@@ -1,0 +1,11 @@
+{
+  "id": "systemsculpt-ai",
+  "name": "SystemSculpt AI",
+  "description": "Enhance your Obsidian experience with AI-powered tools for note-taking, task management, and more.",
+  "author": "SystemSculpt",
+  "authorUrl": "systemsculpt.com",
+  "fundingUrl": "https://www.patreon.com/SystemSculpt",
+  "minAppVersion": "1.5.8",
+  "version": "0.1.0",
+  "isDesktopOnly": true
+}
