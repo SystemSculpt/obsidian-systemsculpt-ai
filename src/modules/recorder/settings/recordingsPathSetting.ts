@@ -1,6 +1,7 @@
-import { Setting } from 'obsidian';
+import { Setting, TFolder } from 'obsidian';
 import { RecorderModule } from '../RecorderModule';
 import { DEFAULT_RECORDER_SETTINGS } from './RecorderSettings';
+import { MultiSuggest } from '../../../utils/MultiSuggest';
 
 export function renderRecordingsPathSetting(
   containerEl: HTMLElement,
@@ -17,6 +18,22 @@ export function renderRecordingsPathSetting(
           plugin.settings.recordingsPath = value;
           await plugin.saveSettings();
         });
+
+      // Add folder suggestion
+      const inputEl = text.inputEl;
+      const suggestionContent = getFolderSuggestions(plugin);
+      const onSelectCallback = (selectedPath: string) => {
+        plugin.settings.recordingsPath = selectedPath;
+        text.setValue(selectedPath);
+        plugin.saveSettings();
+      };
+
+      new MultiSuggest(
+        inputEl,
+        suggestionContent,
+        onSelectCallback,
+        plugin.plugin.app
+      );
     })
     .addExtraButton(button => {
       button
@@ -29,4 +46,12 @@ export function renderRecordingsPathSetting(
           plugin.settingsDisplay(containerEl);
         });
     });
+}
+
+function getFolderSuggestions(plugin: RecorderModule): Set<string> {
+  const folders = plugin.plugin.app.vault
+    .getAllLoadedFiles()
+    .filter(file => file instanceof TFolder) as TFolder[];
+  const suggestionContent = new Set(folders.map(folder => folder.path));
+  return suggestionContent;
 }

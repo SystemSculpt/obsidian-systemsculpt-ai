@@ -1,6 +1,7 @@
-import { Setting } from 'obsidian';
+import { Setting, TFile } from 'obsidian';
 import { TasksModule } from '../TasksModule';
 import { DEFAULT_TASKS_SETTINGS } from './TasksSettings';
+import { MultiSuggest } from '../../../utils/MultiSuggest';
 
 export function renderTasksLocationSetting(
   containerEl: HTMLElement,
@@ -17,6 +18,22 @@ export function renderTasksLocationSetting(
           plugin.settings.tasksLocation = newValue;
           await plugin.saveSettings();
         });
+
+      // Add file suggestion
+      const inputEl = text.inputEl;
+      const suggestionContent = getFileSuggestions(plugin);
+      const onSelectCallback = (selectedPath: string) => {
+        plugin.settings.tasksLocation = selectedPath;
+        text.setValue(selectedPath);
+        plugin.saveSettings();
+      };
+
+      new MultiSuggest(
+        inputEl,
+        suggestionContent,
+        onSelectCallback,
+        plugin.plugin.app
+      );
     })
     .addExtraButton(button => {
       button
@@ -28,4 +45,11 @@ export function renderTasksLocationSetting(
           plugin.settingsDisplay(containerEl);
         });
     });
+}
+
+function getFileSuggestions(plugin: TasksModule): Set<string> {
+  const files = plugin.plugin.app.vault.getFiles();
+  const mdFiles = files.filter(file => file.path.endsWith('.md'));
+  const suggestionContent = new Set(mdFiles.map(file => file.path));
+  return suggestionContent;
 }
