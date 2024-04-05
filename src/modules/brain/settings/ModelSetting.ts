@@ -42,7 +42,8 @@ async function populateModelOptions(
 ): Promise<Model[]> {
   const selectEl = dropdown.selectEl;
   if (selectEl) {
-    selectEl.innerHTML = `<option value="">Loading models...</option>`;
+    selectEl.empty();
+    selectEl.createEl('option', { text: 'Loading models...', value: '' });
   }
 
   clearTimeout(populateModelOptionsTimeout);
@@ -52,21 +53,18 @@ async function populateModelOptions(
       try {
         const models = await apiService.getModels();
         if (selectEl) {
-          selectEl.innerHTML = '';
+          selectEl.empty();
 
           models.forEach((model: Model) => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            // Customizing the display name based on model ID
-            // 0.0010 for gpt 3.5, 0.02 for gpt 4
-            if (model.id === 'gpt-3.5-turbo') {
-              option.text = 'GPT 3.5 Turbo ($0.001 per 1K tokens)';
-            } else if (model.id === 'gpt-4-turbo-preview') {
-              option.text = 'GPT 4 Turbo ($0.02 per 1K tokens)';
-            } else {
-              option.text = model.name; // Default to model name if no custom name is defined
-            }
-            selectEl.appendChild(option);
+            const option = selectEl.createEl('option', {
+              text:
+                model.id === 'gpt-3.5-turbo'
+                  ? 'GPT 3.5 Turbo ($0.001 per 1K tokens)'
+                  : model.id === 'gpt-4-turbo-preview'
+                  ? 'GPT 4 Turbo ($0.02 per 1K tokens)'
+                  : model.name,
+              value: model.id,
+            });
           });
 
           dropdown.setValue(selectedModelId || models[0]?.id || '');
@@ -75,7 +73,11 @@ async function populateModelOptions(
       } catch (error) {
         console.error('Error loading models:', error);
         if (selectEl) {
-          selectEl.innerHTML = `<option value="">Failed - check your API key.</option>`;
+          selectEl.empty();
+          selectEl.createEl('option', {
+            text: 'Failed - check your API key.',
+            value: '',
+          });
         }
         reject(error);
       }

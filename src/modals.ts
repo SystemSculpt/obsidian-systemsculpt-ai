@@ -53,11 +53,9 @@ export function showCustomNotice(
   duration: number = 5000
 ): Notice {
   const notice = new Notice('', duration);
-  notice.noticeEl.innerHTML = `
-    <div class="custom-notice-content">
-      <div class="custom-notice-message">${message}</div>
-    </div>
-  `;
+  const noticeContentEl = notice.noticeEl.createDiv('custom-notice-content');
+  const messageDiv = noticeContentEl.createDiv('custom-notice-message');
+  messageDiv.textContent = message; // Correct way to set text content
   notice.noticeEl.addClass('custom-notice');
   notice.noticeEl.addEventListener('click', () => notice.hide());
 
@@ -72,11 +70,7 @@ export function showCustomNotice(
     noticeContainer.appendChild(notice.noticeEl);
   }
 
-  notice.noticeEl.style.position = 'fixed';
-  notice.noticeEl.style.bottom = '20px';
-  notice.noticeEl.style.right = '20px';
-  notice.noticeEl.style.top = 'auto';
-  notice.noticeEl.style.left = 'auto';
+  notice.noticeEl.addClass('custom-notice-position');
 
   return notice;
 }

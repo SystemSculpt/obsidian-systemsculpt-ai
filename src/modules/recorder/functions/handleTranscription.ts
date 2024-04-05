@@ -2,6 +2,7 @@ import { RecorderModule } from '../RecorderModule';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { transcribeRecording } from './transcribeRecording';
 import { OpenAIService } from '../../../api/OpenAIService';
+import { MarkdownView } from 'obsidian';
 
 export async function handleTranscription(
   plugin: RecorderModule,
@@ -33,8 +34,8 @@ export async function handleTranscription(
       activeLeaf.view.getViewType() === 'markdown' &&
       plugin.settings.pasteIntoActiveNote
     ) {
-      const markdownView = activeLeaf.view as any; // Temporarily cast to 'any' to bypass type checking
-      const editor = markdownView.editor; // Directly access the 'editor' for 'MarkdownView'
+      const markdownView = activeLeaf.view as MarkdownView;
+      const editor = markdownView.editor;
       if (editor) {
         editor.replaceSelection(transcription);
         showCustomNotice(

@@ -11,14 +11,11 @@ export class RecordingNotice {
   private canvasContext: CanvasRenderingContext2D;
   private rafId: number;
   private mediaRecorder: MediaRecorder;
-  private isDragging = false;
-  private dragOffset = { x: 0, y: 0 };
 
   constructor(app: App, plugin: RecorderModule) {
     this.app = app;
     this.plugin = plugin;
     this.noticeEl = this.createNoticeEl();
-    this.addDragEventListeners();
   }
 
   private createNoticeEl(): HTMLElement {
@@ -37,34 +34,6 @@ export class RecordingNotice {
     return noticeEl;
   }
 
-  private addDragEventListeners(): void {
-    this.noticeEl.addEventListener('mousedown', this.startDragging.bind(this));
-    window.addEventListener('mousemove', this.drag.bind(this));
-    window.addEventListener('mouseup', this.stopDragging.bind(this));
-  }
-
-  private startDragging(event: MouseEvent): void {
-    this.isDragging = true;
-    this.dragOffset.x = event.clientX - this.noticeEl.offsetLeft;
-    this.dragOffset.y = event.clientY - this.noticeEl.offsetTop;
-  }
-
-  private drag(event: MouseEvent): void {
-    if (!this.isDragging) return;
-
-    const left = event.clientX - this.dragOffset.x;
-    const top = event.clientY - this.dragOffset.y;
-
-    this.noticeEl.style.left = `${left}px`;
-    this.noticeEl.style.top = `${top}px`;
-    this.noticeEl.style.bottom = 'auto';
-    this.noticeEl.style.right = 'auto';
-  }
-
-  private stopDragging(): void {
-    this.isDragging = false;
-  }
-
   show(): Promise<void> {
     return new Promise((resolve, reject) => {
       let noticeContainer = document.body.querySelector('.notice-container');
@@ -77,9 +46,7 @@ export class RecordingNotice {
 
       if (noticeContainer) {
         noticeContainer.appendChild(this.noticeEl);
-        this.noticeEl.style.position = 'fixed'; // Ensure it's positioned correctly
-        this.noticeEl.style.bottom = '20px';
-        this.noticeEl.style.right = '20px';
+        this.noticeEl.addClass('recording-notice-position');
         this.startRecording().then(resolve).catch(reject);
       } else {
         reject(new Error('Notice container not found'));

@@ -6,7 +6,7 @@ export async function transcribeRecording(
 ): Promise<string> {
   const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
   const formData = new FormData();
-  formData.append('file', blob);
+  formData.append('file', blob, 'recording.mp3');
   formData.append('model', plugin.settings.whisperModel);
 
   console.log(`Using model: ${plugin.settings.whisperModel}`); // Log the model being used
@@ -20,14 +20,14 @@ export async function transcribeRecording(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${currentOpenAIApiKey}`,
+        // 'Content-Type': 'multipart/form-data' is not needed when using FormData
       },
       body: formData,
-      mode: 'cors',
     }
   );
 
   if (!response.ok) {
-    console.error('Failed to transcribe recording:', await response.text());
+    console.error('Failed to transcribe recording:', response.statusText);
     throw new Error('Transcription failed');
   }
 

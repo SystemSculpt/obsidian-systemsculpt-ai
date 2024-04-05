@@ -190,9 +190,6 @@ button:disabled {
 
 /* Recording Notice */
 .recording-notice {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
   background-color: var(--background-primary);
   padding: 20px;
   border-radius: 10px;
@@ -210,6 +207,12 @@ button:disabled {
   margin-right: 5px;
 }
 
+.recording-notice-position {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+}
+
 .recording-notice-header {
   margin-bottom: 10px;
 }
@@ -220,9 +223,6 @@ button:disabled {
 
 /* Custom Notice */
 .custom-notice {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
   background-color: var(--background-secondary);
   color: var(--text-normal);
   padding: 20px;
@@ -234,6 +234,14 @@ button:disabled {
   cursor: pointer;
   z-index: 1000;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.custom-notice-position {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  top: auto;
+  left: auto;
 }
 
 .custom-notice:hover {

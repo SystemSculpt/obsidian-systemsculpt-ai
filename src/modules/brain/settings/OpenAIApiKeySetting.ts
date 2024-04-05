@@ -71,14 +71,13 @@ async function validateApiKeyAndUpdateStatus(
   apiService: OpenAIService,
   textComponent: TextComponent
 ): Promise<void> {
-  const statusText = textComponent.inputEl.nextElementSibling as HTMLElement;
-  if (!statusText) {
-    textComponent.inputEl.insertAdjacentHTML(
-      'afterend',
-      '<span class="api-key-status"></span>'
-    );
+  const statusTextEl = textComponent.inputEl.nextElementSibling;
+  if (!statusTextEl) {
+    const newStatusTextEl = createSpan('api-key-status');
+    textComponent.inputEl.insertAdjacentElement('afterend', newStatusTextEl);
   }
 
+  const statusText = statusTextEl as HTMLElement;
   statusText.textContent = 'Validating...';
   statusText.classList.remove('valid', 'invalid');
   statusText.classList.add('validating');
@@ -89,6 +88,12 @@ async function validateApiKeyAndUpdateStatus(
   statusText.classList.remove('validating');
   statusText.classList.toggle('valid', isValid);
   statusText.classList.toggle('invalid', !isValid);
+}
+
+function createSpan(className: string): HTMLElement {
+  const span = document.createElement('span');
+  span.className = className;
+  return span;
 }
 
 export async function validateApiKey(
