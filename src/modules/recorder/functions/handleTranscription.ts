@@ -2,11 +2,12 @@ import { RecorderModule } from '../RecorderModule';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { transcribeRecording } from './transcribeRecording';
 import { OpenAIService } from '../../../api/OpenAIService';
-import { MarkdownView } from 'obsidian';
+import { MarkdownView, TFile, normalizePath } from 'obsidian';
 
 export async function handleTranscription(
   plugin: RecorderModule,
-  arrayBuffer: ArrayBuffer
+  arrayBuffer: ArrayBuffer,
+  recordingFile: TFile
 ): Promise<void> {
   // Check if OpenAI API key is valid
   const isValidApiKey = await OpenAIService.validateApiKey(
@@ -23,6 +24,10 @@ export async function handleTranscription(
   try {
     const transcription = await transcribeRecording(plugin, arrayBuffer);
     hideCustomNotice(notice);
+
+    if (plugin.settings.saveTranscriptionToFile) {
+      await saveTranscriptionToFile(plugin, transcription, recordingFile);
+    }
     // Always copy to clipboard if the setting is enabled
     if (plugin.settings.copyToClipboard) {
       navigator.clipboard.writeText(transcription);
@@ -53,5 +58,36 @@ export async function handleTranscription(
   } catch (error) {
     plugin.handleError(error, 'Error generating transcription');
     hideCustomNotice(notice);
+  }
+
+  async function saveTranscriptionToFile(
+    plugin: RecorderModule,
+    transcription: string,
+    recordingFile: TFile
+  ): Promise<void> {
+    const { vault } = plugin.plugin.app;
+    const { transcriptionsPath } = plugin.settings;
+
+    const recordingFileName = recordingFile.basename;
+    const transcriptionFileName =
+      recordingFileName.replace('recording-', 'transcription-') + '.md';
+    const transcriptionFilePath = normalizePath(
+      `${transcriptionsPath}/${transcriptionFileName}`
+    );
+
+    const transcriptionContent = `![${recordingFileName}](${recordingFile.path})\n${transcription}`;
+
+    // Ensure the entire directory path exists
+    const directories = transcriptionsPath.split('/');
+    let currentPath = '';
+    for (const directory of directories) {
+      currentPath += directory + '/';
+      if (!(await vault.adapter.exists(currentPath))) {
+        await vault.createFolder(currentPath);
+      }
+    }
+
+    // Create the transcription file
+    await vault.create(transcriptionFilePath, transcriptionContent);
   }
 }

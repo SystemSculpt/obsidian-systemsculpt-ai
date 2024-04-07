@@ -11,9 +11,9 @@ export async function stopRecording(plugin: RecorderModule): Promise<void> {
     plugin.recordingNotice = null;
 
     if (arrayBuffer) {
-      const file = await plugin.saveRecording(arrayBuffer);
-      if (file && plugin.settings.autoTranscriptionEnabled) {
-        await plugin.handleTranscription(arrayBuffer);
+      const recordingFile = await plugin.saveRecording(arrayBuffer);
+      if (recordingFile && plugin.settings.autoTranscriptionEnabled) {
+        await plugin.handleTranscription(arrayBuffer, recordingFile);
       }
     }
   } else {

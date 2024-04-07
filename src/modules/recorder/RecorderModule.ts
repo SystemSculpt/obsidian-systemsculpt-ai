@@ -116,8 +116,11 @@ export class RecorderModule {
     return saveRecording(this, arrayBuffer);
   }
 
-  async handleTranscription(arrayBuffer: ArrayBuffer): Promise<void> {
-    return handleTranscription(this, arrayBuffer);
+  async handleTranscription(
+    arrayBuffer: ArrayBuffer,
+    recordingFile: TFile
+  ): Promise<void> {
+    return handleTranscription(this, arrayBuffer, recordingFile);
   }
 
   handleError(error: Error, message: string): void {

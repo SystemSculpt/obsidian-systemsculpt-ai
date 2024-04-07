@@ -6,6 +6,8 @@ import { renderAutoTranscriptionToggle } from './autoTranscriptionSetting';
 import { renderSaveAudioClipsToggle } from './saveAudioClipsSetting';
 import { renderPasteOnTranscriptionToggle } from './pasteOnTranscriptionSetting';
 import { renderCopyToClipboardToggle } from './copyToClipboardSetting'; // Added import for the new setting
+import { renderSaveTranscriptionToFileToggle } from './saveTranscriptionToFileSetting';
+import { renderTranscriptionsPathSetting } from './transcriptionsPathSetting';
 
 export class SystemSculptRecorderSettingTab extends PluginSettingTab {
   plugin: RecorderModule;
@@ -35,11 +37,13 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
     });
 
     renderRecordingsPathSetting(containerEl, this.plugin);
+    renderTranscriptionsPathSetting(containerEl, this.plugin);
     renderMicrophoneDropdown(containerEl, this.plugin);
     renderAutoTranscriptionToggle(containerEl, this.plugin);
     renderSaveAudioClipsToggle(containerEl, this.plugin);
-    renderPasteOnTranscriptionToggle(containerEl, this.plugin); // This will be modified as per the instructions but not shown here
-    renderCopyToClipboardToggle(containerEl, this.plugin); // Added the new setting to the display method
+    renderSaveTranscriptionToFileToggle(containerEl, this.plugin);
+    renderCopyToClipboardToggle(containerEl, this.plugin);
+    renderPasteOnTranscriptionToggle(containerEl, this.plugin);
 
     // Upcoming Features
     const upcomingFeaturesEl = containerEl.createDiv('upcoming-features');
@@ -50,9 +54,6 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
     const featuresListEl = upcomingFeaturesEl.createEl('ul');
     featuresListEl.createEl('li', {
       text: '100% local, offline Whisper AI transcription integration',
-    });
-    featuresListEl.createEl('li', {
-      text: 'Save transcriptions, each to a separate file within a folder or all within a single designated note',
     });
     featuresListEl.createEl('li', {
       text: 'Custom words, phrases; things that Whisper usually gets wrong, you can provide Whisper with the correct spelling within this Custom Words box that it will reference and fix before giving you the final transcription',
