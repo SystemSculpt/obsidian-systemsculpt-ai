@@ -71,7 +71,7 @@ export async function handleTranscription(
     const recordingFileName = recordingFile.basename;
     const transcriptionFileName =
       recordingFileName.replace('recording-', 'transcription-') + '.md';
-    const transcriptionFilePath = normalizePath(
+    let transcriptionFilePath = normalizePath(
       `${transcriptionsPath}/${transcriptionFileName}`
     );
 
@@ -85,6 +85,18 @@ export async function handleTranscription(
       if (!(await vault.adapter.exists(currentPath))) {
         await vault.createFolder(currentPath);
       }
+    }
+
+    // Check if the transcription file already exists
+    if (await vault.adapter.exists(transcriptionFilePath)) {
+      const timestamp = Date.now();
+      const newTranscriptionFileName = `${recordingFileName.replace(
+        'recording-',
+        'transcription-'
+      )}-${timestamp}.md`;
+      transcriptionFilePath = normalizePath(
+        `${transcriptionsPath}/${newTranscriptionFileName}`
+      );
     }
 
     // Create the transcription file

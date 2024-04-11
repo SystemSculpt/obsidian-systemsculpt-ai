@@ -1,5 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
+import https from 'https';
 import { Model } from './Model';
+import { showCustomNotice } from '../modals';
 
 export class OpenAIService {
   private static instance: OpenAIService;
@@ -74,6 +76,161 @@ export class OpenAIService {
     }
   }
 
+  async createStreamingChatCompletion(
+    prompt: string,
+    modelId: string,
+    maxTokens: number
+  ): Promise<string> {
+    const currentApiKey = this.settings.openAIApiKey;
+
+    console.log('Using API Key: ', currentApiKey);
+    console.log(`Using model: ${modelId}`);
+    console.log(`Max tokens: ${maxTokens}`);
+
+    const requestData = JSON.stringify({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+      max_tokens: maxTokens,
+    });
+
+    return new Promise<string>((resolve, reject) => {
+      const req = https.request(
+        {
+          hostname: 'api.openai.com',
+          port: 443,
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentApiKey}`,
+          },
+        },
+        res => {
+          if (res.statusCode !== 200) {
+            const error = new Error(
+              `Request failed with status code ${res.statusCode}`
+            );
+            reject(error);
+            return;
+          }
+
+          const decoder = new TextDecoder('utf-8');
+          let result = '';
+
+          res.on('data', chunk => {
+            const chunkValue = decoder.decode(chunk);
+            result += chunkValue;
+            showCustomNotice(chunkValue, 1000); // Show the chunk of text for 1 second
+          });
+
+          res.on('end', () => {
+            resolve(result);
+          });
+
+          res.on('error', error => {
+            console.error('Error generating streaming chat completion:', error);
+            reject(
+              new Error(
+                'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+              )
+            );
+          });
+        }
+      );
+
+      req.on('error', error => {
+        console.error('Error generating streaming chat completion:', error);
+        reject(
+          new Error(
+            'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+          )
+        );
+      });
+
+      req.write(requestData);
+      req.end();
+    });
+  }
+
+  async createStreamingChatCompletionWithCallback(
+    systemPrompt: string,
+    userMessage: string,
+    modelId: string,
+    maxTokens: number,
+    callback: (chunk: string) => void,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    const currentApiKey = this.settings.openAIApiKey;
+
+    const requestData = JSON.stringify({
+      model: modelId,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      stream: true,
+      max_tokens: maxTokens,
+    });
+
+    return new Promise<void>((resolve, reject) => {
+      const req = https.request(
+        {
+          hostname: 'api.openai.com',
+          port: 443,
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentApiKey}`,
+          },
+        },
+        res => {
+          if (abortSignal) {
+            abortSignal.addEventListener('abort', () => {
+              req.destroy();
+              reject(new Error('Request aborted'));
+            });
+          }
+
+          res.on('data', chunk => {
+            if (!abortSignal || !abortSignal.aborted) {
+              const chunkValue = new TextDecoder('utf-8').decode(chunk);
+              callback(chunkValue);
+            }
+          });
+
+          res.on('end', () => {
+            if (!abortSignal || !abortSignal.aborted) {
+              resolve();
+            }
+          });
+
+          res.on('error', error => {
+            console.error('Error generating streaming chat completion:', error);
+            reject(
+              new Error(
+                'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+              )
+            );
+          });
+        }
+      );
+
+      req.on('error', error => {
+        console.error('Error generating streaming chat completion:', error);
+        reject(
+          new Error(
+            'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+          )
+        );
+      });
+
+      req.write(requestData);
+      req.end();
+    });
+  }
+
   async validateApiKeyInternal(): Promise<boolean> {
     try {
       await this.getModels();
@@ -92,8 +249,7 @@ export class OpenAIService {
       const response = await this.client.get('/models');
       return response.data.data
         .filter(
-          model =>
-            model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo-preview'
+          model => model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
         )
         .map((model: any) => ({
           id: model.id,

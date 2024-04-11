@@ -72,9 +72,13 @@ export function showCustomNotice(
 
   notice.noticeEl.addClass('custom-notice-position');
 
+  // Add animation class for generating notice
+  if (message.startsWith('Generating')) {
+    notice.noticeEl.addClass('generating-notice');
+  }
+
   return notice;
 }
-
 export function hideCustomNotice(notice: Notice): void {
   notice.hide();
 }

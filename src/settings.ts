@@ -4,10 +4,12 @@ import { renderBrainAnimation } from './modules/brain/views/BrainAnimation';
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
+  version: string;
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: '',
+  version: '0.0.5',
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {
@@ -101,10 +103,13 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   showTab(tabId: string): void {
     const tabContainer = this.containerEl.querySelector('.tab-container');
+    if (!tabContainer) return; // Add this line to handle the null case
+
     const tabs = tabContainer.childNodes;
     const settingsContainer = this.containerEl.querySelector(
       '.settings-container'
     );
+    if (!settingsContainer) return; // It's also good to check this
 
     this.setActiveTab(tabs, tabId);
     settingsContainer.empty();
@@ -144,11 +149,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   private setActiveTab(tabs: NodeListOf<ChildNode>, activeTabId: string): void {
-    tabs.forEach((tab: HTMLElement) => {
-      if (tab.dataset.tabId === activeTabId) {
-        tab.addClass('active');
-      } else {
-        tab.removeClass('active');
+    tabs.forEach(tab => {
+      if (tab instanceof HTMLElement && tab.dataset.tabId === activeTabId) {
+        tab.classList.add('active');
+      } else if (tab instanceof HTMLElement) {
+        tab.classList.remove('active');
       }
     });
   }

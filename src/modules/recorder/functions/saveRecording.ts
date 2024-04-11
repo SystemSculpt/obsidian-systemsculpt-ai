@@ -4,7 +4,7 @@ import { normalizePath, TFile } from 'obsidian';
 export async function saveRecording(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer
-): Promise<TFile> {
+): Promise<TFile | null> {
   const { vault } = plugin.plugin.app;
   const { recordingsPath } = plugin.settings;
   const date = new Date();

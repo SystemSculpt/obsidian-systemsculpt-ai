@@ -8,11 +8,17 @@ import { BrainSettingTab } from './settings/BrainSettingTab';
 import { generateTitle } from './functions/generateTitle';
 import { generateTitleForCurrentNote } from './functions/generateTitleForCurrentNote';
 import { renderBrainAnimation } from './views/BrainAnimation';
+import { toggleGeneration } from './functions/toggleGeneration';
+import { MaxTokensModal } from './views/MaxTokensModal';
+import { updateMaxTokensStatusBar } from './functions/updateMaxTokensStatusBar';
+import { MarkdownView } from 'obsidian';
 
 export class BrainModule {
   plugin: SystemSculptPlugin;
   settings: BrainSettings;
   openAIService: OpenAIService;
+  abortController: AbortController | null = null;
+  isGenerating: boolean = false;
 
   constructor(plugin: SystemSculptPlugin, openAIService: OpenAIService) {
     this.plugin = plugin;
@@ -30,6 +36,36 @@ export class BrainModule {
       },
     });
 
+    this.plugin.addCommand({
+      id: 'toggle-generation',
+      name: 'Toggle Generation',
+      callback: async () => {
+        await this.toggleGeneration();
+      },
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'G' }],
+    });
+
+    this.plugin.addCommand({
+      id: 'toggle-model',
+      name: 'Toggle Model',
+      callback: () => {
+        this.switchModel();
+        const activeLeaf = this.plugin.app.workspace.activeLeaf;
+        if (activeLeaf && activeLeaf.view.getViewType() === 'markdown') {
+          const markdownView = activeLeaf.view as MarkdownView;
+          markdownView.editor.focus();
+        }
+      },
+    });
+
+    this.plugin.addCommand({
+      id: 'change-max-tokens',
+      name: 'Change Max Tokens',
+      callback: () => {
+        new MaxTokensModal(this.plugin.app, this).open();
+      },
+    });
+
     // Add a status bar item for the model toggle
     if (!this.plugin.modelToggleStatusBarItem) {
       this.plugin.modelToggleStatusBarItem = this.plugin.addStatusBarItem();
@@ -42,9 +78,25 @@ export class BrainModule {
     // Add click listener to toggle the model and update the status bar text
     this.plugin.modelToggleStatusBarItem.onClickEvent(() => {
       this.switchModel();
-      this.plugin.modelToggleStatusBarItem.setText(
-        `GPT-${this.getCurrentModelShortName()}`
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText(
+          `GPT-${this.getCurrentModelShortName()}`
+        );
+      }
+    });
+
+    // Add a status bar item for the max tokens toggle
+    if (!this.plugin.maxTokensToggleStatusBarItem) {
+      this.plugin.maxTokensToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.maxTokensToggleStatusBarItem.addClass(
+        'max-tokens-toggle-button'
       );
+      updateMaxTokensStatusBar(this); // Update the status bar when the module is loaded
+    }
+
+    // Add click listener to open the Max Tokens modal
+    this.plugin.maxTokensToggleStatusBarItem.onClickEvent(() => {
+      new MaxTokensModal(this.plugin.app, this).open();
     });
   }
 
@@ -58,6 +110,7 @@ export class BrainModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
+    updateMaxTokensStatusBar(this); // Update the status bar when settings are saved
     this.openAIService.updateApiKey(this.settings.openAIApiKey);
   }
 
@@ -76,17 +129,30 @@ export class BrainModule {
     return generateTitleForCurrentNote(this);
   }
 
-  // Method to switch between GPT-3.5 Turbo and GPT-4 Turbo
+  async toggleGeneration(): Promise<void> {
+    return toggleGeneration(this);
+  }
+
   switchModel(): void {
     const newModelId =
       this.settings.defaultOpenAIModelId === 'gpt-3.5-turbo'
-        ? 'gpt-4-turbo-preview'
+        ? 'gpt-4-turbo'
         : 'gpt-3.5-turbo';
     this.settings.defaultOpenAIModelId = newModelId;
-    this.saveSettings();
+    this.saveSettings().then(() => {
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText(
+          `GPT-${this.getCurrentModelShortName()}`
+        );
+      }
+      const activeLeaf = this.plugin.app.workspace.activeLeaf;
+      if (activeLeaf && activeLeaf.view.getViewType() === 'markdown') {
+        const markdownView = activeLeaf.view as MarkdownView;
+        markdownView.editor.focus();
+      }
+    });
   }
 
-  // Method to get the current model's short name for the status bar
   getCurrentModelShortName(): string {
     return this.settings.defaultOpenAIModelId === 'gpt-3.5-turbo'
       ? '3.5 Turbo'

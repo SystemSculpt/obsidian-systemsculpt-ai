@@ -14,8 +14,9 @@ export function renderMaxTokensSetting(
         .setValue(plugin.settings.maxTokens.toString())
         .onChange(async (value: string) => {
           const maxTokens = parseInt(value);
-          if (!isNaN(maxTokens)) {
-            plugin.settings.maxTokens = maxTokens;
+          if (!isNaN(maxTokens) && maxTokens >= 1) {
+            const correctedMaxTokens = Math.min(Math.max(maxTokens, 1), 4096);
+            plugin.settings.maxTokens = correctedMaxTokens;
             await plugin.saveSettings();
           }
         })

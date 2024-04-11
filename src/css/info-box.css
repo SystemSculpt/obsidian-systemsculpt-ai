@@ -1,0 +1,17 @@
+/* Info Box */
+.upcoming-features li,
+.info-box {
+  background-color: var(--background-secondary);
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.info-box p {
+  margin: 0;
+}
+
+.upcoming-features {
+  margin-top: 35px;
+}

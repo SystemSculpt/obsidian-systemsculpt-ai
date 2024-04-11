@@ -29,7 +29,7 @@ export class RecordingNotice {
     const canvas = canvasEl.createEl('canvas');
     canvas.width = 250;
     canvas.height = 50;
-    this.canvasContext = canvas.getContext('2d');
+    this.canvasContext = canvas.getContext('2d') as CanvasRenderingContext2D;
 
     return noticeEl;
   }

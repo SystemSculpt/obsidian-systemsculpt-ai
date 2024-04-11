@@ -24,18 +24,42 @@ export function renderBrainAnimation(containerEl: HTMLElement): void {
     pulseRadius: Math.random() * 3 + 2,
   }));
 
-  // Define a blue color scale
   const blueColorScale = d3
     .scaleLinear<string>()
     .domain([0, numNodes / 2, numNodes])
-    .range(['#e6f7ff', '#91d5ff', '#1890ff', '#096dd9', '#0050b3', '#003a8c']); // Light blue to darker blue
+    .range(['#e6f7ff', '#91d5ff', '#1890ff', '#096dd9', '#0050b3', '#003a8c']);
 
   let quadtree = d3
     .quadtree()
     .x(d => d.x)
     .y(d => d.y)
     .addAll(nodes);
-  const links = [];
+
+  interface Link {
+    source: {
+      id: string;
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      radius: number;
+      pulseDelay: number;
+      pulseRadius: number;
+    };
+    target: {
+      id: string;
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      radius: number;
+      pulseDelay: number;
+      pulseRadius: number;
+    };
+    opacity: number;
+  }
+
+  const links: Link[] = [];
 
   const node = svg
     .selectAll('.node')
@@ -46,7 +70,7 @@ export function renderBrainAnimation(containerEl: HTMLElement): void {
     .attr('fill', (_, i) => blueColorScale(i));
 
   function updateLinks() {
-    links.length = 0; // Clear the links array
+    links.length = 0;
 
     nodes.forEach(source => {
       quadtree.visit((quad, x1, y1, x2, y2) => {
@@ -79,16 +103,11 @@ export function renderBrainAnimation(containerEl: HTMLElement): void {
       node.x += node.vx;
       node.y += node.vy;
 
-      if (node.x < padding || node.x > width - padding) {
-        node.vx *= -1;
-      }
-
-      if (node.y < padding || node.y > height - padding) {
-        node.vy *= -1;
-      }
+      // Reflect nodes off the boundaries
+      node.vx *= node.x < padding || node.x > width - padding ? -1 : 1;
+      node.vy *= node.y < padding || node.y > height - padding ? -1 : 1;
     });
 
-    // Rebuild the quadtree with the updated nodes positions
     quadtree = d3
       .quadtree()
       .x(d => d.x)
@@ -97,7 +116,6 @@ export function renderBrainAnimation(containerEl: HTMLElement): void {
 
     updateLinks();
 
-    // Update the link selection here, after links have been updated
     const link = svg
       .selectAll('.link')
       .data(links, d => `${d.source.id}-${d.target.id}`);

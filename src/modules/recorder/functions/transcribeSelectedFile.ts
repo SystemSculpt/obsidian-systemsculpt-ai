@@ -11,5 +11,5 @@ export async function transcribeSelectedFile(
   }
 
   const arrayBuffer = await plugin.readFileAsArrayBuffer(file);
-  await plugin.handleTranscription(arrayBuffer);
+  await plugin.handleTranscription(arrayBuffer, file);
 }

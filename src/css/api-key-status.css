@@ -1,0 +1,15 @@
+/* API Key Status */
+.valid {
+  background-color: #4caf50;
+  color: white;
+}
+
+.invalid {
+  background-color: #f44336;
+  color: white;
+}
+
+.validating {
+  background-color: #2196f3;
+  color: white;
+}

@@ -1,0 +1,27 @@
+/* Global styles */
+.ss-h3 {
+  font-size: 24px;
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 20px;
+  position: relative;
+  display: inline-block;
+}
+
+.ss-h3::before,
+.ss-h3::after {
+  content: '';
+  position: absolute;
+  width: 40%;
+  height: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ss-h3::before {
+  left: -50%;
+}
+.ss-h3::after {
+  right: -50%;
+}

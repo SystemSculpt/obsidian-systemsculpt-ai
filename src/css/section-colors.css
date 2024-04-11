@@ -1,0 +1,23 @@
+/* Section Colors */
+.bmac-section h3 {
+  color: #ffdd00;
+}
+.patreon-section h3 {
+  color: #75b6e4;
+}
+.youtube-section h3 {
+  color: #e43d3d;
+}
+
+.bmac-yellow::before,
+.bmac-yellow::after {
+  background-color: #ffdd00;
+}
+.patreon-blue::before,
+.patreon-blue::after {
+  background-color: #75b6e4;
+}
+.youtube-red::before,
+.youtube-red::after {
+  background-color: #e43d3d;
+}

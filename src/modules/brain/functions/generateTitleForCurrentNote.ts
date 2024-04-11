@@ -9,6 +9,10 @@ export async function generateTitleForCurrentNote(
     plugin.plugin.app.workspace.getActiveViewOfType(MarkdownView);
   if (activeView) {
     const currentFile = activeView.file;
+    if (!currentFile) {
+      console.error('No file is currently active.');
+      return;
+    }
     const noteContent = await plugin.plugin.app.vault.read(currentFile);
 
     const generatingTitleModal = new GeneratingTitleModal(plugin.plugin.app);
@@ -33,6 +37,10 @@ async function renameCurrentNote(
   currentFile: TFile,
   newTitle: string
 ): Promise<void> {
+  if (!currentFile.parent) {
+    console.error('The current file does not have a parent directory.');
+    return;
+  }
   const newPath = `${currentFile.parent.path}/${newTitle}.md`;
   await plugin.plugin.app.fileManager.renameFile(currentFile, newPath);
 }

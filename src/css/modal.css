@@ -1,0 +1,12 @@
+/* Modal */
+.modal-content-centered {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.modal-header {
+  text-align: center;
+}

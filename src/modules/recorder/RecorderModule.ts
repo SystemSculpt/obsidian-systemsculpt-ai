@@ -113,7 +113,11 @@ export class RecorderModule {
   }
 
   async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
-    return saveRecording(this, arrayBuffer);
+    const result = await saveRecording(this, arrayBuffer);
+    if (!result) {
+      throw new Error('Failed to save recording');
+    }
+    return result;
   }
 
   async handleTranscription(

@@ -3,6 +3,7 @@ import { BrainModule } from '../BrainModule';
 import { renderOpenAIApiKeySetting } from './OpenAIApiKeySetting';
 import { renderModelDropdown } from './ModelSetting';
 import { renderGenerateTitlePrompt } from './GenerateTitlePromptSetting';
+import { renderGeneralGenerationPromptSetting } from './GeneralGenerationPromptSetting';
 import { renderMaxTokensSetting } from './MaxTokensSetting';
 
 export class BrainSettingTab extends PluginSettingTab {
@@ -36,6 +37,7 @@ export class BrainSettingTab extends PluginSettingTab {
 
     renderMaxTokensSetting(containerEl, this.plugin);
     renderGenerateTitlePrompt(containerEl, this.plugin);
+    renderGeneralGenerationPromptSetting(containerEl, this.plugin);
 
     // Upcoming Features
     const upcomingFeaturesEl = containerEl.createDiv('upcoming-features');

@@ -1,0 +1,8 @@
+/* Task Modal */
+.task-modal-button {
+  margin-top: 20px;
+  text-align: center;
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}

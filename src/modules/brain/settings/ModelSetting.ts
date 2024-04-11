@@ -27,9 +27,11 @@ export async function renderModelDropdown(
         plugin.settings.defaultOpenAIModelId = value;
         await plugin.saveSettings();
         // Update the status bar text to reflect the new model
-        plugin.plugin.modelToggleStatusBarItem.setText(
-          `GPT-${plugin.getCurrentModelShortName()}`
-        );
+        if (plugin.plugin.modelToggleStatusBarItem) {
+          plugin.plugin.modelToggleStatusBarItem.setText(
+            `GPT-${plugin.getCurrentModelShortName()}`
+          );
+        }
       });
     });
 }
@@ -60,7 +62,7 @@ async function populateModelOptions(
               text:
                 model.id === 'gpt-3.5-turbo'
                   ? 'GPT 3.5 Turbo ($0.001 per 1K tokens)'
-                  : model.id === 'gpt-4-turbo-preview'
+                  : model.id === 'gpt-4-turbo'
                   ? 'GPT 4 Turbo ($0.02 per 1K tokens)'
                   : model.name,
               value: model.id,

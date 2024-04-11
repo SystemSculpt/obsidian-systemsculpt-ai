@@ -11,6 +11,7 @@ import { DataModule } from './modules/data/DataModule';
 import { RecorderModule } from './modules/recorder/RecorderModule';
 import { AboutModule } from './modules/about/AboutModule';
 import { OpenAIService } from './api/OpenAIService';
+import { UpdateModule } from './modules/update/UpdateModule';
 
 export default class SystemSculptPlugin extends Plugin {
   settings: SystemSculptSettings;
@@ -20,7 +21,9 @@ export default class SystemSculptPlugin extends Plugin {
   dataModule: DataModule;
   recorderModule: RecorderModule;
   aboutModule: AboutModule;
+  updateModule: UpdateModule;
   modelToggleStatusBarItem: HTMLElement | null = null;
+  maxTokensToggleStatusBarItem: HTMLElement | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -47,6 +50,9 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.aboutModule = new AboutModule(this);
     this.aboutModule.load();
+
+    this.updateModule = new UpdateModule(this);
+    this.updateModule.load();
 
     this.addSettingTab(new SystemSculptSettingTab(this.app, this));
 

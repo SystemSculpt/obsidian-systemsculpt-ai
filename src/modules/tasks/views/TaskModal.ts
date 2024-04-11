@@ -32,7 +32,11 @@ export class TaskModal extends Modal {
       .addTextArea(textarea => textarea);
     taskDescriptionSetting.controlEl.classList.add('task-description-textarea');
 
-    return taskDescriptionSetting.controlEl.querySelector('textarea');
+    const textarea = taskDescriptionSetting.controlEl.querySelector('textarea');
+    if (!textarea) {
+      throw new Error('Textarea element not found');
+    }
+    return textarea;
   }
 
   private renderButtons(contentEl: HTMLElement): void {
