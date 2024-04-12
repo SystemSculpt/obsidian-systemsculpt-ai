@@ -9,7 +9,7 @@ export function renderOpenAIApiKeySetting(
   let textComponent: TextComponent;
 
   new Setting(containerEl)
-    .setName('OpenAI API Key')
+    .setName('OpenAI API key')
     .setDesc('Enter your OpenAI API key')
     .addText(text => {
       textComponent = text;

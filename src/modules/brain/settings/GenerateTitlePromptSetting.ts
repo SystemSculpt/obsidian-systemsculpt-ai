@@ -7,7 +7,7 @@ export function renderGenerateTitlePrompt(
   plugin: BrainModule
 ): void {
   new Setting(containerEl)
-    .setName('Generate Title Prompt')
+    .setName('Generate title prompt')
     .setDesc(
       'The prompt used when generating titles for notes. Use {note} as a placeholder for the note content.'
     )

@@ -6,7 +6,7 @@ export function renderSaveTranscriptionToFileToggle(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Save Transcription to File')
+    .setName('Save transcription to file')
     .setDesc('Automatically save transcriptions to separate files')
     .addToggle(toggle => {
       toggle

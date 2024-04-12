@@ -8,7 +8,7 @@ export function renderTranscriptionsPathSetting(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Transcriptions Path')
+    .setName('Transcriptions path')
     .setDesc('Path where the transcriptions will be stored')
     .addText(text => {
       text

@@ -8,7 +8,7 @@ export function renderRecordingsPathSetting(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Recordings Path')
+    .setName('Recordings path')
     .setDesc('Path where the recordings will be stored')
     .addText(text => {
       text

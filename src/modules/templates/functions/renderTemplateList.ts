@@ -7,16 +7,7 @@ export async function renderTemplateList(
   templateFile: TFile,
   el: HTMLElement
 ): Promise<void> {
-  const { vault } = app;
-  const templateContent = await vault.cachedRead(templateFile);
-
-  if (!templateContent) {
-    el.createEl('p', { text: 'Failed to load template content.' });
-    return;
-  }
-
-  const frontMatter = parseFrontMatter(templateContent);
-  await frontMatter;
+  const frontMatter = await parseFrontMatter(app, templateFile);
   const { name, description, maxTokens } = frontMatter;
 
   el.empty();

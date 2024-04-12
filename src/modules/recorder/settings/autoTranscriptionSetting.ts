@@ -6,7 +6,7 @@ export function renderAutoTranscriptionToggle(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Auto-Transcription')
+    .setName('Auto-transcription')
     .setDesc('Automatically transcribe recordings')
     .addToggle(toggle => {
       toggle

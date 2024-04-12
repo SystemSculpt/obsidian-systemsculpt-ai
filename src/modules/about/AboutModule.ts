@@ -41,8 +41,7 @@ class AboutSettingTab extends PluginSettingTab {
 
     const descEl = contentEl.createDiv('about-description');
 
-    const justMeh3 = descEl.createEl('h3', { text: "It's just me :D" });
-    justMeh3.addClass('ss-h3');
+    new Setting(descEl).setName("It's just me :D").setHeading();
 
     descEl.createEl('p', {
       text: 'By sponsoring or donating, you allow me to put more time into this and other Obsidian tools to benefit your productivity.',
@@ -54,14 +53,14 @@ class AboutSettingTab extends PluginSettingTab {
       cls: 'support-link',
     });
     patreonLink.createSpan({ cls: 'icon', text: 'P' });
-    patreonLink.createSpan({ text: 'Become a Patron' });
+    patreonLink.createSpan({ text: 'Become a patron' });
 
     const coffeeLink = supportEl.createEl('a', {
       href: 'https://www.buymeacoffee.com/SystemSculpt',
       cls: 'support-link',
     });
     coffeeLink.createSpan({ cls: 'icon', text: 'C' });
-    coffeeLink.createSpan({ text: 'Buy Me a Coffee' });
+    coffeeLink.createSpan({ text: 'Buy me a coffee' });
 
     const socialEl = contentEl.createDiv('about-social');
     const socialLinks = [
@@ -111,33 +110,33 @@ class AboutSettingTab extends PluginSettingTab {
     // Render "Bought Me a Coffee" section
     this.renderMembershipSection(
       hallOfFameEl,
-      'Bought Me a Coffee',
+      'Bought me a coffee',
       AboutData.buyMeACoffee,
       'bmac-section',
       'bmac-yellow',
-      'Buy Me Some Coffee!',
+      'Buy me some coffee!',
       'https://www.buymeacoffee.com/SystemSculpt'
     );
 
     // Render "Patreon" section
     this.renderMembershipSection(
       hallOfFameEl,
-      'Patreon Supporters',
+      'Patreon supporters',
       AboutData.patreonMembers,
       'patreon-section',
       'patreon-blue',
-      'Become a Patron',
+      'Become a patron',
       'https://www.patreon.com/SystemSculpt'
     );
 
     // Render "YouTube" section
     this.renderMembershipSection(
       hallOfFameEl,
-      'YouTube Members',
+      'YouTube members',
       AboutData.youtubeMembers,
       'youtube-section',
       'youtube-red',
-      'Become a YouTube Member',
+      'Become a YouTube member',
       'https://www.youtube.com/channel/your-channel-id/join'
     );
   }

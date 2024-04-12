@@ -8,7 +8,7 @@ export function renderTasksLocationSetting(
   plugin: TasksModule
 ): void {
   new Setting(containerEl)
-    .setName('Tasks Location')
+    .setName('Tasks location')
     .setDesc('The file path where tasks will be stored')
     .addText(text => {
       text

@@ -7,7 +7,7 @@ export function renderTaskPromptSetting(
   plugin: TasksModule
 ): void {
   new Setting(containerEl)
-    .setName('Task Prompt')
+    .setName('Task prompt')
     .setDesc(
       'The prompt used when generating tasks. Use {task} as a placeholder for the task description.'
     )
@@ -34,3 +34,4 @@ export function renderTaskPromptSetting(
         });
     });
 }
+``;

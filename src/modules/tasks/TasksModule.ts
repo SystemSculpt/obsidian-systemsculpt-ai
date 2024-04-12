@@ -9,6 +9,7 @@ import { viewTasks } from './functions/viewTasks';
 import { TaskModal } from './views/TaskModal';
 import { generateTask as generateTaskFunction } from './functions/generateTask';
 import { insertGeneratedTask as insertGeneratedTaskFunction } from './functions/insertGeneratedTask';
+import { updateTaskButtonStatusBar } from './functions/updateTaskButtonStatusBar';
 
 export interface Task {
   description: string;
@@ -44,6 +45,20 @@ export class TasksModule {
         this.viewTasks();
       },
     });
+
+    // Initialize status bar for Task Button
+    if (!this.plugin.taskToggleStatusBarItem) {
+      this.plugin.taskToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.taskToggleStatusBarItem.addClass('task-toggle-button');
+      this.plugin.taskToggleStatusBarItem.setText('T'); // Set text to "T"
+    }
+
+    updateTaskButtonStatusBar(this); // Update the status bar on load
+
+    // Add click listener to open the Task Modal
+    this.plugin.taskToggleStatusBarItem.onClickEvent(async () => {
+      new TaskModal(this.plugin.app, this).open();
+    });
   }
 
   async loadSettings() {
@@ -56,6 +71,7 @@ export class TasksModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
+    updateTaskButtonStatusBar(this); // Update the status bar when settings are saved
   }
 
   settingsDisplay(containerEl: HTMLElement): void {

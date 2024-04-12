@@ -13,8 +13,7 @@ export async function searchAndOrderTemplates(
   const lowerCaseQuery = query.toLowerCase();
   const scoredTemplates = await Promise.all(
     templateFiles.map(async file => {
-      const fileContent = await app.vault.cachedRead(file);
-      const { name, description } = parseFrontMatter(fileContent);
+      const { name, description } = await parseFrontMatter(app, file);
       const nameScore = name.toLowerCase().includes(lowerCaseQuery) ? 1 : 0;
       const descriptionScore = description
         .toLowerCase()

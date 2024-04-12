@@ -1,3 +1,5 @@
+import { App, TFile } from 'obsidian';
+
 export interface FrontMatter {
   name: string;
   description: string;
@@ -6,27 +8,21 @@ export interface FrontMatter {
   prompt: string;
 }
 
-export function parseFrontMatter(content: string): FrontMatter {
-  const frontMatterRegex = /---\n([\s\S]*?)\n---/;
-  const frontMatterMatch = content.match(frontMatterRegex);
+export async function parseFrontMatter(
+  app: App,
+  file: TFile
+): Promise<FrontMatter> {
+  const fileCache = app.metadataCache.getFileCache(file);
+  const frontMatter = fileCache?.frontmatter;
 
-  if (frontMatterMatch) {
-    const frontMatterContent = frontMatterMatch[1];
-    const frontMatter = {} as FrontMatter;
-
-    frontMatterContent.split('\n').forEach(line => {
-      const [key, value] = line.split(':').map(item => item.trim());
-      if (key === 'max tokens') {
-        frontMatter.maxTokens = parseInt(value, 10);
-      } else {
-        (frontMatter as any)[key] = value;
-      }
-    });
-
-    const promptContent = content.slice(frontMatterMatch[0].length).trim();
-    frontMatter.prompt = promptContent;
-
-    return frontMatter;
+  if (frontMatter) {
+    return {
+      name: frontMatter.name || '',
+      description: frontMatter.description || '',
+      model: frontMatter.model || '',
+      maxTokens: frontMatter['max tokens'] || 0,
+      prompt: await app.vault.read(file),
+    };
   }
 
   return {

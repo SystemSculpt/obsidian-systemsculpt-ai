@@ -6,7 +6,7 @@ export function renderMaxTokensSetting(
   plugin: BrainModule
 ): void {
   new Setting(containerEl)
-    .setName('Max Tokens')
+    .setName('Max tokens')
     .setDesc('The maximum number of tokens to generate in the chat completion')
     .addText(text =>
       text

@@ -5,6 +5,8 @@ export interface BrainSettings {
   generalGenerationPrompt: string;
   temperature: number;
   maxTokens: number;
+  showMaxTokensOnStatusBar: boolean; // New setting
+  showDefaultModelOnStatusBar: boolean; // New setting
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -28,4 +30,6 @@ Here is the note content to continue, within triple backticks:
 \`\`\``,
   temperature: 0.2,
   maxTokens: 1000,
+  showMaxTokensOnStatusBar: true, // Enabled by default
+  showDefaultModelOnStatusBar: true, // Enabled by default
 };

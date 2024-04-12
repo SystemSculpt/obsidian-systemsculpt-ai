@@ -9,8 +9,6 @@ export async function transcribeRecording(
   formData.append('file', blob, 'recording.mp3');
   formData.append('model', plugin.settings.whisperModel);
 
-  console.log(`Using model: ${plugin.settings.whisperModel}`); // Log the model being used
-
   // Fetch the latest OpenAI API key from the brain settings
   const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
 

@@ -6,7 +6,7 @@ export function renderCopyToClipboardToggle(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Copy to Clipboard')
+    .setName('Copy to clipboard')
     .setDesc('Automatically copy the transcription to the clipboard')
     .addToggle(toggle => {
       toggle

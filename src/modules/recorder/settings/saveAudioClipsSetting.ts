@@ -6,7 +6,7 @@ export function renderSaveAudioClipsToggle(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Save Audio Clips')
+    .setName('Save audio clips')
     .setDesc('Save audio clips after transcription')
     .addToggle(toggle => {
       toggle

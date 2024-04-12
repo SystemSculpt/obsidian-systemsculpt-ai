@@ -1,12 +1,13 @@
 import { UpdateModule } from '../UpdateModule';
-import { Notice } from 'obsidian';
+import { requestUrl } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 
 export async function checkForUpdate(plugin: UpdateModule): Promise<void> {
   try {
-    const response = await fetch(
-      'https://api.github.com/repos/SystemSculpt/obsidian-systemsculpt-ai/releases/latest'
-    );
+    const response = await requestUrl({
+      url: 'https://api.github.com/repos/SystemSculpt/obsidian-systemsculpt-ai/releases/latest',
+      method: 'GET',
+    });
     const data = await response.json();
     const latestRelease = data.tag_name;
 

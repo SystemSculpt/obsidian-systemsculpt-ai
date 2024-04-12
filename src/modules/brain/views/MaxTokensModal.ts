@@ -14,10 +14,10 @@ export class MaxTokensModal extends Modal {
   onOpen(): void {
     let { contentEl } = this;
 
-    contentEl.createEl('h2', { text: 'Max Tokens' });
+    contentEl.createEl('h2', { text: 'Max tokens' });
 
     new Setting(contentEl)
-      .setName('Max Tokens')
+      .setName('Max tokens')
       .setDesc(
         'The maximum number of tokens to generate in the chat completion'
       )

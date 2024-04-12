@@ -15,6 +15,7 @@ import { handleTranscription } from './functions/handleTranscription';
 import { transcribeSelectedFile } from './functions/transcribeSelectedFile';
 import { RecordingNotice } from './views/RecordingNotice';
 import { OpenAIService } from '../../api/OpenAIService';
+import { updateRecorderButtonStatusBar } from './functions/updateRecorderButtonStatusBar';
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
@@ -42,6 +43,22 @@ export class RecorderModule {
       name: 'Transcribe Selected File',
       callback: () => {},
     });
+
+    // Initialize status bar for Recorder Button
+    if (!this.plugin.recorderToggleStatusBarItem) {
+      this.plugin.recorderToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.recorderToggleStatusBarItem.setText('R'); // Set text to "R"
+      this.plugin.recorderToggleStatusBarItem.addClass(
+        'recorder-toggle-button'
+      );
+    }
+
+    updateRecorderButtonStatusBar(this); // Update the status bar on load
+
+    // Add click listener to toggle the Recording modal
+    this.plugin.recorderToggleStatusBarItem.onClickEvent(() => {
+      this.toggleRecording();
+    });
   }
 
   async loadSettings() {
@@ -54,6 +71,7 @@ export class RecorderModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
+    updateRecorderButtonStatusBar(this); // Update the status bar when settings are saved
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -78,9 +96,6 @@ export class RecorderModule {
       this.plugin.app.workspace.trigger('refresh-files');
     } catch (error) {
       if (error.message.includes('Folder already exists')) {
-        console.log(
-          'The recordings directory already exists. No action needed.'
-        );
       } else {
         console.error('Error ensuring recordings directory:', error);
       }

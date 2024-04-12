@@ -11,8 +11,6 @@ export async function generateTitle(
 
   const modelId = plugin.settings.defaultOpenAIModelId || 'gpt-3.5-turbo';
 
-  console.log(`Using model: ${modelId}`);
-
   try {
     const generatedTitle = await plugin.openAIService.createChatCompletion(
       prompt,

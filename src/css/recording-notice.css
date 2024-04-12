@@ -30,3 +30,13 @@
 .recording-notice-canvas {
   width: 100%;
 }
+.recording-notice-header button {
+  position: absolute;
+  right: 10px;
+  top: 5px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+}

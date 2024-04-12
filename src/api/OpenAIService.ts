@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import { requestUrl } from 'obsidian';
 import https from 'https';
 import { Model } from './Model';
 import { showCustomNotice } from '../modals';
@@ -6,17 +6,10 @@ import { showCustomNotice } from '../modals';
 export class OpenAIService {
   private static instance: OpenAIService;
   private apiKey: string;
-  client: AxiosInstance;
   private settings: { openAIApiKey: string };
 
   private constructor(apiKey: string, settings: { openAIApiKey: string }) {
     this.apiKey = apiKey;
-    this.client = axios.create({
-      baseURL: 'https://api.openai.com/v1',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
     this.settings = settings;
   }
 
@@ -33,7 +26,6 @@ export class OpenAIService {
   static updateApiKey(newApiKey: string): OpenAIService {
     if (this.instance) {
       this.instance.apiKey = newApiKey;
-      this.instance.client.defaults.headers.Authorization = `Bearer ${newApiKey}`;
       this.instance.settings.openAIApiKey = newApiKey;
     } else {
       this.instance = new OpenAIService(newApiKey, { openAIApiKey: newApiKey });
@@ -43,7 +35,6 @@ export class OpenAIService {
 
   updateApiKey(newApiKey: string): void {
     this.apiKey = newApiKey;
-    this.client.defaults.headers.Authorization = `Bearer ${newApiKey}`;
     this.settings.openAIApiKey = newApiKey;
   }
 
@@ -54,20 +45,24 @@ export class OpenAIService {
     maxTokens: number = 100
   ): Promise<string> {
     const currentApiKey = this.settings.openAIApiKey;
-    this.client.defaults.headers.Authorization = `Bearer ${currentApiKey}`;
 
-    console.log('Using API Key: ', this.client.defaults.headers.Authorization);
-    console.log(`Using model: ${modelId}`);
-    console.log(`Max tokens: ${maxTokens}`);
     try {
-      const response = await this.client.post('/chat/completions', {
-        model: modelId,
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${currentApiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: 'user', content: prompt }],
+          temperature,
+          max_tokens: maxTokens,
+        }),
       });
 
-      return response.data.choices[0].message.content.trim();
+      return response.json.choices[0].message.content.trim();
     } catch (error) {
       console.error('Error generating chat completion:', error);
       throw new Error(
@@ -82,10 +77,6 @@ export class OpenAIService {
     maxTokens: number
   ): Promise<string> {
     const currentApiKey = this.settings.openAIApiKey;
-
-    console.log('Using API Key: ', currentApiKey);
-    console.log(`Using model: ${modelId}`);
-    console.log(`Max tokens: ${maxTokens}`);
 
     const requestData = JSON.stringify({
       model: modelId,
@@ -243,11 +234,17 @@ export class OpenAIService {
 
   async getModels(): Promise<Model[]> {
     const currentApiKey = this.settings.openAIApiKey;
-    this.client.defaults.headers.Authorization = `Bearer ${currentApiKey}`;
 
     try {
-      const response = await this.client.get('/models');
-      return response.data.data
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/models',
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${currentApiKey}`,
+        },
+      });
+
+      return response.json.data
         .filter(
           model => model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
         )
@@ -265,11 +262,16 @@ export class OpenAIService {
 
   async getUsage(): Promise<any> {
     const currentApiKey = this.settings.openAIApiKey;
-    this.client.defaults.headers.Authorization = `Bearer ${currentApiKey}`;
 
     try {
-      const response = await this.client.get('/usage');
-      return response.data;
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/usage',
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${currentApiKey}`,
+        },
+      });
+      return response.json;
     } catch (error) {
       console.error('Error fetching OpenAI usage:', error);
       throw new Error(
@@ -280,15 +282,22 @@ export class OpenAIService {
 
   async generateEmbeddings(input: string): Promise<number[]> {
     const currentApiKey = this.settings.openAIApiKey;
-    this.client.defaults.headers.Authorization = `Bearer ${currentApiKey}`;
 
     try {
-      const response = await this.client.post('/embeddings', {
-        input,
-        model: 'text-embedding-3-large',
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/embeddings',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${currentApiKey}`,
+        },
+        body: JSON.stringify({
+          input,
+          model: 'text-embedding-3-large',
+        }),
       });
 
-      return response.data.data[0].embedding;
+      return response.json.data[0].embedding;
     } catch (error) {
       console.error('Error generating embeddings:', error);
       throw new Error(
@@ -303,7 +312,9 @@ export class OpenAIService {
       return false;
     }
     try {
-      const response = await axios.get('https://api.openai.com/v1/models', {
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/models',
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },

@@ -51,30 +51,10 @@ class DataSettingTab extends PluginSettingTab {
     let { containerEl } = this;
 
     containerEl.empty();
-    const dataSettingsH3 = containerEl.createEl('h3', {
-      text: 'Data Settings',
-    });
-    dataSettingsH3.addClass('ss-h3');
+    new Setting(containerEl).setName('Data').setHeading();
 
     containerEl.createEl('p', {
       text: 'Coming soon...',
-    });
-
-    // Upcoming Features
-    const upcomingFeaturesEl = containerEl.createDiv('upcoming-features');
-    const upcomingDataFeaturesH3 = upcomingFeaturesEl.createEl('h3', {
-      text: 'Upcoming Data Features',
-    });
-    upcomingDataFeaturesH3.addClass('ss-h3');
-    const featuresListEl = upcomingFeaturesEl.createEl('ul');
-    featuresListEl.createEl('li', {
-      text: 'A SystemSculpt Chrome extension to streamline the syncing of articles, tweets, youtube videos, and much more',
-    });
-    featuresListEl.createEl('li', {
-      text: 'Omnivore / Readwise / Reader API integrations',
-    });
-    featuresListEl.createEl('li', {
-      text: 'Have a cool data source that has an API that I can connect the SystemSculpt data route to? Message me on X or email!',
     });
   }
 }

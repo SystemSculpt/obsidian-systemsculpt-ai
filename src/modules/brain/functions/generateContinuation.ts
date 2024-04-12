@@ -18,15 +18,8 @@ export async function generateContinuation(
 
     // Check if abort has been signaled before proceeding
     if (abortSignal.aborted) {
-      console.log('Generation aborted before starting');
       return;
     }
-
-    console.log('Triggering streaming continuation with:');
-    console.log('System prompt:', plugin.settings.generalGenerationPrompt);
-    console.log('User message:', noteContent);
-    console.log('Model:', plugin.settings.defaultOpenAIModelId);
-    console.log('Max tokens:', plugin.settings.maxTokens);
 
     await plugin.openAIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,
@@ -35,21 +28,16 @@ export async function generateContinuation(
       plugin.settings.maxTokens,
       (chunk: string) => {
         if (abortSignal.aborted) {
-          console.log('Generation aborted during processing');
           return;
         }
-        console.log('Received chunk:', chunk);
         handleStreamingResponse(chunk, editor);
       },
       abortSignal
     );
 
     if (abortSignal.aborted) {
-      console.log('Generation aborted after completion');
       return;
     }
-
-    console.log('Streaming continuation finished');
   } else {
     showCustomNotice('No active note found to generate continuation');
   }
@@ -67,7 +55,6 @@ function handleStreamingResponse(chunk: string, editor: Editor): void {
     if (line.startsWith('data:')) {
       const dataStr = line.slice(5).trim();
       if (dataStr === '[DONE]') {
-        console.log('Received [DONE] marker, stopping');
         showCustomNotice('Generation completed!', 5000); // Display the completion notice
         return;
       }
@@ -92,14 +79,12 @@ function handleStreamingResponse(chunk: string, editor: Editor): void {
           error instanceof SyntaxError &&
           error.message.includes('Unexpected end of JSON input')
         ) {
-          console.log('Incomplete JSON string, waiting for more data');
           incompleteJSON += dataStr;
         } else {
           console.error('Error parsing JSON:', error);
         }
       }
     } else {
-      console.log('Ignoring non-data line');
     }
   }
 }

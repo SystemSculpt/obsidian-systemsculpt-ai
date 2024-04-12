@@ -1,6 +1,7 @@
 export interface SystemSculptTasksSettings {
   defaultTaskPrompt: string;
   tasksLocation: string;
+  showTaskButtonOnStatusBar: boolean; // Added as per instructions
 }
 
 export const DEFAULT_TASKS_SETTINGS: SystemSculptTasksSettings = {
@@ -31,4 +32,5 @@ Now that you understand your objectives and purpose, here is the user's latest t
 
 "{task}"`,
   tasksLocation: 'SystemSculpt/Tasks/Tasks.md',
+  showTaskButtonOnStatusBar: true, // Default to showing the "T" button, added as per instructions
 } as const;

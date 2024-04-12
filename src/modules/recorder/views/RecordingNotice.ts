@@ -23,6 +23,11 @@ export class RecordingNotice {
     noticeEl.addClass('recording-notice');
 
     const headerEl = noticeEl.createDiv('recording-notice-header');
+    const closeButton = headerEl.createEl('button', { text: 'X' });
+    closeButton.addEventListener('click', () => {
+      this.plugin.toggleRecording();
+    });
+
     headerEl.createEl('h3', { text: 'Recording audio...' });
 
     const canvasEl = noticeEl.createDiv('recording-notice-canvas');
@@ -137,7 +142,11 @@ export class RecordingNotice {
   async stopRecording(): Promise<ArrayBuffer> {
     cancelAnimationFrame(this.rafId);
     this.audioSource.disconnect();
-    this.audioContext.close();
+
+    // Check if the audio context is still open before trying to close it
+    if (this.audioContext.state !== 'closed') {
+      this.audioContext.close();
+    }
 
     // Add this block to stop all tracks on the stream
     if (this.mediaRecorder.stream) {

@@ -6,7 +6,7 @@ export function renderPasteOnTranscriptionToggle(
   plugin: RecorderModule
 ): void {
   new Setting(containerEl)
-    .setName('Paste into Active Note')
+    .setName('Paste into active note')
     .setDesc(
       'Automatically paste the transcription into the active note at the cursor position'
     )

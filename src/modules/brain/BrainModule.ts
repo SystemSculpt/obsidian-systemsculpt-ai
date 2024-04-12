@@ -60,39 +60,49 @@ export class BrainModule {
 
     this.plugin.addCommand({
       id: 'change-max-tokens',
-      name: 'Change Max Tokens',
+      name: 'Change max tokens',
       callback: () => {
         new MaxTokensModal(this.plugin.app, this).open();
       },
     });
 
-    // Add a status bar item for the model toggle
-    if (!this.plugin.modelToggleStatusBarItem) {
-      this.plugin.modelToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.modelToggleStatusBarItem.addClass('model-toggle-button');
-      this.plugin.modelToggleStatusBarItem.setText(
-        `GPT-${this.getCurrentModelShortName()}`
-      );
-    }
-
-    // Add click listener to toggle the model and update the status bar text
-    this.plugin.modelToggleStatusBarItem.onClickEvent(() => {
-      this.switchModel();
-      if (this.plugin.modelToggleStatusBarItem) {
-        this.plugin.modelToggleStatusBarItem.setText(
-          `GPT-${this.getCurrentModelShortName()}`
-        );
-      }
-    });
-
-    // Add a status bar item for the max tokens toggle
+    // Initialize status bar for Max Tokens
     if (!this.plugin.maxTokensToggleStatusBarItem) {
       this.plugin.maxTokensToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.maxTokensToggleStatusBarItem.addClass(
         'max-tokens-toggle-button'
       );
-      updateMaxTokensStatusBar(this); // Update the status bar when the module is loaded
     }
+    if (this.settings.showMaxTokensOnStatusBar) {
+      updateMaxTokensStatusBar(this);
+    } else {
+      this.plugin.maxTokensToggleStatusBarItem.setText('');
+    }
+
+    // Initialize status bar for Default Model
+    if (!this.plugin.modelToggleStatusBarItem) {
+      this.plugin.modelToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.modelToggleStatusBarItem.addClass('model-toggle-button');
+    }
+    if (this.settings.showDefaultModelOnStatusBar) {
+      this.plugin.modelToggleStatusBarItem.setText(
+        `GPT-${this.getCurrentModelShortName()}`
+      );
+    } else {
+      this.plugin.modelToggleStatusBarItem.setText('');
+    }
+
+    this.plugin.modelToggleStatusBarItem.onClickEvent(() => {
+      this.switchModel();
+      if (
+        this.plugin.modelToggleStatusBarItem &&
+        this.settings.showDefaultModelOnStatusBar
+      ) {
+        this.plugin.modelToggleStatusBarItem.setText(
+          `GPT-${this.getCurrentModelShortName()}`
+        );
+      }
+    });
 
     // Add click listener to open the Max Tokens modal
     this.plugin.maxTokensToggleStatusBarItem.onClickEvent(() => {
@@ -110,7 +120,9 @@ export class BrainModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
-    updateMaxTokensStatusBar(this); // Update the status bar when settings are saved
+    if (this.settings.showMaxTokensOnStatusBar) {
+      updateMaxTokensStatusBar(this); // Update the status bar when settings are saved
+    }
     this.openAIService.updateApiKey(this.settings.openAIApiKey);
   }
 
@@ -140,7 +152,10 @@ export class BrainModule {
         : 'gpt-3.5-turbo';
     this.settings.defaultOpenAIModelId = newModelId;
     this.saveSettings().then(() => {
-      if (this.plugin.modelToggleStatusBarItem) {
+      if (
+        this.plugin.modelToggleStatusBarItem &&
+        this.settings.showDefaultModelOnStatusBar
+      ) {
         this.plugin.modelToggleStatusBarItem.setText(
           `GPT-${this.getCurrentModelShortName()}`
         );

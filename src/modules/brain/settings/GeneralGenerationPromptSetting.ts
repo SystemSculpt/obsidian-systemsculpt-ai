@@ -7,7 +7,7 @@ export function renderGeneralGenerationPromptSetting(
   plugin: BrainModule
 ): void {
   new Setting(containerEl)
-    .setName('General Generation Prompt')
+    .setName('General generation prompt')
     .setDesc(
       'The prompt used for general note continuation. Use {{context}} as a placeholder for the note content.'
     )

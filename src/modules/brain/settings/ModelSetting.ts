@@ -12,7 +12,7 @@ export async function renderModelDropdown(
   let dropdownRef: DropdownComponent | null = null; // Declare a variable to hold the dropdown reference
 
   new Setting(containerEl)
-    .setName('Default Model')
+    .setName('Default model')
     .setDesc('Select the default model for generating tasks')
     .addDropdown(async (dropdown: DropdownComponent) => {
       dropdownRef = dropdown; // Assign the dropdown to the external variable

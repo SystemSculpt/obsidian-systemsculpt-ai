@@ -49,9 +49,6 @@ export class BlankTemplateModal extends Modal {
         editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
 
         showCustomNotice('Generating...', 5000);
-        console.log('Triggering streaming completion with:');
-        console.log('System prompt:', this.plugin.settings.blankTemplatePrompt);
-        console.log('User message:', userPrompt);
 
         if (!this.plugin.abortController) {
           this.plugin.abortController = new AbortController();
@@ -68,9 +65,7 @@ export class BlankTemplateModal extends Modal {
           model,
           maxTokens,
           (chunk: string) => {
-            console.log('Received chunk:', chunk);
             handleStreamingResponse(chunk, editor, signal);
-            console.log('Received [DONE] marker, stopping');
             showCustomNotice('Generation completed!', 5000); // Display the completion notice
             this.plugin.abortController = null; // Reset the abortController
             this.plugin.isGenerationCompleted = true; // Mark generation as completed
@@ -78,8 +73,6 @@ export class BlankTemplateModal extends Modal {
           },
           signal
         );
-
-        console.log('Streaming completion finished');
       }
     }
   }

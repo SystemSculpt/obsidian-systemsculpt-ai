@@ -1,6 +1,6 @@
 import { Setting } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
-import { DEFAULT_TEMPLATES_SETTINGS } from '../TemplatesModule';
+import { DEFAULT_TEMPLATES_SETTINGS } from './TemplatesSettings';
 
 export function renderBlankTemplatePromptSetting(
   containerEl: HTMLElement,

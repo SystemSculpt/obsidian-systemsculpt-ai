@@ -24,6 +24,8 @@ export default class SystemSculptPlugin extends Plugin {
   updateModule: UpdateModule;
   modelToggleStatusBarItem: HTMLElement | null = null;
   maxTokensToggleStatusBarItem: HTMLElement | null = null;
+  taskToggleStatusBarItem: HTMLElement | null = null; // Add this line
+  recorderToggleStatusBarItem: HTMLElement | null = null; // Add this line
 
   async onload() {
     await this.loadSettings();

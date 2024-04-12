@@ -1,6 +1,6 @@
 import { Setting, TFolder } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
-import { DEFAULT_TEMPLATES_SETTINGS } from '../TemplatesModule';
+import { DEFAULT_TEMPLATES_SETTINGS } from '../settings/TemplatesSettings';
 import { MultiSuggest } from '../../../utils/MultiSuggest';
 
 export function renderTemplatesPathSetting(
@@ -8,7 +8,7 @@ export function renderTemplatesPathSetting(
   plugin: TemplatesModule
 ): void {
   new Setting(containerEl)
-    .setName('Templates Path')
+    .setName('Template folder location')
     .setDesc('Path where the templates will be stored')
     .addText(text => {
       text
