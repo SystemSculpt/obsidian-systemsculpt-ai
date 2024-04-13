@@ -32,6 +32,11 @@ export async function checkForUpdate(plugin: UpdateModule): Promise<void> {
         }
       } else {
         console.log(`Update available: NO`);
+        // Hide the update button and set updateAvailable to false
+        if (plugin.plugin.updateStatusBarItem) {
+          plugin.plugin.updateStatusBarItem.style.display = 'none';
+        }
+        plugin.updateAvailable = false;
       }
     }
   } catch (error) {

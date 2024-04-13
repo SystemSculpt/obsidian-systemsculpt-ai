@@ -78,14 +78,23 @@ export async function updatePlugin(plugin: UpdateModule): Promise<void> {
         );
       }
 
-      // Reload the plugin
+      // Unload the plugin
       const app = plugin.plugin.app as any;
-      await app.plugins.disablePlugin(pluginId);
-      await app.plugins.enablePlugin(pluginId);
+      app.plugins.disablePlugin(pluginId);
+
+      // Re-load the plugin
+      await app.plugins.loadManifests();
+      await app.plugins.enablePluginAndSave(pluginId);
 
       showCustomNotice(
         `SystemSculpt AI has been updated to version ${latestRelease} successfully!`
       );
+
+      // Hide the update status bar item and set updateAvailable to false
+      if (plugin.plugin.updateStatusBarItem) {
+        plugin.plugin.updateStatusBarItem.style.display = 'none';
+      }
+      plugin.updateAvailable = false;
     } else {
       throw new Error('Required assets not found in the release.');
     }

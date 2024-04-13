@@ -25,6 +25,12 @@ export class UpdateModule {
   }
 
   async updatePlugin(): Promise<void> {
-    return updatePlugin(this);
+    await updatePlugin(this);
+
+    // Hide the update status bar item and set updateAvailable to false
+    if (this.plugin.updateStatusBarItem) {
+      this.plugin.updateStatusBarItem.style.display = 'none';
+    }
+    this.updateAvailable = false;
   }
 }
