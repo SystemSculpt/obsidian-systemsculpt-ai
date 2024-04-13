@@ -11,6 +11,7 @@ import { renderBlankTemplatePromptSetting } from './settings/BlankTemplatePrompt
 import { downloadTemplatesFromServer } from './functions/downloadTemplatesFromServer';
 import { TemplatesSuggest } from './TemplatesSuggest';
 import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
+import { checkLicenseValidity } from './functions/checkLicenseValidity';
 
 export class TemplatesModule {
   plugin: SystemSculptPlugin;
@@ -27,15 +28,12 @@ export class TemplatesModule {
   async load() {
     await this.loadSettings();
     this.registerCodeMirror();
-    setInterval(() => this.checkAndUpdateTemplates(), 10800000); // 3 hours in milliseconds
-
-    this.plugin.addCommand({
-      id: 'sync-templates',
-      name: 'Sync templates from server',
-      callback: async () => {
-        await downloadTemplatesFromServer(this);
-      },
-    });
+    setTimeout(async () => {
+      if (await checkLicenseValidity(this)) {
+        this.checkAndUpdateTemplates();
+        setInterval(() => this.checkAndUpdateTemplates(), 10800000); // 3 hours in milliseconds
+      }
+    }, 5000); // Delay of 5 seconds after plugin initialization
   }
 
   async loadSettings() {
@@ -67,18 +65,34 @@ export class TemplatesModule {
   }
 
   async checkAndUpdateTemplates(): Promise<void> {
+    // First, check if the license key is valid
+    if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
+      console.log(
+        'No valid license key found. Please enter your license key in the settings.'
+      );
+      return;
+    }
+
+    // Check if the license key is valid by calling the license validation function
+    const isValidLicense = await checkLicenseValidity(this);
+    if (!isValidLicense) {
+      console.log(
+        'Your license key is not valid. Please check your license key in the settings.'
+      );
+      return;
+    }
+
+    // Proceed with checking the server for the latest templates version
     const serverVersionResponse = await requestUrl({
       url: 'https://license.systemsculpt.com/templates-version',
     });
     const serverVersion = serverVersionResponse.json.version;
     if (this.settings.templatesVersion !== serverVersion) {
-      await downloadTemplatesFromServer(this);
-      this.settings.templatesVersion = serverVersion;
-      await this.saveSettings();
-      showCustomNotice('SS-Sync Templates updated to the latest version!');
+      showCustomNotice(
+        'A new version of the templates is available. Please update manually through the settings.'
+      );
     } else {
-      showCustomNotice('You already have the latest version of the templates.');
-      await downloadTemplatesFromServer(this);
+      console.log('You already have the latest version of the templates.');
     }
   }
 }

@@ -5,8 +5,9 @@ export interface BrainSettings {
   generalGenerationPrompt: string;
   temperature: number;
   maxTokens: number;
-  showMaxTokensOnStatusBar: boolean; // New setting
-  showDefaultModelOnStatusBar: boolean; // New setting
+  showMaxTokensOnStatusBar: boolean;
+  showDefaultModelOnStatusBar: boolean;
+  showUpdateButtonInStatusBar: boolean; // New setting
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -47,6 +48,7 @@ Rules:
 - Your generation response should be purely the text to be added, without any additional labels or explanations.`,
   temperature: 0.2,
   maxTokens: 1000,
-  showMaxTokensOnStatusBar: true, // Enabled by default
-  showDefaultModelOnStatusBar: true, // Enabled by default
+  showMaxTokensOnStatusBar: true,
+  showDefaultModelOnStatusBar: true,
+  showUpdateButtonInStatusBar: true, // Enabled by default
 };

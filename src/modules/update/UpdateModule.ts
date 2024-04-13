@@ -1,6 +1,7 @@
 import SystemSculptPlugin from '../../main';
 import { checkForUpdates } from './functions/checkForUpdates';
 import { checkForUpdate } from './functions/checkForUpdate';
+import { updatePlugin } from './functions/updatePlugin';
 
 export class UpdateModule {
   plugin: SystemSculptPlugin;
@@ -11,9 +12,8 @@ export class UpdateModule {
   }
 
   async load() {
-    setTimeout(() => this.checkForUpdates(), 3000);
-    setTimeout(() => this.checkForUpdate(), 5000);
-    setInterval(() => this.checkForUpdate(), 10800000); // Check every 3 hours
+    this.checkForUpdate();
+    setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000); // Check every 3 hours
   }
 
   async checkForUpdates(): Promise<void> {
@@ -22,5 +22,9 @@ export class UpdateModule {
 
   async checkForUpdate(): Promise<void> {
     return checkForUpdate(this);
+  }
+
+  async updatePlugin(): Promise<void> {
+    return updatePlugin(this);
   }
 }

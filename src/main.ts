@@ -13,7 +13,7 @@ import { AboutModule } from './modules/about/AboutModule';
 import { OpenAIService } from './api/OpenAIService';
 import { UpdateModule } from './modules/update/UpdateModule';
 
-const development = true;
+const development = false;
 
 if (!development) {
   console.log = function () {}; // Disable console.log in non-development environments
@@ -31,6 +31,7 @@ export default class SystemSculptPlugin extends Plugin {
   maxTokensToggleStatusBarItem: HTMLElement | null = null;
   taskToggleStatusBarItem: HTMLElement | null = null; // Add this line
   recorderToggleStatusBarItem: HTMLElement | null = null; // Add this line
+  updateStatusBarItem: HTMLElement | null = null; // Add this line
 
   async onload() {
     await this.loadSettings();
@@ -78,6 +79,34 @@ export default class SystemSculptPlugin extends Plugin {
         }
       })
     );
+
+    // Initialize and add the update status bar item
+    this.updateStatusBarItem = this.addStatusBarItem();
+    this.updateStatusBarItem.setText('Update SystemSculpt AI');
+    this.updateStatusBarItem.addClass('update-button');
+    this.updateStatusBarItem.addEventListener('click', async () => {
+      if (
+        this.updateStatusBarItem &&
+        !this.updateStatusBarItem.classList.contains('disabled')
+      ) {
+        this.updateStatusBarItem.setText('Updating...');
+        this.updateStatusBarItem.classList.add('disabled');
+        await this.updateModule.updatePlugin();
+        if (this.updateStatusBarItem) {
+          this.updateStatusBarItem.classList.remove('disabled'); // Optionally re-enable
+        }
+      }
+    });
+
+    // Set the initial visibility of the update status bar item
+    if (
+      this.brainModule.settings.showUpdateButtonInStatusBar &&
+      this.updateModule.updateAvailable
+    ) {
+      this.updateStatusBarItem.style.display = 'inline-block';
+    } else {
+      this.updateStatusBarItem.style.display = 'none';
+    }
   }
 
   private initializeBrainModule(): BrainModule {

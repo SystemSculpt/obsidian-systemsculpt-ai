@@ -29,7 +29,21 @@ export async function transcribeRecording(
     console.error(
       'Failed to transcribe recording:',
       response.statusText,
-      errorBody
+      errorBody,
+      JSON.stringify(
+        {
+          headers: {
+            Authorization: `Bearer ${currentOpenAIApiKey}`,
+          },
+          model: plugin.settings.whisperModel,
+          fileDetails: {
+            type: blob.type,
+            size: blob.size,
+          },
+        },
+        null,
+        2
+      ) // Log detailed request info for debugging
     );
     throw new Error('Transcription failed with response: ' + errorBody);
   }
