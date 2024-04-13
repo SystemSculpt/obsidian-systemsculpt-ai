@@ -26,11 +26,7 @@ Or, if you deem the task worthy of having sub-tasks, like this:
 
 However many sub-tasks you deem necessary without, again, going overboard in terms of complication.
 
-The main objective is to always break down the user's tasks or notes into actionable items that they can set out to accomplish in high quality. That is your main purpose.
-
-Now that you understand your objectives and purpose, here is the user's latest task:
-
-"{task}"`,
+The main objective is to always break down the user's tasks or notes into actionable items that they can set out to accomplish in high quality. That is your main purpose.`,
   tasksLocation: 'SystemSculpt/Tasks/Tasks.md',
   showTaskButtonOnStatusBar: true, // Default to showing the "T" button, added as per instructions
 } as const;

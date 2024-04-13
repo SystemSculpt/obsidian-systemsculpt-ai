@@ -8,9 +8,7 @@ export function renderGeneralGenerationPromptSetting(
 ): void {
   new Setting(containerEl)
     .setName('General generation prompt')
-    .setDesc(
-      'The prompt used for general note continuation. Use {{context}} as a placeholder for the note content.'
-    )
+    .setDesc('The prompt used for general note continuation.')
     .addTextArea(text => {
       text
         .setPlaceholder('Enter general generation prompt')
@@ -33,4 +31,8 @@ export function renderGeneralGenerationPromptSetting(
           plugin.settingsDisplay(containerEl);
         });
     });
+  const infoBoxEl = containerEl.createDiv('info-box');
+  infoBoxEl.createEl('p', {
+    text: "You can hotkey this (I personally hotkey it to CMD+Shift+G). It uses the entire note's contents as context to continue the generation forward. Useful for quick end-of-note things like summaries, action items, ideas, brainstorming, etc.",
+  });
 }

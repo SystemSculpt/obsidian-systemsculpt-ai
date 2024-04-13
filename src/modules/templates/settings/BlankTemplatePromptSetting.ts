@@ -8,9 +8,7 @@ export function renderBlankTemplatePromptSetting(
 ): void {
   new Setting(containerEl)
     .setName('Blank Template Prompt')
-    .setDesc(
-      'The system prompt used for the Blank Template. Use {{context}} as a placeholder for the user prompt.'
-    )
+    .setDesc('The system prompt used for the Blank Template.')
     .addTextArea(text => {
       text
         .setPlaceholder('Enter blank template prompt')

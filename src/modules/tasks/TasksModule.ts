@@ -32,7 +32,7 @@ export class TasksModule {
 
     this.plugin.addCommand({
       id: 'open-task-modal',
-      name: 'Add Task',
+      name: 'Add task',
       callback: async () => {
         new TaskModal(this.plugin.app, this).open();
       },
@@ -40,7 +40,7 @@ export class TasksModule {
 
     this.plugin.addCommand({
       id: 'view-tasks',
-      name: 'View Tasks',
+      name: 'View tasks',
       callback: () => {
         this.viewTasks();
       },

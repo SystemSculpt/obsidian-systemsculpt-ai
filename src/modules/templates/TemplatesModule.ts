@@ -97,6 +97,14 @@ class TemplatesSettingTab extends PluginSettingTab {
 
     containerEl.empty();
     new Setting(containerEl).setName('Templates').setHeading();
+    containerEl.createEl('p', {
+      text: 'Change your default AI templates location, what your default blank prompt does in the background, and more.',
+    });
+
+    const infoBoxEl = containerEl.createDiv('info-box');
+    infoBoxEl.createEl('p', {
+      text: "If you're a Patreon member, download the latest AI templates from SystemSculpt!",
+    });
 
     renderLicenseKeySetting(containerEl, this.plugin);
 

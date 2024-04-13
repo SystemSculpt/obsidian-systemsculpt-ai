@@ -30,7 +30,7 @@ export class BrainModule {
 
     this.plugin.addCommand({
       id: 'generate-note-title',
-      name: 'Generate Title for Current Note',
+      name: 'Generate title for current note',
       callback: async () => {
         await this.generateTitleForCurrentNote();
       },
@@ -38,16 +38,15 @@ export class BrainModule {
 
     this.plugin.addCommand({
       id: 'toggle-generation',
-      name: 'Toggle Generation',
+      name: 'Toggle generation',
       callback: async () => {
         await this.toggleGeneration();
       },
-      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'G' }],
     });
 
     this.plugin.addCommand({
       id: 'toggle-model',
-      name: 'Toggle Model',
+      name: 'Toggle model',
       callback: () => {
         this.switchModel();
         const activeLeaf = this.plugin.app.workspace.activeLeaf;

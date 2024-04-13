@@ -23,6 +23,11 @@ export class SystemSculptTasksSettingTab extends PluginSettingTab {
       text: 'Tasks-specific settings such as the task prompt and the location of the task list.',
     });
 
+    const infoBoxEl = containerEl.createDiv('info-box');
+    infoBoxEl.createEl('p', {
+      text: "You can 'View tasks' (which I hotkey to CMD+OPTION+V) to see your current tasks, and 'Add task' (which I hotkey to CMD+OPTION+T) to add a task to your current list of tasks.",
+    });
+
     // Add toggle for showing Task Button on the status bar
     new Setting(containerEl)
       .setName('Show task button on status bar')

@@ -25,8 +25,13 @@ export async function transcribeRecording(
   );
 
   if (!response.ok) {
-    console.error('Failed to transcribe recording:', response.statusText);
-    throw new Error('Transcription failed');
+    const errorBody = await response.text(); // Get full response body as text
+    console.error(
+      'Failed to transcribe recording:',
+      response.statusText,
+      errorBody
+    );
+    throw new Error('Transcription failed with response: ' + errorBody);
   }
 
   const data = await response.json();

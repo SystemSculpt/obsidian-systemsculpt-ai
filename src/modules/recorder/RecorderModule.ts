@@ -33,14 +33,13 @@ export class RecorderModule {
 
     this.plugin.addCommand({
       id: 'record-audio-note',
-      name: 'Record Audio Note',
+      name: 'Record audio note',
       callback: () => this.toggleRecording(),
-      hotkeys: [],
     });
 
     this.plugin.addCommand({
       id: 'transcribe-selected-file',
-      name: 'Transcribe Selected File',
+      name: 'Transcribe selected file',
       callback: () => {},
     });
 

@@ -7,6 +7,9 @@ export const AboutData = {
   ],
   patreonMembers: [
     {
+      name: 'Ronny Khalil',
+    },
+    {
       name: 'Francisco Lopez',
     },
     {
@@ -50,6 +53,9 @@ export const AboutData = {
     },
     {
       name: 'Richard Bennett',
+    },
+    {
+      name: 'Neil',
     },
     {
       name: 'James Traver',

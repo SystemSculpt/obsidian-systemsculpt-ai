@@ -4,16 +4,15 @@ export async function generateTitle(
   plugin: BrainModule,
   noteContent: string
 ): Promise<string> {
-  const prompt = buildGenerateTitlePrompt(
-    noteContent,
-    plugin.settings.generateTitlePrompt
-  );
+  const systemPrompt = plugin.settings.generateTitlePrompt;
+  const userMessage = noteContent;
 
   const modelId = plugin.settings.defaultOpenAIModelId || 'gpt-3.5-turbo';
 
   try {
     const generatedTitle = await plugin.openAIService.createChatCompletion(
-      prompt,
+      systemPrompt,
+      userMessage,
       modelId,
       plugin.settings.temperature,
       plugin.settings.maxTokens

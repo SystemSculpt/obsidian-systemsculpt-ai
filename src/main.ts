@@ -13,6 +13,11 @@ import { AboutModule } from './modules/about/AboutModule';
 import { OpenAIService } from './api/OpenAIService';
 import { UpdateModule } from './modules/update/UpdateModule';
 
+const development = true;
+
+if (!development) {
+  console.log = function () {}; // Disable console.log in non-development environments
+}
 export default class SystemSculptPlugin extends Plugin {
   settings: SystemSculptSettings;
   tasksModule: TasksModule;

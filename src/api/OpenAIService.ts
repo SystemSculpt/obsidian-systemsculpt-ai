@@ -39,11 +39,18 @@ export class OpenAIService {
   }
 
   async createChatCompletion(
-    prompt: string,
+    systemPrompt: string,
+    userMessage: string,
     modelId: string,
     temperature: number = 0.2,
     maxTokens: number = 100
   ): Promise<string> {
+    console.log('System Prompt:', systemPrompt);
+    console.log('User Message:', userMessage);
+    console.log(
+      `Model ID: ${modelId} | Temperature: ${temperature} | Max Tokens: ${maxTokens}`
+    );
+
     const currentApiKey = this.settings.openAIApiKey;
 
     try {
@@ -56,7 +63,10 @@ export class OpenAIService {
         },
         body: JSON.stringify({
           model: modelId,
-          messages: [{ role: 'user', content: prompt }],
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
           temperature,
           max_tokens: maxTokens,
         }),
@@ -71,79 +81,6 @@ export class OpenAIService {
     }
   }
 
-  async createStreamingChatCompletion(
-    prompt: string,
-    modelId: string,
-    maxTokens: number
-  ): Promise<string> {
-    const currentApiKey = this.settings.openAIApiKey;
-
-    const requestData = JSON.stringify({
-      model: modelId,
-      messages: [{ role: 'user', content: prompt }],
-      stream: true,
-      max_tokens: maxTokens,
-    });
-
-    return new Promise<string>((resolve, reject) => {
-      const req = https.request(
-        {
-          hostname: 'api.openai.com',
-          port: 443,
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentApiKey}`,
-          },
-        },
-        res => {
-          if (res.statusCode !== 200) {
-            const error = new Error(
-              `Request failed with status code ${res.statusCode}`
-            );
-            reject(error);
-            return;
-          }
-
-          const decoder = new TextDecoder('utf-8');
-          let result = '';
-
-          res.on('data', chunk => {
-            const chunkValue = decoder.decode(chunk);
-            result += chunkValue;
-            showCustomNotice(chunkValue, 1000); // Show the chunk of text for 1 second
-          });
-
-          res.on('end', () => {
-            resolve(result);
-          });
-
-          res.on('error', error => {
-            console.error('Error generating streaming chat completion:', error);
-            reject(
-              new Error(
-                'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
-              )
-            );
-          });
-        }
-      );
-
-      req.on('error', error => {
-        console.error('Error generating streaming chat completion:', error);
-        reject(
-          new Error(
-            'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
-          )
-        );
-      });
-
-      req.write(requestData);
-      req.end();
-    });
-  }
-
   async createStreamingChatCompletionWithCallback(
     systemPrompt: string,
     userMessage: string,
@@ -152,6 +89,10 @@ export class OpenAIService {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    console.log('System Prompt:', systemPrompt);
+    console.log('User Message:', userMessage);
+    console.log(`Model ID: ${modelId} | Max Tokens: ${maxTokens}`);
+
     const currentApiKey = this.settings.openAIApiKey;
 
     const requestData = JSON.stringify({
@@ -256,52 +197,6 @@ export class OpenAIService {
       console.error('Error fetching OpenAI models:', error);
       throw new Error(
         'Failed to fetch OpenAI models. Please check your OpenAI API key and try again.'
-      );
-    }
-  }
-
-  async getUsage(): Promise<any> {
-    const currentApiKey = this.settings.openAIApiKey;
-
-    try {
-      const response = await requestUrl({
-        url: 'https://api.openai.com/v1/usage',
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${currentApiKey}`,
-        },
-      });
-      return response.json;
-    } catch (error) {
-      console.error('Error fetching OpenAI usage:', error);
-      throw new Error(
-        'Failed to fetch OpenAI usage. Please check your OpenAI API key and try again.'
-      );
-    }
-  }
-
-  async generateEmbeddings(input: string): Promise<number[]> {
-    const currentApiKey = this.settings.openAIApiKey;
-
-    try {
-      const response = await requestUrl({
-        url: 'https://api.openai.com/v1/embeddings',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${currentApiKey}`,
-        },
-        body: JSON.stringify({
-          input,
-          model: 'text-embedding-3-large',
-        }),
-      });
-
-      return response.json.data[0].embedding;
-    } catch (error) {
-      console.error('Error generating embeddings:', error);
-      throw new Error(
-        'Failed to generate embeddings. Please check your OpenAI API key and try again.'
       );
     }
   }

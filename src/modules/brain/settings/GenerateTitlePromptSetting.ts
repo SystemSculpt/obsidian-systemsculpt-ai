@@ -8,9 +8,7 @@ export function renderGenerateTitlePrompt(
 ): void {
   new Setting(containerEl)
     .setName('Generate title prompt')
-    .setDesc(
-      'The prompt used when generating titles for notes. Use {note} as a placeholder for the note content.'
-    )
+    .setDesc('The prompt used when generating titles for notes.')
     .addTextArea(text => {
       text
         .setPlaceholder('Enter generate title prompt')
@@ -32,5 +30,9 @@ export function renderGenerateTitlePrompt(
           await plugin.saveSettings();
           plugin.settingsDisplay(containerEl);
         });
+      const infoBoxEl = containerEl.createDiv('info-box');
+      infoBoxEl.createEl('p', {
+        text: "You can hotkey this (I personally hotkey it to CMD+Shift+T). It take's the note's contents and generates a title according to these instructions.",
+      });
     });
 }

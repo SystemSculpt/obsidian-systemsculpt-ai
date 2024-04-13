@@ -53,7 +53,7 @@ export class BrainSettingTab extends PluginSettingTab {
 
     const infoBoxEl = containerEl.createDiv('info-box');
     infoBoxEl.createEl('p', {
-      text: "Note: GPT-3.5-Turbo is pretty much free; it's fractions of a cent and pretty powerful. I personally spend less than $3 a day from very heavy use of GPT-4-Turbo. Each person is different. I recommend tracking your daily use and seeing what your average is, and then adjust between using GPT-3.5-Turbo and GPT-4-Turbo.",
+      text: "GPT-3.5-Turbo is pretty much free; it's fractions of a cent and pretty powerful. I personally spend less than $3 a day from very heavy use of GPT-4-Turbo. Each person is different. I recommend tracking your daily use and seeing what your average is, and then adjust between using GPT-3.5-Turbo and GPT-4-Turbo.",
     });
 
     renderMaxTokensSetting(containerEl, this.plugin);
