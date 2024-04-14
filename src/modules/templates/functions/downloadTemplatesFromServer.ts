@@ -81,7 +81,7 @@ export async function downloadTemplatesFromServer(
         'SS-Sync Templates downloaded successfully! Thanks for your support on Patreon!'
       );
     } else {
-      console.log('You already have the latest version of the templates.');
+      showCustomNotice('You already have the latest version of the templates.');
     }
   } catch (error) {
     console.error('Error downloading templates:', error);

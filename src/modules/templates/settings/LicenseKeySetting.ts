@@ -30,6 +30,8 @@ export function renderLicenseKeySetting(
           'Sync templates from the server using the provided license key'
         )
         .onClick(async () => {
+          button.setDisabled(true); // Disable the button
+          setTimeout(() => button.setDisabled(false), 3000); // Re-enable after 3 seconds
           if (
             !plugin.settings.licenseKey ||
             plugin.settings.licenseKey.trim() === ''

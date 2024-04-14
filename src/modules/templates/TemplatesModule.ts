@@ -94,26 +94,17 @@ export class TemplatesModule {
       return;
     }
 
-    // Check if the license key is valid by calling the license validation function
-    const isValidLicense = await checkLicenseValidity(this);
-    if (!isValidLicense) {
-      console.log(
-        'Your license key is not valid. Please check your license key in the settings.'
-      );
-      return;
-    }
-
     // Proceed with checking the server for the latest templates version
     const serverVersionResponse = await requestUrl({
       url: 'https://license.systemsculpt.com/templates-version',
     });
+
     const serverVersion = serverVersionResponse.json.version;
+
     if (this.settings.templatesVersion !== serverVersion) {
       showCustomNotice(
         'A new version of the templates is available. Please update manually through the settings.'
       );
-    } else {
-      console.log('You already have the latest version of the templates.');
     }
   }
 }
