@@ -18,8 +18,8 @@ export async function renderTemplateList(
 
   const descriptionEl = el.createEl('p');
   const truncatedDescription =
-    description.length > 100
-      ? `${description.substring(0, 100)}...`
+    description.length > 125
+      ? `${description.substring(0, 125)}...`
       : description;
   descriptionEl.textContent = truncatedDescription;
   descriptionEl.style.fontSize = '12px';

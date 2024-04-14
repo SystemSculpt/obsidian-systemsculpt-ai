@@ -3,6 +3,7 @@ export interface TemplatesSettings {
   blankTemplatePrompt: string;
   licenseKey: string;
   templatesVersion: string; // Add this line
+  showSSSyncTemplates: boolean; // Add this line
 }
 
 export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
@@ -18,4 +19,5 @@ Rules:
 - Your generation response should be purely the requested content, without any additional labels or explanations.`,
   licenseKey: '',
   templatesVersion: '0.0.1', // Initialize with a default version
+  showSSSyncTemplates: true, // Add this line
 };

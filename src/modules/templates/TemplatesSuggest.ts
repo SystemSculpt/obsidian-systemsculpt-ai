@@ -6,6 +6,7 @@ import {
   EditorSuggestTriggerInfo,
   MarkdownView,
   TFile,
+  normalizePath,
 } from 'obsidian';
 import { TemplatesModule } from './TemplatesModule';
 import { handleStreamingResponse } from './functions/handleStreamingResponse';
@@ -48,14 +49,27 @@ export class TemplatesSuggest extends EditorSuggest<string> {
       this.app,
       this.plugin.settings.templatesPath
     );
+    const filteredTemplateFiles = templateFiles.filter(file =>
+      this.shouldIncludeTemplate(file)
+    );
     const searchResults = await searchAndOrderTemplates(
       this.app,
-      templateFiles,
+      filteredTemplateFiles,
       context.query
     );
     return context.query
       ? searchResults.map(file => file.basename)
       : ['Blank Template', ...searchResults.map(file => file.basename)];
+  }
+
+  private shouldIncludeTemplate(file: TFile): boolean {
+    if (this.plugin.settings.showSSSyncTemplates) {
+      return true;
+    }
+    const ssSyncFolderPath = normalizePath(
+      `${this.plugin.settings.templatesPath}/SS-Sync`
+    );
+    return !file.path.startsWith(ssSyncFolderPath);
   }
 
   async renderSuggestion(value: string, el: HTMLElement): Promise<void> {

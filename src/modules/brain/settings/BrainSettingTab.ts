@@ -28,7 +28,7 @@ export class BrainSettingTab extends PluginSettingTab {
     });
     if (this.plugin.plugin.updateModule.updateAvailable) {
       new Setting(containerEl)
-        .setName('Update Plugin')
+        .setName('Update plugin')
         .setDesc(
           'A new version of SystemSculpt AI is available. Click to update.'
         )
@@ -71,11 +71,6 @@ export class BrainSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
-
-    const infoBoxEl = containerEl.createDiv('info-box');
-    infoBoxEl.createEl('p', {
-      text: "GPT-3.5-Turbo is pretty much free; it's fractions of a cent and pretty powerful. I personally spend less than $3 a day from very heavy use of GPT-4-Turbo. Each person is different. I recommend tracking your daily use and seeing what your average is, and then adjust between using GPT-3.5-Turbo and GPT-4-Turbo.",
-    });
 
     renderMaxTokensSetting(containerEl, this.plugin);
 

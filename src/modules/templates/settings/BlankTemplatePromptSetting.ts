@@ -7,7 +7,7 @@ export function renderBlankTemplatePromptSetting(
   plugin: TemplatesModule
 ): void {
   new Setting(containerEl)
-    .setName('Blank Template Prompt')
+    .setName('Blank template prompt')
     .setDesc('The system prompt used for the Blank Template.')
     .addTextArea(text => {
       text

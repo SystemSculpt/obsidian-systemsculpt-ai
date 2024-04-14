@@ -8,9 +8,7 @@ export function renderTaskPromptSetting(
 ): void {
   new Setting(containerEl)
     .setName('Task prompt')
-    .setDesc(
-      'The prompt used when generating tasks. Use {task} as a placeholder for the task description.'
-    )
+    .setDesc('The prompt used when generating tasks.')
     .addTextArea(text => {
       text
         .setPlaceholder('Enter task prompt')
@@ -32,6 +30,9 @@ export function renderTaskPromptSetting(
           await plugin.saveSettings();
           plugin.settingsDisplay(containerEl);
         });
+      const infoBoxEl = containerEl.createDiv('info-box');
+      infoBoxEl.createEl('p', {
+        text: 'This is the system prompt that runs alongside whatever task you input. It is used to generate the actual tasks. If you prefer a different task structure, this is where you would input your custom instructions.',
+      });
     });
 }
-``;

@@ -31,7 +31,7 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
 
     const infoBoxEl = containerEl.createDiv('info-box');
     infoBoxEl.createEl('p', {
-      text: 'Please ensure that you have set your OpenAI API key in the Brain settings.',
+      text: 'Please ensure that you have set your OpenAI API key in the Brain settings. The Recorder acts as a toggle - meaning you can hotkey it (I hotkey mine to CMD+SHIFT+R) to start, and then just hit the same hotkey again to end it.',
     });
 
     // Add toggle for showing Recorder Button on the status bar

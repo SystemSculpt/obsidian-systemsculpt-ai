@@ -8,7 +8,6 @@ import { renderTemplatesPathSetting } from './settings/TemplatesPathSetting';
 import { OpenAIService } from '../../api/OpenAIService';
 import { showCustomNotice } from '../../modals';
 import { renderBlankTemplatePromptSetting } from './settings/BlankTemplatePromptSetting';
-import { downloadTemplatesFromServer } from './functions/downloadTemplatesFromServer';
 import { TemplatesSuggest } from './TemplatesSuggest';
 import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
@@ -19,6 +18,7 @@ export class TemplatesModule {
   openAIService: OpenAIService;
   abortController: AbortController | null = null;
   isGenerationCompleted: boolean = false;
+  private firstLicenseCheckDone: boolean = false;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -29,10 +29,8 @@ export class TemplatesModule {
     await this.loadSettings();
     this.registerCodeMirror();
     setTimeout(async () => {
-      if (await checkLicenseValidity(this)) {
-        this.checkAndUpdateTemplates();
-        setInterval(() => this.checkAndUpdateTemplates(), 10800000); // 3 hours in milliseconds
-      }
+      await this.checkLicenseOnStartup();
+      setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000); // 3 hours in milliseconds
     }, 5000); // Delay of 5 seconds after plugin initialization
   }
 
@@ -64,11 +62,34 @@ export class TemplatesModule {
     }
   }
 
+  async checkLicenseOnStartup(): Promise<void> {
+    if (this.firstLicenseCheckDone) return;
+
+    const licenseKey = this.settings.licenseKey;
+    if (!licenseKey || !licenseKey.includes('-') || licenseKey.includes(' ')) {
+      console.log(
+        'License key format is invalid or missing. Skipping license check on startup.'
+      );
+      return;
+    }
+
+    if (await checkLicenseValidity(this)) {
+      await this.checkAndUpdateTemplates();
+    }
+    this.firstLicenseCheckDone = true;
+  }
+
+  async checkForUpdate(): Promise<void> {
+    if (await checkLicenseValidity(this)) {
+      await this.checkAndUpdateTemplates();
+    }
+  }
+
   async checkAndUpdateTemplates(): Promise<void> {
-    // First, check if the license key is valid
+    // First, check if the license key is empty
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
       console.log(
-        'No valid license key found. Please enter your license key in the settings.'
+        'No valid license key found. Please enter your license key in the settings. If you need a license key, please message on Patreon or Discord.'
       );
       return;
     }
@@ -121,6 +142,24 @@ class TemplatesSettingTab extends PluginSettingTab {
     });
 
     renderLicenseKeySetting(containerEl, this.plugin);
+
+    new Setting(containerEl)
+      .setName('Show SS-Sync templates in suggestions')
+      .setDesc('Toggle the display of templates within the SS-Sync folder')
+      .addToggle(toggle => {
+        toggle
+          .setValue(this.plugin.settings.showSSSyncTemplates)
+          .onChange(async (value: boolean) => {
+            this.plugin.settings.showSSSyncTemplates = value;
+            console.log('Show SS-Sync templates set to:', value); // Add this for debugging
+            await this.plugin.saveSettings();
+          });
+
+        const keepInMindBoxEl = containerEl.createDiv('info-box');
+        keepInMindBoxEl.createEl('p', {
+          text: "Whenever you sync to the latest templates, all templates found in the SS-Sync folder will be overwritten. This means that if you want to modify one to your own liking, make sure to place it in the Templates folder, outside of the SS-Sync directory - it will be safe there and won't be overwritten.",
+        });
+      });
 
     renderTemplatesPathSetting(containerEl, this.plugin);
     renderBlankTemplatePromptSetting(containerEl, this.plugin);

@@ -34,6 +34,11 @@ export async function renderModelDropdown(
         }
       });
     });
+
+  const infoBoxEl = containerEl.createDiv('info-box');
+  infoBoxEl.createEl('p', {
+    text: 'You can hotkey this (I personally hotkey it to CMD+Shift+M). This allows you to quickly switch between OpenAI models in order to heavily save costs with GPT-3.5-Turbo and/or toggle on maximum brain power with GPT-4-Turbo.',
+  });
 }
 
 async function populateModelOptions(

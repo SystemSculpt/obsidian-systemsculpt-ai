@@ -42,7 +42,7 @@ export class SystemSculptTasksSettingTab extends PluginSettingTab {
           });
       });
 
-    renderTaskPromptSetting(containerEl, this.plugin);
     renderTasksLocationSetting(containerEl, this.plugin);
+    renderTaskPromptSetting(containerEl, this.plugin);
   }
 }
