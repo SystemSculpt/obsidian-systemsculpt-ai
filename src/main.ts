@@ -15,7 +15,7 @@ import { UpdateModule } from './modules/update/UpdateModule';
 import { registerMp3ContextMenu } from './events';
 import { setupUpdateStatusBar } from './modules/update/updateInStatusBar';
 
-const development = true;
+const development = false;
 
 if (!development) {
   console.log = function () {}; // Disable console.log in non-development environments
