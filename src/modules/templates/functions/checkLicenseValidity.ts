@@ -61,17 +61,29 @@ export async function checkLicenseValidity(
       }
       attemptCount++; // Increment attempt count on invalid key
       return false;
+    } else if (response.status === 429) {
+      if (showNotice) {
+        showCustomNotice('Too many requests. Please try again later.', 5000);
+      }
+      return false;
     } else {
       console.error('Error checking license validity:', response.text);
       throw new Error('Server error');
     }
   } catch (error) {
     console.error('Error checking license validity:', error);
-    if (showNotice) {
-      showCustomNotice(
-        'Your license key is invalid. Please contact Mike on Patreon or Discord to obtain a valid license key.',
-        5000
-      );
+    // Check if the error is due to too many requests
+    if (error instanceof Error && error.message.includes('429')) {
+      if (showNotice) {
+        showCustomNotice('Too many requests. Please try again later.', 5000);
+      }
+    } else {
+      if (showNotice) {
+        showCustomNotice(
+          'An error occurred while checking the license key. Please try again later.',
+          5000
+        );
+      }
     }
     throw error;
   }

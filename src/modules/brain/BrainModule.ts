@@ -12,13 +12,16 @@ import { toggleGeneration } from './functions/toggleGeneration';
 import { MaxTokensModal } from './views/MaxTokensModal';
 import { updateMaxTokensStatusBar } from './functions/updateMaxTokensStatusBar';
 import { MarkdownView } from 'obsidian';
+import { IGenerationModule } from '../../interfaces/IGenerationModule';
+import { showCustomNotice } from '../../modals';
 
-export class BrainModule {
+export class BrainModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
   settings: BrainSettings;
   openAIService: OpenAIService;
   abortController: AbortController | null = null;
   isGenerating: boolean = false;
+  isGenerationCompleted: boolean = false;
 
   constructor(plugin: SystemSculptPlugin, openAIService: OpenAIService) {
     this.plugin = plugin;
@@ -37,8 +40,8 @@ export class BrainModule {
     });
 
     this.plugin.addCommand({
-      id: 'toggle-generation',
-      name: 'Toggle generation',
+      id: 'toggle-general-generation',
+      name: 'Toggle general generation',
       callback: async () => {
         await this.toggleGeneration();
       },
@@ -171,5 +174,14 @@ export class BrainModule {
     return this.settings.defaultOpenAIModelId === 'gpt-3.5-turbo'
       ? '3.5 Turbo'
       : '4 Turbo';
+  }
+
+  stopGeneration(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+      this.isGenerationCompleted = false;
+      showCustomNotice('Generation stopped by user', 5000);
+    }
   }
 }

@@ -1,100 +1,99 @@
-# SystemSculpt for Obsidian
+# SystemSculpt AI for Obsidian
 
-SystemSculpt is a powerful suite of AI-powered tools designed to enhance your [Obsidian](https://obsidian.md/) experience. Developed by me, Mike, a single dedicated developer - this plugin aims to revolutionize your note-taking, task management, and knowledge management workflow.
+SystemSculpt AI is a comprehensive suite of AI-powered tools designed to supercharge your [Obsidian](https://obsidian.md/) experience. Developed by Mike, a dedicated solo developer, this plugin aims to revolutionize your note-taking, task management, knowledge management, and audio transcription workflow.
 
 ## Features
 
-SystemSculpt offers a wide range of features to streamline your productivity:
-
-![preview](./assets/general_preview.gif)
+SystemSculpt AI offers a wide range of cutting-edge features to enhance your productivity:
 
 ### Brain Module
 
-- Seamlessly integrates with OpenAI API
-- Supports multiple AI models for generating titles, summaries, and more
-- Intuitive settings for customizing models, max tokens, and prompts
+![brain_module](./assets/brain_module.png)
+
+- Seamlessly integrates with OpenAI API for AI-powered content generation
+- Supports multiple AI models, including GPT-3.5 Turbo and GPT-4 Turbo
+- Customizable prompts for generating titles, summaries, and general note continuation
+- Hotkey-enabled model switching and max tokens adjustment
+- Status bar indicators for quick access to key settings
 
 ### Tasks Module
 
+![tasks_module](./assets/tasks_module.png)
+
 - Effortlessly create and manage tasks directly within Obsidian
-- Automatically generate actionable subtasks based on your task descriptions
-- Customize task prompts and storage location to fit your workflow
+- AI-powered task generation based on your custom prompts
+- Automatically generate actionable subtasks for complex tasks
+- Customizable task storage location and hotkey support
+- Status bar button for quick task addition
 
 ### Recorder Module
 
-- Record and transcribe audio notes with a single action
-- Automatically paste transcriptions into your active note
-- Customize microphone settings, auto-transcription, and audio clip storage
+![recorder_module](./assets/recorder_module.png)
+
+- One-click audio recording and transcription powered by OpenAI's Whisper API
+- Automatic transcription pasting into active notes
+- Customizable microphone selection and audio clip storage
+- Support for manual transcription of selected audio files
+- Status bar toggle for seamless recording control
 
 ### Templates Module
 
-- _Coming soon: A robust template system for creating AI generation workflows_
+![templates_module](./assets/templates_module.png)
 
-### Data Module
+- Robust AI template system for streamlined content generation workflows
+- Sync custom templates from the SystemSculpt Patreon community (requires a valid license key)
+- Customizable template folder location and blank template prompt
+- Intelligent template search and selection with preview
 
-- _Coming soon: Advanced data management, integration, and analysis tools_
+### About Module
+
+- Highlights key supporters from Buy Me a Coffee, Patreon, and YouTube memberships
+- Provides quick access to support, social media, and contact links
+- Displays important notices and updates
+
+### Update Module
+
+- Automatic update checks to ensure you always have the latest features and improvements
+- One-click plugin updating directly from the settings panel
+- Status bar indicator for available updates
 
 ## Getting Started
 
 1. Install the SystemSculpt AI plugin from the Obsidian Plugin Gallery.
 2. Set up your API keys:
-   - [Get an OpenAI API key](https://platform.openai.com/usage) (requires login)
+   - Get an OpenAI API key (requires login)
+   - If you're a Patreon supporter, enter your license key in the Templates settings
 3. Configure the plugin settings to your preferences.
-4. Start using SystemSculpt to supercharge your Obsidian workflow!
-
-## Tips and Tricks
-
-- For the Recorder Module to transcribe audio, make sure to set your OpenAI API key in the Brain Module settings
-- Experiment with different AI models and settings to find the best fit
-- Customize task prompts to generate tasks tailored to your unique workflow
-
-## Contributing
-
-I welcome contributions from the community! Here's how you can get involved:
-
-1. Fork the repository on GitHub.
-2. Create a new branch for your feature or bug fix.
-3. Make your changes and commit them with descriptive messages.
-4. Push your changes to your forked repository.
-5. Submit a pull request to the main repository.
-
-Please ensure that your code adheres to the existing style and passes all tests before submitting a pull request.
-
-## Bug Reports and Feature Requests
-
-If you encounter any bugs or have ideas for new features, please submit an issue on the [GitHub repository](https://github.com/SystemSculpt/obsidian-plugin/issues). When submitting an issue, please include:
-
-- A clear and descriptive title
-- Steps to reproduce the bug (if applicable)
-- Expected behavior and actual behavior
-- Any relevant screenshots or error messages
+4. Start using SystemSculpt AI to supercharge your Obsidian workflow!
 
 ## Support the Project
 
-SystemSculpt is a one-person community project, and your support is crucial for its continued development and improvement. By supporting the project, you enable the developer to dedicate more time and resources to creating new features and refining existing ones.
+SystemSculpt AI is a one-person passion project, and your support is crucial for its continued development and improvement. By supporting the project, you enable Mike to dedicate more time and resources to creating new features and refining existing ones.
 
-Here are some ways you can support SystemSculpt:
+Here are some ways you can support SystemSculpt AI:
 
-- Buy me a coffee on [BuyMeACoffee](https://www.buymeacoffee.com/SystemSculpt)
-- Become a patron on [Patreon](https://www.patreon.com/SystemSculpt)
-- Check out [SystemSculpt.com](https://systemsculpt.com/) for consulting sessions on Obsidian, programming, productivity, and more
+- Buy Mike a coffee on [BuyMeACoffee](https://www.buymeacoffee.com/SystemSculpt)
+- Become a patron on [Patreon](https://www.patreon.com/SystemSculpt) for exclusive perks and early access to new features
+- Follow SystemSculpt on [YouTube](https://www.youtube.com/systemsculpt) and [Twitter](https://x.com/systemsculpt) for updates, tutorials, and more
+
+## Feedback and Bug Reports
+
+If you have any feedback, feature requests, or encounter any bugs, please submit an issue on the [GitHub repository](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues). Your input is valuable in shaping the future of SystemSculpt AI!
 
 ## Network Usage and Data Access
 
-SystemSculpt uses the following network services and accesses data outside the vault:
+SystemSculpt AI uses the following network services and accesses data outside the vault:
 
-- OpenAI API: Used for generating tasks, titles, and more. Requires an API key.
+- OpenAI API: Used for generating tasks, titles, transcriptions, and more. Requires an API key.
+
+- SystemSculpt API: Used to sync custom templates from the SystemSculpt Patreon community. Requires a license key.
 
 No data is sent to these services without the user's explicit configuration and consent. The plugin does not collect or send any telemetry data.
 
 ## License
 
-SystemSculpt is released under the [MIT License](LICENSE).
-
-## Acknowledgements
-
-SystemSculpt would not be possible without the incredible Obsidian community and the support of its users. A special thanks to all the contributors and supporters who have helped shape this project.
+SystemSculpt AI is released under the [MIT License](LICENSE).
 
 ---
 
-🚀 Elevate your Obsidian experience with SystemSculpt! 🧠
+🚀 Transform your Obsidian experience with the power of AI using SystemSculpt AI! 🧠

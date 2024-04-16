@@ -11,8 +11,9 @@ import { renderBlankTemplatePromptSetting } from './settings/BlankTemplatePrompt
 import { TemplatesSuggest } from './TemplatesSuggest';
 import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
+import { IGenerationModule } from '../../interfaces/IGenerationModule';
 
-export class TemplatesModule {
+export class TemplatesModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
   settings: TemplatesSettings;
   openAIService: OpenAIService;
@@ -58,6 +59,7 @@ export class TemplatesModule {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
+      this.isGenerationCompleted = false;
       showCustomNotice('Template generation stopped', 5000);
     }
   }

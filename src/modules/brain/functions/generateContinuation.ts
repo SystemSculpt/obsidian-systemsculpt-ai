@@ -1,6 +1,7 @@
 import { BrainModule } from '../BrainModule';
 import { MarkdownView, Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
+import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse'; // Import the function
 
 export async function generateContinuation(
   plugin: BrainModule,
@@ -30,7 +31,7 @@ export async function generateContinuation(
         if (abortSignal.aborted) {
           return;
         }
-        handleStreamingResponse(chunk, editor);
+        handleStreamingResponse(chunk, editor, plugin); // Use the imported function
       },
       abortSignal
     );
@@ -40,51 +41,5 @@ export async function generateContinuation(
     }
   } else {
     showCustomNotice('No active note found to generate continuation');
-  }
-}
-
-function handleStreamingResponse(chunk: string, editor: Editor): void {
-  const dataLines = chunk.split('\n');
-  let incompleteJSON = '';
-
-  for (const line of dataLines) {
-    if (line.trim() === '') {
-      continue;
-    }
-
-    if (line.startsWith('data:')) {
-      const dataStr = line.slice(5).trim();
-      if (dataStr === '[DONE]') {
-        showCustomNotice('Generation completed!', 5000); // Display the completion notice
-        return;
-      }
-
-      try {
-        const jsonStr = incompleteJSON + dataStr;
-        incompleteJSON = '';
-        const data = JSON.parse(jsonStr);
-
-        if (data.choices && data.choices[0].delta.content) {
-          let content = data.choices[0].delta.content;
-          // Escape backticks to prevent formatting issues
-          content = content.replace(/`/g, '`');
-          editor.replaceRange(content, editor.getCursor());
-          const endPosition = editor.getCursor();
-          endPosition.ch += content.length;
-          editor.setCursor(endPosition);
-        }
-      } catch (error) {
-        // Check if the error is due to an incomplete JSON string
-        if (
-          error instanceof SyntaxError &&
-          error.message.includes('Unexpected end of JSON input')
-        ) {
-          incompleteJSON += dataStr;
-        } else {
-          console.error('Error parsing JSON:', error);
-        }
-      }
-    } else {
-    }
   }
 }

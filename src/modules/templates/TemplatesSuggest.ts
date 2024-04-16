@@ -95,6 +95,14 @@ export class TemplatesSuggest extends EditorSuggest<string> {
       new BlankTemplateModal(this.plugin).open();
       this.plugin.isGenerationCompleted = false; // Reset generation completion flag
     } else {
+      if (this.plugin.openAIService.isRequestCurrentlyInProgress()) {
+        console.warn(
+          'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
+        );
+        this.plugin.openAIService.abortCurrentRequest(); // Ensure this method exists and correctly aborts the request
+        return;
+      }
+
       if (!this.plugin.abortController) {
         this.plugin.abortController = new AbortController();
       }
@@ -124,19 +132,31 @@ export class TemplatesSuggest extends EditorSuggest<string> {
 
           showCustomNotice('Generating...', 5000);
 
-          await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
-            prompt,
-            noteContent,
-            model,
-            maxTokens,
-            (chunk: string) => {
-              handleStreamingResponse(chunk, editor, signal);
-              showCustomNotice('Generation completed!', 5000); // Display the completion notice
-              this.plugin.abortController = null; // Reset the abortController
-              this.plugin.isGenerationCompleted = true; // Mark generation as completed
-            },
-            signal
-          );
+          try {
+            await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
+              prompt,
+              noteContent,
+              model,
+              maxTokens,
+              (chunk: string) => {
+                if (signal.aborted) {
+                  console.log('Request was aborted successfully.');
+                  return;
+                }
+                handleStreamingResponse(chunk, editor, this.plugin);
+              },
+              signal
+            );
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              console.log('Request was aborted as expected.'); // Optional: for internal logging without exposing to user
+            } else {
+              console.error('Error during streaming chat completion:', error);
+            }
+          } finally {
+            this.plugin.abortController = null; // Reset the abortController
+            this.plugin.isGenerationCompleted = true; // Mark generation as completed
+          }
         }
       }
     }

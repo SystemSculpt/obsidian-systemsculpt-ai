@@ -1,4 +1,4 @@
-import { Plugin, Menu, TAbstractFile, TFile } from 'obsidian';
+import { Plugin, TAbstractFile, TFile } from 'obsidian';
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,
@@ -12,6 +12,8 @@ import { RecorderModule } from './modules/recorder/RecorderModule';
 import { AboutModule } from './modules/about/AboutModule';
 import { OpenAIService } from './api/OpenAIService';
 import { UpdateModule } from './modules/update/UpdateModule';
+import { registerMp3ContextMenu } from './events';
+import { setupUpdateStatusBar } from './modules/update/updateInStatusBar';
 
 const development = true;
 
@@ -64,49 +66,10 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.addSettingTab(new SystemSculptSettingTab(this.app, this));
 
-    // Register the context menu item for .mp3 files
-    this.registerEvent(
-      this.app.workspace.on('file-menu', (menu, file: TAbstractFile) => {
-        if (file instanceof TFile && file.extension === 'mp3') {
-          menu.addItem(item => {
-            item
-              .setTitle('SystemSculpt - Transcribe')
-              .setIcon('microphone')
-              .onClick(async () => {
-                await this.recorderModule.transcribeSelectedFile(file);
-              });
-          });
-        }
-      })
-    );
+    // Register the context menu item for .mp3 files using the new events module
+    registerMp3ContextMenu(this, this.recorderModule);
 
-    // Initialize and add the update status bar item
-    this.updateStatusBarItem = this.addStatusBarItem();
-    this.updateStatusBarItem.setText('Update SystemSculpt AI');
-    this.updateStatusBarItem.addClass('update-button');
-    this.updateStatusBarItem.addEventListener('click', async () => {
-      if (
-        this.updateStatusBarItem &&
-        !this.updateStatusBarItem.classList.contains('disabled')
-      ) {
-        this.updateStatusBarItem.setText('Updating...');
-        this.updateStatusBarItem.classList.add('disabled');
-        await this.updateModule.updatePlugin();
-        if (this.updateStatusBarItem) {
-          this.updateStatusBarItem.classList.remove('disabled'); // Optionally re-enable
-        }
-      }
-    });
-
-    // Set the initial visibility of the update status bar item
-    if (
-      this.brainModule.settings.showUpdateButtonInStatusBar &&
-      this.updateModule.updateAvailable
-    ) {
-      this.updateStatusBarItem.style.display = 'inline-block';
-    } else {
-      this.updateStatusBarItem.style.display = 'none';
-    }
+    this.updateStatusBarItem = setupUpdateStatusBar(this, this.updateModule);
   }
 
   private initializeBrainModule(): BrainModule {

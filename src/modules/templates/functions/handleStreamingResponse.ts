@@ -1,12 +1,14 @@
 import { Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
+import { IGenerationModule } from '../../../interfaces/IGenerationModule';
 
 export function handleStreamingResponse(
   chunk: string,
   editor: Editor,
-  signal: AbortSignal
+  plugin: IGenerationModule
 ): void {
-  if (signal.aborted) {
+  const signal = plugin.abortController?.signal;
+  if (signal?.aborted) {
     return;
   }
 
@@ -22,8 +24,8 @@ export function handleStreamingResponse(
       const dataStr = line.slice(5).trim();
       if (dataStr === '[DONE]') {
         showCustomNotice('Generation completed!', 5000); // Display the completion notice
-        this.plugin.abortController = null; // Reset the abortController
-        this.plugin.isGenerationCompleted = true; // Mark generation as completed
+        plugin.abortController = null; // Reset the abortController
+        plugin.isGenerationCompleted = true; // Mark generation as completed
         return;
       }
 
@@ -48,8 +50,12 @@ export function handleStreamingResponse(
           error.message.includes('Unexpected end of JSON input')
         ) {
           incompleteJSON += dataStr;
+        } else if (
+          error.message.includes('Unterminated string in JSON at position')
+        ) {
+          // Suppress specific error message from being logged
         } else {
-          console.error('Error parsing JSON:', error);
+          console.error('Error parsing JSON:', error); // Log other errors
         }
       }
     } else {

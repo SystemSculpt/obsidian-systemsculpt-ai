@@ -1,12 +1,13 @@
 import { requestUrl } from 'obsidian';
 import https from 'https';
 import { Model } from './Model';
-import { showCustomNotice } from '../modals';
 
 export class OpenAIService {
   private static instance: OpenAIService;
   private apiKey: string;
   private settings: { openAIApiKey: string };
+  private isRequestInProgress: boolean = false;
+  private currentAbortController: AbortController | null = null;
 
   private constructor(apiKey: string, settings: { openAIApiKey: string }) {
     this.apiKey = apiKey;
@@ -38,6 +39,21 @@ export class OpenAIService {
     this.settings.openAIApiKey = newApiKey;
   }
 
+  public isRequestCurrentlyInProgress(): boolean {
+    return this.isRequestInProgress;
+  }
+
+  public setRequestInProgress(state: boolean): void {
+    this.isRequestInProgress = state;
+  }
+
+  public abortCurrentRequest(): void {
+    if (this.currentAbortController) {
+      this.currentAbortController.abort(); // Send an abort signal
+      this.currentAbortController = null; // Reset the controller
+    }
+  }
+
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
@@ -45,6 +61,18 @@ export class OpenAIService {
     temperature: number = 0.2,
     maxTokens: number = 100
   ): Promise<string> {
+    if (this.isRequestInProgress) {
+      console.warn(
+        'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
+      );
+      this.abortCurrentRequest(); // Abort the current request
+      return '';
+    }
+
+    this.setRequestInProgress(true); // Use the setter method
+    const abortController = new AbortController(); // Create a new AbortController for this request
+    this.currentAbortController = abortController; // Store the controller to possibly abort later
+
     console.log('System Prompt:', systemPrompt);
     console.log('User Message:', userMessage);
     console.log(
@@ -78,6 +106,8 @@ export class OpenAIService {
       throw new Error(
         'Failed to generate chat completion. Please check your OpenAI API key and try again.'
       );
+    } finally {
+      this.setRequestInProgress(false);
     }
   }
 
@@ -89,6 +119,18 @@ export class OpenAIService {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    if (this.isRequestInProgress) {
+      console.warn(
+        'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
+      );
+      this.abortCurrentRequest(); // Abort the current request
+      return;
+    }
+
+    this.setRequestInProgress(true); // Use the setter method
+    const abortController = new AbortController(); // Create a new AbortController for this request
+    this.currentAbortController = abortController; // Store the controller to possibly abort later
+
     console.log('System Prompt:', systemPrompt);
     console.log('User Message:', userMessage);
     console.log(`Model ID: ${modelId} | Max Tokens: ${maxTokens}`);
@@ -139,27 +181,39 @@ export class OpenAIService {
           });
 
           res.on('error', error => {
-            console.error('Error generating streaming chat completion:', error);
-            reject(
-              new Error(
-                'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
-              )
-            );
+            if (error.message === 'aborted') {
+              console.log('Request was aborted as expected.'); // Silently handle the abort error
+            } else {
+              console.error(
+                'Error generating streaming chat completion:',
+                error
+              );
+              reject(
+                new Error(
+                  'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+                )
+              );
+            }
           });
         }
       );
 
       req.on('error', error => {
-        console.error('Error generating streaming chat completion:', error);
-        reject(
-          new Error(
-            'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
-          )
-        );
+        if (error.message !== 'aborted') {
+          // Only log if the error is not the expected abort error
+          console.error('Error generating streaming chat completion:', error);
+          reject(
+            new Error(
+              'Failed to generate streaming chat completion. Please check your OpenAI API key and try again.'
+            )
+          );
+        }
       });
 
       req.write(requestData);
       req.end();
+    }).finally(() => {
+      this.setRequestInProgress(false);
     });
   }
 

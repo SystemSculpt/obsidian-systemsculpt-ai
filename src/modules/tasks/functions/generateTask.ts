@@ -13,6 +13,13 @@ export async function generateTask(
   const temperature = plugin.plugin.brainModule.settings.temperature || 0.5; // Assuming a default value if not set
   const maxTokens = plugin.plugin.brainModule.settings.maxTokens || 2048; // Assuming a default value if not set
 
+  if (plugin.plugin.brainModule.openAIService.isRequestCurrentlyInProgress()) {
+    console.warn(
+      'An OpenAI request is already in progress. Skipping task generation.'
+    );
+    return '';
+  }
+
   try {
     const apiService = plugin.plugin.brainModule.openAIService;
     return await apiService.createChatCompletion(

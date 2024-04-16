@@ -50,6 +50,14 @@ export class BlankTemplateModal extends Modal {
 
         showCustomNotice('Generating...', 5000);
 
+        if (this.plugin.openAIService.isRequestCurrentlyInProgress()) {
+          console.warn(
+            'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
+          );
+          this.plugin.openAIService.abortCurrentRequest(); // Ensure this method exists and correctly aborts the request
+          return;
+        }
+
         if (!this.plugin.abortController) {
           this.plugin.abortController = new AbortController();
         }
@@ -59,20 +67,27 @@ export class BlankTemplateModal extends Modal {
           this.plugin.plugin.brainModule.settings.defaultOpenAIModelId;
         const maxTokens = this.plugin.plugin.brainModule.settings.maxTokens;
 
-        await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
-          this.plugin.settings.blankTemplatePrompt,
-          userPrompt,
-          model,
-          maxTokens,
-          (chunk: string) => {
-            handleStreamingResponse(chunk, editor, signal);
-            showCustomNotice('Generation completed!', 5000); // Display the completion notice
-            this.plugin.abortController = null; // Reset the abortController
-            this.plugin.isGenerationCompleted = true; // Mark generation as completed
-            return;
-          },
-          signal
-        );
+        try {
+          await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
+            this.plugin.settings.blankTemplatePrompt,
+            userPrompt,
+            model,
+            maxTokens,
+            (chunk: string) => {
+              if (signal.aborted) {
+                console.log('Request was aborted successfully.');
+                return;
+              }
+              handleStreamingResponse(chunk, editor, this.plugin);
+            },
+            signal
+          );
+        } catch (error) {
+          console.error('Error during streaming chat completion:', error);
+        } finally {
+          this.plugin.abortController = null; // Reset the abortController
+          this.plugin.isGenerationCompleted = true; // Mark generation as completed
+        }
       }
     }
   }
