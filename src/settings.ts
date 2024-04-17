@@ -4,12 +4,10 @@ import { renderBrainAnimation } from './modules/brain/views/BrainAnimation';
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
-  version: string;
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: '',
-  version: '0.0.5',
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {

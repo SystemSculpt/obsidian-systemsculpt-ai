@@ -15,19 +15,29 @@ export class BlankTemplateModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Blank Template' });
+    contentEl.addClass('blank-template-modal');
 
-    const promptContainer = contentEl.createDiv('prompt-container');
-    promptContainer.createEl('label', { text: 'User Prompt:' });
+    const modalContent = contentEl.createDiv('modal-content');
+    modalContent.createEl('h2', { text: 'Blank Template' });
+
+    const infoBox = modalContent.createDiv('info-box');
+    infoBox.createEl('p', {
+      text: 'The Blank Template allows you to generate content based on your custom prompt. Simply enter your prompt, and the AI will generate relevant content for you. This is useful for creating generic content, brainstorming ideas, or getting inspiration for your writing.',
+    });
+
+    const promptContainer = modalContent.createDiv('prompt-container');
     this.userPromptInput = promptContainer.createEl('textarea', {
       cls: 'user-prompt-input',
     });
 
-    const buttonContainer = contentEl.createDiv('button-container');
+    const buttonContainer = modalContent.createDiv('button-container');
     const generateButton = buttonContainer.createEl('button', {
       text: 'Generate',
     });
     generateButton.addEventListener('click', this.handleGenerate.bind(this));
+
+    // Register hotkeys
+    this.scope.register(['Mod'], 'Enter', this.handleGenerate.bind(this));
   }
 
   async handleGenerate(): Promise<void> {

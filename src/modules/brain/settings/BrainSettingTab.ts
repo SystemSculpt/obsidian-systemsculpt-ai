@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, DropdownComponent, Setting } from 'obsidian';
+import { App, PluginSettingTab, Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { renderOpenAIApiKeySetting } from './OpenAIApiKeySetting';
 import { renderModelDropdown } from './ModelSetting';
@@ -6,7 +6,6 @@ import { renderGenerateTitlePrompt } from './GenerateTitlePromptSetting';
 import { renderGeneralGenerationPromptSetting } from './GeneralGenerationPromptSetting';
 import { renderMaxTokensSetting } from './MaxTokensSetting';
 import { updateMaxTokensStatusBar } from '../functions/updateMaxTokensStatusBar';
-import { renderUpdateButtonStatusBarSetting } from './UpdateButtonStatusBarSetting';
 
 export class BrainSettingTab extends PluginSettingTab {
   plugin: BrainModule;
@@ -26,26 +25,6 @@ export class BrainSettingTab extends PluginSettingTab {
     containerEl.createEl('p', {
       text: 'Set the more general settings here, which are used across all modules.',
     });
-    if (this.plugin.plugin.updateModule.updateAvailable) {
-      new Setting(containerEl)
-        .setName('Update plugin')
-        .setDesc(
-          'A new version of SystemSculpt AI is available. Click to update.'
-        )
-        .addButton(button => {
-          button
-            .setButtonText('Update')
-            .setCta()
-            .onClick(async () => {
-              button.setButtonText('Updating...');
-              button.setDisabled(true);
-              await this.plugin.plugin.updateModule.updatePlugin();
-            });
-        });
-
-      // Add toggle for showing Update Button on the status bar
-      renderUpdateButtonStatusBarSetting(containerEl, this.plugin);
-    }
 
     renderOpenAIApiKeySetting(containerEl, this.plugin);
     renderModelDropdown(containerEl, this.plugin);

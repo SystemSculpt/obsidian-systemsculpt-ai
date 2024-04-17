@@ -7,7 +7,6 @@ export interface BrainSettings {
   maxTokens: number;
   showMaxTokensOnStatusBar: boolean;
   showDefaultModelOnStatusBar: boolean;
-  showUpdateButtonInStatusBar: boolean; // New setting
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -50,5 +49,4 @@ Rules:
   maxTokens: 1000,
   showMaxTokensOnStatusBar: true,
   showDefaultModelOnStatusBar: true,
-  showUpdateButtonInStatusBar: true, // Enabled by default
 };

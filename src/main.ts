@@ -11,9 +11,7 @@ import { DataModule } from './modules/data/DataModule';
 import { RecorderModule } from './modules/recorder/RecorderModule';
 import { AboutModule } from './modules/about/AboutModule';
 import { OpenAIService } from './api/OpenAIService';
-import { UpdateModule } from './modules/update/UpdateModule';
 import { registerMp3ContextMenu } from './events';
-import { setupUpdateStatusBar } from './modules/update/updateInStatusBar';
 
 const development = false;
 
@@ -28,12 +26,10 @@ export default class SystemSculptPlugin extends Plugin {
   dataModule: DataModule;
   recorderModule: RecorderModule;
   aboutModule: AboutModule;
-  updateModule: UpdateModule;
   modelToggleStatusBarItem: HTMLElement | null = null;
   maxTokensToggleStatusBarItem: HTMLElement | null = null;
   taskToggleStatusBarItem: HTMLElement | null = null; // Add this line
   recorderToggleStatusBarItem: HTMLElement | null = null; // Add this line
-  updateStatusBarItem: HTMLElement | null = null; // Add this line
 
   async onload() {
     await this.loadSettings();
@@ -61,15 +57,10 @@ export default class SystemSculptPlugin extends Plugin {
     this.aboutModule = new AboutModule(this);
     this.aboutModule.load();
 
-    this.updateModule = new UpdateModule(this);
-    this.updateModule.load();
-
     this.addSettingTab(new SystemSculptSettingTab(this.app, this));
 
     // Register the context menu item for .mp3 files using the new events module
     registerMp3ContextMenu(this, this.recorderModule);
-
-    this.updateStatusBarItem = setupUpdateStatusBar(this, this.updateModule);
   }
 
   private initializeBrainModule(): BrainModule {
