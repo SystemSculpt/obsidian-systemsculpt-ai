@@ -1,10 +1,16 @@
+export interface Supporter {
+  name: string;
+  coffees?: number; // Optional property if some supporters might have this
+}
+
 export const AboutData = {
   buyMeACoffee: [
     {
       name: 'Ronny Khalil',
       coffees: 1,
     },
-  ],
+  ] as Supporter[],
+
   patreonMembers: [
     {
       name: 'Ronny Khalil',
@@ -43,10 +49,16 @@ export const AboutData = {
       name: 'Pavel Eliminiro',
     },
     {
+      name: 'Charles Bronitsky',
+    },
+    {
       name: 'Sashi',
     },
     {
       name: 'Darren Taylor',
+    },
+    {
+      name: 'Sebastian Kost',
     },
     {
       name: 'C.A. Hall',
@@ -75,10 +87,11 @@ export const AboutData = {
     {
       name: 'Jeff Kiefer',
     },
-  ],
+  ] as Supporter[],
+
   youtubeMembers: [
     {
       name: 'Sebastian Kost',
     },
-  ],
+  ] as Supporter[],
 };

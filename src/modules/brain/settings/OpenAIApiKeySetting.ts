@@ -1,18 +1,25 @@
 import { Setting, TextComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
-import { OpenAIService } from '../../../api/OpenAIService';
+import { AIService } from '../../../api/AIService';
 
 export function renderOpenAIApiKeySetting(
   containerEl: HTMLElement,
-  plugin: BrainModule
+  plugin: BrainModule,
+  onAfterSave: () => void
 ): void {
-  let textComponent: TextComponent;
+  let apiKeyTextComponent: TextComponent;
+
+  function createSpan(className: string): HTMLElement {
+    const span = document.createElement('span');
+    span.className = className;
+    return span;
+  }
 
   new Setting(containerEl)
     .setName('OpenAI API key')
     .setDesc('Enter your OpenAI API key')
     .addText(text => {
-      textComponent = text;
+      apiKeyTextComponent = text;
       text
         .setPlaceholder('API Key')
         .setValue(plugin.settings.openAIApiKey)
@@ -20,85 +27,75 @@ export function renderOpenAIApiKeySetting(
           plugin.settings.openAIApiKey = value;
           await plugin.saveSettings();
 
-          OpenAIService.updateApiKey(value);
-          await validateApiKeyAndUpdateStatus(
-            value,
-            OpenAIService.getInstance(value, plugin.settings),
-            textComponent
-          );
+          // Clear the existing timeout if it exists
+          if ((apiKeyTextComponent as any).timeoutId) {
+            clearTimeout((apiKeyTextComponent as any).timeoutId);
+          }
+
+          // Set a new timeout
+          (apiKeyTextComponent as any).timeoutId = setTimeout(async () => {
+            if (value) {
+              // Check if the new API key is not empty
+              await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
+            }
+            onAfterSave();
+          }, 2000);
         });
 
-      textComponent.inputEl.type = 'password';
-
-      textComponent.inputEl.addEventListener('focus', () => {
-        textComponent.inputEl.type = 'text';
+      text.inputEl.type = 'password';
+      text.inputEl.addEventListener('focus', () => {
+        text.inputEl.type = 'text';
+      });
+      text.inputEl.addEventListener('blur', () => {
+        text.inputEl.type = 'password';
       });
 
-      textComponent.inputEl.addEventListener('blur', () => {
-        textComponent.inputEl.type = 'password';
-      });
+      validateApiKeyAndUpdateStatus(
+        plugin.settings.openAIApiKey,
+        apiKeyTextComponent
+      );
     })
     .addExtraButton(button => {
       button.setIcon('reset');
       button.onClick(async () => {
         await validateApiKeyAndUpdateStatus(
           plugin.settings.openAIApiKey,
-          OpenAIService.getInstance(
-            plugin.settings.openAIApiKey,
-            plugin.settings
-          ),
-          textComponent
+          apiKeyTextComponent
         );
       });
-      button.extraSettingsEl.classList.add('reset-label');
-      button.extraSettingsEl.textContent = 'Re-check';
-    })
-    .then(setting => {
-      const text = setting.components[0] as TextComponent;
-      validateApiKeyAndUpdateStatus(
-        plugin.settings.openAIApiKey,
-        OpenAIService.getInstance(
-          plugin.settings.openAIApiKey,
-          plugin.settings
-        ),
-        text
-      );
+      button.setTooltip('Re-check API Key');
     });
-}
 
-async function validateApiKeyAndUpdateStatus(
-  apiKey: string,
-  apiService: OpenAIService,
-  textComponent: TextComponent
-): Promise<void> {
-  const statusTextEl = textComponent.inputEl.nextElementSibling;
-  if (!statusTextEl) {
-    const newStatusTextEl = createSpan('api-key-status');
-    textComponent.inputEl.insertAdjacentElement('afterend', newStatusTextEl);
+  async function validateApiKeyAndUpdateStatus(
+    apiKey: string,
+    textComponent: TextComponent
+  ): Promise<void> {
+    const statusTextEl =
+      textComponent.inputEl.nextElementSibling || createSpan('api-key-status');
+    if (!textComponent.inputEl.nextElementSibling) {
+      textComponent.inputEl.insertAdjacentElement('afterend', statusTextEl);
+    }
+
+    statusTextEl.textContent = 'Validating...';
+    statusTextEl.className = 'api-key-status validating';
+
+    const isValid = await AIService.validateApiKey(apiKey);
+
+    statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
+    statusTextEl.classList.remove('validating');
+    statusTextEl.classList.toggle('valid', isValid);
+    statusTextEl.classList.toggle('invalid', !isValid);
+
+    // Update the openAIApiKeyValid flag and API key in the AIService instance
+    const aiServiceInstance = AIService.getInstance(
+      plugin.settings.openAIApiKey,
+      plugin.settings
+    );
+    aiServiceInstance.setOpenAIApiKeyValid(isValid);
+    if (isValid) {
+      aiServiceInstance.updateApiKey(apiKey);
+      plugin.settings.openAIApiKey = apiKey;
+      await plugin.saveSettings();
+    }
   }
-
-  const statusText = statusTextEl as HTMLElement;
-  statusText.textContent = 'Validating...';
-  statusText.classList.remove('valid', 'invalid');
-  statusText.classList.add('validating');
-
-  const isValid = await validateApiKey(apiKey, apiService);
-
-  statusText.textContent = isValid ? 'Valid' : 'Invalid';
-  statusText.classList.remove('validating');
-  statusText.classList.toggle('valid', isValid);
-  statusText.classList.toggle('invalid', !isValid);
-}
-
-function createSpan(className: string): HTMLElement {
-  const span = document.createElement('span');
-  span.className = className;
-  return span;
-}
-
-export async function validateApiKey(
-  apiKey: string,
-  apiService: OpenAIService
-): Promise<boolean> {
-  return await apiService.validateApiKeyInternal();
 }

@@ -74,6 +74,27 @@
   font-size: 1.5em;
   cursor: pointer;
 }
+.version-info-container {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.version-info-text {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: white;
+  text-align: center;
+}
+
+.version-info-text.up-to-date {
+  background-color: #5cb85c; /* Bootstrap's success color */
+}
+
+.version-info-text.outdated {
+  background-color: #d9534f; /* Bootstrap's danger color */
+}
 /* Section Link */
 .section-link {
   display: inline-block;
@@ -94,56 +115,6 @@
   display: block;
   text-align: center;
   margin-bottom: 20px;
-}
-/* Section Colors */
-.bmac-section h3 {
-  color: #ffdd00;
-}
-.patreon-section h3 {
-  color: #75b6e4;
-}
-.youtube-section h3 {
-  color: #e43d3d;
-}
-
-.bmac-yellow::before,
-.bmac-yellow::after {
-  background-color: #ffdd00;
-}
-.patreon-blue::before,
-.patreon-blue::after {
-  background-color: #75b6e4;
-}
-.youtube-red::before,
-.youtube-red::after {
-  background-color: #e43d3d;
-}
-/* Global styles */
-.ss-h3 {
-  font-size: 24px;
-  color: var(--text-accent);
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  margin-bottom: 20px;
-  position: relative;
-  display: inline-block;
-}
-
-.ss-h3::before,
-.ss-h3::after {
-  content: '';
-  position: absolute;
-  width: 40%;
-  height: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.ss-h3::before {
-  left: -50%;
-}
-.ss-h3::after {
-  right: -50%;
 }
 /* Animation Container */
 .animation-container {
@@ -240,6 +211,52 @@
   margin-right: 10px;
   font-size: 16px;
   font-weight: 500;
+}
+.template-name {
+  margin-top: 5px;
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+
+.template-description {
+  margin-top: 0px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.template-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px; /* Added margin-bottom for space between model + max tokens combo and tags list */
+}
+
+.template-meta-item {
+  margin-right: 2px;
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  margin-bottom: 3px;
+  color: var(--color-green); /* Changed color to green */
+}
+
+.template-tags {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%; /* This ensures it takes the full width and moves to a new line */
+  margin-top: 0; /* Removes any top margin to keep tags close to the line above */
+  margin-bottom: 0;
+}
+
+.template-tag {
+  margin-right: 2px;
+  margin-bottom: 2px; /* Ensures tags are close to each other vertically */
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  white-space: nowrap;
 }
 /* Hall of Fame */
 .about-hall-of-fame {
@@ -347,7 +364,7 @@
 
 .blank-template-modal .user-prompt-input {
   width: 100%;
-  min-height: 100px;
+  min-height: 50px; /* Ensure this is larger than context areas */
   border-radius: 5px;
   border: 1px solid var(--background-modifier-border);
   background-color: var(--background-secondary);
@@ -355,7 +372,8 @@
   padding: 10px;
   font-size: 16px;
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
+  margin-top: 2.5px;
 }
 
 .blank-template-modal .button-container {
@@ -376,6 +394,33 @@
 
 .blank-template-modal .button-container button:hover {
   background-color: var(--interactive-accent-hover);
+}
+
+.context-area {
+  width: 100%;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 5px;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto; /* Allows scrolling if content is longer */
+  display: none; /* Hidden by default */
+  min-height: 100px;
+}
+
+.pre-context-area {
+  margin-bottom: 10px; /* Space below the pre-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
+}
+
+.post-context-area {
+  margin-top: 10px; /* Space above the post-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
 }
 /* Info Box */
 .upcoming-features li,
@@ -550,6 +595,24 @@
   background-color: var(--interactive-accent-hover);
   transform: translateY(-2px);
 }
+
+.supporters-description {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+/* Global styles */
+.ss-h3 {
+  font-size: 24px;
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 5px;
+  position: relative;
+  display: inline-block;
+}
 /* Modal */
 .modal-content-centered {
   display: flex;
@@ -636,20 +699,27 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* API Key Status */
-.valid {
-  background-color: #4caf50;
+.api-key-status,
+.endpoint-status {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
   color: white;
-}
-
-.invalid {
-  background-color: #f44336;
-  color: white;
+  text-align: center;
 }
 
 .validating {
-  background-color: #2196f3;
-  color: white;
+  background-color: #f0ad4e; /* Bootstrap's warning color */
+}
+
+.valid {
+  background-color: #5cb85c; /* Bootstrap's success color */
+}
+
+.invalid {
+  background-color: #d9534f; /* Bootstrap's danger color */
 }
 /* Task Modal */
 .task-modal-button {
@@ -658,6 +728,13 @@ button:disabled {
   position: relative;
   display: flex;
   justify-content: flex-end;
+}
+.task-description-textarea textarea {
+  height: 200px;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  resize: none;
 }
 /* Variables */
 :root {

@@ -5,6 +5,7 @@ export interface FrontMatter {
   description: string;
   model: string;
   maxTokens: number;
+  tags: string[];
   prompt: string;
 }
 
@@ -21,6 +22,12 @@ export async function parseFrontMatter(
       description: frontMatter.description || '',
       model: frontMatter.model || '',
       maxTokens: frontMatter['max tokens'] || 0,
+      tags:
+        typeof frontMatter.tags === 'string'
+          ? frontMatter.tags.split(',').map((tag: string) => tag.trim())
+          : Array.isArray(frontMatter.tags)
+          ? frontMatter.tags
+          : [],
       prompt: await app.vault.read(file),
     };
   }
@@ -30,6 +37,7 @@ export async function parseFrontMatter(
     description: '',
     model: '',
     maxTokens: 0,
+    tags: [],
     prompt: '',
   };
 }

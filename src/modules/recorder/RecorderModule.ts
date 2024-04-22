@@ -14,16 +14,16 @@ import { saveRecording } from './functions/saveRecording';
 import { handleTranscription } from './functions/handleTranscription';
 import { transcribeSelectedFile } from './functions/transcribeSelectedFile';
 import { RecordingNotice } from './views/RecordingNotice';
-import { OpenAIService } from '../../api/OpenAIService';
+import { AIService } from '../../api/AIService';
 import { updateRecorderButtonStatusBar } from './functions/updateRecorderButtonStatusBar';
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
   settings: SystemSculptRecorderSettings;
   recordingNotice: RecordingNotice | null = null;
-  openAIService: OpenAIService;
+  openAIService: AIService;
 
-  constructor(plugin: SystemSculptPlugin, openAIService: OpenAIService) {
+  constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
     this.plugin = plugin;
     this.openAIService = openAIService;
   }

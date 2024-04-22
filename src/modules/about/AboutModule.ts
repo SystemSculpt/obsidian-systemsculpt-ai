@@ -1,6 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import SystemSculptPlugin from '../../main';
-import { AboutData } from './AboutData';
+import { AboutData, Supporter } from './AboutData';
 
 export class AboutModule {
   plugin: SystemSculptPlugin;
@@ -107,77 +107,51 @@ class AboutSettingTab extends PluginSettingTab {
   private async renderHallOfFame(containerEl: HTMLElement): Promise<void> {
     const hallOfFameEl = containerEl.createDiv('about-hall-of-fame');
 
-    // Render "Bought Me a Coffee" section
-    this.renderMembershipSection(
-      hallOfFameEl,
-      'Bought me a coffee',
-      AboutData.buyMeACoffee,
-      'bmac-section',
-      'bmac-yellow',
-      'Buy me some coffee!',
-      'https://www.buymeacoffee.com/SystemSculpt'
+    // Combine all supporters into one list
+    const combinedSupporters: Supporter[] = [
+      ...AboutData.buyMeACoffee,
+      ...AboutData.patreonMembers,
+      ...AboutData.youtubeMembers,
+    ];
+
+    // Remove duplicates
+    const uniqueSupporters = combinedSupporters.reduce<Supporter[]>(
+      (acc, current) => {
+        if (!acc.some(item => item.name === current.name)) {
+          acc.push(current);
+        }
+        return acc;
+      },
+      []
     );
 
-    // Render "Patreon" section
-    this.renderMembershipSection(
+    // Render combined and unique supporters section
+    this.renderSupportersSection(
       hallOfFameEl,
-      'Patreon supporters',
-      AboutData.patreonMembers,
-      'patreon-section',
-      'patreon-blue',
-      'Become a patron',
-      'https://www.patreon.com/SystemSculpt'
-    );
-
-    // Render "YouTube" section
-    this.renderMembershipSection(
-      hallOfFameEl,
-      'YouTube members',
-      AboutData.youtubeMembers,
-      'youtube-section',
-      'youtube-red',
-      'Become a YouTube member',
-      'https://www.youtube.com/channel/your-channel-id/join'
+      'SystemSculpt Supporters',
+      uniqueSupporters
     );
   }
 
-  private renderMembershipSection(
+  private renderSupportersSection(
     containerEl: HTMLElement,
     title: string,
-    members: any[],
-    sectionClass: string,
-    colorClass: string,
-    linkText: string,
-    linkUrl: string
+    supporters: Supporter[]
   ): void {
-    const sectionEl = containerEl.createDiv(sectionClass);
+    const sectionEl = containerEl.createDiv('supporters-section');
     const titleEl = sectionEl.createEl('h3', { text: title });
-    titleEl.addClass(colorClass);
     titleEl.addClass('ss-h3');
 
-    const linkEl = sectionEl.createEl('a', {
-      text: linkText,
-      href: linkUrl,
-      cls: 'section-link',
+    // Add description under the title
+    const descriptionEl = sectionEl.createEl('p', {
+      text: 'This includes all those that bought me a coffee, are a patron through Patreon, or a YouTube member. Your support allows me to put more focus into SystemSculpt productivity tools.',
     });
-    linkEl.addClass(colorClass);
+    descriptionEl.addClass('supporters-description');
 
     const listEl = sectionEl.createEl('ul', { cls: 'supporter-list' });
-    const chunkSize = 3;
-    for (let i = 0; i < members.length; i += chunkSize) {
-      const chunk = members.slice(i, i + chunkSize);
-      const rowEl = listEl.createEl('li', { cls: 'supporter-row' });
-      chunk.forEach(member => {
-        const itemEl = rowEl.createEl('div', { cls: 'supporter-item' });
-        itemEl.createSpan({ text: member.name });
-
-        if (member.coffees) {
-          itemEl.createSpan({
-            cls: 'supporter-contribution',
-            text: `${member.coffees} coffee${member.coffees > 1 ? 's' : ''}`,
-          });
-        }
-      });
-    }
+    supporters.forEach(supporter => {
+      const itemEl = listEl.createEl('li', { cls: 'supporter-item' });
+      itemEl.createSpan({ text: supporter.name });
+    });
   }
 }

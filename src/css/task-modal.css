@@ -6,3 +6,10 @@
   display: flex;
   justify-content: flex-end;
 }
+.task-description-textarea textarea {
+  height: 200px;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  resize: none;
+}

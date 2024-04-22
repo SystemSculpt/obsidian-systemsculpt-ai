@@ -4,10 +4,14 @@ import { renderBrainAnimation } from './modules/brain/views/BrainAnimation';
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
+  apiEndpoint: string; // Existing line
+  localEndpoint: string; // Add this line for the local endpoint
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: '',
+  apiEndpoint: 'https://api.openai.com', // Existing default API endpoint
+  localEndpoint: 'http://localhost:1234', // Set a default value for the local endpoint
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {

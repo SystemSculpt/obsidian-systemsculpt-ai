@@ -36,12 +36,31 @@ export function handleStreamingResponse(
 
         if (data.choices && data.choices[0].delta.content) {
           let content = data.choices[0].delta.content;
-          // Escape backticks to prevent formatting issues
-          content = content.replace(/`/g, '`');
-          editor.replaceRange(content, editor.getCursor());
-          const endPosition = editor.getCursor();
-          endPosition.ch += content.length;
-          editor.setCursor(endPosition);
+
+          // Insert the content character by character
+          const cursor = editor.getCursor();
+          for (const char of content) {
+            if (
+              char === '`' ||
+              char === '*' ||
+              char === '[' ||
+              char === ']' ||
+              char === '(' ||
+              char === ')' ||
+              char === '{' ||
+              char === '}'
+            ) {
+              // Insert a zero-width space before the special character
+              editor.replaceRange('\u200b' + char, cursor, cursor);
+              cursor.ch += 2;
+            } else {
+              editor.replaceRange(char, cursor, cursor);
+              cursor.ch++;
+            }
+          }
+
+          // Move the cursor to the end of the inserted content
+          editor.setCursor(cursor);
         }
       } catch (error) {
         // Check if the error is due to an incomplete JSON string
@@ -50,15 +69,10 @@ export function handleStreamingResponse(
           error.message.includes('Unexpected end of JSON input')
         ) {
           incompleteJSON += dataStr;
-        } else if (
-          error.message.includes('Unterminated string in JSON at position')
-        ) {
-          // Suppress specific error message from being logged
         } else {
-          console.error('Error parsing JSON:', error); // Log other errors
+          console.error('Error parsing JSON:', error);
         }
       }
-    } else {
     }
   }
 }

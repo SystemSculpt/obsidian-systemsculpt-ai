@@ -120,3 +120,21 @@
   background-color: var(--interactive-accent-hover);
   transform: translateY(-2px);
 }
+
+.supporters-description {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+/* Global styles */
+.ss-h3 {
+  font-size: 24px;
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 5px;
+  position: relative;
+  display: inline-block;
+}

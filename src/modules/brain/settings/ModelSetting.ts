@@ -1,6 +1,6 @@
 import { Setting, DropdownComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
-import { OpenAIService } from '../../../api/OpenAIService';
+import { AIService } from '../../../api/AIService';
 import { Model } from '../../../api/Model';
 
 let populateModelOptionsTimeout: NodeJS.Timeout | undefined;
@@ -9,29 +9,20 @@ export async function renderModelDropdown(
   containerEl: HTMLElement,
   plugin: BrainModule
 ): Promise<void> {
-  let dropdownRef: DropdownComponent | null = null; // Declare a variable to hold the dropdown reference
+  let dropdownRef: DropdownComponent | null = null;
 
   new Setting(containerEl)
     .setName('Default model')
     .setDesc('Select the default model for generating tasks')
     .addDropdown(async (dropdown: DropdownComponent) => {
-      dropdownRef = dropdown; // Assign the dropdown to the external variable
-      const models = await populateModelOptions(
-        plugin,
-        dropdown,
-        plugin.settings.defaultOpenAIModelId,
-        OpenAIService.getInstance(plugin.settings.openAIApiKey, plugin.settings)
-      );
+      dropdownRef = dropdown;
+      await populateModelOptions(plugin, dropdown);
 
       dropdown.onChange(async (value: string) => {
         plugin.settings.defaultOpenAIModelId = value;
         await plugin.saveSettings();
-        // Update the status bar text to reflect the new model
-        if (plugin.plugin.modelToggleStatusBarItem) {
-          plugin.plugin.modelToggleStatusBarItem.setText(
-            `GPT-${plugin.getCurrentModelShortName()}`
-          );
-        }
+        plugin.refreshAIService();
+        updateModelStatusBar(plugin);
       });
     });
 
@@ -43,10 +34,8 @@ export async function renderModelDropdown(
 
 async function populateModelOptions(
   plugin: BrainModule,
-  dropdown: DropdownComponent,
-  selectedModelId: string,
-  apiService: OpenAIService
-): Promise<Model[]> {
+  dropdown: DropdownComponent
+): Promise<void> {
   const selectEl = dropdown.selectEl;
   if (selectEl) {
     selectEl.empty();
@@ -55,39 +44,131 @@ async function populateModelOptions(
 
   clearTimeout(populateModelOptionsTimeout);
 
-  return new Promise((resolve, reject) => {
-    populateModelOptionsTimeout = setTimeout(async () => {
-      try {
-        const models = await apiService.getModels();
-        if (selectEl) {
-          selectEl.empty();
+  populateModelOptionsTimeout = setTimeout(async () => {
+    try {
+      const models = await getAvailableModels(plugin);
 
+      if (selectEl) {
+        selectEl.empty();
+
+        if (models.length === 0) {
+          selectEl.createEl('option', {
+            text: 'No models available. Check your local endpoint and OpenAI API key.',
+            value: '',
+          });
+          // Ensure the status bar is updated when no models are available
+          updateModelStatusBar(plugin, 'No Models Available');
+        } else {
           models.forEach((model: Model) => {
             const option = selectEl.createEl('option', {
-              text:
-                model.id === 'gpt-3.5-turbo'
-                  ? 'GPT 3.5 Turbo ($0.001 per 1K tokens)'
-                  : model.id === 'gpt-4-turbo'
-                  ? 'GPT 4 Turbo ($0.02 per 1K tokens)'
-                  : model.name,
+              text: getModelDisplayName(model),
               value: model.id,
             });
           });
 
-          dropdown.setValue(selectedModelId || models[0]?.id || '');
+          const selectedModelId = await setDefaultModel(plugin, models);
+          dropdown.setValue(selectedModelId);
+          updateModelStatusBar(plugin); // Update status bar with the selected model
         }
-        resolve(models);
-      } catch (error) {
-        console.error('Error loading models:', error);
-        if (selectEl) {
-          selectEl.empty();
-          selectEl.createEl('option', {
-            text: 'Failed - check your API key.',
-            value: '',
-          });
-        }
-        reject(error);
       }
-    }, 500);
-  });
+    } catch (error) {
+      console.error('Error loading models:', error);
+      if (selectEl) {
+        selectEl.empty();
+        selectEl.createEl('option', {
+          text: 'Failed - check your local endpoint and OpenAI API key.',
+          value: '',
+        });
+      }
+      updateModelStatusBar(plugin, 'Model not configured');
+    }
+  }, 500);
+}
+
+async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
+  const localEndpointOnline = await AIService.validateLocalEndpoint(
+    plugin.settings.localEndpoint
+  );
+  const openAIApiKeyValid = await AIService.validateApiKey(
+    plugin.settings.openAIApiKey
+  );
+
+  const models: Model[] = [];
+
+  if (localEndpointOnline) {
+    const localResponse = await fetch(
+      `${plugin.settings.localEndpoint}/v1/models`
+    );
+    if (localResponse.ok) {
+      const localModels = await localResponse.json();
+      models.push(
+        ...localModels.data.map((model: any) => ({
+          id: model.id,
+          name: model.id.split('/').pop(),
+          isLocal: true,
+        }))
+      );
+    }
+  }
+
+  if (openAIApiKeyValid) {
+    const response = await plugin.openAIService.getModels();
+    models.push(
+      ...response
+        .filter(
+          (model: any) =>
+            model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
+        )
+        .map((model: any) => ({
+          id: model.id,
+          name: model.id.replace(/-turbo$/, ' turbo'),
+          isLocal: false,
+        }))
+    );
+  }
+
+  return models;
+}
+
+async function setDefaultModel(
+  plugin: BrainModule,
+  models: Model[]
+): Promise<string> {
+  const selectedModelId = plugin.settings.defaultOpenAIModelId;
+  const selectedModel = models.find(model => model.id === selectedModelId);
+
+  if (!selectedModel) {
+    // If the previously selected model is no longer available, select the first available model
+    const defaultModel = models[0];
+    plugin.settings.defaultOpenAIModelId = defaultModel.id;
+    await plugin.saveSettings();
+    return defaultModel.id;
+  }
+
+  return selectedModelId;
+}
+
+function getModelDisplayName(model: Model): string {
+  if (model.id === 'gpt-3.5-turbo') {
+    return 'GPT 3.5 Turbo ($0.001 per 1K tokens)';
+  } else if (model.id === 'gpt-4-turbo') {
+    return 'GPT 4 Turbo ($0.02 per 1K tokens)';
+  } else if (model.isLocal) {
+    return model.name;
+  } else {
+    return model.name;
+  }
+}
+
+function updateModelStatusBar(plugin: BrainModule, text?: string): void {
+  if (plugin.plugin.modelToggleStatusBarItem) {
+    if (text) {
+      plugin.plugin.modelToggleStatusBarItem.setText(text);
+    } else {
+      const modelName = plugin.settings.defaultOpenAIModelId.split('/').pop();
+      plugin.plugin.modelToggleStatusBarItem.setText(
+        modelName ? `Model: ${modelName}` : 'Model not configured'
+      );
+    }
+  }
 }

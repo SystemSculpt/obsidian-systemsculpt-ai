@@ -1,0 +1,46 @@
+.template-name {
+  margin-top: 5px;
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+
+.template-description {
+  margin-top: 0px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.template-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px; /* Added margin-bottom for space between model + max tokens combo and tags list */
+}
+
+.template-meta-item {
+  margin-right: 2px;
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  margin-bottom: 3px;
+  color: var(--color-green); /* Changed color to green */
+}
+
+.template-tags {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%; /* This ensures it takes the full width and moves to a new line */
+  margin-top: 0; /* Removes any top margin to keep tags close to the line above */
+  margin-bottom: 0;
+}
+
+.template-tag {
+  margin-right: 2px;
+  margin-bottom: 2px; /* Ensures tags are close to each other vertically */
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  white-space: nowrap;
+}

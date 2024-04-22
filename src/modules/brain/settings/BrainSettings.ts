@@ -1,4 +1,5 @@
 export interface BrainSettings {
+  localEndpoint: string;
   openAIApiKey: string;
   defaultOpenAIModelId: string;
   generateTitlePrompt: string;
@@ -7,9 +8,11 @@ export interface BrainSettings {
   maxTokens: number;
   showMaxTokensOnStatusBar: boolean;
   showDefaultModelOnStatusBar: boolean;
+  apiEndpoint: string;
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
+  localEndpoint: '',
   openAIApiKey: '',
   defaultOpenAIModelId: '',
   generateTitlePrompt: `You are TitleMaster, an AI specialized in generating clear, concise, and informative titles for Obsidian notes.
@@ -30,12 +33,16 @@ When generating titles, consider the following:
 - Your generation response should be the title only, no Title: prefix, purely the title and nothing else.
 - Do not use :, /, , or any other characters that cannot be included within a filename itself.
 
-Here are some high quality note title examples:
+Your generated response should be purely the title, without any precontext, postcontext, any additional labels or explanations. Your response will directly become the title as-is.
 
-- Mastering the Art of Effective Time Management in the Digital Age
-- A ChatGPT Prompt For Creating A High Quality README Based On A Codebase
-- Meeting Synopsis With Jeremy Rutger - 2024-02-15
-- OpenRouter API Documentation`,
+Here are some high quality note title examples that I would expect you to generate similarly to:
+
+Mastering the Art of Effective Time Management in the Digital Age
+A ChatGPT Prompt For Creating A High Quality README Based On A Codebase
+Meeting Synopsis With Jeremy Rutger - 2024-02-15
+OpenRouter API Documentation
+
+Now I will give you a note's entire context, and you will generate the title for it.`,
   generalGenerationPrompt: `You are an AI assistant tasked with continuing and extending the provided note content. Your role is to generate relevant and coherent text that seamlessly follows the given context.
 
 Rules:
@@ -49,4 +56,5 @@ Rules:
   maxTokens: 1000,
   showMaxTokensOnStatusBar: true,
   showDefaultModelOnStatusBar: true,
+  apiEndpoint: 'https://api.openai.com',
 };

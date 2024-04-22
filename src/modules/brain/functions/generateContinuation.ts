@@ -1,7 +1,8 @@
 import { BrainModule } from '../BrainModule';
 import { MarkdownView, Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
-import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse'; // Import the function
+import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
+import { AIService } from '../../../api/AIService';
 
 export async function generateContinuation(
   plugin: BrainModule,
@@ -22,16 +23,35 @@ export async function generateContinuation(
       return;
     }
 
+    const modelId = plugin.settings.defaultOpenAIModelId;
+    let model = await plugin.openAIService.getModelById(modelId);
+
+    if (!model) {
+      const localModels = await plugin.openAIService.getModels(false);
+      const firstLocalModel = localModels[0];
+      if (firstLocalModel) {
+        plugin.settings.defaultOpenAIModelId = firstLocalModel.id;
+        await plugin.saveSettings();
+        updateModelStatusBar(plugin, firstLocalModel.name);
+        model = firstLocalModel;
+      } else {
+        showCustomNotice(
+          'No local models available. Please check your local endpoint settings.'
+        );
+        return;
+      }
+    }
+
     await plugin.openAIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,
       noteContent,
-      plugin.settings.defaultOpenAIModelId,
+      model.id,
       plugin.settings.maxTokens,
       (chunk: string) => {
         if (abortSignal.aborted) {
           return;
         }
-        handleStreamingResponse(chunk, editor, plugin); // Use the imported function
+        handleStreamingResponse(chunk, editor, plugin);
       },
       abortSignal
     );
@@ -41,5 +61,11 @@ export async function generateContinuation(
     }
   } else {
     showCustomNotice('No active note found to generate continuation');
+  }
+}
+
+function updateModelStatusBar(plugin: BrainModule, modelName: string): void {
+  if (plugin.plugin.modelToggleStatusBarItem) {
+    plugin.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
   }
 }

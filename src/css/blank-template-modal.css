@@ -45,7 +45,7 @@
 
 .blank-template-modal .user-prompt-input {
   width: 100%;
-  min-height: 100px;
+  min-height: 50px; /* Ensure this is larger than context areas */
   border-radius: 5px;
   border: 1px solid var(--background-modifier-border);
   background-color: var(--background-secondary);
@@ -53,7 +53,8 @@
   padding: 10px;
   font-size: 16px;
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
+  margin-top: 2.5px;
 }
 
 .blank-template-modal .button-container {
@@ -74,4 +75,31 @@
 
 .blank-template-modal .button-container button:hover {
   background-color: var(--interactive-accent-hover);
+}
+
+.context-area {
+  width: 100%;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 5px;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto; /* Allows scrolling if content is longer */
+  display: none; /* Hidden by default */
+  min-height: 100px;
+}
+
+.pre-context-area {
+  margin-bottom: 10px; /* Space below the pre-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
+}
+
+.post-context-area {
+  margin-top: 10px; /* Space above the post-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
 }

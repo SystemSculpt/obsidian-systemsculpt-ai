@@ -4,6 +4,7 @@ export interface TemplatesSettings {
   licenseKey: string;
   templatesVersion: string; // Add this line
   showSSSyncTemplates: boolean; // Add this line
+  triggerKey: string;
 }
 
 export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
@@ -20,4 +21,5 @@ Rules:
   licenseKey: '',
   templatesVersion: '0.0.1', // Initialize with a default version
   showSSSyncTemplates: true, // Add this line
+  triggerKey: '/',
 };

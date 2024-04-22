@@ -33,11 +33,17 @@ export class TemplatesSuggest extends EditorSuggest<string> {
     const line = editor.getLine(cursor.line);
     const sub = line.substring(0, cursor.ch);
 
-    if (sub.startsWith('/')) {
+    if (sub.startsWith(this.plugin.settings.triggerKey)) {
+      const selectedText = editor.getSelection();
+      if (selectedText) {
+        new BlankTemplateModal(this.plugin).open();
+        return null;
+      }
+
       return {
         start: { line: cursor.line, ch: 0 },
         end: { line: cursor.line, ch: sub.length },
-        query: sub.substring(1),
+        query: sub.substring(this.plugin.settings.triggerKey.length),
       };
     }
 
@@ -119,6 +125,28 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           templateFile
         );
 
+        let modelInstance;
+
+        if (model === 'local') {
+          const localModels = await this.plugin.openAIService.getModels(false);
+          if (localModels.length > 0) {
+            modelInstance = localModels[0];
+          } else {
+            showCustomNotice(
+              'Your local model seems unreachable; please check your local model settings and endpoint setup.'
+            );
+            return;
+          }
+        } else {
+          modelInstance = await this.plugin.openAIService.getModelById(model);
+          if (!modelInstance) {
+            showCustomNotice(
+              `The model "${model}" is not available. Please check your template settings.`
+            );
+            return;
+          }
+        }
+
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (activeView) {
           const editor = activeView.editor;
@@ -126,17 +154,29 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           const line = cursor.line;
           const ch = cursor.ch;
 
+          // Remove the trigger and user input before sending the final note state
+          editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
+
           const noteContent = editor.getRange({ line: 0, ch: 0 }, { line, ch });
 
-          editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
+          // Remove only the initial frontmatter from the prompt
+          const parts = prompt.split('---');
+          let promptWithoutFrontmatter;
+          if (parts.length > 2) {
+            // Rejoin all parts beyond the first frontmatter block
+            promptWithoutFrontmatter = parts.slice(2).join('---').trim();
+          } else {
+            // If no frontmatter is detected, use the original prompt
+            promptWithoutFrontmatter = prompt.trim();
+          }
 
           showCustomNotice('Generating...', 5000);
 
           try {
             await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
-              prompt,
+              promptWithoutFrontmatter,
               noteContent,
-              model,
+              modelInstance.id,
               maxTokens,
               (chunk: string) => {
                 if (signal.aborted) {
@@ -149,13 +189,13 @@ export class TemplatesSuggest extends EditorSuggest<string> {
             );
           } catch (error) {
             if (error.name === 'AbortError') {
-              console.log('Request was aborted as expected.'); // Optional: for internal logging without exposing to user
+              console.log('Request was aborted as expected.');
             } else {
               console.error('Error during streaming chat completion:', error);
             }
           } finally {
-            this.plugin.abortController = null; // Reset the abortController
-            this.plugin.isGenerationCompleted = true; // Mark generation as completed
+            this.plugin.abortController = null;
+            this.plugin.isGenerationCompleted = true;
           }
         }
       }

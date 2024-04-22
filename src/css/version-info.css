@@ -1,7 +1,10 @@
-.api-key-status,
-.endpoint-status {
+.version-info-container {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.version-info-text {
   display: inline-block;
-  margin-left: 10px;
   padding: 2px 6px;
   font-size: 12px;
   border-radius: 4px;
@@ -9,14 +12,10 @@
   text-align: center;
 }
 
-.validating {
-  background-color: #f0ad4e; /* Bootstrap's warning color */
-}
-
-.valid {
+.version-info-text.up-to-date {
   background-color: #5cb85c; /* Bootstrap's success color */
 }
 
-.invalid {
+.version-info-text.outdated {
   background-color: #d9534f; /* Bootstrap's danger color */
 }

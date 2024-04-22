@@ -1,22 +1,29 @@
-import { App, PluginSettingTab, requestUrl, Setting } from 'obsidian';
+import {
+  MarkdownView,
+  App,
+  PluginSettingTab,
+  requestUrl,
+  Setting,
+} from 'obsidian';
 import SystemSculptPlugin from '../../main';
 import {
   TemplatesSettings,
   DEFAULT_TEMPLATES_SETTINGS,
 } from './settings/TemplatesSettings';
 import { renderTemplatesPathSetting } from './settings/TemplatesPathSetting';
-import { OpenAIService } from '../../api/OpenAIService';
+import { AIService } from '../../api/AIService';
 import { showCustomNotice } from '../../modals';
 import { renderBlankTemplatePromptSetting } from './settings/BlankTemplatePromptSetting';
 import { TemplatesSuggest } from './TemplatesSuggest';
 import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
+import { BlankTemplateModal } from './views/BlankTemplateModal';
 
 export class TemplatesModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
   settings: TemplatesSettings;
-  openAIService: OpenAIService;
+  openAIService: AIService;
   abortController: AbortController | null = null;
   isGenerationCompleted: boolean = false;
   private firstLicenseCheckDone: boolean = false;
@@ -29,10 +36,16 @@ export class TemplatesModule implements IGenerationModule {
   async load() {
     await this.loadSettings();
     this.registerCodeMirror();
+    this.registerDomEvent();
     setTimeout(async () => {
       await this.checkLicenseOnStartup();
       setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000); // 3 hours in milliseconds
     }, 5000); // Delay of 5 seconds after plugin initialization
+    this.plugin.addCommand({
+      id: 'trigger-template-suggestions',
+      name: 'Trigger template suggestions',
+      callback: () => this.triggerTemplateSuggestions(),
+    });
   }
 
   async loadSettings() {
@@ -53,6 +66,23 @@ export class TemplatesModule implements IGenerationModule {
 
   registerCodeMirror() {
     this.plugin.registerEditorSuggest(new TemplatesSuggest(this));
+  }
+
+  registerDomEvent() {
+    this.plugin.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
+      if (evt.key === this.settings.triggerKey) {
+        const activeView =
+          this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+        if (activeView) {
+          const editor = activeView.editor;
+          const selectedText = editor.getSelection();
+          if (selectedText) {
+            evt.preventDefault();
+            new BlankTemplateModal(this).open();
+          }
+        }
+      }
+    });
   }
 
   stopGeneration(): void {
@@ -109,6 +139,18 @@ export class TemplatesModule implements IGenerationModule {
       );
     }
   }
+
+  async triggerTemplateSuggestions(): Promise<void> {
+    const activeView =
+      this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView) {
+      const editor = activeView.editor;
+      const selectedText = editor.getSelection();
+      if (selectedText) {
+        new BlankTemplateModal(this).open();
+      }
+    }
+  }
 }
 
 class TemplatesSettingTab extends PluginSettingTab {
@@ -144,7 +186,6 @@ class TemplatesSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.showSSSyncTemplates)
           .onChange(async (value: boolean) => {
             this.plugin.settings.showSSSyncTemplates = value;
-            console.log('Show SS-Sync templates set to:', value); // Add this for debugging
             await this.plugin.saveSettings();
           });
 
@@ -152,6 +193,38 @@ class TemplatesSettingTab extends PluginSettingTab {
         keepInMindBoxEl.createEl('p', {
           text: "Whenever you sync to the latest templates, all templates found in the SS-Sync folder will be overwritten. This means that if you want to modify one to your own liking, make sure to place it in the Templates folder, outside of the SS-Sync directory - it will be safe there and won't be overwritten.",
         });
+      });
+
+    new Setting(containerEl)
+      .setName('Trigger key')
+      .setDesc(
+        'The key that triggers the template suggestion modal (single character only)'
+      )
+      .addText(text => {
+        text
+          .setPlaceholder('Enter trigger key')
+          .setValue(this.plugin.settings.triggerKey);
+
+        text.inputEl.addEventListener(
+          'keydown',
+          async (event: KeyboardEvent) => {
+            event.preventDefault();
+            const triggerKey = event.key.length === 1 ? event.key : '/';
+            this.plugin.settings.triggerKey = triggerKey;
+            await this.plugin.saveSettings();
+            text.setValue(triggerKey);
+          }
+        );
+      })
+      .addExtraButton(button => {
+        button
+          .setIcon('reset')
+          .setTooltip('Reset to default trigger key')
+          .onClick(async () => {
+            this.plugin.settings.triggerKey = '/';
+            await this.plugin.saveSettings();
+            this.display(); // Refresh the settings view
+          });
       });
 
     renderTemplatesPathSetting(containerEl, this.plugin);

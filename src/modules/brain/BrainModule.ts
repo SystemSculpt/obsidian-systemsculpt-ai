@@ -3,7 +3,7 @@ import {
   BrainSettings,
   DEFAULT_BRAIN_SETTINGS,
 } from './settings/BrainSettings';
-import { OpenAIService } from '../../api/OpenAIService';
+import { AIService } from '../../api/AIService';
 import { BrainSettingTab } from './settings/BrainSettingTab';
 import { generateTitle } from './functions/generateTitle';
 import { generateTitleForCurrentNote } from './functions/generateTitleForCurrentNote';
@@ -18,12 +18,12 @@ import { showCustomNotice } from '../../modals';
 export class BrainModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
   settings: BrainSettings;
-  openAIService: OpenAIService;
+  openAIService: AIService;
   abortController: AbortController | null = null;
   isGenerating: boolean = false;
   isGenerationCompleted: boolean = false;
 
-  constructor(plugin: SystemSculptPlugin, openAIService: OpenAIService) {
+  constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
     this.plugin = plugin;
     this.openAIService = openAIService;
   }
@@ -87,9 +87,10 @@ export class BrainModule implements IGenerationModule {
       this.plugin.modelToggleStatusBarItem.addClass('model-toggle-button');
     }
     if (this.settings.showDefaultModelOnStatusBar) {
-      this.plugin.modelToggleStatusBarItem.setText(
-        `GPT-${this.getCurrentModelShortName()}`
-      );
+      this.getCurrentModelShortName().then(modelName => {
+        //@ts-ignore
+        this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
+      });
     } else {
       this.plugin.modelToggleStatusBarItem.setText('');
     }
@@ -100,9 +101,10 @@ export class BrainModule implements IGenerationModule {
         this.plugin.modelToggleStatusBarItem &&
         this.settings.showDefaultModelOnStatusBar
       ) {
-        this.plugin.modelToggleStatusBarItem.setText(
-          `GPT-${this.getCurrentModelShortName()}`
-        );
+        this.getCurrentModelShortName().then(modelName => {
+          //@ts-ignore
+          this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
+        });
       }
     });
 
@@ -122,10 +124,19 @@ export class BrainModule implements IGenerationModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
+    this.refreshAIService(); // Refresh AIService with new settings
     if (this.settings.showMaxTokensOnStatusBar) {
       updateMaxTokensStatusBar(this); // Update the status bar when settings are saved
     }
-    this.openAIService.updateApiKey(this.settings.openAIApiKey);
+  }
+
+  refreshAIService() {
+    // Use getInstance to either get the existing instance or update it
+    this.openAIService = AIService.getInstance(this.settings.openAIApiKey, {
+      openAIApiKey: this.settings.openAIApiKey,
+      apiEndpoint: 'https://api.openai.com', // Assuming this is your default API endpoint
+      localEndpoint: this.settings.localEndpoint,
+    });
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -148,32 +159,31 @@ export class BrainModule implements IGenerationModule {
   }
 
   switchModel(): void {
-    const newModelId =
-      this.settings.defaultOpenAIModelId === 'gpt-3.5-turbo'
-        ? 'gpt-4-turbo'
-        : 'gpt-3.5-turbo';
-    this.settings.defaultOpenAIModelId = newModelId;
-    this.saveSettings().then(() => {
-      if (
-        this.plugin.modelToggleStatusBarItem &&
-        this.settings.showDefaultModelOnStatusBar
-      ) {
-        this.plugin.modelToggleStatusBarItem.setText(
-          `GPT-${this.getCurrentModelShortName()}`
-        );
-      }
-      const activeLeaf = this.plugin.app.workspace.activeLeaf;
-      if (activeLeaf && activeLeaf.view.getViewType() === 'markdown') {
-        const markdownView = activeLeaf.view as MarkdownView;
-        markdownView.editor.focus();
-      }
+    this.openAIService.getModels().then(models => {
+      let currentIndex = models.findIndex(
+        model => model.id === this.settings.defaultOpenAIModelId
+      );
+      let nextIndex = (currentIndex + 1) % models.length;
+      this.settings.defaultOpenAIModelId = models[nextIndex].id;
+      this.saveSettings().then(() => {
+        if (
+          this.plugin.modelToggleStatusBarItem &&
+          this.settings.showDefaultModelOnStatusBar
+        ) {
+          this.plugin.modelToggleStatusBarItem.setText(
+            `Model: ${models[nextIndex].name}`
+          );
+        }
+      });
     });
   }
 
-  getCurrentModelShortName(): string {
-    return this.settings.defaultOpenAIModelId === 'gpt-3.5-turbo'
-      ? '3.5 Turbo'
-      : '4 Turbo';
+  async getCurrentModelShortName(): Promise<string> {
+    const models = await this.openAIService.getModels();
+    const currentModel = models.find(
+      model => model.id === this.settings.defaultOpenAIModelId
+    );
+    return currentModel ? currentModel.name : 'Unknown';
   }
 
   stopGeneration(): void {

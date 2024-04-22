@@ -1,7 +1,7 @@
 import { RecorderModule } from '../RecorderModule';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { transcribeRecording } from './transcribeRecording';
-import { OpenAIService } from '../../../api/OpenAIService';
+import { AIService } from '../../../api/AIService';
 import { MarkdownView, TFile, normalizePath } from 'obsidian';
 
 export async function handleTranscription(
@@ -10,9 +10,8 @@ export async function handleTranscription(
   recordingFile: TFile
 ): Promise<void> {
   // Check if OpenAI API key is valid
-  const isValidApiKey = await OpenAIService.validateApiKey(
-    plugin.plugin.settings.openAIApiKey
-  );
+  const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
+  const isValidApiKey = await AIService.validateApiKey(currentOpenAIApiKey);
   if (!isValidApiKey) {
     showCustomNotice(
       'Invalid OpenAI API Key. Please check your Brain settings -> OpenAI API Key.'
