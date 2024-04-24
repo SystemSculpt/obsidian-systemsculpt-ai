@@ -19,7 +19,14 @@ export async function renderModelDropdown(
       await populateModelOptions(plugin, dropdown);
 
       dropdown.onChange(async (value: string) => {
-        plugin.settings.defaultOpenAIModelId = value;
+        if (value === 'Unknown') {
+          const models = await getAvailableModels(plugin);
+          if (models.length > 0) {
+            plugin.settings.defaultOpenAIModelId = models[0].id;
+          }
+        } else {
+          plugin.settings.defaultOpenAIModelId = value;
+        }
         await plugin.saveSettings();
         plugin.refreshAIService();
         updateModelStatusBar(plugin);
@@ -137,8 +144,8 @@ async function setDefaultModel(
   const selectedModelId = plugin.settings.defaultOpenAIModelId;
   const selectedModel = models.find(model => model.id === selectedModelId);
 
-  if (!selectedModel) {
-    // If the previously selected model is no longer available, select the first available model
+  if (!selectedModel || selectedModelId === 'Unknown') {
+    // If the previously selected model is no longer available or is "Unknown", select the first available model
     const defaultModel = models[0];
     plugin.settings.defaultOpenAIModelId = defaultModel.id;
     await plugin.saveSettings();

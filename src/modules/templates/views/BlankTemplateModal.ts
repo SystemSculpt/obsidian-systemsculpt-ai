@@ -219,18 +219,23 @@ export class BlankTemplateModal extends Modal {
           const localModels = await this.plugin.openAIService.getModels(false);
           if (localModels.length > 0) {
             modelInstance = localModels[0];
-            this.plugin.plugin.brainModule.settings.defaultOpenAIModelId =
-              modelInstance.id;
-            await this.plugin.plugin.saveSettings();
-            this.updateStatusBar(
-              this.plugin.plugin.brainModule,
-              modelInstance.name
-            ); // Update status bar with the new model name
           } else {
-            showCustomNotice(
-              'No local models available. Please check your local endpoint settings.'
+            const onlineModels = await this.plugin.openAIService.getModels(
+              true
             );
-            return;
+            if (onlineModels.length > 0) {
+              modelInstance = onlineModels[0]; // Use the first available online model
+              // Update the status bar with the new model
+              this.updateStatusBar(
+                this.plugin.plugin.brainModule,
+                modelInstance.name
+              );
+            } else {
+              showCustomNotice(
+                'No local or online models found. Please check your model settings.'
+              );
+              return;
+            }
           }
         } else {
           this.updateStatusBar(

@@ -36,31 +36,19 @@ export function handleStreamingResponse(
 
         if (data.choices && data.choices[0].delta.content) {
           let content = data.choices[0].delta.content;
+          const startPos = editor.getCursor(); // Get the starting cursor position before insertion
+          editor.replaceSelection(content); // Paste the content directly
 
-          // Insert the content character by character
-          const cursor = editor.getCursor();
-          for (const char of content) {
-            if (
-              char === '`' ||
-              char === '*' ||
-              char === '[' ||
-              char === ']' ||
-              char === '(' ||
-              char === ')' ||
-              char === '{' ||
-              char === '}'
-            ) {
-              // Insert a zero-width space before the special character
-              editor.replaceRange('\u200b' + char, cursor, cursor);
-              cursor.ch += 2;
-            } else {
-              editor.replaceRange(char, cursor, cursor);
-              cursor.ch++;
-            }
-          }
+          const lines = content.split('\n');
+          let endPos = {
+            line: startPos.line + lines.length - 1,
+            ch:
+              lines.length === 1
+                ? startPos.ch + lines[lines.length - 1].length
+                : lines[lines.length - 1].length,
+          };
 
-          // Move the cursor to the end of the inserted content
-          editor.setCursor(cursor);
+          editor.setCursor(endPos); // Set the cursor at the end of the inserted content
         }
       } catch (error) {
         // Check if the error is due to an incomplete JSON string
@@ -69,10 +57,15 @@ export function handleStreamingResponse(
           error.message.includes('Unexpected end of JSON input')
         ) {
           incompleteJSON += dataStr;
+        } else if (
+          error.message.includes('Unterminated string in JSON at position')
+        ) {
+          // Suppress specific error message from being logged
         } else {
-          console.error('Error parsing JSON:', error);
+          console.error('Error parsing JSON:', error); // Log other errors
         }
       }
+    } else {
     }
   }
 }

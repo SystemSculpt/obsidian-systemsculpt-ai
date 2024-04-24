@@ -132,10 +132,22 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           if (localModels.length > 0) {
             modelInstance = localModels[0];
           } else {
-            showCustomNotice(
-              'Your local model seems unreachable; please check your local model settings and endpoint setup.'
+            // Check for online models if no local models are available
+            const onlineModels = await this.plugin.openAIService.getModels(
+              true
             );
-            return;
+            if (onlineModels.length > 0) {
+              modelInstance = onlineModels[0]; // Use the first available online model
+              //@ts-ignore
+              this.plugin.plugin.modelToggleStatusBarItem.setText(
+                `Model: ${modelInstance.name}`
+              );
+            } else {
+              showCustomNotice(
+                'No local or online models found; please check your model settings.'
+              );
+              return;
+            }
           }
         } else {
           modelInstance = await this.plugin.openAIService.getModelById(model);

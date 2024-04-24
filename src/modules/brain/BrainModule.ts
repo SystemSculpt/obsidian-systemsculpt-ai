@@ -179,11 +179,25 @@ export class BrainModule implements IGenerationModule {
   }
 
   async getCurrentModelShortName(): Promise<string> {
+    // Introduce a delay to ensure models have adequate time to load
+    await new Promise(resolve => setTimeout(resolve, 5000));
     const models = await this.openAIService.getModels();
-    const currentModel = models.find(
+    let currentModel = models.find(
       model => model.id === this.settings.defaultOpenAIModelId
     );
-    return currentModel ? currentModel.name : 'Unknown';
+
+    // Ensure currentModel is defined, otherwise set to the first model
+    if (!currentModel) {
+      if (models.length > 0) {
+        currentModel = models[0];
+        this.settings.defaultOpenAIModelId = currentModel.id;
+        await this.saveSettings();
+      } else {
+        throw new Error('No models available.');
+      }
+    }
+
+    return currentModel.name;
   }
 
   stopGeneration(): void {

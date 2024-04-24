@@ -21,6 +21,8 @@ export async function generateTask(
     const localModels = await plugin.plugin.brainModule.openAIService.getModels(
       false
     );
+    const onlineModels =
+      await plugin.plugin.brainModule.openAIService.getModels(true);
     const firstLocalModel = localModels[0];
     if (firstLocalModel) {
       plugin.plugin.brainModule.settings.defaultOpenAIModelId =
@@ -28,9 +30,14 @@ export async function generateTask(
       await plugin.plugin.brainModule.saveSettings();
       updateModelStatusBar(plugin.plugin.brainModule, firstLocalModel.name);
       model = firstLocalModel;
+    } else if (onlineModels.length > 0) {
+      model = onlineModels[0];
+      plugin.plugin.brainModule.settings.defaultOpenAIModelId = model.id;
+      await plugin.plugin.brainModule.saveSettings();
+      updateModelStatusBar(plugin.plugin.brainModule, model.name);
     } else {
       showCustomNotice(
-        'No local models available. Please check your local endpoint settings.'
+        'No local or online models available. Please check your model settings.'
       );
       return '';
     }

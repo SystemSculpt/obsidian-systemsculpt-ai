@@ -28,15 +28,22 @@ export async function generateContinuation(
 
     if (!model) {
       const localModels = await plugin.openAIService.getModels(false);
+      const onlineModels = await plugin.openAIService.getModels(true);
       const firstLocalModel = localModels[0];
       if (firstLocalModel) {
         plugin.settings.defaultOpenAIModelId = firstLocalModel.id;
         await plugin.saveSettings();
         updateModelStatusBar(plugin, firstLocalModel.name);
         model = firstLocalModel;
+        // if there's no local model, use the first online model
+      } else if (onlineModels.length > 0) {
+        model = onlineModels[0];
+        plugin.settings.defaultOpenAIModelId = model.id;
+        await plugin.saveSettings();
+        updateModelStatusBar(plugin, model.name);
       } else {
         showCustomNotice(
-          'No local models available. Please check your local endpoint settings.'
+          'No local or online models available. Please check your model settings.'
         );
         return;
       }
