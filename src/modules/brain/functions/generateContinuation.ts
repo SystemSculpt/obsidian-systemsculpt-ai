@@ -23,22 +23,23 @@ export async function generateContinuation(
       return;
     }
 
-    const modelId = plugin.settings.defaultOpenAIModelId;
-    let model = await plugin.openAIService.getModelById(modelId);
+    const modelId = plugin.settings.defaultModelId;
+    let model = await plugin.getModelById(modelId);
 
     if (!model) {
+      console.log('model not found, trying to find a local/ online model...');
       const localModels = await plugin.openAIService.getModels(false);
       const onlineModels = await plugin.openAIService.getModels(true);
       const firstLocalModel = localModels[0];
       if (firstLocalModel) {
-        plugin.settings.defaultOpenAIModelId = firstLocalModel.id;
+        plugin.settings.defaultModelId = firstLocalModel.id;
         await plugin.saveSettings();
         updateModelStatusBar(plugin, firstLocalModel.name);
         model = firstLocalModel;
         // if there's no local model, use the first online model
       } else if (onlineModels.length > 0) {
         model = onlineModels[0];
-        plugin.settings.defaultOpenAIModelId = model.id;
+        plugin.settings.defaultModelId = model.id;
         await plugin.saveSettings();
         updateModelStatusBar(plugin, model.name);
       } else {
@@ -48,6 +49,8 @@ export async function generateContinuation(
         return;
       }
     }
+
+    console.log('model found: ', model);
 
     await plugin.openAIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,

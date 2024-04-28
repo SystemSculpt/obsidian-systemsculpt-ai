@@ -14,6 +14,7 @@ import { updateMaxTokensStatusBar } from './functions/updateMaxTokensStatusBar';
 import { MarkdownView } from 'obsidian';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { showCustomNotice } from '../../modals';
+import { Model } from '../../api/Model';
 
 export class BrainModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -48,10 +49,10 @@ export class BrainModule implements IGenerationModule {
     });
 
     this.plugin.addCommand({
-      id: 'toggle-model',
-      name: 'Toggle model',
-      callback: () => {
-        this.switchModel();
+      id: 'cycle-through-models',
+      name: 'Cycle through available models',
+      callback: async () => {
+        await this.cycleModels();
         const activeLeaf = this.plugin.app.workspace.activeLeaf;
         if (activeLeaf && activeLeaf.view.getViewType() === 'markdown') {
           const markdownView = activeLeaf.view as MarkdownView;
@@ -65,6 +66,14 @@ export class BrainModule implements IGenerationModule {
       name: 'Change max tokens',
       callback: () => {
         new MaxTokensModal(this.plugin.app, this).open();
+      },
+    });
+
+    this.plugin.addCommand({
+      id: 'stop-all-generation-processes',
+      name: 'Stop all generation processes',
+      callback: async () => {
+        await this.stopAllGenerationProcesses();
       },
     });
 
@@ -95,17 +104,8 @@ export class BrainModule implements IGenerationModule {
       this.plugin.modelToggleStatusBarItem.setText('');
     }
 
-    this.plugin.modelToggleStatusBarItem.onClickEvent(() => {
-      this.switchModel();
-      if (
-        this.plugin.modelToggleStatusBarItem &&
-        this.settings.showDefaultModelOnStatusBar
-      ) {
-        this.getCurrentModelShortName().then(modelName => {
-          //@ts-ignore
-          this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
-        });
-      }
+    this.plugin.modelToggleStatusBarItem.onClickEvent(async () => {
+      await this.cycleModels();
     });
 
     // Add click listener to open the Max Tokens modal
@@ -132,11 +132,16 @@ export class BrainModule implements IGenerationModule {
 
   refreshAIService() {
     // Use getInstance to either get the existing instance or update it
-    this.openAIService = AIService.getInstance(this.settings.openAIApiKey, {
-      openAIApiKey: this.settings.openAIApiKey,
-      apiEndpoint: 'https://api.openai.com', // Assuming this is your default API endpoint
-      localEndpoint: this.settings.localEndpoint,
-    });
+    this.openAIService = AIService.getInstance(
+      this.settings.openAIApiKey,
+      this.settings.groqAPIKey,
+      {
+        openAIApiKey: this.settings.openAIApiKey,
+        groqAPIKey: this.settings.groqAPIKey,
+        apiEndpoint: 'https://api.openai.com', // Assuming this is your default API endpoint
+        localEndpoint: this.settings.localEndpoint,
+      }
+    );
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -158,24 +163,34 @@ export class BrainModule implements IGenerationModule {
     return toggleGeneration(this);
   }
 
-  switchModel(): void {
-    this.openAIService.getModels().then(models => {
-      let currentIndex = models.findIndex(
-        model => model.id === this.settings.defaultOpenAIModelId
+  async cycleModels(): Promise<void> {
+    if (
+      this.plugin.modelToggleStatusBarItem &&
+      this.settings.showDefaultModelOnStatusBar
+    ) {
+      this.plugin.modelToggleStatusBarItem.setText('Cycling...');
+    }
+
+    const models = await this.openAIService.getModels();
+    const enabledModels = models.filter(model =>
+      this.settings.enabledModels.includes(model.id)
+    );
+
+    let currentIndex = enabledModels.findIndex(
+      model => model.id === this.settings.defaultModelId
+    );
+    let nextIndex = (currentIndex + 1) % enabledModels.length;
+    this.settings.defaultModelId = enabledModels[nextIndex].id;
+    await this.saveSettings();
+
+    if (
+      this.plugin.modelToggleStatusBarItem &&
+      this.settings.showDefaultModelOnStatusBar
+    ) {
+      this.plugin.modelToggleStatusBarItem.setText(
+        `Model: ${enabledModels[nextIndex].name}`
       );
-      let nextIndex = (currentIndex + 1) % models.length;
-      this.settings.defaultOpenAIModelId = models[nextIndex].id;
-      this.saveSettings().then(() => {
-        if (
-          this.plugin.modelToggleStatusBarItem &&
-          this.settings.showDefaultModelOnStatusBar
-        ) {
-          this.plugin.modelToggleStatusBarItem.setText(
-            `Model: ${models[nextIndex].name}`
-          );
-        }
-      });
-    });
+    }
   }
 
   async getCurrentModelShortName(): Promise<string> {
@@ -183,14 +198,14 @@ export class BrainModule implements IGenerationModule {
     await new Promise(resolve => setTimeout(resolve, 5000));
     const models = await this.openAIService.getModels();
     let currentModel = models.find(
-      model => model.id === this.settings.defaultOpenAIModelId
+      model => model.id === this.settings.defaultModelId
     );
 
     // Ensure currentModel is defined, otherwise set to the first model
     if (!currentModel) {
       if (models.length > 0) {
         currentModel = models[0];
-        this.settings.defaultOpenAIModelId = currentModel.id;
+        this.settings.defaultModelId = currentModel.id;
         await this.saveSettings();
       } else {
         throw new Error('No models available.');
@@ -206,6 +221,28 @@ export class BrainModule implements IGenerationModule {
       this.abortController = null;
       this.isGenerationCompleted = false;
       showCustomNotice('Generation stopped by user', 5000);
+    }
+  }
+
+  async getModelById(modelId: string): Promise<Model | undefined> {
+    const localModels = await this.openAIService.getModels(false, false);
+    const onlineModels = await this.openAIService.getModels(true, true);
+    const allModels = [...localModels, ...onlineModels];
+    return allModels.find(model => model.id === modelId);
+  }
+
+  async stopAllGenerationProcesses(): Promise<void> {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+      this.isGenerationCompleted = false;
+      this.isGenerating = false;
+      showCustomNotice('All AI generations have stopped successfully.', 5000);
+    } else {
+      showCustomNotice(
+        "There's nothing being generated by AI currently.",
+        5000
+      );
     }
   }
 }

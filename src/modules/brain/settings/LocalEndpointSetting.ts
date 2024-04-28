@@ -59,6 +59,7 @@ export function renderLocalEndpointSetting(
           plugin.settings.localEndpoint,
           endpointTextComponent
         );
+        onAfterSave();
       });
       button.setTooltip('Re-check Endpoint');
     });
@@ -82,11 +83,5 @@ export function renderLocalEndpointSetting(
     statusTextEl.classList.remove('validating');
     statusTextEl.classList.toggle('valid', isOnline);
     statusTextEl.classList.toggle('invalid', !isOnline);
-
-    // Update the localEndpointOnline flag in the AIService instance
-    AIService.getInstance(
-      plugin.settings.openAIApiKey,
-      plugin.settings
-    ).setLocalEndpointOnline(isOnline);
   }
 }

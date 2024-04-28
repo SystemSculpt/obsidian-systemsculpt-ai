@@ -12,15 +12,6 @@ export async function transcribeRecording(
   // Fetch the latest OpenAI API key from the brain settings
   const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
 
-  if (plugin.plugin.brainModule.openAIService.isRequestCurrentlyInProgress()) {
-    console.warn(
-      'An OpenAI request is already in progress. Skipping transcription.'
-    );
-    throw new Error(
-      'Transcription skipped due to a request already in progress.'
-    );
-  }
-
   const response = await fetch(
     'https://api.openai.com/v1/audio/transcriptions',
     {

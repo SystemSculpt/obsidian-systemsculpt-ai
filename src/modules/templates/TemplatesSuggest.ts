@@ -101,14 +101,6 @@ export class TemplatesSuggest extends EditorSuggest<string> {
       new BlankTemplateModal(this.plugin).open();
       this.plugin.isGenerationCompleted = false; // Reset generation completion flag
     } else {
-      if (this.plugin.openAIService.isRequestCurrentlyInProgress()) {
-        console.warn(
-          'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
-        );
-        this.plugin.openAIService.abortCurrentRequest(); // Ensure this method exists and correctly aborts the request
-        return;
-      }
-
       if (!this.plugin.abortController) {
         this.plugin.abortController = new AbortController();
       }
@@ -128,30 +120,29 @@ export class TemplatesSuggest extends EditorSuggest<string> {
         let modelInstance;
 
         if (model === 'local') {
-          const localModels = await this.plugin.openAIService.getModels(false);
+          const localModels = await this.plugin.openAIService.getModels(
+            false,
+            false
+          );
           if (localModels.length > 0) {
-            modelInstance = localModels[0];
-          } else {
-            // Check for online models if no local models are available
-            const onlineModels = await this.plugin.openAIService.getModels(
-              true
+            modelInstance = localModels.find(
+              m =>
+                m.id === this.plugin.plugin.brainModule.settings.defaultModelId
             );
-            if (onlineModels.length > 0) {
-              modelInstance = onlineModels[0]; // Use the first available online model
-              //@ts-ignore
-              this.plugin.plugin.modelToggleStatusBarItem.setText(
-                `Model: ${modelInstance.name}`
-              );
-            } else {
-              showCustomNotice(
-                'No local or online models found; please check your model settings.'
-              );
-              return;
+            if (!modelInstance) {
+              modelInstance = localModels[0];
             }
+          } else {
+            showCustomNotice(
+              'No local models found; please check your model settings.'
+            );
+            return;
           }
         } else {
-          modelInstance = await this.plugin.openAIService.getModelById(model);
-          if (!modelInstance) {
+          try {
+            modelInstance = await this.plugin.openAIService.getModelById(model);
+          } catch (error) {
+            console.error('Error fetching model:', error);
             showCustomNotice(
               `The model "${model}" is not available. Please check your template settings.`
             );

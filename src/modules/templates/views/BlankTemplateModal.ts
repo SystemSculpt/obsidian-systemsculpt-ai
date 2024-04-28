@@ -199,21 +199,13 @@ export class BlankTemplateModal extends Modal {
 
         showCustomNotice('Generating...', 5000);
 
-        if (this.plugin.openAIService.isRequestCurrentlyInProgress()) {
-          console.warn(
-            'An OpenAI request is already in progress. Aborting the ongoing request and skipping new request.'
-          );
-          this.plugin.openAIService.abortCurrentRequest();
-          return;
-        }
-
         if (!this.plugin.abortController) {
           this.plugin.abortController = new AbortController();
         }
         const signal = this.plugin.abortController.signal;
 
         let modelInstance = await this.plugin.openAIService.getModelById(
-          this.plugin.plugin.brainModule.settings.defaultOpenAIModelId
+          this.plugin.plugin.brainModule.settings.defaultModelId
         );
         if (!modelInstance) {
           const localModels = await this.plugin.openAIService.getModels(false);

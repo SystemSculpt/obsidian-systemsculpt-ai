@@ -32,6 +32,15 @@ export async function downloadTemplatesFromServer(
   plugin: TemplatesModule
 ): Promise<void> {
   try {
+    // Check if the license key is empty
+    const licenseKey = plugin.settings.licenseKey.trim();
+    if (!licenseKey) {
+      console.log(
+        'License key is empty. Skipping template version check and update.'
+      );
+      return;
+    }
+
     // Fetch the latest templates version from the server
     const versionResponse = await requestUrl({
       url: 'https://license.systemsculpt.com/templates-version',

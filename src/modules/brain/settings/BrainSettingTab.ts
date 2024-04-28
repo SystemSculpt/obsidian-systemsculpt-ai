@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { renderOpenAIApiKeySetting } from './OpenAIApiKeySetting';
+import { renderGroqAPIKeySetting } from './GroqAPIKeySetting';
 import { renderLocalEndpointSetting } from './LocalEndpointSetting';
 import { renderModelDropdown } from './ModelSetting';
 import { renderGenerateTitlePrompt } from './GenerateTitlePromptSetting';
@@ -37,6 +38,7 @@ export class BrainSettingTab extends PluginSettingTab {
     renderOpenAIApiKeySetting(containerEl, this.plugin, () =>
       this.refreshTab()
     );
+    renderGroqAPIKeySetting(containerEl, this.plugin, () => this.refreshTab());
     renderModelDropdown(containerEl, this.plugin);
     renderShowDefaultModelOnStatusBarSetting(containerEl, this.plugin);
     renderMaxTokensSetting(containerEl, this.plugin);

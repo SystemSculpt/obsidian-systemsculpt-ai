@@ -5,12 +5,14 @@ import { renderBrainAnimation } from './modules/brain/views/BrainAnimation';
 export interface SystemSculptSettings {
   openAIApiKey: string;
   apiEndpoint: string; // Existing line
-  localEndpoint: string; // Add this line for the local endpoint
+  groqAPIKey: string; // Add this line for the Groq API key
+  localEndpoint: string; // Existing line
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: '',
   apiEndpoint: 'https://api.openai.com', // Existing default API endpoint
+  groqAPIKey: '', // Set a default value for the Groq API key
   localEndpoint: 'http://localhost:1234', // Set a default value for the local endpoint
 };
 

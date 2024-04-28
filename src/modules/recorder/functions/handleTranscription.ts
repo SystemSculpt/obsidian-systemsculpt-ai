@@ -11,7 +11,9 @@ export async function handleTranscription(
 ): Promise<void> {
   // Check if OpenAI API key is valid
   const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
-  const isValidApiKey = await AIService.validateApiKey(currentOpenAIApiKey);
+  const isValidApiKey = await AIService.validateOpenAIApiKey(
+    currentOpenAIApiKey
+  );
   if (!isValidApiKey) {
     showCustomNotice(
       'Invalid OpenAI API Key. Please check your Brain settings -> OpenAI API Key.'

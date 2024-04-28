@@ -12,12 +12,14 @@ import { RecorderModule } from './modules/recorder/RecorderModule';
 import { AboutModule } from './modules/about/AboutModule';
 import { AIService } from './api/AIService';
 import { registerMp3ContextMenu } from './events';
+import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
 
 const development = false;
 
 if (!development) {
   console.log = function () {}; // Disable console.log in non-development environments
 }
+
 export default class SystemSculptPlugin extends Plugin {
   settings: SystemSculptSettings;
   tasksModule: TasksModule;
@@ -50,6 +52,7 @@ export default class SystemSculptPlugin extends Plugin {
 
     const openAIService = AIService.getInstance(
       this.settings.openAIApiKey,
+      this.settings.groqAPIKey,
       this.settings
     );
     this.recorderModule = new RecorderModule(this, openAIService);
@@ -75,27 +78,21 @@ export default class SystemSculptPlugin extends Plugin {
         this.app.setting.openTabById(this.settingsTab.id);
       },
     });
+    // Check for updates and display a notice
+    setTimeout(async () => {
+      await checkForUpdate(this.brainModule);
+      setInterval(async () => {
+        await checkForUpdate(this.brainModule);
+      }, 1 * 60 * 60 * 1000); // recurring 1 hour check
+    }, 5000); // initial check after 5 seconds
   }
 
   private initializeBrainModule(): BrainModule {
     const openAIService = AIService.getInstance(
       this.settings.openAIApiKey,
+      this.settings.groqAPIKey,
       this.settings
     );
-
-    AIService.validateApiKey(this.settings.openAIApiKey).then(isValid => {
-      if (isValid) {
-        AIService.validateLocalEndpoint(this.settings.localEndpoint).then(
-          isOnline => {
-            openAIService.setOpenAIApiKeyValid(isOnline);
-            openAIService.setLocalEndpointOnline(isOnline);
-          }
-        );
-      } else {
-        openAIService.setOpenAIApiKeyValid(false);
-        openAIService.setLocalEndpointOnline(false);
-      }
-    });
 
     // Check if the API key and local endpoint are initially valid
     return new BrainModule(this, openAIService);

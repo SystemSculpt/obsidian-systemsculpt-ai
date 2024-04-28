@@ -2,7 +2,7 @@ import { Setting, TextComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 
-export function renderOpenAIApiKeySetting(
+export function renderGroqAPIKeySetting(
   containerEl: HTMLElement,
   plugin: BrainModule,
   onAfterSave: () => void
@@ -16,15 +16,15 @@ export function renderOpenAIApiKeySetting(
   }
 
   new Setting(containerEl)
-    .setName('OpenAI API key')
-    .setDesc('Enter your OpenAI API key')
+    .setName('Groq API key')
+    .setDesc('Enter your Groq API key')
     .addText(text => {
       apiKeyTextComponent = text;
       text
         .setPlaceholder('API Key')
-        .setValue(plugin.settings.openAIApiKey)
+        .setValue(plugin.settings.groqAPIKey)
         .onChange(async (value: string) => {
-          plugin.settings.openAIApiKey = value;
+          plugin.settings.groqAPIKey = value;
           await plugin.saveSettings();
 
           // Clear the existing timeout if it exists
@@ -51,7 +51,7 @@ export function renderOpenAIApiKeySetting(
       });
 
       validateApiKeyAndUpdateStatus(
-        plugin.settings.openAIApiKey,
+        plugin.settings.groqAPIKey,
         apiKeyTextComponent
       );
     })
@@ -59,7 +59,7 @@ export function renderOpenAIApiKeySetting(
       button.setIcon('reset');
       button.onClick(async () => {
         await validateApiKeyAndUpdateStatus(
-          plugin.settings.openAIApiKey,
+          plugin.settings.groqAPIKey,
           apiKeyTextComponent
         );
         onAfterSave();
@@ -80,14 +80,14 @@ export function renderOpenAIApiKeySetting(
     statusTextEl.textContent = 'Validating...';
     statusTextEl.className = 'api-key-status validating';
 
-    const isValid = await AIService.validateOpenAIApiKey(apiKey);
+    const isValid = await AIService.validateGroqAPIKey(apiKey);
 
     statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
     statusTextEl.classList.remove('validating');
     statusTextEl.classList.toggle('valid', isValid);
     statusTextEl.classList.toggle('invalid', !isValid);
 
-    // Update the openAIApiKeyValid flag and API key in the AIService instance
+    // Update the groqAPIKeyValid flag and API key in the AIService instance
     const aiServiceInstance = AIService.getInstance(
       plugin.settings.openAIApiKey,
       plugin.settings.groqAPIKey,

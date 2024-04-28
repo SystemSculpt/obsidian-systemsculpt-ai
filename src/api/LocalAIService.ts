@@ -1,18 +1,12 @@
 import { requestUrl } from 'obsidian';
-import https from 'https';
+import http from 'http';
 import { Model } from './Model';
 
-export class OpenAIService {
-  private apiKey: string;
-  private apiEndpoint: string;
+export class LocalAIService {
+  private endpoint?: string;
 
-  constructor(apiKey: string, apiEndpoint: string) {
-    this.apiKey = apiKey;
-    this.apiEndpoint = apiEndpoint;
-  }
-
-  updateApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
+  constructor(endpoint?: string) {
+    this.endpoint = endpoint;
   }
 
   async createChatCompletion(
@@ -21,8 +15,8 @@ export class OpenAIService {
     modelId: string,
     maxTokens: number
   ): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('OpenAI API key is not set');
+    if (!this.endpoint) {
+      throw new Error('Local endpoint not configured');
     }
 
     const requestData = JSON.stringify({
@@ -34,17 +28,16 @@ export class OpenAIService {
       max_tokens: maxTokens,
     });
 
-    const response = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
+    const response = await fetch(`${this.endpoint}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
       },
       body: requestData,
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI request failed with status ${response.status}`);
+      throw new Error(`Local AI request failed with status ${response.status}`);
     }
 
     const data = await response.json();
@@ -59,8 +52,8 @@ export class OpenAIService {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    if (!this.apiKey) {
-      throw new Error('OpenAI API key is not set');
+    if (!this.endpoint) {
+      throw new Error('Local endpoint not configured');
     }
 
     const requestData = JSON.stringify({
@@ -73,20 +66,19 @@ export class OpenAIService {
       max_tokens: maxTokens,
     });
 
-    const req = https.request(
-      `${this.apiEndpoint}/v1/chat/completions`,
+    const req = http.request(
+      `${this.endpoint}/v1/chat/completions`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
         },
       },
       res => this.handleResponse(res, callback)
     );
 
     req.on('error', error => {
-      console.error('OpenAI request error:', error);
+      console.error('Local AI request error:', error);
     });
 
     req.write(requestData);
@@ -114,53 +106,37 @@ export class OpenAIService {
   }
 
   async getModels(): Promise<Model[]> {
-    if (!this.apiKey) return [];
+    if (!this.endpoint) return [];
 
     try {
-      const response = await requestUrl({
-        url: `https://api.openai.com/v1/models`,
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-      });
+      const response = await requestUrl(`${this.endpoint}/v1/models`);
       if (response.status === 200) {
         const data = response.json;
-        return data.data
-          .filter(
-            (model: any) =>
-              model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
-          )
-          .map((model: any) => ({
-            id: model.id,
-            name: model.id,
-            isLocal: false,
-            provider: 'openai',
-          }));
+        return data.data.map((model: any) => ({
+          id: model.id,
+          name: model.id.split('/').pop(),
+          isLocal: true,
+          provider: 'local',
+        }));
       } else {
-        console.error('Failed to fetch OpenAI models:', response.status);
+        console.error('Failed to fetch local models:', response.status);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching OpenAI models:', error);
       return [];
     }
   }
 
-  static async validateApiKey(apiKey: string): Promise<boolean> {
-    if (!apiKey) return false;
+  static async validateEndpoint(endpoint: string): Promise<boolean> {
+    if (!endpoint) return false;
 
     try {
       const response = await requestUrl({
-        url: `https://api.openai.com/v1/models`,
+        url: `${endpoint}/v1/models`,
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
       });
       return response.status === 200;
     } catch (error) {
-      console.error('Error validating OpenAI API key:', error);
       return false;
     }
   }

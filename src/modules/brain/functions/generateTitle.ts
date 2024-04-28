@@ -1,6 +1,5 @@
 import { BrainModule } from '../BrainModule';
 import { showCustomNotice } from '../../../modals';
-import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
 import { AIService } from '../../../api/AIService';
 
 export async function generateTitle(
@@ -10,22 +9,22 @@ export async function generateTitle(
   const systemPrompt = plugin.settings.generateTitlePrompt;
   const userMessage = noteContent;
 
-  const modelId = plugin.settings.defaultOpenAIModelId;
+  const modelId = plugin.settings.defaultModelId;
 
-  let model = await plugin.openAIService.getModelById(modelId);
+  let model = await plugin.getModelById(modelId);
 
   if (!model) {
     const localModels = await plugin.openAIService.getModels(false);
     const onlineModels = await plugin.openAIService.getModels(true);
     const firstLocalModel = localModels[0];
     if (firstLocalModel) {
-      plugin.settings.defaultOpenAIModelId = firstLocalModel.id;
+      plugin.settings.defaultModelId = firstLocalModel.id;
       await plugin.saveSettings();
       updateModelStatusBar(plugin, firstLocalModel.name);
       model = firstLocalModel;
     } else if (onlineModels.length > 0) {
       model = onlineModels[0];
-      plugin.settings.defaultOpenAIModelId = model.id;
+      plugin.settings.defaultModelId = model.id;
       await plugin.saveSettings();
       updateModelStatusBar(plugin, model.name);
     } else {
@@ -37,41 +36,12 @@ export async function generateTitle(
   }
 
   try {
-    let generatedTitle = '';
-    let isGenerationComplete = false;
-    const abortController = new AbortController();
-
-    await plugin.openAIService.createStreamingChatCompletionWithCallback(
+    const generatedTitle = await plugin.openAIService.createChatCompletion(
       systemPrompt,
       userMessage,
       model.id,
-      plugin.settings.maxTokens,
-      (chunk: string) => {
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const data = line.slice(5).trim();
-            if (data === '[DONE]') {
-              isGenerationComplete = true;
-              break;
-            }
-            try {
-              const json = JSON.parse(data);
-              if (json.choices && json.choices[0].delta.content) {
-                generatedTitle += json.choices[0].delta.content;
-              }
-            } catch (error) {
-              console.error('Error parsing JSON:', error);
-            }
-          }
-        }
-      },
-      abortController.signal
+      plugin.settings.maxTokens
     );
-
-    if (!isGenerationComplete) {
-      throw new Error('Title generation incomplete');
-    }
 
     return sanitizeFileName(generatedTitle.trim());
   } catch (error) {

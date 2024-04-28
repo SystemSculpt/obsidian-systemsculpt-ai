@@ -15,13 +15,6 @@ export async function generateTitleForCurrentNote(
     }
     const noteContent = await plugin.plugin.app.vault.read(currentFile);
 
-    if (plugin.openAIService.isRequestCurrentlyInProgress()) {
-      console.warn(
-        'An OpenAI request is already in progress. Skipping title generation.'
-      );
-      return;
-    }
-
     const generatingTitleModal = new GeneratingTitleModal(plugin.plugin.app);
     generatingTitleModal.open();
 

@@ -1,4 +1,4 @@
-import { Setting, DropdownComponent } from 'obsidian';
+import { Setting, DropdownComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 import { Model } from '../../../api/Model';
@@ -22,10 +22,10 @@ export async function renderModelDropdown(
         if (value === 'Unknown') {
           const models = await getAvailableModels(plugin);
           if (models.length > 0) {
-            plugin.settings.defaultOpenAIModelId = models[0].id;
+            plugin.settings.defaultModelId = models[0].id;
           }
         } else {
-          plugin.settings.defaultOpenAIModelId = value;
+          plugin.settings.defaultModelId = value;
         }
         await plugin.saveSettings();
         plugin.refreshAIService();
@@ -33,9 +33,57 @@ export async function renderModelDropdown(
       });
     });
 
+  const modelListSetting = new Setting(containerEl)
+    .setName('Available models')
+    .setDesc('Select which models to include when cycling through models')
+    .setClass('model-list-setting');
+
+  const modelListEl = containerEl.createDiv('model-list');
+  const loadingTextEl = modelListEl.createDiv('info-box');
+  loadingTextEl.textContent = 'Loading available models list...';
+  let dots = 0;
+  const loadingInterval = setInterval(() => {
+    dots = (dots + 1) % 4;
+    loadingTextEl.textContent = `Loading available models list${'.'.repeat(
+      dots
+    )}`;
+  }, 500);
+
   const infoBoxEl = containerEl.createDiv('info-box');
   infoBoxEl.createEl('p', {
-    text: 'You can hotkey this (I personally hotkey it to CMD+Shift+M). This allows you to quickly switch between OpenAI models in order to heavily save costs with GPT-3.5-Turbo and/or toggle on maximum brain power with GPT-4-Turbo.',
+    text: 'You can hotkey this (I personally hotkey it to CMD+Shift+M). This allows you to quickly cycle through selected OpenAI models in order to heavily save costs with GPT-3.5-Turbo and/or toggle on maximum brain power with GPT-4-Turbo.',
+  });
+
+  const models = await getAvailableModels(plugin);
+  clearInterval(loadingInterval);
+  loadingTextEl.remove(); // Remove the loading text once models are loaded
+
+  models.forEach((model: Model) => {
+    const modelItemEl = modelListEl.createDiv('model-item');
+    const modelNameEl = modelItemEl.createSpan('model-name');
+    modelNameEl.textContent = getModelDisplayName(model);
+
+    const isModelEnabled = plugin.settings.enabledModels.includes(model.id);
+    const toggleComponent = new ToggleComponent(modelItemEl)
+      .setValue(isModelEnabled) // Set the toggle based on whether the model is enabled
+      .onChange(async value => {
+        const index = plugin.settings.enabledModels.indexOf(model.id);
+        if (value) {
+          // If the toggle is on, the model should be enabled
+          if (index === -1) {
+            plugin.settings.enabledModels.push(model.id); // Add to enabled models if it's enabled
+          }
+        } else {
+          // If the toggle is off, the model should be disabled
+          if (index > -1) {
+            plugin.settings.enabledModels.splice(index, 1); // Remove from enabled models if it's disabled
+          }
+        }
+        await plugin.saveSettings(); // Save settings after updating
+        modelItemEl.toggleClass('disabled', !value);
+        //@ts-ignore
+        await populateModelOptions(plugin, dropdownRef); // Refresh the dropdown options
+      });
   });
 }
 
@@ -46,32 +94,40 @@ async function populateModelOptions(
   const selectEl = dropdown.selectEl;
   if (selectEl) {
     selectEl.empty();
-    selectEl.createEl('option', { text: 'Loading models...', value: '' });
-  }
+    const loadingOption = selectEl.createEl('option', {
+      text: 'Loading available models list...',
+      value: '',
+    });
+    let loadingText = 'Loading available models list';
+    let dots = 0;
 
-  clearTimeout(populateModelOptionsTimeout);
+    const loadingInterval = setInterval(() => {
+      dots = (dots + 1) % 4;
+      loadingOption.textContent = `${loadingText}${'.'.repeat(dots)}`;
+    }, 500);
 
-  populateModelOptionsTimeout = setTimeout(async () => {
     try {
       const models = await getAvailableModels(plugin);
+      clearInterval(loadingInterval);
 
       if (selectEl) {
         selectEl.empty();
 
         if (models.length === 0) {
           selectEl.createEl('option', {
-            text: 'No models available. Check your local endpoint and OpenAI API key.',
+            text: 'No models available. Check your local endpoint and API keys.',
             value: '',
           });
-          // Ensure the status bar is updated when no models are available
           updateModelStatusBar(plugin, 'No Models Available');
         } else {
-          models.forEach((model: Model) => {
-            const option = selectEl.createEl('option', {
-              text: getModelDisplayName(model),
-              value: model.id,
+          models
+            .filter(model => plugin.settings.enabledModels.includes(model.id))
+            .forEach((model: Model) => {
+              const option = selectEl.createEl('option', {
+                text: getModelDisplayName(model),
+                value: model.id,
+              });
             });
-          });
 
           const selectedModelId = await setDefaultModel(plugin, models);
           dropdown.setValue(selectedModelId);
@@ -79,25 +135,29 @@ async function populateModelOptions(
         }
       }
     } catch (error) {
+      clearInterval(loadingInterval);
       console.error('Error loading models:', error);
       if (selectEl) {
         selectEl.empty();
         selectEl.createEl('option', {
-          text: 'Failed - check your local endpoint and OpenAI API key.',
+          text: 'Failed - check your local endpoint and API keys.',
           value: '',
         });
       }
       updateModelStatusBar(plugin, 'Model not configured');
     }
-  }, 500);
+  }
 }
 
 async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
   const localEndpointOnline = await AIService.validateLocalEndpoint(
     plugin.settings.localEndpoint
   );
-  const openAIApiKeyValid = await AIService.validateApiKey(
+  const openAIApiKeyValid = await AIService.validateOpenAIApiKey(
     plugin.settings.openAIApiKey
+  );
+  const groqAPIKeyValid = await AIService.validateGroqAPIKey(
+    plugin.settings.groqAPIKey
   );
 
   const models: Model[] = [];
@@ -113,6 +173,7 @@ async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
           id: model.id,
           name: model.id.split('/').pop(),
           isLocal: true,
+          provider: 'local' as const, // Specify the literal type
         }))
       );
     }
@@ -128,9 +189,17 @@ async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
         )
         .map((model: any) => ({
           id: model.id,
-          name: model.id.replace(/-turbo$/, ' turbo'),
+          name: model.id,
           isLocal: false,
+          provider: 'openai' as const, // Explicitly set to 'openai'
         }))
+    );
+  }
+
+  if (groqAPIKeyValid) {
+    const response = await plugin.openAIService.getModels(false, true);
+    models.push(
+      ...response.filter((model: Model) => model.provider === 'groq')
     );
   }
 
@@ -141,13 +210,13 @@ async function setDefaultModel(
   plugin: BrainModule,
   models: Model[]
 ): Promise<string> {
-  const selectedModelId = plugin.settings.defaultOpenAIModelId;
+  const selectedModelId = plugin.settings.defaultModelId;
   const selectedModel = models.find(model => model.id === selectedModelId);
 
   if (!selectedModel || selectedModelId === 'Unknown') {
     // If the previously selected model is no longer available or is "Unknown", select the first available model
     const defaultModel = models[0];
-    plugin.settings.defaultOpenAIModelId = defaultModel.id;
+    plugin.settings.defaultModelId = defaultModel.id;
     await plugin.saveSettings();
     return defaultModel.id;
   }
@@ -172,7 +241,7 @@ function updateModelStatusBar(plugin: BrainModule, text?: string): void {
     if (text) {
       plugin.plugin.modelToggleStatusBarItem.setText(text);
     } else {
-      const modelName = plugin.settings.defaultOpenAIModelId.split('/').pop();
+      const modelName = plugin.settings.defaultModelId.split('/').pop();
       plugin.plugin.modelToggleStatusBarItem.setText(
         modelName ? `Model: ${modelName}` : 'Model not configured'
       );

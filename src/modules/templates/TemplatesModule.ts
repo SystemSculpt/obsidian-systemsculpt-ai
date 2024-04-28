@@ -112,6 +112,10 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   async checkForUpdate(): Promise<void> {
+    if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
+      console.log('No valid license key found. Skipping update check.');
+      return;
+    }
     if (await checkLicenseValidity(this)) {
       await this.checkAndUpdateTemplates();
     }
