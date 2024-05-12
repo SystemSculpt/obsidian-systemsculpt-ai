@@ -158,6 +158,15 @@ export class BlankTemplateModal extends Modal {
   }
 
   async handleGenerate(): Promise<void> {
+    if (!this.plugin.abortController) {
+      this.plugin.abortController = new AbortController();
+    }
+    const signal = this.plugin.abortController.signal;
+
+    console.log(
+      'Checking blank template abort controller: ',
+      this.plugin.abortController
+    );
     // Ensure context areas are updated with any user edits
     const preContext = this.preContextArea.value;
     const postContext = this.postContextArea.value;
@@ -198,11 +207,6 @@ export class BlankTemplateModal extends Modal {
         editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
 
         showCustomNotice('Generating...', 5000);
-
-        if (!this.plugin.abortController) {
-          this.plugin.abortController = new AbortController();
-        }
-        const signal = this.plugin.abortController.signal;
 
         let modelInstance = await this.plugin.openAIService.getModelById(
           this.plugin.plugin.brainModule.settings.defaultModelId
@@ -258,6 +262,7 @@ export class BlankTemplateModal extends Modal {
         } finally {
           this.plugin.abortController = null; // Reset the abortController
           this.plugin.isGenerationCompleted = true; // Mark generation as completed
+          console.log('Blank template generation completed.');
         }
       }
     }

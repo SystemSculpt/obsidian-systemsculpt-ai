@@ -11,6 +11,9 @@ export interface BrainSettings {
   showDefaultModelOnStatusBar: boolean;
   apiEndpoint: string;
   enabledModels: string[];
+  showopenAISetting: boolean;
+  showgroqSetting: boolean;
+  showlocalEndpointSetting: boolean;
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -61,4 +64,7 @@ Rules:
   showDefaultModelOnStatusBar: true,
   apiEndpoint: 'https://api.openai.com',
   enabledModels: [],
+  showopenAISetting: true,
+  showgroqSetting: true,
+  showlocalEndpointSetting: true,
 };

@@ -7,6 +7,10 @@ export function renderLocalEndpointSetting(
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
+  if (!plugin.settings.showlocalEndpointSetting) {
+    return;
+  }
+
   let endpointTextComponent: TextComponent;
 
   function createSpan(className: string): HTMLElement {
@@ -77,11 +81,16 @@ export function renderLocalEndpointSetting(
     statusTextEl.textContent = 'Checking...';
     statusTextEl.className = 'api-key-status validating';
 
-    const isOnline = await AIService.validateLocalEndpoint(endpoint);
+    if (plugin.settings.showlocalEndpointSetting) {
+      const isOnline = await AIService.validateLocalEndpoint(endpoint);
 
-    statusTextEl.textContent = isOnline ? 'Online' : 'Offline';
-    statusTextEl.classList.remove('validating');
-    statusTextEl.classList.toggle('valid', isOnline);
-    statusTextEl.classList.toggle('invalid', !isOnline);
+      statusTextEl.textContent = isOnline ? 'Online' : 'Offline';
+      statusTextEl.classList.remove('validating');
+      statusTextEl.classList.toggle('valid', isOnline);
+      statusTextEl.classList.toggle('invalid', !isOnline);
+    } else {
+      statusTextEl.textContent = 'Disabled';
+      statusTextEl.classList.remove('validating', 'valid', 'invalid');
+    }
   }
 }

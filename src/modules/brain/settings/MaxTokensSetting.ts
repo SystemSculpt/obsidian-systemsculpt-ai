@@ -23,6 +23,6 @@ export function renderMaxTokensSetting(
     );
   const infoBoxEl = containerEl.createDiv('info-box');
   infoBoxEl.createEl('p', {
-    text: 'You can hotkey this (I personally hotkey it to CMD+M). It will open up a simple modal that you can change the max tokens on the fly with.',
+    text: 'You can hotkey this (I personally hotkey it to CMD+Shift+M). It will open up a simple modal that you can change the max tokens on the fly with.',
   });
 }

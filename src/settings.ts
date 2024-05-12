@@ -1,6 +1,5 @@
 import { App, PluginSettingTab } from 'obsidian';
 import SystemSculptPlugin from './main';
-import { renderBrainAnimation } from './modules/brain/views/BrainAnimation';
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
@@ -29,11 +28,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     containerEl.empty();
 
-    const animationContainer = this.renderAnimationContainer();
-    renderBrainAnimation(animationContainer);
-
     const linksContainer = this.renderLinksContainer();
-
     const tabContainer = this.renderTabContainer();
     const settingsContainer = this.renderSettingsContainer();
 

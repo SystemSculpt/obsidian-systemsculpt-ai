@@ -51,7 +51,7 @@ export async function renderModelDropdown(
 
   const infoBoxEl = containerEl.createDiv('info-box');
   infoBoxEl.createEl('p', {
-    text: 'You can hotkey this (I personally hotkey it to CMD+Shift+M). This allows you to quickly cycle through selected OpenAI models in order to heavily save costs with GPT-3.5-Turbo and/or toggle on maximum brain power with GPT-4-Turbo.',
+    text: "You can hotkey this (I personally hotkey it to CMD+M). This allows you to quickly cycle through whatever models you've enabled (example: use a local model for simple generations, a groq model for speedy smarter ones, and gpt-4-turbo for the big-brain tasks).",
   });
 
   const models = await getAvailableModels(plugin);
@@ -150,15 +150,15 @@ async function populateModelOptions(
 }
 
 async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
-  const localEndpointOnline = await AIService.validateLocalEndpoint(
-    plugin.settings.localEndpoint
-  );
-  const openAIApiKeyValid = await AIService.validateOpenAIApiKey(
-    plugin.settings.openAIApiKey
-  );
-  const groqAPIKeyValid = await AIService.validateGroqAPIKey(
-    plugin.settings.groqAPIKey
-  );
+  const localEndpointOnline = plugin.settings.showlocalEndpointSetting
+    ? await AIService.validateLocalEndpoint(plugin.settings.localEndpoint)
+    : false;
+  const openAIApiKeyValid = plugin.settings.showopenAISetting
+    ? await AIService.validateOpenAIApiKey(plugin.settings.openAIApiKey)
+    : false;
+  const groqAPIKeyValid = plugin.settings.showgroqSetting
+    ? await AIService.validateGroqAPIKey(plugin.settings.groqAPIKey)
+    : false;
 
   const models: Model[] = [];
 

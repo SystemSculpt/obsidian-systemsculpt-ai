@@ -97,15 +97,14 @@ export class TemplatesSuggest extends EditorSuggest<string> {
     value: string,
     evt: MouseEvent | KeyboardEvent
   ): Promise<void> {
+    // Create a new abort controller for the template generation
+    this.plugin.abortController = new AbortController();
+    const signal = this.plugin.abortController.signal;
+
     if (value === 'Blank Template') {
       new BlankTemplateModal(this.plugin).open();
       this.plugin.isGenerationCompleted = false; // Reset generation completion flag
     } else {
-      if (!this.plugin.abortController) {
-        this.plugin.abortController = new AbortController();
-      }
-      const signal = this.plugin.abortController.signal;
-
       const templateFiles = await getTemplateFiles(
         this.app,
         this.plugin.settings.templatesPath

@@ -10,7 +10,6 @@ export const AboutData = {
       coffees: 1,
     },
   ] as Supporter[],
-
   patreonMembers: [
     { name: 'Paul Stephenson III' },
     { name: 'Mehmet' },
@@ -41,6 +40,8 @@ export const AboutData = {
     { name: 'Stefan Wagner' },
     { name: 'BuzzSenior' },
     { name: 'Jeff Kiefer' },
+    { name: 'Wilinusa' },
+    { name: 'Bone74' },
   ] as Supporter[],
 
   youtubeMembers: [

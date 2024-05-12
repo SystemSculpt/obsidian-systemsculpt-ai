@@ -3,6 +3,7 @@ import { showCustomNotice } from '../../../modals';
 import { TemplatesModule } from '../../templates/TemplatesModule';
 
 export async function stopGeneration(plugin: BrainModule): Promise<void> {
+  console.log('Checking brain abort controller: ', plugin.abortController);
   if (plugin.abortController) {
     plugin.abortController.abort();
     plugin.abortController = null;
@@ -11,11 +12,9 @@ export async function stopGeneration(plugin: BrainModule): Promise<void> {
   } else {
     showCustomNotice('No generation in progress', 5000);
   }
-  plugin.openAIService.setRequestInProgress(false);
 
-  // Stop template generation if it's running
-  const templatesModule = plugin.plugin.templatesModule as TemplatesModule;
-  if (templatesModule.abortController) {
-    templatesModule.stopGeneration();
-  }
+  console.log(
+    'Checking templates abort controller: ',
+    plugin.plugin.templatesModule.abortController
+  );
 }

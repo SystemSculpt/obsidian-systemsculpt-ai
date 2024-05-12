@@ -7,6 +7,10 @@ export function renderGroqAPIKeySetting(
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
+  if (!plugin.settings.showgroqSetting) {
+    return;
+  }
+
   let apiKeyTextComponent: TextComponent;
 
   function createSpan(className: string): HTMLElement {
@@ -80,12 +84,17 @@ export function renderGroqAPIKeySetting(
     statusTextEl.textContent = 'Validating...';
     statusTextEl.className = 'api-key-status validating';
 
-    const isValid = await AIService.validateGroqAPIKey(apiKey);
+    if (plugin.settings.showgroqSetting) {
+      const isValid = await AIService.validateGroqAPIKey(apiKey);
 
-    statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
-    statusTextEl.classList.remove('validating');
-    statusTextEl.classList.toggle('valid', isValid);
-    statusTextEl.classList.toggle('invalid', !isValid);
+      statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
+      statusTextEl.classList.remove('validating');
+      statusTextEl.classList.toggle('valid', isValid);
+      statusTextEl.classList.toggle('invalid', !isValid);
+    } else {
+      statusTextEl.textContent = 'Disabled';
+      statusTextEl.classList.remove('validating', 'valid', 'invalid');
+    }
 
     // Update the groqAPIKeyValid flag and API key in the AIService instance
     const aiServiceInstance = AIService.getInstance(

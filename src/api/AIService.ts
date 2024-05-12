@@ -1,4 +1,3 @@
-import { requestUrl } from 'obsidian';
 import { LocalAIService } from './LocalAIService';
 import { OpenAIService } from './OpenAIService';
 import { GroqService } from './GroqService';

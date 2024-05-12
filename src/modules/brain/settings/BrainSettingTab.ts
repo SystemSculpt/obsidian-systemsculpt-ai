@@ -10,6 +10,7 @@ import { renderMaxTokensSetting } from './MaxTokensSetting';
 import { renderShowDefaultModelOnStatusBarSetting } from './ShowDefaultModelOnStatusBarSetting';
 import { renderShowMaxTokensOnStatusBarSetting } from './ShowMaxTokensOnStatusBarSetting';
 import { displayVersionInfo } from '../functions/displayVersionInfo';
+import { renderAPIEndpointToggles } from './APIEndpointToggles';
 
 export class BrainSettingTab extends PluginSettingTab {
   plugin: BrainModule;
@@ -31,6 +32,8 @@ export class BrainSettingTab extends PluginSettingTab {
     });
 
     displayVersionInfo(containerEl, this.plugin);
+
+    renderAPIEndpointToggles(containerEl, this.plugin, () => this.refreshTab());
 
     renderLocalEndpointSetting(containerEl, this.plugin, () =>
       this.refreshTab()
