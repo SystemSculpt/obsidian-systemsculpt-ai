@@ -111,10 +111,14 @@ export class TemplatesSuggest extends EditorSuggest<string> {
       );
       const templateFile = templateFiles.find(file => file.basename === value);
       if (templateFile) {
-        const { model, maxTokens, prompt } = await parseFrontMatter(
+        let { model, maxTokens, prompt } = await parseFrontMatter(
           this.app,
           templateFile
         );
+
+        if (model === 'gpt-4-turbo') {
+          model = 'gpt-4o';
+        }
 
         let modelInstance;
 

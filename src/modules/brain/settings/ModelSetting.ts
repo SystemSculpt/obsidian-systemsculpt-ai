@@ -11,28 +11,7 @@ export async function renderModelDropdown(
 ): Promise<void> {
   let dropdownRef: DropdownComponent | null = null;
 
-  new Setting(containerEl)
-    .setName('Default model')
-    .setDesc('Select the default model for generating tasks')
-    .addDropdown(async (dropdown: DropdownComponent) => {
-      dropdownRef = dropdown;
-      await populateModelOptions(plugin, dropdown);
-
-      dropdown.onChange(async (value: string) => {
-        if (value === 'Unknown') {
-          const models = await getAvailableModels(plugin);
-          if (models.length > 0) {
-            plugin.settings.defaultModelId = models[0].id;
-          }
-        } else {
-          plugin.settings.defaultModelId = value;
-        }
-        await plugin.saveSettings();
-        plugin.refreshAIService();
-        updateModelStatusBar(plugin);
-      });
-    });
-
+  // Available models list setting
   const modelListSetting = new Setting(containerEl)
     .setName('Available models')
     .setDesc('Select which models to include when cycling through models')
@@ -51,9 +30,34 @@ export async function renderModelDropdown(
 
   const infoBoxEl = containerEl.createDiv('info-box');
   infoBoxEl.createEl('p', {
-    text: "You can hotkey this (I personally hotkey it to CMD+M). This allows you to quickly cycle through whatever models you've enabled (example: use a local model for simple generations, a groq model for speedy smarter ones, and gpt-4-turbo for the big-brain tasks).",
+    text: "You can hotkey this (I personally hotkey it to CMD+M). This allows you to quickly cycle through whatever models you've enabled (example: use a local model for simple generations, a groq model for speedy smarter ones, and gpt-4o for the big-brain tasks).",
   });
 
+  // Default model setting with a loading placeholder
+  const defaultModelSetting = new Setting(containerEl)
+    .setName('Default model')
+    .setDesc('Select the default model for generating tasks')
+    .addDropdown((dropdown: DropdownComponent) => {
+      dropdownRef = dropdown;
+      dropdown.addOption('', 'Loading models...');
+      dropdown.setDisabled(true);
+
+      dropdown.onChange(async (value: string) => {
+        if (value === 'Unknown') {
+          const models = await getAvailableModels(plugin);
+          if (models.length > 0) {
+            plugin.settings.defaultModelId = models[0].id;
+          }
+        } else {
+          plugin.settings.defaultModelId = value;
+        }
+        await plugin.saveSettings();
+        plugin.refreshAIService();
+        updateModelStatusBar(plugin);
+      });
+    });
+
+  // Load available models
   const models = await getAvailableModels(plugin);
   clearInterval(loadingInterval);
   loadingTextEl.remove(); // Remove the loading text once models are loaded
@@ -85,6 +89,13 @@ export async function renderModelDropdown(
         await populateModelOptions(plugin, dropdownRef); // Refresh the dropdown options
       });
   });
+
+  // Update the default model dropdown with actual options
+  if (dropdownRef) {
+    await populateModelOptions(plugin, dropdownRef as DropdownComponent);
+    (dropdownRef as DropdownComponent).setDisabled(false);
+    updateModelStatusBar(plugin); // Update status bar with the selected model
+  }
 }
 
 async function populateModelOptions(
@@ -184,8 +195,7 @@ async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
     models.push(
       ...response
         .filter(
-          (model: any) =>
-            model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
+          (model: any) => model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4o'
         )
         .map((model: any) => ({
           id: model.id,
@@ -210,15 +220,27 @@ async function setDefaultModel(
   plugin: BrainModule,
   models: Model[]
 ): Promise<string> {
-  const selectedModelId = plugin.settings.defaultModelId;
-  const selectedModel = models.find(model => model.id === selectedModelId);
+  let selectedModelId = plugin.settings.defaultModelId;
+  const enabledModels = models.filter(model =>
+    plugin.settings.enabledModels.includes(model.id)
+  );
+  const selectedModel = enabledModels.find(
+    model => model.id === selectedModelId
+  );
 
   if (!selectedModel || selectedModelId === 'Unknown') {
-    // If the previously selected model is no longer available or is "Unknown", select the first available model
-    const defaultModel = models[0];
-    plugin.settings.defaultModelId = defaultModel.id;
-    await plugin.saveSettings();
-    return defaultModel.id;
+    // If the previously selected model is no longer available or is "Unknown", select the first available enabled model
+    if (enabledModels.length > 0) {
+      const defaultModel = enabledModels[0];
+      plugin.settings.defaultModelId = defaultModel.id;
+      await plugin.saveSettings();
+      return defaultModel.id;
+    } else {
+      // No enabled models available
+      plugin.settings.defaultModelId = '';
+      await plugin.saveSettings();
+      return '';
+    }
   }
 
   return selectedModelId;
@@ -226,9 +248,9 @@ async function setDefaultModel(
 
 function getModelDisplayName(model: Model): string {
   if (model.id === 'gpt-3.5-turbo') {
-    return 'GPT 3.5 Turbo ($0.001 per 1K tokens)';
-  } else if (model.id === 'gpt-4-turbo') {
-    return 'GPT 4 Turbo ($0.02 per 1K tokens)';
+    return 'gpt-3.5-turbo';
+  } else if (model.id === 'gpt-4o') {
+    return 'gpt-4o (most advanced)';
   } else if (model.isLocal) {
     return model.name;
   } else {

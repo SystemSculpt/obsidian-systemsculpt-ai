@@ -129,7 +129,7 @@ export class OpenAIService {
         return data.data
           .filter(
             (model: any) =>
-              model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4-turbo'
+              model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4o'
           )
           .map((model: any) => ({
             id: model.id,
