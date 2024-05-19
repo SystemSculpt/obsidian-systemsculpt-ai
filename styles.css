@@ -74,6 +74,217 @@
   font-size: 1.5em;
   cursor: pointer;
 }
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.chat-header {
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  padding: 15px;
+  text-align: center;
+  font-weight: bold;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chat-title {
+  background-color: var(--background-primary-alt);
+  color: var(--text-muted);
+  padding: 10px;
+  text-align: center;
+  font-style: italic;
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chat-title-container {
+  display: flex;
+  align-items: center;
+}
+
+.chat-title-text {
+  margin-right: 10px;
+}
+
+.edit-icon {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+  margin-left: 5px; /* Add margin to avoid overlap with the input field */
+}
+
+.edit-icon:hover {
+  color: var(--interactive-accent);
+}
+
+.edit-title-input {
+  width: calc(100% - 20px); /* Adjust width to fit within the container */
+  padding: 5px;
+  font-size: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  margin-right: 10px; /* Add margin to avoid overlap with the icon */
+}
+
+.token-count {
+  font-size: 12px;
+  color: var(--text-faint);
+  background-color: var(--background-secondary);
+  padding: 5px 10px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 20px;
+}
+
+.chat-input-container {
+  display: flex;
+  padding: 15px;
+  background-color: var(--background-primary-alt);
+  align-items: center;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.chat-input {
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  resize: vertical;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1;
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.chat-send-button {
+  padding: 10px 20px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s ease;
+}
+
+.chat-send-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.chat-message.user {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  align-self: flex-end;
+  text-align: right;
+  box-shadow: 2px 2px 1px var(--interactive-accent);
+  position: relative;
+  user-select: text; /* Allow text selection */
+}
+
+.chat-message {
+  position: relative;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  user-select: text; /* Allow text selection */
+}
+
+/* this is a codeblock within our chat message */
+.chat-message pre {
+  background-color: rgba(0, 0, 0, 0.5); /* Darker with transparency */
+  font-size: 75%;
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.message-actions {
+  position: relative;
+  margin-top: -30px; /* Initially hidden */
+  opacity: 0; /* Initially transparent */
+  transition: margin-top 0.3s ease, opacity 0.3s ease;
+  text-align: right;
+}
+
+.chat-message:hover .message-actions {
+  margin-top: 10px; /* Slide out below the message */
+  opacity: 1; /* Fade in on hover */
+}
+
+.copy-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.copy-button.copied {
+  background-color: green;
+  color: white;
+}
+
+.delete-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s, color 0.3s;
+  margin-left: 5px; /* Add margin to separate from the copy button */
+}
+
+.delete-button.confirm-delete {
+  background-color: red;
+  color: white;
+}
+
+.delete-button:hover {
+  color: red;
+}
+
+.chat-message.ai {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  align-self: flex-start;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  user-select: text; /* Allow text selection */
+}
 .model-list-setting {
   margin-top: 0;
 }

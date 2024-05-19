@@ -1,5 +1,4 @@
 import { requestUrl } from 'obsidian';
-import http from 'http';
 import { Model } from './Model';
 
 export class LocalAIService {
@@ -66,31 +65,33 @@ export class LocalAIService {
       max_tokens: maxTokens,
     });
 
-    const req = http.request(
-      `${this.endpoint}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
-      res => this.handleResponse(res, callback)
-    );
+    // Instead of using requestUrl, the fetch function is used to make the request to the Groq API.
+    // This is because requestUrl doesn't provide a body property on the response object.
 
-    req.on('error', error => {
-      console.error('Local AI request error:', error);
+    const req = await fetch(`${this.endpoint}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: requestData,
+      signal: abortSignal,
     });
 
-    req.write(requestData);
-    req.end();
-  }
+    if (!req.ok) {
+      throw new Error(`Local AI request failed with status ${req.status}`);
+    }
 
-  private handleResponse(res: any, callback: (chunk: string) => void): void {
+    //@ts-ignore
+    const reader = req.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done = false;
     let firstPartialChunk = '';
     let secondPartialChunk = '';
-    let accumulatedResponse = '';
-    res.on('data', chunk => {
-      const decodedChunk = new TextDecoder('utf-8').decode(chunk);
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      const decodedChunk = decoder.decode(value);
       const chunks = decodedChunk.split('\n');
       chunks.forEach(chunk => {
         if (chunk.startsWith('data: ') && chunk.endsWith('null}]}')) {
@@ -102,7 +103,7 @@ export class LocalAIService {
           callback(firstPartialChunk + secondPartialChunk);
         }
       });
-    });
+    }
   }
 
   async getModels(): Promise<Model[]> {

@@ -14,7 +14,8 @@ import { MarkdownView } from 'obsidian';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { showCustomNotice } from '../../modals';
 import { Model } from '../../api/Model';
-import { stopGeneration } from './functions/stopGeneration'; // Import the new stopGeneration function
+import { stopGeneration } from './functions/stopGeneration';
+import { ChatView, VIEW_TYPE_CHAT } from '../chat/ChatView';
 
 export class BrainModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -112,6 +113,12 @@ export class BrainModule implements IGenerationModule {
     this.plugin.maxTokensToggleStatusBarItem.onClickEvent(() => {
       new MaxTokensModal(this.plugin.app, this).open();
     });
+
+    // Register the ChatView
+    this.plugin.registerView(
+      VIEW_TYPE_CHAT,
+      leaf => new ChatView(leaf, this, this.plugin.chatModule)
+    );
   }
 
   async loadSettings() {

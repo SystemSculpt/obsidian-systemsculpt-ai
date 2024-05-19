@@ -46,7 +46,8 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.renderTab(tabContainer, 'tasks', 'Tasks');
     this.renderTab(tabContainer, 'recorder', 'Recorder');
     this.renderTab(tabContainer, 'templates', 'Templates');
-    this.renderTab(tabContainer, 'data', 'Data');
+    this.renderTab(tabContainer, 'chat', 'Chat');
+    // this.renderTab(tabContainer, 'data', 'Data');
     this.renderTab(tabContainer, 'about', 'About');
 
     return tabContainer;
@@ -124,6 +125,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
           settingsContainer as HTMLElement
         );
         break;
+      case 'chat':
+        this.plugin.chatModule.settingsDisplay(
+          settingsContainer as HTMLElement
+        );
+        break;
       case 'templates':
         this.plugin.templatesModule.settingsDisplay(
           settingsContainer as HTMLElement
@@ -134,11 +140,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
           settingsContainer as HTMLElement
         );
         break;
-      case 'data':
-        this.plugin.dataModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
+      // case 'data':
+      //   this.plugin.dataModule.settingsDisplay(
+      //     settingsContainer as HTMLElement
+      //   );
+      //   break;
       case 'about':
         this.plugin.aboutModule.settingsDisplay(
           settingsContainer as HTMLElement

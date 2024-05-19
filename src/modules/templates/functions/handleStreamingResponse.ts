@@ -1,6 +1,7 @@
 import { Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 import { IGenerationModule } from '../../../interfaces/IGenerationModule';
+import { ChatMessage } from '../../chat/ChatMessage';
 
 export function handleStreamingResponse(
   chunk: string,
@@ -66,6 +67,11 @@ export function handleStreamingResponse(
         }
       }
     } else {
+      // Handle chat response
+      if (plugin.addMessage) {
+        const aiMessage = new ChatMessage('ai', line.trim());
+        plugin.addMessage(aiMessage);
+      }
     }
   }
 }

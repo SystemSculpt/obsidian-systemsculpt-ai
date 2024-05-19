@@ -1,5 +1,4 @@
 import { requestUrl } from 'obsidian';
-import https from 'https';
 import { Model } from './Model';
 
 export class OpenAIService {
@@ -9,10 +8,6 @@ export class OpenAIService {
   constructor(apiKey: string, apiEndpoint: string) {
     this.apiKey = apiKey;
     this.apiEndpoint = apiEndpoint;
-  }
-
-  updateApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
   }
 
   async createChatCompletion(
@@ -73,32 +68,34 @@ export class OpenAIService {
       max_tokens: maxTokens,
     });
 
-    const req = https.request(
-      `${this.apiEndpoint}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-      },
-      res => this.handleResponse(res, callback)
-    );
+    // Instead of using requestUrl, the fetch function is used to make the request to the Groq API.
+    // This is because requestUrl doesn't provide a body property on the response object.
 
-    req.on('error', error => {
-      console.error('OpenAI request error:', error);
+    const req = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: requestData,
+      signal: abortSignal,
     });
 
-    req.write(requestData);
-    req.end();
-  }
+    if (!req.ok) {
+      throw new Error(`OpenAI request failed with status ${req.status}`);
+    }
 
-  private handleResponse(res: any, callback: (chunk: string) => void): void {
+    //@ts-ignore
+    const reader = req.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done = false;
     let firstPartialChunk = '';
     let secondPartialChunk = '';
-    let accumulatedResponse = '';
-    res.on('data', chunk => {
-      const decodedChunk = new TextDecoder('utf-8').decode(chunk);
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      const decodedChunk = decoder.decode(value);
       const chunks = decodedChunk.split('\n');
       chunks.forEach(chunk => {
         if (chunk.startsWith('data: ') && chunk.endsWith('null}]}')) {
@@ -110,7 +107,7 @@ export class OpenAIService {
           callback(firstPartialChunk + secondPartialChunk);
         }
       });
-    });
+    }
   }
 
   async getModels(): Promise<Model[]> {
@@ -163,5 +160,9 @@ export class OpenAIService {
       console.error('Error validating OpenAI API key:', error);
       return false;
     }
+  }
+
+  updateApiKey(apiKey: string): void {
+    this.apiKey = apiKey;
   }
 }

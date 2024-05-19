@@ -8,11 +8,6 @@ export class GroqService {
     this.apiKey = apiKey;
   }
 
-  updateApiKey(apiKey: string): void {
-    console.log('updating groq api key...');
-    this.apiKey = apiKey;
-  }
-
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
@@ -23,7 +18,6 @@ export class GroqService {
       throw new Error('Groq API key is not set');
     }
 
-    console.log('creating groq chat completion...');
     const requestData = JSON.stringify({
       model: modelId,
       messages: [
@@ -65,7 +59,6 @@ export class GroqService {
       throw new Error('Groq API key is not set');
     }
 
-    console.log('creating groq streaming chat completion...');
     const requestData = JSON.stringify({
       model: modelId,
       messages: [
@@ -165,5 +158,10 @@ export class GroqService {
       console.error('Error validating Groq API key:', error);
       return false;
     }
+  }
+
+  updateApiKey(apiKey: string): void {
+    console.log('updating groq api key...');
+    this.apiKey = apiKey;
   }
 }
