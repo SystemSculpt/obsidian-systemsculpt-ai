@@ -16,6 +16,7 @@ export class RecordingNotice {
     this.app = app;
     this.plugin = plugin;
     this.noticeEl = this.createNoticeEl();
+    console.log('RecordingNotice created');
   }
 
   private createNoticeEl(): HTMLElement {
@@ -26,6 +27,7 @@ export class RecordingNotice {
     const closeButton = headerEl.createEl('button', { text: 'X' });
     closeButton.addEventListener('click', () => {
       this.plugin.toggleRecording();
+      console.log('Recording stopped via close button');
     });
 
     headerEl.createEl('h3', { text: 'Recording audio...' });
@@ -62,6 +64,7 @@ export class RecordingNotice {
   async startRecording(): Promise<void> {
     try {
       const selectedMicrophone = await this.plugin.getSelectedMicrophone();
+      console.log('Selected microphone:', selectedMicrophone);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedMicrophone
@@ -76,6 +79,7 @@ export class RecordingNotice {
 
       this.mediaRecorder = new MediaRecorder(stream);
       this.mediaRecorder.start();
+      console.log('MediaRecorder started');
 
       // Start visualizing the audio right after starting the recording
       this.visualize();
@@ -140,15 +144,16 @@ export class RecordingNotice {
   }
 
   async stopRecording(): Promise<ArrayBuffer> {
+    console.log('stopRecording called');
     cancelAnimationFrame(this.rafId);
     this.audioSource.disconnect();
 
     // Check if the audio context is still open before trying to close it
     if (this.audioContext.state !== 'closed') {
-      this.audioContext.close();
+      await this.audioContext.close();
     }
 
-    // Add this block to stop all tracks on the stream
+    // Stop all tracks on the stream
     if (this.mediaRecorder.stream) {
       this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
     }
@@ -159,6 +164,7 @@ export class RecordingNotice {
         async (event: BlobEvent) => {
           try {
             const arrayBuffer = await event.data.arrayBuffer();
+            console.log('ArrayBuffer created');
             resolve(arrayBuffer);
           } catch (error) {
             reject(error);
@@ -166,6 +172,7 @@ export class RecordingNotice {
         }
       );
       this.mediaRecorder.stop();
+      console.log('MediaRecorder stopped');
     });
   }
 

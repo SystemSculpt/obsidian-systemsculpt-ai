@@ -44,6 +44,22 @@ export class ChatModule {
         return false;
       },
     });
+
+    // Add status bar item for chat
+    if (
+      this.settings.showChatButtonOnStatusBar &&
+      !this.plugin.chatToggleStatusBarItem
+    ) {
+      this.plugin.chatToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.chatToggleStatusBarItem.setText('C'); // Set text to "C"
+      this.plugin.chatToggleStatusBarItem.addClass('chat-toggle-button');
+    }
+
+    if (this.plugin.chatToggleStatusBarItem) {
+      this.plugin.chatToggleStatusBarItem.onClickEvent(() => {
+        this.openNewChat();
+      });
+    }
   }
 
   async loadSettings() {
@@ -65,6 +81,12 @@ export class ChatModule {
     if (leaves.length > 0) {
       chatLeaf = leaves[0];
       chatLeaf.detach(); // Detach the existing leaf to reset it
+    }
+
+    // Ensure the sidebar is expanded
+    const rightSplit = this.plugin.app.workspace.rightSplit;
+    if (rightSplit && rightSplit.collapsed) {
+      rightSplit.expand();
     }
 
     chatLeaf = this.plugin.app.workspace.getRightLeaf(false);

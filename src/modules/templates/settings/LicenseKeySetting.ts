@@ -10,7 +10,7 @@ export function renderLicenseKeySetting(
 ): void {
   let inputElement: HTMLInputElement; // Define a variable to hold the input element
 
-  new Setting(containerEl)
+  const licenseKeySetting = new Setting(containerEl)
     .setName('License key')
     .setDesc('Enter your license key to sync templates from the server')
     .addText(text => {
@@ -54,4 +54,7 @@ export function renderLicenseKeySetting(
           downloadTemplatesFromServer(plugin);
         });
     });
+
+  // Apply custom CSS class
+  licenseKeySetting.settingEl.addClass('patreon-sub-setting');
 }

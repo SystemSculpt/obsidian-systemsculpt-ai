@@ -10,7 +10,7 @@ export interface BrainSettings {
   showMaxTokensOnStatusBar: boolean;
   showDefaultModelOnStatusBar: boolean;
   apiEndpoint: string;
-  enabledModels: string[];
+  disabledModels: string[];
   showopenAISetting: boolean;
   showgroqSetting: boolean;
   showlocalEndpointSetting: boolean;
@@ -63,7 +63,7 @@ Rules:
   showMaxTokensOnStatusBar: true,
   showDefaultModelOnStatusBar: true,
   apiEndpoint: 'https://api.openai.com',
-  enabledModels: [],
+  disabledModels: [],
   showopenAISetting: true,
   showgroqSetting: true,
   showlocalEndpointSetting: true,

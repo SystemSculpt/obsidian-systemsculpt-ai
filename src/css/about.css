@@ -50,6 +50,10 @@
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
+.support-link {
+  margin-top: 25px; /* Add margin-top to the coffee link */
+}
+
 .support-link:hover,
 .contact-link:hover,
 .social-link:hover {

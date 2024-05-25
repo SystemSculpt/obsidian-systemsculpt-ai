@@ -35,6 +35,7 @@ export default class SystemSculptPlugin extends Plugin {
   maxTokensToggleStatusBarItem: HTMLElement | null = null;
   taskToggleStatusBarItem: HTMLElement | null = null;
   recorderToggleStatusBarItem: HTMLElement | null = null;
+  chatToggleStatusBarItem: HTMLElement | null = null;
   settingsTab: SystemSculptSettingTab;
 
   async onload() {
@@ -146,6 +147,23 @@ export default class SystemSculptPlugin extends Plugin {
         }
       })
     );
+
+    // Register file rename event to update chat view when the file is renamed
+    this.registerEvent(
+      this.app.vault.on('rename', async (file, oldPath) => {
+        if (
+          file instanceof TFile &&
+          file.path.startsWith('SystemSculpt/Chats')
+        ) {
+          const chatLeaf =
+            this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
+          if (chatLeaf) {
+            const chatView = chatLeaf.view as ChatView;
+            await chatView.onFileRename(file, oldPath);
+          }
+        }
+      })
+    );
   }
 
   private initializeBrainModule(): BrainModule {
@@ -174,5 +192,9 @@ export default class SystemSculptPlugin extends Plugin {
   async onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
     // Add any additional cleanup logic here if needed
+  }
+
+  onClickEvent(element: HTMLElement, callback: () => void) {
+    element.addEventListener('click', callback);
   }
 }

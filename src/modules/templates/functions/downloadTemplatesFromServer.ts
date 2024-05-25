@@ -44,19 +44,6 @@ async function isFolderEmpty(vault: any, folderPath: string): Promise<boolean> {
   return true;
 }
 
-async function clearFolder(vault: any, folderPath: string): Promise<void> {
-  let folder = vault.getAbstractFileByPath(folderPath);
-  while (folder instanceof TFolder && folder.children.length > 0) {
-    for (const child of folder.children) {
-      if (child instanceof TFolder) {
-        await clearFolder(vault, child.path); // Recursively clear subfolders
-      }
-      await vault.delete(child, true); // Delete the file or empty folder
-    }
-    folder = vault.getAbstractFileByPath(folderPath); // Refresh the folder reference
-  }
-}
-
 export async function downloadTemplatesFromServer(
   plugin: TemplatesModule
 ): Promise<void> {
@@ -92,7 +79,6 @@ export async function downloadTemplatesFromServer(
       });
 
       if (userChoice === 'overwrite') {
-        await clearFolder(plugin.plugin.app.vault, ssSyncsPath);
         await performTemplateSync(plugin, latestVersion);
       } else {
         showCustomNotice('Template sync cancelled.');

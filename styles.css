@@ -32,6 +32,79 @@
 .settings-link:last-child {
   margin-right: 0;
 }
+.patreon-member-setting {
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 0.5) 0%,
+    rgba(253, 160, 133, 0.5) 25%,
+    rgba(246, 211, 101, 0.5) 50%,
+    rgba(253, 160, 133, 0.5) 75%,
+    rgba(246, 179, 101, 0.5) 100%
+  );
+  border: 2px solid #b8860b; /* Darker gold for better contrast */
+  border-radius: 8px;
+  padding: 10px;
+  color: #fff; /* White text for better readability */
+  font-weight: bold;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
+}
+
+.patreon-member-setting .setting-item-name,
+.patreon-member-setting .setting-item-description {
+  color: #fff; /* White text for better readability */
+}
+
+.patreon-sub-setting {
+  border: 1px solid #b8860b; /* Golden border */
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: bold;
+  text-shadow: none; /* Remove text shadow for a cleaner look */
+  box-shadow: none; /* Remove box shadow for a simpler appearance */
+}
+
+.patreon-sub-setting-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 0.8) 0%,
+    rgba(253, 160, 133, 0.8) 25%,
+    rgba(246, 211, 101, 0.8) 50%,
+    rgba(253, 160, 133, 0.8) 75%,
+    rgba(246, 179, 101, 0.8) 100%
+  );
+  border: 2px solid #b8860b; /* Darker gold for better contrast */
+  border-radius: 8px;
+  padding: 20px;
+  color: #fff; /* White text for better readability */
+  font-weight: bold;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.patreon-sub-setting-button:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 1) 0%,
+    rgba(253, 160, 133, 1) 25%,
+    rgba(246, 211, 101, 1) 50%,
+    rgba(253, 160, 133, 1) 75%,
+    rgba(246, 179, 101, 1) 100%
+  );
+  transform: scale(0.95);
+}
+
+.patreon-sub-setting-button:active {
+  transform: scale(0.85);
+  margin-bottom: 25px; /* Add margin-bottom to separate from the coffee link */
+}
 /* Recording Notice */
 .recording-notice {
   background-color: var(--background-primary);
@@ -82,6 +155,7 @@
   border-radius: 8px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  position: relative; /* Add this to position the exit button */
 }
 
 .chat-header {
@@ -91,6 +165,50 @@
   text-align: center;
   font-weight: bold;
   border-bottom: 1px solid var(--background-modifier-border);
+  position: relative; /* Add this to position the buttons */
+}
+
+.exit-button,
+.history-button,
+.new-chat-button,
+.history-file-button {
+  position: absolute;
+  top: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.exit-button {
+  transition: background-color 0.3s, color 0.3s;
+  right: 10px;
+}
+
+.exit-button.confirm-exit {
+  background-color: red;
+  color: white;
+}
+
+.exit-button:hover,
+.history-button:hover,
+.new-chat-button:hover,
+.history-file-button:hover {
+  color: var(--interactive-accent);
+}
+
+.history-button {
+  left: 10px;
+}
+
+.new-chat-button {
+  right: 50px; /* Adjust position to ensure proper spacing */
+}
+
+.history-file-button {
+  left: 60px; /* Adjust position to ensure proper spacing */
 }
 
 .chat-title {
@@ -186,14 +304,10 @@
 }
 
 .chat-send-button {
-  padding: 10px 20px;
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
   transition: background-color 0.3s ease;
+  background-color: blue;
 }
 
 .chat-send-button:hover {
@@ -233,37 +347,30 @@
 
 .message-actions {
   position: relative;
-  margin-top: -30px; /* Initially hidden */
-  opacity: 0; /* Initially transparent */
-  transition: margin-top 0.3s ease, opacity 0.3s ease;
+  opacity: 1; /* Fully visible */
   text-align: right;
-}
-
-.chat-message:hover .message-actions {
-  margin-top: 10px; /* Slide out below the message */
-  opacity: 1; /* Fade in on hover */
 }
 
 .copy-button {
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 10px;
   transition: background-color 0.3s, color 0.3s;
-}
-
-.copy-button.copied {
-  background-color: green;
-  color: white;
 }
 
 .delete-button {
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 10px;
   transition: background-color 0.3s, color 0.3s;
   margin-left: 5px; /* Add margin to separate from the copy button */
+}
+
+.copy-button.copied {
+  background-color: green;
+  color: white;
 }
 
 .delete-button.confirm-delete {
@@ -272,7 +379,7 @@
 }
 
 .delete-button:hover {
-  color: red;
+  color: white;
 }
 
 .chat-message.ai {
@@ -284,6 +391,120 @@
   align-self: flex-start;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   user-select: text; /* Allow text selection */
+}
+
+.context-files-container {
+  padding: 15px;
+  background-color: var(--background-primary-alt);
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.context-files-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  cursor: pointer; /* Make the entire header clickable */
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.context-files-header:hover {
+  color: var(--interactive-accent);
+}
+
+.context-files-header h3 {
+  margin: 0;
+  font-size: 1.2em;
+  display: inline; /* Ensure the text and icon are on the same line */
+}
+
+.context-files-header .add-context-file {
+  font-size: 1.2em;
+  margin-left: 5px; /* Add some space between the text and the icon */
+}
+
+.context-files-header .add-context-file:hover {
+  color: inherit; /* Inherit the color from the parent on hover */
+}
+
+.context-files {
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  border-radius: 4px;
+  color: var(--text-normal);
+  display: none; /* Hide by default */
+}
+
+.context-files.has-files {
+  display: block; /* Show when there are context files */
+}
+
+.context-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.context-file:last-child {
+  border-bottom: none;
+}
+
+.context-file .remove-context-file {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.context-file .remove-context-file:hover {
+  color: var(--interactive-accent);
+}
+
+/* Add this above the .context-files-container section */
+
+.loading-container {
+  display: none; /* Hide by default */
+  padding: 15px;
+  background-color: var(--background-primary-alt);
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  text-align: center;
+  flex-direction: column; /* Arrange spinner and text vertically */
+  justify-content: center;
+  align-items: center;
+}
+
+.loading-container.visible {
+  display: flex; /* Show when loading */
+}
+
+.loading-spinner {
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top: 4px solid white;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 10px; /* Add space between spinner and text */
+}
+
+.loading-text {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 .model-list-setting {
   margin-top: 0;
@@ -775,6 +996,10 @@
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
+.support-link {
+  margin-top: 25px; /* Add margin-top to the coffee link */
+}
+
 .support-link:hover,
 .contact-link:hover,
 .social-link:hover {
@@ -885,7 +1110,8 @@ button:disabled {
 .max-tokens-toggle-button,
 .model-toggle-button,
 .task-toggle-button,
-.recorder-toggle-button {
+.recorder-toggle-button,
+.chat-toggle-button {
   cursor: pointer;
   padding: 2px 10px;
   margin: 0 1px;
@@ -901,11 +1127,15 @@ button:disabled {
 }
 
 .model-toggle-button {
-  order: -4;
+  order: -5;
 }
 
 .max-tokens-toggle-button {
-  order: -3;
+  order: -4;
+}
+
+.chat-toggle-button {
+  order: -3; /* Order between tokens and task buttons */
 }
 
 .task-toggle-button {
@@ -919,7 +1149,8 @@ button:disabled {
 .max-tokens-toggle-button:hover,
 .model-toggle-button:hover,
 .task-toggle-button:hover,
-.recorder-toggle-button:hover {
+.recorder-toggle-button:hover,
+.chat-toggle-button:hover {
   background-color: var(--background-secondary);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 1);
   border: 1px solid purple;
@@ -940,7 +1171,8 @@ button:disabled {
 .max-tokens-toggle-button:active,
 .model-toggle-button:active,
 .task-toggle-button:active,
-.recorder-toggle-button:active {
+.recorder-toggle-button:active,
+.chat-toggle-button:active {
   background-color: var(--background-primary);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0);
 }

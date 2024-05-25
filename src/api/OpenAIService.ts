@@ -110,6 +110,64 @@ export class OpenAIService {
     }
   }
 
+  async createStreamingConversationWithCallback(
+    systemPrompt: string,
+    messages: { role: string; content: string }[],
+    modelId: string,
+    maxTokens: number,
+    callback: (chunk: string) => void,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key is not set');
+    }
+
+    const requestData = JSON.stringify({
+      model: modelId,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      stream: true,
+      max_tokens: maxTokens,
+    });
+
+    const req = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: requestData,
+      signal: abortSignal,
+    });
+
+    if (!req.ok) {
+      throw new Error(`OpenAI request failed with status ${req.status}`);
+    }
+
+    //@ts-ignore
+    const reader = req.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done = false;
+    let firstPartialChunk = '';
+    let secondPartialChunk = '';
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      const decodedChunk = decoder.decode(value);
+      const chunks = decodedChunk.split('\n');
+      chunks.forEach(chunk => {
+        if (chunk.startsWith('data: ') && chunk.endsWith('null}]}')) {
+          callback(chunk);
+        } else if (chunk.startsWith('data: ')) {
+          firstPartialChunk = chunk;
+        } else {
+          secondPartialChunk = chunk;
+          callback(firstPartialChunk + secondPartialChunk);
+        }
+      });
+    }
+  }
+
   async getModels(): Promise<Model[]> {
     if (!this.apiKey) return [];
 

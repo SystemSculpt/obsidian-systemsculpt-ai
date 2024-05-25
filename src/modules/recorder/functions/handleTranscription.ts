@@ -3,6 +3,7 @@ import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { transcribeRecording } from './transcribeRecording';
 import { AIService } from '../../../api/AIService';
 import { MarkdownView, TFile, normalizePath } from 'obsidian';
+import { ChatView } from '../../chat/ChatView';
 
 export async function handleTranscription(
   plugin: RecorderModule,
@@ -32,9 +33,21 @@ export async function handleTranscription(
     // Always copy to clipboard if the setting is enabled
     if (plugin.settings.copyToClipboard) {
       navigator.clipboard.writeText(transcription);
+      showCustomNotice('Transcribed and copied to your clipboard!');
+    } else {
+      showCustomNotice('Transcription completed!');
     }
-    // Attempt to paste into the active note if possible
+
     const activeLeaf = plugin.plugin.app.workspace.activeLeaf;
+    const activeView = activeLeaf?.view;
+
+    if (activeView instanceof ChatView) {
+      const chatView = activeView as ChatView;
+      chatView.setChatInputValue(transcription);
+      showCustomNotice('Transcribed and pasted into the chat input!');
+      return; // Exit early since paste was successful
+    }
+
     if (
       activeLeaf &&
       activeLeaf.view.getViewType() === 'markdown' &&
@@ -50,12 +63,6 @@ export async function handleTranscription(
         return; // Exit early since paste was successful
       }
     }
-    // Fallback notice if paste wasn't possible but transcription was copied
-    if (plugin.settings.copyToClipboard) {
-      showCustomNotice('Transcribed and copied to your clipboard!');
-    } else {
-      showCustomNotice('Transcription completed!');
-    }
   } catch (error) {
     plugin.handleError(error, 'Error generating transcription');
     hideCustomNotice(notice);
@@ -70,8 +77,9 @@ export async function handleTranscription(
     const { transcriptionsPath } = plugin.settings;
 
     const recordingFileName = recordingFile.basename;
-    const transcriptionFileName =
-      recordingFileName.replace('recording-', 'transcription-') + '.md';
+    const transcriptionFileName = `Transcription ${recordingFileName
+      .replace('Recording-', '')
+      .replace('.mp3', '.md')}`;
     let transcriptionFilePath = normalizePath(
       `${transcriptionsPath}/${transcriptionFileName}`
     );
@@ -90,11 +98,16 @@ export async function handleTranscription(
 
     // Check if the transcription file already exists
     if (await vault.adapter.exists(transcriptionFilePath)) {
-      const timestamp = Date.now();
-      const newTranscriptionFileName = `${recordingFileName.replace(
-        'recording-',
-        'transcription-'
-      )}-${timestamp}.md`;
+      const timestamp = new Date();
+      const formattedTimestamp = `${timestamp.getFullYear()}-${String(
+        timestamp.getMonth() + 1
+      ).padStart(2, '0')}-${String(timestamp.getDate()).padStart(
+        2,
+        '0'
+      )} ${String(timestamp.getHours()).padStart(2, '0')}-${String(
+        timestamp.getMinutes()
+      ).padStart(2, '0')}-${String(timestamp.getSeconds()).padStart(2, '0')}`;
+      const newTranscriptionFileName = `Transcription ${formattedTimestamp}.md`;
       transcriptionFilePath = normalizePath(
         `${transcriptionsPath}/${newTranscriptionFileName}`
       );

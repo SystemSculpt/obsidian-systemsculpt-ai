@@ -178,8 +178,8 @@ export class BrainModule implements IGenerationModule {
     }
 
     const models = await this.openAIService.getModels();
-    const enabledModels = models.filter(model =>
-      this.settings.enabledModels.includes(model.id)
+    const enabledModels = models.filter(
+      model => !this.settings.disabledModels.includes(model.id)
     );
 
     let currentIndex = enabledModels.findIndex(

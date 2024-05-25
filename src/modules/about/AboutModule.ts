@@ -48,25 +48,23 @@ class AboutSettingTab extends PluginSettingTab {
     });
 
     const supportEl = contentEl.createDiv('about-support');
-    const patreonLink = supportEl.createEl('a', {
-      href: 'https://www.patreon.com/SystemSculpt',
-      cls: 'support-link',
-    });
-    patreonLink.createSpan({ cls: 'icon', text: 'P' });
-    patreonLink.createSpan({ text: 'Become a patron' });
 
-    const coffeeLink = supportEl.createEl('a', {
-      href: 'https://www.buymeacoffee.com/SystemSculpt',
-      cls: 'support-link',
+    // Replace Patreon link with a button
+    const patreonButton = supportEl.createEl('button', {
+      cls: 'patreon-sub-setting-button',
+      text: 'Click here to become a Patreon member for only $10 bucks!',
     });
-    coffeeLink.createSpan({ cls: 'icon', text: 'C' });
-    coffeeLink.createSpan({ text: 'Buy me a coffee' });
+
+    // Add event listener to open the Patreon URL
+    patreonButton.addEventListener('click', () => {
+      window.open('https://www.patreon.com/SystemSculpt', '_blank');
+    });
 
     const socialEl = contentEl.createDiv('about-social');
     const socialLinks = [
       {
         name: 'YouTube',
-        url: 'https://www.youtube.com/systemsculpt',
+        url: 'https://www.youtube.com/@systemsculpt',
         icon: 'Y',
       },
       {
@@ -78,6 +76,11 @@ class AboutSettingTab extends PluginSettingTab {
         name: 'GitHub',
         url: 'https://github.com/systemsculpt',
         icon: 'G',
+      },
+      {
+        name: 'Buy me a coffee',
+        url: 'https://www.buymeacoffee.com/SystemSculpt',
+        icon: 'C',
       },
     ];
 

@@ -67,20 +67,20 @@ export async function renderModelDropdown(
     const modelNameEl = modelItemEl.createSpan('model-name');
     modelNameEl.textContent = getModelDisplayName(model);
 
-    const isModelEnabled = plugin.settings.enabledModels.includes(model.id);
+    const isModelDisabled = plugin.settings.disabledModels.includes(model.id);
     const toggleComponent = new ToggleComponent(modelItemEl)
-      .setValue(isModelEnabled) // Set the toggle based on whether the model is enabled
+      .setValue(!isModelDisabled) // Set the toggle based on whether the model is enabled
       .onChange(async value => {
-        const index = plugin.settings.enabledModels.indexOf(model.id);
-        if (value) {
-          // If the toggle is on, the model should be enabled
+        const index = plugin.settings.disabledModels.indexOf(model.id);
+        if (!value) {
+          // If the toggle is off, the model should be disabled
           if (index === -1) {
-            plugin.settings.enabledModels.push(model.id); // Add to enabled models if it's enabled
+            plugin.settings.disabledModels.push(model.id); // Add to disabled models if it's disabled
           }
         } else {
-          // If the toggle is off, the model should be disabled
+          // If the toggle is on, the model should be enabled
           if (index > -1) {
-            plugin.settings.enabledModels.splice(index, 1); // Remove from enabled models if it's disabled
+            plugin.settings.disabledModels.splice(index, 1); // Remove from disabled models if it's enabled
           }
         }
         await plugin.saveSettings(); // Save settings after updating
@@ -132,7 +132,7 @@ async function populateModelOptions(
           updateModelStatusBar(plugin, 'No Models Available');
         } else {
           models
-            .filter(model => plugin.settings.enabledModels.includes(model.id))
+            .filter(model => !plugin.settings.disabledModels.includes(model.id))
             .forEach((model: Model) => {
               const option = selectEl.createEl('option', {
                 text: getModelDisplayName(model),
@@ -221,8 +221,8 @@ async function setDefaultModel(
   models: Model[]
 ): Promise<string> {
   let selectedModelId = plugin.settings.defaultModelId;
-  const enabledModels = models.filter(model =>
-    plugin.settings.enabledModels.includes(model.id)
+  const enabledModels = models.filter(
+    model => !plugin.settings.disabledModels.includes(model.id)
   );
   const selectedModel = enabledModels.find(
     model => model.id === selectedModelId

@@ -23,5 +23,37 @@ export class ChatSettingTab extends PluginSettingTab {
 
     renderChatsPathSetting(containerEl, this.plugin);
     renderSystemPromptSetting(containerEl, this.plugin);
+
+    new Setting(containerEl)
+      .setName('Show chat button on status bar')
+      .setDesc('Toggle the display of chat button on the status bar')
+      .addToggle(toggle => {
+        toggle
+          .setValue(this.plugin.settings.showChatButtonOnStatusBar)
+          .onChange(async value => {
+            this.plugin.settings.showChatButtonOnStatusBar = value;
+            if (!this.plugin.plugin.chatToggleStatusBarItem) {
+              this.plugin.plugin.chatToggleStatusBarItem =
+                this.plugin.plugin.addStatusBarItem();
+              this.plugin.plugin.chatToggleStatusBarItem.setText('C');
+              this.plugin.plugin.chatToggleStatusBarItem.style.display =
+                'inline-block';
+              this.plugin.plugin.chatToggleStatusBarItem.addClass(
+                'chat-toggle-button'
+              );
+              this.plugin.plugin.chatToggleStatusBarItem.onClickEvent(() => {
+                this.plugin.openNewChat();
+              });
+            }
+
+            if (value) {
+              this.plugin.plugin.chatToggleStatusBarItem.style.display =
+                'inline-block';
+            } else {
+              this.plugin.plugin.chatToggleStatusBarItem.style.display = 'none';
+            }
+            await this.plugin.saveSettings();
+          });
+      });
   }
 }

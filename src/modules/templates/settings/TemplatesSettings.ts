@@ -2,9 +2,10 @@ export interface TemplatesSettings {
   templatesPath: string;
   blankTemplatePrompt: string;
   licenseKey: string;
-  templatesVersion: string; // Add this line
-  showSSSyncTemplates: boolean; // Add this line
+  templatesVersion: string;
+  showSSSyncTemplates: boolean;
   triggerKey: string;
+  isPatreonMember: boolean; // Add this line
 }
 
 export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
@@ -19,7 +20,8 @@ Rules:
 - Do not introduce any new formatting or markdown syntax unless specifically requested in the prompt.
 - Your generation response should be purely the requested content, without any additional labels or explanations.`,
   licenseKey: '',
-  templatesVersion: '0.0.1', // Initialize with a default version
-  showSSSyncTemplates: true, // Add this line
+  templatesVersion: '0.0.1',
+  showSSSyncTemplates: true,
   triggerKey: '/',
+  isPatreonMember: false, // Add this line
 };

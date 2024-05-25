@@ -26,6 +26,7 @@ export class RecorderModule {
   constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
     this.plugin = plugin;
     this.openAIService = openAIService;
+    console.log('RecorderModule initialized');
   }
 
   async load() {
@@ -110,6 +111,7 @@ export class RecorderModule {
   }
 
   async toggleRecording(): Promise<void> {
+    console.log('toggleRecording called');
     if (this.recordingNotice) {
       await this.stopRecording();
     } else {
@@ -118,15 +120,18 @@ export class RecorderModule {
   }
 
   async startRecording(): Promise<void> {
+    console.log('startRecording called');
     await this.ensureRecordingsDirectory();
     await startRecording(this);
   }
 
   async stopRecording(): Promise<void> {
+    console.log('stopRecording called');
     await stopRecording(this);
   }
 
   async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
+    console.log('saveRecording called');
     const result = await saveRecording(this, arrayBuffer);
     if (!result) {
       throw new Error('Failed to save recording');
@@ -138,6 +143,7 @@ export class RecorderModule {
     arrayBuffer: ArrayBuffer,
     recordingFile: TFile
   ): Promise<void> {
+    console.log('handleTranscription called');
     return handleTranscription(this, arrayBuffer, recordingFile);
   }
 

@@ -1,0 +1,73 @@
+.patreon-member-setting {
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 0.5) 0%,
+    rgba(253, 160, 133, 0.5) 25%,
+    rgba(246, 211, 101, 0.5) 50%,
+    rgba(253, 160, 133, 0.5) 75%,
+    rgba(246, 179, 101, 0.5) 100%
+  );
+  border: 2px solid #b8860b; /* Darker gold for better contrast */
+  border-radius: 8px;
+  padding: 10px;
+  color: #fff; /* White text for better readability */
+  font-weight: bold;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
+}
+
+.patreon-member-setting .setting-item-name,
+.patreon-member-setting .setting-item-description {
+  color: #fff; /* White text for better readability */
+}
+
+.patreon-sub-setting {
+  border: 1px solid #b8860b; /* Golden border */
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: bold;
+  text-shadow: none; /* Remove text shadow for a cleaner look */
+  box-shadow: none; /* Remove box shadow for a simpler appearance */
+}
+
+.patreon-sub-setting-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 0.8) 0%,
+    rgba(253, 160, 133, 0.8) 25%,
+    rgba(246, 211, 101, 0.8) 50%,
+    rgba(253, 160, 133, 0.8) 75%,
+    rgba(246, 179, 101, 0.8) 100%
+  );
+  border: 2px solid #b8860b; /* Darker gold for better contrast */
+  border-radius: 8px;
+  padding: 20px;
+  color: #fff; /* White text for better readability */
+  font-weight: bold;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.patreon-sub-setting-button:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(246, 179, 101, 1) 0%,
+    rgba(253, 160, 133, 1) 25%,
+    rgba(246, 211, 101, 1) 50%,
+    rgba(253, 160, 133, 1) 75%,
+    rgba(246, 179, 101, 1) 100%
+  );
+  transform: scale(0.95);
+}
+
+.patreon-sub-setting-button:active {
+  transform: scale(0.85);
+  margin-bottom: 25px; /* Add margin-bottom to separate from the coffee link */
+}

@@ -10,10 +10,12 @@ export async function saveRecording(
   const date = new Date();
   const formattedDate = `${date.getFullYear()}-${String(
     date.getMonth() + 1
-  ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${String(
+  ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(
     date.getHours()
-  ).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
-  const fileName = `recording-${formattedDate}.mp3`;
+  ).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}-${String(
+    date.getSeconds()
+  ).padStart(2, '0')}`;
+  const fileName = `Recording ${formattedDate}.mp3`;
   const filePath = normalizePath(`${recordingsPath}/${fileName}`);
 
   const file = await vault.createBinary(filePath, arrayBuffer);

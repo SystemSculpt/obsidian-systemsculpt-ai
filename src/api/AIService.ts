@@ -132,6 +132,51 @@ export class AIService {
     }
   }
 
+  async createStreamingConversationWithCallback(
+    systemPrompt: string,
+    messages: { role: string; content: string }[],
+    modelId: string,
+    maxTokens: number,
+    callback: (chunk: string) => void,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    const model = await this.getModelById(modelId);
+    console.log('model found: ', model);
+    if (model?.isLocal) {
+      console.log('model is local');
+      await this.localAIService.createStreamingConversationWithCallback(
+        systemPrompt,
+        messages,
+        modelId,
+        maxTokens,
+        callback,
+        abortSignal
+      );
+    } else if (model?.provider === 'openai') {
+      console.log('model is openai');
+      await this.openAIService.createStreamingConversationWithCallback(
+        systemPrompt,
+        messages,
+        modelId,
+        maxTokens,
+        callback,
+        abortSignal
+      );
+    } else if (model?.provider === 'groq') {
+      console.log('model is groq');
+      await this.groqService.createStreamingConversationWithCallback(
+        systemPrompt,
+        messages,
+        modelId,
+        maxTokens,
+        callback,
+        abortSignal
+      );
+    } else {
+      throw new Error(`Unsupported model provider: ${model?.provider}`);
+    }
+  }
+
   async getModels(
     includeOpenAI: boolean = true,
     includeGroq: boolean = true

@@ -1,4 +1,12 @@
-import { ItemView, WorkspaceLeaf, TFile, moment } from 'obsidian';
+import {
+  MarkdownView,
+  App,
+  ItemView,
+  WorkspaceLeaf,
+  TFile,
+  moment,
+  FuzzySuggestModal,
+} from 'obsidian';
 import { ChatMessage } from './ChatMessage';
 import { BrainModule } from '../brain/BrainModule';
 import { encode } from 'gpt-tokenizer';
@@ -12,6 +20,7 @@ export class ChatView extends ItemView {
   brainModule: BrainModule;
   chatModule: ChatModule;
   chatFile: TFile;
+  contextFiles: TFile[] = [];
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -37,24 +46,39 @@ export class ChatView extends ItemView {
   }
 
   async onOpen() {
-    const container = this.containerEl.children[1];
+    const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
 
     const chatTemplate = document.createElement('template');
     chatTemplate.innerHTML = `
       <div class="chat-container">
-        <div class="chat-header">SystemSculpt AI Chat</div>
+        <div class="chat-header">
+          SystemSculpt AI Chat
+          <button class="history-button" title="Open Chat History">📂</button>
+          <button class="history-file-button" title="Open Chat History File">📖</button>
+          <button class="exit-button" title="Exit Chat">❌</button>
+          <button class="new-chat-button" title="Start New Chat">🗒️</button>
+        </div>
         <div class="chat-title">
           <div class="chat-title-container" style="display: none;">
             <span class="chat-title-text"></span>
-            <span class="edit-icon">✏️</span>
+            <span class="edit-icon" title="Edit Title">✏️</span>
           </div>
           <span class="token-count" style="display: none;">Tokens: 0</span>
         </div>
         <div class="chat-messages"></div>
+        <div class="context-files-container">
+          <div class="context-files-header" title="Add Context File" style="cursor: pointer;">
+            <h3>Context Files ➕</h3>
+          </div>
+          <div class="context-files"></div>
+        </div>
         <div class="chat-input-container">
           <textarea class="chat-input" placeholder="Type a message..."></textarea>
-          <button class="chat-send-button">Send</button>
+          <button class="chat-send-button" title="Send Message">Send</button>
+        </div>
+        <div class="loading-container">
+          <div class="loading-spinner"></div>
         </div>
       </div>
     `;
@@ -67,7 +91,9 @@ export class ChatView extends ItemView {
       this.focusInput();
     }, 100);
 
-    const titleEl = this.containerEl.querySelector('.chat-title-text');
+    const titleEl = this.containerEl.querySelector(
+      '.chat-title-text'
+    ) as HTMLElement;
     if (this.chatFile) {
       await this.loadChatFile(this.chatFile);
       if (titleEl) {
@@ -83,11 +109,129 @@ export class ChatView extends ItemView {
 
     // Update token count initially
     this.updateTokenCount();
+
+    // Add event listener for the exit button
+    const exitButton = this.containerEl.querySelector(
+      '.exit-button'
+    ) as HTMLElement;
+    if (exitButton) {
+      exitButton.addEventListener('click', () =>
+        this.handleExitButtonClick(exitButton)
+      );
+    }
+
+    // Add event listener for the history button
+    const historyButton = this.containerEl.querySelector(
+      '.history-button'
+    ) as HTMLElement;
+    if (historyButton) {
+      historyButton.addEventListener('click', () => this.openChatHistory());
+    }
+
+    // Add event listener for the new chat button
+    const newChatButton = this.containerEl.querySelector(
+      '.new-chat-button'
+    ) as HTMLElement;
+    if (newChatButton) {
+      newChatButton.addEventListener('click', () =>
+        this.chatModule.openNewChat()
+      );
+    }
+
+    // Add event listener for the add context file button
+    const contextFilesHeader = this.containerEl.querySelector(
+      '.context-files-header'
+    ) as HTMLElement;
+    if (contextFilesHeader) {
+      contextFilesHeader.addEventListener('click', () => {
+        this.openFileSearcher(undefined, true);
+      });
+    }
+
+    // Add event listener for the history file button
+    const historyFileButton = this.containerEl.querySelector(
+      '.history-file-button'
+    ) as HTMLElement;
+    if (historyFileButton) {
+      historyFileButton.addEventListener('click', () =>
+        this.openChatHistoryFile()
+      );
+    }
+  }
+
+  handleExitButtonClick(exitButton: HTMLElement) {
+    if (exitButton.classList.contains('confirm-exit')) {
+      this.leaf.detach();
+    } else {
+      exitButton.classList.add('confirm-exit');
+      exitButton.innerHTML = 'You sure? ❌';
+      setTimeout(() => {
+        exitButton.classList.remove('confirm-exit');
+        exitButton.innerHTML = '❌';
+      }, 3000);
+    }
+  }
+
+  openChatHistory() {
+    const fileSearcher = new FileSearcher(
+      this.app,
+      this.chatModule.settings.chatsPath
+    );
+    fileSearcher.open();
+    fileSearcher.onChooseItem = (file: TFile) => {
+      this.setChatFile(file);
+      this.loadChatFile(file);
+    };
+  }
+
+  openChatHistoryFile() {
+    if (this.chatFile) {
+      const leaves = this.app.workspace.getLeavesOfType('markdown');
+      for (const leaf of leaves) {
+        const view = leaf.view;
+        if (
+          view instanceof MarkdownView &&
+          view.file &&
+          view.file.path === this.chatFile.path
+        ) {
+          this.app.workspace.revealLeaf(leaf);
+          return;
+        }
+      }
+      this.app.workspace.openLinkText(this.chatFile.path, '', true);
+    }
   }
 
   async loadChatFile(file: TFile) {
     const content = await this.app.vault.read(file);
     const messages: ChatMessage[] = [];
+    this.contextFiles = []; // Clear existing context files
+
+    // Extract the "Context Files" section
+    const contextFilesSection = content.match(
+      /# Context Files\n([\s\S]*?)\n# AI Chat History/
+    );
+    if (contextFilesSection) {
+      const contextFilesContent = contextFilesSection[1];
+      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      let match;
+
+      while ((match = linkRegex.exec(contextFilesContent)) !== null) {
+        const linkText = match[1].trim();
+        const contextFile = this.app.metadataCache.getFirstLinkpathDest(
+          linkText,
+          file.path
+        ) as TFile;
+        if (
+          contextFile &&
+          !this.contextFiles.some(
+            existingFile => existingFile.path === contextFile.path
+          )
+        ) {
+          this.contextFiles.push(contextFile);
+        }
+      }
+    }
 
     // Match all code blocks with user or ai roles
     const blockRegex = /`````\s*(user|ai)\s*([\s\S]*?)\s*`````/g;
@@ -96,30 +240,21 @@ export class ChatView extends ItemView {
     while ((match = blockRegex.exec(content)) !== null) {
       const role = match[1] as 'user' | 'ai';
       const text = match[2].trim();
-
-      // Detect typical 3 backtick code blocks within the message text
-      const codeBlockRegex = /```[\s\S]*?```/g;
-      const codeBlocks = text.match(codeBlockRegex);
-
-      if (codeBlocks) {
-        codeBlocks.forEach(block => {
-          // Process each code block if needed
-          console.log(`Detected code block: ${block}`);
-        });
-      }
-
       messages.push(new ChatMessage(role, text));
     }
 
     this.chatMessages = messages;
     this.chatFile = file;
     this.renderMessages();
+    this.renderContextFiles(); // Ensure context files are rendered
     this.updateTokenCountWithInput('');
   }
 
   setChatFile(file: TFile) {
     this.chatFile = file;
-    const titleEl = this.containerEl.querySelector('.chat-title-text');
+    const titleEl = this.containerEl.querySelector(
+      '.chat-title-text'
+    ) as HTMLElement;
     if (titleEl) {
       const fileName = file.basename;
       titleEl.textContent = fileName;
@@ -150,12 +285,132 @@ export class ChatView extends ItemView {
     // Add event listener to update token count as the user types
     inputEl.addEventListener('input', () => {
       this.updateTokenCountWithInput(inputEl.value);
+      this.detectFileLink(inputEl);
     });
 
     // Add event listener for the edit icon
     editIconEl.addEventListener('click', () => this.toggleEditTitle());
   }
 
+  detectFileLink(inputEl: HTMLTextAreaElement) {
+    const value = inputEl.value;
+    if (value.endsWith('[[')) {
+      this.openFileSearcher(inputEl, true);
+    }
+  }
+
+  openFileSearcher(
+    inputEl?: HTMLTextAreaElement,
+    addToContextFiles: boolean = false
+  ) {
+    const fileSearcher = new FileSearcher(this.app);
+    fileSearcher.open();
+    fileSearcher.onChooseItem = (file: TFile) => {
+      const fileName = file.basename;
+      if (inputEl) {
+        inputEl.value = inputEl.value.slice(0, -2) + `[[${fileName}]]`;
+        inputEl.focus();
+        this.updateTokenCountWithInput(inputEl.value);
+      }
+
+      if (addToContextFiles) {
+        this.addFileToContextFiles(file);
+      }
+    };
+  }
+
+  addFileToContextFiles(file: TFile) {
+    if (
+      !this.contextFiles.some(contextFile => contextFile.path === file.path)
+    ) {
+      this.contextFiles.push(file);
+      this.renderContextFiles();
+      this.updateChatFileWithContext(file, 'add');
+    }
+  }
+
+  async updateChatFileWithContext(file: TFile, action: 'add' | 'remove') {
+    if (!this.chatFile) return;
+
+    const content = await this.app.vault.read(this.chatFile);
+    const contextTagShort = `[[${file.basename}]]`;
+    const contextTagFull = `[[${file.path}]]`;
+
+    let updatedContent;
+    if (action === 'add') {
+      // Add context file reference under # Context Files section
+      if (content.includes('# Context Files')) {
+        updatedContent = content.replace(
+          '# Context Files',
+          `# Context Files\n${contextTagShort}`
+        );
+      } else {
+        updatedContent = `# Context Files\n${contextTagShort}\n${content}`;
+      }
+    } else {
+      // Remove context file reference
+      const contextFilesSection = content.match(
+        /# Context Files\n([\s\S]*?)\n# AI Chat History/
+      );
+      if (contextFilesSection) {
+        const contextFilesContent = contextFilesSection[1];
+        const updatedContextFilesContent = contextFilesContent
+          .split('\n')
+          .filter(
+            line =>
+              line.trim() !== contextTagShort && line.trim() !== contextTagFull
+          )
+          .join('\n');
+        updatedContent = content.replace(
+          contextFilesSection[0],
+          `# Context Files\n${updatedContextFilesContent}\n# AI Chat History`
+        );
+      } else {
+        updatedContent = content
+          .replace(contextTagShort, '')
+          .replace(contextTagFull, '');
+      }
+    }
+
+    // Ensure the context files section is at the top
+    if (!updatedContent.startsWith('# Context Files')) {
+      updatedContent = `# Context Files\n\n${updatedContent}`;
+    }
+    await this.app.vault.modify(this.chatFile, updatedContent);
+    await this.loadChatFile(this.chatFile); // Reload the chat file to update the view
+  }
+
+  renderContextFiles() {
+    const contextFilesContainer =
+      this.containerEl.querySelector('.context-files');
+    if (!contextFilesContainer) return;
+    contextFilesContainer.innerHTML = '';
+
+    if (this.contextFiles.length === 0) {
+      contextFilesContainer.classList.remove('has-files');
+      return;
+    }
+
+    contextFilesContainer.classList.add('has-files');
+    this.contextFiles.forEach((file, index) => {
+      const fileEl = document.createElement('div');
+      fileEl.className = 'context-file';
+      fileEl.innerHTML = `
+      <span>${file.path}</span>
+      <button class="remove-context-file" title="Remove Context File">🗑️</button>
+    `;
+      contextFilesContainer.appendChild(fileEl);
+
+      const removeButton = fileEl.querySelector('.remove-context-file');
+      if (removeButton) {
+        removeButton.addEventListener('click', () => {
+          this.contextFiles.splice(index, 1);
+          this.renderContextFiles();
+          this.updateChatFileWithContext(file, 'remove');
+        });
+      }
+    });
+  }
   toggleEditTitle() {
     const titleEl = this.containerEl.querySelector(
       '.chat-title-text'
@@ -220,7 +475,7 @@ export class ChatView extends ItemView {
     }
   }
 
-  handleSendMessage(inputEl: HTMLTextAreaElement) {
+  async handleSendMessage(inputEl: HTMLTextAreaElement) {
     const messageText = inputEl.value.trim();
     if (messageText === '') return;
 
@@ -234,11 +489,22 @@ export class ChatView extends ItemView {
       this.updateChatFile(`\`\`\`\`\`user\n${messageText}\n\`\`\`\`\`\n\n`);
     }
 
-    this.sendMessageToAI(userMessage.text);
+    this.sendMessageToAI();
     this.updateTokenCount(); // Update token count after sending message
   }
 
-  async sendMessageToAI(message: string) {
+  async getContextFilesContent(): Promise<string> {
+    if (this.contextFiles.length === 0) {
+      return '';
+    }
+    let contextContent = '';
+    for (const file of this.contextFiles) {
+      const content = await this.app.vault.read(file);
+      contextContent += `### ${file.basename}\n${content}\n`;
+    }
+    return contextContent;
+  }
+  async sendMessageToAI() {
     const aiService = this.brainModule.openAIService;
     const modelId = this.brainModule.settings.defaultModelId;
     const maxTokens = this.brainModule.settings.maxTokens;
@@ -246,16 +512,20 @@ export class ChatView extends ItemView {
 
     const systemPrompt = this.chatModule.settings.systemPrompt;
 
-    const messageHistory = this.chatMessages
-      .slice(0, -1)
-      .map(msg => `${msg.role}\n${msg.text}`)
-      .join('\n\n');
-    const fullMessage = `${messageHistory}\n\nuser\n${message}`;
+    const messageHistory = await this.constructMessageHistory();
+
+    // Change 'ai' role to 'assistant' before sending
+    const updatedMessageHistory = messageHistory.map(msg => ({
+      role: msg.role === 'ai' ? 'assistant' : msg.role,
+      content: msg.content,
+    }));
+
+    this.showLoading(); // Show loading animation
 
     try {
-      await aiService.createStreamingChatCompletionWithCallback(
+      await aiService.createStreamingConversationWithCallback(
         systemPrompt,
-        fullMessage,
+        updatedMessageHistory,
         modelId,
         maxTokens,
         async (chunk: string) => {
@@ -268,6 +538,56 @@ export class ChatView extends ItemView {
       );
     } catch (error) {
       console.error('Error streaming AI response:', error);
+    } finally {
+      this.hideLoading(); // Hide loading animation
+    }
+  }
+
+  async constructMessageHistory(): Promise<
+    { role: string; content: string }[]
+  > {
+    const messageHistory = this.chatMessages.map(msg => ({
+      role: msg.role,
+      content: msg.text,
+    }));
+
+    const contextFilesContent = await this.getContextFilesContent();
+    if (contextFilesContent) {
+      messageHistory.unshift({
+        role: 'user',
+        content: `CONTEXT FILES:\n${contextFilesContent}`,
+      });
+    }
+
+    return messageHistory;
+  }
+
+  showLoading() {
+    const loadingContainer = this.containerEl.querySelector(
+      '.loading-container'
+    ) as HTMLElement;
+    const chatInputContainer = this.containerEl.querySelector(
+      '.chat-input-container'
+    ) as HTMLElement;
+    if (loadingContainer && chatInputContainer) {
+      chatInputContainer.style.display = 'none';
+      loadingContainer.style.display = 'flex';
+      loadingContainer.classList.add('visible');
+    }
+  }
+
+  hideLoading() {
+    const loadingContainer = this.containerEl.querySelector(
+      '.loading-container'
+    ) as HTMLElement;
+    const chatInputContainer = this.containerEl.querySelector(
+      '.chat-input-container'
+    ) as HTMLElement;
+    if (loadingContainer && chatInputContainer) {
+      loadingContainer.style.display = 'none';
+      loadingContainer.classList.remove('visible');
+      chatInputContainer.style.display = 'flex';
+      this.focusInput(); // Refocus the input field
     }
   }
 
@@ -359,8 +679,8 @@ export class ChatView extends ItemView {
       messageEl.innerHTML = `
         ${marked(message.text)}
         <div class="message-actions">
-          <button class="copy-button">📋</button>
-          <button class="delete-button">🗑️</button>
+          <button class="copy-button" title="Copy Message">📋</button>
+          <button class="delete-button" title="Delete Message">🗑️</button>
         </div>
       `;
       messagesContainer.appendChild(messageEl);
@@ -395,7 +715,7 @@ export class ChatView extends ItemView {
       this.deleteMessage(index);
     } else {
       deleteButton.classList.add('confirm-delete');
-      deleteButton.innerHTML = '🛑';
+      deleteButton.innerHTML = 'You sure? 🗑️';
       setTimeout(() => {
         deleteButton.classList.remove('confirm-delete');
         deleteButton.innerHTML = '🗑️';
@@ -432,13 +752,29 @@ export class ChatView extends ItemView {
     await this.app.vault.createFolder(folderPath).catch(() => {});
     const fileName = moment().format('YYYY-MM-DD HH-mm-ss');
     const filePath = `${folderPath}/${fileName}.md`;
-    const initialContent = `# AI Chat History\n\n\`\`\`\`\`user\n${initialMessage}\n\`\`\`\`\`\n\n`;
+
+    // Include context files in the initial content
+    let contextFilesContent = '';
+    for (const file of this.contextFiles) {
+      contextFilesContent += `[[${file.path}]]\n`;
+    }
+
+    const initialContent = `# Context Files\n${contextFilesContent}\n# AI Chat History\n\n\`\`\`\`\`user\n${initialMessage}\n\`\`\`\`\`\n\n`;
     this.chatFile = await this.app.vault.create(filePath, initialContent);
   }
 
   async updateChatFile(content: string) {
     if (this.chatFile) {
-      await this.app.vault.append(this.chatFile, content);
+      const fileContent = await this.app.vault.read(this.chatFile);
+      const lines = fileContent.split('\n');
+      const lastLine = lines[lines.length - 1];
+
+      let newContent = content;
+      if (lastLine.trim() !== '') {
+        newContent = '\n\n' + content;
+      }
+
+      await this.app.vault.append(this.chatFile, newContent);
       await this.loadChatFile(this.chatFile); // Reload the chat file to update the view
     }
   }
@@ -446,6 +782,12 @@ export class ChatView extends ItemView {
   async onFileChange(file: TFile) {
     if (this.chatFile && file.path === this.chatFile.path) {
       await this.loadChatFile(file);
+    }
+  }
+
+  async onFileRename(file: TFile, oldPath: string) {
+    if (this.chatFile && file.path === this.chatFile.path) {
+      this.setChatFile(file);
     }
   }
 
@@ -458,23 +800,37 @@ export class ChatView extends ItemView {
     }
   }
 
-  updateTokenCount() {
+  async updateTokenCount() {
     const messageHistory = this.chatMessages
       .map(msg => `${msg.role}\n${msg.text}`)
       .join('\n\n');
-    const tokens = encode(messageHistory);
+
+    const contextFilesContent = await this.getContextFilesContent();
+    const fullMessage = `${contextFilesContent}\n\n${messageHistory}`;
+    const tokens = encode(fullMessage);
 
     this.displayTokenCount(tokens.length);
   }
 
-  updateTokenCountWithInput(input: string) {
+  async updateTokenCountWithInput(input: string) {
     const messageHistory = this.chatMessages
       .map(msg => `${msg.role}\n${msg.text}`)
       .join('\n\n');
-    const fullMessage = `${messageHistory}\n\nuser\n${input}`;
+
+    const contextFilesContent = await this.getContextFilesContent();
+    const fullMessage = `${contextFilesContent}\n\n${messageHistory}\n\nuser\n${input}`;
     const tokens = encode(fullMessage);
 
     this.displayTokenCount(tokens.length);
+  }
+
+  setChatInputValue(value: string) {
+    const inputEl = this.containerEl.querySelector(
+      '.chat-input'
+    ) as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.value = value;
+    }
   }
 
   displayTokenCount(tokenCount: number) {
@@ -512,5 +868,31 @@ export class ChatView extends ItemView {
         titleContainerEl.style.display = 'flex';
       }
     }
+  }
+}
+
+class FileSearcher extends FuzzySuggestModal<TFile> {
+  chatsPath?: string;
+
+  constructor(app: App, chatsPath?: string) {
+    super(app);
+    this.chatsPath = chatsPath;
+  }
+
+  getItems(): TFile[] {
+    const allFiles = this.app.vault.getMarkdownFiles();
+    if (this.chatsPath) {
+      //@ts-ignore
+      return allFiles.filter(file => file.path.startsWith(this.chatsPath));
+    }
+    return allFiles;
+  }
+
+  getItemText(item: TFile): string {
+    return item.path;
+  }
+
+  onChooseItem(item: TFile, evt: MouseEvent | KeyboardEvent): void {
+    // This will be overridden by the onChooseItem callback in ChatView
   }
 }
