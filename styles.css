@@ -228,6 +228,33 @@
   align-items: center;
 }
 
+.chat-title-container.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.chat-title-container.loading > * {
+  display: none;
+}
+
+.chat-title-container.loading::before {
+  content: 'Generating title...';
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-right: 10px;
+}
+
+.chat-title-container.loading .loading-spinner {
+  display: inline-block;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid var(--interactive-accent);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+}
+
 .chat-title-text {
   margin-right: 10px;
 }
@@ -241,6 +268,18 @@
 }
 
 .edit-icon:hover {
+  color: var(--interactive-accent);
+}
+
+.generate-title-icon {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+  margin-left: 5px;
+}
+
+.generate-title-icon:hover {
   color: var(--interactive-accent);
 }
 
@@ -295,6 +334,7 @@
   line-height: 1;
   margin-right: 10px;
   margin-bottom: 10px;
+  max-height: 250px; /* Set max height */
 }
 
 .chat-input:focus {
@@ -434,6 +474,8 @@
   border-radius: 4px;
   color: var(--text-normal);
   display: none; /* Hide by default */
+  max-height: 150px; /* Set a max height */
+  overflow-y: auto; /* Enable vertical scrolling */
 }
 
 .context-files.has-files {
@@ -505,6 +547,10 @@
   100% {
     transform: rotate(360deg);
   }
+}
+
+.loading-container.scaled-down {
+  transform: scale(0.5);
 }
 .model-list-setting {
   margin-top: 0;
@@ -1120,6 +1166,11 @@ button:disabled {
   background-color: var(--background-secondary-alt);
   color: var(--text-normal);
   transition: background-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* Center the letter */
+  font-size: 14px; /* Ensure consistent font size */
+  height: 100%; /* Ensure the button takes the full height of the status bar */
 }
 
 .update-button {

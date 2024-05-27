@@ -1,6 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import SystemSculptPlugin from '../../main';
-import { AboutData, Supporter } from './AboutData';
+import { members } from './AboutData';
 
 export class AboutModule {
   plugin: SystemSculptPlugin;
@@ -110,15 +110,8 @@ class AboutSettingTab extends PluginSettingTab {
   private async renderHallOfFame(containerEl: HTMLElement): Promise<void> {
     const hallOfFameEl = containerEl.createDiv('about-hall-of-fame');
 
-    // Combine all supporters into one list
-    const combinedSupporters: Supporter[] = [
-      ...AboutData.buyMeACoffee,
-      ...AboutData.patreonMembers,
-      ...AboutData.youtubeMembers,
-    ];
-
-    // Remove duplicates
-    const uniqueSupporters = combinedSupporters.reduce<Supporter[]>(
+    // Use the combined members list
+    const uniqueSupporters = members.reduce<{ name: string }[]>(
       (acc, current) => {
         if (!acc.some(item => item.name === current.name)) {
           acc.push(current);
@@ -139,7 +132,7 @@ class AboutSettingTab extends PluginSettingTab {
   private renderSupportersSection(
     containerEl: HTMLElement,
     title: string,
-    supporters: Supporter[]
+    supporters: { name: string }[]
   ): void {
     const sectionEl = containerEl.createDiv('supporters-section');
     const titleEl = sectionEl.createEl('h3', { text: title });
@@ -147,7 +140,7 @@ class AboutSettingTab extends PluginSettingTab {
 
     // Add description under the title
     const descriptionEl = sectionEl.createEl('p', {
-      text: 'This includes all those that bought me a coffee, are a patron through Patreon, or a YouTube member. Your support allows me to put more focus into SystemSculpt productivity tools.',
+      text: 'This section is dedicated to all Patreon members! Your support as a Patreon member allows me to dedicate more time to developing SystemSculpt productivity tools. Thank you!',
     });
     descriptionEl.addClass('supporters-description');
 

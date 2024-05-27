@@ -12,7 +12,7 @@ import { BrainModule } from '../brain/BrainModule';
 import { encode } from 'gpt-tokenizer';
 import { ChatModule } from './ChatModule';
 import { marked } from 'marked';
-
+import { showCustomNotice, hideCustomNotice } from '../../modals';
 export const VIEW_TYPE_CHAT = 'chat-view';
 
 export class ChatView extends ItemView {
@@ -63,6 +63,7 @@ export class ChatView extends ItemView {
           <div class="chat-title-container" style="display: none;">
             <span class="chat-title-text"></span>
             <span class="edit-icon" title="Edit Title">✏️</span>
+            <span class="generate-title-icon" title="Generate Title">🔄</span>
           </div>
           <span class="token-count" style="display: none;">Tokens: 0</span>
         </div>
@@ -269,6 +270,9 @@ export class ChatView extends ItemView {
       '.chat-send-button'
     ) as HTMLButtonElement;
     const editIconEl = container.querySelector('.edit-icon') as HTMLElement;
+    const generateTitleIconEl = container.querySelector(
+      '.generate-title-icon'
+    ) as HTMLElement;
 
     sendButtonEl.addEventListener('click', () =>
       this.handleSendMessage(inputEl)
@@ -286,10 +290,21 @@ export class ChatView extends ItemView {
     inputEl.addEventListener('input', () => {
       this.updateTokenCountWithInput(inputEl.value);
       this.detectFileLink(inputEl);
+      this.adjustInputHeight(inputEl); // Add this line
     });
 
     // Add event listener for the edit icon
     editIconEl.addEventListener('click', () => this.toggleEditTitle());
+
+    // Add event listener for the generate title icon
+    generateTitleIconEl.addEventListener('click', () =>
+      this.generateTitleForChat()
+    );
+  }
+
+  adjustInputHeight(inputEl: HTMLTextAreaElement) {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = `${Math.min(inputEl.scrollHeight, 250)}px`;
   }
 
   detectFileLink(inputEl: HTMLTextAreaElement) {
@@ -299,6 +314,36 @@ export class ChatView extends ItemView {
     }
   }
 
+  async generateTitleForChat() {
+    if (!this.chatFile) return;
+    const noteContent = await this.app.vault.read(this.chatFile);
+    const notice = showCustomNotice('Generating Title...');
+    const titleContainerEl = this.containerEl.querySelector(
+      '.chat-title-container'
+    ) as HTMLElement;
+    if (titleContainerEl) {
+      titleContainerEl.classList.add('loading');
+    }
+
+    try {
+      const generatedTitle = await this.brainModule.generateTitle(noteContent);
+      if (generatedTitle) {
+        await this.saveTitleEdit(
+          this.containerEl.querySelector('.chat-title-text') as HTMLElement,
+          generatedTitle
+        );
+      }
+      showCustomNotice('Title generated successfully!');
+    } catch (error) {
+      console.error('Error generating title:', error);
+      showCustomNotice(`Title generation failed: ${error.message}`);
+    } finally {
+      hideCustomNotice(notice);
+      if (titleContainerEl) {
+        titleContainerEl.classList.remove('loading');
+      }
+    }
+  }
   openFileSearcher(
     inputEl?: HTMLTextAreaElement,
     addToContextFiles: boolean = false
@@ -444,22 +489,22 @@ export class ChatView extends ItemView {
     });
   }
 
-  async saveTitleEdit(titleEl: HTMLElement) {
+  async saveTitleEdit(titleEl: HTMLElement, newTitle?: string) {
     const inputEl = titleEl.querySelector(
       '.edit-title-input'
     ) as HTMLInputElement;
-    const newTitle = inputEl.value.trim();
-    if (newTitle && this.chatFile) {
-      const newFilePath = `${this.chatModule.settings.chatsPath}/${newTitle}.md`;
+    const finalTitle = newTitle || inputEl.value.trim();
+    if (finalTitle && this.chatFile) {
+      const newFilePath = `${this.chatModule.settings.chatsPath}/${finalTitle}.md`;
       await this.app.fileManager.renameFile(this.chatFile, newFilePath);
       this.chatFile = this.app.vault.getAbstractFileByPath(
         newFilePath
       ) as TFile;
-      this.updateChatTitle(newTitle);
+      this.updateChatTitle(finalTitle);
     }
 
     // Restore the title text without duplicating the edit icon
-    titleEl.textContent = newTitle;
+    titleEl.textContent = finalTitle;
   }
 
   updateChatTitle(title: string) {
@@ -470,6 +515,7 @@ export class ChatView extends ItemView {
       titleEl.innerHTML = `
         ${title}
         <span class="edit-icon">✏️</span>
+        <span class="generate-title-icon">🔄</span>
       `;
       this.attachEventListeners(this.containerEl as HTMLElement);
     }

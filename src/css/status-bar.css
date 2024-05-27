@@ -13,6 +13,11 @@
   background-color: var(--background-secondary-alt);
   color: var(--text-normal);
   transition: background-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* Center the letter */
+  font-size: 14px; /* Ensure consistent font size */
+  height: 100%; /* Ensure the button takes the full height of the status bar */
 }
 
 .update-button {

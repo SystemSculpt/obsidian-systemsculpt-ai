@@ -10,6 +10,7 @@ import { TaskModal } from './views/TaskModal';
 import { generateTask as generateTaskFunction } from './functions/generateTask';
 import { insertGeneratedTask as insertGeneratedTaskFunction } from './functions/insertGeneratedTask';
 import { updateTaskButtonStatusBar } from './functions/updateTaskButtonStatusBar';
+import { MarkdownView } from 'obsidian';
 
 export interface Task {
   description: string;
@@ -83,6 +84,15 @@ export class TasksModule {
   }
 
   async viewTasks(): Promise<void> {
+    const leaves = this.plugin.app.workspace.getLeavesOfType('markdown');
+    for (const leaf of leaves) {
+      const fileView = leaf.view as MarkdownView;
+      if (fileView.file?.path === this.settings.tasksLocation) {
+        this.plugin.app.workspace.revealLeaf(leaf);
+        fileView.editor.focus(); // Set cursor focus to the active file
+        return;
+      }
+    }
     return viewTasks(this);
   }
 

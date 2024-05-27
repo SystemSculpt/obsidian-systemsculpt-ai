@@ -1,21 +1,12 @@
-import {
-  MarkdownView,
-  App,
-  PluginSettingTab,
-  requestUrl,
-  Setting,
-} from 'obsidian';
+import { MarkdownView, requestUrl } from 'obsidian';
 import SystemSculptPlugin from '../../main';
 import {
   TemplatesSettings,
   DEFAULT_TEMPLATES_SETTINGS,
 } from './settings/TemplatesSettings';
-import { renderTemplatesPathSetting } from './settings/TemplatesPathSetting';
 import { AIService } from '../../api/AIService';
 import { showCustomNotice } from '../../modals';
-import { renderBlankTemplatePromptSetting } from './settings/BlankTemplatePromptSetting';
 import { TemplatesSuggest } from './TemplatesSuggest';
-import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
@@ -123,6 +114,14 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   async checkAndUpdateTemplates(): Promise<void> {
+    // Check if the user is a Patreon member
+    if (!this.settings.isPatreonMember) {
+      console.log(
+        'User is not a Patreon member. Skipping template update check.'
+      );
+      return;
+    }
+
     // First, check if the license key is empty
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
       console.log(

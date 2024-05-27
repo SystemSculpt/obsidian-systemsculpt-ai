@@ -79,7 +79,7 @@ export async function handleTranscription(
     const recordingFileName = recordingFile.basename;
     const transcriptionFileName = `Transcription ${recordingFileName
       .replace('Recording-', '')
-      .replace('.mp3', '.md')}`;
+      .replace('.mp3', '')}.md`; // Ensure .md extension
     let transcriptionFilePath = normalizePath(
       `${transcriptionsPath}/${transcriptionFileName}`
     );

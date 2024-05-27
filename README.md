@@ -8,8 +8,6 @@ SystemSculpt AI offers a wide range of cutting-edge features to enhance your pro
 
 ### Brain Module
 
-![brain_module](./assets/brain_module.png)
-
 - Seamlessly integrates with OpenAI API for AI-powered content generation
 - Supports multiple AI models, including GPT-3.5 Turbo and GPT-4 Turbo
 - Customizable prompts for generating titles, summaries, and general note continuation
@@ -17,8 +15,6 @@ SystemSculpt AI offers a wide range of cutting-edge features to enhance your pro
 - Status bar indicators for quick access to key settings
 
 ### Tasks Module
-
-![tasks_module](./assets/tasks_module.png)
 
 - Effortlessly create and manage tasks directly within Obsidian
 - AI-powered task generation based on your custom prompts
@@ -28,8 +24,6 @@ SystemSculpt AI offers a wide range of cutting-edge features to enhance your pro
 
 ### Recorder Module
 
-![recorder_module](./assets/recorder_module.png)
-
 - One-click audio recording and transcription powered by OpenAI's Whisper API
 - Automatic transcription pasting into active notes
 - Customizable microphone selection and audio clip storage
@@ -37,8 +31,6 @@ SystemSculpt AI offers a wide range of cutting-edge features to enhance your pro
 - Status bar toggle for seamless recording control
 
 ### Templates Module
-
-![templates_module](./assets/templates_module.png)
 
 - Robust AI template system for streamlined content generation workflows
 - Sync custom templates from the SystemSculpt Patreon community (requires a valid license key)

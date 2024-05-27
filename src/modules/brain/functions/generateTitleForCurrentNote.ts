@@ -1,6 +1,6 @@
 import { BrainModule } from '../BrainModule';
 import { MarkdownView, TFile } from 'obsidian';
-import { GeneratingTitleModal } from '../../../modals';
+import { showCustomNotice, hideCustomNotice } from '../../../modals';
 
 export async function generateTitleForCurrentNote(
   plugin: BrainModule
@@ -15,19 +15,20 @@ export async function generateTitleForCurrentNote(
     }
     const noteContent = await plugin.plugin.app.vault.read(currentFile);
 
-    const generatingTitleModal = new GeneratingTitleModal(plugin.plugin.app);
-    generatingTitleModal.open();
+    const notice = showCustomNotice('Generating Title...');
 
     try {
       const generatedTitle = await plugin.generateTitle(noteContent);
       await renameCurrentNote(plugin, currentFile, generatedTitle);
+      showCustomNotice('Title generated successfully!');
     } catch (error) {
       console.error('Error generating title:', error);
+      showCustomNotice(`Title generation failed: ${error.message}`);
       throw new Error(
         'Failed to generate title. Please check your API key and try again.'
       );
     } finally {
-      generatingTitleModal.close();
+      hideCustomNotice(notice);
     }
   }
 }
