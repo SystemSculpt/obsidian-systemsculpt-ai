@@ -8,7 +8,7 @@ export interface SystemSculptRecorderSettings {
   copyToClipboard: boolean;
   saveTranscriptionToFile: boolean;
   transcriptionsPath: string;
-  showRecorderButtonOnStatusBar: boolean; // Add this line
+  showRecorderButtonOnStatusBar: boolean;
 }
 
 export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
@@ -20,6 +20,6 @@ export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
   pasteIntoActiveNote: true,
   copyToClipboard: true,
   saveTranscriptionToFile: true,
-  transcriptionsPath: 'SystemSculpt/Recordings/Transcriptions',
-  showRecorderButtonOnStatusBar: true, // Add this line
+  transcriptionsPath: 'SystemSculpt/Transcriptions',
+  showRecorderButtonOnStatusBar: true,
 };

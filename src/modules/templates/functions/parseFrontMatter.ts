@@ -20,7 +20,7 @@ export async function parseFrontMatter(
     return {
       name: frontMatter.name || '',
       description: frontMatter.description || '',
-      model: frontMatter.model || '',
+      model: frontMatter.model || 'default',
       maxTokens: frontMatter['max tokens'] || 0,
       tags:
         typeof frontMatter.tags === 'string'

@@ -27,7 +27,7 @@ export async function renderTemplateList(
   const metaEl = el.createEl('div', { cls: 'template-meta' });
 
   const modelEl = metaEl.createEl('span', { cls: 'template-meta-item' });
-  modelEl.textContent = model;
+  modelEl.textContent = model === 'default' ? 'current' : model;
 
   const maxTokensEl = metaEl.createEl('span', { cls: 'template-meta-item' });
   maxTokensEl.textContent = `${maxTokens} max`;

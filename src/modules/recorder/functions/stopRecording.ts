@@ -1,6 +1,11 @@
 import { RecorderModule } from '../RecorderModule';
 
 export async function stopRecording(plugin: RecorderModule): Promise<void> {
+  // if it's in status bar, hide it
+  if (plugin.recordingStatusBarItem) {
+    plugin.recordingStatusBarItem.hide();
+  }
+
   if (plugin.recordingNotice) {
     console.log('stopRecording called');
     const arrayBuffer = await plugin.recordingNotice

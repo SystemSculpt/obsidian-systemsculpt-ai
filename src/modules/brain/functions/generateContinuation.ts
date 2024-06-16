@@ -2,7 +2,6 @@ import { BrainModule } from '../BrainModule';
 import { MarkdownView, Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
-import { AIService } from '../../../api/AIService';
 
 export async function generateContinuation(
   plugin: BrainModule,

@@ -7,7 +7,10 @@ export function registerMp3ContextMenu(
 ) {
   plugin.registerEvent(
     plugin.app.workspace.on('file-menu', (menu, file: TAbstractFile) => {
-      if (file instanceof TFile && file.extension === 'mp3') {
+      if (
+        file instanceof TFile &&
+        (file.extension === 'mp3' || file.extension === 'mp4')
+      ) {
         menu.addItem(item => {
           item
             .setTitle('SystemSculpt - Transcribe')

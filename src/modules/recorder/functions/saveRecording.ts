@@ -7,6 +7,14 @@ export async function saveRecording(
 ): Promise<TFile | null> {
   const { vault } = plugin.plugin.app;
   const { recordingsPath } = plugin.settings;
+
+  // Ensure the recordings directory exists
+  const normalizedRecordingsPath = normalizePath(recordingsPath);
+  const directory = vault.getAbstractFileByPath(normalizedRecordingsPath);
+  if (!directory) {
+    await vault.createFolder(normalizedRecordingsPath);
+  }
+
   const date = new Date();
   const formattedDate = `${date.getFullYear()}-${String(
     date.getMonth() + 1
@@ -16,7 +24,9 @@ export async function saveRecording(
     date.getSeconds()
   ).padStart(2, '0')}`;
   const fileName = `Recording ${formattedDate}.mp3`;
-  const filePath = normalizePath(`${recordingsPath}/${fileName}`);
+  // replace spaces with -
+  const fileNameNoSpaces = fileName.replace(/ /g, '-');
+  const filePath = normalizePath(`${recordingsPath}/${fileNameNoSpaces}`);
 
   const file = await vault.createBinary(filePath, arrayBuffer);
 

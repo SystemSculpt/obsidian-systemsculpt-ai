@@ -24,13 +24,18 @@ export class RecordingNotice {
     noticeEl.addClass('recording-notice');
 
     const headerEl = noticeEl.createDiv('recording-notice-header');
+    const hideButton = headerEl.createEl('button', { text: '-' });
     const closeButton = headerEl.createEl('button', { text: 'X' });
+    hideButton.addEventListener('click', () => {
+      this.hideToStatusBar();
+    });
     closeButton.addEventListener('click', () => {
       this.plugin.toggleRecording();
       console.log('Recording stopped via close button');
     });
 
-    headerEl.createEl('h3', { text: 'Recording audio...' });
+    const titleEl = noticeEl.createEl('h3', { text: 'Recording audio...' });
+    titleEl.addClass('recording-notice-title');
 
     const canvasEl = noticeEl.createDiv('recording-notice-canvas');
     const canvas = canvasEl.createEl('canvas');
@@ -39,6 +44,25 @@ export class RecordingNotice {
     this.canvasContext = canvas.getContext('2d') as CanvasRenderingContext2D;
 
     return noticeEl;
+  }
+
+  private hideToStatusBar(): void {
+    this.hide();
+    this.plugin.showRecordingStatusBar();
+  }
+
+  showWithoutStartingRecording(): void {
+    let noticeContainer = document.body.querySelector('.notice-container');
+    if (!noticeContainer) {
+      noticeContainer = document.createElement('div');
+      noticeContainer.className = 'notice-container';
+      document.body.appendChild(noticeContainer);
+    }
+
+    if (noticeContainer) {
+      noticeContainer.appendChild(this.noticeEl);
+      this.noticeEl.addClass('recording-notice-position');
+    }
   }
 
   show(): Promise<void> {
@@ -90,8 +114,8 @@ export class RecordingNotice {
   }
 
   visualize(): void {
-    if (!this.analyser) {
-      console.error('Analyser not initialized');
+    if (!this.analyser || !this.canvasContext) {
+      console.error('Analyser or CanvasContext not initialized');
       return;
     }
     const bufferLength = this.analyser.frequencyBinCount;
@@ -99,44 +123,34 @@ export class RecordingNotice {
 
     const draw = () => {
       this.rafId = requestAnimationFrame(draw);
-
       this.analyser.getByteTimeDomainData(dataArray);
 
-      this.canvasContext.clearRect(
-        0,
-        0,
-        this.canvasContext.canvas.width,
-        this.canvasContext.canvas.height
-      );
+      const { width, height } = this.canvasContext.canvas;
+      this.canvasContext.clearRect(0, 0, width, height); // Clear the canvas
 
+      this.canvasContext.beginPath(); // Start a new path
+      this.canvasContext.strokeStyle = getComputedStyle(
+        document.documentElement
+      ).getPropertyValue('--primary-color');
       this.canvasContext.lineWidth = 2;
-      this.canvasContext.strokeStyle = 'white';
 
-      this.canvasContext.beginPath();
-
-      const sliceWidth = (this.canvasContext.canvas.width * 1.0) / bufferLength;
+      const sliceWidth = width / bufferLength;
       let x = 0;
 
       for (let i = 0; i < bufferLength; i++) {
         const v = dataArray[i] / 128.0;
-        const y = ((v * this.canvasContext.canvas.height) / 2) * 1.5;
+        const y = (v * height) / 2;
 
         if (i === 0) {
-          this.canvasContext.moveTo(x, this.canvasContext.canvas.height / 2);
+          this.canvasContext.moveTo(x, y);
         } else {
-          this.canvasContext.lineTo(
-            x,
-            this.canvasContext.canvas.height / 1 - y
-          );
+          this.canvasContext.lineTo(x, y);
         }
 
         x += sliceWidth;
       }
 
-      this.canvasContext.lineTo(
-        this.canvasContext.canvas.width,
-        this.canvasContext.canvas.height / 2
-      );
+      this.canvasContext.lineTo(width, height / 2);
       this.canvasContext.stroke();
     };
 

@@ -1,7 +1,7 @@
 import { Modal } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
 import { handleStreamingResponse } from '../functions/handleStreamingResponse';
-import { showCustomNotice } from '../../../modals';
+import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { MarkdownView } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
 
@@ -206,7 +206,7 @@ export class BlankTemplateModal extends Modal {
 
         editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
 
-        showCustomNotice('Generating...', 5000);
+        showCustomNotice('Generating...', 5000, true);
 
         let modelInstance = await this.plugin.openAIService.getModelById(
           this.plugin.plugin.brainModule.settings.defaultModelId
@@ -260,6 +260,7 @@ export class BlankTemplateModal extends Modal {
         } catch (error) {
           console.error('Error during streaming chat completion:', error);
         } finally {
+          hideCustomNotice();
           this.plugin.abortController = null; // Reset the abortController
           this.plugin.isGenerationCompleted = true; // Mark generation as completed
           console.log('Blank template generation completed.');

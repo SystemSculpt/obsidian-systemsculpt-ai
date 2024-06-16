@@ -161,59 +161,14 @@ async function populateModelOptions(
 }
 
 async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
-  const localEndpointOnline = plugin.settings.showlocalEndpointSetting
-    ? await AIService.validateLocalEndpoint(plugin.settings.localEndpoint)
-    : false;
-  const openAIApiKeyValid = plugin.settings.showopenAISetting
-    ? await AIService.validateOpenAIApiKey(plugin.settings.openAIApiKey)
-    : false;
-  const groqAPIKeyValid = plugin.settings.showgroqSetting
-    ? await AIService.validateGroqAPIKey(plugin.settings.groqAPIKey)
-    : false;
-
-  const models: Model[] = [];
-
-  if (localEndpointOnline) {
-    const localResponse = await fetch(
-      `${plugin.settings.localEndpoint}/v1/models`
-    );
-    if (localResponse.ok) {
-      const localModels = await localResponse.json();
-      models.push(
-        ...localModels.data.map((model: any) => ({
-          id: model.id,
-          name: model.id.split('/').pop(),
-          isLocal: true,
-          provider: 'local' as const, // Specify the literal type
-        }))
-      );
-    }
-  }
-
-  if (openAIApiKeyValid) {
-    const response = await plugin.openAIService.getModels();
-    models.push(
-      ...response
-        .filter(
-          (model: any) => model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4o'
-        )
-        .map((model: any) => ({
-          id: model.id,
-          name: model.id,
-          isLocal: false,
-          provider: 'openai' as const, // Explicitly set to 'openai'
-        }))
-    );
-  }
-
-  if (groqAPIKeyValid) {
-    const response = await plugin.openAIService.getModels(false, true);
-    models.push(
-      ...response.filter((model: Model) => model.provider === 'groq')
-    );
-  }
-
-  return models;
+  const includeOpenAI = plugin.settings.showopenAISetting;
+  const includeGroq = plugin.settings.showgroqSetting;
+  const includeLocal = plugin.settings.showlocalEndpointSetting;
+  return plugin.openAIService.getModels(
+    includeOpenAI,
+    includeGroq,
+    includeLocal
+  );
 }
 
 async function setDefaultModel(
@@ -259,7 +214,13 @@ function getModelDisplayName(model: Model): string {
 }
 
 function updateModelStatusBar(plugin: BrainModule, text?: string): void {
+  const { showopenAISetting, showgroqSetting, showlocalEndpointSetting } =
+    plugin.settings;
   if (plugin.plugin.modelToggleStatusBarItem) {
+    if (!showopenAISetting && !showgroqSetting && !showlocalEndpointSetting) {
+      plugin.plugin.modelToggleStatusBarItem.setText('');
+      return;
+    }
     if (text) {
       plugin.plugin.modelToggleStatusBarItem.setText(text);
     } else {

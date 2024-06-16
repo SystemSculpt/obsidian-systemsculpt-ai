@@ -1,0 +1,142 @@
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.cost-table th,
+.cost-table td {
+  border: 1px solid var(--background-modifier-border);
+  padding: 8px;
+  text-align: left;
+}
+
+.cost-table th {
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+}
+
+.tabs {
+  display: flex;
+  margin-top: 20px;
+}
+
+.tab-button {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  margin-right: 5px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.tab-button.active {
+  background-color: var(--interactive-accent);
+  color: white;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.current-model {
+  background-color: var(--background-primary-alt);
+  color: var(--interactive-accent);
+  padding: 10px;
+  margin: 10px auto;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  font-size: 1.2em;
+  text-align: center;
+  transition: background-color 0.3s, color 0.3s;
+  border: 2px solid var(--interactive-accent);
+}
+
+.token-info-container {
+  display: flex;
+  justify-content: space-between;
+  margin: 10px auto;
+  gap: 20px;
+}
+
+.token-info {
+  flex: 1;
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  font-size: 1em;
+  text-align: center;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.token-info .value {
+  font-weight: bold;
+  color: var(--interactive-accent);
+  font-size: 1.2em;
+}
+
+.token-info:hover {
+  background-color: var(--interactive-accent);
+  color: white;
+}
+
+.token-info:hover .value {
+  color: white;
+}
+
+.current-model:hover {
+  background-color: var(--interactive-accent);
+  color: white;
+}
+
+.predicted-cost {
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  padding: 10px;
+  margin: 10px auto 20px; /* Added more bottom margin */
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  font-size: 1em;
+  text-align: center;
+  transition: background-color 0.3s, color 0.3s;
+  border: 2px solid green; /* Added border to make it stand out */
+}
+
+.predicted-cost .value {
+  font-weight: bold;
+  color: green; /* Changed color to green */
+  font-size: 1.2em;
+}
+
+.predicted-cost:hover {
+  background-color: green; /* Changed hover background color to green */
+  color: white;
+}
+
+.predicted-cost:hover .value {
+  color: white;
+}
+
+.cost-notice {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-top: 10px;
+  text-align: center;
+  margin-bottom: 20px;
+}

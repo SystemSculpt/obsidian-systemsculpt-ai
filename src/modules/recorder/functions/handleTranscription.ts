@@ -22,10 +22,10 @@ export async function handleTranscription(
     return;
   }
 
-  const notice = showCustomNotice('Transcribing...');
+  const notice = showCustomNotice('Transcribing...', 5000, true);
   try {
     const transcription = await transcribeRecording(plugin, arrayBuffer);
-    hideCustomNotice(notice);
+    hideCustomNotice();
 
     if (plugin.settings.saveTranscriptionToFile) {
       await saveTranscriptionToFile(plugin, transcription, recordingFile);
@@ -60,12 +60,13 @@ export async function handleTranscription(
         showCustomNotice(
           'Transcribed and pasted into your note at the cursor position!'
         );
+        hideCustomNotice();
         return; // Exit early since paste was successful
       }
     }
   } catch (error) {
+    hideCustomNotice();
     plugin.handleError(error, 'Error generating transcription');
-    hideCustomNotice(notice);
   }
 
   async function saveTranscriptionToFile(

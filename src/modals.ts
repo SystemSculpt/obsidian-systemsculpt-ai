@@ -50,16 +50,28 @@ export class LoadingModal extends Modal {
 
 export function showCustomNotice(
   message: string,
-  duration: number = 5000
+  duration: number = 5000,
+  until_hidden: boolean = false
 ): Notice {
-  const notice = new Notice('', duration);
+  const notice = new Notice('', until_hidden ? 0 : duration);
   const noticeContentEl = notice.noticeEl.createDiv('custom-notice-content');
   const messageDiv = noticeContentEl.createDiv('custom-notice-message');
-  messageDiv.textContent = message; // Correct way to set text content
+
+  if (message.includes('...')) {
+    const parts = message.split('...');
+    messageDiv.textContent = parts[0];
+    const revolvingSpan = messageDiv.createSpan();
+    revolvingSpan.addClass('revolving-dots');
+    if (parts[1]) {
+      messageDiv.createSpan().textContent = parts[1];
+    }
+  } else {
+    messageDiv.textContent = message;
+  }
+
   notice.noticeEl.addClass('custom-notice');
   notice.noticeEl.addEventListener('click', () => notice.hide());
 
-  // Ensure the notice is positioned in the bottom right corner
   const noticeContainer = document.body.querySelector('.notice-container');
   if (!noticeContainer) {
     const createdContainer = document.createElement('div');
@@ -72,13 +84,16 @@ export function showCustomNotice(
 
   notice.noticeEl.addClass('custom-notice-position');
 
-  // Add animation class for generating notice
   if (message.startsWith('Generating')) {
     notice.noticeEl.addClass('generating-notice');
   }
 
   return notice;
 }
-export function hideCustomNotice(notice: Notice): void {
-  notice.hide();
+
+export function hideCustomNotice(): void {
+  const notice = document.querySelector('.custom-notice');
+  if (notice) {
+    notice.remove();
+  }
 }

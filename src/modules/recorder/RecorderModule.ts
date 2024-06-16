@@ -22,6 +22,7 @@ export class RecorderModule {
   settings: SystemSculptRecorderSettings;
   recordingNotice: RecordingNotice | null = null;
   openAIService: AIService;
+  recordingStatusBarItem: HTMLElement | null = null;
 
   constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
     this.plugin = plugin;
@@ -89,15 +90,14 @@ export class RecorderModule {
     const normalizedPath = normalizePath(recordingsPath);
     const directory = vault.getAbstractFileByPath(normalizedPath);
 
-    if (directory) return;
-
-    try {
-      await vault.createFolder(normalizedPath);
-      this.plugin.app.workspace.trigger('refresh-files');
-    } catch (error) {
-      if (error.message.includes('Folder already exists')) {
-      } else {
-        console.error('Error ensuring recordings directory:', error);
+    if (!directory) {
+      try {
+        await vault.createFolder(normalizedPath);
+        this.plugin.app.workspace.trigger('refresh-files');
+      } catch (error) {
+        if (!error.message.includes('Folder already exists')) {
+          console.error('Error ensuring recordings directory:', error);
+        }
       }
     }
   }
@@ -115,7 +115,7 @@ export class RecorderModule {
     if (this.recordingNotice) {
       await this.stopRecording();
     } else {
-      await this.startRecording();
+      await this.showRecordingNotice();
     }
   }
 
@@ -158,5 +158,38 @@ export class RecorderModule {
 
   async readFileAsArrayBuffer(file: TFile): Promise<ArrayBuffer> {
     return await this.plugin.app.vault.readBinary(file);
+  }
+
+  showRecordingStatusBar(): void {
+    if (!this.recordingStatusBarItem) {
+      this.recordingStatusBarItem = this.plugin.addStatusBarItem();
+      this.recordingStatusBarItem.setText('Recording...');
+      this.recordingStatusBarItem.addClass('recorder-notice-toggle-button'); // Add this line
+      this.recordingStatusBarItem.addEventListener('click', () => {
+        this.showRecordingNoticeWithoutStarting();
+      });
+    }
+  }
+
+  hideRecordingStatusBar(): void {
+    if (this.recordingStatusBarItem) {
+      this.recordingStatusBarItem.remove();
+      this.recordingStatusBarItem = null;
+    }
+  }
+
+  async showRecordingNotice(): Promise<void> {
+    if (!this.recordingNotice) {
+      this.recordingNotice = new RecordingNotice(this.plugin.app, this);
+      await this.recordingNotice.show();
+    }
+    this.hideRecordingStatusBar();
+  }
+
+  showRecordingNoticeWithoutStarting(): void {
+    if (this.recordingNotice) {
+      this.recordingNotice.showWithoutStartingRecording();
+    }
+    this.hideRecordingStatusBar();
   }
 }

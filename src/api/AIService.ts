@@ -179,11 +179,12 @@ export class AIService {
 
   async getModels(
     includeOpenAI: boolean = true,
-    includeGroq: boolean = true
+    includeGroq: boolean = true,
+    includeLocal: boolean = true
   ): Promise<Model[]> {
     const models: Model[] = [];
 
-    if (this.settings.localEndpoint) {
+    if (includeLocal && this.settings.localEndpoint) {
       const localModels = await this.localAIService.getModels();
       models.push(...localModels);
     }

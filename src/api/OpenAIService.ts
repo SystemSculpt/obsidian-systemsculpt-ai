@@ -85,7 +85,10 @@ export class OpenAIService {
       throw new Error(`OpenAI request failed with status ${req.status}`);
     }
 
-    //@ts-ignore
+    if (!req.body) {
+      throw new Error('OpenAI request failed with status 404');
+    }
+
     const reader = req.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let done = false;
@@ -143,7 +146,10 @@ export class OpenAIService {
       throw new Error(`OpenAI request failed with status ${req.status}`);
     }
 
-    //@ts-ignore
+    if (!req.body) {
+      throw new Error('OpenAI request failed with status 404');
+    }
+
     const reader = req.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let done = false;

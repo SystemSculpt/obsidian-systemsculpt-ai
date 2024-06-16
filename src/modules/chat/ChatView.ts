@@ -13,6 +13,8 @@ import { encode } from 'gpt-tokenizer';
 import { ChatModule } from './ChatModule';
 import { marked } from 'marked';
 import { showCustomNotice, hideCustomNotice } from '../../modals';
+import { TitleEditModal } from './views/TitleEditModal';
+import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 export const VIEW_TYPE_CHAT = 'chat-view';
 
 export class ChatView extends ItemView {
@@ -56,6 +58,7 @@ export class ChatView extends ItemView {
           SystemSculpt AI Chat
           <button class="history-button" title="Open Chat History">📂</button>
           <button class="history-file-button" title="Open Chat History File">📖</button>
+          <button class="archive-button" title="Archive Chat">📦</button>
           <button class="exit-button" title="Exit Chat">❌</button>
           <button class="new-chat-button" title="Start New Chat">🗒️</button>
         </div>
@@ -65,7 +68,10 @@ export class ChatView extends ItemView {
             <span class="edit-icon" title="Edit Title">✏️</span>
             <span class="generate-title-icon" title="Generate Title">🔄</span>
           </div>
+          <div class="token-container">
+          <span class="dollar-button" style="display: none;" title="Estimate Cost">💰</span>
           <span class="token-count" style="display: none;">Tokens: 0</span>
+          </div>
         </div>
         <div class="chat-messages"></div>
         <div class="context-files-container">
@@ -80,6 +86,7 @@ export class ChatView extends ItemView {
         </div>
         <div class="loading-container">
           <div class="loading-spinner"></div>
+          <div class="loading-text">Generating response...</div>
         </div>
       </div>
     `;
@@ -158,6 +165,115 @@ export class ChatView extends ItemView {
         this.openChatHistoryFile()
       );
     }
+
+    // Add event listener for the dollar button
+    const dollarButton = this.containerEl.querySelector(
+      '.dollar-button'
+    ) as HTMLElement;
+    if (dollarButton) {
+      dollarButton.addEventListener('click', () => {
+        this.openCostEstimator();
+      });
+    }
+
+    // Add event listener for the archive button
+    const archiveButton = this.containerEl.querySelector(
+      '.archive-button'
+    ) as HTMLElement;
+    if (archiveButton) {
+      archiveButton.addEventListener('click', () => this.showArchivePopup());
+    }
+  }
+
+  showArchivePopup() {
+    const overlay = document.createElement('div');
+    overlay.className = 'archive-popup-overlay';
+    document.body.appendChild(overlay);
+
+    const popup = document.createElement('div');
+    popup.className = 'archive-popup';
+    popup.innerHTML = `
+      <h3>What would you like to do?</h3>
+      <div class="archive-popup-buttons">
+        <button class="archive-popup-button archive">Archive this chat [a]</button>
+        <button class="archive-popup-button delete">Delete this chat [d]</button>
+      </div>
+    `;
+    document.body.appendChild(popup);
+
+    const archiveButton = popup.querySelector('.archive-popup-button.archive');
+    const deleteButton = popup.querySelector('.archive-popup-button.delete');
+
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.key === 'a') {
+        // @ts-ignore
+        archiveButton?.click();
+      } else if (event.key === 'd') {
+        // @ts-ignore
+        deleteButton?.click();
+      }
+    };
+
+    archiveButton?.addEventListener('click', () => {
+      this.archiveChatFile();
+      this.closeArchivePopup(popup, overlay, handleKeyPress);
+    });
+
+    deleteButton?.addEventListener('click', () => {
+      this.deleteChatFile();
+      this.closeArchivePopup(popup, overlay, handleKeyPress);
+    });
+
+    overlay.addEventListener('click', () => {
+      this.closeArchivePopup(popup, overlay, handleKeyPress);
+    });
+
+    document.addEventListener('keydown', handleKeyPress);
+  }
+
+  closeArchivePopup(
+    popup: HTMLElement,
+    overlay: HTMLElement,
+    handleKeyPress: (event: KeyboardEvent) => void
+  ) {
+    document.body.removeChild(popup);
+    document.body.removeChild(overlay);
+    document.removeEventListener('keydown', handleKeyPress);
+  }
+
+  async deleteChatFile() {
+    if (!this.chatFile) return;
+
+    // Get the index of the current chat file within the Chats directory
+    const allFiles = this.app.vault
+      .getMarkdownFiles()
+      .filter(
+        file =>
+          file.path.startsWith(this.chatModule.settings.chatsPath) &&
+          !file.path.includes('/Archive/')
+      );
+    const currentIndex = allFiles.findIndex(
+      file => file.path === this.chatFile.path
+    );
+
+    // Get the next chat file within the Chats directory
+    let nextFile: TFile | null = null;
+    if (currentIndex !== -1 && currentIndex < allFiles.length - 1) {
+      nextFile = allFiles[currentIndex + 1];
+    } else if (currentIndex > 0) {
+      nextFile = allFiles[currentIndex - 1];
+    }
+
+    // Delete the current chat file
+    await this.app.vault.delete(this.chatFile);
+
+    // Open the next chat file if available
+    if (nextFile) {
+      this.setChatFile(nextFile);
+      await this.loadChatFile(nextFile);
+    } else {
+      this.chatModule.openNewChat();
+    }
   }
 
   handleExitButtonClick(exitButton: HTMLElement) {
@@ -170,6 +286,44 @@ export class ChatView extends ItemView {
         exitButton.classList.remove('confirm-exit');
         exitButton.innerHTML = '❌';
       }, 3000);
+    }
+  }
+
+  async archiveChatFile() {
+    if (!this.chatFile) return;
+
+    // Get the index of the current chat file within the Chats directory
+    const allFiles = this.app.vault
+      .getMarkdownFiles()
+      .filter(
+        file =>
+          file.path.startsWith(this.chatModule.settings.chatsPath) &&
+          !file.path.includes('/Archive/')
+      );
+    const currentIndex = allFiles.findIndex(
+      file => file.path === this.chatFile.path
+    );
+
+    // Get the next chat file within the Chats directory
+    let nextFile: TFile | null = null;
+    if (currentIndex !== -1 && currentIndex < allFiles.length - 1) {
+      nextFile = allFiles[currentIndex + 1];
+    } else if (currentIndex > 0) {
+      nextFile = allFiles[currentIndex - 1];
+    }
+
+    // Move the chat file to the archive folder
+    const archivePath = `${this.chatModule.settings.chatsPath}/Archive`;
+    await this.app.vault.createFolder(archivePath).catch(() => {});
+    const newFilePath = `${archivePath}/${this.chatFile.name}`;
+    await this.app.fileManager.renameFile(this.chatFile, newFilePath);
+
+    // Open the next chat file if available
+    if (nextFile) {
+      this.setChatFile(nextFile);
+      await this.loadChatFile(nextFile);
+    } else {
+      this.chatModule.openNewChat();
     }
   }
 
@@ -235,13 +389,14 @@ export class ChatView extends ItemView {
     }
 
     // Match all code blocks with user or ai roles
-    const blockRegex = /`````\s*(user|ai)\s*([\s\S]*?)\s*`````/g;
+    const blockRegex = /`````\s*(user|ai(?:-[^\s]+)?)\s*([\s\S]*?)\s*`````/g;
     let match;
 
     while ((match = blockRegex.exec(content)) !== null) {
       const role = match[1] as 'user' | 'ai';
       const text = match[2].trim();
-      messages.push(new ChatMessage(role, text));
+      const model = role.startsWith('ai-') ? role.split('-')[1] : undefined; // Extract model info
+      messages.push(new ChatMessage(role as 'user' | 'ai', text, model));
     }
 
     this.chatMessages = messages;
@@ -273,6 +428,9 @@ export class ChatView extends ItemView {
     const generateTitleIconEl = container.querySelector(
       '.generate-title-icon'
     ) as HTMLElement;
+    const dollarButtonEl = container.querySelector(
+      '.dollar-button'
+    ) as HTMLElement;
 
     sendButtonEl.addEventListener('click', () =>
       this.handleSendMessage(inputEl)
@@ -302,6 +460,29 @@ export class ChatView extends ItemView {
     );
   }
 
+  async openCostEstimator() {
+    const maxTokens = this.brainModule.settings.maxTokens;
+    const modelId = this.brainModule.settings.defaultModelId;
+    const tokenCount = await this.getTokenCount();
+    new CostEstimator(this.app, modelId, tokenCount, maxTokens).open();
+  }
+
+  async getTokenCount(): Promise<number> {
+    const inputEl = this.containerEl.querySelector(
+      '.chat-input'
+    ) as HTMLTextAreaElement;
+    const inputText = inputEl ? inputEl.value : '';
+    const messageHistory = this.chatMessages
+      .map(msg => `${msg.role}\n${msg.text}`)
+      .join('\n\n');
+
+    const contextFilesContent = await this.getContextFilesContent();
+    const fullMessage = `${contextFilesContent}\n\n${messageHistory}\n\nuser\n${inputText}`;
+    const tokens = encode(fullMessage);
+
+    return tokens.length;
+  }
+
   adjustInputHeight(inputEl: HTMLTextAreaElement) {
     inputEl.style.height = 'auto';
     inputEl.style.height = `${Math.min(inputEl.scrollHeight, 250)}px`;
@@ -317,7 +498,7 @@ export class ChatView extends ItemView {
   async generateTitleForChat() {
     if (!this.chatFile) return;
     const noteContent = await this.app.vault.read(this.chatFile);
-    const notice = showCustomNotice('Generating Title...');
+    const notice = showCustomNotice('Generating Title...', 0, true);
     const titleContainerEl = this.containerEl.querySelector(
       '.chat-title-container'
     ) as HTMLElement;
@@ -338,7 +519,7 @@ export class ChatView extends ItemView {
       console.error('Error generating title:', error);
       showCustomNotice(`Title generation failed: ${error.message}`);
     } finally {
-      hideCustomNotice(notice);
+      hideCustomNotice();
       if (titleContainerEl) {
         titleContainerEl.classList.remove('loading');
       }
@@ -455,6 +636,7 @@ export class ChatView extends ItemView {
         });
       }
     });
+    this.focusInput();
   }
   toggleEditTitle() {
     const titleEl = this.containerEl.querySelector(
@@ -462,20 +644,16 @@ export class ChatView extends ItemView {
     ) as HTMLElement;
     if (!titleEl) return;
 
-    const isEditing = titleEl.querySelector(
-      '.edit-title-input'
-    ) as HTMLInputElement;
-    if (isEditing) {
-      this.saveTitleEdit(titleEl);
-    } else {
-      this.startTitleEdit(titleEl);
-    }
+    const currentTitle = titleEl.textContent?.trim() || '';
+    new TitleEditModal(this.app, currentTitle, (newTitle: string) => {
+      this.saveTitleEdit(titleEl, newTitle);
+    }).open();
   }
 
   startTitleEdit(titleEl: HTMLElement) {
     const currentTitle = titleEl.textContent?.trim() || '';
     titleEl.innerHTML = `
-      <input type="text" class="edit-title-input" value="${currentTitle}" />
+      <input type="text" class="edit-title-input" value="${currentTitle}" style="width: 100%; height: auto;" />
     `;
 
     const inputEl = titleEl.querySelector(
@@ -562,7 +740,10 @@ export class ChatView extends ItemView {
 
     // Change 'ai' role to 'assistant' before sending
     const updatedMessageHistory = messageHistory.map(msg => ({
-      role: msg.role === 'ai' ? 'assistant' : msg.role,
+      role:
+        msg.role === 'ai' || msg.role.startsWith('ai-')
+          ? 'assistant'
+          : msg.role,
       content: msg.content,
     }));
 
@@ -579,8 +760,11 @@ export class ChatView extends ItemView {
         }
       );
 
+      const modelInfo = await this.brainModule.getModelById(modelId); // Get model info
+      const modelName = modelInfo ? modelInfo.name : 'unknown model'; // Extract model name
+
       await this.updateChatFile(
-        `\`\`\`\`\`ai\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
+        `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
       );
     } catch (error) {
       console.error('Error streaming AI response:', error);
@@ -721,13 +905,19 @@ export class ChatView extends ItemView {
 
     this.chatMessages.forEach((message, index) => {
       const messageEl = document.createElement('div');
-      messageEl.className = `chat-message ${message.role}`;
+      const roleClass = message.role.startsWith('ai') ? 'ai' : message.role;
+      messageEl.className = `chat-message ${roleClass}`;
       messageEl.innerHTML = `
         ${marked(message.text)}
         <div class="message-actions">
           <button class="copy-button" title="Copy Message">📋</button>
           <button class="delete-button" title="Delete Message">🗑️</button>
         </div>
+        ${
+          message.role.startsWith('ai-')
+            ? `<span class="model-name">${message.role.slice(3)}</span>`
+            : ''
+        }
       `;
       messagesContainer.appendChild(messageEl);
 
@@ -880,6 +1070,9 @@ export class ChatView extends ItemView {
   }
 
   displayTokenCount(tokenCount: number) {
+    let dollarButton = this.containerEl.querySelector(
+      '.dollar-button'
+    ) as HTMLElement;
     let tokenCountEl = this.containerEl.querySelector(
       '.token-count'
     ) as HTMLElement;
@@ -902,6 +1095,9 @@ export class ChatView extends ItemView {
       if (tokenCountEl) {
         tokenCountEl.style.display = 'none';
       }
+      if (dollarButton) {
+        dollarButton.style.display = 'none';
+      }
       if (titleContainerEl) {
         titleContainerEl.style.display = 'none';
       }
@@ -912,6 +1108,9 @@ export class ChatView extends ItemView {
       }
       if (titleContainerEl) {
         titleContainerEl.style.display = 'flex';
+      }
+      if (dollarButton) {
+        dollarButton.style.display = 'inline';
       }
     }
   }
@@ -928,8 +1127,12 @@ class FileSearcher extends FuzzySuggestModal<TFile> {
   getItems(): TFile[] {
     const allFiles = this.app.vault.getMarkdownFiles();
     if (this.chatsPath) {
-      //@ts-ignore
-      return allFiles.filter(file => file.path.startsWith(this.chatsPath));
+      return allFiles.filter(
+        file =>
+          //@ts-ignore
+          file.path.startsWith(this.chatsPath) &&
+          !file.path.includes('/Archive/')
+      );
     }
     return allFiles;
   }

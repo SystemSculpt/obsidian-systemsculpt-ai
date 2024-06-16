@@ -170,6 +170,16 @@ export class BrainModule implements IGenerationModule {
   }
 
   async cycleModels(): Promise<void> {
+    // if there are no models to cycle through OR all endpoints are disabled, return
+    if (
+      this.settings.disabledModels.length === 0 ||
+      (!this.settings.showopenAISetting &&
+        !this.settings.showgroqSetting &&
+        !this.settings.showlocalEndpointSetting)
+    ) {
+      return;
+    }
+
     if (
       this.plugin.modelToggleStatusBarItem &&
       this.settings.showDefaultModelOnStatusBar
@@ -177,9 +187,15 @@ export class BrainModule implements IGenerationModule {
       this.plugin.modelToggleStatusBarItem.setText('Cycling...');
     }
 
+    console.log('Cycling models...');
     const models = await this.openAIService.getModels();
     const enabledModels = models.filter(
-      model => !this.settings.disabledModels.includes(model.id)
+      model =>
+        !this.settings.disabledModels.includes(model.id) &&
+        ((model.provider === 'openai' && this.settings.showopenAISetting) ||
+          (model.provider === 'groq' && this.settings.showgroqSetting) ||
+          (model.provider === 'local' &&
+            this.settings.showlocalEndpointSetting))
     );
 
     let currentIndex = enabledModels.findIndex(
@@ -200,8 +216,19 @@ export class BrainModule implements IGenerationModule {
   }
 
   async getCurrentModelShortName(): Promise<string> {
-    // Introduce a delay to ensure models have adequate time to load
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('Getting current model...');
+    if (this.plugin.modelToggleStatusBarItem) {
+      this.plugin.modelToggleStatusBarItem.setText('Model: Loading...');
+    }
+    // if there are no models to cycle through OR all endpoints are disabled, return
+    if (
+      this.settings.disabledModels.length === 0 ||
+      (!this.settings.showopenAISetting &&
+        !this.settings.showgroqSetting &&
+        !this.settings.showlocalEndpointSetting)
+    ) {
+      return 'Loading...';
+    }
     const models = await this.openAIService.getModels();
     let currentModel = models.find(
       model => model.id === this.settings.defaultModelId
@@ -231,6 +258,9 @@ export class BrainModule implements IGenerationModule {
   }
 
   async getModelById(modelId: string): Promise<Model | undefined> {
+    if (modelId === 'default') {
+      modelId = this.settings.defaultModelId;
+    }
     const localModels = await this.openAIService.getModels(false, false);
     const onlineModels = await this.openAIService.getModels(true, true);
     const allModels = [...localModels, ...onlineModels];

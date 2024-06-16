@@ -14,7 +14,7 @@ import { parseFrontMatter } from './functions/parseFrontMatter';
 import { renderTemplateList } from './functions/renderTemplateList';
 import { getTemplateFiles } from './functions/getTemplateFiles';
 import { searchAndOrderTemplates } from './functions/searchAndOrderTemplates';
-import { showCustomNotice } from '../../modals';
+import { showCustomNotice, hideCustomNotice } from '../../modals';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
 
 export class TemplatesSuggest extends EditorSuggest<string> {
@@ -116,8 +116,8 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           templateFile
         );
 
-        if (model === 'gpt-4-turbo') {
-          model = 'gpt-4o';
+        if (model === 'default') {
+          model = this.plugin.plugin.brainModule.settings.defaultModelId;
         }
 
         let modelInstance;
@@ -153,6 +153,13 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           }
         }
 
+        if (!modelInstance) {
+          showCustomNotice(
+            `The model "${model}" is not available. Please check your template settings.`
+          );
+          return;
+        }
+
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (activeView) {
           const editor = activeView.editor;
@@ -176,7 +183,7 @@ export class TemplatesSuggest extends EditorSuggest<string> {
             promptWithoutFrontmatter = prompt.trim();
           }
 
-          showCustomNotice('Generating...', 5000);
+          showCustomNotice('Generating...', 5000, true);
 
           try {
             await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
@@ -200,6 +207,7 @@ export class TemplatesSuggest extends EditorSuggest<string> {
               console.error('Error during streaming chat completion:', error);
             }
           } finally {
+            hideCustomNotice();
             this.plugin.abortController = null;
             this.plugin.isGenerationCompleted = true;
           }
