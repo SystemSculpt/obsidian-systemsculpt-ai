@@ -1,16 +1,20 @@
 /* Settings */
 .tab-container {
   display: flex;
-  justify-content: space-around;
-  margin-bottom: 0px;
+  flex-wrap: wrap;
+  justify-content: center;
   background-color: var(--background-secondary);
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 0px 0px 0 0;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .tab {
-  padding: 10px 20px;
+  flex: 0 1 calc(16.666% - 20px); /* 6 tabs per row, accounting for padding */
+  min-width: 100px; /* Minimum width for each tab */
+  max-width: 200px; /* Maximum width for each tab */
+  margin: 5px;
+  margin-bottom: 0px;
+  padding: 10px 0px;
   border: none;
   background-color: transparent;
   color: var(--text-muted);
@@ -18,7 +22,11 @@
   font-weight: 500;
   cursor: pointer;
   position: relative;
-  transition: color 0.3s ease;
+  transition: color 0.3s ease, font-weight 0.3s ease;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab:hover {
@@ -28,7 +36,7 @@
 .tab::after {
   content: '';
   position: absolute;
-  bottom: -5px;
+  bottom: -10px; /* Match this with the value in .tab.active::after */
   left: 0;
   width: 100%;
   height: 2px;
@@ -39,10 +47,12 @@
 
 .tab.active {
   color: var(--text-normal);
+  font-weight: bold;
 }
 
 .tab.active::after {
   transform: scaleX(1);
+  bottom: 2px; /* Adjust this value to position the underline correctly */
 }
 
 .settings-container {
@@ -50,4 +60,42 @@
   padding: 20px;
   border-radius: 10px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  min-height: 100%;
+}
+
+.search-container {
+  padding: 10px 0px;
+  border-radius: 0px 0px 10px 10px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.settings-search-input {
+  width: 80%;
+  max-width: 600px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  text-align: center;
+}
+
+.settings-search-input::placeholder {
+  text-align: center;
+}
+
+.settings-search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
 }

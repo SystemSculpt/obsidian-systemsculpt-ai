@@ -3,9 +3,15 @@ import { Model } from './Model';
 
 export class GroqService {
   private apiKey: string;
+  private settings: { temperature: number };
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, settings: { temperature: number }) {
     this.apiKey = apiKey;
+    this.settings = settings;
+  }
+
+  updateSettings(settings: { temperature: number }) {
+    this.settings = settings;
   }
 
   async createChatCompletion(
@@ -25,7 +31,17 @@ export class GroqService {
         { role: 'user', content: userMessage },
       ],
       max_tokens: maxTokens,
+      temperature: this.settings.temperature,
     });
+
+    console.log(
+      'Model: ',
+      modelId,
+      'Max Tokens: ',
+      maxTokens,
+      'Temperature: ',
+      this.settings.temperature
+    );
 
     const response = await fetch(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -67,8 +83,17 @@ export class GroqService {
       ],
       stream: true,
       max_tokens: maxTokens,
+      temperature: this.settings.temperature,
     });
 
+    console.log(
+      'Model: ',
+      modelId,
+      'Max Tokens: ',
+      maxTokens,
+      'Temperature: ',
+      this.settings.temperature
+    );
     // Instead of using requestUrl, the fetch function is used to make the request to the Groq API.
     // This is because requestUrl doesn't provide a body property on the response object.
 
@@ -79,7 +104,6 @@ export class GroqService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: requestData,
-      signal: abortSignal,
     });
 
     if (!req.ok) {
@@ -131,7 +155,17 @@ export class GroqService {
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
       stream: true,
       max_tokens: maxTokens,
+      temperature: this.settings.temperature,
     });
+
+    console.log(
+      'Model: ',
+      modelId,
+      'Max Tokens: ',
+      maxTokens,
+      'Temperature: ',
+      this.settings.temperature
+    );
 
     const req = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -140,7 +174,6 @@ export class GroqService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: requestData,
-      signal: abortSignal,
     });
 
     if (!req.ok) {
@@ -189,12 +222,14 @@ export class GroqService {
       });
       if (response.status === 200) {
         const data = response.json;
-        return data.data.map((model: any) => ({
-          id: model.id,
-          name: model.id,
-          isLocal: false,
-          provider: 'groq',
-        }));
+        return data.data
+          .filter((model: any) => model.id !== 'whisper-large-v3')
+          .map((model: any) => ({
+            id: model.id,
+            name: model.id,
+            isLocal: false,
+            provider: 'groq',
+          }));
       } else {
         console.error('Failed to fetch Groq models:', response.status);
         return [];

@@ -1,4 +1,4 @@
-/* Add this CSS to your stylesheet */
+/* Revolving dots animation */
 @keyframes revolving-dots {
   0% {
     content: '...';
@@ -18,4 +18,125 @@
   display: inline-block;
   animation: revolving-dots 1s infinite steps(3);
   content: '...';
+}
+
+/* Modal list styles */
+.modal-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.modal-list h3 {
+  margin: 15px 0 0px;
+  padding: 0 5px;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modal-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  max-width: 600px;
+}
+
+.modal-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 5px;
+  transition: background-color 0.2s ease;
+  padding: 10px;
+  cursor: pointer;
+  background-color: var(--background-secondary-alt);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  font-size: 0.9em; /* Add this line to reduce font size by 25% */
+}
+
+.modal-item:hover {
+  background-color: var(--background-secondary);
+}
+
+.modal-item.disabled {
+  color: var(--text-muted);
+}
+
+.modal-name {
+  flex: 1;
+  margin-right: 10px;
+  font-size: 0.9em; /* Update this line */
+  white-space: normal;
+}
+
+.modal-item .checkbox-container {
+  margin-left: auto;
+}
+
+/* Additional styles */
+.modal-list-setting {
+  margin-top: 0;
+}
+
+.model-search-input {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 5px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.modal-item.selected {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.modal-item.selected .fuzzy-match {
+  color: inherit;
+  background-color: transparent;
+}
+
+.no-results-message {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+}
+
+/* API Endpoints specific styles */
+.api-endpoints-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.api-endpoints-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.api-endpoints-group .modal-item {
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .api-endpoints-group {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  }
 }

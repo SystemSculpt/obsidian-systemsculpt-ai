@@ -3,5 +3,5 @@ export interface Model {
   name: string;
   description?: string;
   isLocal?: boolean;
-  provider: 'openai' | 'groq' | 'local';
+  provider: 'openai' | 'groq' | 'openRouter' | 'local';
 }

@@ -1,4 +1,4 @@
-import { Plugin, TFile } from 'obsidian';
+import { Plugin, TFile, Notice } from 'obsidian';
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,
@@ -15,6 +15,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './modules/chat/ChatView';
 import { AIService } from './api/AIService';
 import { registerMp3ContextMenu } from './events';
 import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
+import { listAllSettings } from './utils/listAllSettings';
 
 const development = false;
 
@@ -43,30 +44,23 @@ export default class SystemSculptPlugin extends Plugin {
 
     // Initialize modules with dependencies
     this.brainModule = this.initializeBrainModule();
-    await this.brainModule.load();
-
     this.tasksModule = this.initializeTasksModule(this.brainModule);
-    this.tasksModule.load();
-
     this.templatesModule = new TemplatesModule(this);
-    this.templatesModule.load();
-
     this.dataModule = new DataModule(this);
-    this.dataModule.load();
-
-    const openAIService = AIService.getInstance(
-      this.settings.openAIApiKey,
-      this.settings.groqAPIKey,
-      this.settings
+    this.recorderModule = new RecorderModule(
+      this,
+      this.brainModule.openAIService
     );
-    this.recorderModule = new RecorderModule(this, openAIService);
-    this.recorderModule.load();
-
     this.aboutModule = new AboutModule(this);
-    this.aboutModule.load();
-
     this.chatModule = new ChatModule(this);
-    console.log('ChatModule initialized');
+
+    // Load modules
+    await this.brainModule.load();
+    this.tasksModule.load();
+    this.templatesModule.load();
+    this.dataModule.load();
+    this.recorderModule.load();
+    this.aboutModule.load();
     await this.chatModule.load();
 
     this.settingsTab = new SystemSculptSettingTab(this.app, this);
@@ -75,6 +69,15 @@ export default class SystemSculptPlugin extends Plugin {
     // Register the context menu item for .mp3 files using the new events module
     registerMp3ContextMenu(this, this.recorderModule);
 
+    // Add commands and event listeners
+    this.addCommands();
+    this.registerEvents();
+
+    // Perform async checks
+    this.performAsyncChecks();
+  }
+
+  private addCommands() {
     // Add command to open SystemSculpt settings
     this.addCommand({
       id: 'open-systemsculpt-settings',
@@ -96,14 +99,21 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
-    // Check for updates and display a notice
-    setTimeout(async () => {
-      await checkForUpdate(this.brainModule);
-      setInterval(async () => {
-        await checkForUpdate(this.brainModule);
-      }, 1 * 60 * 60 * 1000); // recurring 1 hour check
-    }, 5000); // initial check after 5 seconds
+    // Add command to list all settings
+    this.addCommand({
+      id: 'list-all-settings',
+      name: 'List all settings',
+      callback: () => {
+        const allSettings = listAllSettings(this);
+        const settingsString = allSettings.join('\n');
+        new Notice('All settings copied to clipboard');
+        navigator.clipboard.writeText(settingsString);
+        console.log('All settings:', allSettings);
+      },
+    });
+  }
 
+  private registerEvents() {
     // Register file open event to load chat files into Chat View
     this.registerEvent(
       this.app.workspace.on('file-open', async file => {
@@ -166,15 +176,32 @@ export default class SystemSculptPlugin extends Plugin {
     );
   }
 
+  private performAsyncChecks() {
+    setTimeout(async () => {
+      await checkForUpdate(this.brainModule);
+      setInterval(async () => {
+        await checkForUpdate(this.brainModule);
+      }, 1 * 60 * 60 * 1000); // recurring 1 hour check
+    }, 5000);
+  }
+
   private initializeBrainModule(): BrainModule {
     const openAIService = AIService.getInstance(
       this.settings.openAIApiKey,
       this.settings.groqAPIKey,
-      this.settings
+      this.settings.openRouterAPIKey,
+      {
+        openAIApiKey: this.settings.openAIApiKey,
+        groqAPIKey: this.settings.groqAPIKey,
+        openRouterAPIKey: this.settings.openRouterAPIKey,
+        apiEndpoint: this.settings.apiEndpoint,
+        localEndpoint: this.settings.localEndpoint,
+        temperature: this.settings.temperature,
+      }
     );
 
     // Check if the API key and local endpoint are initially valid
-    return new BrainModule(this, openAIService);
+    return new BrainModule(this);
   }
 
   private initializeTasksModule(brainModule: BrainModule): TasksModule {
@@ -183,6 +210,9 @@ export default class SystemSculptPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    if (this.settings.temperature === undefined) {
+      this.settings.temperature = DEFAULT_SETTINGS.temperature;
+    }
   }
 
   async saveSettings() {

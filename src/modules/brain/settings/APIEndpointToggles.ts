@@ -1,4 +1,4 @@
-import { Setting, ToggleComponent } from 'obsidian';
+import { ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 
 export function renderAPIEndpointToggles(
@@ -11,17 +11,20 @@ export function renderAPIEndpointToggles(
   );
   apiEndpointsContainer.createEl('h3', { text: 'API Endpoints' });
 
-  const apiEndpointsList = apiEndpointsContainer.createDiv('model-list');
+  const apiEndpointsList =
+    apiEndpointsContainer.createDiv('api-endpoints-list');
+  const apiEndpointsGroup = apiEndpointsList.createDiv('api-endpoints-group');
 
   const apiEndpoints = [
     { id: 'openAI', name: 'OpenAI' },
     { id: 'groq', name: 'Groq' },
-    { id: 'localEndpoint', name: 'Local Endpoint' },
+    { id: 'openRouter', name: 'OpenRouter' },
+    { id: 'localEndpoint', name: 'Local' },
   ];
 
   apiEndpoints.forEach(endpoint => {
-    const apiEndpointItem = apiEndpointsList.createDiv('model-item');
-    const apiEndpointName = apiEndpointItem.createDiv('model-name');
+    const apiEndpointItem = apiEndpointsGroup.createDiv('modal-item');
+    const apiEndpointName = apiEndpointItem.createDiv('modal-name');
     apiEndpointName.setText(endpoint.name);
 
     const toggleComponent = new ToggleComponent(apiEndpointItem);
@@ -29,6 +32,7 @@ export function renderAPIEndpointToggles(
     toggleComponent.onChange(async value => {
       plugin.settings[`show${endpoint.id}Setting`] = value;
       await plugin.saveSettings();
+      await plugin.updateDefaultModelAfterEndpointToggle();
       onAfterSave();
       apiEndpointItem.toggleClass('disabled', !value);
     });

@@ -1,34 +1,35 @@
 /* Links Container */
 .links-container {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  padding: 5px 20px;
+  padding: 0px;
   background-color: var(--background-secondary);
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
   margin-bottom: 5px;
 }
 
 .settings-link {
-  color: var(--text-normal);
+  flex: 0 1 calc(16.666% - 10px); /* 6 links per row, accounting for gap */
+  min-width: 100px; /* Minimum width for each link */
+  max-width: 250px; /* Maximum width for each link */
+  margin: 5px;
+  padding: 10px 0px;
+  color: var(--text-muted);
   text-decoration: none;
+  font-size: 10px;
   font-weight: 500;
-  font-size: 12px;
-  transition: color 0.3s ease;
-  padding: 5px 10px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease, background-color 0.3s ease;
   border-radius: 4px;
 }
 
 .settings-link:hover {
-  color: var(--text-accent);
+  color: var(--text-normal);
   background-color: var(--background-modifier-hover);
-}
-
-.settings-link:first-child {
-  margin-left: 0;
-}
-
-.settings-link:last-child {
-  margin-right: 0;
 }

@@ -1,12 +1,21 @@
 import { BrainModule } from '../BrainModule';
 import { MarkdownView, TFile } from 'obsidian';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
+import { ChatView } from '../../chat/ChatView';
 
 export async function generateTitleForCurrentNote(
   plugin: BrainModule
 ): Promise<void> {
   const activeView =
     plugin.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+  const activeChatView =
+    plugin.plugin.app.workspace.getActiveViewOfType(ChatView);
+
+  if (activeChatView) {
+    await activeChatView.handleGenerateTitle();
+    return;
+  }
+
   if (activeView) {
     const currentFile = activeView.file;
     if (!currentFile) {
@@ -28,7 +37,7 @@ export async function generateTitleForCurrentNote(
         'Failed to generate title. Please check your API key and try again.'
       );
     } finally {
-      hideCustomNotice(notice);
+      hideCustomNotice();
     }
   }
 }

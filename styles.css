@@ -1,36 +1,37 @@
 /* Links Container */
 .links-container {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  padding: 5px 20px;
+  padding: 0px;
   background-color: var(--background-secondary);
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
   margin-bottom: 5px;
 }
 
 .settings-link {
-  color: var(--text-normal);
+  flex: 0 1 calc(16.666% - 10px); /* 6 links per row, accounting for gap */
+  min-width: 100px; /* Minimum width for each link */
+  max-width: 250px; /* Maximum width for each link */
+  margin: 5px;
+  padding: 10px 0px;
+  color: var(--text-muted);
   text-decoration: none;
+  font-size: 10px;
   font-weight: 500;
-  font-size: 12px;
-  transition: color 0.3s ease;
-  padding: 5px 10px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease, background-color 0.3s ease;
   border-radius: 4px;
 }
 
 .settings-link:hover {
-  color: var(--text-accent);
+  color: var(--text-normal);
   background-color: var(--background-modifier-hover);
-}
-
-.settings-link:first-child {
-  margin-left: 0;
-}
-
-.settings-link:last-child {
-  margin-right: 0;
 }
 .cost-table {
   width: 100%;
@@ -174,78 +175,27 @@
   text-align: center;
   margin-bottom: 20px;
 }
-.patreon-member-setting {
-  background: linear-gradient(
-    135deg,
-    rgba(246, 179, 101, 0.5) 0%,
-    rgba(253, 160, 133, 0.5) 25%,
-    rgba(246, 211, 101, 0.5) 50%,
-    rgba(253, 160, 133, 0.5) 75%,
-    rgba(246, 179, 101, 0.5) 100%
-  );
-  border: 2px solid #b8860b; /* Darker gold for better contrast */
-  border-radius: 8px;
-  padding: 10px;
-  color: #fff; /* White text for better readability */
-  font-weight: bold;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
-}
-
-.patreon-member-setting .setting-item-name,
-.patreon-member-setting .setting-item-description {
-  color: #fff; /* White text for better readability */
-}
-
-.patreon-sub-setting {
-  border: 1px solid #b8860b; /* Golden border */
-  border-radius: 6px;
-  padding: 8px;
-  font-weight: bold;
-  text-shadow: none; /* Remove text shadow for a cleaner look */
-  box-shadow: none; /* Remove box shadow for a simpler appearance */
-}
+/* Remove all existing styles and replace with these simplified styles */
 
 .patreon-sub-setting-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  text-align: center;
-  background: linear-gradient(
-    135deg,
-    rgba(246, 179, 101, 0.8) 0%,
-    rgba(253, 160, 133, 0.8) 25%,
-    rgba(246, 211, 101, 0.8) 50%,
-    rgba(253, 160, 133, 0.8) 75%,
-    rgba(246, 179, 101, 0.8) 100%
-  );
-  border: 2px solid #b8860b; /* Darker gold for better contrast */
-  border-radius: 8px;
-  padding: 20px;
-  color: #fff; /* White text for better readability */
-  font-weight: bold;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Darker shadow for better text visibility */
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Slightly darker shadow */
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 10px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.3s ease;
+  transition: background-color 0.2s ease;
 }
 
 .patreon-sub-setting-button:hover {
-  background: linear-gradient(
-    135deg,
-    rgba(246, 179, 101, 1) 0%,
-    rgba(253, 160, 133, 1) 25%,
-    rgba(246, 211, 101, 1) 50%,
-    rgba(253, 160, 133, 1) 75%,
-    rgba(246, 179, 101, 1) 100%
-  );
-  transform: scale(0.95);
+  background-color: var(--interactive-accent-hover);
 }
 
-.patreon-sub-setting-button:active {
-  transform: scale(0.85);
-  margin-bottom: 25px; /* Add margin-bottom to separate from the coffee link */
+.info-box {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 10px;
+  margin-top: 10px;
 }
 /* Recording Notice */
 .recording-notice {
@@ -323,13 +273,30 @@
 }
 
 .chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   background-color: var(--background-primary-alt);
   color: var(--text-normal);
   padding: 15px;
-  text-align: center;
-  font-weight: bold;
   border-bottom: 1px solid var(--background-modifier-border);
-  position: relative; /* Add this to position the buttons */
+}
+
+.chat-title {
+  font-weight: bold;
+}
+
+.actions-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.actions-button:hover {
+  color: var(--interactive-accent);
 }
 
 .exit-button,
@@ -381,7 +348,7 @@
   background-color: var(--background-primary-alt);
   color: var(--text-muted);
   padding: 10px;
-  text-align: center;
+  text-align: left; /* Change this from 'center' to 'left' */
   font-style: italic;
   border-bottom: 1px solid var(--background-modifier-border);
   display: flex;
@@ -423,30 +390,13 @@
 
 .chat-title-text {
   margin-right: 10px;
-}
-
-.edit-icon {
   cursor: pointer;
-  font-size: 14px;
-  color: var(--text-muted);
-  transition: color 0.3s;
-  margin-left: 5px; /* Add margin to avoid overlap with the input field */
+  transition: color 0.3s ease;
+  text-decoration: underline;
 }
 
-.edit-icon:hover {
-  color: var(--interactive-accent);
-}
-
-.generate-title-icon {
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text-muted);
-  transition: color 0.3s;
-  margin-left: 5px;
-}
-
-.generate-title-icon:hover {
-  color: var(--interactive-accent);
+.chat-title-text:hover {
+  color: var(--text-accent);
 }
 
 .edit-title-input {
@@ -462,27 +412,17 @@
   overflow: auto; /* Ensure scrollbars appear if needed */
 }
 
-.dollar-button {
-  position: relative; /* Change to relative to align with token count */
-  top: 0; /* Reset top position */
-  right: 0; /* Reset right position */
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 18px;
-  color: var(--text-muted);
-  transition: color 0.3s;
-}
-
 .token-count {
   font-size: 12px;
   color: var(--text-faint);
   background-color: var(--background-secondary);
-  padding: 5px 0px 5px 10px; /* Remove left margin padding */
+  padding: 5px 10px; /* Add padding on both sides */
   border-radius: 12px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: flex; /* Add flex display to align with dollar button */
-  align-items: center; /* Center align items */
+  display: flex;
+  justify-content: flex-end; /* Right-align the content */
+  align-items: center; /* Center vertically */
+  margin-left: auto; /* Push to the right side of its container */
 }
 
 .chat-messages {
@@ -867,6 +807,46 @@
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 999; /* Ensure it appears below the popup but above other elements */
 }
+
+.suggestion-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.suggestion-title {
+  font-weight: bold;
+}
+
+.suggestion-note {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.context-file-path {
+  color: var(--text-normal);
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.context-file-path:hover {
+  color: var(--text-accent);
+}
+
+.chat-title-text {
+  cursor: pointer;
+  transition: color 0.3s ease;
+  text-decoration: underline;
+}
+
+.chat-title-text:hover {
+  color: var(--text-accent);
+}
 .model-list-setting {
   margin-top: 0;
 }
@@ -955,7 +935,25 @@
   align-items: center;
   margin-bottom: 20px;
 }
-/* Add this CSS to your stylesheet */
+.setting-item textarea {
+  width: 100%;
+  min-height: 250px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.setting-item textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+/* Revolving dots animation */
 @keyframes revolving-dots {
   0% {
     content: '...';
@@ -976,19 +974,144 @@
   animation: revolving-dots 1s infinite steps(3);
   content: '...';
 }
+
+/* Modal list styles */
+.modal-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.modal-list h3 {
+  margin: 15px 0 0px;
+  padding: 0 5px;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modal-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  max-width: 600px;
+}
+
+.modal-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 5px;
+  transition: background-color 0.2s ease;
+  padding: 10px;
+  cursor: pointer;
+  background-color: var(--background-secondary-alt);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  font-size: 0.9em; /* Add this line to reduce font size by 25% */
+}
+
+.modal-item:hover {
+  background-color: var(--background-secondary);
+}
+
+.modal-item.disabled {
+  color: var(--text-muted);
+}
+
+.modal-name {
+  flex: 1;
+  margin-right: 10px;
+  font-size: 0.9em; /* Update this line */
+  white-space: normal;
+}
+
+.modal-item .checkbox-container {
+  margin-left: auto;
+}
+
+/* Additional styles */
+.modal-list-setting {
+  margin-top: 0;
+}
+
+.model-search-input {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 5px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.modal-item.selected {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.modal-item.selected .fuzzy-match {
+  color: inherit;
+  background-color: transparent;
+}
+
+.no-results-message {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+}
+
+/* API Endpoints specific styles */
+.api-endpoints-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.api-endpoints-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.api-endpoints-group .modal-item {
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .api-endpoints-group {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  }
+}
 /* Settings */
 .tab-container {
   display: flex;
-  justify-content: space-around;
-  margin-bottom: 0px;
+  flex-wrap: wrap;
+  justify-content: center;
   background-color: var(--background-secondary);
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 0px 0px 0 0;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .tab {
-  padding: 10px 20px;
+  flex: 0 1 calc(16.666% - 20px); /* 6 tabs per row, accounting for padding */
+  min-width: 100px; /* Minimum width for each tab */
+  max-width: 200px; /* Maximum width for each tab */
+  margin: 5px;
+  margin-bottom: 0px;
+  padding: 10px 0px;
   border: none;
   background-color: transparent;
   color: var(--text-muted);
@@ -996,7 +1119,11 @@
   font-weight: 500;
   cursor: pointer;
   position: relative;
-  transition: color 0.3s ease;
+  transition: color 0.3s ease, font-weight 0.3s ease;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab:hover {
@@ -1006,7 +1133,7 @@
 .tab::after {
   content: '';
   position: absolute;
-  bottom: -5px;
+  bottom: -10px; /* Match this with the value in .tab.active::after */
   left: 0;
   width: 100%;
   height: 2px;
@@ -1017,10 +1144,12 @@
 
 .tab.active {
   color: var(--text-normal);
+  font-weight: bold;
 }
 
 .tab.active::after {
   transform: scaleX(1);
+  bottom: 2px; /* Adjust this value to position the underline correctly */
 }
 
 .settings-container {
@@ -1028,6 +1157,44 @@
   padding: 20px;
   border-radius: 10px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  min-height: 100%;
+}
+
+.search-container {
+  padding: 10px 0px;
+  border-radius: 0px 0px 10px 10px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.settings-search-input {
+  width: 80%;
+  max-width: 600px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  text-align: center;
+}
+
+.settings-search-input::placeholder {
+  text-align: center;
+}
+
+.settings-search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
 }
 /* Custom Notice */
 .custom-notice {
@@ -1110,65 +1277,6 @@
   background-color: var(--background-secondary-alt);
   border-radius: 4px;
   white-space: nowrap;
-}
-/* Hall of Fame */
-.about-hall-of-fame {
-  text-align: center;
-}
-
-.supporter-list {
-  list-style-type: none;
-  padding: 0;
-}
-
-.supporter-item {
-  display: flex;
-  justify-content: space-between;
-}
-
-.supporter-contribution {
-  color: var(--text-muted);
-}
-
-.supporter-list {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 30px;
-  margin-top: 20px;
-}
-
-.supporter-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 30px;
-  width: 100%;
-}
-
-.supporter-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 10px;
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  flex: 1 1 30%;
-  max-width: 30%;
-}
-
-.supporter-contribution {
-  margin-top: 10px;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-@media (max-width: 768px) {
-  .supporter-item {
-    flex: 1 1 100%;
-    max-width: 100%;
-  }
 }
 /* Blank Template Modal */
 
@@ -1361,96 +1469,77 @@
 }
 
 .about-description {
-  margin-bottom: 40px;
+  margin-bottom: 20px;
 }
 
-.support-link,
-.contact-link,
-.social-link {
-  display: inline-flex;
-  align-items: center;
-  margin-right: 20px;
-  padding: 10px 20px;
+.about-button-container,
+.supporter-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.about-button,
+.supporter-item {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
-  text-decoration: none;
+  border: none;
+  padding: 8px 12px;
   border-radius: 4px;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.support-link {
-  margin-top: 25px; /* Add margin-top to the coffee link */
-}
-
-.support-link:hover,
-.contact-link:hover,
-.social-link:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-}
-
-.icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  font-size: 18px;
-  background-color: var(--text-on-accent);
-  color: var(--interactive-accent);
-  border-radius: 50%;
-  margin-right: 10px;
-  transition: transform 0.3s ease;
-}
-
-.support-link:hover .icon,
-.social-link:hover .icon {
-  transform: rotate(360deg);
-}
-
-.social-list {
-  list-style-type: none;
-  padding: 0;
-  display: flex;
-  justify-content: center;
-  margin: auto;
-}
-
-.about-support,
-.about-contact {
-  display: block;
+  cursor: pointer;
+  font-size: 14px;
   text-align: center;
-  margin-bottom: 1em;
-  justify-content: center;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
-.about-support,
-.about-social,
-.about-contact {
-  text-align: center;
+.about-button {
+  transition: background-color 0.3s ease;
 }
 
-.support-link,
-.social-link,
-.contact-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 24px;
-  margin: 0 10px;
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  text-decoration: none;
-  border-radius: 4px;
-  transition: background-color 0.3s ease, transform 0.3s ease;
-}
-
-.support-link:hover,
-.social-link:hover,
-.contact-link:hover {
+.about-button:hover {
   background-color: var(--interactive-accent-hover);
-  transform: translateY(-2px);
+}
+
+.supporter-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  margin-bottom: 30px;
+}
+
+.supporter-item {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.supporter-contribution {
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Hall of Fame styles */
+.about-hall-of-fame {
+  text-align: center;
 }
 
 .supporters-description {
@@ -1458,17 +1547,35 @@
   color: var(--text-muted);
   margin-top: 0;
   margin-bottom: 10px;
+  font-size: 14px;
 }
 
-/* Global styles */
 .ss-h3 {
-  font-size: 24px;
+  font-size: 20px;
   color: var(--text-accent);
   text-transform: uppercase;
-  letter-spacing: 2px;
-  margin-bottom: 5px;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
   position: relative;
   display: inline-block;
+}
+
+/* Media query for smaller screens */
+@media (max-width: 768px) {
+  .about-button-container,
+  .supporter-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .supporter-list {
+    gap: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .supporter-list {
+    grid-template-columns: 1fr;
+  }
 }
 /* Modal */
 .modal-content-centered {

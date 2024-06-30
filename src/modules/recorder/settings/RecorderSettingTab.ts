@@ -9,6 +9,7 @@ import { renderCopyToClipboardToggle } from './copyToClipboardSetting';
 import { renderSaveTranscriptionToFileToggle } from './saveTranscriptionToFileSetting';
 import { renderTranscriptionsPathSetting } from './transcriptionsPathSetting';
 import { updateRecorderButtonStatusBar } from '../functions/updateRecorderButtonStatusBar';
+import { renderWhisperProviderSetting } from './whisperProviderSetting';
 
 export class SystemSculptRecorderSettingTab extends PluginSettingTab {
   plugin: RecorderModule;
@@ -48,6 +49,7 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
           });
       });
 
+    renderWhisperProviderSetting(containerEl, this.plugin);
     renderRecordingsPathSetting(containerEl, this.plugin);
     renderTranscriptionsPathSetting(containerEl, this.plugin);
     renderMicrophoneDropdown(containerEl, this.plugin);

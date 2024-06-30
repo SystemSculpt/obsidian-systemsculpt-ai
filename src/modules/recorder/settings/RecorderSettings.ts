@@ -9,6 +9,7 @@ export interface SystemSculptRecorderSettings {
   saveTranscriptionToFile: boolean;
   transcriptionsPath: string;
   showRecorderButtonOnStatusBar: boolean;
+  whisperProvider: 'openai' | 'groq';
 }
 
 export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
@@ -22,4 +23,5 @@ export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
   saveTranscriptionToFile: true,
   transcriptionsPath: 'SystemSculpt/Transcriptions',
   showRecorderButtonOnStatusBar: true,
+  whisperProvider: 'openai',
 };

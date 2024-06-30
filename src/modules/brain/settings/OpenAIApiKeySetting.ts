@@ -100,7 +100,15 @@ export function renderOpenAIApiKeySetting(
     const aiServiceInstance = AIService.getInstance(
       plugin.settings.openAIApiKey,
       plugin.settings.groqAPIKey,
-      plugin.settings
+      plugin.settings.openRouterAPIKey,
+      {
+        openAIApiKey: plugin.settings.openAIApiKey,
+        groqAPIKey: plugin.settings.groqAPIKey,
+        openRouterAPIKey: plugin.settings.openRouterAPIKey,
+        apiEndpoint: plugin.settings.apiEndpoint,
+        localEndpoint: plugin.settings.localEndpoint,
+        temperature: plugin.settings.temperature,
+      }
     );
   }
 }

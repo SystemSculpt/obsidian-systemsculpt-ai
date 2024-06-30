@@ -2,19 +2,27 @@ import SystemSculptPlugin from '../../main';
 import { ChatSettings, DEFAULT_CHAT_SETTINGS } from './settings/ChatSettings';
 import { ChatSettingTab } from './settings/ChatSettingTab';
 import { ChatView } from './ChatView';
+import { ChatFileManager } from './ChatFileManager';
 import { TFile } from 'obsidian';
 
 export class ChatModule {
   plugin: SystemSculptPlugin;
   settings: ChatSettings;
+  chatFileManager: ChatFileManager;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
+    this.settings = DEFAULT_CHAT_SETTINGS;
   }
 
   async load() {
     console.log('ChatModule load method called');
     await this.loadSettings();
+
+    this.chatFileManager = new ChatFileManager(
+      this.plugin.app,
+      this.settings.chatsPath
+    );
 
     this.plugin.addRibbonIcon(
       'message-square-plus',
@@ -45,6 +53,37 @@ export class ChatModule {
       },
     });
 
+    this.plugin.addCommand({
+      id: 'open-chat-actions',
+      name: 'Open Chat Actions',
+      callback: () => {
+        let chatView = this.plugin.app.workspace
+          .getLeavesOfType('chat-view')
+          .map(leaf => leaf.view as ChatView)
+          .find(view => view instanceof ChatView);
+
+        if (!chatView) {
+          // If no chat view is open, open a new one
+          this.openNewChat();
+
+          // Wait for the new chat view to be created
+          setTimeout(() => {
+            // @ts-ignore
+            chatView = this.plugin.app.workspace.getActiveViewOfType(ChatView);
+            if (chatView) {
+              chatView.showActionsModal();
+            }
+          }, 300);
+        } else {
+          // If a chat view is already open, switch to it and show the actions modal
+          const leaf =
+            this.plugin.app.workspace.getLeavesOfType('chat-view')[0];
+          this.plugin.app.workspace.revealLeaf(leaf);
+          chatView.showActionsModal();
+        }
+      },
+    });
+
     // Add status bar item for chat
     if (
       this.settings.showChatButtonOnStatusBar &&
@@ -59,6 +98,15 @@ export class ChatModule {
       this.plugin.chatToggleStatusBarItem.onClickEvent(() => {
         this.openNewChat();
       });
+    }
+
+    if (this.settings.lastOpenedChatPath) {
+      const file = this.plugin.app.vault.getAbstractFileByPath(
+        this.settings.lastOpenedChatPath
+      );
+      if (file instanceof TFile) {
+        this.openChatWithFile(file);
+      }
     }
   }
 
@@ -97,9 +145,13 @@ export class ChatModule {
       });
     }
 
-    this.plugin.app.workspace.revealLeaf(
-      this.plugin.app.workspace.getLeavesOfType('chat-view')[0]
-    );
+    if (this.plugin.app.workspace.getLeavesOfType('chat-view').length > 0) {
+      const chatLeaf =
+        this.plugin.app.workspace.getLeavesOfType('chat-view')[0];
+      if (chatLeaf) {
+        this.plugin.app.workspace.revealLeaf(chatLeaf);
+      }
+    }
 
     // Add a slight delay to ensure the DOM is fully updated
     setTimeout(() => {
@@ -133,6 +185,13 @@ export class ChatModule {
       chatView.focusInput();
       this.updateTokenCount(chatView); // Ensure token count is updated
     }, 100); // 100ms delay
+
+    this.saveLastOpenedChat(file.path);
+  }
+
+  async saveLastOpenedChat(filePath: string) {
+    this.settings.lastOpenedChatPath = filePath;
+    await this.saveSettings();
   }
 
   updateTokenCount(chatView: ChatView) {

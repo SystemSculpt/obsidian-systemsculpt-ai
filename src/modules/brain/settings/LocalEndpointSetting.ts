@@ -21,9 +21,7 @@ export function renderLocalEndpointSetting(
 
   new Setting(containerEl)
     .setName('Local server endpoint')
-    .setDesc(
-      'Enter the local endpoint URL (currently LM Studio compatible only)'
-    )
+    .setDesc('Enter the local endpoint URL')
     .addText(text => {
       endpointTextComponent = text;
       text
@@ -82,12 +80,28 @@ export function renderLocalEndpointSetting(
     statusTextEl.className = 'api-key-status validating';
 
     if (plugin.settings.showlocalEndpointSetting) {
-      const isOnline = await AIService.validateLocalEndpoint(endpoint);
+      try {
+        const isOnline = await AIService.validateLocalEndpoint(endpoint);
+        statusTextEl.textContent = isOnline ? 'Online' : 'Offline';
+        statusTextEl.classList.remove('validating');
+        statusTextEl.classList.toggle('valid', isOnline);
+        statusTextEl.classList.toggle('invalid', !isOnline);
 
-      statusTextEl.textContent = isOnline ? 'Online' : 'Offline';
-      statusTextEl.classList.remove('validating');
-      statusTextEl.classList.toggle('valid', isOnline);
-      statusTextEl.classList.toggle('invalid', !isOnline);
+        if (isOnline) {
+          await plugin.refreshAIService(true);
+        } else {
+          // Refresh AI service to clear local models without toggling off the setting
+          await plugin.refreshAIService(true);
+        }
+      } catch (error) {
+        console.error('Error validating endpoint:', error);
+        statusTextEl.textContent = 'Error';
+        statusTextEl.classList.remove('validating');
+        statusTextEl.classList.add('invalid');
+
+        // Refresh AI service to clear local models without toggling off the setting
+        await plugin.refreshAIService(true);
+      }
     } else {
       statusTextEl.textContent = 'Disabled';
       statusTextEl.classList.remove('validating', 'valid', 'invalid');

@@ -1,14 +1,13 @@
 import { requestUrl } from 'obsidian';
 import { Model } from './Model';
 
-export class OpenAIService {
+export class OpenRouterService {
   private apiKey: string;
-  private apiEndpoint: string;
   private settings: { temperature: number };
 
-  constructor(apiKey: string, apiEndpoint: string) {
+  constructor(apiKey: string, settings: { temperature: number }) {
     this.apiKey = apiKey;
-    this.apiEndpoint = apiEndpoint;
+    this.settings = settings;
   }
 
   updateSettings(settings: { temperature: number }) {
@@ -19,11 +18,10 @@ export class OpenAIService {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxTokens: number,
-    temperature?: number
+    maxTokens: number
   ): Promise<string> {
     if (!this.apiKey) {
-      throw new Error('OpenAI API key is not set');
+      throw new Error('OpenRouter API key is not set');
     }
 
     const requestData = JSON.stringify({
@@ -45,17 +43,24 @@ export class OpenAIService {
       this.settings.temperature
     );
 
-    const response = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: requestData,
-    });
+    const response = await fetch(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          'HTTP-Referer': 'https://SystemSculpt.com',
+          'X-Title': 'SystemSculpt AI for Obsidian',
+        },
+        body: requestData,
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`OpenAI request failed with status ${response.status}`);
+      throw new Error(
+        `OpenRouter request failed with status ${response.status}`
+      );
     }
 
     const data = await response.json();
@@ -68,11 +73,10 @@ export class OpenAIService {
     modelId: string,
     maxTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal,
-    temperature?: number
+    abortSignal?: AbortSignal
   ): Promise<void> {
     if (!this.apiKey) {
-      throw new Error('OpenAI API key is not set');
+      throw new Error('OpenRouter API key is not set');
     }
 
     const requestData = JSON.stringify({
@@ -94,24 +98,24 @@ export class OpenAIService {
       'Temperature: ',
       this.settings.temperature
     );
-    // Instead of using requestUrl, the fetch function is used to make the request to the Groq API.
-    // This is because requestUrl doesn't provide a body property on the response object.
 
-    const req = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
+    const req = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
+        'HTTP-Referer': 'https://SystemSculpt.com',
+        'X-Title': 'SystemSculpt AI for Obsidian',
       },
       body: requestData,
     });
 
     if (!req.ok) {
-      throw new Error(`OpenAI request failed with status ${req.status}`);
+      throw new Error(`OpenRouter request failed with status ${req.status}`);
     }
 
     if (!req.body) {
-      throw new Error('OpenAI request failed with status 404');
+      throw new Error('OpenRouter request failed with status 404');
     }
 
     const reader = req.body.getReader();
@@ -144,11 +148,10 @@ export class OpenAIService {
     modelId: string,
     maxTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal,
-    temperature?: number
+    abortSignal?: AbortSignal
   ): Promise<void> {
     if (!this.apiKey) {
-      throw new Error('OpenAI API key is not set');
+      throw new Error('OpenRouter API key is not set');
     }
 
     const requestData = JSON.stringify({
@@ -168,21 +171,23 @@ export class OpenAIService {
       this.settings.temperature
     );
 
-    const req = await fetch(`${this.apiEndpoint}/v1/chat/completions`, {
+    const req = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
+        'HTTP-Referer': 'https://SystemSculpt.com',
+        'X-Title': 'SystemSculpt AI for Obsidian',
       },
       body: requestData,
     });
 
     if (!req.ok) {
-      throw new Error(`OpenAI request failed with status ${req.status}`);
+      throw new Error(`OpenRouter request failed with status ${req.status}`);
     }
 
     if (!req.body) {
-      throw new Error('OpenAI request failed with status 404');
+      throw new Error('OpenRouter request failed with status 404');
     }
 
     const reader = req.body.getReader();
@@ -212,33 +217,31 @@ export class OpenAIService {
   async getModels(): Promise<Model[]> {
     if (!this.apiKey) return [];
 
+    console.log('getting openRouter models...');
     try {
       const response = await requestUrl({
-        url: `https://api.openai.com/v1/models`,
+        url: 'https://openrouter.ai/api/v1/models',
         method: 'GET',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
+          'HTTP-Referer': 'https://SystemSculpt.com',
+          'X-Title': 'SystemSculpt AI for Obsidian',
         },
       });
       if (response.status === 200) {
         const data = response.json;
-        return data.data
-          .filter(
-            (model: any) =>
-              model.id === 'gpt-3.5-turbo' || model.id === 'gpt-4o'
-          )
-          .map((model: any) => ({
-            id: model.id,
-            name: model.id,
-            isLocal: false,
-            provider: 'openai',
-          }));
+        return data.data.map((model: any) => ({
+          id: model.id,
+          name: model.id,
+          isLocal: false,
+          provider: 'openRouter',
+        }));
       } else {
-        console.error('Failed to fetch OpenAI models:', response.status);
+        console.error('Failed to fetch OpenRouter models:', response.status);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching OpenAI models:', error);
+      console.error('Error fetching OpenRouter models:', error);
       return [];
     }
   }
@@ -246,22 +249,26 @@ export class OpenAIService {
   static async validateApiKey(apiKey: string): Promise<boolean> {
     if (!apiKey) return false;
 
+    console.log('validating openRouter api key...');
     try {
       const response = await requestUrl({
-        url: `https://api.openai.com/v1/models`,
+        url: 'https://openrouter.ai/api/v1/models',
         method: 'GET',
         headers: {
           Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://SystemSculpt.com',
+          'X-Title': 'SystemSculpt AI for Obsidian',
         },
       });
       return response.status === 200;
     } catch (error) {
-      console.error('Error validating OpenAI API key:', error);
+      console.error('Error validating OpenRouter API key:', error);
       return false;
     }
   }
 
   updateApiKey(apiKey: string): void {
+    console.log('updating openRouter api key...');
     this.apiKey = apiKey;
   }
 }

@@ -33,96 +33,77 @@
 }
 
 .about-description {
-  margin-bottom: 40px;
+  margin-bottom: 20px;
 }
 
-.support-link,
-.contact-link,
-.social-link {
-  display: inline-flex;
-  align-items: center;
-  margin-right: 20px;
-  padding: 10px 20px;
+.about-button-container,
+.supporter-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.about-button,
+.supporter-item {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
-  text-decoration: none;
+  border: none;
+  padding: 8px 12px;
   border-radius: 4px;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.support-link {
-  margin-top: 25px; /* Add margin-top to the coffee link */
-}
-
-.support-link:hover,
-.contact-link:hover,
-.social-link:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-}
-
-.icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  font-size: 18px;
-  background-color: var(--text-on-accent);
-  color: var(--interactive-accent);
-  border-radius: 50%;
-  margin-right: 10px;
-  transition: transform 0.3s ease;
-}
-
-.support-link:hover .icon,
-.social-link:hover .icon {
-  transform: rotate(360deg);
-}
-
-.social-list {
-  list-style-type: none;
-  padding: 0;
-  display: flex;
-  justify-content: center;
-  margin: auto;
-}
-
-.about-support,
-.about-contact {
-  display: block;
+  cursor: pointer;
+  font-size: 14px;
   text-align: center;
-  margin-bottom: 1em;
-  justify-content: center;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
-.about-support,
-.about-social,
-.about-contact {
-  text-align: center;
+.about-button {
+  transition: background-color 0.3s ease;
 }
 
-.support-link,
-.social-link,
-.contact-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 24px;
-  margin: 0 10px;
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  text-decoration: none;
-  border-radius: 4px;
-  transition: background-color 0.3s ease, transform 0.3s ease;
-}
-
-.support-link:hover,
-.social-link:hover,
-.contact-link:hover {
+.about-button:hover {
   background-color: var(--interactive-accent-hover);
-  transform: translateY(-2px);
+}
+
+.supporter-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  margin-bottom: 30px;
+}
+
+.supporter-item {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.supporter-contribution {
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Hall of Fame styles */
+.about-hall-of-fame {
+  text-align: center;
 }
 
 .supporters-description {
@@ -130,15 +111,33 @@
   color: var(--text-muted);
   margin-top: 0;
   margin-bottom: 10px;
+  font-size: 14px;
 }
 
-/* Global styles */
 .ss-h3 {
-  font-size: 24px;
+  font-size: 20px;
   color: var(--text-accent);
   text-transform: uppercase;
-  letter-spacing: 2px;
-  margin-bottom: 5px;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
   position: relative;
   display: inline-block;
+}
+
+/* Media query for smaller screens */
+@media (max-width: 768px) {
+  .about-button-container,
+  .supporter-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .supporter-list {
+    gap: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .supporter-list {
+    grid-template-columns: 1fr;
+  }
 }

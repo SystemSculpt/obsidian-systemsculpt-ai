@@ -1,173 +1,37 @@
-import { Setting, DropdownComponent, ToggleComponent } from 'obsidian';
+import { Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
-import { AIService } from '../../../api/AIService';
 import { Model } from '../../../api/Model';
+import { ModelSelectionModal } from '../views/ModelSelectionModal';
 
 let populateModelOptionsTimeout: NodeJS.Timeout | undefined;
 
-export async function renderModelDropdown(
+export function renderModelSelectionButton(
   containerEl: HTMLElement,
   plugin: BrainModule
-): Promise<void> {
-  let dropdownRef: DropdownComponent | null = null;
-
-  // Available models list setting
-  const modelListSetting = new Setting(containerEl)
-    .setName('Available models')
-    .setDesc('Select which models to include when cycling through models')
-    .setClass('model-list-setting');
-
-  const modelListEl = containerEl.createDiv('model-list');
-  const loadingTextEl = modelListEl.createDiv('info-box');
-  loadingTextEl.textContent = 'Loading available models list...';
-  let dots = 0;
-  const loadingInterval = setInterval(() => {
-    dots = (dots + 1) % 4;
-    loadingTextEl.textContent = `Loading available models list${'.'.repeat(
-      dots
-    )}`;
-  }, 500);
-
-  const infoBoxEl = containerEl.createDiv('info-box');
-  infoBoxEl.createEl('p', {
-    text: "You can hotkey this (I personally hotkey it to CMD+M). This allows you to quickly cycle through whatever models you've enabled (example: use a local model for simple generations, a groq model for speedy smarter ones, and gpt-4o for the big-brain tasks).",
-  });
-
-  // Default model setting with a loading placeholder
-  const defaultModelSetting = new Setting(containerEl)
+): void {
+  const currentModel = plugin.settings.defaultModelId || 'No model selected';
+  new Setting(containerEl)
     .setName('Default model')
     .setDesc('Select the default model for generating tasks')
-    .addDropdown((dropdown: DropdownComponent) => {
-      dropdownRef = dropdown;
-      dropdown.addOption('', 'Loading models...');
-      dropdown.setDisabled(true);
-
-      dropdown.onChange(async (value: string) => {
-        if (value === 'Unknown') {
-          const models = await getAvailableModels(plugin);
-          if (models.length > 0) {
-            plugin.settings.defaultModelId = models[0].id;
-          }
-        } else {
-          plugin.settings.defaultModelId = value;
-        }
-        await plugin.saveSettings();
-        plugin.refreshAIService();
-        updateModelStatusBar(plugin);
-      });
-    });
-
-  // Load available models
-  const models = await getAvailableModels(plugin);
-  clearInterval(loadingInterval);
-  loadingTextEl.remove(); // Remove the loading text once models are loaded
-
-  models.forEach((model: Model) => {
-    const modelItemEl = modelListEl.createDiv('model-item');
-    const modelNameEl = modelItemEl.createSpan('model-name');
-    modelNameEl.textContent = getModelDisplayName(model);
-
-    const isModelDisabled = plugin.settings.disabledModels.includes(model.id);
-    const toggleComponent = new ToggleComponent(modelItemEl)
-      .setValue(!isModelDisabled) // Set the toggle based on whether the model is enabled
-      .onChange(async value => {
-        const index = plugin.settings.disabledModels.indexOf(model.id);
-        if (!value) {
-          // If the toggle is off, the model should be disabled
-          if (index === -1) {
-            plugin.settings.disabledModels.push(model.id); // Add to disabled models if it's disabled
-          }
-        } else {
-          // If the toggle is on, the model should be enabled
-          if (index > -1) {
-            plugin.settings.disabledModels.splice(index, 1); // Remove from disabled models if it's enabled
-          }
-        }
-        await plugin.saveSettings(); // Save settings after updating
-        modelItemEl.toggleClass('disabled', !value);
-        //@ts-ignore
-        await populateModelOptions(plugin, dropdownRef); // Refresh the dropdown options
-      });
-  });
-
-  // Update the default model dropdown with actual options
-  if (dropdownRef) {
-    await populateModelOptions(plugin, dropdownRef as DropdownComponent);
-    (dropdownRef as DropdownComponent).setDisabled(false);
-    updateModelStatusBar(plugin); // Update status bar with the selected model
-  }
-}
-
-async function populateModelOptions(
-  plugin: BrainModule,
-  dropdown: DropdownComponent
-): Promise<void> {
-  const selectEl = dropdown.selectEl;
-  if (selectEl) {
-    selectEl.empty();
-    const loadingOption = selectEl.createEl('option', {
-      text: 'Loading available models list...',
-      value: '',
-    });
-    let loadingText = 'Loading available models list';
-    let dots = 0;
-
-    const loadingInterval = setInterval(() => {
-      dots = (dots + 1) % 4;
-      loadingOption.textContent = `${loadingText}${'.'.repeat(dots)}`;
-    }, 500);
-
-    try {
-      const models = await getAvailableModels(plugin);
-      clearInterval(loadingInterval);
-
-      if (selectEl) {
-        selectEl.empty();
-
-        if (models.length === 0) {
-          selectEl.createEl('option', {
-            text: 'No models available. Check your local endpoint and API keys.',
-            value: '',
-          });
-          updateModelStatusBar(plugin, 'No Models Available');
-        } else {
-          models
-            .filter(model => !plugin.settings.disabledModels.includes(model.id))
-            .forEach((model: Model) => {
-              const option = selectEl.createEl('option', {
-                text: getModelDisplayName(model),
-                value: model.id,
-              });
-            });
-
-          const selectedModelId = await setDefaultModel(plugin, models);
-          dropdown.setValue(selectedModelId);
-          updateModelStatusBar(plugin); // Update status bar with the selected model
-        }
-      }
-    } catch (error) {
-      clearInterval(loadingInterval);
-      console.error('Error loading models:', error);
-      if (selectEl) {
-        selectEl.empty();
-        selectEl.createEl('option', {
-          text: 'Failed - check your local endpoint and API keys.',
-          value: '',
+    .addButton(button => {
+      button
+        .setButtonText(`Choose Default Model (Currently ${currentModel})`)
+        .onClick(() => {
+          new ModelSelectionModal(plugin.plugin.app, plugin).open();
         });
-      }
-      updateModelStatusBar(plugin, 'Model not configured');
-    }
-  }
+    });
 }
 
 async function getAvailableModels(plugin: BrainModule): Promise<Model[]> {
   const includeOpenAI = plugin.settings.showopenAISetting;
   const includeGroq = plugin.settings.showgroqSetting;
   const includeLocal = plugin.settings.showlocalEndpointSetting;
+  const includeOpenRouter = plugin.settings.showOpenRouterSetting;
   return plugin.openAIService.getModels(
     includeOpenAI,
     includeGroq,
-    includeLocal
+    includeLocal,
+    includeOpenRouter
   );
 }
 
@@ -176,9 +40,7 @@ async function setDefaultModel(
   models: Model[]
 ): Promise<string> {
   let selectedModelId = plugin.settings.defaultModelId;
-  const enabledModels = models.filter(
-    model => !plugin.settings.disabledModels.includes(model.id)
-  );
+  const enabledModels = models;
   const selectedModel = enabledModels.find(
     model => model.id === selectedModelId
   );
@@ -214,19 +76,30 @@ function getModelDisplayName(model: Model): string {
 }
 
 function updateModelStatusBar(plugin: BrainModule, text?: string): void {
-  const { showopenAISetting, showgroqSetting, showlocalEndpointSetting } =
-    plugin.settings;
+  const {
+    showopenAISetting,
+    showgroqSetting,
+    showlocalEndpointSetting,
+    showOpenRouterSetting,
+  } = plugin.settings;
   if (plugin.plugin.modelToggleStatusBarItem) {
-    if (!showopenAISetting && !showgroqSetting && !showlocalEndpointSetting) {
-      plugin.plugin.modelToggleStatusBarItem.setText('');
+    if (
+      !showopenAISetting &&
+      !showgroqSetting &&
+      !showlocalEndpointSetting &&
+      !showOpenRouterSetting
+    ) {
+      plugin.plugin.modelToggleStatusBarItem.setText('No Models Detected');
       return;
     }
     if (text) {
       plugin.plugin.modelToggleStatusBarItem.setText(text);
     } else {
-      const modelName = plugin.settings.defaultModelId.split('/').pop();
+      const modelName = plugin.settings.defaultModelId
+        ? plugin.settings.defaultModelId.split('/').pop()
+        : 'No Models Detected';
       plugin.plugin.modelToggleStatusBarItem.setText(
-        modelName ? `Model: ${modelName}` : 'Model not configured'
+        modelName ? `Model: ${modelName}` : 'No Models Detected'
       );
     }
   }

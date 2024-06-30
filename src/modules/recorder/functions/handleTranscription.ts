@@ -10,14 +10,16 @@ export async function handleTranscription(
   arrayBuffer: ArrayBuffer,
   recordingFile: TFile
 ): Promise<void> {
-  // Check if OpenAI API key is valid
-  const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
-  const isValidApiKey = await AIService.validateOpenAIApiKey(
-    currentOpenAIApiKey
-  );
-  if (!isValidApiKey) {
+  const whisperProvider = plugin.settings.whisperProvider;
+  const apiKey =
+    whisperProvider === 'groq'
+      ? plugin.plugin.brainModule.settings.groqAPIKey
+      : plugin.plugin.brainModule.settings.openAIApiKey;
+
+  if (!apiKey) {
     showCustomNotice(
-      'Invalid OpenAI API Key. Please check your Brain settings -> OpenAI API Key.'
+      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
+      5000
     );
     return;
   }
@@ -66,7 +68,18 @@ export async function handleTranscription(
     }
   } catch (error) {
     hideCustomNotice();
-    plugin.handleError(error, 'Error generating transcription');
+    if (error.message.includes('Invalid API Key')) {
+      showCustomNotice(
+        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
+        10000
+      );
+    } else {
+      showCustomNotice(
+        `Error generating transcription: ${error.message}. Please check your internet connection and try again.`,
+        10000
+      );
+    }
+    console.error('Error generating transcription', error);
   }
 
   async function saveTranscriptionToFile(

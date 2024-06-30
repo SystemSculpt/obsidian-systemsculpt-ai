@@ -10,10 +10,11 @@ export interface BrainSettings {
   showMaxTokensOnStatusBar: boolean;
   showDefaultModelOnStatusBar: boolean;
   apiEndpoint: string;
-  disabledModels: string[];
   showopenAISetting: boolean;
   showgroqSetting: boolean;
   showlocalEndpointSetting: boolean;
+  openRouterAPIKey: string;
+  showOpenRouterSetting: boolean;
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -63,8 +64,9 @@ Rules:
   showMaxTokensOnStatusBar: true,
   showDefaultModelOnStatusBar: true,
   apiEndpoint: 'https://api.openai.com',
-  disabledModels: [],
   showopenAISetting: true,
   showgroqSetting: true,
   showlocalEndpointSetting: true,
+  openRouterAPIKey: '',
+  showOpenRouterSetting: true,
 };

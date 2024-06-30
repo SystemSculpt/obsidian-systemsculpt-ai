@@ -2,12 +2,12 @@ import { Setting, TextComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 
-export function renderGroqAPIKeySetting(
+export function renderOpenRouterAPIKeySetting(
   containerEl: HTMLElement,
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
-  if (!plugin.settings.showgroqSetting) {
+  if (!plugin.settings.showOpenRouterSetting) {
     return;
   }
 
@@ -20,26 +20,23 @@ export function renderGroqAPIKeySetting(
   }
 
   new Setting(containerEl)
-    .setName('Groq API key')
-    .setDesc('Enter your Groq API key')
+    .setName('OpenRouter API key')
+    .setDesc('Enter your OpenRouter API key')
     .addText(text => {
       apiKeyTextComponent = text;
       text
         .setPlaceholder('API Key')
-        .setValue(plugin.settings.groqAPIKey)
+        .setValue(plugin.settings.openRouterAPIKey)
         .onChange(async (value: string) => {
-          plugin.settings.groqAPIKey = value;
+          plugin.settings.openRouterAPIKey = value;
           await plugin.saveSettings();
 
-          // Clear the existing timeout if it exists
           if ((apiKeyTextComponent as any).timeoutId) {
             clearTimeout((apiKeyTextComponent as any).timeoutId);
           }
 
-          // Set a new timeout
           (apiKeyTextComponent as any).timeoutId = setTimeout(async () => {
             if (value) {
-              // Check if the new API key is not empty
               await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
             }
             onAfterSave();
@@ -55,7 +52,7 @@ export function renderGroqAPIKeySetting(
       });
 
       validateApiKeyAndUpdateStatus(
-        plugin.settings.groqAPIKey,
+        plugin.settings.openRouterAPIKey,
         apiKeyTextComponent
       );
     })
@@ -63,7 +60,7 @@ export function renderGroqAPIKeySetting(
       button.setIcon('reset');
       button.onClick(async () => {
         await validateApiKeyAndUpdateStatus(
-          plugin.settings.groqAPIKey,
+          plugin.settings.openRouterAPIKey,
           apiKeyTextComponent
         );
         onAfterSave();
@@ -84,8 +81,8 @@ export function renderGroqAPIKeySetting(
     statusTextEl.textContent = 'Validating...';
     statusTextEl.className = 'api-key-status validating';
 
-    if (plugin.settings.showgroqSetting) {
-      const isValid = await AIService.validateGroqAPIKey(apiKey);
+    if (plugin.settings.showOpenRouterSetting) {
+      const isValid = await AIService.validateOpenRouterApiKey(apiKey);
 
       statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
       statusTextEl.classList.remove('validating');
@@ -96,7 +93,6 @@ export function renderGroqAPIKeySetting(
       statusTextEl.classList.remove('validating', 'valid', 'invalid');
     }
 
-    // Update the groqAPIKeyValid flag and API key in the AIService instance
     const aiServiceInstance = AIService.getInstance(
       plugin.settings.openAIApiKey,
       plugin.settings.groqAPIKey,

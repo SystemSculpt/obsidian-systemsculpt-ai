@@ -16,6 +16,7 @@ import { showCustomNotice } from '../../modals';
 import { Model } from '../../api/Model';
 import { stopGeneration } from './functions/stopGeneration';
 import { ChatView, VIEW_TYPE_CHAT } from '../chat/ChatView';
+import { ModelSelectionModal } from './views/ModelSelectionModal';
 
 export class BrainModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -25,9 +26,16 @@ export class BrainModule implements IGenerationModule {
   isGenerating: boolean = false;
   isGenerationCompleted: boolean = false;
 
-  constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
+  constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
-    this.openAIService = openAIService;
+    this.openAIService = AIService.getInstance('', '', '', {
+      openAIApiKey: '',
+      groqAPIKey: '',
+      openRouterAPIKey: '',
+      apiEndpoint: '',
+      localEndpoint: '',
+      temperature: 0.5,
+    });
   }
 
   async load() {
@@ -96,20 +104,18 @@ export class BrainModule implements IGenerationModule {
       this.plugin.modelToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.modelToggleStatusBarItem.addClass('model-toggle-button');
     }
-    if (this.settings.showDefaultModelOnStatusBar) {
-      this.getCurrentModelShortName().then(modelName => {
-        //@ts-ignore
-        this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
-      });
-    } else {
-      this.plugin.modelToggleStatusBarItem.setText('');
-    }
+
+    await this.updateModelStatusBar();
 
     this.plugin.modelToggleStatusBarItem.onClickEvent(async () => {
       await this.cycleModels();
     });
 
     // Add click listener to open the Max Tokens modal
+
+    if (!this.plugin.maxTokensToggleStatusBarItem) {
+      this.plugin.maxTokensToggleStatusBarItem = this.plugin.addStatusBarItem();
+    }
     this.plugin.maxTokensToggleStatusBarItem.onClickEvent(() => {
       new MaxTokensModal(this.plugin.app, this).open();
     });
@@ -137,18 +143,25 @@ export class BrainModule implements IGenerationModule {
     }
   }
 
-  refreshAIService() {
-    // Use getInstance to either get the existing instance or update it
+  async refreshAIService(keepLocalModels = false) {
     this.openAIService = AIService.getInstance(
       this.settings.openAIApiKey,
       this.settings.groqAPIKey,
+      this.settings.openRouterAPIKey,
       {
         openAIApiKey: this.settings.openAIApiKey,
         groqAPIKey: this.settings.groqAPIKey,
-        apiEndpoint: 'https://api.openai.com', // Assuming this is your default API endpoint
+        openRouterAPIKey: this.settings.openRouterAPIKey,
+        apiEndpoint: this.settings.apiEndpoint,
         localEndpoint: this.settings.localEndpoint,
+        temperature: this.settings.temperature,
       }
     );
+
+    if (keepLocalModels) {
+      this.openAIService.clearModelCache();
+      this.updateDefaultModelAfterEndpointToggle();
+    }
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -170,78 +183,41 @@ export class BrainModule implements IGenerationModule {
   }
 
   async cycleModels(): Promise<void> {
-    // if there are no models to cycle through OR all endpoints are disabled, return
-    if (
-      this.settings.disabledModels.length === 0 ||
-      (!this.settings.showopenAISetting &&
-        !this.settings.showgroqSetting &&
-        !this.settings.showlocalEndpointSetting)
-    ) {
-      return;
-    }
-
-    if (
-      this.plugin.modelToggleStatusBarItem &&
-      this.settings.showDefaultModelOnStatusBar
-    ) {
-      this.plugin.modelToggleStatusBarItem.setText('Cycling...');
-    }
-
-    console.log('Cycling models...');
-    const models = await this.openAIService.getModels();
-    const enabledModels = models.filter(
-      model =>
-        !this.settings.disabledModels.includes(model.id) &&
-        ((model.provider === 'openai' && this.settings.showopenAISetting) ||
-          (model.provider === 'groq' && this.settings.showgroqSetting) ||
-          (model.provider === 'local' &&
-            this.settings.showlocalEndpointSetting))
-    );
-
-    let currentIndex = enabledModels.findIndex(
-      model => model.id === this.settings.defaultModelId
-    );
-    let nextIndex = (currentIndex + 1) % enabledModels.length;
-    this.settings.defaultModelId = enabledModels[nextIndex].id;
-    await this.saveSettings();
-
-    if (
-      this.plugin.modelToggleStatusBarItem &&
-      this.settings.showDefaultModelOnStatusBar
-    ) {
-      this.plugin.modelToggleStatusBarItem.setText(
-        `Model: ${enabledModels[nextIndex].name}`
-      );
-    }
+    new ModelSelectionModal(this.plugin.app, this).open();
   }
 
   async getCurrentModelShortName(): Promise<string> {
-    console.log('Getting current model...');
-    if (this.plugin.modelToggleStatusBarItem) {
-      this.plugin.modelToggleStatusBarItem.setText('Model: Loading...');
-    }
-    // if there are no models to cycle through OR all endpoints are disabled, return
     if (
-      this.settings.disabledModels.length === 0 ||
-      (!this.settings.showopenAISetting &&
-        !this.settings.showgroqSetting &&
-        !this.settings.showlocalEndpointSetting)
+      !this.settings.showopenAISetting &&
+      !this.settings.showgroqSetting &&
+      !this.settings.showlocalEndpointSetting &&
+      !this.settings.showOpenRouterSetting
     ) {
-      return 'Loading...';
+      return 'No Models Detected';
     }
-    const models = await this.openAIService.getModels();
+
+    const models = await this.openAIService.getModels(
+      this.settings.showopenAISetting,
+      this.settings.showgroqSetting,
+      this.settings.showlocalEndpointSetting,
+      this.settings.showOpenRouterSetting
+    );
+
+    if (models.length === 0) {
+      return 'No Models Detected';
+    }
+
     let currentModel = models.find(
       model => model.id === this.settings.defaultModelId
     );
 
-    // Ensure currentModel is defined, otherwise set to the first model
     if (!currentModel) {
       if (models.length > 0) {
         currentModel = models[0];
         this.settings.defaultModelId = currentModel.id;
         await this.saveSettings();
       } else {
-        throw new Error('No models available.');
+        return 'No Models Detected';
       }
     }
 
@@ -265,5 +241,74 @@ export class BrainModule implements IGenerationModule {
     const onlineModels = await this.openAIService.getModels(true, true);
     const allModels = [...localModels, ...onlineModels];
     return allModels.find(model => model.id === modelId);
+  }
+
+  async updateDefaultModelAfterEndpointToggle(): Promise<void> {
+    const { showopenAISetting, showgroqSetting, showlocalEndpointSetting } =
+      this.settings;
+
+    if (!showopenAISetting && !showgroqSetting && !showlocalEndpointSetting) {
+      this.settings.defaultModelId = '';
+      await this.saveSettings();
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText('No Models Detected');
+      }
+      return;
+    }
+
+    const models = await this.openAIService.getModels(
+      showopenAISetting,
+      showgroqSetting,
+      showlocalEndpointSetting
+    );
+
+    if (models.length === 0) {
+      this.settings.defaultModelId = '';
+      await this.saveSettings();
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText('No Models Detected');
+      }
+      return;
+    }
+
+    const currentModel = models.find(
+      model => model.id === this.settings.defaultModelId
+    );
+
+    if (!currentModel) {
+      this.settings.defaultModelId = models[0].id;
+      await this.saveSettings();
+    }
+
+    if (this.plugin.modelToggleStatusBarItem) {
+      const modelName = this.settings.defaultModelId
+        ? models.find(m => m.id === this.settings.defaultModelId)?.name ||
+          'Unknown Model'
+        : 'No Models Detected';
+      this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
+    }
+  }
+
+  async updateModelStatusBar() {
+    const { showopenAISetting, showgroqSetting, showlocalEndpointSetting } =
+      this.settings;
+
+    if (!showopenAISetting && !showgroqSetting && !showlocalEndpointSetting) {
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText('No Models Detected');
+      }
+      return;
+    }
+
+    if (this.settings.showDefaultModelOnStatusBar) {
+      const modelName = await this.getCurrentModelShortName();
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText(`Model: ${modelName}`);
+      }
+    } else {
+      if (this.plugin.modelToggleStatusBarItem) {
+        this.plugin.modelToggleStatusBarItem.setText('');
+      }
+    }
   }
 }

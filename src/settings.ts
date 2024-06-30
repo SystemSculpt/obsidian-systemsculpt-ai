@@ -3,16 +3,20 @@ import SystemSculptPlugin from './main';
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
-  apiEndpoint: string; // Existing line
-  groqAPIKey: string; // Add this line for the Groq API key
-  localEndpoint: string; // Existing line
+  apiEndpoint: string;
+  groqAPIKey: string;
+  localEndpoint: string;
+  openRouterAPIKey: string;
+  temperature: number;
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: '',
-  apiEndpoint: 'https://api.openai.com', // Existing default API endpoint
-  groqAPIKey: '', // Set a default value for the Groq API key
-  localEndpoint: 'http://localhost:1234', // Set a default value for the local endpoint
+  apiEndpoint: 'https://api.openai.com',
+  groqAPIKey: '',
+  localEndpoint: 'http://localhost:1234',
+  openRouterAPIKey: '',
+  temperature: 0.5,
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {
@@ -30,13 +34,205 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const linksContainer = this.renderLinksContainer();
     const tabContainer = this.renderTabContainer();
+
+    const searchContainer = containerEl.createDiv('search-container');
+    const searchInput = searchContainer.createEl('input', {
+      type: 'text',
+      placeholder: 'Search settings...',
+      cls: 'settings-search-input',
+    });
+
     const settingsContainer = this.renderSettingsContainer();
 
+    this.addSearchFunctionality(searchInput, settingsContainer);
+
     this.showTab('brain');
+    this.toggleTabContainer(true); // Ensure tab container is visible on initial load
+
+    // Focus on the search input
+    searchInput.focus();
   }
 
-  private renderAnimationContainer(): HTMLElement {
-    return this.containerEl.createDiv('animation-container');
+  private addSearchFunctionality(
+    searchInput: HTMLInputElement,
+    settingsContainer: HTMLElement
+  ): void {
+    const allSettings: {
+      module: string;
+      name: string;
+      desc: string;
+      element: HTMLElement;
+    }[] = [];
+
+    searchInput.addEventListener('input', () => {
+      const searchTerm = searchInput.value.toLowerCase();
+      if (searchTerm === '') {
+        // If the search input is empty, refresh the entire settings display
+        this.display();
+        // Focus on the search input after refreshing
+        setTimeout(() => {
+          const newSearchInput = this.containerEl.querySelector(
+            '.settings-search-input'
+          ) as HTMLInputElement;
+          if (newSearchInput) {
+            newSearchInput.focus();
+          }
+        }, 0);
+      } else {
+        this.filterSettings(searchTerm, allSettings, settingsContainer);
+      }
+    });
+
+    // Populate allSettings array
+    this.populateAllSettings(allSettings, settingsContainer);
+  }
+
+  private populateAllSettings(
+    allSettings: {
+      module: string;
+      name: string;
+      desc: string;
+      element: HTMLElement;
+    }[],
+    settingsContainer: HTMLElement
+  ): void {
+    const modules = [
+      'brain',
+      'tasks',
+      'recorder',
+      'templates',
+      'chat',
+      'about',
+    ];
+
+    modules.forEach(module => {
+      const moduleContainer = settingsContainer.createDiv(`${module}-settings`);
+      moduleContainer.style.display = 'block';
+
+      switch (module) {
+        case 'brain':
+          this.plugin.brainModule.settingsDisplay(moduleContainer);
+          break;
+        case 'tasks':
+          this.plugin.tasksModule.settingsDisplay(moduleContainer);
+          break;
+        case 'recorder':
+          this.plugin.recorderModule.settingsDisplay(moduleContainer);
+          break;
+        case 'templates':
+          this.plugin.templatesModule.settingsDisplay(moduleContainer);
+          break;
+        case 'chat':
+          this.plugin.chatModule.settingsDisplay(moduleContainer);
+          break;
+        case 'about':
+          this.plugin.aboutModule.settingsDisplay(moduleContainer);
+          break;
+      }
+
+      const settingItems = moduleContainer.querySelectorAll('.setting-item');
+      settingItems.forEach(item => {
+        if (
+          item instanceof HTMLElement &&
+          item.classList.contains('setting-item')
+        ) {
+          const nameEl = item.querySelector('.setting-item-name');
+          const descEl = item.querySelector('.setting-item-description');
+          if (nameEl && nameEl.textContent && descEl && descEl.textContent) {
+            const settingName = nameEl.textContent.trim();
+            const settingDesc = descEl.textContent.trim();
+            // Only add the setting if it doesn't include the word "settings"
+            if (!settingName.toLowerCase().includes('settings')) {
+              allSettings.push({
+                module,
+                name: settingName,
+                desc: settingDesc,
+                element: item,
+              });
+            }
+          }
+        }
+      });
+    });
+  }
+
+  private filterSettings(
+    searchTerm: string,
+    allSettings: {
+      module: string;
+      name: string;
+      desc: string;
+      element: HTMLElement;
+    }[],
+    settingsContainer: HTMLElement
+  ): void {
+    const searchTerms = searchTerm.split(/\s+/).filter(term => term.length > 0);
+
+    // Clear all existing settings
+    settingsContainer.empty();
+
+    allSettings.forEach(setting => {
+      const nameMatches = searchTerms.every(term =>
+        setting.name.toLowerCase().includes(term.toLowerCase())
+      );
+      const descMatches = searchTerms.every(term =>
+        setting.desc.toLowerCase().includes(term.toLowerCase())
+      );
+
+      if (nameMatches || descMatches) {
+        // Append the original setting element to the container
+        settingsContainer.appendChild(setting.element);
+
+        const nameEl = setting.element.querySelector('.setting-item-name');
+        const descEl = setting.element.querySelector(
+          '.setting-item-description'
+        );
+
+        if (nameEl) {
+          this.highlightText(nameEl as HTMLElement, setting.name, searchTerms);
+        }
+        if (descEl) {
+          this.highlightText(descEl as HTMLElement, setting.desc, searchTerms);
+        }
+      }
+    });
+
+    // Hide the tab container when searching
+    this.toggleTabContainer(false);
+  }
+
+  private highlightText(
+    element: HTMLElement,
+    text: string,
+    searchTerms: string[]
+  ) {
+    element.empty();
+    if (searchTerms.length === 0) {
+      element.textContent = text;
+      return;
+    }
+
+    const regex = new RegExp(`(${searchTerms.join('|')})`, 'gi');
+    const parts = text.split(regex);
+
+    parts.forEach(part => {
+      const span = element.createEl('span');
+      span.textContent = part;
+      if (
+        searchTerms.some(term =>
+          part.toLowerCase().includes(term.toLowerCase())
+        )
+      ) {
+        span.addClass('fuzzy-match');
+      }
+    });
+  }
+
+  private toggleTabContainer(show: boolean): void {
+    const tabContainer = this.containerEl.querySelector('.tab-container');
+    if (tabContainer instanceof HTMLElement) {
+      tabContainer.style.display = show ? 'flex' : 'none';
+    }
   }
 
   private renderTabContainer(): HTMLElement {
@@ -68,20 +264,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     const linksContainer = this.containerEl.createDiv('links-container');
 
     const links = [
-      { text: 'SystemSculpt.com', url: 'https://systemsculpt.com' },
-      {
-        text: 'Buy Me a Coffee',
-        url: 'https://www.buymeacoffee.com/SystemSculpt',
-      },
-
-      {
-        text: 'Patreon',
-        url: 'https://www.patreon.com/SystemSculpt',
-      },
-      {
-        text: 'X/Twitter',
-        url: 'https://www.twitter.com/SystemSculpt',
-      },
+      { text: 'Website', url: 'https://systemsculpt.com' },
+      { text: 'Patreon', url: 'https://www.patreon.com/SystemSculpt' },
+      { text: 'X/Twitter', url: 'https://www.twitter.com/SystemSculpt' },
+      { text: 'YouTube', url: 'https://www.youtube.com/@systemsculpt' },
+      { text: 'GitHub', url: 'https://github.com/systemsculpt' },
     ];
 
     links.forEach(link => {
@@ -103,53 +290,33 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   showTab(tabId: string): void {
     const tabContainer = this.containerEl.querySelector('.tab-container');
-    if (!tabContainer) return; // Add this line to handle the null case
+    if (!tabContainer) return;
 
     const tabs = tabContainer.childNodes;
     const settingsContainer = this.containerEl.querySelector(
       '.settings-container'
-    );
-    if (!settingsContainer) return; // It's also good to check this
+    ) as HTMLElement;
+    if (!settingsContainer) return;
 
     this.setActiveTab(tabs, tabId);
-    settingsContainer.empty();
 
-    switch (tabId) {
-      case 'brain':
-        this.plugin.brainModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
-      case 'tasks':
-        this.plugin.tasksModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
-      case 'chat':
-        this.plugin.chatModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
-      case 'templates':
-        this.plugin.templatesModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
-      case 'recorder':
-        this.plugin.recorderModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
-      // case 'data':
-      //   this.plugin.dataModule.settingsDisplay(
-      //     settingsContainer as HTMLElement
-      //   );
-      //   break;
-      case 'about':
-        this.plugin.aboutModule.settingsDisplay(
-          settingsContainer as HTMLElement
-        );
-        break;
+    // Hide all module containers
+    const moduleContainers = settingsContainer.querySelectorAll(
+      'div[class$="-settings"]'
+    );
+    moduleContainers.forEach(container => {
+      (container as HTMLElement).style.display = 'none';
+    });
+
+    // Show the selected module container
+    const selectedContainer = settingsContainer.querySelector(
+      `.${tabId}-settings`
+    ) as HTMLElement;
+    if (selectedContainer) {
+      selectedContainer.style.display = 'block';
+      if (tabId === 'about') {
+        this.plugin.aboutModule.settingsDisplay(selectedContainer);
+      }
     }
   }
 
