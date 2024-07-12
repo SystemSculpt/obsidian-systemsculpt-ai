@@ -1,5 +1,6 @@
 import { BrainModule } from '../BrainModule';
 import { showCustomNotice } from '../../../modals';
+import { logger } from '../../../utils/logger';
 
 export async function checkForUpdate(plugin: BrainModule): Promise<void> {
   try {
@@ -20,6 +21,6 @@ export async function checkForUpdate(plugin: BrainModule): Promise<void> {
       );
     }
   } catch (error) {
-    console.error('Error checking for updates:', error);
+    logger.error('Error checking for updates:', error);
   }
 }

@@ -16,6 +16,7 @@ import { getTemplateFiles } from './functions/getTemplateFiles';
 import { searchAndOrderTemplates } from './functions/searchAndOrderTemplates';
 import { showCustomNotice, hideCustomNotice } from '../../modals';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
+import { logger } from '../../utils/logger';
 
 export class TemplatesSuggest extends EditorSuggest<string> {
   plugin: TemplatesModule;
@@ -97,13 +98,12 @@ export class TemplatesSuggest extends EditorSuggest<string> {
     value: string,
     evt: MouseEvent | KeyboardEvent
   ): Promise<void> {
-    // Create a new abort controller for the template generation
     this.plugin.abortController = new AbortController();
     const signal = this.plugin.abortController.signal;
 
     if (value === 'Blank Template') {
       new BlankTemplateModal(this.plugin).open();
-      this.plugin.isGenerationCompleted = false; // Reset generation completion flag
+      this.plugin.isGenerationCompleted = false;
     } else {
       const templateFiles = await getTemplateFiles(
         this.app,
@@ -122,40 +122,33 @@ export class TemplatesSuggest extends EditorSuggest<string> {
 
         let modelInstance;
 
-        if (model === 'local') {
-          const localModels = await this.plugin.openAIService.getModels(
-            false,
-            false
+        try {
+          const models = await this.plugin.openAIService.getModels(
+            this.plugin.plugin.brainModule.settings.showopenAISetting,
+            this.plugin.plugin.brainModule.settings.showgroqSetting,
+            this.plugin.plugin.brainModule.settings.showlocalEndpointSetting,
+            this.plugin.plugin.brainModule.settings.showopenRouterSetting
           );
-          if (localModels.length > 0) {
-            modelInstance = localModels.find(
-              m =>
-                m.id === this.plugin.plugin.brainModule.settings.defaultModelId
+
+          modelInstance = models.find(m => m.id === model);
+
+          if (!modelInstance && models.length > 0) {
+            modelInstance = models[0];
+            logger.warn(
+              `Model "${model}" not found. Using ${modelInstance.id} instead.`
             );
-            if (!modelInstance) {
-              modelInstance = localModels[0];
-            }
-          } else {
-            showCustomNotice(
-              'No local models found; please check your model settings.'
-            );
-            return;
           }
-        } else {
-          try {
-            modelInstance = await this.plugin.openAIService.getModelById(model);
-          } catch (error) {
-            console.error('Error fetching model:', error);
-            showCustomNotice(
-              `The model "${model}" is not available. Please check your template settings.`
-            );
-            return;
-          }
+        } catch (error) {
+          logger.error('Error fetching models:', error);
+          showCustomNotice(
+            'Failed to fetch models. Please check your settings and try again.'
+          );
+          return;
         }
 
         if (!modelInstance) {
           showCustomNotice(
-            `The model "${model}" is not available. Please check your template settings.`
+            'No models available. Please check your model settings and ensure at least one provider is enabled.'
           );
           return;
         }
@@ -167,21 +160,15 @@ export class TemplatesSuggest extends EditorSuggest<string> {
           const line = cursor.line;
           const ch = cursor.ch;
 
-          // Remove the trigger and user input before sending the final note state
           editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
 
           const noteContent = editor.getRange({ line: 0, ch: 0 }, { line, ch });
 
-          // Remove only the initial frontmatter from the prompt
           const parts = prompt.split('---');
-          let promptWithoutFrontmatter;
-          if (parts.length > 2) {
-            // Rejoin all parts beyond the first frontmatter block
-            promptWithoutFrontmatter = parts.slice(2).join('---').trim();
-          } else {
-            // If no frontmatter is detected, use the original prompt
-            promptWithoutFrontmatter = prompt.trim();
-          }
+          let promptWithoutFrontmatter =
+            parts.length > 2
+              ? parts.slice(2).join('---').trim()
+              : prompt.trim();
 
           showCustomNotice('Generating...', 5000, true);
 
@@ -193,7 +180,7 @@ export class TemplatesSuggest extends EditorSuggest<string> {
               maxTokens,
               (chunk: string) => {
                 if (signal.aborted) {
-                  console.log('Request was aborted successfully.');
+                  logger.log('Request was aborted successfully.');
                   return;
                 }
                 handleStreamingResponse(chunk, editor, this.plugin);
@@ -202,9 +189,9 @@ export class TemplatesSuggest extends EditorSuggest<string> {
             );
           } catch (error) {
             if (error.name === 'AbortError') {
-              console.log('Request was aborted as expected.');
+              logger.log('Request was aborted as expected.');
             } else {
-              console.error('Error during streaming chat completion:', error);
+              logger.error('Error during streaming chat completion:', error);
             }
           } finally {
             hideCustomNotice();

@@ -16,12 +16,7 @@ import { AIService } from './api/AIService';
 import { registerMp3ContextMenu } from './events';
 import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
 import { listAllSettings } from './utils/listAllSettings';
-
-const development = false;
-
-if (!development) {
-  console.log = function () {}; // Disable console.log in non-development environments
-}
+import { logger } from './utils/logger';
 
 export default class SystemSculptPlugin extends Plugin {
   settings: SystemSculptSettings;
@@ -55,13 +50,24 @@ export default class SystemSculptPlugin extends Plugin {
     this.chatModule = new ChatModule(this);
 
     // Load modules
-    await this.brainModule.load();
-    this.tasksModule.load();
-    this.templatesModule.load();
-    this.dataModule.load();
-    this.recorderModule.load();
-    this.aboutModule.load();
-    await this.chatModule.load();
+    const modules = [
+      { name: 'Brain', load: () => this.brainModule.load() },
+      { name: 'Tasks', load: () => this.tasksModule.load() },
+      { name: 'Templates', load: () => this.templatesModule.load() },
+      { name: 'Data', load: () => this.dataModule.load() },
+      { name: 'Recorder', load: () => this.recorderModule.load() },
+      { name: 'About', load: () => this.aboutModule.load() },
+      { name: 'Chat', load: () => this.chatModule.load() },
+    ];
+
+    for (const module of modules) {
+      try {
+        await module.load();
+        logger.log(`${module.name} module loaded successfully.`);
+      } catch (error) {
+        logger.error(`Failed to load ${module.name} module:`, error);
+      }
+    }
 
     this.settingsTab = new SystemSculptSettingTab(this.app, this);
     this.addSettingTab(this.settingsTab);
@@ -108,7 +114,7 @@ export default class SystemSculptPlugin extends Plugin {
         const settingsString = allSettings.join('\n');
         new Notice('All settings copied to clipboard');
         navigator.clipboard.writeText(settingsString);
-        console.log('All settings:', allSettings);
+        logger.log('All settings:', allSettings);
       },
     });
   }

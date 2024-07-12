@@ -2,6 +2,7 @@ import { BrainModule } from '../BrainModule';
 import { MarkdownView, Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
+import { logger } from '../../../utils/logger';
 
 export async function generateContinuation(
   plugin: BrainModule,
@@ -26,30 +27,28 @@ export async function generateContinuation(
     let model = await plugin.getModelById(modelId);
 
     if (!model) {
-      console.log('model not found, trying to find a local/ online model...');
-      const localModels = await plugin.openAIService.getModels(false);
-      const onlineModels = await plugin.openAIService.getModels(true);
-      const firstLocalModel = localModels[0];
-      if (firstLocalModel) {
-        plugin.settings.defaultModelId = firstLocalModel.id;
-        await plugin.saveSettings();
-        updateModelStatusBar(plugin, firstLocalModel.name);
-        model = firstLocalModel;
-        // if there's no local model, use the first online model
-      } else if (onlineModels.length > 0) {
-        model = onlineModels[0];
+      logger.log('Model not found, trying to find an available model...');
+      const models = await plugin.openAIService.getModels(
+        plugin.settings.showopenAISetting,
+        plugin.settings.showgroqSetting,
+        plugin.settings.showlocalEndpointSetting,
+        plugin.settings.showopenRouterSetting
+      );
+
+      if (models.length > 0) {
+        model = models[0];
         plugin.settings.defaultModelId = model.id;
         await plugin.saveSettings();
         updateModelStatusBar(plugin, model.name);
       } else {
         showCustomNotice(
-          'No local or online models available. Please check your model settings.'
+          'No models available. Please check your model settings and ensure at least one provider is enabled.'
         );
         return;
       }
     }
 
-    console.log('model found: ', model);
+    logger.log('Model found: ', model);
 
     await plugin.openAIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,

@@ -41,10 +41,6 @@ async function handleSendMessage(
     chatView.showLoading.bind(chatView),
     chatView.hideLoading.bind(chatView)
   );
-
-  if (isFirstMessage) {
-    await chatView.handleFirstMessage();
-  }
 }
 
 function handleInputKeydown(

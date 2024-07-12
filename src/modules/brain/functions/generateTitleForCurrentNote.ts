@@ -2,6 +2,7 @@ import { BrainModule } from '../BrainModule';
 import { MarkdownView, TFile } from 'obsidian';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { ChatView } from '../../chat/ChatView';
+import { logger } from '../../../utils/logger';
 
 export async function generateTitleForCurrentNote(
   plugin: BrainModule
@@ -19,7 +20,7 @@ export async function generateTitleForCurrentNote(
   if (activeView) {
     const currentFile = activeView.file;
     if (!currentFile) {
-      console.error('No file is currently active.');
+      logger.error('No file is currently active.');
       return;
     }
     const noteContent = await plugin.plugin.app.vault.read(currentFile);
@@ -31,7 +32,7 @@ export async function generateTitleForCurrentNote(
       await renameCurrentNote(plugin, currentFile, generatedTitle);
       showCustomNotice('Title generated successfully!');
     } catch (error) {
-      console.error('Error generating title:', error);
+      logger.error('Error generating title:', error);
       showCustomNotice(`Title generation failed: ${error.message}`);
       throw new Error(
         'Failed to generate title. Please check your API key and try again.'
@@ -48,7 +49,7 @@ async function renameCurrentNote(
   newTitle: string
 ): Promise<void> {
   if (!currentFile.parent) {
-    console.error('The current file does not have a parent directory.');
+    logger.error('The current file does not have a parent directory.');
     return;
   }
   const newPath = `${currentFile.parent.path}/${newTitle}.md`;

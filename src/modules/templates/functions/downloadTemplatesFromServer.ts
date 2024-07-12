@@ -8,6 +8,7 @@ import {
   TFolder,
 } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
+import { logger } from '../../../utils/logger';
 
 async function createFolderIfNotExists(
   vault: any,
@@ -50,7 +51,7 @@ export async function downloadTemplatesFromServer(
   try {
     const licenseKey = plugin.settings.licenseKey.trim();
     if (!licenseKey) {
-      console.log(
+      logger.log(
         'License key is empty. Skipping template version check and update.'
       );
       return;
@@ -85,7 +86,7 @@ export async function downloadTemplatesFromServer(
       }
     }
   } catch (error) {
-    console.error('Error downloading templates:', error);
+    logger.error('Error downloading templates:', error);
     showCustomNotice(
       "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again."
     );

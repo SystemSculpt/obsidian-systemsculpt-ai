@@ -42,6 +42,15 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       cls: 'settings-search-input',
     });
 
+    const alphaRibbon = containerEl.createDiv('alpha-ribbon');
+    alphaRibbon.createSpan({ text: 'SystemSculpt AI is currently in alpha. ' });
+    const linkEl = alphaRibbon.createEl('a', {
+      text: 'Click here to report a bug or request a feature.',
+      href: 'https://systemsculpt.com/submit-issue',
+    });
+    linkEl.setAttr('target', '_blank');
+    linkEl.setAttr('rel', 'noopener noreferrer');
+
     const settingsContainer = this.renderSettingsContainer();
 
     this.addSearchFunctionality(searchInput, settingsContainer);
@@ -96,57 +105,25 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }[],
     settingsContainer: HTMLElement
   ): void {
-    const modules = [
-      'brain',
-      'tasks',
-      'recorder',
-      'templates',
-      'chat',
-      'about',
-    ];
+    const modules = ['brain', 'tasks', 'recorder', 'templates', 'chat', 'about'];
 
     modules.forEach(module => {
       const moduleContainer = settingsContainer.createDiv(`${module}-settings`);
       moduleContainer.style.display = 'block';
 
-      switch (module) {
-        case 'brain':
-          this.plugin.brainModule.settingsDisplay(moduleContainer);
-          break;
-        case 'tasks':
-          this.plugin.tasksModule.settingsDisplay(moduleContainer);
-          break;
-        case 'recorder':
-          this.plugin.recorderModule.settingsDisplay(moduleContainer);
-          break;
-        case 'templates':
-          this.plugin.templatesModule.settingsDisplay(moduleContainer);
-          break;
-        case 'chat':
-          this.plugin.chatModule.settingsDisplay(moduleContainer);
-          break;
-        case 'about':
-          this.plugin.aboutModule.settingsDisplay(moduleContainer);
-          break;
-      }
+      this.plugin[`${module}Module`].settingsDisplay(moduleContainer);
 
-      const settingItems = moduleContainer.querySelectorAll('.setting-item');
-      settingItems.forEach(item => {
-        if (
-          item instanceof HTMLElement &&
-          item.classList.contains('setting-item')
-        ) {
+      moduleContainer.querySelectorAll('.setting-item').forEach(item => {
+        if (item instanceof HTMLElement) {
           const nameEl = item.querySelector('.setting-item-name');
           const descEl = item.querySelector('.setting-item-description');
-          if (nameEl && nameEl.textContent && descEl && descEl.textContent) {
+          if (nameEl?.textContent && descEl?.textContent) {
             const settingName = nameEl.textContent.trim();
-            const settingDesc = descEl.textContent.trim();
-            // Only add the setting if it doesn't include the word "settings"
             if (!settingName.toLowerCase().includes('settings')) {
               allSettings.push({
                 module,
                 name: settingName,
-                desc: settingDesc,
+                desc: descEl.textContent.trim(),
                 element: item,
               });
             }

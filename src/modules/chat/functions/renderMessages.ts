@@ -21,8 +21,8 @@ export function renderMessages(
         <button class="delete-button" title="Delete Message">🗑️</button>
       </div>
       ${
-        message.role.startsWith('ai-')
-          ? `<span class="model-name">${message.role.slice(3)}</span>`
+        message.role.startsWith('ai')
+          ? `<span class="model-name">${message.model || 'AI'}</span>`
           : ''
       }
     `;
@@ -50,6 +50,20 @@ export function renderMessages(
         );
       });
     }
+  });
+
+  // Add click event listener for code blocks
+  const codeBlocks = messagesContainer.querySelectorAll('pre');
+  codeBlocks.forEach(codeBlock => {
+    codeBlock.addEventListener('click', () => {
+      const code = codeBlock.textContent || '';
+      navigator.clipboard.writeText(code).then(() => {
+        codeBlock.classList.add('copied');
+        setTimeout(() => {
+          codeBlock.classList.remove('copied');
+        }, 2000);
+      });
+    });
   });
 
   messagesContainer.scrollTop = messagesContainer.scrollHeight;

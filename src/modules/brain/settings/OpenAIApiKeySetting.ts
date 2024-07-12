@@ -7,6 +7,18 @@ export function renderOpenAIApiKeySetting(
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
+  let debounceTimer: NodeJS.Timeout | null = null;
+  const debouncedSaveAndReinitialize = (value: string) => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      plugin.settings.openAIApiKey = value;
+      await plugin.saveSettings();
+      await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
+      await plugin.reInitiateAIService();
+      console.log('AI Service has been reinitialized');
+      onAfterSave();
+    }, 3000);
+  };
   if (!plugin.settings.showopenAISetting) {
     return;
   }
@@ -27,23 +39,8 @@ export function renderOpenAIApiKeySetting(
       text
         .setPlaceholder('API Key')
         .setValue(plugin.settings.openAIApiKey)
-        .onChange(async (value: string) => {
-          plugin.settings.openAIApiKey = value;
-          await plugin.saveSettings();
-
-          // Clear the existing timeout if it exists
-          if ((apiKeyTextComponent as any).timeoutId) {
-            clearTimeout((apiKeyTextComponent as any).timeoutId);
-          }
-
-          // Set a new timeout
-          (apiKeyTextComponent as any).timeoutId = setTimeout(async () => {
-            if (value) {
-              // Check if the new API key is not empty
-              await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
-            }
-            onAfterSave();
-          }, 2000);
+        .onChange((value: string) => {
+          debouncedSaveAndReinitialize(value);
         });
 
       text.inputEl.type = 'password';
@@ -66,9 +63,11 @@ export function renderOpenAIApiKeySetting(
           plugin.settings.openAIApiKey,
           apiKeyTextComponent
         );
+        await plugin.reInitiateAIService();
+        console.log('AI Service has been reinitialized');
         onAfterSave();
       });
-      button.setTooltip('Re-check API Key');
+      button.setTooltip('Re-check API Key and Reinitialize AI Service');
     });
 
   async function validateApiKeyAndUpdateStatus(
@@ -95,20 +94,5 @@ export function renderOpenAIApiKeySetting(
       statusTextEl.textContent = 'Disabled';
       statusTextEl.classList.remove('validating', 'valid', 'invalid');
     }
-
-    // Update the openAIApiKeyValid flag and API key in the AIService instance
-    const aiServiceInstance = AIService.getInstance(
-      plugin.settings.openAIApiKey,
-      plugin.settings.groqAPIKey,
-      plugin.settings.openRouterAPIKey,
-      {
-        openAIApiKey: plugin.settings.openAIApiKey,
-        groqAPIKey: plugin.settings.groqAPIKey,
-        openRouterAPIKey: plugin.settings.openRouterAPIKey,
-        apiEndpoint: plugin.settings.apiEndpoint,
-        localEndpoint: plugin.settings.localEndpoint,
-        temperature: plugin.settings.temperature,
-      }
-    );
   }
 }

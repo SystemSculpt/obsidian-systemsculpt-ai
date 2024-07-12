@@ -1,10 +1,11 @@
 import { Modal, App } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { Model } from '../../../api/Model';
+import { setIcon } from 'obsidian';
 
 export class ModelSelectionModal extends Modal {
   private plugin: BrainModule;
-  private models: Model[] | null;
+  private models: Model[] = [];
   private searchInput: HTMLInputElement;
   private modelListContainer: HTMLElement;
   private selectedModelIndex: number = -1;
@@ -12,15 +13,25 @@ export class ModelSelectionModal extends Modal {
   constructor(app: App, plugin: BrainModule) {
     super(app);
     this.plugin = plugin;
-    this.models = null;
+    this.models = [];
   }
 
-  onOpen() {
+  async onOpen() {
+    if (this.plugin.isReinitializing) {
+      this.contentEl.setText('AI service is reinitializing. Please try again later.');
+      setTimeout(() => this.close(), 2000);
+      return;
+    }
+    super.onOpen();
+
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass('model-selection-modal');
+    contentEl.style.maxHeight = '500px';
+    contentEl.style.overflow = 'auto';
+    contentEl.style.marginTop = '20px';
     contentEl.createEl('h2', { text: 'Select Model' });
 
-    // Create search input
     this.searchInput = contentEl.createEl('input', {
       type: 'text',
       placeholder: 'Search models...',
@@ -30,12 +41,10 @@ export class ModelSelectionModal extends Modal {
     this.modelListContainer = contentEl.createEl('div', { cls: 'modal-list' });
     this.renderLoadingState(this.modelListContainer);
 
-    this.loadModels().then(() => {
-      this.renderModelList();
-      this.setupEventListeners();
-    });
+    await this.loadModels();
+    this.renderModelList();
+    this.setupEventListeners();
 
-    // Set focus to the search input
     setTimeout(() => this.searchInput.focus(), 0);
   }
 
@@ -46,80 +55,130 @@ export class ModelSelectionModal extends Modal {
   }
 
   private async loadModels() {
-    const models = await this.plugin.openAIService.getModels();
-    this.models = models.filter(
-      model =>
-        (model.provider === 'openai' &&
-          this.plugin.settings.showopenAISetting) ||
-        (model.provider === 'groq' && this.plugin.settings.showgroqSetting) ||
-        (model.provider === 'local' &&
-          this.plugin.settings.showlocalEndpointSetting) ||
-        (model.provider === 'openRouter' &&
-          this.plugin.settings.showOpenRouterSetting)
+    const models = await this.plugin.openAIService.getModels(
+      this.plugin.settings.showopenAISetting,
+      this.plugin.settings.showgroqSetting,
+      this.plugin.settings.showlocalEndpointSetting,
+      this.plugin.settings.showopenRouterSetting
     );
+    this.models = models;
+
+    const favoritedModels = new Set(this.plugin.settings.favoritedModels || []);
+    this.models.forEach(model => {
+      model.favorite = favoritedModels.has(model.id);
+    });
   }
 
   private renderModelList(filter: string = '') {
     this.modelListContainer.empty();
     if (!this.models || this.models.length === 0) {
-      this.modelListContainer.createEl('div', {
-        text: 'No enabled models available.',
-      });
+      this.modelListContainer.createEl('div', { text: 'No enabled models available.' });
       return;
     }
 
-    const providers = ['local', 'openai', 'groq', 'openRouter'];
-    const searchTerms = filter
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(term => term.length > 0);
-
-    providers.forEach(provider => {
-      // @ts-ignore
-      const providerModels = this.models.filter(
-        model =>
-          model.provider === provider &&
-          (searchTerms.length === 0 ||
-            searchTerms.every(
-              term =>
-                model.name.toLowerCase().includes(term) ||
-                model.id.toLowerCase().includes(term)
-            ))
+    const searchTerms = filter.toLowerCase().split(/\s+/).filter(Boolean);
+    const filterModel = (model: Model) =>
+      !searchTerms.length || searchTerms.every(term =>
+        model.name.toLowerCase().includes(term) || model.id.toLowerCase().includes(term)
       );
-      if (providerModels.length > 0) {
-        this.modelListContainer.createEl('h3', {
-          text: this.getProviderName(provider),
-        });
-        const groupContainer = this.modelListContainer.createEl('div', {
-          cls: 'modal-group',
-        });
 
-        providerModels.forEach(model => {
-          const modelItem = groupContainer.createEl('div', {
-            cls: 'modal-item',
-          });
-          const nameSpan = modelItem.createEl('span');
-          this.highlightText(nameSpan, model.name, searchTerms);
-          modelItem.addEventListener('click', () => this.selectModel(model));
-          modelItem.dataset.modelId = model.id;
-        });
+    const renderGroup = (groupName: string, models: Model[]) => {
+      if (models.length) {
+        this.renderModelGroup(groupName, models, searchTerms);
       }
-    });
+    };
 
-    if (this.modelListContainer.childElementCount === 0) {
+    renderGroup('Favorited', this.models.filter(m => m.favorite && filterModel(m)));
+
+    ['local', 'openai', 'groq', 'openRouter'].forEach(provider =>
+      renderGroup(
+        this.getProviderName(provider),
+        this.models.filter(m => m.provider === provider && filterModel(m))
+      )
+    );
+
+    if (!this.modelListContainer.childElementCount) {
       this.modelListContainer.createEl('div', {
         text: 'No models match your search.',
         cls: 'no-results-message',
       });
     }
 
-    // Set the selectedModelIndex to 0 (first item) if there are any results
-    this.selectedModelIndex = this.modelListContainer.querySelector(
-      '.modal-item'
-    )
-      ? 0
-      : -1;
+    this.selectedModelIndex = filter ? (this.modelListContainer.querySelector('.modal-item') ? 0 : -1) : -1;
     this.updateSelectedModel();
+  }
+
+  private renderModelGroup(
+    groupName: string,
+    models: Model[],
+    searchTerms: string[]
+  ) {
+    this.modelListContainer.createEl('h3', { text: groupName });
+    const groupContainer = this.modelListContainer.createEl('div', {
+      cls: 'modal-group',
+    });
+
+    models.forEach(model => {
+      const modelItem = groupContainer.createEl('div', { cls: 'modal-item' });
+      const nameSpan = modelItem.createEl('span', { cls: 'model-name' });
+      this.highlightText(nameSpan, model.name, searchTerms);
+
+      const contextLengthSpan = modelItem.createEl('span', {
+        cls: 'model-context-length',
+      });
+      contextLengthSpan.textContent = model.contextLength
+        ? `Context: ${this.formatContextLength(model.contextLength)}`
+        : 'Context: Unknown';
+
+      const starIcon = modelItem.createEl('span', {
+        cls: 'model-favorite-star',
+      });
+      this.updateFavoriteIcon(starIcon, model.favorite ?? false);
+
+      starIcon.addEventListener('click', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.toggleFavorite(model);
+      });
+
+      // Add hover effect for both favorited and unfavorited states
+      starIcon.addEventListener('mouseenter', () => {
+        if (model.favorite) {
+          setIcon(starIcon, 'star-off');
+        } else {
+          setIcon(starIcon, 'star');
+          starIcon.style.fontVariationSettings = "'FILL' 1";
+        }
+      });
+
+      starIcon.addEventListener('mouseleave', () => {
+        this.updateFavoriteIcon(starIcon, model.favorite ?? false);
+      });
+
+      modelItem.addEventListener('click', () => this.selectModel(model));
+      modelItem.dataset.modelId = model.id;
+    });
+  }
+
+  private updateFavoriteIcon(element: HTMLElement, isFavorite: boolean) {
+    if (isFavorite) {
+      setIcon(element, 'star');
+      element.classList.add('is-favorite');
+      element.style.fontVariationSettings = "'FILL' 1";
+    } else {
+      setIcon(element, 'star');
+      element.classList.remove('is-favorite');
+      element.style.fontVariationSettings = "'FILL' 0";
+    }
+  }
+
+  private toggleFavorite(model: Model) {
+    model.favorite = !model.favorite;
+    this.plugin.settings.favoritedModels = this.models
+      .filter(m => m.favorite)
+      .map(m => m.id);
+    this.plugin.saveSettings();
+    this.renderModelList(this.searchInput.value);
   }
 
   private highlightText(
@@ -157,6 +216,13 @@ export class ModelSelectionModal extends Modal {
       default:
         return provider.charAt(0).toUpperCase() + provider.slice(1);
     }
+  }
+
+  private formatContextLength(contextLength: number): string {
+    if (contextLength >= 1000) {
+      return `${(contextLength / 1000).toFixed(0)}K`;
+    }
+    return contextLength.toString();
   }
 
   private setupEventListeners() {
@@ -217,6 +283,11 @@ export class ModelSelectionModal extends Modal {
         item.removeClass('selected');
       }
     });
+
+    // Add this condition
+    if (this.selectedModelIndex === -1) {
+      this.modelListContainer.scrollTop = 0;
+    }
   }
 
   private async selectModel(model: Model) {
@@ -228,7 +299,7 @@ export class ModelSelectionModal extends Modal {
         `Model: ${model.name}`
       );
     }
-    this.plugin.plugin.settingsTab.display(); // Added this line
+    this.plugin.plugin.settingsTab.display();
     this.close();
   }
 

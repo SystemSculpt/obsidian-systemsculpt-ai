@@ -1,7 +1,11 @@
+export type AIProvider = 'openai' | 'groq' | 'openRouter' | 'local';
+
 export interface Model {
   id: string;
   name: string;
   description?: string;
   isLocal?: boolean;
-  provider: 'openai' | 'groq' | 'openRouter' | 'local';
+  provider: AIProvider;
+  contextLength?: number;
+  favorite?: boolean;
 }

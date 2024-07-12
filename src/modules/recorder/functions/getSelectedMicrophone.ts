@@ -1,4 +1,5 @@
 import { RecorderModule } from '../RecorderModule';
+import { logger } from '../../../utils/logger';
 
 export async function getSelectedMicrophone(
   plugin: RecorderModule
@@ -9,7 +10,7 @@ export async function getSelectedMicrophone(
       microphone.deviceId === plugin.settings.selectedMicrophone || 'default'
   );
   if (!selectedMic) {
-    console.warn('Selected microphone not found, using default');
+    logger.warn('Selected microphone not found, using default');
     plugin.settings.selectedMicrophone = 'default';
     await plugin.saveSettings();
   }

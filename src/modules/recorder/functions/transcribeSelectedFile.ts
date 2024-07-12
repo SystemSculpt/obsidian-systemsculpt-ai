@@ -1,12 +1,13 @@
 import { RecorderModule } from '../RecorderModule';
 import { TFile } from 'obsidian';
+import { logger } from '../../../utils/logger';
 
 export async function transcribeSelectedFile(
   plugin: RecorderModule,
   file: TFile
 ): Promise<void> {
   if (file.extension !== 'mp3') {
-    console.error('Selected file is not an .mp3 file');
+    logger.error('Selected file is not an .mp3 file');
     return;
   }
 

@@ -1,3 +1,5 @@
+import { DEFAULT_CHATS_PATH, DEFAULT_SYSTEM_PROMPT } from '../utils';
+
 export interface ChatSettings {
   chatsPath: string;
   systemPrompt: string;
@@ -6,9 +8,8 @@ export interface ChatSettings {
 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
-  chatsPath: 'SystemSculpt/Chats',
-  systemPrompt:
-    "You are the universe's most intelligent assistant. Your responses are succinct, problem solving, and concise. You don't limit yourself to something as unimportant as a simple AI; you're much more than that - an entity built on human history, ecompassing knowledge from all depths of what has been created thus far.",
+  chatsPath: DEFAULT_CHATS_PATH,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
   showChatButtonOnStatusBar: true,
   lastOpenedChatPath: null,
 };

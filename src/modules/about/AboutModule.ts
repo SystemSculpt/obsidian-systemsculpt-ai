@@ -37,14 +37,26 @@ class AboutSettingTab extends PluginSettingTab {
   private renderGeneral(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('About SystemSculpt').setHeading();
 
-    containerEl.createEl('p', {
-      text: 'By sponsoring or donating, you allow me to put more time into this and other Obsidian tools to benefit your productivity.',
-      cls: 'about-description',
-    });
+    // Documentation Section
+    const docContainer = containerEl.createDiv('about-doc-container');
+    docContainer.createEl('h3', { text: 'Documentation & Resources', cls: 'about-section-header' });
 
-    const buttonContainer = containerEl.createDiv('about-button-container');
+    const docButtons = [
+      { name: 'Complete Documentation', url: 'https://www.systemsculpt.com/docs' },
+      { name: 'Quick Start Guide', url: 'https://www.systemsculpt.com/docs/getting-started' },
+      { name: 'Features Overview', url: 'https://www.systemsculpt.com/docs/features' },
+      { name: 'Troubleshooting Guide', url: 'https://www.systemsculpt.com/docs/troubleshooting' },
+      { name: 'FAQ', url: 'https://www.systemsculpt.com/docs/faq' },
+      { name: 'Submit Issue', url: 'https://systemsculpt.com/submit-issue' },
+    ];
 
-    const buttons = [
+    this.createButtonGroup(docContainer, docButtons, 'about-doc-button');
+
+    // Personal Links Section
+    const personalContainer = containerEl.createDiv('about-personal-container');
+    personalContainer.createEl('h3', { text: 'Connect & Support', cls: 'about-section-header' });
+
+    const personalButtons = [
       { name: 'Patreon', url: 'https://www.patreon.com/SystemSculpt' },
       { name: 'YouTube', url: 'https://www.youtube.com/@systemsculpt' },
       { name: 'X (Twitter)', url: 'https://x.com/systemsculpt' },
@@ -53,10 +65,15 @@ class AboutSettingTab extends PluginSettingTab {
       { name: 'Email', url: 'mailto:systemsculpt@gmail.com' },
     ];
 
+    this.createButtonGroup(personalContainer, personalButtons, 'about-button');
+  }
+
+  private createButtonGroup(container: HTMLElement, buttons: { name: string; url: string }[], buttonClass: string): void {
+    const buttonContainer = container.createDiv('about-button-container');
     buttons.forEach(button => {
       const buttonEl = buttonContainer.createEl('button', {
         text: button.name,
-        cls: 'about-button',
+        cls: buttonClass,
       });
       buttonEl.addEventListener('click', () => {
         window.open(button.url, '_blank');
@@ -97,6 +114,11 @@ class AboutSettingTab extends PluginSettingTab {
       text: 'This section is dedicated to all Patreon members! Your support as a Patreon member allows me to dedicate more time to developing SystemSculpt productivity tools. Thank you!',
     });
     descriptionEl.addClass('supporters-description');
+
+    const sponsorDescriptionEl = sectionEl.createEl('p', {
+      text: 'By sponsoring or donating, you allow me to put more time into this and other Obsidian tools to benefit your productivity.',
+      cls: 'about-description',
+    });
 
     const listEl = sectionEl.createEl('div', { cls: 'supporter-list' });
     supporters.forEach(supporter => {

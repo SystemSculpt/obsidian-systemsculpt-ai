@@ -1,4 +1,5 @@
 import { Modal, App } from 'obsidian';
+import { logger } from '../utils/logger';
 
 export class CostEstimator extends Modal {
   modelId: string;
@@ -47,7 +48,7 @@ export class CostEstimator extends Modal {
       const minTotalCost = inputCost + minOutputCost;
       const maxTotalCost = inputCost + maxOutputCost;
 
-      console.log(
+      logger.log(
         'Input cost is ',
         inputCost,
         ', min output cost is ',

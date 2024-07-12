@@ -16,6 +16,7 @@ import { transcribeSelectedFile } from './functions/transcribeSelectedFile';
 import { RecordingNotice } from './views/RecordingNotice';
 import { AIService } from '../../api/AIService';
 import { updateRecorderButtonStatusBar } from './functions/updateRecorderButtonStatusBar';
+import { logger } from '../../utils/logger';
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
@@ -27,7 +28,7 @@ export class RecorderModule {
   constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
     this.plugin = plugin;
     this.openAIService = openAIService;
-    console.log('RecorderModule initialized');
+    logger.log('RecorderModule initialized');
   }
 
   async load() {
@@ -96,7 +97,7 @@ export class RecorderModule {
         this.plugin.app.workspace.trigger('refresh-files');
       } catch (error) {
         if (!error.message.includes('Folder already exists')) {
-          console.error('Error ensuring recordings directory:', error);
+          logger.error('Error ensuring recordings directory:', error);
         }
       }
     }
@@ -111,7 +112,7 @@ export class RecorderModule {
   }
 
   async toggleRecording(): Promise<void> {
-    console.log('toggleRecording called');
+    logger.log('toggleRecording called');
     if (this.recordingNotice) {
       await this.stopRecording();
     } else {
@@ -120,18 +121,18 @@ export class RecorderModule {
   }
 
   async startRecording(): Promise<void> {
-    console.log('startRecording called');
+    logger.log('startRecording called');
     await this.ensureRecordingsDirectory();
     await startRecording(this);
   }
 
   async stopRecording(): Promise<void> {
-    console.log('stopRecording called');
+    logger.log('stopRecording called');
     await stopRecording(this);
   }
 
   async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
-    console.log('saveRecording called');
+    logger.log('saveRecording called');
     const result = await saveRecording(this, arrayBuffer);
     if (!result) {
       throw new Error('Failed to save recording');
@@ -143,12 +144,12 @@ export class RecorderModule {
     arrayBuffer: ArrayBuffer,
     recordingFile: TFile
   ): Promise<void> {
-    console.log('handleTranscription called');
+    logger.log('handleTranscription called');
     return handleTranscription(this, arrayBuffer, recordingFile);
   }
 
   handleError(error: Error, message: string): void {
-    console.error(message, error);
+    logger.error(message, error);
     showCustomNotice(`${message}. Please try again.`);
   }
 

@@ -2,6 +2,7 @@ import { App, TFile } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { TitleEditModal } from '../views/TitleEditModal';
+import { logger } from '../../../utils/logger';
 
 export async function generateTitleForChat(
   app: App,
@@ -21,7 +22,7 @@ export async function generateTitleForChat(
     }
     showCustomNotice('Title generated successfully!');
   } catch (error) {
-    console.error('Error generating title:', error);
+    logger.error('Error generating title:', error);
     showCustomNotice(`Title generation failed: ${error.message}`);
   } finally {
     hideCustomNotice();

@@ -1,7 +1,9 @@
 import { requestUrl } from 'obsidian';
-import { Model } from './Model';
+import { Model, AIProvider } from './Model';
+import { AIServiceInterface } from './AIServiceInterface';
+import { logger } from '../utils/logger';
 
-export class OpenAIService {
+export class OpenAIService implements AIServiceInterface {
   private apiKey: string;
   private apiEndpoint: string;
   private settings: { temperature: number };
@@ -36,7 +38,7 @@ export class OpenAIService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -86,7 +88,7 @@ export class OpenAIService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -159,7 +161,7 @@ export class OpenAIService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -232,13 +234,14 @@ export class OpenAIService {
             name: model.id,
             isLocal: false,
             provider: 'openai',
+            contextLength: model.id === 'gpt-3.5-turbo' ? 16384 : 128000,
           }));
       } else {
-        console.error('Failed to fetch OpenAI models:', response.status);
+        logger.error('Failed to fetch OpenAI models:', response.status);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching OpenAI models:', error);
+      logger.error('Error fetching OpenAI models:', error);
       return [];
     }
   }
@@ -256,7 +259,7 @@ export class OpenAIService {
       });
       return response.status === 200;
     } catch (error) {
-      console.error('Error validating OpenAI API key:', error);
+      logger.error('Error validating OpenAI API key:', error);
       return false;
     }
   }

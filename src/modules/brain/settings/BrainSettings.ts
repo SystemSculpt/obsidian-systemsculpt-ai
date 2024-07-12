@@ -14,7 +14,8 @@ export interface BrainSettings {
   showgroqSetting: boolean;
   showlocalEndpointSetting: boolean;
   openRouterAPIKey: string;
-  showOpenRouterSetting: boolean;
+  showopenRouterSetting: boolean;
+  favoritedModels: string[];
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -68,5 +69,6 @@ Rules:
   showgroqSetting: true,
   showlocalEndpointSetting: true,
   openRouterAPIKey: '',
-  showOpenRouterSetting: true,
+  showopenRouterSetting: true,
+  favoritedModels: [],
 };

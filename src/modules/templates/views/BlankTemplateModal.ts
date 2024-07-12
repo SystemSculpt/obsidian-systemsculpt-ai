@@ -4,6 +4,7 @@ import { handleStreamingResponse } from '../functions/handleStreamingResponse';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { MarkdownView } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
+import { logger } from '../../../utils/logger';
 
 export class BlankTemplateModal extends Modal {
   private userPromptInput: HTMLTextAreaElement;
@@ -163,7 +164,7 @@ export class BlankTemplateModal extends Modal {
     }
     const signal = this.plugin.abortController.signal;
 
-    console.log(
+    logger.log(
       'Checking blank template abort controller: ',
       this.plugin.abortController
     );
@@ -208,36 +209,43 @@ export class BlankTemplateModal extends Modal {
 
         showCustomNotice('Generating...', 5000, true);
 
-        let modelInstance = await this.plugin.openAIService.getModelById(
-          this.plugin.plugin.brainModule.settings.defaultModelId
-        );
-        if (!modelInstance) {
-          const localModels = await this.plugin.openAIService.getModels(false);
-          if (localModels.length > 0) {
-            modelInstance = localModels[0];
-          } else {
-            const onlineModels = await this.plugin.openAIService.getModels(
-              true
+        let modelInstance;
+        try {
+          const models = await this.plugin.openAIService.getModels(
+            this.plugin.plugin.brainModule.settings.showopenAISetting,
+            this.plugin.plugin.brainModule.settings.showgroqSetting,
+            this.plugin.plugin.brainModule.settings.showlocalEndpointSetting,
+            this.plugin.plugin.brainModule.settings.showopenRouterSetting
+          );
+
+          modelInstance = models.find(
+            m => m.id === this.plugin.plugin.brainModule.settings.defaultModelId
+          );
+
+          if (!modelInstance && models.length > 0) {
+            modelInstance = models[0];
+            logger.warn(
+              `Default model not found. Using ${modelInstance.name} instead.`
             );
-            if (onlineModels.length > 0) {
-              modelInstance = onlineModels[0]; // Use the first available online model
-              // Update the status bar with the new model
-              this.updateStatusBar(
-                this.plugin.plugin.brainModule,
-                modelInstance.name
-              );
-            } else {
-              showCustomNotice(
-                'No local or online models found. Please check your model settings.'
-              );
-              return;
-            }
           }
-        } else {
-          this.updateStatusBar(
-            this.plugin.plugin.brainModule,
-            modelInstance.name
-          ); // Update status bar with the current model name
+
+          if (modelInstance) {
+            this.updateStatusBar(
+              this.plugin.plugin.brainModule,
+              modelInstance.name
+            );
+          } else {
+            showCustomNotice(
+              'No models available. Please check your model settings and ensure at least one provider is enabled.'
+            );
+            return;
+          }
+        } catch (error) {
+          logger.error('Error fetching models:', error);
+          showCustomNotice(
+            'Failed to fetch models. Please check your settings and try again.'
+          );
+          return;
         }
 
         const maxTokens = this.plugin.plugin.brainModule.settings.maxTokens;
@@ -250,7 +258,7 @@ export class BlankTemplateModal extends Modal {
             maxTokens,
             (chunk: string) => {
               if (signal.aborted) {
-                console.log('Request was aborted successfully.');
+                logger.log('Request was aborted successfully.');
                 return;
               }
               handleStreamingResponse(chunk, editor, this.plugin);
@@ -258,12 +266,12 @@ export class BlankTemplateModal extends Modal {
             signal
           );
         } catch (error) {
-          console.error('Error during streaming chat completion:', error);
+          logger.error('Error during streaming chat completion:', error);
         } finally {
           hideCustomNotice();
           this.plugin.abortController = null; // Reset the abortController
           this.plugin.isGenerationCompleted = true; // Mark generation as completed
-          console.log('Blank template generation completed.');
+          logger.log('Blank template generation completed.');
         }
       }
     }

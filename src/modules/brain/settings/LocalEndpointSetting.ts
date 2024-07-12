@@ -1,12 +1,25 @@
 import { Setting, TextComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
+import { logger } from '../../../utils/logger';
 
 export function renderLocalEndpointSetting(
   containerEl: HTMLElement,
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
+  let debounceTimer: NodeJS.Timeout | null = null;
+  const debouncedSaveAndReinitialize = (value: string) => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      plugin.settings.localEndpoint = value;
+      await plugin.saveSettings();
+      await validateEndpointAndUpdateStatus(value, endpointTextComponent);
+      await plugin.reInitiateAIService();
+      console.log('AI Service has been reinitialized');
+      onAfterSave();
+    }, 3000);
+  };
   if (!plugin.settings.showlocalEndpointSetting) {
     return;
   }
@@ -27,26 +40,8 @@ export function renderLocalEndpointSetting(
       text
         .setPlaceholder('http://localhost:1234')
         .setValue(plugin.settings.localEndpoint)
-        .onChange(async (value: string) => {
-          plugin.settings.localEndpoint = value;
-          await plugin.saveSettings();
-
-          // Clear the existing timeout if it exists
-          if ((endpointTextComponent as any).timeoutId) {
-            clearTimeout((endpointTextComponent as any).timeoutId);
-          }
-
-          // Set a new timeout
-          (endpointTextComponent as any).timeoutId = setTimeout(async () => {
-            if (value) {
-              // Check if the new endpoint is not empty
-              await validateEndpointAndUpdateStatus(
-                value,
-                endpointTextComponent
-              );
-            }
-            onAfterSave();
-          }, 2000);
+        .onChange((value: string) => {
+          debouncedSaveAndReinitialize(value);
         });
 
       validateEndpointAndUpdateStatus(
@@ -61,9 +56,11 @@ export function renderLocalEndpointSetting(
           plugin.settings.localEndpoint,
           endpointTextComponent
         );
+        await plugin.reInitiateAIService();
+        console.log('AI Service has been reinitialized');
         onAfterSave();
       });
-      button.setTooltip('Re-check Endpoint');
+      button.setTooltip('Re-check Endpoint and Reinitialize AI Service');
     });
 
   async function validateEndpointAndUpdateStatus(
@@ -87,14 +84,9 @@ export function renderLocalEndpointSetting(
         statusTextEl.classList.toggle('valid', isOnline);
         statusTextEl.classList.toggle('invalid', !isOnline);
 
-        if (isOnline) {
-          await plugin.refreshAIService(true);
-        } else {
-          // Refresh AI service to clear local models without toggling off the setting
-          await plugin.refreshAIService(true);
-        }
+        await plugin.refreshAIService();
       } catch (error) {
-        console.error('Error validating endpoint:', error);
+        logger.error('Error validating endpoint:', error);
         statusTextEl.textContent = 'Error';
         statusTextEl.classList.remove('validating');
         statusTextEl.classList.add('invalid');

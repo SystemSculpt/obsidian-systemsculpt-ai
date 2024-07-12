@@ -238,10 +238,34 @@
 
 /* this is a codeblock within our chat message */
 .chat-message pre {
-  background-color: rgba(0, 0, 0, 0.5); /* Darker with transparency */
+  background-color: rgba(0, 0, 0, 0.5);
   font-size: 75%;
   padding: 10px;
   border-radius: 10px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  transition: box-shadow 0.1s ease, border-color 0.1s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.chat-message pre:hover {
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+.chat-message pre.copied {
+  animation: greenGlow 1s ease;
+}
+
+@keyframes greenGlow {
+  0% {
+    border-color: transparent;
+  }
+  50% {
+    border-color: #4caf50;
+  }
+  100% {
+    border-color: transparent;
+  }
 }
 
 .message-actions {

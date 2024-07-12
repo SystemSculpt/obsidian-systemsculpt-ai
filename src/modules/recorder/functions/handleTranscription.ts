@@ -1,9 +1,9 @@
 import { RecorderModule } from '../RecorderModule';
 import { showCustomNotice, hideCustomNotice } from '../../../modals';
 import { transcribeRecording } from './transcribeRecording';
-import { AIService } from '../../../api/AIService';
 import { MarkdownView, TFile, normalizePath } from 'obsidian';
 import { ChatView } from '../../chat/ChatView';
+import { logger } from '../../../utils/logger';
 
 export async function handleTranscription(
   plugin: RecorderModule,
@@ -79,7 +79,7 @@ export async function handleTranscription(
         10000
       );
     }
-    console.error('Error generating transcription', error);
+    logger.error('Error generating transcription', error);
   }
 
   async function saveTranscriptionToFile(

@@ -36,16 +36,28 @@
   margin-bottom: 20px;
 }
 
+.about-doc-container,
+.about-personal-container {
+  margin-bottom: 30px;
+}
+
+.about-section-header {
+  font-size: 18px;
+  color: var(--text-normal);
+  margin-bottom: 10px;
+}
+
 .about-button-container,
 .supporter-list {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   width: 100%;
   margin-bottom: 20px;
 }
 
 .about-button,
+.about-doc-button,
 .supporter-item {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
@@ -59,13 +71,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
-}
-
-.about-button {
   transition: background-color 0.3s ease;
 }
 
-.about-button:hover {
+.about-button:hover,
+.about-doc-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 

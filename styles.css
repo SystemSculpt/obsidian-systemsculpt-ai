@@ -501,10 +501,34 @@
 
 /* this is a codeblock within our chat message */
 .chat-message pre {
-  background-color: rgba(0, 0, 0, 0.5); /* Darker with transparency */
+  background-color: rgba(0, 0, 0, 0.5);
   font-size: 75%;
   padding: 10px;
   border-radius: 10px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  transition: box-shadow 0.1s ease, border-color 0.1s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.chat-message pre:hover {
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+.chat-message pre.copied {
+  animation: greenGlow 1s ease;
+}
+
+@keyframes greenGlow {
+  0% {
+    border-color: transparent;
+  }
+  50% {
+    border-color: #4caf50;
+  }
+  100% {
+    border-color: transparent;
+  }
 }
 
 .message-actions {
@@ -993,17 +1017,46 @@
   letter-spacing: 0.5px;
 }
 
+/* Custom scrollbar styles */
+.model-selection-modal {
+  padding-right: 12px; /* Increased padding to accommodate wider scrollbar */
+  margin-top: 20px; /* Add top margin to modal content */
+}
+
+.model-selection-modal::-webkit-scrollbar {
+  width: 12px; /* Increased width */
+}
+
+.model-selection-modal::-webkit-scrollbar-track {
+  background: var(--background-secondary-alt);
+  border-radius: 6px;
+}
+
+.model-selection-modal::-webkit-scrollbar-thumb {
+  background: var(--interactive-accent); /* Changed to a more visible color */
+  border-radius: 6px;
+  border: 3px solid var(--background-secondary-alt); /* Added border for contrast */
+}
+
+.model-selection-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Adjust modal group layout */
 .modal-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   max-width: 600px;
+  margin-left: 10px; /* Add left margin */
+  margin-right: 10px; /* Add right margin */
 }
 
 .modal-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
   border-radius: 5px;
   transition: background-color 0.2s ease;
   padding: 10px;
@@ -1012,7 +1065,50 @@
   word-break: break-all;
   overflow-wrap: break-word;
   hyphens: auto;
-  font-size: 0.9em; /* Add this line to reduce font size by 25% */
+  position: relative;
+}
+
+.model-name {
+  font-size: 0.9em;
+  margin-bottom: 2px;
+}
+
+.model-context-length {
+  font-size: 0.7em;
+  color: var(--text-muted);
+}
+
+.model-favorite-star {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s ease, transform 0.2s ease;
+  padding: 5px;
+  margin: -5px;
+}
+
+.model-favorite-star:not(.is-favorite):hover {
+  color: var(--text-accent);
+}
+
+.model-favorite-star.is-favorite {
+  color: var(--text-accent);
+  filter: drop-shadow(0 0 3px var(--text-accent))
+    drop-shadow(0 0 1px var(--text-accent));
+}
+
+.model-favorite-star:not(.is-favorite) {
+  font-variation-settings: 'FILL' 0;
+}
+
+.model-favorite-star:hover {
+  transform: scale(1.2);
+}
+
+.model-favorite-star.is-favorite:hover {
+  color: var(--text-muted);
 }
 
 .modal-item:hover {
@@ -1021,13 +1117,6 @@
 
 .modal-item.disabled {
   color: var(--text-muted);
-}
-
-.modal-name {
-  flex: 1;
-  margin-right: 10px;
-  font-size: 0.9em; /* Update this line */
-  white-space: normal;
 }
 
 .modal-item .checkbox-container {
@@ -1472,16 +1561,28 @@
   margin-bottom: 20px;
 }
 
+.about-doc-container,
+.about-personal-container {
+  margin-bottom: 30px;
+}
+
+.about-section-header {
+  font-size: 18px;
+  color: var(--text-normal);
+  margin-bottom: 10px;
+}
+
 .about-button-container,
 .supporter-list {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   width: 100%;
   margin-bottom: 20px;
 }
 
 .about-button,
+.about-doc-button,
 .supporter-item {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
@@ -1495,13 +1596,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
-}
-
-.about-button {
   transition: background-color 0.3s ease;
 }
 
-.about-button:hover {
+.about-button:hover,
+.about-doc-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
@@ -1727,4 +1826,27 @@ button:disabled {
   --primary-color: #1890ff;
   --secondary-color: #91d5ff;
   --tertiary-color: #e6f7ff;
+}
+.alpha-ribbon {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 14px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.alpha-ribbon a {
+  color: var(--text-accent);
+  text-decoration: underline;
+  font-weight: bold;
+}
+
+.alpha-ribbon a:hover {
+  text-decoration: none;
+  color: var(--text-accent-hover);
 }

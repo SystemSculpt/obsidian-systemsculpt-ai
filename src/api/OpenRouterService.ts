@@ -1,7 +1,9 @@
 import { requestUrl } from 'obsidian';
-import { Model } from './Model';
+import { Model, AIProvider } from './Model';
+import { AIServiceInterface } from './AIServiceInterface';
+import { logger } from '../utils/logger';
 
-export class OpenRouterService {
+export class OpenRouterService implements AIServiceInterface {
   private apiKey: string;
   private settings: { temperature: number };
 
@@ -34,7 +36,7 @@ export class OpenRouterService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -90,7 +92,7 @@ export class OpenRouterService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -162,7 +164,7 @@ export class OpenRouterService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -217,7 +219,7 @@ export class OpenRouterService {
   async getModels(): Promise<Model[]> {
     if (!this.apiKey) return [];
 
-    console.log('getting openRouter models...');
+    logger.log('getting openRouter models...');
     try {
       const response = await requestUrl({
         url: 'https://openrouter.ai/api/v1/models',
@@ -230,18 +232,26 @@ export class OpenRouterService {
       });
       if (response.status === 200) {
         const data = response.json;
-        return data.data.map((model: any) => ({
-          id: model.id,
-          name: model.id,
-          isLocal: false,
-          provider: 'openRouter',
-        }));
+        if (Array.isArray(data.data)) {
+          const models = data.data.map((model: any) => ({
+            id: model.id || model.name,
+            name: model.name || model.id,
+            isLocal: false,
+            provider: 'openRouter',
+            contextLength: model.context_length || undefined,
+          }));
+          logger.log('OpenRouter models:', models);
+          return models;
+        } else {
+          logger.error('Unexpected OpenRouter API response structure:', data);
+          return [];
+        }
       } else {
-        console.error('Failed to fetch OpenRouter models:', response.status);
+        logger.error('Failed to fetch OpenRouter models:', response.status);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching OpenRouter models:', error);
+      logger.error('Error fetching OpenRouter models:', error);
       return [];
     }
   }
@@ -249,7 +259,7 @@ export class OpenRouterService {
   static async validateApiKey(apiKey: string): Promise<boolean> {
     if (!apiKey) return false;
 
-    console.log('validating openRouter api key...');
+    logger.log('validating openRouter api key...');
     try {
       const response = await requestUrl({
         url: 'https://openrouter.ai/api/v1/models',
@@ -262,13 +272,13 @@ export class OpenRouterService {
       });
       return response.status === 200;
     } catch (error) {
-      console.error('Error validating OpenRouter API key:', error);
+      logger.error('Error validating OpenRouter API key:', error);
       return false;
     }
   }
 
   updateApiKey(apiKey: string): void {
-    console.log('updating openRouter api key...');
+    logger.log('updating openRouter api key...');
     this.apiKey = apiKey;
   }
 }

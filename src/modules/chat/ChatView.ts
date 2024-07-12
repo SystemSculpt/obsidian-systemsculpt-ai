@@ -21,6 +21,7 @@ import {
 } from './functions/generateTitleForChat';
 import { FileSearcher } from './FileSearcher';
 import { showCustomNotice } from '../../modals';
+import { logger } from '../../utils/logger';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
@@ -28,7 +29,7 @@ export class ChatView extends ItemView {
   chatMessages: ChatMessage[];
   brainModule: BrainModule;
   chatModule: ChatModule;
-  chatFile: TFile;
+  chatFile: TFile | null;
   contextFiles: TFile[] = [];
   public tokenManager: TokenManager;
   public chatHistoryManager: ChatHistoryManager;
@@ -44,6 +45,10 @@ export class ChatView extends ItemView {
     this.chatMessages = [];
     this.brainModule = brainModule;
     this.chatModule = chatModule;
+    this.initializeManagers();
+  }
+
+  private initializeManagers() {
     this.contextFileManager = new ContextFileManager(this.app, this);
     this.tokenManager = new TokenManager(this.app);
     this.chatHistoryManager = new ChatHistoryManager(
@@ -57,6 +62,11 @@ export class ChatView extends ItemView {
     );
   }
 
+  private attachListeners() {
+    this.attachContextFilesButtonListener();
+    this.attachChatTitleListener();
+  }
+
   private attachContextFilesButtonListener() {
     const contextFilesButton = this.containerEl.querySelector(
       '.context-files-header'
@@ -67,8 +77,6 @@ export class ChatView extends ItemView {
         e.stopPropagation();
         this.openContextFilesSearch();
       });
-    } else {
-      console.error('Context Files button not found');
     }
   }
 
@@ -78,27 +86,26 @@ export class ChatView extends ItemView {
     ) as HTMLElement;
     if (titleEl) {
       titleEl.style.cursor = 'pointer';
-      titleEl.addEventListener('click', () => {
-        console.log('Chat title clicked'); // Add this line for debugging
-        this.openChatHistoryFile();
-      });
-    } else {
-      console.error('Chat title element not found'); // Add this line for debugging
+      titleEl.addEventListener('click', () => this.openChatHistoryFile());
     }
   }
 
   openChatHistoryFile() {
-    console.log('Opening chat history file'); // Add this line for debugging
     this.chatHistoryManager.openChatHistoryFile();
   }
 
-  async handleFirstMessage() {
-    if (this.chatFile) {
-      const fileName = this.chatFile.basename;
-      this.updateChatTitle(fileName);
-      await this.updateTokenCount();
+  async handleMessage(message: string) {
+    if (!this.chatFile) {
+      // This is the first message, create a new chat file
+      this.chatFile = await this.createChatFile(message);
+      this.updateChatTitle(this.chatFile.basename);
       this.chatModule.saveLastOpenedChat(this.chatFile.path);
+    } else {
+      await this.updateChatFile(message);
     }
+    const userMessage = new ChatMessage('user', message);
+    this.addMessage(userMessage);
+    await this.updateTokenCount();
   }
 
   private getNextChatFile(): TFile | null {
@@ -112,15 +119,13 @@ export class ChatView extends ItemView {
       )
       .sort((a, b) => a.basename.localeCompare(b.basename));
 
-    if (this.chatFile) {
-      const currentIndex = allChatFiles.findIndex(
-        file => file.path === this.chatFile.path
-      );
-      if (currentIndex !== -1 && currentIndex < allChatFiles.length - 1) {
-        return allChatFiles[currentIndex + 1];
-      } else if (currentIndex > 0) {
-        return allChatFiles[currentIndex - 1];
-      }
+    const currentIndex = this.chatFile
+      ? allChatFiles.findIndex(file => file.path === this.chatFile!.path)
+      : -1;
+    if (currentIndex !== -1 && currentIndex < allChatFiles.length - 1) {
+      return allChatFiles[currentIndex + 1];
+    } else if (currentIndex > 0) {
+      return allChatFiles[currentIndex - 1];
     }
 
     return allChatFiles.length > 0 ? allChatFiles[0] : null;
@@ -129,37 +134,68 @@ export class ChatView extends ItemView {
   async archiveChat() {
     if (!this.chatFile) return;
 
-    const nextChatFile = this.getNextChatFile();
+    const currentChatFile = this.chatFile;
+    this.chatFile = null; // Clear the current chat file reference
 
-    const archivePath = `${this.chatModule.settings.chatsPath}/Archive`;
-    await this.app.vault.createFolder(archivePath).catch(() => {});
-    const newFilePath = `${archivePath}/${this.chatFile.name}`;
-    await this.app.fileManager.renameFile(this.chatFile, newFilePath);
+    try {
+      const archivePath = `${this.chatModule.settings.chatsPath}/Archive`;
+      await this.app.vault.createFolder(archivePath).catch(() => {});
+      const newFilePath = `${archivePath}/${currentChatFile.name}`;
+      await this.app.fileManager.renameFile(currentChatFile, newFilePath);
 
-    showCustomNotice(`Archived '${this.chatFile.basename}' successfully!`);
+      showCustomNotice(`Archived '${currentChatFile.basename}' successfully!`);
 
-    if (nextChatFile) {
-      this.chatFile = nextChatFile;
-      await this.visualReload();
-    } else {
-      this.chatModule.openNewChat();
+      const nextChatFile = this.getNextChatFile();
+      if (nextChatFile) {
+        this.chatFile = nextChatFile;
+        await this.visualReload();
+      } else {
+        await this.handleNoMoreChats(
+          "All tidy! You've archived all your chats; here's a fresh start."
+        );
+      }
+    } catch (error) {
+      logger.error('Error archiving chat file:', error);
+      showCustomNotice(
+        `Failed to archive '${currentChatFile.basename}'. Error: ${error.message}`
+      );
+      this.chatFile = currentChatFile; // Restore the chat file reference if archiving failed
     }
   }
 
   async deleteChat() {
     if (!this.chatFile) return;
 
-    const nextChatFile = this.getNextChatFile();
+    const currentChatFile = this.chatFile;
+    this.chatFile = null; // Clear the current chat file reference
 
-    await this.app.vault.delete(this.chatFile);
-    showCustomNotice(`Deleted '${this.chatFile.basename}' successfully!`);
+    try {
+      await this.app.vault.delete(currentChatFile);
+      showCustomNotice(`Deleted '${currentChatFile.basename}' successfully!`);
 
-    if (nextChatFile) {
-      this.chatFile = nextChatFile;
-      await this.visualReload();
-    } else {
-      this.chatModule.openNewChat();
+      const nextChatFile = this.getNextChatFile();
+      if (nextChatFile) {
+        this.chatFile = nextChatFile;
+        await this.visualReload();
+      } else {
+        await this.handleNoMoreChats(
+          "All clean! You've deleted all your chats; here's a fresh start."
+        );
+      }
+    } catch (error) {
+      logger.error('Error deleting chat file:', error);
+      showCustomNotice(
+        `Failed to delete '${currentChatFile.basename}'. Error: ${error.message}`
+      );
+      this.chatFile = currentChatFile; // Restore the chat file reference if deletion failed
     }
+  }
+
+  private async handleNoMoreChats(message: string) {
+    await this.chatModule.openNewChat();
+    this.initializeChatView();
+    await this.visualReload();
+    showCustomNotice(message);
   }
 
   async openRandomChat() {
@@ -180,9 +216,8 @@ export class ChatView extends ItemView {
       return;
     }
 
-    const randomIndex = Math.floor(Math.random() * chatFiles.length);
-    const randomChatFile = chatFiles[randomIndex];
-
+    const randomChatFile =
+      chatFiles[Math.floor(Math.random() * chatFiles.length)];
     this.setChatFile(randomChatFile);
     await this.loadChatFile(randomChatFile);
     this.chatModule.saveLastOpenedChat(randomChatFile.path);
@@ -191,11 +226,9 @@ export class ChatView extends ItemView {
   private openContextFilesSearch() {
     const fileSearcher = new FileSearcher(this.app);
     fileSearcher.setPlaceholder('Search for context files');
-
     fileSearcher.onChooseItem = (file: TFile) => {
       this.contextFileManager.addFileToContextFiles(file);
     };
-
     fileSearcher.open();
   }
 
@@ -221,41 +254,53 @@ export class ChatView extends ItemView {
   async onOpen() {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
-    container.createEl('div', { text: 'Loading chat...' });
+    container.innerHTML = chatTemplate;
 
-    // Use setTimeout to ensure the DOM is fully rendered
-    setTimeout(() => {
-      container.empty();
-      container.innerHTML = chatTemplate;
-      this.attachEventListeners(container as HTMLElement);
-      this.attachContextFilesButtonListener();
-      this.attachChatTitleListener(); // Move this line here
-    }, 0);
+    this.attachEventListeners(container as HTMLElement);
+    this.attachListeners();
 
-    // wait 100ms before focusing the input field
+    // Defer non-critical operations
     setTimeout(() => {
+      this.initializeChatView();
       this.focusInput();
-    }, 100);
+    }, 0);
+  }
+
+  public initializeChatView() {
+    this.chatFile = null;
+    this.chatMessages = [];
+    this.contextFiles = [];
 
     const titleEl = this.containerEl.querySelector(
       '.chat-title-text'
     ) as HTMLElement;
-    if (this.chatFile) {
-      await this.loadChatFile(this.chatFile);
-      if (titleEl) {
-        const fileName = this.chatFile.basename;
-        titleEl.textContent = fileName;
-      }
-    } else {
-      // Set the title to the current date and time if no chat file exists
-      if (titleEl) {
-        titleEl.textContent = moment().format('YYYY-MM-DD HH-mm-ss');
-      }
+    if (titleEl) {
+      titleEl.textContent = moment().format('YYYY-MM-DD HH-mm-ss');
     }
 
-    // Update token count initially
+    // Defer token count update
+    setTimeout(() => {
+      this.updateTokenCount();
+    }, 0);
+  }
+
+  public clearChatView() {
+    const messagesContainer = this.containerEl.querySelector('.chat-messages');
+    if (messagesContainer) {
+      messagesContainer.innerHTML = '';
+    }
+
+    const contextFilesContainer = this.containerEl.querySelector('.context-files');
+    if (contextFilesContainer) {
+      contextFilesContainer.innerHTML = '';
+    }
+
+    const inputEl = this.containerEl.querySelector('.chat-input') as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.value = '';
+    }
+
     this.updateTokenCount();
-    this.attachChatTitleListener();
   }
 
   handleExitButtonClick(exitButton: HTMLElement) {
@@ -285,8 +330,7 @@ export class ChatView extends ItemView {
       '.chat-title-text'
     ) as HTMLElement;
     if (titleEl) {
-      const fileName = file.basename;
-      titleEl.textContent = fileName;
+      titleEl.textContent = file.basename;
     }
   }
 
@@ -340,20 +384,14 @@ export class ChatView extends ItemView {
   }
 
   showLoading() {
-    const loadingContainer = this.containerEl.querySelector(
-      '.loading-container'
-    ) as HTMLElement;
-    const chatInputContainer = this.containerEl.querySelector(
-      '.chat-input-container'
-    ) as HTMLElement;
-    if (loadingContainer && chatInputContainer) {
-      chatInputContainer.style.display = 'none';
-      loadingContainer.style.display = 'flex';
-      loadingContainer.classList.add('visible');
-    }
+    this.toggleLoadingState(true);
   }
 
   hideLoading() {
+    this.toggleLoadingState(false);
+  }
+
+  private toggleLoadingState(isLoading: boolean) {
     const loadingContainer = this.containerEl.querySelector(
       '.loading-container'
     ) as HTMLElement;
@@ -361,10 +399,12 @@ export class ChatView extends ItemView {
       '.chat-input-container'
     ) as HTMLElement;
     if (loadingContainer && chatInputContainer) {
-      loadingContainer.style.display = 'none';
-      loadingContainer.classList.remove('visible');
-      chatInputContainer.style.display = 'flex';
-      this.focusInput(); // Refocus the input field
+      chatInputContainer.style.display = isLoading ? 'none' : 'flex';
+      loadingContainer.style.display = isLoading ? 'flex' : 'none';
+      loadingContainer.classList.toggle('visible', isLoading);
+      if (!isLoading) {
+        this.focusInput();
+      }
     }
   }
 
@@ -415,19 +455,20 @@ export class ChatView extends ItemView {
     deletedMessage: ChatMessage,
     index: number
   ) {
-    await this.chatFileManager.updateChatFileAfterDeletion(
-      this.chatFile,
-      deletedMessage,
-      index
-    );
-    await this.loadChatFile(this.chatFile);
+    if (this.chatFile) {
+      await this.chatFileManager.updateChatFileAfterDeletion(
+        this.chatFile,
+        deletedMessage,
+        index
+      );
+      await this.loadChatFile(this.chatFile);
+    }
   }
 
   addMessage(message: ChatMessage) {
     this.chatMessages.push(message);
-
     this.renderMessages();
-    this.updateTokenCount(); // Update token count after adding message
+    this.updateTokenCount();
   }
 
   async createChatFile(initialMessage: string) {
@@ -439,8 +480,12 @@ export class ChatView extends ItemView {
   }
 
   async updateChatFile(content: string) {
-    await this.chatFileManager.updateChatFile(this.chatFile, content);
-    await this.loadChatFile(this.chatFile); // Reload the chat file to update the view
+    if (this.chatFile) {
+      await this.chatFileManager.updateChatFile(this.chatFile, content);
+      await this.loadChatFile(this.chatFile);
+    } else {
+      logger.error('No chat file to update');
+    }
   }
 
   async onFileChange(file: TFile) {
@@ -558,7 +603,6 @@ export class ChatView extends ItemView {
       titleEl.textContent = this.chatFile.basename;
     }
 
-    // Refresh the input field
     const inputEl = this.containerEl.querySelector(
       '.chat-input'
     ) as HTMLTextAreaElement;

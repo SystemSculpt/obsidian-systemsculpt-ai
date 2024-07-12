@@ -73,13 +73,13 @@ export class ChatHistoryManager {
     }
 
     // Match all code blocks with user or ai roles
-    const blockRegex = /`````\s*(user|ai(?:-[^\s]+)?)\s*([\s\S]*?)\s*`````/g;
+    const blockRegex = /`````\s*(user|ai(?:-[^\n]+)?)\s*([\s\S]*?)\s*`````/g;
     let match;
 
     while ((match = blockRegex.exec(content)) !== null) {
       const role = match[1] as 'user' | 'ai';
       const text = match[2].trim();
-      const model = role.startsWith('ai-') ? role.split('-')[1] : undefined;
+      const model = role.startsWith('ai-') ? match[1].slice(3) : undefined;
       messages.push(new ChatMessage(role as 'user' | 'ai', text, model));
     }
 

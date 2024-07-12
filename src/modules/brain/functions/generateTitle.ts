@@ -1,6 +1,6 @@
 import { BrainModule } from '../BrainModule';
 import { showCustomNotice } from '../../../modals';
-import { AIService } from '../../../api/AIService';
+import { logger } from '../../../utils/logger';
 
 export async function generateTitle(
   plugin: BrainModule,
@@ -14,22 +14,22 @@ export async function generateTitle(
   let model = await plugin.getModelById(modelId);
 
   if (!model) {
-    const localModels = await plugin.openAIService.getModels(false);
-    const onlineModels = await plugin.openAIService.getModels(true);
-    const firstLocalModel = localModels[0];
-    if (firstLocalModel) {
-      plugin.settings.defaultModelId = firstLocalModel.id;
-      await plugin.saveSettings();
-      updateModelStatusBar(plugin, firstLocalModel.name);
-      model = firstLocalModel;
-    } else if (onlineModels.length > 0) {
-      model = onlineModels[0];
+    logger.log('Model not found, trying to find an available model...');
+    const models = await plugin.openAIService.getModels(
+      plugin.settings.showopenAISetting,
+      plugin.settings.showgroqSetting,
+      plugin.settings.showlocalEndpointSetting,
+      plugin.settings.showopenRouterSetting
+    );
+
+    if (models.length > 0) {
+      model = models[0];
       plugin.settings.defaultModelId = model.id;
       await plugin.saveSettings();
       updateModelStatusBar(plugin, model.name);
     } else {
       showCustomNotice(
-        'No local or online models available. Please check your model settings.'
+        'No models available. Please check your model settings and ensure at least one provider is enabled.'
       );
       return '';
     }
@@ -45,7 +45,7 @@ export async function generateTitle(
 
     return sanitizeFileName(generatedTitle.trim());
   } catch (error) {
-    console.error('Error generating title:', error);
+    logger.error('Error generating title:', error);
     throw new Error(
       'Failed to generate title. Please check your API key and try again.'
     );

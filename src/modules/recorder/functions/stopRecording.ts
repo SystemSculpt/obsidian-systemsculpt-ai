@@ -1,4 +1,5 @@
 import { RecorderModule } from '../RecorderModule';
+import { logger } from '../../../utils/logger';
 
 export async function stopRecording(plugin: RecorderModule): Promise<void> {
   // if it's in status bar, hide it
@@ -7,26 +8,26 @@ export async function stopRecording(plugin: RecorderModule): Promise<void> {
   }
 
   if (plugin.recordingNotice) {
-    console.log('stopRecording called');
+    logger.log('stopRecording called');
     const arrayBuffer = await plugin.recordingNotice
       .stopRecording()
       .catch(error => {
-        console.error('Error stopping recording:', error);
+        logger.error('Error stopping recording:', error);
         plugin.handleError(error, 'Error stopping recording');
       });
-    console.log('Recording stopped');
+    logger.log('Recording stopped');
     plugin.recordingNotice.hide();
     plugin.recordingNotice = null;
 
     if (arrayBuffer) {
-      console.log('ArrayBuffer received');
+      logger.log('ArrayBuffer received');
       const recordingFile = await plugin.saveRecording(arrayBuffer);
       if (recordingFile && plugin.settings.autoTranscriptionEnabled) {
-        console.log('Starting transcription');
+        logger.log('Starting transcription');
         await plugin.handleTranscription(arrayBuffer, recordingFile);
       }
     }
   } else {
-    console.warn('No recording is in progress.');
+    logger.warn('No recording is in progress.');
   }
 }

@@ -1,7 +1,9 @@
-import { requestUrl, RequestUrlParam } from 'obsidian';
-import { Model } from './Model';
+import { requestUrl, RequestUrlParam, Notice } from 'obsidian';
+import { Model, AIProvider } from './Model';
+import { AIServiceInterface } from './AIServiceInterface';
+import { logger } from '../utils/logger';
 
-export class LocalAIService {
+export class LocalAIService implements AIServiceInterface {
   private endpoint?: string;
   private settings: { temperature: number };
 
@@ -12,6 +14,10 @@ export class LocalAIService {
 
   updateSettings(settings: { temperature: number }) {
     this.settings = settings;
+  }
+
+  updateApiKey(_apiKey: string): void {
+    // LocalAIService doesn't use an API key, so this method is a no-op
   }
 
   async createChatCompletion(
@@ -35,7 +41,7 @@ export class LocalAIService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -85,7 +91,7 @@ export class LocalAIService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -134,7 +140,7 @@ export class LocalAIService {
         });
       }
     } catch (error) {
-      console.log(
+      logger.log(
         'Using requestUrl without stream instead of fetch due to error!'
       );
 
@@ -149,7 +155,7 @@ export class LocalAIService {
         temperature: this.settings.temperature,
       });
 
-      console.log(
+      logger.log(
         'Model: ',
         modelId,
         'Max Tokens: ',
@@ -198,7 +204,7 @@ export class LocalAIService {
         temperature: this.settings.temperature,
       });
 
-      console.log(
+      logger.log(
         'Model: ',
         modelId,
         'Max Tokens: ',
@@ -246,7 +252,23 @@ export class LocalAIService {
         });
       }
     } catch (error) {
-      console.log(
+      logger.log('Error in LocalAIService:', error);
+
+      if (error instanceof Error && error.message.includes('status 500')) {
+        // Create a CustomNotice to inform the user
+        const notice = new Notice(
+          'Ollama error detected. Please try restarting your Ollama instance.',
+          10000
+        );
+
+        // Throw a more informative error
+        throw new Error(
+          'Ollama instance may need to be restarted. Please restart Ollama and try again.'
+        );
+      }
+
+      // If it's not the specific error we're looking for, proceed with the existing fallback
+      logger.log(
         'Using requestUrl without stream instead of fetch due to error!'
       );
 
@@ -258,7 +280,7 @@ export class LocalAIService {
         temperature: this.settings.temperature,
       });
 
-      console.log(
+      logger.log(
         'Model: ',
         modelId,
         'Max Tokens: ',
@@ -287,93 +309,108 @@ export class LocalAIService {
   }
 
   async getModels(): Promise<Model[]> {
-    console.log('LocalAIService: Starting getModels');
+    logger.log('LocalAIService: Starting getModels');
     if (!this.endpoint) {
-      console.log(
+      logger.log(
         'LocalAIService: No endpoint configured, returning empty array'
       );
       return [];
     }
 
-    // Validate the endpoint URL
     if (!this.isValidEndpoint(this.endpoint)) {
-      console.error('LocalAIService: Invalid endpoint URL:', this.endpoint);
+      logger.error('LocalAIService: Invalid endpoint URL:', this.endpoint);
       return [];
     }
 
     try {
-      console.log('LocalAIService: Attempting to fetch models from /v1/models');
-      const requestOptions: RequestUrlParam = {
-        url: `${this.endpoint}/v1/models`,
-        method: 'GET',
-      };
+      // First, try to fetch models from /v1/models (LM Studio compatibility)
+      try {
+        const v1ModelsResponse = await requestUrl({
+          url: `${this.endpoint}/v1/models`,
+          method: 'GET',
+        });
 
-      const response = await requestUrl(requestOptions);
-      console.log('LocalAIService: Response status:', response.status);
-
-      if (response.status === 200) {
-        const data = response.json;
-        console.log('LocalAIService: Models data received:', data);
-
-        const models = data.data.map((model: any) => ({
-          id: model.id,
-          name: model.id.split('/').pop(),
-          isLocal: true,
-          provider: 'local',
-        }));
-        console.log('LocalAIService: Processed models:', models);
-        return models;
-      } else {
-        console.log(
-          'LocalAIService: Failed to fetch models from /v1/models, attempting /api/tags'
+        if (v1ModelsResponse.status === 200) {
+          return this.fetchModelsFromV1Models(v1ModelsResponse.json);
+        }
+      } catch (error) {
+        logger.log(
+          'LocalAIService: /v1/models endpoint not available, trying /api/tags'
         );
-        return this.fetchModelsFromApiTags();
       }
-    } catch (error) {
-      console.log(
-        'LocalAIService: Error fetching from /v1/models, attempting /api/tags'
+
+      // If /v1/models fails, try /api/tags (Ollama compatibility)
+      logger.log('LocalAIService: Attempting to fetch models from /api/tags');
+      const tagsResponse = await requestUrl({
+        url: `${this.endpoint}/api/tags`,
+        method: 'GET',
+      });
+
+      if (tagsResponse.status === 200) {
+        return this.fetchModelsFromApiTags(tagsResponse.json);
+      }
+
+      logger.error(
+        'LocalAIService: Failed to fetch models from both endpoints'
       );
-      return this.fetchModelsFromApiTags();
+      return [];
+    } catch (error) {
+      logger.error('LocalAIService: Error fetching models:', error);
+      return [];
     }
   }
 
-  private async fetchModelsFromApiTags(): Promise<Model[]> {
-    try {
-      let response = await requestUrl(`${this.endpoint}/api/tags`);
-      console.log(
-        'LocalAIService: Response status from /api/tags:',
-        response.status
-      );
+  private async fetchModels(data: any, isV1Models: boolean): Promise<Model[]> {
+    const models: Model[] = [];
 
-      if (response.status === 200) {
-        const data = response.json;
-        console.log(
-          'LocalAIService: Models data received from /api/tags:',
-          data
-        );
+    const modelList = isV1Models ? data.data : data.models;
 
-        const models = data.models.map((model: any) => ({
-          id: model.name,
-          name: model.name,
-          isLocal: true,
-          provider: 'local',
-        }));
-        console.log('LocalAIService: Processed models from /api/tags:', models);
-        return models;
-      } else {
-        console.error(
-          'LocalAIService: Failed to fetch local models from /api/tags:',
-          response.status
-        );
-        return [];
+    for (const model of modelList) {
+      const modelId = isV1Models ? model.id : model.name;
+      let contextLength: number | undefined = undefined;
+
+      try {
+        const showResponse = await requestUrl({
+          url: `${this.endpoint}/api/show`,
+          method: 'POST',
+          body: JSON.stringify({ name: modelId }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (showResponse.status === 200) {
+          const showData = showResponse.json;
+          if (showData.model_info) {
+            const contextLengthKey = Object.keys(showData.model_info).find(key =>
+              key.endsWith('.context_length')
+            );
+            if (contextLengthKey) {
+              const rawContextLength = showData.model_info[contextLengthKey];
+              contextLength = typeof rawContextLength === 'number' ? rawContextLength : undefined;
+            }
+          }
+        }
+      } catch (error) {
+        logger.error(`LocalAIService: Failed to fetch details for model ${modelId}`, error);
       }
-    } catch (error) {
-      console.error(
-        'LocalAIService: Error fetching models from /api/tags:',
-        error
-      );
-      return [];
+
+      models.push({
+        id: modelId,
+        name: modelId,
+        isLocal: true,
+        provider: 'local',
+        contextLength: contextLength,
+      });
     }
+
+    return models;
+  }
+
+  private async fetchModelsFromV1Models(data: any): Promise<Model[]> {
+    return this.fetchModels(data, true);
+  }
+
+  private async fetchModelsFromApiTags(data: any): Promise<Model[]> {
+    return this.fetchModels(data, false);
   }
 
   private isValidEndpoint(url: string): boolean {
@@ -383,13 +420,13 @@ export class LocalAIService {
 
       // Check if the port is within the valid range (1-65535)
       if (port && (port < 1 || port > 65535)) {
-        console.error('LocalAIService: Invalid port number:', port);
+        logger.error('LocalAIService: Invalid port number:', port);
         return false;
       }
 
       return true;
     } catch (error) {
-      console.error('LocalAIService: Invalid URL:', url, error);
+      logger.error('LocalAIService: Invalid URL:', url, error);
       return false;
     }
   }
@@ -412,11 +449,11 @@ export class LocalAIService {
           });
           return response.status === 200;
         } catch (error) {
-          console.error('Error validating endpoint with /api/tags:', error);
+          logger.error('Error validating endpoint with /api/tags:', error);
           return false;
         }
       } else {
-        console.error('Error validating endpoint:', error);
+        logger.error('Error validating endpoint:', error);
         return false;
       }
     }

@@ -7,7 +7,19 @@ export function renderOpenRouterAPIKeySetting(
   plugin: BrainModule,
   onAfterSave: () => void
 ): void {
-  if (!plugin.settings.showOpenRouterSetting) {
+  let debounceTimer: NodeJS.Timeout | null = null;
+  const debouncedSaveAndReinitialize = (value: string) => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      plugin.settings.openRouterAPIKey = value;
+      await plugin.saveSettings();
+      await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
+      await plugin.reInitiateAIService();
+      console.log('AI Service has been reinitialized');
+      onAfterSave();
+    }, 3000);
+  };
+  if (!plugin.settings.showopenRouterSetting) {
     return;
   }
 
@@ -27,20 +39,8 @@ export function renderOpenRouterAPIKeySetting(
       text
         .setPlaceholder('API Key')
         .setValue(plugin.settings.openRouterAPIKey)
-        .onChange(async (value: string) => {
-          plugin.settings.openRouterAPIKey = value;
-          await plugin.saveSettings();
-
-          if ((apiKeyTextComponent as any).timeoutId) {
-            clearTimeout((apiKeyTextComponent as any).timeoutId);
-          }
-
-          (apiKeyTextComponent as any).timeoutId = setTimeout(async () => {
-            if (value) {
-              await validateApiKeyAndUpdateStatus(value, apiKeyTextComponent);
-            }
-            onAfterSave();
-          }, 2000);
+        .onChange((value: string) => {
+          debouncedSaveAndReinitialize(value);
         });
 
       text.inputEl.type = 'password';
@@ -63,9 +63,11 @@ export function renderOpenRouterAPIKeySetting(
           plugin.settings.openRouterAPIKey,
           apiKeyTextComponent
         );
+        await plugin.reInitiateAIService();
+        console.log('AI Service has been reinitialized');
         onAfterSave();
       });
-      button.setTooltip('Re-check API Key');
+      button.setTooltip('Re-check API Key and Reinitialize AI Service');
     });
 
   async function validateApiKeyAndUpdateStatus(
@@ -81,7 +83,7 @@ export function renderOpenRouterAPIKeySetting(
     statusTextEl.textContent = 'Validating...';
     statusTextEl.className = 'api-key-status validating';
 
-    if (plugin.settings.showOpenRouterSetting) {
+    if (plugin.settings.showopenRouterSetting) {
       const isValid = await AIService.validateOpenRouterApiKey(apiKey);
 
       statusTextEl.textContent = isValid ? 'Valid' : 'Invalid';
@@ -92,19 +94,5 @@ export function renderOpenRouterAPIKeySetting(
       statusTextEl.textContent = 'Disabled';
       statusTextEl.classList.remove('validating', 'valid', 'invalid');
     }
-
-    const aiServiceInstance = AIService.getInstance(
-      plugin.settings.openAIApiKey,
-      plugin.settings.groqAPIKey,
-      plugin.settings.openRouterAPIKey,
-      {
-        openAIApiKey: plugin.settings.openAIApiKey,
-        groqAPIKey: plugin.settings.groqAPIKey,
-        openRouterAPIKey: plugin.settings.openRouterAPIKey,
-        apiEndpoint: plugin.settings.apiEndpoint,
-        localEndpoint: plugin.settings.localEndpoint,
-        temperature: plugin.settings.temperature,
-      }
-    );
   }
 }

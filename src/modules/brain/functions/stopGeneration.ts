@@ -1,9 +1,9 @@
 import { BrainModule } from '../BrainModule';
 import { showCustomNotice } from '../../../modals';
-import { TemplatesModule } from '../../templates/TemplatesModule';
+import { logger } from '../../../utils/logger';
 
 export async function stopGeneration(plugin: BrainModule): Promise<void> {
-  console.log('Checking brain abort controller: ', plugin.abortController);
+  logger.log('Checking brain abort controller: ', plugin.abortController);
   if (plugin.abortController) {
     plugin.abortController.abort();
     plugin.abortController = null;
@@ -13,7 +13,7 @@ export async function stopGeneration(plugin: BrainModule): Promise<void> {
     showCustomNotice('No generation in progress', 5000);
   }
 
-  console.log(
+  logger.log(
     'Checking templates abort controller: ',
     plugin.plugin.templatesModule.abortController
   );

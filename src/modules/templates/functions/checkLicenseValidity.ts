@@ -1,6 +1,7 @@
 import { TemplatesModule } from '../TemplatesModule';
 import { requestUrl } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
+import { logger } from '../../../utils/logger';
 
 let attemptCount = 0;
 let lastAttemptTime = 0;
@@ -67,11 +68,11 @@ export async function checkLicenseValidity(
       }
       return false;
     } else {
-      console.error('Error checking license validity:', response.text);
+      logger.error('Error checking license validity:', response.text);
       throw new Error('Server error');
     }
   } catch (error) {
-    console.error('Error checking license validity:', error);
+    logger.error('Error checking license validity:', error);
     // Check if the error is due to too many requests
     if (error instanceof Error && error.message.includes('429')) {
       if (showNotice) {

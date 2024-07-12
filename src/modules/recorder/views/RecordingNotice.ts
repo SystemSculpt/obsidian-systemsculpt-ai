@@ -1,5 +1,6 @@
 import { App } from 'obsidian';
 import { RecorderModule } from '../RecorderModule';
+import { logger } from '../../../utils/logger';
 
 export class RecordingNotice {
   app: App;
@@ -16,7 +17,7 @@ export class RecordingNotice {
     this.app = app;
     this.plugin = plugin;
     this.noticeEl = this.createNoticeEl();
-    console.log('RecordingNotice created');
+    logger.log('RecordingNotice created');
   }
 
   private createNoticeEl(): HTMLElement {
@@ -31,7 +32,7 @@ export class RecordingNotice {
     });
     closeButton.addEventListener('click', () => {
       this.plugin.toggleRecording();
-      console.log('Recording stopped via close button');
+      logger.log('Recording stopped via close button');
     });
 
     const titleEl = noticeEl.createEl('h3', { text: 'Recording audio...' });
@@ -88,7 +89,7 @@ export class RecordingNotice {
   async startRecording(): Promise<void> {
     try {
       const selectedMicrophone = await this.plugin.getSelectedMicrophone();
-      console.log('Selected microphone:', selectedMicrophone);
+      logger.log('Selected microphone:', selectedMicrophone);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedMicrophone
@@ -103,19 +104,19 @@ export class RecordingNotice {
 
       this.mediaRecorder = new MediaRecorder(stream);
       this.mediaRecorder.start();
-      console.log('MediaRecorder started');
+      logger.log('MediaRecorder started');
 
       // Start visualizing the audio right after starting the recording
       this.visualize();
     } catch (error) {
-      console.error('Error starting recording:', error);
+      logger.error('Error starting recording:', error);
       throw error; // Ensure the error is propagated so the calling function can handle it
     }
   }
 
   visualize(): void {
     if (!this.analyser || !this.canvasContext) {
-      console.error('Analyser or CanvasContext not initialized');
+      logger.error('Analyser or CanvasContext not initialized');
       return;
     }
     const bufferLength = this.analyser.frequencyBinCount;
@@ -158,7 +159,7 @@ export class RecordingNotice {
   }
 
   async stopRecording(): Promise<ArrayBuffer> {
-    console.log('stopRecording called');
+    logger.log('stopRecording called');
     cancelAnimationFrame(this.rafId);
     this.audioSource.disconnect();
 
@@ -178,7 +179,7 @@ export class RecordingNotice {
         async (event: BlobEvent) => {
           try {
             const arrayBuffer = await event.data.arrayBuffer();
-            console.log('ArrayBuffer created');
+            logger.log('ArrayBuffer created');
             resolve(arrayBuffer);
           } catch (error) {
             reject(error);
@@ -186,7 +187,7 @@ export class RecordingNotice {
         }
       );
       this.mediaRecorder.stop();
-      console.log('MediaRecorder stopped');
+      logger.log('MediaRecorder stopped');
     });
   }
 

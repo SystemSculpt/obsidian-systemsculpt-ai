@@ -38,17 +38,46 @@
   letter-spacing: 0.5px;
 }
 
+/* Custom scrollbar styles */
+.model-selection-modal {
+  padding-right: 12px; /* Increased padding to accommodate wider scrollbar */
+  margin-top: 20px; /* Add top margin to modal content */
+}
+
+.model-selection-modal::-webkit-scrollbar {
+  width: 12px; /* Increased width */
+}
+
+.model-selection-modal::-webkit-scrollbar-track {
+  background: var(--background-secondary-alt);
+  border-radius: 6px;
+}
+
+.model-selection-modal::-webkit-scrollbar-thumb {
+  background: var(--interactive-accent); /* Changed to a more visible color */
+  border-radius: 6px;
+  border: 3px solid var(--background-secondary-alt); /* Added border for contrast */
+}
+
+.model-selection-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Adjust modal group layout */
 .modal-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   max-width: 600px;
+  margin-left: 10px; /* Add left margin */
+  margin-right: 10px; /* Add right margin */
 }
 
 .modal-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
   border-radius: 5px;
   transition: background-color 0.2s ease;
   padding: 10px;
@@ -57,7 +86,50 @@
   word-break: break-all;
   overflow-wrap: break-word;
   hyphens: auto;
-  font-size: 0.9em; /* Add this line to reduce font size by 25% */
+  position: relative;
+}
+
+.model-name {
+  font-size: 0.9em;
+  margin-bottom: 2px;
+}
+
+.model-context-length {
+  font-size: 0.7em;
+  color: var(--text-muted);
+}
+
+.model-favorite-star {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s ease, transform 0.2s ease;
+  padding: 5px;
+  margin: -5px;
+}
+
+.model-favorite-star:not(.is-favorite):hover {
+  color: var(--text-accent);
+}
+
+.model-favorite-star.is-favorite {
+  color: var(--text-accent);
+  filter: drop-shadow(0 0 3px var(--text-accent))
+    drop-shadow(0 0 1px var(--text-accent));
+}
+
+.model-favorite-star:not(.is-favorite) {
+  font-variation-settings: 'FILL' 0;
+}
+
+.model-favorite-star:hover {
+  transform: scale(1.2);
+}
+
+.model-favorite-star.is-favorite:hover {
+  color: var(--text-muted);
 }
 
 .modal-item:hover {
@@ -66,13 +138,6 @@
 
 .modal-item.disabled {
   color: var(--text-muted);
-}
-
-.modal-name {
-  flex: 1;
-  margin-right: 10px;
-  font-size: 0.9em; /* Update this line */
-  white-space: normal;
 }
 
 .modal-item .checkbox-container {

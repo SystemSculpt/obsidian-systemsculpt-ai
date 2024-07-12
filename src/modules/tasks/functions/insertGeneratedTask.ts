@@ -1,6 +1,7 @@
 import { TasksModule } from '../TasksModule';
 import { TFile } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
+import { logger } from '../../../utils/logger';
 
 export async function insertGeneratedTask(
   plugin: TasksModule,
@@ -47,7 +48,7 @@ export async function insertGeneratedTask(
       );
     }
   } catch (error) {
-    console.error('Error adding task:', error);
+    logger.error('Error adding task:', error);
     showCustomNotice('Failed to add task. Please check the tasks location.');
   }
 }

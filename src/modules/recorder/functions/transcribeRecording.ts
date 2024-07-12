@@ -1,4 +1,5 @@
 import { RecorderModule } from '../RecorderModule';
+import { logger } from '../../../utils/logger';
 
 async function transcribeChunk(
   plugin: RecorderModule,
@@ -10,7 +11,7 @@ async function transcribeChunk(
 
   const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
 
-  console.log(`Sending chunk to OpenAI API (size: ${chunk.size} bytes)`);
+  logger.log(`Sending chunk to OpenAI API (size: ${chunk.size} bytes)`);
   const response = await fetch(
     'https://api.openai.com/v1/audio/transcriptions',
     {
@@ -24,16 +25,12 @@ async function transcribeChunk(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(
-      'Failed to transcribe chunk:',
-      response.statusText,
-      errorBody
-    );
+    logger.error('Failed to transcribe chunk:', response.statusText, errorBody);
     throw new Error('Transcription failed with response: ' + errorBody);
   }
 
   const data = await response.json();
-  console.log('Chunk transcription successful');
+  logger.log('Chunk transcription successful');
   return data.text;
 }
 
@@ -41,7 +38,7 @@ export async function transcribeRecording(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer
 ): Promise<string> {
-  console.log(
+  logger.log(
     `Starting transcription with provider: ${plugin.settings.whisperProvider}`
   );
   if (plugin.settings.whisperProvider === 'groq') {
@@ -55,30 +52,30 @@ async function transcribeWithOpenAI(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer
 ): Promise<string> {
-  console.log('Transcribing with OpenAI');
+  logger.log('Transcribing with OpenAI');
   let CHUNK_SIZE = 23 * 1024 * 1024; // 25MB is max, do in 23MB chunks to be safe
   const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
   const totalSize = blob.size;
-  console.log(`Total audio size: ${totalSize} bytes`);
+  logger.log(`Total audio size: ${totalSize} bytes`);
   const chunks: Blob[] = [];
 
   for (let start = 0; start < totalSize; start += CHUNK_SIZE) {
     const chunk = blob.slice(start, start + CHUNK_SIZE);
     chunks.push(chunk);
   }
-  console.log(`Number of chunks: ${chunks.length}`);
+  logger.log(`Number of chunks: ${chunks.length}`);
 
   let transcriptions: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    console.log(`Transcribing chunk ${i + 1} of ${chunks.length}`);
+    logger.log(`Transcribing chunk ${i + 1} of ${chunks.length}`);
     try {
       const transcription = await transcribeChunk(plugin, chunks[i]);
       transcriptions.push(transcription);
     } catch (error) {
-      console.error(`Error transcribing chunk ${i + 1}:`, error);
+      logger.error(`Error transcribing chunk ${i + 1}:`, error);
       if (error.message.includes('Maximum content size limit')) {
         CHUNK_SIZE = Math.floor(CHUNK_SIZE / 2);
-        console.warn(`Chunk size reduced to ${CHUNK_SIZE} bytes. Retrying...`);
+        logger.warn(`Chunk size reduced to ${CHUNK_SIZE} bytes. Retrying...`);
         return await transcribeRecording(plugin, arrayBuffer); // Retry with smaller chunks
       } else {
         throw error;
@@ -86,7 +83,7 @@ async function transcribeWithOpenAI(
     }
   }
 
-  console.log('OpenAI transcription completed');
+  logger.log('OpenAI transcription completed');
   return transcriptions.join(' ');
 }
 
@@ -94,7 +91,7 @@ async function transcribeWithGroq(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer
 ): Promise<string> {
-  console.log('Transcribing with Groq');
+  logger.log('Transcribing with Groq');
   const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
   const formData = new FormData();
   formData.append('file', blob, 'recording.mp3');
@@ -102,7 +99,7 @@ async function transcribeWithGroq(
 
   const currentGroqApiKey = plugin.plugin.brainModule.settings.groqAPIKey;
 
-  console.log(`Sending audio to Groq API (size: ${blob.size} bytes)`);
+  logger.log(`Sending audio to Groq API (size: ${blob.size} bytes)`);
   const response = await fetch(
     'https://api.groq.com/openai/v1/audio/transcriptions',
     {
@@ -116,7 +113,7 @@ async function transcribeWithGroq(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(
+    logger.error(
       'Failed to transcribe with Groq:',
       response.statusText,
       errorBody
@@ -125,6 +122,6 @@ async function transcribeWithGroq(
   }
 
   const data = await response.json();
-  console.log('Groq transcription completed');
+  logger.log('Groq transcription completed');
   return data.text;
 }

@@ -1,7 +1,9 @@
 import { requestUrl } from 'obsidian';
-import { Model } from './Model';
+import { Model, AIProvider } from './Model';
+import { AIServiceInterface } from './AIServiceInterface';
+import { logger } from '../utils/logger';
 
-export class GroqService {
+export class GroqService implements AIServiceInterface {
   private apiKey: string;
   private settings: { temperature: number };
 
@@ -34,7 +36,7 @@ export class GroqService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -86,7 +88,7 @@ export class GroqService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -158,7 +160,7 @@ export class GroqService {
       temperature: this.settings.temperature,
     });
 
-    console.log(
+    logger.log(
       'Model: ',
       modelId,
       'Max Tokens: ',
@@ -211,7 +213,7 @@ export class GroqService {
   async getModels(): Promise<Model[]> {
     if (!this.apiKey) return [];
 
-    console.log('getting groq models...');
+    logger.log('getting groq models...');
     try {
       const response = await requestUrl({
         url: 'https://api.groq.com/openai/v1/models',
@@ -229,13 +231,14 @@ export class GroqService {
             name: model.id,
             isLocal: false,
             provider: 'groq',
+            contextLength: model.context_window || 'Unknown',
           }));
       } else {
-        console.error('Failed to fetch Groq models:', response.status);
+        logger.error('Failed to fetch Groq models:', response.status);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching Groq models:', error);
+      logger.error('Error fetching Groq models:', error);
       return [];
     }
   }
@@ -243,7 +246,7 @@ export class GroqService {
   static async validateApiKey(apiKey: string): Promise<boolean> {
     if (!apiKey) return false;
 
-    console.log('validating groq api key...');
+    logger.log('validating groq api key...');
     try {
       const response = await requestUrl({
         url: 'https://api.groq.com/openai/v1/models',
@@ -254,13 +257,13 @@ export class GroqService {
       });
       return response.status === 200;
     } catch (error) {
-      console.error('Error validating Groq API key:', error);
+      logger.error('Error validating Groq API key:', error);
       return false;
     }
   }
 
   updateApiKey(apiKey: string): void {
-    console.log('updating groq api key...');
+    logger.log('updating groq api key...');
     this.apiKey = apiKey;
   }
 }

@@ -1,4 +1,5 @@
 import { ChatMessage } from '../ChatMessage';
+import { logger } from '../../../utils/logger';
 
 export function handleStreamingResponse(
   chunk: string,
@@ -18,6 +19,7 @@ export function handleStreamingResponse(
     if (line.startsWith('data:')) {
       const dataStr = line.slice(5).trim();
       if (dataStr === '[DONE]') {
+        updateTokenCount(); // Update token count only at the end
         return accumulatedContent;
       }
 
@@ -33,7 +35,6 @@ export function handleStreamingResponse(
         ) {
           accumulatedContent += data.choices[0].delta.content;
           appendToLastMessage(accumulatedContent);
-          updateTokenCount();
         }
       } catch (error) {
         if (
@@ -46,7 +47,7 @@ export function handleStreamingResponse(
         ) {
           // Suppress specific error message from being logged
         } else {
-          console.error('Error parsing JSON:', error);
+          logger.error('Error parsing JSON:', error);
         }
       }
     }

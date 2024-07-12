@@ -2,6 +2,7 @@ import { Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 import { IGenerationModule } from '../../../interfaces/IGenerationModule';
 import { ChatMessage } from '../../chat/ChatMessage';
+import { logger } from '../../../utils/logger';
 
 export function handleStreamingResponse(
   chunk: string,
@@ -63,7 +64,7 @@ export function handleStreamingResponse(
         ) {
           // Suppress specific error message from being logged
         } else {
-          console.error('Error parsing JSON:', error); // Log other errors
+          logger.error('Error parsing JSON:', error); // Log other errors
         }
       }
     } else {

@@ -11,6 +11,7 @@ import { checkLicenseValidity } from './functions/checkLicenseValidity';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
 import { TemplatesSettingTab } from './settings/TemplatesSettingTab';
+import { logger } from '../../utils/logger';
 
 export class TemplatesModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -91,7 +92,7 @@ export class TemplatesModule implements IGenerationModule {
 
     const licenseKey = this.settings.licenseKey;
     if (!licenseKey || !licenseKey.includes('-') || licenseKey.includes(' ')) {
-      console.log(
+      logger.log(
         'License key format is invalid or missing. Skipping license check on startup.'
       );
       return;
@@ -105,7 +106,7 @@ export class TemplatesModule implements IGenerationModule {
 
   async checkForUpdate(): Promise<void> {
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
-      console.log('No valid license key found. Skipping update check.');
+      logger.log('No valid license key found. Skipping update check.');
       return;
     }
     if (await checkLicenseValidity(this)) {
@@ -116,7 +117,7 @@ export class TemplatesModule implements IGenerationModule {
   async checkAndUpdateTemplates(): Promise<void> {
     // Check if the user is a Patreon member
     if (!this.settings.isPatreonMember) {
-      console.log(
+      logger.log(
         'User is not a Patreon member. Skipping template update check.'
       );
       return;
@@ -124,7 +125,7 @@ export class TemplatesModule implements IGenerationModule {
 
     // First, check if the license key is empty
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
-      console.log(
+      logger.log(
         'No valid license key found. Please enter your license key in the settings. If you need a license key, please message on Patreon or Discord.'
       );
       return;

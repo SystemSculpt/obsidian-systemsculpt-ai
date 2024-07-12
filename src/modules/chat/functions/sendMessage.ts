@@ -1,6 +1,7 @@
 import { TFile } from 'obsidian';
 import { ChatMessage } from '../ChatMessage';
 import { handleStreamingResponse } from './handleStreamingResponse';
+import { logger } from '../../../utils/logger';
 
 export async function sendMessage(
   inputEl: HTMLTextAreaElement,
@@ -72,7 +73,7 @@ export async function sendMessage(
       `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
     );
   } catch (error) {
-    console.error('Error streaming AI response:', error);
+    logger.error('Error streaming AI response:', error);
   } finally {
     hideLoading();
   }
