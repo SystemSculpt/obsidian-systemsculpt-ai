@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, moment } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, moment, Notice } from 'obsidian';
 import { ChatMessage } from './ChatMessage';
 import { BrainModule } from '../brain/BrainModule';
 import { ChatModule } from './ChatModule';
@@ -12,7 +12,6 @@ import {
   attachEventListeners,
   attachFileSearcherListeners,
 } from './functions/EventListeners';
-import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 import { ActionsModal } from './views/ActionsModal';
 import {
   toggleEditTitle,
@@ -22,6 +21,8 @@ import {
 import { FileSearcher } from './FileSearcher';
 import { showCustomNotice } from '../../modals';
 import { logger } from '../../utils/logger';
+import { displayTokenCount, formatNumber } from './utils';
+import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
@@ -29,12 +30,12 @@ export class ChatView extends ItemView {
   chatMessages: ChatMessage[];
   brainModule: BrainModule;
   chatModule: ChatModule;
-  chatFile: TFile | null;
+  chatFile: TFile | null = null;
   contextFiles: TFile[] = [];
-  public tokenManager: TokenManager;
-  public chatHistoryManager: ChatHistoryManager;
-  public contextFileManager: ContextFileManager;
-  public chatFileManager: ChatFileManager;
+  public tokenManager!: TokenManager;
+  public chatHistoryManager!: ChatHistoryManager;
+  public contextFileManager!: ContextFileManager;
+  public chatFileManager!: ChatFileManager;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -46,6 +47,33 @@ export class ChatView extends ItemView {
     this.brainModule = brainModule;
     this.chatModule = chatModule;
     this.initializeManagers();
+    this.listenForModelChanges();
+  }
+
+  public setChatModule(chatModule: ChatModule) {
+    this.chatModule = chatModule;
+    this.initializeManagers();
+  }
+
+  private listenForModelChanges() {
+    this.brainModule.on('model-changed', async () => {
+      await this.updateTokenCount();
+    });
+
+    this.brainModule.on('cost-estimate-updated', ({ minCost, maxCost }) => {
+      this.updateCostEstimate(minCost, maxCost);
+    });
+  }
+
+  private updateCostEstimate(minCost: number, maxCost: number) {
+    const costEstimateEl = this.containerEl.querySelector(
+      '.cost-estimate'
+    ) as HTMLElement;
+    if (costEstimateEl) {
+      costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
+        minCost
+      )} - $${formatNumber(maxCost)}`;
+    }
   }
 
   private initializeManagers() {
@@ -54,12 +82,10 @@ export class ChatView extends ItemView {
     this.chatHistoryManager = new ChatHistoryManager(
       this.app,
       this,
-      this.contextFileManager
+      this.contextFileManager,
+      this.chatModule
     );
-    this.chatFileManager = new ChatFileManager(
-      this.app,
-      this.chatModule.settings.chatsPath
-    );
+    this.chatFileManager = new ChatFileManager(this.app, this.chatModule);
   }
 
   private attachListeners() {
@@ -157,7 +183,9 @@ export class ChatView extends ItemView {
     } catch (error) {
       logger.error('Error archiving chat file:', error);
       showCustomNotice(
-        `Failed to archive '${currentChatFile.basename}'. Error: ${error.message}`
+        `Failed to archive '${currentChatFile.basename}'. Error: ${
+          (error as Error).message
+        }`
       );
       this.chatFile = currentChatFile; // Restore the chat file reference if archiving failed
     }
@@ -185,7 +213,9 @@ export class ChatView extends ItemView {
     } catch (error) {
       logger.error('Error deleting chat file:', error);
       showCustomNotice(
-        `Failed to delete '${currentChatFile.basename}'. Error: ${error.message}`
+        `Failed to delete '${currentChatFile.basename}'. Error: ${
+          (error as Error).message
+        }`
       );
       this.chatFile = currentChatFile; // Restore the chat file reference if deletion failed
     }
@@ -275,6 +305,8 @@ export class ChatView extends ItemView {
       '.chat-title-text'
     ) as HTMLElement;
     if (titleEl) {
+      // Reason to ignore: works just fine, fixes seem to fuck things up tbh
+      // @ts-ignore
       titleEl.textContent = moment().format('YYYY-MM-DD HH-mm-ss');
     }
 
@@ -282,6 +314,8 @@ export class ChatView extends ItemView {
     setTimeout(() => {
       this.updateTokenCount();
     }, 0);
+
+    this.scrollToBottom();
   }
 
   public clearChatView() {
@@ -290,12 +324,15 @@ export class ChatView extends ItemView {
       messagesContainer.innerHTML = '';
     }
 
-    const contextFilesContainer = this.containerEl.querySelector('.context-files');
+    const contextFilesContainer =
+      this.containerEl.querySelector('.context-files');
     if (contextFilesContainer) {
       contextFilesContainer.innerHTML = '';
     }
 
-    const inputEl = this.containerEl.querySelector('.chat-input') as HTMLTextAreaElement;
+    const inputEl = this.containerEl.querySelector(
+      '.chat-input'
+    ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = '';
     }
@@ -322,6 +359,7 @@ export class ChatView extends ItemView {
 
   async loadChatFile(file: TFile) {
     await this.chatHistoryManager.loadChatFile(file);
+    this.scrollToBottom();
   }
 
   setChatFile(file: TFile) {
@@ -336,6 +374,41 @@ export class ChatView extends ItemView {
 
   attachEventListeners(container: HTMLElement) {
     attachEventListeners(this);
+    this.attachInputChangeListener();
+  }
+
+  private attachInputChangeListener() {
+    const inputEl = this.containerEl.querySelector(
+      '.chat-input'
+    ) as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.addEventListener('input', () => {
+        this.updateTokenCountAndCost();
+      });
+    }
+  }
+
+  private async updateTokenCountAndCost() {
+    const inputEl = this.containerEl.querySelector(
+      '.chat-input'
+    ) as HTMLTextAreaElement;
+    const inputText = inputEl ? inputEl.value : '';
+    const tokenCount = await this.tokenManager.getTokenCount(
+      this.chatMessages,
+      this.contextFiles,
+      inputText
+    );
+    const currentModel = this.brainModule.getCurrentModel();
+    if (currentModel) {
+      displayTokenCount(
+        tokenCount,
+        this.containerEl,
+        this.chatMessages.length,
+        currentModel,
+        this.brainModule.getMaxOutputTokens()
+      );
+      this.brainModule.updateCostEstimate(tokenCount);
+    }
   }
 
   async getTokenCount(): Promise<number> {
@@ -438,6 +511,7 @@ export class ChatView extends ItemView {
         messagesContainer,
         this.deleteMessage.bind(this)
       );
+      this.scrollToBottom();
     }
   }
 
@@ -472,7 +546,10 @@ export class ChatView extends ItemView {
   }
 
   async createChatFile(initialMessage: string) {
-    this.chatFile = await this.chatFileManager.createChatFile(
+    if (!this.chatModule) {
+      throw new Error('ChatModule is not initialized');
+    }
+    this.chatFile = await this.chatModule.chatFileManager.createChatFile(
       initialMessage,
       this.contextFiles
     );
@@ -510,25 +587,7 @@ export class ChatView extends ItemView {
   }
 
   async updateTokenCount() {
-    const tokenCount = await this.getTokenCount();
-    this.tokenManager.displayTokenCount(
-      tokenCount,
-      this.containerEl,
-      this.chatMessages.length
-    );
-  }
-
-  async updateTokenCountWithInput(input: string) {
-    const tokenCount = await this.tokenManager.getTokenCount(
-      this.chatMessages,
-      this.contextFiles,
-      input
-    );
-    this.tokenManager.displayTokenCount(
-      tokenCount,
-      this.containerEl,
-      this.chatMessages.length
-    );
+    await this.updateTokenCountAndCost();
   }
 
   setChatInputValue(value: string) {
@@ -546,13 +605,19 @@ export class ChatView extends ItemView {
       this.contextFiles,
       ''
     );
-    const costEstimator = new CostEstimator(
-      this.app,
-      this.brainModule.settings.defaultModelId,
-      tokenCount,
-      this.brainModule.settings.maxTokens
-    );
-    costEstimator.open();
+    const currentModel = this.brainModule.getCurrentModel();
+    if (currentModel) {
+      const costEstimator = new CostEstimator(
+        this.app,
+        currentModel,
+        tokenCount
+      );
+      costEstimator.open();
+    } else {
+      new Notice(
+        "Couldn't find the current model. Please check your settings."
+      );
+    }
   }
 
   showActionsModal() {
@@ -611,5 +676,12 @@ export class ChatView extends ItemView {
     }
 
     this.focusInput();
+  }
+
+  scrollToBottom() {
+    const messagesContainer = this.containerEl.querySelector('.chat-messages');
+    if (messagesContainer instanceof HTMLElement) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
   }
 }

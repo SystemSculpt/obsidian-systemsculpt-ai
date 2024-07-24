@@ -1,242 +1,149 @@
-import { Modal, App } from 'obsidian';
-import { logger } from '../utils/logger';
+import { Modal, App, setIcon } from 'obsidian';
+import { Model } from '../api/Model';
 
 export class CostEstimator extends Modal {
-  modelId: string;
-  tokenCount: number;
-  maxTokens: number;
+  private model: Model;
+  private tokenCount: number;
+  private maxOutputTokens: number;
 
-  constructor(
-    app: App,
-    modelId: string,
-    tokenCount: number,
-    maxTokens: number
-  ) {
+  constructor(app: App, model: Model, tokenCount: number) {
     super(app);
-    this.modelId = modelId;
+    this.model = model;
     this.tokenCount = tokenCount;
-    this.maxTokens = maxTokens;
+    this.maxOutputTokens = model.maxOutputTokens || 4096;
+  }
+
+  public static calculateCost(
+    model: Model,
+    tokenCount: number,
+    maxOutputTokens: number
+  ): { minCost: number; maxCost: number } {
+    if (!model.pricing) {
+      return { minCost: 0, maxCost: 0 };
+    }
+    const { prompt: inputCost, completion: outputCost } = model.pricing;
+    const minCost = tokenCount * inputCost;
+    const maxCost = tokenCount * inputCost + maxOutputTokens * outputCost;
+    return { minCost, maxCost };
   }
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Cost Estimator' });
-    contentEl.createEl('p', {
-      text: `Currently Selected Model: ${this.modelId}`,
-      cls: 'current-model',
+    contentEl.empty();
+    contentEl.addClass('cost-estimator-modal');
+
+    this.createHeader(contentEl);
+    this.createModelInfo(contentEl);
+    this.createTokenInfo(contentEl);
+    this.createCostEstimate(contentEl);
+  }
+
+  private createHeader(contentEl: HTMLElement) {
+    const header = contentEl.createEl('div', { cls: 'modal-header' });
+    setIcon(header.createEl('span', { cls: 'modal-icon' }), 'calculator');
+    header.createEl('h2', { text: 'Cost Estimator', cls: 'modal-title' });
+  }
+
+  private createModelInfo(contentEl: HTMLElement) {
+    const modelInfo = contentEl.createEl('div', { cls: 'model-info' });
+    modelInfo.createEl('h3', { text: 'Selected Model' });
+    modelInfo.createEl('p', {
+      text: this.model.name,
+      cls: 'model-name',
     });
 
-    // Calculate and display cost for the current model
-    const modelCosts = {
-      'gpt-4o': {
-        perThousandInput: 0.005,
-        perThousandOutput: 0.015,
-      },
-      'gpt-3.5-turbo': {
-        perThousandInput: 0.0005,
-        perThousandOutput: 0.0015,
-      },
-    };
+    if (this.model.pricing) {
+      const pricePerMillionInput = this.model.pricing.prompt * 1000000;
+      const pricePerMillionOutput = this.model.pricing.completion * 1000000;
 
-    if (modelCosts[this.modelId]) {
-      const perThousandInput = modelCosts[this.modelId].perThousandInput;
-      const perThousandOutput = modelCosts[this.modelId].perThousandOutput;
-
-      const inputCost = this.tokenCount * perThousandInput;
-      const minOutputCost = 1 * perThousandOutput;
-      const maxOutputCost = this.maxTokens * perThousandOutput;
-      const minTotalCost = inputCost + minOutputCost;
-      const maxTotalCost = inputCost + maxOutputCost;
-
-      logger.log(
-        'Input cost is ',
-        inputCost,
-        ', min output cost is ',
-        minOutputCost,
-        ', max output cost is ',
-        maxOutputCost,
-        ', min total cost is ',
-        minTotalCost,
-        ', max total cost is ',
-        maxTotalCost
-      );
-
-      const tokenInfoContainer = contentEl.createDiv({
-        cls: 'token-info-container',
+      const pricingInfo = modelInfo.createEl('div', { cls: 'pricing-info' });
+      pricingInfo.createEl('p', {
+        text: `$${this.formatNumber(
+          pricePerMillionInput
+        )} per million input tokens`,
+        cls: 'pricing-detail',
       });
-
-      tokenInfoContainer.createEl('div', {
-        text: `Current input tokens: ${this.tokenCount} (Estimated $${(
-          inputCost / 1000
-        ).toFixed(2)})`,
-        cls: 'token-info latest-token-count',
-      });
-
-      tokenInfoContainer.createEl('div', {
-        text: `Max output tokens: ${this.maxTokens} (Estimated $${(
-          minOutputCost / 1000
-        ).toFixed(2)} - $${(maxOutputCost / 1000).toFixed(2)})`,
-        cls: 'token-info max-tokens-setting',
-      });
-
-      contentEl.createEl('p', {
-        text: `Predicted next chat cost: $${(minTotalCost / 1000).toFixed(
-          2
-        )} - $${(maxTotalCost / 1000).toFixed(2)}*`,
-        cls: 'predicted-cost',
-      });
-
-      contentEl.createEl('p', {
-        text: '* This is the range of possible costs. The actual cost is usually on the lower end as the response from the LLM often does not utilize all possible output tokens unless the output requested is specifically lengthy.',
-        cls: 'cost-notice',
+      pricingInfo.createEl('p', {
+        text: `$${this.formatNumber(
+          pricePerMillionOutput
+        )} per million output tokens`,
+        cls: 'pricing-detail',
       });
     }
-
-    const costTypeTabs = `
-      <div class="tabs cost-type-tabs">
-        <button class="tab-button" data-cost-type="thousand">Per Thousand Cost</button>
-        <button class="tab-button active" data-cost-type="million">Per Million Cost</button>
-      </div>
-    `;
-
-    const tableHtml = `
-      <h3>OpenAI API Models</h3>
-      <table class="cost-table">
-        <tr>
-          <th>Model</th>
-          <th>Input</th>
-          <th>Output</th>
-        </tr>
-        <tr>
-          <td>gpt-4o</td>
-          <td class="cost-input" data-thousand="0.005" data-million="5.00">$5.00 / 1M tokens</td>
-          <td class="cost-output" data-thousand="0.015" data-million="15.00">$15.00 / 1M tokens</td>
-        </tr>
-        <tr>
-          <td>gpt-3.5-turbo</td>
-          <td class="cost-input" data-thousand="0.0005" data-million="0.50">$0.50 / 1M tokens</td>
-          <td class="cost-output" data-thousand="0.0015" data-million="1.50">$1.50 / 1M tokens</td>
-        </tr>
-      </table>
-
-      <h3>Groq Models</h3>
-      <div class="tabs groq-model-tabs">
-        <button class="tab-button active" data-tab="free">Free Version</button>
-        <button class="tab-button" data-tab="on-demand">On-Demand Version</button>
-      </div>
-      <div class="tab-content" id="free" style="display:block;">
-        <table class="cost-table">
-          <tr>
-            <th>Model</th>
-            <th>Input</th>
-            <th>Output</th>
-          </tr>
-          <tr>
-            <td>Llama3-70B-8k</td>
-            <td>Free</td>
-            <td>Free</td>
-          </tr>
-          <tr>
-            <td>Llama3-8B-8k</td>
-            <td>Free</td>
-            <td>Free</td>
-          </tr>
-          <tr>
-            <td>Mixtral-8x7B-32k Instruct</td>
-            <td>Free</td>
-            <td>Free</td>
-          </tr>
-          <tr>
-            <td>Gemma-7B-Instruct</td>
-            <td>Free</td>
-            <td>Free</td>
-          </tr>
-        </table>
-      </div>
-      <div class="tab-content" id="on-demand" style="display:none;">
-        <table class="cost-table">
-          <tr>
-            <th>Model</th>
-            <th>Input</th>
-            <th>Output</th>
-          </tr>
-          <tr>
-            <td>Llama3-70B-8k</td>
-            <td class="cost-input" data-thousand="0.00059" data-million="0.59">$0.59 / 1M tokens</td>
-            <td class="cost-output" data-thousand="0.00079" data-million="0.79">$0.79 / 1M tokens</td>
-          </tr>
-          <tr>
-            <td>Llama3-8B-8k</td>
-            <td class="cost-input" data-thousand="0.00005" data-million="0.05">$0.05 / 1M tokens</td>
-            <td class="cost-output" data-thousand="0.00010" data-million="0.10">$0.10 / 1M tokens</td>
-          </tr>
-          <tr>
-            <td>Mixtral-8x7B-32k Instruct</td>
-            <td class="cost-input" data-thousand="0.00027" data-million="0.27">$0.27 / 1M tokens</td>
-            <td class="cost-output" data-thousand="0.00027" data-million="0.27">$0.27 / 1M tokens</td>
-          </tr>
-          <tr>
-            <td>Gemma-7B-Instruct</td>
-            <td class="cost-input" data-thousand="0.00010" data-million="0.10">$0.10 / 1M tokens</td>
-            <td class="cost-output" data-thousand="0.00010" data-million="0.10">$0.10 / 1M tokens</td>
-          </tr>
-        </table>
-      </div>
-    `;
-
-    contentEl.innerHTML += costTypeTabs + tableHtml;
-
-    this.registerCostTypeEvents();
-    this.registerTabEvents();
   }
 
-  registerCostTypeEvents() {
-    const costTypeButtons = this.contentEl.querySelectorAll(
-      '.cost-type-tabs .tab-button[data-cost-type]'
-    );
-    const costInputs = this.contentEl.querySelectorAll('.cost-input');
-    const costOutputs = this.contentEl.querySelectorAll('.cost-output');
+  private createTokenInfo(contentEl: HTMLElement) {
+    const tokenInfo = contentEl.createEl('div', {
+      cls: 'token-info-container',
+    });
+    const leftTokenInfo = tokenInfo.createEl('div', {
+      cls: 'token-info left',
+    });
+    leftTokenInfo.createEl('span', { text: 'Current input tokens:' });
+    leftTokenInfo.createEl('span', {
+      text: this.tokenCount.toString(),
+      cls: 'token-value',
+    });
 
-    costTypeButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        costTypeButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-
-        const costType = button.getAttribute('data-cost-type');
-        const unit = costType === 'thousand' ? '1K' : '1M';
-
-        costInputs.forEach(input => {
-          input.textContent = `$${input.getAttribute(
-            `data-${costType}`
-          )} / ${unit} tokens`;
-        });
-        costOutputs.forEach(output => {
-          output.textContent = `$${output.getAttribute(
-            `data-${costType}`
-          )} / ${unit} tokens`;
-        });
-      });
+    const rightTokenInfo = tokenInfo.createEl('div', {
+      cls: 'token-info right',
+    });
+    rightTokenInfo.createEl('span', { text: 'Max output tokens:' });
+    rightTokenInfo.createEl('span', {
+      text: this.maxOutputTokens.toString(),
+      cls: 'token-value',
     });
   }
 
-  registerTabEvents() {
-    const tabButtons = this.contentEl.querySelectorAll(
-      '.groq-model-tabs .tab-button'
-    );
-    const tabContents = this.contentEl.querySelectorAll('.tab-content');
+  private createCostEstimate(contentEl: HTMLElement) {
+    const costEstimate = contentEl.createEl('div', { cls: 'predicted-cost' });
+    costEstimate.createEl('h3', { text: 'Estimated Cost for Next Message' });
+    const costInfo = costEstimate.createEl('p', { cls: 'value' });
 
-    tabButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        tabButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
+    if (this.model.provider === 'local') {
+      costInfo.innerHTML =
+        'Local model detected. No cost calculation available.';
+    } else if (this.model.pricing) {
+      const { prompt: inputCost, completion: outputCost } = this.model.pricing;
+      const minCost = this.tokenCount * inputCost + outputCost;
+      const maxCost =
+        this.tokenCount * inputCost + this.maxOutputTokens * outputCost;
+      costInfo.innerHTML = `$${this.formatNumber(
+        minCost
+      )} - $${this.formatNumber(maxCost)}`;
 
-        const target = button.getAttribute('data-tab');
-        tabContents.forEach(content => {
-          (content as HTMLElement).style.display =
-            content.id === target ? 'block' : 'none';
-        });
-      });
-    });
+      const disclaimer = contentEl.createEl('p', { cls: 'cost-notice' });
+      disclaimer.innerHTML =
+        'This is a rough estimate. Actual cost may vary based on the specific content and length of the message.';
+    } else {
+      costInfo.innerHTML =
+        'Pricing information is not available for this model.';
+    }
+  }
+
+  private formatNumber(num: number): string {
+    if (num === 0) return '0.00';
+    if (num >= 1) return num.toFixed(2);
+
+    const fixed = num.toFixed(10);
+    const [integer, decimal] = fixed.split('.');
+
+    if (decimal.startsWith('00')) {
+      const significantIndex = decimal.split('').findIndex(d => d !== '0');
+      if (significantIndex === -1) {
+        // If there are no non-zero digits, return with all zeros
+        return `${integer}.${'0'.repeat(10)}`;
+      }
+      const significantDigits = decimal.slice(
+        significantIndex,
+        significantIndex + 2
+      );
+      return `${integer}.${'0'.repeat(
+        Math.max(0, significantIndex)
+      )}${significantDigits}`;
+    }
+
+    return Number(fixed).toFixed(2);
   }
 
   onClose() {

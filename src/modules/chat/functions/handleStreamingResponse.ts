@@ -4,8 +4,7 @@ import { logger } from '../../../utils/logger';
 export function handleStreamingResponse(
   chunk: string,
   appendToLastMessage: (content: string) => void,
-  addMessage: (message: ChatMessage) => void,
-  updateTokenCount: () => void
+  addMessage: (message: ChatMessage) => void
 ): string {
   const dataLines = chunk.split('\n');
   let incompleteJSON = '';
@@ -19,7 +18,6 @@ export function handleStreamingResponse(
     if (line.startsWith('data:')) {
       const dataStr = line.slice(5).trim();
       if (dataStr === '[DONE]') {
-        updateTokenCount(); // Update token count only at the end
         return accumulatedContent;
       }
 
@@ -43,7 +41,9 @@ export function handleStreamingResponse(
         ) {
           incompleteJSON += dataStr;
         } else if (
-          error.message.includes('Unterminated string in JSON at position')
+          (error as Error).message.includes(
+            'Unterminated string in JSON at position'
+          )
         ) {
           // Suppress specific error message from being logged
         } else {

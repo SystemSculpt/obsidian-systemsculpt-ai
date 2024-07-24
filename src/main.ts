@@ -1,4 +1,4 @@
-import { Plugin, TFile, Notice } from 'obsidian';
+import { Plugin, TFile, Notice, WorkspaceLeaf } from 'obsidian';
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,
@@ -15,37 +15,34 @@ import { ChatView, VIEW_TYPE_CHAT } from './modules/chat/ChatView';
 import { AIService } from './api/AIService';
 import { registerMp3ContextMenu } from './events';
 import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
-import { listAllSettings } from './utils/listAllSettings';
 import { logger } from './utils/logger';
 
 export default class SystemSculptPlugin extends Plugin {
-  settings: SystemSculptSettings;
-  tasksModule: TasksModule;
-  brainModule: BrainModule;
-  templatesModule: TemplatesModule;
-  dataModule: DataModule;
-  recorderModule: RecorderModule;
-  aboutModule: AboutModule;
-  chatModule: ChatModule;
+  settings!: SystemSculptSettings;
+  tasksModule!: TasksModule;
+  brainModule!: BrainModule;
+  templatesModule!: TemplatesModule;
+  dataModule!: DataModule;
+  recorderModule!: RecorderModule;
+  aboutModule!: AboutModule;
+  chatModule!: ChatModule;
   modelToggleStatusBarItem: HTMLElement | null = null;
-  maxTokensToggleStatusBarItem: HTMLElement | null = null;
   taskToggleStatusBarItem: HTMLElement | null = null;
   recorderToggleStatusBarItem: HTMLElement | null = null;
   chatToggleStatusBarItem: HTMLElement | null = null;
-  settingsTab: SystemSculptSettingTab;
+  settingsTab!: SystemSculptSettingTab;
 
   async onload() {
     await this.loadSettings();
 
     // Initialize modules with dependencies
-    this.brainModule = this.initializeBrainModule();
+    this.brainModule = new BrainModule(this);
+    await this.brainModule.load();
+
     this.tasksModule = this.initializeTasksModule(this.brainModule);
     this.templatesModule = new TemplatesModule(this);
     this.dataModule = new DataModule(this);
-    this.recorderModule = new RecorderModule(
-      this,
-      this.brainModule.openAIService
-    );
+    this.recorderModule = new RecorderModule(this, this.brainModule.AIService);
     this.aboutModule = new AboutModule(this);
     this.chatModule = new ChatModule(this);
 
@@ -81,6 +78,11 @@ export default class SystemSculptPlugin extends Plugin {
 
     // Perform async checks
     this.performAsyncChecks();
+
+    // Ensure the views are initialized
+    this.app.workspace.onLayoutReady(() => {
+      this.initializeViews();
+    });
   }
 
   private addCommands() {
@@ -102,19 +104,6 @@ export default class SystemSculptPlugin extends Plugin {
       name: 'Reload SystemSculpt',
       callback: () => {
         location.reload();
-      },
-    });
-
-    // Add command to list all settings
-    this.addCommand({
-      id: 'list-all-settings',
-      name: 'List all settings',
-      callback: () => {
-        const allSettings = listAllSettings(this);
-        const settingsString = allSettings.join('\n');
-        new Notice('All settings copied to clipboard');
-        navigator.clipboard.writeText(settingsString);
-        logger.log('All settings:', allSettings);
       },
     });
   }
@@ -191,25 +180,6 @@ export default class SystemSculptPlugin extends Plugin {
     }, 5000);
   }
 
-  private initializeBrainModule(): BrainModule {
-    const openAIService = AIService.getInstance(
-      this.settings.openAIApiKey,
-      this.settings.groqAPIKey,
-      this.settings.openRouterAPIKey,
-      {
-        openAIApiKey: this.settings.openAIApiKey,
-        groqAPIKey: this.settings.groqAPIKey,
-        openRouterAPIKey: this.settings.openRouterAPIKey,
-        apiEndpoint: this.settings.apiEndpoint,
-        localEndpoint: this.settings.localEndpoint,
-        temperature: this.settings.temperature,
-      }
-    );
-
-    // Check if the API key and local endpoint are initially valid
-    return new BrainModule(this);
-  }
-
   private initializeTasksModule(brainModule: BrainModule): TasksModule {
     return new TasksModule(this, brainModule);
   }
@@ -228,6 +198,19 @@ export default class SystemSculptPlugin extends Plugin {
   async onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
     // Add any additional cleanup logic here if needed
+  }
+
+  private initializeViews() {
+    if (this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).length === 0) {
+      this.app.workspace.getRightLeaf(false)?.setViewState({
+        type: VIEW_TYPE_CHAT,
+        active: false,
+      }) ??
+        this.app.workspace.getLeaf(true).setViewState({
+          type: VIEW_TYPE_CHAT,
+          active: false,
+        });
+    }
   }
 
   onClickEvent(element: HTMLElement, callback: () => void) {

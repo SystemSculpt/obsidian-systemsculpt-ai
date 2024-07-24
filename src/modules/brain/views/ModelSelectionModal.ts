@@ -6,8 +6,8 @@ import { setIcon } from 'obsidian';
 export class ModelSelectionModal extends Modal {
   private plugin: BrainModule;
   private models: Model[] = [];
-  private searchInput: HTMLInputElement;
-  private modelListContainer: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  private modelListContainer!: HTMLElement;
   private selectedModelIndex: number = -1;
 
   constructor(app: App, plugin: BrainModule) {
@@ -18,7 +18,9 @@ export class ModelSelectionModal extends Modal {
 
   async onOpen() {
     if (this.plugin.isReinitializing) {
-      this.contentEl.setText('AI service is reinitializing. Please try again later.');
+      this.contentEl.setText(
+        'AI service is reinitializing. Please try again later.'
+      );
       setTimeout(() => this.close(), 2000);
       return;
     }
@@ -41,9 +43,18 @@ export class ModelSelectionModal extends Modal {
     this.modelListContainer = contentEl.createEl('div', { cls: 'modal-list' });
     this.renderLoadingState(this.modelListContainer);
 
-    await this.loadModels();
-    this.renderModelList();
-    this.setupEventListeners();
+    try {
+      await this.loadModels();
+      this.renderModelList();
+      this.setupEventListeners();
+    } catch (error) {
+      console.error('Error loading models:', error);
+      this.modelListContainer.empty();
+      this.modelListContainer.createEl('div', {
+        text: 'Error loading models. Please try again later.',
+        cls: 'error-message',
+      });
+    }
 
     setTimeout(() => this.searchInput.focus(), 0);
   }
@@ -55,12 +66,7 @@ export class ModelSelectionModal extends Modal {
   }
 
   private async loadModels() {
-    const models = await this.plugin.openAIService.getModels(
-      this.plugin.settings.showopenAISetting,
-      this.plugin.settings.showgroqSetting,
-      this.plugin.settings.showlocalEndpointSetting,
-      this.plugin.settings.showopenRouterSetting
-    );
+    const models = await this.plugin.getEnabledModels();
     this.models = models;
 
     const favoritedModels = new Set(this.plugin.settings.favoritedModels || []);
@@ -72,14 +78,19 @@ export class ModelSelectionModal extends Modal {
   private renderModelList(filter: string = '') {
     this.modelListContainer.empty();
     if (!this.models || this.models.length === 0) {
-      this.modelListContainer.createEl('div', { text: 'No enabled models available.' });
+      this.modelListContainer.createEl('div', {
+        text: 'No enabled models available.',
+      });
       return;
     }
 
     const searchTerms = filter.toLowerCase().split(/\s+/).filter(Boolean);
     const filterModel = (model: Model) =>
-      !searchTerms.length || searchTerms.every(term =>
-        model.name.toLowerCase().includes(term) || model.id.toLowerCase().includes(term)
+      !searchTerms.length ||
+      searchTerms.every(
+        term =>
+          model.name.toLowerCase().includes(term) ||
+          model.id.toLowerCase().includes(term)
       );
 
     const renderGroup = (groupName: string, models: Model[]) => {
@@ -88,7 +99,10 @@ export class ModelSelectionModal extends Modal {
       }
     };
 
-    renderGroup('Favorited', this.models.filter(m => m.favorite && filterModel(m)));
+    renderGroup(
+      'Favorited',
+      this.models.filter(m => m.favorite && filterModel(m))
+    );
 
     ['local', 'openai', 'groq', 'openRouter'].forEach(provider =>
       renderGroup(
@@ -104,7 +118,11 @@ export class ModelSelectionModal extends Modal {
       });
     }
 
-    this.selectedModelIndex = filter ? (this.modelListContainer.querySelector('.modal-item') ? 0 : -1) : -1;
+    this.selectedModelIndex = filter
+      ? this.modelListContainer.querySelector('.modal-item')
+        ? 0
+        : -1
+      : -1;
     this.updateSelectedModel();
   }
 
@@ -123,12 +141,14 @@ export class ModelSelectionModal extends Modal {
       const nameSpan = modelItem.createEl('span', { cls: 'model-name' });
       this.highlightText(nameSpan, model.name, searchTerms);
 
-      const contextLengthSpan = modelItem.createEl('span', {
-        cls: 'model-context-length',
-      });
-      contextLengthSpan.textContent = model.contextLength
-        ? `Context: ${this.formatContextLength(model.contextLength)}`
-        : 'Context: Unknown';
+      if (model.provider !== 'local') {
+        const contextLengthSpan = modelItem.createEl('span', {
+          cls: 'model-context-length',
+        });
+        contextLengthSpan.textContent = model.contextLength
+          ? `Context: ${this.formatContextLength(model.contextLength)}`
+          : 'Context: Unknown';
+      }
 
       const starIcon = modelItem.createEl('span', {
         cls: 'model-favorite-star',

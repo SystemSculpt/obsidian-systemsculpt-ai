@@ -7,8 +7,8 @@ export class ActionsModal extends Modal {
     group: string;
     items: { name: string; callback: () => void }[];
   }[];
-  private searchInput: HTMLInputElement;
-  private actionListContainer: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  private actionListContainer!: HTMLElement;
   private selectedActionIndex: number = -1;
 
   constructor(app: App, chatView: ChatView) {
@@ -45,7 +45,9 @@ export class ActionsModal extends Modal {
         items: [
           {
             name: 'Open Chat History',
-            callback: () => this.chatView.openChatHistory(),
+            callback: () => {
+              this.chatView.chatHistoryManager.openChatHistory();
+            },
           },
           {
             name: 'Open Chat History File',

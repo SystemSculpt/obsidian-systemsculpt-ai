@@ -1,0 +1,305 @@
+import { Setting, TextComponent, ToggleComponent } from 'obsidian';
+import { BrainModule } from '../BrainModule';
+import { AIService } from '../../../api/AIService';
+import { AIProvider } from '../../../api/Model';
+import { UnifiedAIService } from '../../../api/UnifiedAIService';
+import { logger } from '../../../utils/logger';
+
+export class EndpointManager {
+  private plugin: BrainModule;
+  private containerEl: HTMLElement;
+  private onAfterSave: () => void;
+  private debounceTimer: NodeJS.Timeout | null = null;
+
+  constructor(
+    containerEl: HTMLElement,
+    plugin: BrainModule,
+    onAfterSave: () => void
+  ) {
+    this.containerEl = containerEl;
+    this.plugin = plugin;
+    this.onAfterSave = onAfterSave;
+  }
+
+  renderEndpointSettings(): void {
+    this.renderAPIEndpointToggles();
+    this.renderAPISettings();
+  }
+
+  private renderAPIEndpointToggles(): void {
+    const apiEndpointsContainer = this.containerEl.createDiv(
+      'api-endpoints-container'
+    );
+    apiEndpointsContainer.createEl('h3', { text: 'API Endpoints' });
+
+    const apiEndpointsList =
+      apiEndpointsContainer.createDiv('api-endpoints-list');
+    const apiEndpointsGroup = apiEndpointsList.createDiv('api-endpoints-group');
+
+    const apiEndpoints = [
+      { id: 'openAI', name: 'OpenAI' },
+      { id: 'groq', name: 'Groq' },
+      { id: 'openRouter', name: 'OpenRouter' },
+      { id: 'localEndpoint', name: 'Local' },
+    ];
+
+    apiEndpoints.forEach(endpoint => {
+      const apiEndpointItem = apiEndpointsGroup.createDiv('modal-item');
+      const apiEndpointName = apiEndpointItem.createDiv('modal-name');
+      apiEndpointName.setText(endpoint.name);
+
+      const toggleComponent = new ToggleComponent(apiEndpointItem);
+      const settingKey =
+        `show${endpoint.id}Setting` as keyof typeof this.plugin.settings;
+      const isEnabled = this.plugin.settings[settingKey] as boolean;
+      toggleComponent.setValue(isEnabled);
+      toggleComponent.onChange(async value => {
+        (this.plugin.settings[settingKey] as boolean) = value;
+        await this.plugin.saveSettings();
+        this.onAfterSave();
+        apiEndpointItem.toggleClass('disabled', !value);
+
+        // Re-render API key settings when toggle changes
+        this.renderAPISettings();
+      });
+
+      // Log the initial state
+      console.log(`${endpoint.name} initial state:`, isEnabled);
+    });
+  }
+
+  private renderAPISettings(): void {
+    const apiProviders = [
+      {
+        name: 'OpenAI',
+        settingKey: 'openAIApiKey',
+        showSettingKey: 'showopenAISetting',
+        validateFunction: AIService.validateOpenAIApiKey,
+      },
+      {
+        name: 'Groq',
+        settingKey: 'groqAPIKey',
+        showSettingKey: 'showgroqSetting',
+        validateFunction: AIService.validateGroqAPIKey,
+      },
+      {
+        name: 'OpenRouter',
+        settingKey: 'openRouterAPIKey',
+        showSettingKey: 'showopenRouterSetting',
+        validateFunction: AIService.validateOpenRouterApiKey,
+      },
+      {
+        name: 'Local',
+        settingKey: 'localEndpoint',
+        showSettingKey: 'showlocalEndpointSetting',
+        validateFunction: AIService.validateLocalEndpoint,
+        placeholder: 'http://localhost:1234',
+      },
+    ] as const;
+
+    apiProviders.forEach(provider => {
+      if (
+        this.plugin.settings[
+          provider.showSettingKey as keyof typeof this.plugin.settings
+        ]
+      ) {
+        this.renderAPISetting(provider);
+      } else {
+        console.log(`${provider.name} setting is disabled`);
+      }
+    });
+  }
+
+  private renderAPISetting(provider: {
+    name: string;
+    settingKey: keyof BrainModule['settings'];
+    validateFunction: (value: string) => Promise<boolean>;
+    placeholder?: string;
+  }): void {
+    let apiSettingTextComponent: TextComponent;
+
+    new Setting(this.containerEl)
+      .setName(
+        `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : 'API Key'}`
+      )
+      .setDesc(
+        `Enter your ${provider.name} ${
+          provider.name === 'Local' ? 'endpoint URL' : 'API key'
+        }`
+      )
+      .addText(text => {
+        apiSettingTextComponent = text;
+        text
+          .setPlaceholder(provider.placeholder || 'API Key')
+          .setValue(this.plugin.settings[provider.settingKey] as string)
+          .onChange((value: string) => {
+            this.debouncedSaveAndReinitialize(
+              value,
+              apiSettingTextComponent,
+              provider.settingKey
+            );
+          });
+
+        if (provider.name !== 'Local') {
+          text.inputEl.type = 'password';
+          text.inputEl.addEventListener('focus', () => {
+            text.inputEl.type = 'text';
+          });
+          text.inputEl.addEventListener('blur', () => {
+            text.inputEl.type = 'password';
+          });
+        }
+
+        // Initial validation
+        this.validateSettingAndUpdateStatus(
+          this.plugin.settings[provider.settingKey] as string,
+          apiSettingTextComponent,
+          provider
+        );
+      })
+      .addExtraButton(button => {
+        button.setIcon('reset');
+        button.onClick(async () => {
+          await this.validateSettingAndUpdateStatus(
+            this.plugin.settings[provider.settingKey] as string,
+            apiSettingTextComponent,
+            provider
+          );
+          await this.plugin.refreshAIService();
+          console.log('AI Service has been refreshed');
+          this.onAfterSave();
+        });
+        button.setTooltip(
+          `Re-check ${
+            provider.name === 'Local' ? 'Endpoint' : 'API Key'
+          } and Refresh AI Service`
+        );
+      });
+  }
+
+  private debouncedSaveAndReinitialize(
+    value: string,
+    textComponent: TextComponent,
+    settingKey: keyof BrainModule['settings']
+  ): void {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(async () => {
+      try {
+        (this.plugin.settings[settingKey] as string) = value;
+        await this.plugin.saveSettings();
+        await this.validateSettingAndUpdateStatus(value, textComponent, {
+          name: settingKey,
+          settingKey,
+          validateFunction: AIService.validateLocalEndpoint,
+        });
+        await this.plugin.refreshAIService();
+        console.log('AI Service has been refreshed');
+        this.onAfterSave();
+      } catch (error) {
+        logger.error('Error saving and refreshing:', error);
+        this.updateStatus(textComponent, 'Error saving', false);
+      }
+    }, 3000);
+  }
+
+  private async validateSettingAndUpdateStatus(
+    value: string,
+    textComponent: TextComponent,
+    provider: {
+      name: string;
+      settingKey: keyof BrainModule['settings'];
+      validateFunction: (value: string) => Promise<boolean>;
+    }
+  ): Promise<void> {
+    const statusTextEl =
+      textComponent.inputEl.nextElementSibling ||
+      this.createSpan('api-key-status');
+    if (!textComponent.inputEl.nextElementSibling) {
+      textComponent.inputEl.insertAdjacentElement('afterend', statusTextEl);
+    }
+
+    statusTextEl.textContent = 'Validating...';
+    statusTextEl.className = 'api-key-status validating';
+
+    try {
+      let isValid: boolean;
+      switch (provider.name) {
+        case 'OpenAI':
+          isValid = await AIService.validateOpenAIApiKey(value);
+          break;
+        case 'Groq':
+          isValid = await AIService.validateGroqAPIKey(value);
+          break;
+        case 'OpenRouter':
+          isValid = await AIService.validateOpenRouterApiKey(value);
+          break;
+        case 'Local':
+          isValid = await AIService.validateLocalEndpoint(value);
+          break;
+        default:
+          isValid = false;
+      }
+
+      if (isValid) {
+        statusTextEl.textContent = 'Online';
+        statusTextEl.classList.remove('validating', 'invalid');
+        statusTextEl.classList.add('valid');
+      } else {
+        statusTextEl.textContent = 'Offline';
+        statusTextEl.classList.remove('validating', 'valid');
+        statusTextEl.classList.add('invalid');
+      }
+    } catch (error) {
+      logger.error(`Error validating ${provider.name} setting:`, error);
+      statusTextEl.textContent = 'Error';
+      statusTextEl.classList.remove('validating', 'valid');
+      statusTextEl.classList.add('invalid');
+    }
+
+    // Update the AIService instance
+    AIService.getInstance({
+      openAIApiKey: this.plugin.settings.openAIApiKey,
+      groqAPIKey: this.plugin.settings.groqAPIKey,
+      openRouterAPIKey: this.plugin.settings.openRouterAPIKey,
+      apiEndpoint: this.plugin.settings.apiEndpoint,
+      localEndpoint: this.plugin.settings.localEndpoint,
+      temperature: this.plugin.settings.temperature,
+    });
+  }
+
+  private updateStatus(
+    textComponent: TextComponent,
+    message: string,
+    isValid: boolean
+  ): void {
+    const statusTextEl = textComponent.inputEl
+      .nextElementSibling as HTMLElement;
+    if (statusTextEl) {
+      statusTextEl.textContent = message;
+      statusTextEl.className = `api-key-status ${
+        isValid ? 'valid' : 'invalid'
+      }`;
+    }
+  }
+
+  private createSpan(className: string): HTMLElement {
+    const span = document.createElement('span');
+    span.className = className;
+    return span;
+  }
+
+  private getEndpointForProvider(providerName: AIProvider): string {
+    switch (providerName) {
+      case 'openai':
+        return this.plugin.settings.apiEndpoint;
+      case 'groq':
+        return 'https://api.groq.com';
+      case 'openRouter':
+        return 'https://openrouter.ai/api';
+      case 'local':
+        return this.plugin.settings.localEndpoint || '';
+      default:
+        return '';
+    }
+  }
+}

@@ -6,8 +6,6 @@ export interface BrainSettings {
   generateTitlePrompt: string;
   generalGenerationPrompt: string;
   temperature: number;
-  maxTokens: number;
-  showMaxTokensOnStatusBar: boolean;
   showDefaultModelOnStatusBar: boolean;
   apiEndpoint: string;
   showopenAISetting: boolean;
@@ -61,8 +59,6 @@ Rules:
 - Do not introduce any new formatting or markdown syntax not already present in the context.
 - Your generation response should be purely the text to be added, without any additional labels or explanations.`,
   temperature: 0.2,
-  maxTokens: 1000,
-  showMaxTokensOnStatusBar: true,
   showDefaultModelOnStatusBar: true,
   apiEndpoint: 'https://api.openai.com',
   showopenAISetting: true,

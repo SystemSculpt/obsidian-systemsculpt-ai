@@ -1,4 +1,5 @@
 import { App, TFile, MarkdownView } from 'obsidian';
+import { showCustomNotice } from '../../modals';
 
 export class ContextFileManager {
   constructor(private app: App, private chatView: any) {}
@@ -6,7 +7,7 @@ export class ContextFileManager {
   addFileToContextFiles(file: TFile) {
     if (
       !this.chatView.contextFiles.some(
-        contextFile => contextFile.path === file.path
+        (contextFile: TFile) => contextFile.path === file.path
       )
     ) {
       this.chatView.contextFiles.push(file);
@@ -75,13 +76,13 @@ export class ContextFileManager {
     }
 
     contextFilesContainer.classList.add('has-files');
-    this.chatView.contextFiles.forEach((file, index) => {
+    this.chatView.contextFiles.forEach((file: TFile, index: number) => {
       const fileEl = document.createElement('div');
       fileEl.className = 'context-file';
       fileEl.innerHTML = `
-      <span class="context-file-path">${file.path}</span>
-      <button class="remove-context-file" title="Remove Context File">🗑️</button>
-    `;
+        <div class="context-file-path" title="${file.path}"><span>${file.path}</span></div>
+        <button class="remove-context-file" title="Remove Context File">🗑️</button>
+      `;
       contextFilesContainer.appendChild(fileEl);
 
       const filePathEl = fileEl.querySelector('.context-file-path');

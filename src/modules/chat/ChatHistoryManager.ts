@@ -8,19 +8,26 @@ export class ChatHistoryManager {
   constructor(
     private app: App,
     private chatView: ChatView,
-    private contextFileManager: ContextFileManager
+    private contextFileManager: ContextFileManager,
+    private chatModule: any
   ) {}
 
   openChatHistory() {
     const fileSearcher = new FileSearcher(
       this.app,
-      this.chatView.chatModule.settings.chatsPath
+      this.chatModule.settings.chatsPath
     );
     fileSearcher.open();
     fileSearcher.onChooseItem = (file: TFile) => {
-      this.chatView.setChatFile(file);
-      this.loadChatFile(file);
+      this.openChatFile(file);
     };
+  }
+
+  async openChatFile(file: TFile) {
+    this.chatView.setChatFile(file);
+    await this.loadChatFile(file);
+    this.chatModule.saveLastOpenedChat(file.path);
+    this.chatView.focusInput();
   }
 
   openChatHistoryFile() {
@@ -87,6 +94,7 @@ export class ChatHistoryManager {
     this.chatView.chatFile = file;
     this.chatView.renderMessages();
     this.contextFileManager.renderContextFiles();
-    this.chatView.updateTokenCountWithInput('');
+    await this.chatView.updateTokenCount();
+    this.chatView.scrollToBottom();
   }
 }

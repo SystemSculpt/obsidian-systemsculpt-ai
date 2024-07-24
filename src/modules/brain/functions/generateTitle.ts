@@ -15,12 +15,7 @@ export async function generateTitle(
 
   if (!model) {
     logger.log('Model not found, trying to find an available model...');
-    const models = await plugin.openAIService.getModels(
-      plugin.settings.showopenAISetting,
-      plugin.settings.showgroqSetting,
-      plugin.settings.showlocalEndpointSetting,
-      plugin.settings.showopenRouterSetting
-    );
+    const models = await plugin.getEnabledModels();
 
     if (models.length > 0) {
       model = models[0];
@@ -36,11 +31,11 @@ export async function generateTitle(
   }
 
   try {
-    const generatedTitle = await plugin.openAIService.createChatCompletion(
+    const generatedTitle = await plugin.AIService.createChatCompletion(
       systemPrompt,
       userMessage,
       model.id,
-      plugin.settings.maxTokens
+      model.maxOutputTokens || 4096
     );
 
     return sanitizeFileName(generatedTitle.trim());

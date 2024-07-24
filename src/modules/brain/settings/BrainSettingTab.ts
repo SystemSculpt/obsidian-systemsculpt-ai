@@ -1,18 +1,12 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
-import { renderOpenAIApiKeySetting } from './OpenAIApiKeySetting';
-import { renderGroqAPIKeySetting } from './GroqAPIKeySetting';
-import { renderLocalEndpointSetting } from './LocalEndpointSetting';
+import { EndpointManager } from './EndpointManager';
 import { renderModelSelectionButton } from './ModelSetting';
 import { renderGenerateTitlePrompt } from './GenerateTitlePromptSetting';
 import { renderGeneralGenerationPromptSetting } from './GeneralGenerationPromptSetting';
-import { renderMaxTokensSetting } from './MaxTokensSetting';
 import { renderShowDefaultModelOnStatusBarSetting } from './ShowDefaultModelOnStatusBarSetting';
-import { renderShowMaxTokensOnStatusBarSetting } from './ShowMaxTokensOnStatusBarSetting';
 import { displayVersionInfo } from '../functions/displayVersionInfo';
-import { renderAPIEndpointToggles } from './APIEndpointToggles';
 import { renderTemperatureSetting } from './renderTemperatureSetting';
-import { renderOpenRouterAPIKeySetting } from './OpenRouterAPIKeySetting';
 
 export class BrainSettingTab extends PluginSettingTab {
   plugin: BrainModule;
@@ -44,19 +38,15 @@ export class BrainSettingTab extends PluginSettingTab {
 
   private renderSettings(): void {
     displayVersionInfo(this.containerEl, this.plugin);
-    this.renderAPISettings();
+    const endpointManager = new EndpointManager(
+      this.containerEl,
+      this.plugin,
+      () => this.refreshTab()
+    );
+    endpointManager.renderEndpointSettings();
     this.renderModelSettings();
     this.renderTemperatureSettings();
-    this.renderTokenSettings();
     this.renderPromptSettings();
-  }
-
-  private renderAPISettings(): void {
-    renderAPIEndpointToggles(this.containerEl, this.plugin, () => this.refreshTab());
-    renderLocalEndpointSetting(this.containerEl, this.plugin, () => this.refreshTab());
-    renderOpenAIApiKeySetting(this.containerEl, this.plugin, () => this.refreshTab());
-    renderGroqAPIKeySetting(this.containerEl, this.plugin, () => this.refreshTab());
-    renderOpenRouterAPIKeySetting(this.containerEl, this.plugin, () => this.refreshTab());
   }
 
   private renderModelSettings(): void {
@@ -74,11 +64,6 @@ export class BrainSettingTab extends PluginSettingTab {
     temperatureInfoBox.createEl('p', {
       text: 'If your LLM temperature is at or above 1.0, it may lead to over-creative results, which potentially runs the risk of producing gibberish or random text in some cases. It is recommended to stay under 1.0.',
     });
-  }
-
-  private renderTokenSettings(): void {
-    renderMaxTokensSetting(this.containerEl, this.plugin);
-    renderShowMaxTokensOnStatusBarSetting(this.containerEl, this.plugin);
   }
 
   private renderPromptSettings(): void {

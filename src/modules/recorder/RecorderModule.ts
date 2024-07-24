@@ -20,14 +20,14 @@ import { logger } from '../../utils/logger';
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
-  settings: SystemSculptRecorderSettings;
+  settings!: SystemSculptRecorderSettings;
   recordingNotice: RecordingNotice | null = null;
-  openAIService: AIService;
+  AIService: AIService;
   recordingStatusBarItem: HTMLElement | null = null;
 
-  constructor(plugin: SystemSculptPlugin, openAIService: AIService) {
+  constructor(plugin: SystemSculptPlugin, AIService: AIService) {
     this.plugin = plugin;
-    this.openAIService = openAIService;
+    this.AIService = AIService;
     logger.log('RecorderModule initialized');
   }
 
@@ -96,7 +96,7 @@ export class RecorderModule {
         await vault.createFolder(normalizedPath);
         this.plugin.app.workspace.trigger('refresh-files');
       } catch (error) {
-        if (!error.message.includes('Folder already exists')) {
+        if (error instanceof Error && !error.message.includes('Folder already exists')) {
           logger.error('Error ensuring recordings directory:', error);
         }
       }

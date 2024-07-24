@@ -1,74 +1,48 @@
-import { LocalAIService } from './LocalAIService';
-import { OpenAIService } from './OpenAIService';
-import { GroqService } from './GroqService';
-import { OpenRouterService } from './OpenRouterService';
+import { UnifiedAIService } from './UnifiedAIService';
 import { Model, AIProvider } from './Model';
-import { AIServiceInterface } from './AIServiceInterface';
 import { logger } from '../utils/logger';
+import { debounce } from 'obsidian';
+import { requestUrl } from 'obsidian';
 
 export class AIService {
-  private services: Map<AIProvider, AIServiceInterface>;
   private static instance: AIService;
-  private settings: {
+  private services: { [key in AIProvider]: UnifiedAIService };
+  private cachedModels: { [key: string]: Model[] } = {};
+
+  private constructor(settings: {
     openAIApiKey: string;
     groqAPIKey: string;
     openRouterAPIKey: string;
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
-  };
-  private localAIService: LocalAIService;
-  private openAIService: OpenAIService;
-  private groqService: GroqService;
-  private openRouterService: OpenRouterService;
-  private cachedModels: Map<AIProvider, Model[]> = new Map();
-
-  private constructor(
-    openAIApiKey: string,
-    groqAPIKey: string,
-    openRouterAPIKey: string,
-    settings: {
-      openAIApiKey: string;
-      groqAPIKey: string;
-      openRouterAPIKey: string;
-      apiEndpoint: string;
-      localEndpoint?: string;
-      temperature: number;
-    }
-  ) {
-    this.settings = settings;
-    this.services = new Map<AIProvider, AIServiceInterface>([
-      ['local', new LocalAIService({ temperature: settings.temperature }, settings.localEndpoint)],
-      ['openai', new OpenAIService(openAIApiKey, settings.apiEndpoint)],
-      ['groq', new GroqService(groqAPIKey, { temperature: settings.temperature })],
-      ['openRouter', new OpenRouterService(openRouterAPIKey, { temperature: settings.temperature })]
-    ]);
-
-    this.services.forEach(service => service.updateSettings({ temperature: settings.temperature }));
+  }) {
+    this.services = {
+      openai: new UnifiedAIService(
+        settings.openAIApiKey,
+        'https://api.openai.com/v1',
+        'openai',
+        { temperature: settings.temperature }
+      ),
+      groq: new UnifiedAIService(
+        settings.groqAPIKey,
+        'https://api.groq.com/openai/v1',
+        'groq',
+        { temperature: settings.temperature }
+      ),
+      local: new UnifiedAIService('', settings.localEndpoint || '', 'local', {
+        temperature: settings.temperature,
+      }),
+      openRouter: new UnifiedAIService(
+        settings.openRouterAPIKey,
+        'https://openrouter.ai/api/v1',
+        'openRouter',
+        { temperature: settings.temperature }
+      ),
+    };
   }
 
-  public async initializeModelCache(): Promise<void> {
-    if (this.cachedModels.size > 0) return;
-
-    const providers: AIProvider[] = ['local', 'openai', 'groq', 'openRouter'];
-
-    await Promise.all(providers.map(async provider => {
-      const service = this.services.get(provider);
-      if (service) {
-        try {
-          this.cachedModels.set(provider, await service.getModels());
-        } catch (error) {
-          logger.error(`Error fetching ${provider} models:`, error);
-          this.cachedModels.set(provider, []);
-        }
-      }
-    }));
-  }
-
-  public static getInstance(
-    openAIApiKey: string,
-    groqAPIKey: string,
-    openRouterAPIKey: string,
+  public static async getInstance(
     settings: {
       openAIApiKey: string;
       groqAPIKey: string;
@@ -77,23 +51,20 @@ export class AIService {
       localEndpoint?: string;
       temperature: number;
     },
-    forceReinitialization: boolean = false
-  ): AIService {
-    if (!AIService.instance || forceReinitialization) {
-      AIService.instance = new AIService(
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        settings
-      );
+    forceNewInstance: boolean = false
+  ): Promise<AIService> {
+    if (!AIService.instance || forceNewInstance) {
+      AIService.instance = new AIService(settings);
+      await AIService.instance.initializeModelCache();
     } else {
       AIService.instance.updateSettings(settings);
     }
+
     return AIService.instance;
   }
 
   public async ensureModelCacheInitialized(): Promise<void> {
-    if (this.cachedModels.size === 0) {
+    if (Object.keys(this.cachedModels).length === 0) {
       await this.initializeModelCache();
     }
   }
@@ -106,25 +77,34 @@ export class AIService {
     localEndpoint?: string;
     temperature: number;
   }) {
-    this.settings = settings;
-    if (this.openAIService) {
-      this.openAIService.updateSettings({ temperature: settings.temperature });
-    }
-    if (this.groqService) {
-      this.groqService.updateSettings({ temperature: settings.temperature });
-    }
-    if (this.localAIService) {
-      this.localAIService.updateSettings({ temperature: settings.temperature });
-    }
-    if (this.openRouterService) {
-      this.openRouterService.updateSettings({
-        temperature: settings.temperature,
-      });
-    }
+    this.updateApiKeysDebounced(settings);
+  }
+
+  private updateApiKeysDebounced = debounce(
+    this.updateApiKeys.bind(this),
+    1000,
+    true
+  );
+
+  private updateApiKeys(settings: {
+    openAIApiKey: string;
+    groqAPIKey: string;
+    openRouterAPIKey: string;
+    apiEndpoint: string;
+    localEndpoint?: string;
+    temperature: number;
+  }) {
+    logger.trace('Updating API keys');
+    this.services.openai.updateApiKey(settings.openAIApiKey);
+    this.services.groq.updateApiKey(settings.groqAPIKey);
+    this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
+    Object.values(this.services).forEach(service =>
+      service.updateSettings({ temperature: settings.temperature })
+    );
   }
 
   clearModelCache() {
-    this.cachedModels.clear();
+    this.cachedModels = {};
     this.initializeModelCache();
   }
 
@@ -132,16 +112,19 @@ export class AIService {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxTokens: number
+    maxOutputTokens: number
   ): Promise<string> {
+    await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
-    return this.executeModelOperation(
-      model,
-      'createChatCompletion',
+    if (!model) {
+      throw new Error(`Model not found: ${modelId}`);
+    }
+    logger.log('model found: ', model);
+    return this.services[model.provider].createChatCompletion(
       systemPrompt,
       userMessage,
       modelId,
-      maxTokens
+      maxOutputTokens
     );
   }
 
@@ -149,18 +132,23 @@ export class AIService {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxTokens: number,
+    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
-    return this.executeModelOperation(
-      model,
-      'createStreamingChatCompletionWithCallback',
+    if (!model) {
+      throw new Error(`Model not found: ${modelId}`);
+    }
+    logger.log('model found: ', model);
+    return this.services[
+      model.provider
+    ].createStreamingChatCompletionWithCallback(
       systemPrompt,
       userMessage,
       modelId,
-      maxTokens,
+      maxOutputTokens,
       callback,
       abortSignal
     );
@@ -170,53 +158,53 @@ export class AIService {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxTokens: number,
+    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
-    return this.executeModelOperation(
-      model,
-      'createStreamingConversationWithCallback',
+    if (!model) {
+      throw new Error(`Model not found: ${modelId}`);
+    }
+    logger.log('model found: ', model);
+    return this.services[
+      model.provider
+    ].createStreamingConversationWithCallback(
       systemPrompt,
       messages,
       modelId,
-      maxTokens,
+      maxOutputTokens,
       callback,
       abortSignal
     );
   }
 
-  private async executeModelOperation(
-    model: Model | undefined,
-    operation: string,
-    ...args: any[]
-  ): Promise<any> {
-    if (!model) {
-      throw new Error(`Model not found: ${args[2]}`);
-    }
-    logger.log('model found: ', model);
-    const service = this.services.get(model.provider);
-    if (!service) {
-      throw new Error(`Unsupported model provider: ${model.provider}`);
-    }
-    return service[operation](...args);
-  }
-
   async getModels(
-    includeOpenAI: boolean,
-    includeGroq: boolean,
-    includeLocal: boolean,
-    includeOpenRouter: boolean
+    showOpenAI: boolean,
+    showGroq: boolean,
+    showLocal: boolean,
+    showOpenRouter: boolean
   ): Promise<Model[]> {
-    const providers: AIProvider[] = ['openai', 'groq', 'local', 'openRouter']
-      .filter((_, index) => [includeOpenAI, includeGroq, includeLocal, includeOpenRouter][index]) as AIProvider[];
+    logger.trace('getModels called');
 
-    return providers.flatMap(provider => this.cachedModels.get(provider) || []);
+    await this.ensureModelCacheInitialized();
+
+    let allModels: Model[] = [];
+
+    if (showOpenAI)
+      allModels = allModels.concat(this.cachedModels['openai'] || []);
+    if (showGroq) allModels = allModels.concat(this.cachedModels['groq'] || []);
+    if (showLocal)
+      allModels = allModels.concat(this.cachedModels['local'] || []);
+    if (showOpenRouter)
+      allModels = allModels.concat(this.cachedModels['openRouter'] || []);
+
+    return allModels;
   }
 
   async getModelById(modelId: string): Promise<Model | undefined> {
-    for (const models of this.cachedModels.values()) {
+    for (const models of Object.values(this.cachedModels)) {
       const model = models.find(m => m.id === modelId);
       if (model) {
         return model;
@@ -226,13 +214,19 @@ export class AIService {
   }
 
   static async validateOpenAIApiKey(apiKey: string): Promise<boolean> {
-    if (!apiKey) return false;
-    return OpenAIService.validateApiKey(apiKey);
+    return UnifiedAIService.validateApiKey(
+      apiKey,
+      'https://api.openai.com/v1',
+      'openai'
+    );
   }
 
   static async validateGroqAPIKey(apiKey: string): Promise<boolean> {
-    if (!apiKey) return false;
-    return GroqService.validateApiKey(apiKey);
+    return UnifiedAIService.validateApiKey(
+      apiKey,
+      'https://api.groq.com/openai/v1',
+      'groq'
+    );
   }
 
   static async validateLocalEndpoint(endpoint: string): Promise<boolean> {
@@ -243,15 +237,75 @@ export class AIService {
         logger.warn('Local endpoint is using an unsafe port (< 1024)');
         return false;
       }
-      return await LocalAIService.validateEndpoint(endpoint);
-    } catch (error) {
-      logger.error('Error validating local endpoint:', error);
+      return UnifiedAIService.validateApiKey('', endpoint, 'local');
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        logger.error('Error validating local endpoint:', error.message);
+      } else {
+        logger.error('Unknown error validating local endpoint');
+      }
       return false;
     }
   }
 
   static async validateOpenRouterApiKey(apiKey: string): Promise<boolean> {
-    if (!apiKey) return false;
-    return OpenRouterService.validateApiKey(apiKey);
+    return UnifiedAIService.validateApiKey(
+      apiKey,
+      'https://openrouter.ai/api/v1',
+      'openRouter'
+    );
+  }
+
+  public async initializeModelCache(): Promise<void> {
+    if (Object.keys(this.cachedModels).length > 0) return;
+
+    const providers: AIProvider[] = ['local', 'openai', 'groq', 'openRouter'];
+
+    await Promise.all(
+      providers.map(async provider => {
+        try {
+          // Skip providers without valid API keys
+          if (!this.services[provider].hasValidApiKey()) {
+            logger.log(
+              `Skipping ${provider} model fetch: No valid API key provided`
+            );
+            this.cachedModels[provider] = [];
+            return;
+          }
+
+          this.cachedModels[provider] = await this.services[
+            provider
+          ].getModels();
+          logger.log(`Successfully fetched models for ${provider}`);
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            logger.error(`Error fetching ${provider} models:`, error.message);
+          } else {
+            logger.error(`Unknown error fetching ${provider} models`);
+          }
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'status' in error
+          ) {
+            if (error.status === 404) {
+              logger.error(
+                `${provider} API endpoint not found. Please check the API documentation and your settings.`
+              );
+            } else if (error.status === 401) {
+              logger.error(
+                `Invalid ${provider} API key. Please check your settings.`
+              );
+            }
+          }
+          this.cachedModels[provider] = [];
+        }
+      })
+    );
+
+    // Log the number of models fetched for each provider
+    for (const [provider, models] of Object.entries(this.cachedModels)) {
+      logger.log(`Fetched ${models.length} models for ${provider}`);
+    }
   }
 }

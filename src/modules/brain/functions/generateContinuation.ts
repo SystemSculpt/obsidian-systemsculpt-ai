@@ -28,12 +28,7 @@ export async function generateContinuation(
 
     if (!model) {
       logger.log('Model not found, trying to find an available model...');
-      const models = await plugin.openAIService.getModels(
-        plugin.settings.showopenAISetting,
-        plugin.settings.showgroqSetting,
-        plugin.settings.showlocalEndpointSetting,
-        plugin.settings.showopenRouterSetting
-      );
+      const models = await plugin.getEnabledModels();
 
       if (models.length > 0) {
         model = models[0];
@@ -50,11 +45,11 @@ export async function generateContinuation(
 
     logger.log('Model found: ', model);
 
-    await plugin.openAIService.createStreamingChatCompletionWithCallback(
+    await plugin.AIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,
       noteContent,
       model.id,
-      plugin.settings.maxTokens,
+      model.maxOutputTokens || 4096,
       (chunk: string) => {
         if (abortSignal.aborted) {
           return;

@@ -7,13 +7,15 @@ SystemSculpt AI is a comprehensive, all-in-one AI-powered plugin designed to rev
 SystemSculpt AI offers a suite of powerful modules, each designed to enhance specific aspects of your Obsidian workflow:
 
 ### [Brain Module](https://www.systemsculpt.com/docs/brain-module-docs/brain-overview)
+
 - Integrates multiple AI services (OpenAI, Groq, OpenRouter, local models)
 - Dynamic model switching with a modal interface (CMD+M)
-- Customizable AI settings (max tokens, temperature)
+- Customizable AI settings (max output tokens, temperature)
 - AI-powered title generation and text continuation
 - API endpoint management for different AI services
 
 ### [Chat Module](https://www.systemsculpt.com/docs/chat-module-docs/chat-overview)
+
 - AI-powered conversations within Obsidian
 - Context-aware responses using your vault's content
 - Local conversation storage and token count tracking
@@ -21,6 +23,7 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Chat file management and archiving
 
 ### [Recorder Module](https://www.systemsculpt.com/docs/recorder-module-docs/recorder-overview)
+
 - In-app audio recording and automatic transcription
 - Integration with OpenAI's and Groq's Whisper models
 - Customizable storage for recordings and transcriptions
@@ -28,6 +31,7 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Microphone selection and status bar controls
 
 ### [Templates Module](https://www.systemsculpt.com/docs/templates-module-docs/templates-overview)
+
 - AI-generated and customizable note templates
 - Template syncing for licensed users
 - Intelligent template suggestions and blank template functionality
@@ -35,6 +39,7 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Custom template creation with frontmatter support
 
 ### [Tasks Module](https://www.systemsculpt.com/docs/tasks-module-docs/tasks-overview)
+
 - AI-powered task generation and management
 - Customizable task prompts and storage locations
 - Quick task creation interface with batch creation support

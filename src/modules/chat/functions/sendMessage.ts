@@ -8,7 +8,7 @@ export async function sendMessage(
   addMessage: (message: ChatMessage) => void,
   createChatFile: (messageText: string) => Promise<TFile>,
   updateChatFile: (content: string) => Promise<void>,
-  updateTokenCount: () => void,
+  updateTokenCount: () => Promise<void>,
   chatFile: TFile | null,
   brainModule: any,
   chatModule: any,
@@ -30,10 +30,12 @@ export async function sendMessage(
     await updateChatFile(`\`\`\`\`\`user\n${messageText}\n\`\`\`\`\`\n\n`);
   }
 
-  const aiService = brainModule.openAIService;
+  console.log('Test 1');
+  const aiService = brainModule.AIService;
   const modelId = brainModule.settings.defaultModelId;
-  const maxTokens = brainModule.settings.maxTokens;
+  const maxOutputTokens = brainModule.getMaxOutputTokens();
   let accumulatedResponse = '';
+  console.log('Test 2');
 
   const systemPrompt = chatModule.settings.systemPrompt;
   const messageHistory = await constructMessageHistory();
@@ -51,7 +53,7 @@ export async function sendMessage(
       systemPrompt,
       updatedMessageHistory,
       modelId,
-      maxTokens,
+      maxOutputTokens,
       async (chunk: string) => {
         accumulatedResponse += handleStreamingResponse(
           chunk,
@@ -60,8 +62,7 @@ export async function sendMessage(
           },
           (message: ChatMessage) => {
             addMessage(message);
-          },
-          () => updateTokenCount()
+          }
         );
       }
     );
@@ -78,5 +79,5 @@ export async function sendMessage(
     hideLoading();
   }
 
-  updateTokenCount();
+  await updateTokenCount();
 }

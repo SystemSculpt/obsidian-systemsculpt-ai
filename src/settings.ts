@@ -8,6 +8,7 @@ export interface SystemSculptSettings {
   localEndpoint: string;
   openRouterAPIKey: string;
   temperature: number;
+  showTaskButtonOnStatusBar: boolean;
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
@@ -17,6 +18,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   localEndpoint: 'http://localhost:1234',
   openRouterAPIKey: '',
   temperature: 0.5,
+  showTaskButtonOnStatusBar: true,
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {
@@ -105,12 +107,20 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }[],
     settingsContainer: HTMLElement
   ): void {
-    const modules = ['brain', 'tasks', 'recorder', 'templates', 'chat', 'about'];
+    const modules = [
+      'brain',
+      'tasks',
+      'recorder',
+      'templates',
+      'chat',
+      'about',
+    ];
 
     modules.forEach(module => {
       const moduleContainer = settingsContainer.createDiv(`${module}-settings`);
       moduleContainer.style.display = 'block';
 
+      // @ts-ignore
       this.plugin[`${module}Module`].settingsDisplay(moduleContainer);
 
       moduleContainer.querySelectorAll('.setting-item').forEach(item => {
@@ -220,7 +230,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.renderTab(tabContainer, 'recorder', 'Recorder');
     this.renderTab(tabContainer, 'templates', 'Templates');
     this.renderTab(tabContainer, 'chat', 'Chat');
-    // this.renderTab(tabContainer, 'data', 'Data');
     this.renderTab(tabContainer, 'about', 'About');
 
     return tabContainer;

@@ -1,9 +1,9 @@
 import SystemSculptPlugin from '../../main';
 import { ChatSettings, DEFAULT_CHAT_SETTINGS } from './settings/ChatSettings';
 import { ChatSettingTab } from './settings/ChatSettingTab';
-import { ChatView } from './ChatView';
+import { ChatView, VIEW_TYPE_CHAT } from './ChatView';
 import { ChatFileManager } from './ChatFileManager';
-import { TFile } from 'obsidian';
+import { TFile, WorkspaceLeaf } from 'obsidian';
 import { logger } from '../../utils/logger';
 
 export class ChatModule {
@@ -14,16 +14,14 @@ export class ChatModule {
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_CHAT_SETTINGS;
+    this.chatFileManager = new ChatFileManager(this.plugin.app, this);
   }
 
   async load() {
     logger.log('ChatModule load method called');
     await this.loadSettings();
 
-    this.chatFileManager = new ChatFileManager(
-      this.plugin.app,
-      this.settings.chatsPath
-    );
+    this.chatFileManager = new ChatFileManager(this.plugin.app, this);
 
     this.plugin.addRibbonIcon(
       'message-square-plus',
@@ -32,6 +30,14 @@ export class ChatModule {
         this.openNewChat();
       }
     );
+
+    // Reinitialize existing ChatViews
+    this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).forEach(leaf => {
+      const view = leaf.view as ChatView;
+      if (view instanceof ChatView) {
+        view.setChatModule(this);
+      }
+    });
 
     this.plugin.addCommand({
       id: 'open-new-chat',
@@ -59,7 +65,7 @@ export class ChatModule {
       name: 'Open Chat Actions',
       callback: () => {
         let chatView = this.plugin.app.workspace
-          .getLeavesOfType('chat-view')
+          .getLeavesOfType(VIEW_TYPE_CHAT)
           .map(leaf => leaf.view as ChatView)
           .find(view => view instanceof ChatView);
 
@@ -78,7 +84,7 @@ export class ChatModule {
         } else {
           // If a chat view is already open, switch to it and show the actions modal
           const leaf =
-            this.plugin.app.workspace.getLeavesOfType('chat-view')[0];
+            this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
           this.plugin.app.workspace.revealLeaf(leaf);
           chatView.showActionsModal();
         }
@@ -100,8 +106,6 @@ export class ChatModule {
         this.openNewChat();
       });
     }
-
-    // Remove the automatic opening of the last chat
   }
 
   async loadSettings() {
@@ -124,17 +128,21 @@ export class ChatModule {
     }
 
     // Check for an existing chat view leaf
-    let chatLeaf = this.plugin.app.workspace.getLeavesOfType('chat-view')[0];
+    let chatLeaf = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 
     if (!chatLeaf) {
       // If no chat view exists, create a new leaf
-      chatLeaf = this.plugin.app.workspace.getRightLeaf(false);
+      chatLeaf =
+        this.plugin.app.workspace.getRightLeaf(false) ||
+        this.plugin.app.workspace.getLeaf('tab');
     }
 
-    chatLeaf.setViewState({
-      type: 'chat-view',
-      active: true,
-    });
+    if (chatLeaf) {
+      chatLeaf.setViewState({
+        type: VIEW_TYPE_CHAT,
+        active: true,
+      });
+    }
 
     this.plugin.app.workspace.revealLeaf(chatLeaf);
 
@@ -151,30 +159,43 @@ export class ChatModule {
   }
 
   openChatWithFile(file: TFile) {
-    const leaves = this.plugin.app.workspace.getLeavesOfType('chat-view');
+    const leaves = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+    let chatLeaf: WorkspaceLeaf | null;
+
     if (leaves.length === 0) {
-      const rightLeaf = this.plugin.app.workspace.getRightLeaf(false);
-      if (rightLeaf) {
-        rightLeaf.setViewState({
-          type: 'chat-view',
-          active: true,
-        });
+      chatLeaf = this.plugin.app.workspace.getRightLeaf(false);
+      if (!chatLeaf) {
+        // If getRightLeaf returns null, create a new leaf
+        chatLeaf = this.plugin.app.workspace.getLeaf('tab');
       }
+    } else {
+      chatLeaf = leaves[0];
     }
-    const chatView = this.plugin.app.workspace.getLeavesOfType('chat-view')[0]
-      .view as ChatView;
-    chatView.setChatFile(file);
-    this.plugin.app.workspace.revealLeaf(
-      this.plugin.app.workspace.getLeavesOfType('chat-view')[0]
-    );
 
-    // Add a slight delay to ensure the DOM is fully updated
-    setTimeout(() => {
-      chatView.focusInput();
-      this.updateTokenCount(chatView); // Ensure token count is updated
-    }, 100); // 100ms delay
+    if (chatLeaf) {
+      chatLeaf.setViewState({
+        type: VIEW_TYPE_CHAT,
+        active: true,
+      });
 
-    this.saveLastOpenedChat(file.path);
+      this.plugin.app.workspace.revealLeaf(chatLeaf);
+      const chatView = chatLeaf.view as ChatView;
+      if (chatView && chatView instanceof ChatView) {
+        chatView.setChatFile(file);
+        chatView.loadChatFile(file);
+
+        // Add a slight delay to ensure the DOM is fully updated
+        setTimeout(() => {
+          chatView.focusInput();
+          this.updateTokenCount(chatView);
+        }, 100);
+      }
+
+      this.saveLastOpenedChat(file.path);
+    } else {
+      // Handle the case where we couldn't create a chat leaf
+      console.error('Failed to create or find a chat leaf');
+    }
   }
 
   async saveLastOpenedChat(filePath: string) {
@@ -189,5 +210,9 @@ export class ChatModule {
   settingsDisplay(containerEl: HTMLElement): void {
     containerEl.empty();
     new ChatSettingTab(this.plugin.app, this, containerEl).display();
+  }
+
+  activateView() {
+    this.openNewChat();
   }
 }

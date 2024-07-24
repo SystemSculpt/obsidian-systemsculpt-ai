@@ -39,22 +39,40 @@ class AboutSettingTab extends PluginSettingTab {
 
     // Documentation Section
     const docContainer = containerEl.createDiv('about-doc-container');
-    docContainer.createEl('h3', { text: 'Documentation & Resources', cls: 'about-section-header' });
+    docContainer.createEl('h3', {
+      text: 'Documentation & Resources',
+      cls: 'about-section-header',
+    });
 
     const docButtons = [
-      { name: 'Complete Documentation', url: 'https://www.systemsculpt.com/docs' },
-      { name: 'Quick Start Guide', url: 'https://www.systemsculpt.com/docs/getting-started' },
-      { name: 'Features Overview', url: 'https://www.systemsculpt.com/docs/features' },
-      { name: 'Troubleshooting Guide', url: 'https://www.systemsculpt.com/docs/troubleshooting' },
+      {
+        name: 'Complete Documentation',
+        url: 'https://www.systemsculpt.com/docs',
+      },
+      {
+        name: 'Quick Start Guide',
+        url: 'https://www.systemsculpt.com/docs/getting-started',
+      },
+      {
+        name: 'Features Overview',
+        url: 'https://www.systemsculpt.com/docs/features',
+      },
+      {
+        name: 'Troubleshooting Guide',
+        url: 'https://www.systemsculpt.com/docs/troubleshooting',
+      },
       { name: 'FAQ', url: 'https://www.systemsculpt.com/docs/faq' },
       { name: 'Submit Issue', url: 'https://systemsculpt.com/submit-issue' },
     ];
 
-    this.createButtonGroup(docContainer, docButtons, 'about-doc-button');
+    this.createButtonGroup(docContainer, docButtons, '');
 
     // Personal Links Section
     const personalContainer = containerEl.createDiv('about-personal-container');
-    personalContainer.createEl('h3', { text: 'Connect & Support', cls: 'about-section-header' });
+    personalContainer.createEl('h3', {
+      text: 'Connect & Support',
+      cls: 'about-section-header',
+    });
 
     const personalButtons = [
       { name: 'Patreon', url: 'https://www.patreon.com/SystemSculpt' },
@@ -65,10 +83,14 @@ class AboutSettingTab extends PluginSettingTab {
       { name: 'Email', url: 'mailto:systemsculpt@gmail.com' },
     ];
 
-    this.createButtonGroup(personalContainer, personalButtons, 'about-button');
+    this.createButtonGroup(personalContainer, personalButtons, '');
   }
 
-  private createButtonGroup(container: HTMLElement, buttons: { name: string; url: string }[], buttonClass: string): void {
+  private createButtonGroup(
+    container: HTMLElement,
+    buttons: { name: string; url: string }[],
+    buttonClass: string
+  ): void {
     const buttonContainer = container.createDiv('about-button-container');
     buttons.forEach(button => {
       const buttonEl = buttonContainer.createEl('button', {

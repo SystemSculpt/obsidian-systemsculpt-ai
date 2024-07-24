@@ -17,6 +17,11 @@ export class BlankTemplateModal extends Modal {
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
     this.plugin = plugin;
+    this.userPromptInput = document.createElement('textarea');
+    this.preContextArea = document.createElement('textarea');
+    this.postContextArea = document.createElement('textarea');
+    this.preContextToggle = document.createElement('input');
+    this.postContextToggle = document.createElement('input');
   }
 
   onOpen(): void {
@@ -211,12 +216,8 @@ export class BlankTemplateModal extends Modal {
 
         let modelInstance;
         try {
-          const models = await this.plugin.openAIService.getModels(
-            this.plugin.plugin.brainModule.settings.showopenAISetting,
-            this.plugin.plugin.brainModule.settings.showgroqSetting,
-            this.plugin.plugin.brainModule.settings.showlocalEndpointSetting,
-            this.plugin.plugin.brainModule.settings.showopenRouterSetting
-          );
+          const models =
+            await this.plugin.plugin.brainModule.getEnabledModels();
 
           modelInstance = models.find(
             m => m.id === this.plugin.plugin.brainModule.settings.defaultModelId
@@ -248,14 +249,14 @@ export class BlankTemplateModal extends Modal {
           return;
         }
 
-        const maxTokens = this.plugin.plugin.brainModule.settings.maxTokens;
+        const maxOutputTokens = this.plugin.plugin.brainModule.getMaxOutputTokens();
 
         try {
-          await this.plugin.openAIService.createStreamingChatCompletionWithCallback(
+          await this.plugin.AIService.createStreamingChatCompletionWithCallback(
             this.plugin.settings.blankTemplatePrompt + postSystemPrompt,
             `${userPrompt}\n\n${contextPrompt}`,
             modelInstance.id,
-            maxTokens,
+            maxOutputTokens,
             (chunk: string) => {
               if (signal.aborted) {
                 logger.log('Request was aborted successfully.');

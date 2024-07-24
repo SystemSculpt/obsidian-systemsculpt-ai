@@ -16,7 +16,7 @@
   flex-wrap: wrap;
   font-size: 10px;
   color: var(--text-muted);
-  margin-bottom: 3px; /* Added margin-bottom for space between model + max tokens combo and tags list */
+  margin-bottom: 3px;
 }
 
 .template-meta-item {
@@ -25,7 +25,7 @@
   background-color: var(--background-secondary-alt);
   border-radius: 4px;
   margin-bottom: 3px;
-  color: var(--color-green); /* Changed color to green */
+  color: var(--color-green);
 }
 
 .template-tags {

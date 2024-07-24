@@ -57,7 +57,6 @@ function handleInputKeydown(
 }
 
 function handleInputChange(chatView: ChatView, inputEl: HTMLTextAreaElement) {
-  chatView.updateTokenCountWithInput(inputEl.value);
   chatView.detectFileLink(inputEl);
   chatView.adjustInputHeight(inputEl);
 }

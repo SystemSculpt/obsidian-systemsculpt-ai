@@ -26,7 +26,7 @@ export function renderModelSelectionButton(
 
   function updateButtonState() {
     if (plugin.isReinitializing) {
-      buttonComponent.setButtonText('Reinitializing...');
+      buttonComponent.setButtonText('Reloading Models...');
       buttonComponent.setDisabled(true);
     } else {
       buttonComponent.setButtonText(
@@ -36,10 +36,8 @@ export function renderModelSelectionButton(
     }
   }
 
-  // Update button state when reinitialization status changes
   plugin.on('reinitialization-status-changed', updateButtonState);
 
-  // Return the cleanup function
   return () => {
     plugin.off('reinitialization-status-changed', updateButtonState);
   };

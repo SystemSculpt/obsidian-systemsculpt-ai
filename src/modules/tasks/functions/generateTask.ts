@@ -16,12 +16,7 @@ export async function generateTask(
 
   if (!model) {
     logger.log('Model not found, trying to find an available model...');
-    const models = await plugin.plugin.brainModule.openAIService.getModels(
-      plugin.plugin.brainModule.settings.showopenAISetting,
-      plugin.plugin.brainModule.settings.showgroqSetting,
-      plugin.plugin.brainModule.settings.showlocalEndpointSetting,
-      plugin.plugin.brainModule.settings.showopenRouterSetting
-    );
+    const models = await plugin.plugin.brainModule.getEnabledModels();
 
     if (models.length > 0) {
       model = models[0];
@@ -37,15 +32,15 @@ export async function generateTask(
   }
 
   const temperature = plugin.plugin.brainModule.settings.temperature || 0.5;
-  const maxTokens = plugin.plugin.brainModule.settings.maxTokens || 2048;
+  const maxOutputTokens = model.maxOutputTokens || 4096;
 
   try {
-    const apiService = plugin.plugin.brainModule.openAIService;
+    const apiService = plugin.plugin.brainModule.AIService;
     const generatedTask = await apiService.createChatCompletion(
       systemPrompt,
       userMessage,
       model.id,
-      maxTokens
+      maxOutputTokens
     );
 
     return generatedTask.trim();

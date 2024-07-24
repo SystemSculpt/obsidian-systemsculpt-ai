@@ -1,29 +1,60 @@
-import { MarkdownView, requestUrl } from 'obsidian';
+import { MarkdownView, requestUrl, Setting, TFolder } from 'obsidian';
 import SystemSculptPlugin from '../../main';
-import {
-  TemplatesSettings,
-  DEFAULT_TEMPLATES_SETTINGS,
-} from './settings/TemplatesSettings';
 import { AIService } from '../../api/AIService';
 import { showCustomNotice } from '../../modals';
 import { TemplatesSuggest } from './TemplatesSuggest';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
-import { TemplatesSettingTab } from './settings/TemplatesSettingTab';
 import { logger } from '../../utils/logger';
+import { MultiSuggest } from '../../utils/MultiSuggest';
+
+export interface TemplatesSettings {
+  templatesPath: string;
+  blankTemplatePrompt: string;
+  licenseKey: string;
+  templatesVersion: string;
+  showSSSyncTemplates: boolean;
+  triggerKey: string;
+  isPatreonMember: boolean;
+}
+
+export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
+  templatesPath: 'SystemSculpt/Templates',
+  blankTemplatePrompt: `You are an AI assistant tasked with generating concise and specific content based on the user's prompt. Your role is to provide a focused and useful response without unnecessary prose.
+  
+Rules:
+- Carefully analyze the user's prompt to understand their intent and desired output.
+- Generate content that directly addresses the prompt, avoiding tangents or filler text.
+- Aim to provide a succinct and actionable response that meets the user's needs.
+- Ensure your output is well-structured, clear, and easy to follow.
+- Do not introduce any new formatting or markdown syntax unless specifically requested in the prompt.
+- Your generation response should be purely the requested content, without any additional labels or explanations.`,
+  licenseKey: '',
+  templatesVersion: '0.0.1',
+  showSSSyncTemplates: true,
+  triggerKey: '/',
+  isPatreonMember: false,
+};
 
 export class TemplatesModule implements IGenerationModule {
   plugin: SystemSculptPlugin;
   settings: TemplatesSettings;
-  openAIService: AIService;
+  private _AIService: AIService | null = null;
   abortController: AbortController | null = null;
   isGenerationCompleted: boolean = false;
   private firstLicenseCheckDone: boolean = false;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
-    this.openAIService = plugin.brainModule.openAIService;
+    this.settings = DEFAULT_TEMPLATES_SETTINGS;
+  }
+
+  get AIService(): AIService {
+    if (!this._AIService) {
+      this._AIService = this.plugin.brainModule.AIService;
+    }
+    return this._AIService as AIService;
   }
 
   async load() {
@@ -39,13 +70,18 @@ export class TemplatesModule implements IGenerationModule {
       name: 'Trigger template suggestions',
       callback: () => this.triggerTemplateSuggestions(),
     });
+
+    // Wait for the BrainModule to initialize the AIService
+    await this.plugin.brainModule.initializeAIService();
+    await this.AIService.ensureModelCacheInitialized();
   }
 
   async loadSettings() {
+    const savedSettings = await this.plugin.loadData();
     this.settings = Object.assign(
       {},
       DEFAULT_TEMPLATES_SETTINGS,
-      await this.plugin.loadData()
+      savedSettings
     );
   }
 
@@ -53,9 +89,6 @@ export class TemplatesModule implements IGenerationModule {
     await this.plugin.saveData(this.settings);
   }
 
-  settingsDisplay(containerEl: HTMLElement): void {
-    new TemplatesSettingTab(this.plugin.app, this, containerEl).display();
-  }
 
   registerCodeMirror() {
     this.plugin.registerEditorSuggest(new TemplatesSuggest(this));
@@ -155,5 +188,204 @@ export class TemplatesModule implements IGenerationModule {
         new BlankTemplateModal(this).open();
       }
     }
+  }
+
+  settingsDisplay(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName('Templates').setHeading();
+    containerEl.createEl('p', {
+      text: 'Change your default AI templates location, what your default blank prompt does in the background, and more.',
+    });
+
+    // Add Patreon member toggle with custom style
+    const patreonSetting = new Setting(containerEl)
+      .setName('Are you a Patreon member?')
+      .setDesc('Toggle to show Patreon member options')
+      .addToggle(toggle => {
+        toggle
+          .setValue(this.settings.isPatreonMember)
+          .onChange(async (value: boolean) => {
+            this.settings.isPatreonMember = value;
+            await this.saveSettings();
+            this.settingsDisplay(containerEl); // Refresh the settings view
+          });
+      });
+
+    // Apply custom CSS class
+    patreonSetting.settingEl.addClass('patreon-member-setting');
+
+    if (this.settings.isPatreonMember) {
+      const infoBoxEl = containerEl.createDiv('info-box');
+      infoBoxEl.createEl('p', {
+        text: "If you're a Patreon member, download the latest AI templates from SystemSculpt!",
+      });
+
+      // Apply custom CSS class to info box
+      infoBoxEl.addClass('patreon-sub-setting');
+
+      this.renderLicenseKeySetting(containerEl);
+
+      const ssSyncSetting = new Setting(containerEl)
+        .setName('Show SS-Sync templates in suggestions')
+        .setDesc('Toggle the display of templates within the SS-Sync folder')
+        .addToggle(toggle => {
+          toggle
+            .setValue(this.settings.showSSSyncTemplates)
+            .onChange(async (value: boolean) => {
+              this.settings.showSSSyncTemplates = value;
+              await this.saveSettings();
+            });
+
+          const keepInMindBoxEl = containerEl.createDiv('info-box');
+          keepInMindBoxEl.createEl('p', {
+            text: "Whenever you sync to the latest templates, all templates found in the SS-Sync folder will be overwritten. This means that if you want to modify one to your own liking, make sure to place it in the Templates folder, outside of the SS-Sync directory - it will be safe there and won't be overwritten.",
+          });
+
+          // Apply custom CSS class to keepInMindBoxEl
+          keepInMindBoxEl.addClass('patreon-sub-setting');
+        });
+
+      // Apply custom CSS class to ssSyncSetting
+      ssSyncSetting.settingEl.addClass('patreon-sub-setting');
+    } else {
+      const becomePatreonEl = containerEl.createDiv('info-box');
+      const becomePatreonButton = becomePatreonEl.createEl('button', {
+        cls: '',
+        text: 'Click here to become a Patreon member for only $10 bucks!',
+      });
+      becomePatreonButton.addEventListener('click', () => {
+        window.open('https://patreon.com/systemsculpt', '_blank');
+      });
+    }
+
+    this.renderTriggerKeySetting(containerEl);
+    this.renderTemplatesPathSetting(containerEl);
+    this.renderBlankTemplatePromptSetting(containerEl);
+  }
+
+  private renderLicenseKeySetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('License Key')
+      .setDesc('Enter your license key')
+      .addText(text =>
+        text
+          .setPlaceholder('Enter your license key')
+          .setValue(this.settings.licenseKey)
+          .onChange(async (value) => {
+            this.settings.licenseKey = value;
+            await this.saveSettings();
+          })
+      );
+  }
+
+  private renderTriggerKeySetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Trigger key')
+      .setDesc(
+        'The key that triggers the template suggestion modal (single character only)'
+      )
+      .addText(text => {
+        text
+          .setPlaceholder('Enter trigger key')
+          .setValue(this.settings.triggerKey);
+
+        text.inputEl.addEventListener(
+          'keydown',
+          async (event: KeyboardEvent) => {
+            event.preventDefault();
+            const triggerKey = event.key.length === 1 ? event.key : '/';
+            this.settings.triggerKey = triggerKey;
+            await this.saveSettings();
+            text.setValue(triggerKey);
+          }
+        );
+      })
+      .addExtraButton(button => {
+        button
+          .setIcon('reset')
+          .setTooltip('Reset to default trigger key')
+          .onClick(async () => {
+            this.settings.triggerKey = '/';
+            await this.saveSettings();
+            this.settingsDisplay(containerEl); // Refresh the settings view
+          });
+      });
+  }
+
+  private renderTemplatesPathSetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Template folder location')
+      .setDesc('Path where the templates will be stored')
+      .addText(text => {
+        text
+          .setPlaceholder('Enter path')
+          .setValue(this.settings.templatesPath)
+          .onChange(async value => {
+            this.settings.templatesPath = value;
+            await this.saveSettings();
+          });
+
+        // Add folder suggestion
+        const inputEl = text.inputEl;
+        const suggestionContent = this.getFolderSuggestions();
+        const onSelectCallback = (selectedPath: string) => {
+          this.settings.templatesPath = selectedPath;
+          text.setValue(selectedPath);
+          this.saveSettings();
+        };
+
+        new MultiSuggest(
+          inputEl,
+          suggestionContent,
+          onSelectCallback,
+          this.plugin.app
+        );
+      })
+      .addExtraButton(button => {
+        button
+          .setIcon('reset')
+          .setTooltip('Reset to default path')
+          .onClick(async () => {
+            this.settings.templatesPath =
+              DEFAULT_TEMPLATES_SETTINGS.templatesPath;
+            await this.saveSettings();
+            this.settingsDisplay(containerEl);
+          });
+      });
+  }
+
+  private getFolderSuggestions(): Set<string> {
+    const folders = this.plugin.app.vault
+      .getAllLoadedFiles()
+      .filter(file => file instanceof TFolder) as TFolder[];
+    const suggestionContent = new Set(folders.map(folder => folder.path));
+    return suggestionContent;
+  }
+
+  private renderBlankTemplatePromptSetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Blank template prompt')
+      .setDesc('The system prompt used for the Blank Template.')
+      .addTextArea(text => {
+        text
+          .setPlaceholder('Enter blank template prompt')
+          .setValue(this.settings.blankTemplatePrompt)
+          .onChange(async (newValue: string) => {
+            this.settings.blankTemplatePrompt = newValue;
+            await this.saveSettings();
+          });
+        text.inputEl.rows = 10;
+        text.inputEl.cols = 50;
+      })
+      .addExtraButton(button => {
+        button
+          .setIcon('reset')
+          .setTooltip('Reset to default blank template prompt')
+          .onClick(async () => {
+            this.settings.blankTemplatePrompt =
+              DEFAULT_TEMPLATES_SETTINGS.blankTemplatePrompt;
+            await this.saveSettings();
+            this.settingsDisplay(containerEl);
+          });
+      });
   }
 }

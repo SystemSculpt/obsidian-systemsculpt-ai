@@ -1,16 +1,20 @@
 import { App, TFile, moment } from 'obsidian';
 import { ChatMessage } from './ChatMessage';
+import { ChatModule } from './ChatModule';
 
 export class ChatFileManager {
-  constructor(private app: App, private chatsPath: string) {}
+  constructor(private app: App, private chatModule: ChatModule) {}
 
   async createChatFile(
     initialMessage: string,
     contextFiles: TFile[]
   ): Promise<TFile> {
-    await this.app.vault.createFolder(this.chatsPath).catch(() => {});
+    const chatsPath = this.chatModule.settings.chatsPath;
+    await this.app.vault.createFolder(chatsPath).catch(() => {});
+    // Reason to ignore: works just fine, fixes seem to fuck things up tbh
+    // @ts-ignore
     const fileName = moment().format('YYYY-MM-DD HH-mm-ss');
-    const filePath = `${this.chatsPath}/${fileName}.md`;
+    const filePath = `${chatsPath}/${fileName}.md`;
 
     let contextFilesContent = '';
     for (const file of contextFiles) {

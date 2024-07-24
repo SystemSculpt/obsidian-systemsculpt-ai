@@ -23,7 +23,7 @@ export async function generateTitleForChat(
     showCustomNotice('Title generated successfully!');
   } catch (error) {
     logger.error('Error generating title:', error);
-    showCustomNotice(`Title generation failed: ${error.message}`);
+    showCustomNotice(`Title generation failed: ${(error as Error).message}`);
   } finally {
     hideCustomNotice();
   }

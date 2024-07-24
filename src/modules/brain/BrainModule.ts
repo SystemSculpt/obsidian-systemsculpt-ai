@@ -4,38 +4,40 @@ import {
   DEFAULT_BRAIN_SETTINGS,
 } from './settings/BrainSettings';
 import { AIService } from '../../api/AIService';
+import { Model } from '../../api/Model';
 import { BrainSettingTab } from './settings/BrainSettingTab';
 import { generateTitle } from './functions/generateTitle';
 import { generateTitleForCurrentNote } from './functions/generateTitleForCurrentNote';
 import { toggleGeneration } from './functions/toggleGeneration';
-import { MaxTokensModal } from './views/MaxTokensModal';
-import { updateMaxTokensStatusBar } from './functions/updateMaxTokensStatusBar';
 import { MarkdownView } from 'obsidian';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { showCustomNotice } from '../../modals';
-import { Model } from '../../api/Model';
 import { stopGeneration } from './functions/stopGeneration';
 import { ChatView, VIEW_TYPE_CHAT } from '../chat/ChatView';
 import { ModelSelectionModal } from './views/ModelSelectionModal';
-import { debounce } from 'obsidian';
-
 import { EventEmitter } from 'events';
+import { logger } from '../../utils/logger';
+import { ButtonComponent } from 'obsidian';
+import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 
 export class BrainModule extends EventEmitter implements IGenerationModule {
   plugin: SystemSculptPlugin;
-  settings: BrainSettings;
-  openAIService: AIService;
+  settings!: BrainSettings;
+  private _AIService: AIService | null = null;
   abortController: AbortController | null = null;
   isGenerating: boolean = false;
   isGenerationCompleted: boolean = false;
   favoritedModels: string[] = [];
   private isUpdatingDefaultModel: boolean = false;
   private _isReinitializing: boolean = false;
+  private isInitialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
+  public modelSelectionButton: ButtonComponent | null = null;
+  private cachedModels: Model[] = [];
 
   constructor(plugin: SystemSculptPlugin) {
     super();
     this.plugin = plugin;
-    this.initializeAIService();
   }
 
   get isReinitializing(): boolean {
@@ -49,7 +51,42 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }
   }
 
-  private initializeAIService() {
+  get AIService(): AIService {
+    if (!this._AIService) {
+      throw new Error('AIService is not initialized');
+    }
+    return this._AIService;
+  }
+
+  getAIService(): AIService {
+    return this.AIService;
+  }
+
+  getMaxOutputTokens(): number {
+    const currentModel = this.getCurrentModel();
+    return currentModel?.maxOutputTokens || 4096;
+  }
+
+  public async load() {
+    if (this.isInitialized) return;
+    if (this.initializationPromise) return this.initializationPromise;
+
+    this.initializationPromise = this.initialize();
+    await this.initializationPromise;
+  }
+
+  private async initialize() {
+    await this.loadSettings();
+    await this.initializeAIService();
+    this.registerCommands();
+    this.initializeStatusBars();
+    this.registerViews();
+    await this.updateDefaultModelAndStatusBar();
+    this.isInitialized = true;
+  }
+
+  public async initializeAIService() {
+    logger.trace('BrainModule.initializeAIService called');
     const {
       openAIApiKey,
       groqAPIKey,
@@ -58,28 +95,14 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       localEndpoint,
       temperature,
     } = this.plugin.settings;
-    this.openAIService = AIService.getInstance(
+    this._AIService = await AIService.getInstance({
       openAIApiKey,
       groqAPIKey,
       openRouterAPIKey,
-      {
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        apiEndpoint,
-        localEndpoint,
-        temperature,
-      }
-    );
-  }
-
-  async load() {
-    await this.loadSettings();
-    this.registerCommands();
-    this.initializeStatusBars();
-    this.registerViews();
-    await this.openAIService.ensureModelCacheInitialized();
-    await this.updateDefaultModelAndStatusBar();
+      apiEndpoint,
+      localEndpoint,
+      temperature,
+    });
   }
 
   private registerCommands() {
@@ -105,12 +128,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     });
 
     this.plugin.addCommand({
-      id: 'change-max-tokens',
-      name: 'Change max tokens',
-      callback: () => new MaxTokensModal(this.plugin.app, this).open(),
-    });
-
-    this.plugin.addCommand({
       id: 'stop-all-generation-processes',
       name: 'Stop all generation processes',
       callback: async () => await stopGeneration(this),
@@ -118,21 +135,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   }
 
   private initializeStatusBars() {
-    this.initializeMaxTokensStatusBar();
     this.initializeModelStatusBar();
-  }
-
-  private initializeMaxTokensStatusBar() {
-    if (!this.plugin.maxTokensToggleStatusBarItem) {
-      this.plugin.maxTokensToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.maxTokensToggleStatusBarItem.addClass(
-        'max-tokens-toggle-button'
-      );
-    }
-    this.updateMaxTokensStatusBar();
-    this.plugin.maxTokensToggleStatusBarItem.onClickEvent(() => {
-      new MaxTokensModal(this.plugin.app, this).open();
-    });
   }
 
   private initializeModelStatusBar() {
@@ -164,44 +167,56 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
   async saveSettings() {
     await this.plugin.saveData(this.settings);
-    this.refreshAIService();
-    this.updateMaxTokensStatusBar();
   }
 
   async refreshAIService() {
-    this.initializeAIService();
-    await this.updateDefaultModelAndStatusBar();
+    logger.trace('BrainModule.refreshAIService called');
+    try {
+      if (
+        this.settings.localEndpoint &&
+        !this.isValidLocalEndpoint(this.settings.localEndpoint)
+      ) {
+        this.settings.localEndpoint = '';
+        await this.saveSettings();
+      }
+
+      this.updateModelStatusBarText('Reloading Models...');
+      this.updateModelSelectionButton('Reloading Models...', true);
+
+      this._AIService = await AIService.getInstance(
+        {
+          openAIApiKey: this.settings.openAIApiKey,
+          groqAPIKey: this.settings.groqAPIKey,
+          openRouterAPIKey: this.settings.openRouterAPIKey,
+          apiEndpoint: this.settings.apiEndpoint,
+          localEndpoint: this.settings.localEndpoint,
+          temperature: this.settings.temperature,
+        },
+        true
+      );
+
+      await this.updateDefaultModelAndStatusBar();
+    } catch (error) {
+      logger.error('Error refreshing AI service:', error);
+      this.updateModelStatusBarText('Error: Check settings');
+      this.updateModelSelectionButton('Error: Check settings', false);
+    }
   }
 
-  async reInitiateAIService() {
-    this.isReinitializing = true;
-    this.updateModelStatusBarText('Reinitializing...');
-    const {
-      openAIApiKey,
-      groqAPIKey,
-      openRouterAPIKey,
-      apiEndpoint,
-      localEndpoint,
-      temperature,
-    } = this.settings;
-    this.openAIService = AIService.getInstance(
-      openAIApiKey,
-      groqAPIKey,
-      openRouterAPIKey,
-      {
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        apiEndpoint,
-        localEndpoint,
-        temperature,
-      },
-      true
-    );
-    await this.openAIService.clearModelCache();
-    await this.openAIService.initializeModelCache();
-    await this.updateDefaultModelAndStatusBar();
-    this.isReinitializing = false;
+  private updateModelSelectionButton(text: string, disabled: boolean) {
+    if (this.modelSelectionButton) {
+      this.modelSelectionButton.setButtonText(text);
+      this.modelSelectionButton.setDisabled(disabled);
+    }
+  }
+
+  public isValidLocalEndpoint(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -224,22 +239,26 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     new ModelSelectionModal(this.plugin.app, this).open();
   }
 
+  public async getEnabledModels(): Promise<Model[]> {
+    if (!this._AIService) {
+      throw new Error('AIService is not initialized');
+    }
+    const enabledModels = await this.getEnabledModelSettings();
+    return this._AIService.getModels(
+      enabledModels.showopenAISetting,
+      enabledModels.showgroqSetting,
+      enabledModels.showlocalEndpointSetting,
+      enabledModels.showopenRouterSetting
+    );
+  }
+
   async getCurrentModelShortName(): Promise<string> {
     const enabledModels = await this.getEnabledModelSettings();
     if (Object.values(enabledModels).every(setting => !setting)) {
       return 'No Models Detected';
     }
 
-    const models = await this.openAIService.getModels(
-      enabledModels.showopenAISetting,
-      enabledModels.showgroqSetting,
-      enabledModels.showlocalEndpointSetting,
-      enabledModels.showopenRouterSetting
-    );
-
-    if (models.length === 0) {
-      return 'No Models Detected';
-    }
+    const models = await this.getEnabledModels();
 
     let currentModel = models.find(
       model => model.id === this.settings.defaultModelId
@@ -265,44 +284,28 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   async getModelById(modelId: string): Promise<Model | undefined> {
     const actualModelId =
       modelId === 'default' ? this.settings.defaultModelId : modelId;
-    const enabledModels = await this.getEnabledModelSettings();
-    const models = await this.openAIService.getModels(
-      enabledModels.showopenAISetting,
-      enabledModels.showgroqSetting,
-      enabledModels.showlocalEndpointSetting,
-      enabledModels.showopenRouterSetting
-    );
+    const models = await this.getEnabledModels();
     return models.find(model => model.id === actualModelId);
   }
 
   async updateDefaultModelAndStatusBar(): Promise<void> {
+    logger.trace('BrainModule.updateDefaultModelAndStatusBar called');
     if (this.isUpdatingDefaultModel) return;
     this.isUpdatingDefaultModel = true;
 
     try {
       this.updateModelStatusBarText('Loading Models...');
 
-      const enabledModels = await this.getEnabledModelSettings();
-      const models = await this.openAIService.getModels(
-        enabledModels.showopenAISetting,
-        enabledModels.showgroqSetting,
-        enabledModels.showlocalEndpointSetting,
-        enabledModels.showopenRouterSetting
-      );
+      await this._AIService?.ensureModelCacheInitialized();
+      this.cachedModels = await this.getEnabledModels();
 
-      if (!models.length) {
-        this.settings.defaultModelId = '';
-        await this.saveSettings();
+      if (this.cachedModels.length === 0) {
         this.updateModelStatusBarText('No Models Detected');
       } else {
-        if (!models.find(model => model.id === this.settings.defaultModelId)) {
-          this.settings.defaultModelId = models[0].id;
-          await this.saveSettings();
-        }
-
+        const currentModel = this.getCurrentModel();
         this.updateModelStatusBarText(
-          this.settings.showDefaultModelOnStatusBar
-            ? `Model: ${await this.getCurrentModelShortName()}`
+          this.settings.showDefaultModelOnStatusBar && currentModel
+            ? `Model: ${currentModel.name}`
             : ''
         );
       }
@@ -325,16 +328,32 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
   private updateModelStatusBarText(text: string) {
     if (this.plugin.modelToggleStatusBarItem) {
-      this.plugin.modelToggleStatusBarItem.setText(text);
+      this.plugin.modelToggleStatusBarItem?.setText(text);
+    }
+    this.emit('model-changed', this.settings.defaultModelId);
+  }
+
+  public updateCostEstimate(tokenCount: number) {
+    const currentModel = this.getCurrentModel();
+    if (currentModel && currentModel.pricing) {
+      const { minCost, maxCost } = CostEstimator.calculateCost(
+        currentModel,
+        tokenCount,
+        this.getMaxOutputTokens()
+      );
+      this.emit('cost-estimate-updated', { minCost, maxCost });
     }
   }
 
-  private updateMaxTokensStatusBar() {
-    if (this.settings.showMaxTokensOnStatusBar) {
-      updateMaxTokensStatusBar(this);
-    } else if (this.plugin.maxTokensToggleStatusBarItem) {
-      this.plugin.maxTokensToggleStatusBarItem.setText('');
+  public getCurrentModel(): Model | null {
+    if (this.cachedModels.length === 0) {
+      return null;
     }
+    return (
+      this.cachedModels.find(
+        model => model.id === this.settings.defaultModelId
+      ) || this.cachedModels[0]
+    );
   }
 
   private focusActiveMarkdownView() {
