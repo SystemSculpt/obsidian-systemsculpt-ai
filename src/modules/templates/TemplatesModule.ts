@@ -191,6 +191,8 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
+    containerEl.empty();
+    
     new Setting(containerEl).setName('Templates').setHeading();
     containerEl.createEl('p', {
       text: 'Change your default AI templates location, what your default blank prompt does in the background, and more.',

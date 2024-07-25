@@ -223,22 +223,25 @@ export class EndpointManager {
 
     try {
       let isValid: boolean;
-      switch (provider.name) {
-        case 'OpenAI':
-          isValid = await AIService.validateOpenAIApiKey(value);
-          break;
-        case 'Groq':
-          isValid = await AIService.validateGroqAPIKey(value);
-          break;
-        case 'OpenRouter':
-          isValid = await AIService.validateOpenRouterApiKey(value);
-          break;
-        case 'Local':
-          isValid = await AIService.validateLocalEndpoint(value);
-          break;
-        default:
-          isValid = false;
-      }
+      const timeoutPromise = new Promise<boolean>((_, reject) =>
+        setTimeout(() => reject(new Error('Validation timeout')), 3000)
+      );
+      const validationPromise = (async () => {
+        switch (provider.name) {
+          case 'OpenAI':
+            return await AIService.validateOpenAIApiKey(value);
+          case 'Groq':
+            return await AIService.validateGroqAPIKey(value);
+          case 'OpenRouter':
+            return await AIService.validateOpenRouterApiKey(value);
+          case 'Local':
+            return await AIService.validateLocalEndpoint(value);
+          default:
+            return false;
+        }
+      })();
+
+      isValid = await Promise.race([validationPromise, timeoutPromise]);
 
       if (isValid) {
         statusTextEl.textContent = 'Online';
@@ -251,7 +254,7 @@ export class EndpointManager {
       }
     } catch (error) {
       logger.error(`Error validating ${provider.name} setting:`, error);
-      statusTextEl.textContent = 'Error';
+      statusTextEl.textContent = error instanceof Error && error.message === 'Validation timeout' ? 'Timeout' : 'Error';
       statusTextEl.classList.remove('validating', 'valid');
       statusTextEl.classList.add('invalid');
     }
@@ -264,6 +267,10 @@ export class EndpointManager {
       apiEndpoint: this.plugin.settings.apiEndpoint,
       localEndpoint: this.plugin.settings.localEndpoint,
       temperature: this.plugin.settings.temperature,
+      showopenAISetting: this.plugin.settings.showopenAISetting,
+      showgroqSetting: this.plugin.settings.showgroqSetting,
+      showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
+      showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
     });
   }
 

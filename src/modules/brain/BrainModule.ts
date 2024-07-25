@@ -76,17 +76,39 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   }
 
   private async initialize() {
-    await this.loadSettings();
-    await this.initializeAIService();
-    this.registerCommands();
-    this.initializeStatusBars();
-    this.registerViews();
-    await this.updateDefaultModelAndStatusBar();
-    this.isInitialized = true;
+    try {
+      await this.loadSettings();
+
+      logger.log('BrainModule: Initializing AIService');
+      await this.initializeAIService();
+      logger.log('BrainModule: AIService initialized');
+
+      logger.log('BrainModule: Registering commands');
+      this.registerCommands();
+      logger.log('BrainModule: Commands registered');
+
+      logger.log('BrainModule: Initializing status bars');
+      this.initializeStatusBars();
+      logger.log('BrainModule: Status bars initialized');
+
+      logger.log('BrainModule: Registering views');
+      this.registerViews();
+      logger.log('BrainModule: Views registered');
+
+      logger.log('BrainModule: Updating default model and status bar');
+      await this.updateDefaultModelAndStatusBar();
+      logger.log('BrainModule: Default model and status bar updated');
+
+      this.isInitialized = true;
+      logger.log('BrainModule: Initialization complete');
+    } catch (error) {
+      logger.error('BrainModule: Error during initialization:', error);
+      throw error;
+    }
   }
 
   public async initializeAIService() {
-    logger.trace('BrainModule.initializeAIService called');
+    logger.log('BrainModule.initializeAIService: Starting');
     const {
       openAIApiKey,
       groqAPIKey,
@@ -94,7 +116,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       apiEndpoint,
       localEndpoint,
       temperature,
-    } = this.plugin.settings;
+      showopenAISetting,
+      showgroqSetting,
+      showlocalEndpointSetting,
+      showopenRouterSetting,
+    } = this.settings;
+    logger.log('BrainModule.initializeAIService: Settings retrieved');
     this._AIService = await AIService.getInstance({
       openAIApiKey,
       groqAPIKey,
@@ -102,7 +129,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       apiEndpoint,
       localEndpoint,
       temperature,
+      showopenAISetting,
+      showgroqSetting,
+      showlocalEndpointSetting,
+      showopenRouterSetting,
     });
+    logger.log('BrainModule.initializeAIService: AIService instance created');
   }
 
   private registerCommands() {
@@ -191,6 +223,10 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
           apiEndpoint: this.settings.apiEndpoint,
           localEndpoint: this.settings.localEndpoint,
           temperature: this.settings.temperature,
+          showopenAISetting: this.settings.showopenAISetting,
+          showgroqSetting: this.settings.showgroqSetting,
+          showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
+          showopenRouterSetting: this.settings.showopenRouterSetting,
         },
         true
       );
@@ -243,17 +279,31 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     if (!this._AIService) {
       throw new Error('AIService is not initialized');
     }
-    const enabledModels = await this.getEnabledModelSettings();
-    return this._AIService.getModels(
-      enabledModels.showopenAISetting,
-      enabledModels.showgroqSetting,
-      enabledModels.showlocalEndpointSetting,
-      enabledModels.showopenRouterSetting
+    const enabledModels = await this.getEndpointSettingValues();
+    const allModels = await this._AIService.getModels(
+      !!enabledModels.openAIApiKey,
+      !!enabledModels.groqAPIKey,
+      !!enabledModels.openRouterAPIKey,
+      !!enabledModels.localEndpoint
     );
+    return allModels.filter(model => {
+      switch (model.provider) {
+        case 'openai':
+          return enabledModels.openAIApiKey;
+        case 'groq':
+          return enabledModels.groqAPIKey;
+        case 'local':
+          return enabledModels.localEndpoint;
+        case 'openRouter':
+          return enabledModels.openRouterAPIKey;
+        default:
+          return false;
+      }
+    });
   }
 
   async getCurrentModelShortName(): Promise<string> {
-    const enabledModels = await this.getEnabledModelSettings();
+    const enabledModels = await this.getEndpointSettingValues();
     if (Object.values(enabledModels).every(setting => !setting)) {
       return 'No Models Detected';
     }
@@ -323,6 +373,44 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showgroqSetting: this.settings.showgroqSetting,
       showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.settings.showopenRouterSetting,
+    };
+  }
+
+  private async getEndpointSettingValues() {
+    // first we check which settings are enabled
+    const enabledSettings = {
+      openAIApiKey: this.settings.showopenAISetting,
+      groqAPIKey: this.settings.showgroqSetting,
+      openRouterAPIKey: this.settings.showopenRouterSetting,
+      localEndpoint: this.settings.showlocalEndpointSetting,
+    };
+
+    // now we check which of the enabled settings have a value
+    const enabledValues = {
+      openAIApiKey: this.settings.openAIApiKey,
+      groqAPIKey: this.settings.groqAPIKey,
+      openRouterAPIKey: this.settings.openRouterAPIKey,
+      localEndpoint: this.settings.localEndpoint,
+    };
+
+    // now if they are both true, we return true
+    // if they are both false, we return false
+    // if they are one true and one false, we return false
+
+    const openAIActive =
+      enabledSettings.openAIApiKey && enabledValues.openAIApiKey;
+    const groqActive = enabledSettings.groqAPIKey && enabledValues.groqAPIKey;
+    const openRouterActive =
+      enabledSettings.openRouterAPIKey && enabledValues.openRouterAPIKey;
+    const localActive =
+      enabledSettings.localEndpoint && enabledValues.localEndpoint;
+
+    return {
+      // return as booleans
+      openAIApiKey: openAIActive,
+      groqAPIKey: groqActive,
+      openRouterAPIKey: openRouterActive,
+      localEndpoint: localActive,
     };
   }
 

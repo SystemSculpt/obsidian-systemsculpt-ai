@@ -901,45 +901,6 @@
     margin-left: 0;
   }
 }
-.model-list-setting {
-  margin-top: 0;
-}
-
-.model-list {
-  margin-top: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.model-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-radius: 5px;
-  transition: background-color 0.2s ease;
-  padding: 10px;
-  background-color: var(--background-secondary-alt);
-}
-
-.model-item:hover {
-  background-color: var(--background-secondary);
-}
-
-.model-item.disabled {
-  color: var(--text-muted);
-}
-
-.model-name {
-  flex: 1;
-  margin-right: 10px;
-  font-size: 14px;
-}
-
-.model-item .checkbox-container {
-  margin-left: auto;
-}
 .version-info-container {
   display: flex;
   margin-bottom: 10px;

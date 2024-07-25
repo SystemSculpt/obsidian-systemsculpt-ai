@@ -8,6 +8,18 @@ export class AIService {
   private static instance: AIService;
   private services: { [key in AIProvider]: UnifiedAIService };
   private cachedModels: { [key: string]: Model[] } = {};
+  private settings: {
+    openAIApiKey: string;
+    groqAPIKey: string;
+    openRouterAPIKey: string;
+    apiEndpoint: string;
+    localEndpoint?: string;
+    temperature: number;
+    showopenAISetting: boolean;
+    showgroqSetting: boolean;
+    showlocalEndpointSetting: boolean;
+    showopenRouterSetting: boolean;
+  };
 
   private constructor(settings: {
     openAIApiKey: string;
@@ -16,7 +28,12 @@ export class AIService {
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
+    showopenAISetting: boolean;
+    showgroqSetting: boolean;
+    showlocalEndpointSetting: boolean;
+    showopenRouterSetting: boolean;
   }) {
+    this.settings = settings;
     this.services = {
       openai: new UnifiedAIService(
         settings.openAIApiKey,
@@ -50,17 +67,33 @@ export class AIService {
       apiEndpoint: string;
       localEndpoint?: string;
       temperature: number;
+      showopenAISetting: boolean;
+      showgroqSetting: boolean;
+      showlocalEndpointSetting: boolean;
+      showopenRouterSetting: boolean;
     },
     forceNewInstance: boolean = false
   ): Promise<AIService> {
-    if (!AIService.instance || forceNewInstance) {
-      AIService.instance = new AIService(settings);
-      await AIService.instance.initializeModelCache();
-    } else {
-      AIService.instance.updateSettings(settings);
+    logger.log('AIService.getInstance called');
+    try {
+      if (!AIService.instance || forceNewInstance) {
+        logger.log('Creating new AIService instance');
+        AIService.instance = new AIService(settings);
+        logger.log('AIService instance created, initializing model cache');
+        await AIService.instance.initializeModelCache();
+        logger.log(
+          'AIService.getInstance: AIService instance created and model cache initialized'
+        );
+      } else {
+        logger.log('Updating existing AIService instance');
+        AIService.instance.updateSettings(settings);
+        logger.log('AIService.getInstance: AIService instance updated');
+      }
+      return AIService.instance;
+    } catch (error) {
+      logger.error('Error in AIService.getInstance:', error);
+      throw error; // Re-throw the error after logging
     }
-
-    return AIService.instance;
   }
 
   public async ensureModelCacheInitialized(): Promise<void> {
@@ -257,55 +290,95 @@ export class AIService {
   }
 
   public async initializeModelCache(): Promise<void> {
-    if (Object.keys(this.cachedModels).length > 0) return;
+    logger.log('Initializing model cache');
+    if (Object.keys(this.cachedModels).length > 0) {
+      logger.log('Model cache already initialized, skipping');
+      return;
+    }
 
     const providers: AIProvider[] = ['local', 'openai', 'groq', 'openRouter'];
+    const fetchPromises: Promise<void>[] = [];
 
-    await Promise.all(
-      providers.map(async provider => {
-        try {
-          // Skip providers without valid API keys
-          if (!this.services[provider].hasValidApiKey()) {
-            logger.log(
-              `Skipping ${provider} model fetch: No valid API key provided`
-            );
-            this.cachedModels[provider] = [];
-            return;
-          }
+    for (const provider of providers) {
+      fetchPromises.push(this.fetchModelsForProvider(provider));
+    }
 
-          this.cachedModels[provider] = await this.services[
-            provider
-          ].getModels();
-          logger.log(`Successfully fetched models for ${provider}`);
-        } catch (error: unknown) {
-          if (error instanceof Error) {
-            logger.error(`Error fetching ${provider} models:`, error.message);
-          } else {
-            logger.error(`Unknown error fetching ${provider} models`);
-          }
-          if (
-            typeof error === 'object' &&
-            error !== null &&
-            'status' in error
-          ) {
-            if (error.status === 404) {
-              logger.error(
-                `${provider} API endpoint not found. Please check the API documentation and your settings.`
-              );
-            } else if (error.status === 401) {
-              logger.error(
-                `Invalid ${provider} API key. Please check your settings.`
-              );
-            }
-          }
-          this.cachedModels[provider] = [];
+    await Promise.all(fetchPromises);
+
+    logger.log('Model cache initialization completed');
+  }
+
+  private async fetchModelsForProvider(provider: AIProvider): Promise<void> {
+    logger.log(`Initializing models for provider: ${provider}`);
+    try {
+      const isEnabled = this.isProviderEnabled(provider);
+      const hasValidApiKey = this.services[provider].hasValidApiKey();
+      const hasValidEndpoint = this.hasValidEndpoint(provider);
+
+      if (!isEnabled || !hasValidApiKey || !hasValidEndpoint) {
+        logger.log(
+          `Skipping ${provider} model fetch: Provider is disabled or no valid API key/endpoint provided`
+        );
+        this.cachedModels[provider] = [];
+        return;
+      }
+
+      logger.log(`Fetching models for ${provider}`);
+      const models = await Promise.race([
+        this.services[provider].getModels(),
+        new Promise<Model[]>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 10000)
+        ),
+      ]);
+      this.cachedModels[provider] = models;
+      logger.log(
+        `Successfully fetched ${models.length} models for ${provider}`
+      );
+    } catch (error: unknown) {
+      logger.error(`Error fetching ${provider} models:`, error);
+      if (error instanceof Error && 'status' in error) {
+        const statusError = error as { status: number };
+        if (statusError.status === 404) {
+          logger.error(
+            `${provider} API endpoint not found. Please check the API documentation and your settings.`
+          );
+        } else if (statusError.status === 401) {
+          logger.error(
+            `Invalid ${provider} API key. Please check your settings.`
+          );
         }
-      })
-    );
+      }
+      this.cachedModels[provider] = [];
+    }
+  }
 
-    // Log the number of models fetched for each provider
-    for (const [provider, models] of Object.entries(this.cachedModels)) {
-      logger.log(`Fetched ${models.length} models for ${provider}`);
+  private isProviderEnabled(provider: AIProvider): boolean {
+    switch (provider) {
+      case 'openai':
+        return this.settings.showopenAISetting;
+      case 'groq':
+        return this.settings.showgroqSetting;
+      case 'openRouter':
+        return this.settings.showopenRouterSetting;
+      case 'local':
+        return this.settings.showlocalEndpointSetting;
+      default:
+        return false;
+    }
+  }
+
+  private hasValidEndpoint(provider: AIProvider): boolean {
+    switch (provider) {
+      case 'openai':
+        return !!this.settings.apiEndpoint.trim();
+      case 'groq':
+        return true; // Groq uses a fixed endpoint
+      case 'openRouter':
+        return true; // OpenRouter uses a fixed endpoint
+      case 'local':
+        return !!this.settings.localEndpoint?.trim();
+      default:
+        return false;
     }
   }
 }

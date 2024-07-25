@@ -249,22 +249,29 @@ export class UnifiedAIService implements AIServiceInterface {
   }
 
   private async getLocalModels(): Promise<Model[]> {
+    logger.log(`Attempting to fetch local models from endpoint: ${this.endpoint}/models`);
     try {
       const response = await requestUrl({
         url: `${this.endpoint}/models`,
         method: 'GET',
       });
+      logger.log(`Local models API response status: ${response.status}`);
       if (response.status === 200) {
         const data = response.json;
+        logger.log(`Successfully fetched local models data: ${JSON.stringify(data)}`);
         return this.parseModels(data);
+      } else {
+        logger.error(`Failed to fetch local models. Status: ${response.status}, Response: ${JSON.stringify(response)}`);
       }
     } catch (error: unknown) {
       if (error instanceof Error) {
-        logger.error('Error fetching OpenAI-compatible models:', error.message);
+        logger.error('Error fetching local models:', error.message);
+        logger.error('Error stack:', error.stack);
       } else {
-        logger.error('Unknown error fetching OpenAI-compatible models');
+        logger.error('Unknown error fetching local models:', error);
       }
     }
+    logger.log('Returning empty array for local models due to error');
     return [];
   }
 
@@ -273,9 +280,9 @@ export class UnifiedAIService implements AIServiceInterface {
       return await this.getLocalModels();
     }
 
-    if (!this.hasValidApiKey()) {
+    if (!this.hasValidApiKey() || !this.endpoint.trim()) {
       logger.log(
-        `No valid API key provided for ${this.provider}. Skipping model fetch.`
+        `No valid API key or endpoint provided for ${this.provider}. Skipping model fetch.`
       );
       return [];
     }
