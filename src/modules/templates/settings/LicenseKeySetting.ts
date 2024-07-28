@@ -1,8 +1,8 @@
 import { Setting } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
 import { downloadTemplatesFromServer } from '../functions/downloadTemplatesFromServer';
-import { checkLicenseValidity } from '../functions/checkLicenseValidity'; // Make sure this import is correct
-import { showCustomNotice } from '../../../modals'; // Ensure this import is correct based on your project structure
+import { checkLicenseValidity } from '../functions/checkLicenseValidity';
+import { showCustomNotice } from '../../../modals';
 
 export function renderLicenseKeySetting(
   containerEl: HTMLElement,

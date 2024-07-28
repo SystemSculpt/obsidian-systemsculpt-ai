@@ -12,7 +12,6 @@ import { RecorderModule } from './modules/recorder/RecorderModule';
 import { AboutModule } from './modules/about/AboutModule';
 import { ChatModule } from './modules/chat/ChatModule';
 import { ChatView, VIEW_TYPE_CHAT } from './modules/chat/ChatView';
-import { AIService } from './api/AIService';
 import { registerMp3ContextMenu } from './events';
 import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
 import { logger } from './utils/logger';

@@ -283,9 +283,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     const allModels = await this._AIService.getModels(
       !!enabledModels.openAIApiKey,
       !!enabledModels.groqAPIKey,
-      !!enabledModels.openRouterAPIKey,
-      !!enabledModels.localEndpoint
+      !!enabledModels.localEndpoint,
+      !!enabledModels.openRouterAPIKey
     );
+    
+    logger.log('Enabled models:', enabledModels);
+    logger.log('All models:', allModels);
     return allModels.filter(model => {
       switch (model.provider) {
         case 'openai':

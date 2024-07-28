@@ -133,7 +133,8 @@ export class EndpointManager {
           .setPlaceholder(provider.placeholder || 'API Key')
           .setValue(this.plugin.settings[provider.settingKey] as string)
           .onChange((value: string) => {
-            this.debouncedSaveAndReinitialize(
+            this.saveImmediately(value, provider.settingKey);
+            this.debouncedReinitialize(
               value,
               apiSettingTextComponent,
               provider.settingKey
@@ -177,7 +178,17 @@ export class EndpointManager {
       });
   }
 
-  private debouncedSaveAndReinitialize(
+  private saveImmediately(
+    value: string,
+    settingKey: keyof BrainModule['settings']
+  ): void {
+    (this.plugin.settings[settingKey] as string) = value;
+    this.plugin.saveSettings().catch(error => {
+      logger.error('Error saving settings:', error);
+    });
+  }
+
+  private debouncedReinitialize(
     value: string,
     textComponent: TextComponent,
     settingKey: keyof BrainModule['settings']
@@ -185,8 +196,6 @@ export class EndpointManager {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(async () => {
       try {
-        (this.plugin.settings[settingKey] as string) = value;
-        await this.plugin.saveSettings();
         await this.validateSettingAndUpdateStatus(value, textComponent, {
           name: settingKey,
           settingKey,
@@ -196,10 +205,10 @@ export class EndpointManager {
         console.log('AI Service has been refreshed');
         this.onAfterSave();
       } catch (error) {
-        logger.error('Error saving and refreshing:', error);
-        this.updateStatus(textComponent, 'Error saving', false);
+        logger.error('Error refreshing:', error);
+        this.updateStatus(textComponent, 'Error refreshing', false);
       }
-    }, 3000);
+    }, 3000); // 3 seconds debounce
   }
 
   private async validateSettingAndUpdateStatus(
