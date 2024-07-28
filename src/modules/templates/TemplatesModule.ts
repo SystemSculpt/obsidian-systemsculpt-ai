@@ -8,6 +8,7 @@ import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
 import { logger } from '../../utils/logger';
 import { MultiSuggest } from '../../utils/MultiSuggest';
+import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 
 export interface TemplatesSettings {
   templatesPath: string;
@@ -265,18 +266,7 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   private renderLicenseKeySetting(containerEl: HTMLElement): void {
-    new Setting(containerEl)
-      .setName('License Key')
-      .setDesc('Enter your license key')
-      .addText(text =>
-        text
-          .setPlaceholder('Enter your license key')
-          .setValue(this.settings.licenseKey)
-          .onChange(async (value) => {
-            this.settings.licenseKey = value;
-            await this.saveSettings();
-          })
-      );
+    renderLicenseKeySetting(containerEl, this);
   }
 
   private renderTriggerKeySetting(containerEl: HTMLElement): void {
