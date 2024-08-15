@@ -13,8 +13,26 @@ export class TokenManager {
     return getTokenCount(this.app, chatMessages, contextFiles, inputText);
   }
 
-  public async getContextFilesContent(contextFiles: TFile[]): Promise<string> {
-    return getContextFilesContent(this.app, contextFiles);
+  public async getContextFilesContent(contextFiles: TFile[]): Promise<{ text: string, images: { path: string, base64: string }[] }> {
+    const textContent = await getContextFilesContent(this.app, contextFiles);
+    const images = await this.getImageFilesContent(contextFiles);
+    return { text: textContent, images };
+  }
+
+  private async getImageFilesContent(contextFiles: TFile[]): Promise<{ path: string, base64: string }[]> {
+    const imageFiles = contextFiles.filter(file => 
+      ['png', 'jpg', 'jpeg', 'gif'].includes(file.extension.toLowerCase())
+    );
+
+    const imageContents = await Promise.all(imageFiles.map(async file => {
+      const arrayBuffer = await this.app.vault.readBinary(file);
+      const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      return { path: file.path, base64 };
+    }));
+
+    return imageContents;
   }
 
   displayTokenCount(

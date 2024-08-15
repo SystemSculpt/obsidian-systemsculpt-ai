@@ -29,8 +29,22 @@ export async function getContextFilesContent(
   if (contextFiles.length === 0) return '';
   let contextContent = '';
   for (const file of contextFiles) {
-    const content = await app.vault.read(file);
-    contextContent += `### ${file.basename}\n${content}\n`;
+    if (file.extension.toLowerCase() === 'pdf') {
+      const extractedFolder = file.parent ? `${file.parent.path}/${file.basename}` : file.basename;
+      const extractedMarkdownPath = `${extractedFolder}/extracted_content.md`.replace(/^\/+/, '');
+      const extractedMarkdownFile = app.vault.getAbstractFileByPath(extractedMarkdownPath);
+      if (extractedMarkdownFile instanceof TFile) {
+        const content = await app.vault.read(extractedMarkdownFile);
+        contextContent += `### ${file.basename} (Extracted Content)\n${content}\n`;
+      } else {
+        contextContent += `### ${file.basename}\n[PDF content not extracted]\n`;
+      }
+    } else if (['png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'].includes(file.extension.toLowerCase())) {
+      contextContent += `### ${file.basename}\n[File content not included for token calculation]\n`;
+    } else {
+      const content = await app.vault.read(file);
+      contextContent += `### ${file.basename}\n${content}\n`;
+    }
   }
   return contextContent;
 }

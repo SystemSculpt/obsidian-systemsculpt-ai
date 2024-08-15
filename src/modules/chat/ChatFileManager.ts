@@ -134,4 +134,9 @@ export class ChatFileManager {
 
     return contextFiles;
   }
+
+  isDirectlyInChatsDirectory(file: TFile): boolean {
+    const chatsPath = this.chatModule.settings.chatsPath;
+    return file.parent?.path === chatsPath;
+  }
 }

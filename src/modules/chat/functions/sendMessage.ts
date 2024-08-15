@@ -40,13 +40,37 @@ export async function sendMessage(
   const systemPrompt = chatModule.settings.systemPrompt;
   const messageHistory = await constructMessageHistory();
 
-  const updatedMessageHistory = messageHistory.map(msg => ({
-    role:
-      msg.role === 'ai' || msg.role.startsWith('ai-') ? 'assistant' : msg.role,
-    content: msg.content,
-  }));
+  // Add this function to handle PDF content
+  const processPDFContent = async (msg: { role: string; content: string }) => {
+    if (msg.role === 'user' && typeof msg.content === 'string' && msg.content.includes('CONTEXT FILES:')) {
+      const lines = msg.content.split('\n');
+      const processedLines = await Promise.all(lines.map(async (line) => {
+        if (line.startsWith('### ') && line.endsWith('.pdf')) {
+          const pdfFileName = line.slice(4, -4);
+          const extractedFolder = `${chatModule.settings.attachmentsPath}/${pdfFileName}`;
+          const extractedMarkdownFile = app.vault.getAbstractFileByPath(`${extractedFolder}/extracted_content.md`);
+          if (extractedMarkdownFile instanceof TFile) {
+            const content = await app.vault.read(extractedMarkdownFile);
+            return `### ${pdfFileName} (Extracted Content)\n${content}`;
+          }
+        }
+        return line;
+      }));
+      return { ...msg, content: processedLines.join('\n') };
+    }
+    return msg;
+  };
+
+  const updatedMessageHistory = await Promise.all(messageHistory.map(processPDFContent));
 
   showLoading();
+
+  // make sure role is 'assistant' for ai-models
+  updatedMessageHistory.forEach(msg => {
+    if (msg.role.startsWith('ai-')) {
+      msg.role = 'assistant';
+    }
+  });
 
   try {
     await aiService.createStreamingConversationWithCallback(

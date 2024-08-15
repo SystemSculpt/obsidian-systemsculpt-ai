@@ -73,6 +73,7 @@ async function transcribeWithOpenAI(
       transcriptions.push(transcription);
     } catch (error) {
       logger.error(`Error transcribing chunk ${i + 1}:`, error);
+      // @ts-ignore
       if (error.message.includes('Maximum content size limit')) {
         CHUNK_SIZE = Math.floor(CHUNK_SIZE / 2);
         logger.warn(`Chunk size reduced to ${CHUNK_SIZE} bytes. Retrying...`);

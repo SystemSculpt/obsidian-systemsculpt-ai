@@ -5,16 +5,21 @@ import { ChatView, VIEW_TYPE_CHAT } from './ChatView';
 import { ChatFileManager } from './ChatFileManager';
 import { TFile, WorkspaceLeaf } from 'obsidian';
 import { logger } from '../../utils/logger';
-
+import { PDFExtractor } from './PDFExtractor';
+import { Notice } from 'obsidian';
+import { createHash } from 'crypto';
+import { ContextFileManager } from './ContextFileManager';
 export class ChatModule {
   plugin: SystemSculptPlugin;
   settings: ChatSettings;
   chatFileManager: ChatFileManager;
+  pdfExtractor: PDFExtractor;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_CHAT_SETTINGS;
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
+    this.pdfExtractor = new PDFExtractor(this);
   }
 
   async load() {
@@ -22,6 +27,9 @@ export class ChatModule {
     await this.loadSettings();
 
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
+
+    // Ensure attachments directory exists
+    await this.plugin.app.vault.createFolder(this.settings.attachmentsPath).catch(() => {});
 
     this.plugin.addRibbonIcon(
       'message-square-plus',
@@ -50,7 +58,7 @@ export class ChatModule {
       name: 'Open Chat with Selected File',
       checkCallback: (checking: boolean) => {
         const file = this.plugin.app.workspace.getActiveFile();
-        if (file && file.path.startsWith(this.settings.chatsPath)) {
+        if (file && file.extension === 'md' && this.chatFileManager.isDirectlyInChatsDirectory(file)) {
           if (!checking) {
             this.openChatWithFile(file);
           }
@@ -159,13 +167,17 @@ export class ChatModule {
   }
 
   openChatWithFile(file: TFile) {
+    if (!this.chatFileManager.isDirectlyInChatsDirectory(file)) {
+      new Notice("This file is not a chat history file.");
+      return;
+    }
+
     const leaves = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
     let chatLeaf: WorkspaceLeaf | null;
 
     if (leaves.length === 0) {
       chatLeaf = this.plugin.app.workspace.getRightLeaf(false);
       if (!chatLeaf) {
-        // If getRightLeaf returns null, create a new leaf
         chatLeaf = this.plugin.app.workspace.getLeaf('tab');
       }
     } else {
@@ -179,8 +191,10 @@ export class ChatModule {
       });
 
       this.plugin.app.workspace.revealLeaf(chatLeaf);
-      const chatView = chatLeaf.view as ChatView;
-      if (chatView && chatView instanceof ChatView) {
+      const chatView = new ChatView(chatLeaf, this.plugin.brainModule, this);
+      chatLeaf.view = chatView;
+
+      if (chatView instanceof ChatView) {
         chatView.setChatFile(file);
         chatView.loadChatFile(file);
 
@@ -214,5 +228,19 @@ export class ChatModule {
 
   activateView() {
     this.openNewChat();
+  }
+
+  async calculateMD5(file: TFile): Promise<string> {
+    const arrayBuffer = await this.plugin.app.vault.readBinary(file);
+    const hash = createHash('md5');
+    hash.update(Buffer.from(arrayBuffer));
+    return hash.digest('hex');
+  }
+
+  async extractPDF(file: TFile) {
+    const pdfExtractor = new PDFExtractor(this);
+    const extractedContent = await pdfExtractor.extractPDF(file);
+    const contextFileManager = new ContextFileManager(this.plugin.app, this);
+    await contextFileManager.savePDFExtractedContent(file, extractedContent);
   }
 }
