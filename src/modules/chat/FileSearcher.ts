@@ -9,7 +9,10 @@ export class FileSearcher extends FuzzySuggestModal<TFile> {
   }
 
   getItems(): TFile[] {
-    const allFiles = this.app.vault.getMarkdownFiles();
+    const supportedExtensions = ['md', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
+    const allFiles = this.app.vault.getFiles().filter(file => 
+      file.extension && supportedExtensions.includes(file.extension.toLowerCase())
+    );
     if (this.chatsPath) {
       return allFiles.filter(
         file =>

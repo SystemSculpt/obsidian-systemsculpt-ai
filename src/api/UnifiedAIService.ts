@@ -166,15 +166,36 @@ export class UnifiedAIService implements AIServiceInterface {
 
   async createStreamingConversationWithCallback(
     systemPrompt: string,
-    messages: { role: string; content: string }[],
+    messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    const formattedMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.map(msg => {
+        if (typeof msg.content === 'string') {
+          return msg;
+        } else {
+          return {
+            role: msg.role,
+            content: msg.content.map(item => {
+              if (item.type === 'text') {
+                return { type: 'text', text: item.text };
+              } else if (item.type === 'image_url') {
+                return { type: 'image_url', image_url: item.image_url };
+              }
+              return item;
+            })
+          };
+        }
+      })
+    ];
+
     const requestData = JSON.stringify({
       model: modelId,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      messages: formattedMessages,
       stream: true,
       max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
@@ -198,6 +219,8 @@ export class UnifiedAIService implements AIServiceInterface {
       headers['HTTP-Referer'] = 'https://SystemSculpt.com';
       headers['X-Title'] = 'SystemSculpt AI for Obsidian';
     }
+
+    console.log('Request payload:', requestData);
 
     const req = await fetch(`${this.endpoint}/chat/completions`, {
       method: 'POST',

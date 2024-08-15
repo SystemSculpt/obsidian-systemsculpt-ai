@@ -1,4 +1,4 @@
-import { Plugin, TFile, Notice, WorkspaceLeaf } from 'obsidian';
+import { Plugin, TFile, Notice, WorkspaceLeaf, Menu } from 'obsidian';
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,
@@ -71,6 +71,36 @@ export default class SystemSculptPlugin extends Plugin {
     // Register the context menu item for .mp3 files using the new events module
     registerMp3ContextMenu(this, this.recorderModule);
 
+    // Register the context menu item for PDF extraction
+    this.addCommand({
+      id: 'extract-pdf',
+      name: 'Extract PDF with SystemSculpt',
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file && file.extension === 'pdf') {
+          if (!checking) {
+            this.chatModule.extractPDF(file);
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
+    // Register the context menu item for PDF files
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file) => {
+        if (file instanceof TFile && file.extension === 'pdf') {
+          menu.addItem((item) => {
+            item
+              .setTitle('Extract PDF with SystemSculpt')
+              .setIcon('file-text')
+              .onClick(() => this.chatModule.extractPDF(file));
+          });
+        }
+      })
+    );
+
     // Add commands and event listeners
     this.addCommands();
     this.registerEvents();
@@ -113,16 +143,21 @@ export default class SystemSculptPlugin extends Plugin {
       this.app.workspace.on('file-open', async file => {
         if (
           file &&
-          file.path.startsWith('SystemSculpt/Chats') &&
-          file instanceof TFile
+          file instanceof TFile &&
+          file.parent &&
+          file.parent.path === this.chatModule.settings.chatsPath &&
+          file.extension === 'md'
         ) {
           let chatLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 
           if (!chatLeaf) {
-            //@ts-ignore
-            chatLeaf = this.app.workspace.getRightLeaf(false);
-            if (chatLeaf) {
-              await chatLeaf.setViewState({ type: VIEW_TYPE_CHAT });
+            const newLeaf = this.app.workspace.getRightLeaf(false);
+            if (newLeaf) {
+              await newLeaf.setViewState({ type: VIEW_TYPE_CHAT });
+              chatLeaf = newLeaf;
+            } else {
+              // Handle the case where a new leaf couldn't be created
+              return;
             }
           } else {
             this.app.workspace.revealLeaf(chatLeaf);
@@ -134,6 +169,7 @@ export default class SystemSculptPlugin extends Plugin {
         }
       })
     );
+
 
     // Register file change event to update chat view when the chat file changes
     this.registerEvent(
