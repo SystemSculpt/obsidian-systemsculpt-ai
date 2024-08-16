@@ -112,29 +112,7 @@ export class ChatSettingTab extends PluginSettingTab {
             })
         );
 
-      new Setting(containerEl)
-        .setName('Force OCR')
-        .setDesc('Force OCR (Activate this when auto-detect often fails, make sure to set the correct languages)')
-        .addToggle(toggle =>
-          toggle
-            .setValue(this.plugin.settings.forceOCR)
-            .onChange(async value => {
-              this.plugin.settings.forceOCR = value;
-              await this.plugin.saveSettings();
-            })
-        );
 
-      new Setting(containerEl)
-        .setName('Paginate')
-        .setDesc('Add horizontal rules between each page')
-        .addToggle(toggle =>
-          toggle
-            .setValue(this.plugin.settings.paginate)
-            .onChange(async value => {
-              this.plugin.settings.paginate = value;
-              await this.plugin.saveSettings();
-            })
-        );
     }
 
     new Setting(containerEl)
@@ -150,18 +128,6 @@ export class ChatSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Move PDF to folder')
-      .setDesc('Move the PDF to the folder after conversion')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.movePDFtoFolder)
-          .onChange(async value => {
-            this.plugin.settings.movePDFtoFolder = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
       .setName('Create asset subfolder')
       .setDesc('Create an asset subfolder for images')
       .addToggle(toggle =>
@@ -169,45 +135,6 @@ export class ChatSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.createAssetSubfolder)
           .onChange(async value => {
             this.plugin.settings.createAssetSubfolder = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName('Extract content')
-      .setDesc('Select the content to extract from the PDF')
-      .addDropdown(dropdown =>
-        dropdown
-          .addOption('all', 'Extract everything')
-          .addOption('text', 'Text Only')
-          .addOption('images', 'Images Only')
-          .setValue(this.plugin.settings.extractContent)
-          .onChange(async value => {
-            this.plugin.settings.extractContent = value as 'all' | 'text' | 'images';
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName('Write metadata')
-      .setDesc('Write metadata as frontmatter in the markdown file')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.writeMetadata)
-          .onChange(async value => {
-            this.plugin.settings.writeMetadata = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName('Delete original PDF')
-      .setDesc('Delete the original PDF after conversion.')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.deleteOriginal)
-          .onChange(async value => {
-            this.plugin.settings.deleteOriginal = value;
             await this.plugin.saveSettings();
           })
       );

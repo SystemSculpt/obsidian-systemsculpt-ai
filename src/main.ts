@@ -71,36 +71,6 @@ export default class SystemSculptPlugin extends Plugin {
     // Register the context menu item for .mp3 files using the new events module
     registerMp3ContextMenu(this, this.recorderModule);
 
-    // Register the context menu item for PDF extraction
-    this.addCommand({
-      id: 'extract-pdf',
-      name: 'Extract PDF with SystemSculpt',
-      checkCallback: (checking: boolean) => {
-        const file = this.app.workspace.getActiveFile();
-        if (file && file.extension === 'pdf') {
-          if (!checking) {
-            this.chatModule.extractPDF(file);
-          }
-          return true;
-        }
-        return false;
-      },
-    });
-
-    // Register the context menu item for PDF files
-    this.registerEvent(
-      this.app.workspace.on('file-menu', (menu, file) => {
-        if (file instanceof TFile && file.extension === 'pdf') {
-          menu.addItem((item) => {
-            item
-              .setTitle('Extract PDF with SystemSculpt')
-              .setIcon('file-text')
-              .onClick(() => this.chatModule.extractPDF(file));
-          });
-        }
-      })
-    );
-
     // Add commands and event listeners
     this.addCommands();
     this.registerEvents();
