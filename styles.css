@@ -691,19 +691,19 @@
 }
 
 .loading-overlay {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(var(--background-primary-rgb), 0.8);
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.3s ease, visibility 0.3s ease;
+  transition: opacity 0.3s, visibility 0.3s;
 }
 
 .loading-overlay.visible {
@@ -712,50 +712,17 @@
 }
 
 .loading-container {
-  background-color: var(--background-secondary);
-  border-radius: 8px;
+  background-color: var(--background-primary);
   padding: 20px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   text-align: center;
-  max-width: 80%;
-  width: 300px;
-}
-
-.loading-spinner {
-  border: 4px solid var(--background-modifier-border);
-  border-top: 4px solid var(--interactive-accent);
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 15px;
 }
 
 .loading-text {
   font-size: 16px;
   color: var(--text-normal);
-  margin-bottom: 15px;
-  font-weight: bold;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 6px;
-  background-color: var(--background-modifier-border);
-  border-radius: 3px;
-  overflow: hidden;
   margin-bottom: 10px;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background-color: var(--interactive-accent);
-  transition: width 0.3s ease;
-}
-
-.progress-text {
-  font-size: 14px;
-  color: var(--text-muted);
 }
 
 @keyframes spin {
@@ -968,6 +935,34 @@
     margin-top: 5px;
     margin-left: 0;
   }
+}
+
+.chat-message.ai.loading {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.chat-message.ai.loading .loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--text-muted);
+  border-top: 2px solid var(--text-normal);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+.chat-message.ai.loading span {
+  color: var(--text-muted);
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 .version-info-container {
   display: flex;

@@ -5,21 +5,22 @@ import { ChatView, VIEW_TYPE_CHAT } from './ChatView';
 import { ChatFileManager } from './ChatFileManager';
 import { TFile, WorkspaceLeaf } from 'obsidian';
 import { logger } from '../../utils/logger';
-import { PDFExtractor } from './PDFExtractor';
+import { DocumentExtractor } from './DocumentExtractor';
 import { Notice } from 'obsidian';
 import { createHash } from 'crypto';
 import { ContextFileManager } from './ContextFileManager';
+
 export class ChatModule {
   plugin: SystemSculptPlugin;
   settings: ChatSettings;
   chatFileManager: ChatFileManager;
-  pdfExtractor: PDFExtractor;
+  documentExtractor: DocumentExtractor;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_CHAT_SETTINGS;
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
-    this.pdfExtractor = new PDFExtractor(this);
+    this.documentExtractor = new DocumentExtractor(this, this.plugin.app);
   }
 
   async load() {
@@ -114,6 +115,8 @@ export class ChatModule {
         this.openNewChat();
       });
     }
+
+    this.registerExtractDocumentCommand();
   }
 
   async loadSettings() {
@@ -237,10 +240,51 @@ export class ChatModule {
     return hash.digest('hex');
   }
 
-  async extractPDF(file: TFile) {
-    const pdfExtractor = new PDFExtractor(this);
-    const extractedContent = await pdfExtractor.extractPDF(file);
+  async extractDocument(file: TFile) {
+    const documentExtractor = new DocumentExtractor(this, this.plugin.app);
+    const extractedContent = await documentExtractor.extractDocument(file);
     const contextFileManager = new ContextFileManager(this.plugin.app, this);
-    await contextFileManager.savePDFExtractedContent(file, extractedContent);
+    await contextFileManager.saveExtractedContent(file, extractedContent);
+  }
+
+  registerExtractDocumentCommand() {
+    const extractDocument = (file: TFile) => {
+      if (file && ['pdf', 'docx', 'pptx'].includes(file.extension.toLowerCase())) {
+        this.openChatAndAddFile(file);
+      }
+    };
+
+    // Register the context menu item
+    this.plugin.registerEvent(
+      this.plugin.app.workspace.on('file-menu', (menu, file) => {
+        if (file instanceof TFile && ['pdf', 'docx', 'pptx'].includes(file.extension.toLowerCase())) {
+          menu.addItem((item) => {
+            item
+              .setTitle('Extract Document with SystemSculpt')
+              .setIcon('file-text')
+              .onClick(() => extractDocument(file));
+          });
+        }
+      })
+    );
+  }
+
+  private async openChatAndAddFile(file: TFile) {
+    const chatLeaf = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0] || 
+                     this.plugin.app.workspace.getRightLeaf(false);
+
+    if (chatLeaf) {
+      await chatLeaf.setViewState({ type: VIEW_TYPE_CHAT, active: true });
+      this.plugin.app.workspace.revealLeaf(chatLeaf);
+      const chatView = chatLeaf.view as ChatView;
+
+      if (chatView instanceof ChatView) {
+        await chatView.addFileToContext(file);
+      } else {
+        new Notice('Failed to open chat view');
+      }
+    } else {
+      new Notice('Failed to create a new chat view');
+    }
   }
 }

@@ -1,12 +1,33 @@
 import { App, TFile, MarkdownView, Modal } from 'obsidian';
-import { PDFExtractor } from './PDFExtractor';
+import { DocumentExtractor } from './DocumentExtractor';
 import { base64ToArrayBuffer } from 'obsidian';
 
 export class ContextFileManager {
   constructor(private app: App, private chatView: any) {}
 
+  private processingQueue: TFile[] = [];
+  private isProcessing: boolean = false;
+
   async addFileToContextFiles(file: TFile) {
-    const supportedExtensions = ['md', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
+    this.processingQueue.push(file);
+    if (!this.isProcessing) {
+      await this.processQueue();
+    }
+  }
+
+  private async processQueue() {
+    this.isProcessing = true;
+    while (this.processingQueue.length > 0) {
+      const file = this.processingQueue.shift();
+      if (file) {
+        await this.processFile(file);
+      }
+    }
+    this.isProcessing = false;
+  }
+
+  private async processFile(file: TFile) {
+    const supportedExtensions = ['md', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
     const fileExtension = file.extension.toLowerCase();
     
     if (supportedExtensions.includes(fileExtension)) {
@@ -33,13 +54,8 @@ export class ContextFileManager {
       this.renderContextFiles();
       await this.updateChatFileWithContext(file, 'add');
       
-      if (fileExtension === 'pdf') {
-        await this.processPDF(file);
-      } else {
-        const isImage = ['png', 'jpg', 'jpeg', 'gif'].includes(fileExtension);
-        if (isImage) {
-          this.appendImageLinkToInput(file.name);
-        }
+      if (['pdf', 'docx', 'pptx'].includes(fileExtension)) {
+        await this.processDocument(file);
       }
     } else {
       const supportedExtensionsString = supportedExtensions.join(', ');
@@ -47,15 +63,26 @@ export class ContextFileManager {
     }
   }
 
-  public async processPDF(file: TFile) {
-    const pdfExtractor = new PDFExtractor(this.chatView.chatModule);
-    const extractedContent = await pdfExtractor.extractPDF(file);
-    await this.savePDFExtractedContent(file, extractedContent);
-    this.chatView.updateTokenCount();
+  public async processDocument(file: TFile) {
+    console.log(`Starting document processing for file: ${file.path}`);
+    try {
+      const documentExtractor = new DocumentExtractor(this.chatView.chatModule, this.app);
+      console.log(`Document extractor created`);
+      const extractedContent = await documentExtractor.extractDocument(file);
+      console.log(`Document extracted successfully`);
+      await this.saveExtractedContent(file, extractedContent);
+      console.log(`Extracted content saved`);
+      this.chatView.updateTokenCount();
+      console.log(`Token count updated`);
+    } catch (error) {
+      console.error(`Error processing document:`, error);
+      this.chatView.updateLoadingText(`Error processing document: ${(error as Error).message}`);
+    }
   }
 
-  public async savePDFExtractedContent(file: TFile, extractedContent: { markdown: string; images: { [key: string]: string } }) {
+  public async saveExtractedContent(file: TFile, extractedContent: { markdown: string; images: { [key: string]: string } }) {
     const extractionFolderPath = `${file.parent?.path || ''}/${file.basename}`;
+    await this.app.vault.createFolder(extractionFolderPath).catch(() => {}); // Create folder if it doesn't exist
     await this.createOrOverwriteMarkdownFile(extractedContent.markdown, extractionFolderPath, file);
     await this.createOrOverwriteImageFiles(extractedContent.images, extractionFolderPath, file);
   }
@@ -64,11 +91,13 @@ export class ContextFileManager {
     const fileName = 'extracted_content.md';
     const filePath = `${folderPath}/${fileName}`;
 
-    const existingFile = this.chatView.chatModule.plugin.app.vault.getAbstractFileByPath(filePath);
+    await this.app.vault.createFolder(folderPath).catch(() => {}); // Ensure folder exists
+
+    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
     if (existingFile instanceof TFile) {
-      await this.chatView.chatModule.plugin.app.vault.modify(existingFile, markdown);
+      await this.app.vault.modify(existingFile, markdown);
     } else {
-      await this.chatView.chatModule.plugin.app.vault.create(filePath, markdown);
+      await this.app.vault.create(filePath, markdown);
     }
   }
 
@@ -76,19 +105,12 @@ export class ContextFileManager {
     for (const [imageName, imageBase64] of Object.entries(images)) {
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
       const imagePath = `${folderPath}/${imageName}`;
-      const existingFile = this.chatView.chatModule.plugin.app.vault.getAbstractFileByPath(imagePath);
+      const existingFile = this.app.vault.getAbstractFileByPath(imagePath);
       if (existingFile instanceof TFile) {
-        await this.chatView.chatModule.plugin.app.vault.modifyBinary(existingFile, imageArrayBuffer);
+        await this.app.vault.modifyBinary(existingFile, imageArrayBuffer);
       } else {
-        await this.chatView.chatModule.plugin.app.vault.createBinary(imagePath, imageArrayBuffer);
+        await this.app.vault.createBinary(imagePath, imageArrayBuffer);
       }
-    }
-  }
-
-  private appendImageLinkToInput(fileName: string) {
-    const inputEl = this.chatView.containerEl.querySelector('.chat-input') as HTMLTextAreaElement;
-    if (inputEl) {
-      this.chatView.updateTokenCountAndCost();
     }
   }
 
@@ -157,6 +179,8 @@ export class ContextFileManager {
       const isImage = ['png', 'jpg', 'jpeg', 'gif'].includes(file.extension.toLowerCase());
       const isAudio = ['mp3', 'wav', 'm4a', 'ogg'].includes(file.extension.toLowerCase());
       const isPDF = file.extension.toLowerCase() === 'pdf';
+      const isDocx = file.extension.toLowerCase() === 'docx';
+      const isPptx = file.extension.toLowerCase() === 'pptx';
   
       if (isImage) {
         const imgPreview = document.createElement('img');
@@ -169,13 +193,13 @@ export class ContextFileManager {
         audioIcon.className = 'context-file-preview audio-icon';
         audioIcon.innerHTML = `<svg viewBox="0 0 100 100" class="audio-icon" width="40" height="40"><path fill="currentColor" stroke="currentColor" d="M50 10 L25 30 L25 70 L50 90 L50 10 M55 30 A20 20 0 0 1 55 70 M65 20 A40 40 0 0 1 65 80"></path></svg>`;
         fileEl.appendChild(audioIcon);
-      } else if (isPDF || file.extension === 'md') {
+      } else if (isPDF || isDocx || isPptx || file.extension === 'md') {
         const icon = document.createElement('span');
-        icon.className = `context-file-preview ${isPDF ? 'pdf-icon' : 'md-icon'}`;
-        icon.innerHTML = `<svg viewBox="0 0 100 100" class="${isPDF ? 'pdf-icon' : 'md-icon'}" width="40" height="40">
+        icon.className = `context-file-preview ${isPDF ? 'pdf-icon' : isDocx ? 'docx-icon' : isPptx ? 'pptx-icon' : 'md-icon'}`;
+        icon.innerHTML = `<svg viewBox="0 0 100 100" class="${isPDF ? 'pdf-icon' : isDocx ? 'docx-icon' : isPptx ? 'pptx-icon' : 'md-icon'}" width="40" height="40">
           <path fill="currentColor" d="M20 10 v80 h60 v-60 l-20 -20 h-40 z" />
           <path fill="currentColor" d="M60 10 v20 h20" opacity="0.5" />
-          <text x="50" y="65" font-size="30" text-anchor="middle" fill="white">${isPDF ? 'PDF' : 'MD'}</text>
+          <text x="50" y="65" font-size="30" text-anchor="middle" fill="white">${isPDF ? 'PDF' : isDocx ? 'DOCX' : isPptx ? 'PPTX' : 'MD'}</text>
         </svg>`;
         fileEl.appendChild(icon);
       }

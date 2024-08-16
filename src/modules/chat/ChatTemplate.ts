@@ -31,10 +31,6 @@ export const chatTemplate = `
       <div class="loading-container">
         <div class="loading-spinner"></div>
         <div class="loading-text">Processing files...</div>
-        <div class="progress-bar">
-          <div class="progress-bar-fill"></div>
-        </div>
-        <div class="progress-text">0 / 0 files processed</div>
       </div>
     </div>
   </div>
