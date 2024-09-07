@@ -38,8 +38,10 @@ export class TokenManager {
   displayTokenCount(
     tokenCount: number,
     containerEl: HTMLElement,
-    chatMessagesLength: number
+    chatMessagesLength: number,
+    model: any,
+    maxOutputTokens: number
   ) {
-    displayTokenCount(tokenCount, containerEl, chatMessagesLength);
+    displayTokenCount(tokenCount, containerEl, chatMessagesLength, model, maxOutputTokens);
   }
 }

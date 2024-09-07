@@ -68,6 +68,7 @@ export async function handleTranscription(
     }
   } catch (error) {
     hideCustomNotice();
+        //@ts-ignore
     if (error.message.includes('Invalid API Key')) {
       showCustomNotice(
         `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
@@ -75,6 +76,7 @@ export async function handleTranscription(
       );
     } else {
       showCustomNotice(
+        //@ts-ignore
         `Error generating transcription: ${error.message}. Please check your internet connection and try again.`,
         10000
       );
@@ -93,7 +95,7 @@ export async function handleTranscription(
     const recordingFileName = recordingFile.basename;
     const transcriptionFileName = `Transcription ${recordingFileName
       .replace('Recording-', '')
-      .replace('.mp3', '')}.md`; // Ensure .md extension
+      .replace(/\.(mp3|mp4)$/, '')}.md`; // Ensure .md extension
     let transcriptionFilePath = normalizePath(
       `${transcriptionsPath}/${transcriptionFileName}`
     );

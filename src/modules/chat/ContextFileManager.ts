@@ -1,4 +1,4 @@
-import { App, TFile, MarkdownView, Modal } from 'obsidian';
+import { App, TFile, MarkdownView, Modal, TFolder } from 'obsidian';
 import { DocumentExtractor } from './DocumentExtractor';
 import { base64ToArrayBuffer } from 'obsidian';
 
@@ -61,6 +61,8 @@ export class ContextFileManager {
       const supportedExtensionsString = supportedExtensions.join(', ');
       this.chatView.updateLoadingText(`We don't handle ${fileExtension} files yet. We only support ${supportedExtensionsString} files.`);
     }
+
+    this.chatView.updateTokenCountAndCost();
   }
 
   public async processDocument(file: TFile) {
@@ -235,6 +237,7 @@ export class ContextFileManager {
     this.chatView.contextFiles.splice(index, 1);
     this.renderContextFiles();
     this.updateChatFileWithContext(file, 'remove');
+    this.chatView.updateTokenCountAndCost();
   }
 
   private openOrSwitchToFile(file: TFile) {
@@ -276,6 +279,13 @@ export class ContextFileManager {
     const newPath = file.parent ? `${file.parent.path}/${newFileName}` : newFileName;
     await this.app.vault.copy(file, newPath);
     return this.app.vault.getAbstractFileByPath(newPath) as TFile;
+  }
+
+  async addDirectoryToContextFiles(folder: TFolder) {
+    const files = folder.children.filter(child => child instanceof TFile) as TFile[];
+    for (const file of files) {
+      await this.addFileToContextFiles(file);
+    }
   }
 }
 

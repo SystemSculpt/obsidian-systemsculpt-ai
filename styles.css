@@ -845,11 +845,74 @@
 
 .suggestion-content {
   display: flex;
+  align-items: center;
+  padding: 5px;
+}
+
+.suggestion-checkbox-container {
+  flex: 0 0 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.suggestion-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.suggestion-checkbox:checked {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.suggestion-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 12px;
+}
+
+.suggestion-checkbox:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background-modifier-border);
+}
+
+.suggestion-checkbox:indeterminate {
+  background-color: var(--interactive-accent);
+  opacity: 0.5;
+}
+
+.suggestion-checkbox:indeterminate::after {
+  content: '-';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 12px;
+}
+
+.suggestion-text {
+  display: flex;
   flex-direction: column;
+  flex-grow: 1;
+  margin-left: 10px;
 }
 
 .suggestion-title {
   font-weight: bold;
+  margin-bottom: 2px;
 }
 
 .suggestion-note {
@@ -858,7 +921,7 @@
 }
 
 .fuzzy-match {
-  font-weight: bold;
+  color: var(--text-accent);
   text-decoration: underline;
 }
 
@@ -964,7 +1027,127 @@
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
-.version-info-container {
+
+.file-searcher-filters {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.file-searcher-confirm-button {
+  display: block;
+  width: calc(100% - 24px); /* Subtract padding from width */
+  padding: 6px 12px; /* Increase vertical padding */
+  margin: 12px auto; /* Increase margin */
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  border: none;
+  border-radius: 4px; /* Add rounded corners */
+  font-size: 14px;
+  cursor: not-allowed;
+  text-align: center;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 200px;
+  max-width: 100%; /* Ensure it doesn't overflow its container */
+  position: sticky;
+  bottom: 0;
+  z-index: 1; /* Ensure button is above other content */
+}
+
+.file-searcher-confirm-button.active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+
+.file-searcher-confirm-button.active:hover {
+  background-color: var(--interactive-accent-hover);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.file-searcher-confirm-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-searcher-filter {
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-searcher-filter-checkbox {
+  margin-right: 4px;
+}
+
+.file-searcher-notice {
+  padding: 8px 12px;
+  margin-top: 8px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.file-searcher-filters {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.file-searcher-filter {
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-searcher-filter-checkbox {
+  margin-right: 4px;
+}
+
+.file-searcher-notice {
+  padding: 8px 12px;
+  margin-top: 0px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.suggestion-file-extension {
+  opacity: 0.7;
+  font-size: 0.9em;
+  margin-left: 0.3em;
+}.version-info-container {
   display: flex;
   margin-bottom: 10px;
 }

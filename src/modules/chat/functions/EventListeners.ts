@@ -1,5 +1,5 @@
 import { ChatView } from '../ChatView';
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 import { sendMessage } from './sendMessage';
 import { FileSearcher } from '../FileSearcher';
 
@@ -76,18 +76,29 @@ export function attachFileSearcherListeners(
   inputEl?: HTMLTextAreaElement,
   addToContextFiles: boolean = false
 ) {
+  console.log('Attaching FileSearcher listeners');
   const fileSearcher = new FileSearcher(chatView.app);
-  fileSearcher.open();
-  fileSearcher.onChooseItem = (file: TFile) => {
-    if (inputEl) {
-      const fileName = file.basename;
-      inputEl.value = inputEl.value.slice(0, -2) + `[[${fileName}]]`;
+  fileSearcher.setPlaceholder('Search for files or folders');
+  
+  fileSearcher.onChooseItems = (files: (TFile | TFolder)[]) => {
+    console.log('FileSearcher: onChooseItems called', { filesCount: files.length });
+    if (addToContextFiles) {
+      files.forEach(file => {
+        if (file instanceof TFile) {
+          console.log('Adding file to context:', file.path);
+          chatView.contextFileManager.addFileToContextFiles(file);
+        } else if (file instanceof TFolder) {
+          console.log('Adding folder to context:', file.path);
+          chatView.contextFileManager.addDirectoryToContextFiles(file);
+        }
+      });
+    } else if (inputEl) {
+      const fileNames = files.map(file => file instanceof TFile ? file.basename : file.name).join(', ');
+      inputEl.value = inputEl.value.slice(0, -2) + `[[${fileNames}]]`;
       inputEl.focus();
       chatView.updateTokenCountWithInput(inputEl.value);
     }
-
-    if (addToContextFiles) {
-      chatView.contextFileManager.addFileToContextFiles(file);
-    }
   };
+
+  fileSearcher.open();
 }

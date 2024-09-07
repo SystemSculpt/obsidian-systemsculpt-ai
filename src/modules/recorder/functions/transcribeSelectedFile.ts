@@ -6,8 +6,8 @@ export async function transcribeSelectedFile(
   plugin: RecorderModule,
   file: TFile
 ): Promise<void> {
-  if (file.extension !== 'mp3') {
-    logger.error('Selected file is not an .mp3 file');
+  if (file.extension !== 'mp3' && file.extension !== 'mp4') {
+    logger.error('Selected file is not an .mp3 or .mp4 file');
     return;
   }
 

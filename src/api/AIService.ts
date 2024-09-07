@@ -2,7 +2,6 @@ import { UnifiedAIService } from './UnifiedAIService';
 import { Model, AIProvider } from './Model';
 import { logger } from '../utils/logger';
 import { debounce } from 'obsidian';
-import { requestUrl } from 'obsidian';
 
 export class AIService {
   private static instance: AIService;

@@ -1,5 +1,3 @@
-import { requestUrl, RequestUrlParam, Notice } from 'obsidian';
-
 export type AIProvider = 'openai' | 'groq' | 'openRouter' | 'local';
 
 export interface Model {
