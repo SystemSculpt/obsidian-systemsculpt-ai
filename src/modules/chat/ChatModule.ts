@@ -161,10 +161,9 @@ export class ChatModule {
     requestAnimationFrame(() => {
       const chatView = chatLeaf.view as ChatView;
       if (chatView) {
-        chatView.initializeChatView(); // Reset the chat view
+        chatView.initializeChatView(); // This now includes updating token count and cost
         chatView.clearChatView(); // Clear the chat view visually
         chatView.focusInput();
-        this.updateTokenCount(chatView);
       }
     });
   }

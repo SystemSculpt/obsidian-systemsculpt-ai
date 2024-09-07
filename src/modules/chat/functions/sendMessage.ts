@@ -12,7 +12,7 @@ export async function sendMessage(
   chatFile: TFile | null,
   brainModule: any,
   chatModule: any,
-  constructMessageHistory: () => Promise<{ role: string; content: string }[]>,
+  constructMessageHistory: () => Promise<{ role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[]>,
   appendToLastMessage: (content: string) => void,
   showLoading: () => void,
   hideLoading: () => void
@@ -41,7 +41,7 @@ export async function sendMessage(
   const messageHistory = await constructMessageHistory();
 
   // Add this function to handle PDF content
-  const processPDFContent = async (msg: { role: string; content: string }) => {
+  const processPDFContent = async (msg: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }) => {
     if (msg.role === 'user' && typeof msg.content === 'string' && msg.content.includes('CONTEXT FILES:')) {
       const lines = msg.content.split('\n');
       const processedLines = await Promise.all(lines.map(async (line) => {

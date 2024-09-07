@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, TFolder } from 'obsidian';
 import moment from 'moment';
 import { ChatMessage } from './ChatMessage';
 import { BrainModule } from '../brain/BrainModule';
@@ -21,7 +21,7 @@ import {
 } from './functions/generateTitleForChat';
 import { FileSearcher } from './FileSearcher';
 import { logger } from '../../utils/logger';
-import { displayTokenCount, formatNumber } from './utils';
+import { formatNumber } from './utils';
 import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
@@ -379,9 +379,15 @@ export class ChatView extends ItemView {
 
   private openContextFilesSearch() {
     const fileSearcher = new FileSearcher(this.app);
-    fileSearcher.setPlaceholder('Search for context files');
-    fileSearcher.onChooseItem = (file: TFile) => {
-      this.contextFileManager.addFileToContextFiles(file);
+    fileSearcher.setPlaceholder('Search for context files or folders');
+    fileSearcher.onChooseItems = async (items: (TFile | TFolder)[]) => {
+      for (const item of items) {
+        if (item instanceof TFolder) {
+          await this.contextFileManager.addDirectoryToContextFiles(item);
+        } else {
+          await this.contextFileManager.addFileToContextFiles(item);
+        }
+      }
     };
     fileSearcher.open();
   }
@@ -519,11 +525,24 @@ export class ChatView extends ItemView {
       titleEl.textContent = moment().format('YYYY-MM-DD HH-mm-ss');
     }
 
-    setTimeout(() => {
-      this.updateTokenCount();
-    }, 0);
-
+    this.initializeTokenCountAndCost();
     this.scrollToBottom();
+  }
+
+  private async initializeTokenCountAndCost() {
+    const tokenCount = 0;
+    const currentModel = this.brainModule.getCurrentModel();
+    const maxOutputTokens = this.brainModule.getMaxOutputTokens();
+
+    if (currentModel) {
+      this.tokenManager.displayTokenCount(
+        tokenCount,
+        this.containerEl,
+        this.chatMessages.length,
+        currentModel,
+        maxOutputTokens
+      );
+    }
   }
 
   public clearChatView() {
@@ -596,27 +615,25 @@ export class ChatView extends ItemView {
     }
   }
 
-  private async updateTokenCountAndCost() {
+  public async updateTokenCountAndCost() {
     const inputEl = this.containerEl.querySelector(
       '.chat-input'
     ) as HTMLTextAreaElement;
-    const inputText = inputEl ? inputEl.value : '';
+    const inputValue = inputEl ? inputEl.value : '';
     const tokenCount = await this.tokenManager.getTokenCount(
       this.chatMessages,
       this.contextFiles,
-      inputText
+      inputValue
     );
     const currentModel = this.brainModule.getCurrentModel();
-    if (currentModel) {
-      displayTokenCount(
-        tokenCount,
-        this.containerEl,
-        this.chatMessages.length,
-        currentModel,
-        this.brainModule.getMaxOutputTokens()
-      );
-      this.brainModule.updateCostEstimate(tokenCount);
-    }
+    const maxOutputTokens = this.brainModule.getMaxOutputTokens();
+    this.tokenManager.displayTokenCount(
+      tokenCount,
+      this.containerEl,
+      this.chatMessages.length,
+      currentModel,
+      maxOutputTokens
+    );
   }
 
   async getTokenCount(): Promise<number> {
@@ -634,6 +651,14 @@ export class ChatView extends ItemView {
   adjustInputHeight(inputEl: HTMLTextAreaElement) {
     inputEl.style.height = 'auto';
     inputEl.style.height = `${Math.min(inputEl.scrollHeight, 250)}px`;
+  }
+
+  public updateTokenCountWithInput(inputValue: string) {
+    const inputEl = this.containerEl.querySelector('.chat-input') as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.value = inputValue;
+      this.updateTokenCountAndCost();
+    }
   }
 
   detectFileLink(inputEl: HTMLTextAreaElement) {
@@ -974,7 +999,7 @@ export class ChatView extends ItemView {
       this.hideLoadingContainer();
     }
 
-    this.updateTokenCount();
+    await this.updateTokenCountAndCost();
     this.scrollToBottom();
   }
 }

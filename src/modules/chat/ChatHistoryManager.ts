@@ -1,5 +1,5 @@
-import { App, TFile, MarkdownView, WorkspaceLeaf } from 'obsidian';
-import { FileSearcher } from './FileSearcher';
+import { App, TFile, MarkdownView } from 'obsidian';
+import { ChatHistorySearcher } from './ChatHistorySearcher';
 import { ChatMessage } from './ChatMessage';
 import { ChatView } from './ChatView';
 import { ContextFileManager } from './ContextFileManager';
@@ -13,12 +13,12 @@ export class ChatHistoryManager {
   ) {}
 
   openChatHistory() {
-    const fileSearcher = new FileSearcher(
+    const chatHistorySearcher = new ChatHistorySearcher(
       this.app,
       this.chatModule.settings.chatsPath
     );
-    fileSearcher.open();
-    fileSearcher.onChooseItem = (file: TFile) => {
+    chatHistorySearcher.open();
+    chatHistorySearcher.onChooseItem = (file: TFile) => {
       this.openChatFile(file);
     };
   }

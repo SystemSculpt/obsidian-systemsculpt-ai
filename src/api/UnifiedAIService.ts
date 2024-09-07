@@ -1,4 +1,4 @@
-import { requestUrl, Notice } from 'obsidian';
+import { requestUrl } from 'obsidian';
 import { Model, AIProvider, AIServiceInterface } from './Model';
 import { logger } from '../utils/logger';
 

@@ -70,34 +70,27 @@ export function displayTokenCount(
     '.chat-title-container'
   ) as HTMLElement;
 
-  if (chatMessagesLength === 0) {
-    if (tokenCountEl) tokenCountEl.style.display = 'none';
-    if (costEstimateEl) costEstimateEl.style.display = 'none';
-    if (dollarButton) dollarButton.style.display = 'none';
-    if (titleContainerEl) titleContainerEl.style.display = 'none';
-  } else {
-    if (tokenCountEl) {
-      tokenCountEl.style.display = 'inline';
-      tokenCountEl.textContent = `Tokens: ${tokenCount}`;
-    }
-    if (costEstimateEl) {
-      if (model.pricing) {
-        const { minCost, maxCost } = CostEstimator.calculateCost(
-          model,
-          tokenCount,
-          maxOutputTokens
-        );
-        costEstimateEl.style.display = 'inline';
-        costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
-          minCost
-        )} - $${formatNumber(maxCost)}`;
-      } else {
-        costEstimateEl.style.display = 'none';
-      }
-    }
-    if (titleContainerEl) titleContainerEl.style.display = 'flex';
-    if (dollarButton) dollarButton.style.display = 'inline';
+  if (tokenCountEl) {
+    tokenCountEl.style.display = 'inline';
+    tokenCountEl.textContent = `Tokens: ${tokenCount}`;
   }
+  if (costEstimateEl) {
+    if (model.pricing) {
+      const { minCost, maxCost } = CostEstimator.calculateCost(
+        model,
+        tokenCount,
+        maxOutputTokens
+      );
+      costEstimateEl.style.display = 'inline';
+      costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
+        minCost
+      )} - $${formatNumber(maxCost)}`;
+    } else {
+      costEstimateEl.style.display = 'none';
+    }
+  }
+  if (titleContainerEl) titleContainerEl.style.display = 'flex';
+  if (dollarButton) dollarButton.style.display = 'inline';
 }
 
 export function formatNumber(num: number): string {
