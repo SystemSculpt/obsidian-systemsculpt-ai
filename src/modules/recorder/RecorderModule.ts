@@ -142,10 +142,11 @@ export class RecorderModule {
 
   async handleTranscription(
     arrayBuffer: ArrayBuffer,
-    recordingFile: TFile
-  ): Promise<void> {
+    recordingFile: TFile,
+    skipPaste: boolean = false
+  ): Promise<string> {
     logger.log('handleTranscription called');
-    return handleTranscription(this, arrayBuffer, recordingFile);
+    return handleTranscription(this, arrayBuffer, recordingFile, skipPaste);
   }
 
   handleError(error: Error, message: string): void {

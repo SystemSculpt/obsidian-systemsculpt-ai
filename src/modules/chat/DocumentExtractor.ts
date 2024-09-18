@@ -254,10 +254,22 @@ export class DocumentExtractor {
   }
 
   private async processAudio(file: TFile): Promise<{ markdown: string; images: { [key: string]: string } }> {
-    return {
-      markdown: `[Audio file: ${file.name}]`,
-      images: {}
-    };
+    const extractionFolderPath = `${file.parent?.path || ''}/${file.basename}`;
+    const transcriptionFilePath = `${extractionFolderPath}/extracted_content.md`;
+    const transcriptionFile = this.app.vault.getAbstractFileByPath(transcriptionFilePath) as TFile;
+
+    if (transcriptionFile) {
+      const transcriptionContent = await this.app.vault.read(transcriptionFile);
+      return {
+        markdown: transcriptionContent,
+        images: {}
+      };
+    } else {
+      return {
+        markdown: `[Audio file: ${file.name}] (Transcription not available)`,
+        images: {}
+      };
+    }
   }
 
   private async processMarkdown(file: TFile): Promise<{ markdown: string; images: { [key: string]: string } }> {
