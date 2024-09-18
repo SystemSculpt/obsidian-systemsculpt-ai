@@ -36,24 +36,26 @@ async function transcribeChunk(
 
 export async function transcribeRecording(
   plugin: RecorderModule,
-  arrayBuffer: ArrayBuffer
+  arrayBuffer: ArrayBuffer,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
   logger.log(
     `Starting transcription with provider: ${plugin.settings.whisperProvider}`
   );
   if (plugin.settings.whisperProvider === 'groq') {
-    return transcribeWithGroq(plugin, arrayBuffer);
+    return transcribeWithGroq(plugin, arrayBuffer, updateProgress);
   } else {
-    return transcribeWithOpenAI(plugin, arrayBuffer);
+    return transcribeWithOpenAI(plugin, arrayBuffer, updateProgress);
   }
 }
 
 async function transcribeWithOpenAI(
   plugin: RecorderModule,
-  arrayBuffer: ArrayBuffer
+  arrayBuffer: ArrayBuffer,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
   logger.log('Transcribing with OpenAI');
-  let CHUNK_SIZE = 23 * 1024 * 1024; // 25MB is max, do in 23MB chunks to be safe
+  let CHUNK_SIZE = 23 * 1024 * 1024; // 23MB
   const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
   const totalSize = blob.size;
   logger.log(`Total audio size: ${totalSize} bytes`);
@@ -66,8 +68,11 @@ async function transcribeWithOpenAI(
   logger.log(`Number of chunks: ${chunks.length}`);
 
   let transcriptions: string[] = [];
+
   for (let i = 0; i < chunks.length; i++) {
     logger.log(`Transcribing chunk ${i + 1} of ${chunks.length}`);
+    updateProgress(i + 1, chunks.length); // Update progress
+
     try {
       const transcription = await transcribeChunk(plugin, chunks[i]);
       transcriptions.push(transcription);
@@ -77,7 +82,7 @@ async function transcribeWithOpenAI(
       if (error.message.includes('Maximum content size limit')) {
         CHUNK_SIZE = Math.floor(CHUNK_SIZE / 2);
         logger.warn(`Chunk size reduced to ${CHUNK_SIZE} bytes. Retrying...`);
-        return await transcribeRecording(plugin, arrayBuffer); // Retry with smaller chunks
+        return await transcribeRecording(plugin, arrayBuffer, updateProgress); // Retry with smaller chunks
       } else {
         throw error;
       }
@@ -90,7 +95,8 @@ async function transcribeWithOpenAI(
 
 async function transcribeWithGroq(
   plugin: RecorderModule,
-  arrayBuffer: ArrayBuffer
+  arrayBuffer: ArrayBuffer,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
   logger.log('Transcribing with Groq');
   const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });

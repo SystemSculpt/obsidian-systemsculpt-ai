@@ -2,7 +2,6 @@ import { Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 import { AIProvider } from '../../../api/Model';
-import { UnifiedAIService } from '../../../api/UnifiedAIService';
 import { logger } from '../../../utils/logger';
 
 export class EndpointManager {

@@ -80,6 +80,10 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     editor: Editor,
     file: TFile
   ): EditorSuggestTriggerInfo | null {
+    if (!this.plugin.settings.triggerKey) {
+      return null; // Disable suggestions if trigger key is empty
+    }
+
     const line = editor.getLine(cursor.line);
     const sub = line.substring(0, cursor.ch);
 

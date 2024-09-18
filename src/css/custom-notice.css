@@ -1,6 +1,6 @@
 /* Custom Notice */
 .custom-notice {
-  border: 1px solid var(--interactive-accent); /* Assuming var(--interactive-accent) is a shade of purple */
+  border: 1px solid var(--interactive-accent);
   background-color: var(--background-secondary);
   color: var(--text-normal);
   padding: 20px;

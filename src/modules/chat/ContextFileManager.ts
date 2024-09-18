@@ -54,7 +54,9 @@ export class ContextFileManager {
       this.renderContextFiles();
       await this.updateChatFileWithContext(file, 'add');
       
-      if (['pdf', 'docx', 'pptx'].includes(fileExtension)) {
+      if (['mp3', 'wav', 'm4a', 'ogg'].includes(fileExtension)) {
+        await this.processAudioFile(file);
+      } else if (['pdf', 'docx', 'pptx'].includes(fileExtension)) {
         await this.processDocument(file);
       }
     } else {
@@ -63,6 +65,66 @@ export class ContextFileManager {
     }
 
     this.chatView.updateTokenCountAndCost();
+  }
+
+  private async processAudioFile(file: TFile) {
+    this.chatView.updateLoadingText(`Processing audio file: ${file.name}`);
+    try {
+      const extractionFolderPath = `${file.parent?.path || ''}/${file.basename}`;
+      const transcriptionFileName = 'extracted_content.md';
+      const transcriptionFilePath = `${extractionFolderPath}/${transcriptionFileName}`;
+
+      const transcriptionFileExists = await this.app.vault.adapter.exists(transcriptionFilePath);
+
+      if (transcriptionFileExists) {
+        const userChoice = await this.showTranscriptionExistsDialog(file.name);
+        
+        if (userChoice === 'use-existing') {
+          const existingTranscriptionFile = this.app.vault.getAbstractFileByPath(transcriptionFilePath) as TFile;
+          if (existingTranscriptionFile) {
+            this.chatView.contextFiles.push(existingTranscriptionFile);
+            this.renderContextFiles();
+            await this.updateChatFileWithContext(existingTranscriptionFile, 'add');
+            this.chatView.updateLoadingText(`Using existing transcription for: ${file.name}`);
+            return;
+          }
+        } else if (userChoice === 'cancel') {
+          this.chatView.updateLoadingText(`Cancelled processing of: ${file.name}`);
+          return;
+        }
+        // If 'transcribe-again' is chosen, we'll continue with the transcription process
+      }
+
+      const arrayBuffer = await this.app.vault.readBinary(file);
+      const transcription = await this.chatView.chatModule.recorderModule.handleTranscription(arrayBuffer, file, true);
+      
+      await this.app.vault.createFolder(extractionFolderPath).catch(() => {}); // Create folder if it doesn't exist
+
+      const transcriptionContent = `# Transcription of ${file.name}\n\n${transcription}\n\n[Original Audio File](${file.path})`;
+      await this.app.vault.create(transcriptionFilePath, transcriptionContent);
+      
+      this.chatView.updateLoadingText(`Audio file transcribed: ${file.name}`);
+      
+      // Add the transcription file to the context files
+      const transcriptionFile = this.app.vault.getAbstractFileByPath(transcriptionFilePath) as TFile;
+      if (transcriptionFile) {
+        this.chatView.contextFiles.push(transcriptionFile);
+        this.renderContextFiles();
+        await this.updateChatFileWithContext(transcriptionFile, 'add');
+      }
+    } catch (error) {
+      this.chatView.updateLoadingText(`Error processing audio file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error processing audio file:', error);
+    }
+  }
+
+  private async showTranscriptionExistsDialog(fileName: string): Promise<'use-existing' | 'transcribe-again' | 'cancel'> {
+    return new Promise((resolve) => {
+      const modal = new TranscriptionExistsModal(this.app, fileName, (result) => {
+        resolve(result);
+      });
+      modal.open();
+    });
   }
 
   public async processDocument(file: TFile) {
@@ -314,6 +376,47 @@ class FileExistsModal extends Modal {
     const keepBothButton = buttonContainer.createEl('button', { text: 'Keep Both' });
     keepBothButton.addEventListener('click', () => {
       this.result = 'keep-both';
+      this.close();
+    });
+
+    const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+    cancelButton.addEventListener('click', () => {
+      this.result = 'cancel';
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.onSubmit(this.result);
+    this.contentEl.empty();
+  }
+}
+
+class TranscriptionExistsModal extends Modal {
+  private result: 'use-existing' | 'transcribe-again' | 'cancel' = 'cancel';
+  private onSubmit: (result: 'use-existing' | 'transcribe-again' | 'cancel') => void;
+
+  constructor(app: App, private fileName: string, onSubmit: (result: 'use-existing' | 'transcribe-again' | 'cancel') => void) {
+    super(app);
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl('h2', { text: 'Existing Transcription Found' });
+    contentEl.createEl('p', { text: `It seems like a transcription already exists for "${this.fileName}". What would you like to do?` });
+
+    const buttonContainer = contentEl.createEl('div', { cls: 'modal-button-container' });
+    
+    const useExistingButton = buttonContainer.createEl('button', { text: 'Use Existing', cls: 'mod-cta' });
+    useExistingButton.addEventListener('click', () => {
+      this.result = 'use-existing';
+      this.close();
+    });
+
+    const transcribeAgainButton = buttonContainer.createEl('button', { text: 'Transcribe Again' });
+    transcribeAgainButton.addEventListener('click', () => {
+      this.result = 'transcribe-again';
       this.close();
     });
 

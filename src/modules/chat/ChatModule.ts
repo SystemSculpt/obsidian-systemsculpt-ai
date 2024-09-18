@@ -9,18 +9,21 @@ import { DocumentExtractor } from './DocumentExtractor';
 import { Notice } from 'obsidian';
 import { createHash } from 'crypto';
 import { ContextFileManager } from './ContextFileManager';
+import { RecorderModule } from '../recorder/RecorderModule';
 
 export class ChatModule {
   plugin: SystemSculptPlugin;
   settings: ChatSettings;
   chatFileManager: ChatFileManager;
   documentExtractor: DocumentExtractor;
+  recorderModule: RecorderModule;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_CHAT_SETTINGS;
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
     this.documentExtractor = new DocumentExtractor(this, this.plugin.app);
+    this.recorderModule = plugin.recorderModule;
   }
 
   async load() {

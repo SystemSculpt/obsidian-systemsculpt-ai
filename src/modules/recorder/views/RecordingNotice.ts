@@ -6,12 +6,12 @@ export class RecordingNotice {
   app: App;
   plugin: RecorderModule;
   noticeEl: HTMLElement;
-  private audioContext: AudioContext;
-  private audioSource: MediaStreamAudioSourceNode;
-  private analyser: AnalyserNode;
-  private canvasContext: CanvasRenderingContext2D;
-  private rafId: number;
-  private mediaRecorder: MediaRecorder;
+  private audioContext!: AudioContext;
+  private audioSource!: MediaStreamAudioSourceNode;
+  private analyser!: AnalyserNode;
+  private canvasContext!: CanvasRenderingContext2D;
+  private rafId!: number;
+  private mediaRecorder!: MediaRecorder;
 
   constructor(app: App, plugin: RecorderModule) {
     this.app = app;

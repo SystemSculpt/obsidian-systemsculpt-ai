@@ -96,20 +96,22 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   registerDomEvent() {
-    this.plugin.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
-      if (evt.key === this.settings.triggerKey) {
-        const activeView =
-          this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-        if (activeView) {
-          const editor = activeView.editor;
-          const selectedText = editor.getSelection();
-          if (selectedText) {
-            evt.preventDefault();
-            new BlankTemplateModal(this).open();
+    if (this.settings.triggerKey) {
+      this.plugin.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
+        if (evt.key === this.settings.triggerKey) {
+          const activeView =
+            this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+          if (activeView) {
+            const editor = activeView.editor;
+            const selectedText = editor.getSelection();
+            if (selectedText) {
+              evt.preventDefault();
+              new BlankTemplateModal(this).open();
+            }
           }
         }
-      }
-    });
+      });
+    }
   }
 
   stopGeneration(): void {
@@ -273,21 +275,22 @@ export class TemplatesModule implements IGenerationModule {
     new Setting(containerEl)
       .setName('Trigger key')
       .setDesc(
-        'The key that triggers the template suggestion modal (single character only)'
+        'The key that triggers the template suggestion modal (single character only, leave empty to disable)'
       )
       .addText(text => {
         text
-          .setPlaceholder('Enter trigger key')
+          .setPlaceholder('Enter trigger key or leave empty')
           .setValue(this.settings.triggerKey);
 
         text.inputEl.addEventListener(
           'keydown',
           async (event: KeyboardEvent) => {
             event.preventDefault();
-            const triggerKey = event.key.length === 1 ? event.key : '/';
+            const triggerKey = event.key.length === 1 ? event.key : '';
             this.settings.triggerKey = triggerKey;
             await this.saveSettings();
             text.setValue(triggerKey);
+            this.registerDomEvent(); // Re-register the event listener
           }
         );
       })
@@ -299,13 +302,14 @@ export class TemplatesModule implements IGenerationModule {
             this.settings.triggerKey = '/';
             await this.saveSettings();
             this.settingsDisplay(containerEl); // Refresh the settings view
+            this.registerDomEvent(); // Re-register the event listener
           });
       });
   }
 
   private renderTemplatesPathSetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('Template folder location')
+      .setName('Templates folder location')
       .setDesc('Path where the templates will be stored')
       .addText(text => {
         text
