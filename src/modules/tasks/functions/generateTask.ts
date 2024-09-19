@@ -1,7 +1,6 @@
 import { TasksModule } from '../TasksModule';
 import { showCustomNotice } from '../../../modals';
 import { BrainModule } from '../../brain/BrainModule';
-import { logger } from '../../../utils/logger';
 
 export async function generateTask(
   plugin: TasksModule,
@@ -15,7 +14,6 @@ export async function generateTask(
   let model = await plugin.plugin.brainModule.getModelById(modelId);
 
   if (!model) {
-    logger.log('Model not found, trying to find an available model...');
     const models = await plugin.plugin.brainModule.getEnabledModels();
 
     if (models.length > 0) {
@@ -45,7 +43,6 @@ export async function generateTask(
 
     return generatedTask.trim();
   } catch (error) {
-    logger.error('Error generating task:', error);
     throw new Error(
       'Failed to generate task. Please check your API key and try again.'
     );

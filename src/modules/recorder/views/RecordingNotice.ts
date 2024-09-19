@@ -1,6 +1,5 @@
 import { App } from 'obsidian';
 import { RecorderModule } from '../RecorderModule';
-import { logger } from '../../../utils/logger';
 
 export class RecordingNotice {
   app: App;
@@ -17,7 +16,6 @@ export class RecordingNotice {
     this.app = app;
     this.plugin = plugin;
     this.noticeEl = this.createNoticeEl();
-    logger.log('RecordingNotice created');
   }
 
   private createNoticeEl(): HTMLElement {
@@ -32,7 +30,6 @@ export class RecordingNotice {
     });
     closeButton.addEventListener('click', () => {
       this.plugin.toggleRecording();
-      logger.log('Recording stopped via close button');
     });
 
     const titleEl = noticeEl.createEl('h3', { text: 'Recording audio...' });
@@ -69,7 +66,6 @@ export class RecordingNotice {
   show(): Promise<void> {
     return new Promise((resolve, reject) => {
       let noticeContainer = document.body.querySelector('.notice-container');
-      // If the notice container doesn't exist, create it and append it to the body
       if (!noticeContainer) {
         noticeContainer = document.createElement('div');
         noticeContainer.className = 'notice-container';
@@ -89,7 +85,6 @@ export class RecordingNotice {
   async startRecording(): Promise<void> {
     try {
       const selectedMicrophone = await this.plugin.getSelectedMicrophone();
-      logger.log('Selected microphone:', selectedMicrophone);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedMicrophone
@@ -104,19 +99,15 @@ export class RecordingNotice {
 
       this.mediaRecorder = new MediaRecorder(stream);
       this.mediaRecorder.start();
-      logger.log('MediaRecorder started');
 
-      // Start visualizing the audio right after starting the recording
       this.visualize();
     } catch (error) {
-      logger.error('Error starting recording:', error);
-      throw error; // Ensure the error is propagated so the calling function can handle it
+      throw error;
     }
   }
 
   visualize(): void {
     if (!this.analyser || !this.canvasContext) {
-      logger.error('Analyser or CanvasContext not initialized');
       return;
     }
     const bufferLength = this.analyser.frequencyBinCount;
@@ -127,9 +118,9 @@ export class RecordingNotice {
       this.analyser.getByteTimeDomainData(dataArray);
 
       const { width, height } = this.canvasContext.canvas;
-      this.canvasContext.clearRect(0, 0, width, height); // Clear the canvas
+      this.canvasContext.clearRect(0, 0, width, height);
 
-      this.canvasContext.beginPath(); // Start a new path
+      this.canvasContext.beginPath();
       this.canvasContext.strokeStyle = getComputedStyle(
         document.documentElement
       ).getPropertyValue('--primary-color');
@@ -159,16 +150,13 @@ export class RecordingNotice {
   }
 
   async stopRecording(): Promise<ArrayBuffer> {
-    logger.log('stopRecording called');
     cancelAnimationFrame(this.rafId);
     this.audioSource.disconnect();
 
-    // Check if the audio context is still open before trying to close it
     if (this.audioContext.state !== 'closed') {
       await this.audioContext.close();
     }
 
-    // Stop all tracks on the stream
     if (this.mediaRecorder.stream) {
       this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
     }
@@ -179,7 +167,6 @@ export class RecordingNotice {
         async (event: BlobEvent) => {
           try {
             const arrayBuffer = await event.data.arrayBuffer();
-            logger.log('ArrayBuffer created');
             resolve(arrayBuffer);
           } catch (error) {
             reject(error);
@@ -187,7 +174,6 @@ export class RecordingNotice {
         }
       );
       this.mediaRecorder.stop();
-      logger.log('MediaRecorder stopped');
     });
   }
 

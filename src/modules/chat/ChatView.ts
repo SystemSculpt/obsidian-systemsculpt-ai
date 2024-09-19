@@ -20,7 +20,6 @@ import {
   updateChatTitle,
 } from './functions/generateTitleForChat';
 import { FileSearcher } from './FileSearcher';
-import { logger } from '../../utils/logger';
 import { formatNumber } from './utils';
 import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 
@@ -40,6 +39,7 @@ export class ChatView extends ItemView {
   private loadingText!: HTMLElement;
   private progressText!: HTMLElement;
   private progressBarFill!: HTMLElement;
+  private userScrolledUp: boolean = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -181,9 +181,6 @@ export class ChatView extends ItemView {
       await this.contextFileManager.addFileToContextFiles(newFile);
       this.updateLoadingProgress(100, 100);
       this.updateLoadingText(`File processed: ${newFile.name}`);
-
-      // Remove the file link appending for all file types
-      // this.appendFileLinkToInput(newFile.name);
     } catch (error) {
       console.error('Error processing file:', error);
       this.updateLoadingText(`Error processing file: ${(error as Error).message}`);
@@ -305,7 +302,7 @@ export class ChatView extends ItemView {
         );
       }
     } catch (error) {
-      logger.error('Error archiving chat file:', error);
+      console.error('Error archiving chat file:', error);
       this.updateLoadingText(
         `Failed to archive '${currentChatFile.basename}'. Error: ${
           (error as Error).message
@@ -335,7 +332,7 @@ export class ChatView extends ItemView {
         );
       }
     } catch (error) {
-      logger.error('Error deleting chat file:', error);
+      console.error('Error deleting chat file:', error);
       this.updateLoadingText(
         `Failed to delete '${currentChatFile.basename}'. Error: ${
           (error as Error).message
@@ -420,10 +417,11 @@ export class ChatView extends ItemView {
     this.attachEventListeners(container as HTMLElement);
     this.attachListeners();
     this.attachDragAndDropListeners(container);
+    this.attachScrollListener();
 
     setTimeout(() => {
       this.initializeChatView();
-      this.focusInput();
+      this.focusInput(true);
     }, 0);
   }
 
@@ -778,7 +776,10 @@ export class ChatView extends ItemView {
         messagesContainer,
         this.deleteMessage.bind(this)
       );
-      this.scrollToBottom();
+
+      if (!this.userScrolledUp) {
+        this.scrollToBottom();
+      }
     }
   }
 
@@ -828,7 +829,7 @@ export class ChatView extends ItemView {
       await this.chatFileManager.updateChatFile(this.chatFile, content);
       await this.loadChatFile(this.chatFile);
     } else {
-      logger.error('No chat file to update');
+      console.error('No chat file to update');
     }
   }
 
@@ -844,12 +845,12 @@ export class ChatView extends ItemView {
     }
   }
 
-  focusInput() {
-    const inputEl = this.containerEl.querySelector(
-      '.chat-input'
-    ) as HTMLTextAreaElement;
-    if (inputEl) {
-      inputEl.focus();
+  focusInput(initialLoad: boolean = false) {
+    if (initialLoad) {
+      const inputEl = this.containerEl.querySelector('.chat-input') as HTMLTextAreaElement;
+      if (inputEl) {
+        inputEl.focus();
+      }
     }
   }
 
@@ -1001,5 +1002,17 @@ export class ChatView extends ItemView {
 
     await this.updateTokenCountAndCost();
     this.scrollToBottom();
+  }
+
+  attachScrollListener() {
+    const messagesContainer = this.containerEl.querySelector('.chat-messages');
+    if (messagesContainer instanceof HTMLElement) {
+      messagesContainer.addEventListener('scroll', () => {
+        const isScrolledToBottom =
+          messagesContainer.scrollHeight - messagesContainer.clientHeight <=
+          messagesContainer.scrollTop + 1;
+        this.userScrolledUp = !isScrolledToBottom;
+      });
+    }
   }
 }

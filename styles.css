@@ -433,7 +433,7 @@
   margin: 10px 0;
   border-radius: 4px;
   align-self: flex-end;
-  text-align: right;
+  text-align: left;
   box-shadow: 2px 2px 1px var(--interactive-accent);
   position: relative;
   user-select: text;

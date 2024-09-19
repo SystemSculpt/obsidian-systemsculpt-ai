@@ -1,5 +1,4 @@
 import { ChatMessage } from '../ChatMessage';
-import { logger } from '../../../utils/logger';
 
 export function handleStreamingResponse(
   chunk: string,
@@ -45,9 +44,7 @@ export function handleStreamingResponse(
             'Unterminated string in JSON at position'
           )
         ) {
-          // Suppress specific error message from being logged
         } else {
-          logger.error('Error parsing JSON:', error);
         }
       }
     }

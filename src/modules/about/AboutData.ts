@@ -1,7 +1,6 @@
 export const members = [
   { name: 'Bone74' },
   { name: 'Sashi' },
-  { name: 'Jose' },
   { name: 'BuzzSenior' },
   { name: 'Kenny D' },
   { name: 'adjen q' },
@@ -21,7 +20,6 @@ export const members = [
   { name: 'Lenny Miller' },
   { name: 'Jennifer & Adam Davis' },
   { name: 'Josh Stephens' },
-  { name: 'Charles Bronitsky' },
   { name: 'Timothy Johnson' },
   { name: 'R. ' },
   { name: 'NotAllWhoWanderAreLost' },

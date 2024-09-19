@@ -16,7 +16,6 @@ import { stopGeneration } from './functions/stopGeneration';
 import { ChatView, VIEW_TYPE_CHAT } from '../chat/ChatView';
 import { ModelSelectionModal } from './views/ModelSelectionModal';
 import { EventEmitter } from 'events';
-import { logger } from '../../utils/logger';
 import { ButtonComponent } from 'obsidian';
 import { CostEstimator } from '../../interfaces/CostEstimatorModal';
 
@@ -78,37 +77,18 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private async initialize() {
     try {
       await this.loadSettings();
-
-      logger.log('BrainModule: Initializing AIService');
       await this.initializeAIService();
-      logger.log('BrainModule: AIService initialized');
-
-      logger.log('BrainModule: Registering commands');
       this.registerCommands();
-      logger.log('BrainModule: Commands registered');
-
-      logger.log('BrainModule: Initializing status bars');
       this.initializeStatusBars();
-      logger.log('BrainModule: Status bars initialized');
-
-      logger.log('BrainModule: Registering views');
       this.registerViews();
-      logger.log('BrainModule: Views registered');
-
-      logger.log('BrainModule: Updating default model and status bar');
       await this.updateDefaultModelAndStatusBar();
-      logger.log('BrainModule: Default model and status bar updated');
-
       this.isInitialized = true;
-      logger.log('BrainModule: Initialization complete');
     } catch (error) {
-      logger.error('BrainModule: Error during initialization:', error);
       throw error;
     }
   }
 
   public async initializeAIService() {
-    logger.log('BrainModule.initializeAIService: Starting');
     const {
       openAIApiKey,
       groqAPIKey,
@@ -121,7 +101,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showlocalEndpointSetting,
       showopenRouterSetting,
     } = this.settings;
-    logger.log('BrainModule.initializeAIService: Settings retrieved');
     this._AIService = await AIService.getInstance({
       openAIApiKey,
       groqAPIKey,
@@ -134,7 +113,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showlocalEndpointSetting,
       showopenRouterSetting,
     });
-    logger.log('BrainModule.initializeAIService: AIService instance created');
   }
 
   private registerCommands() {
@@ -198,11 +176,10 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
+    await this.plugin.saveSettings(this.settings);
   }
 
   async refreshAIService() {
-    logger.trace('BrainModule.refreshAIService called');
     try {
       if (
         this.settings.localEndpoint &&
@@ -233,7 +210,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
       await this.updateDefaultModelAndStatusBar();
     } catch (error) {
-      logger.error('Error refreshing AI service:', error);
       this.updateModelStatusBarText('Error: Check settings');
       this.updateModelSelectionButton('Error: Check settings', false);
     }
@@ -287,8 +263,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       !!enabledModels.openRouterAPIKey
     );
     
-    logger.log('Enabled models:', enabledModels);
-    logger.log('All models:', allModels);
     return allModels.filter(model => {
       switch (model.provider) {
         case 'openai':
@@ -342,7 +316,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   }
 
   async updateDefaultModelAndStatusBar(): Promise<void> {
-    logger.trace('BrainModule.updateDefaultModelAndStatusBar called');
     if (this.isUpdatingDefaultModel) return;
     this.isUpdatingDefaultModel = true;
 

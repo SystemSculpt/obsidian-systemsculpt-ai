@@ -1,7 +1,6 @@
 import { TasksModule } from '../TasksModule';
 import { TFile } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
-import { logger } from '../../../utils/logger';
 
 export async function insertGeneratedTask(
   plugin: TasksModule,
@@ -14,25 +13,20 @@ export async function insertGeneratedTask(
     const tasksDirectory = getDirectoryFromPath(tasksLocation);
     const tasksFilename = getFilenameFromPath(tasksLocation);
 
-    // Ensure the tasks file has a .md extension
     const tasksFileWithExtension = ensureMdExtension(tasksFilename);
 
-    // Update the tasks location with the corrected file extension
     const tasksLocationWithExtension = `${tasksDirectory}/${tasksFileWithExtension}`;
 
-    // Check if the directory exists, and create it if it doesn't
     const directoryExists = await vault.adapter.exists(tasksDirectory);
     if (!directoryExists) {
       await vault.createFolder(tasksDirectory);
     }
 
-    // Check if the file exists, and create it if it doesn't
     let file = await vault.getAbstractFileByPath(tasksLocationWithExtension);
     if (!file) {
       file = await vault.create(tasksLocationWithExtension, '');
     }
 
-    // Append the generated task to the file
     if (file instanceof TFile) {
       const fileContent = await vault.read(file);
       const shouldPrependNewline =
@@ -48,7 +42,6 @@ export async function insertGeneratedTask(
       );
     }
   } catch (error) {
-    logger.error('Error adding task:', error);
     showCustomNotice('Failed to add task. Please check the tasks location.');
   }
 }

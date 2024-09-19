@@ -2,8 +2,12 @@ import { marked } from 'marked';
 import { ChatMessage } from '../ChatMessage';
 import { handleDeleteMessage } from './handleDeleteMessage';
 
-const INITIAL_LOAD_LIMIT = 3000; // Characters
-const CHUNK_SIZE = 1000; // Characters
+const INITIAL_LOAD_LIMIT = 30000; // Characters
+const CHUNK_SIZE = 10000; // Characters
+
+function isScrolledToBottom(container: HTMLElement): boolean {
+  return container.scrollHeight - container.clientHeight <= container.scrollTop + 1;
+}
 
 export function renderMessages(
   chatMessages: ChatMessage[],
@@ -68,7 +72,12 @@ export function renderMessages(
     visibleMessageIndices = [...newIndices, ...visibleMessageIndices];
   };
 
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  // Check if the user is scrolled to the bottom
+  const wasScrolledToBottom = isScrolledToBottom(messagesContainer);
+
+  if (wasScrolledToBottom) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
 }
 
 function renderVisibleMessages(

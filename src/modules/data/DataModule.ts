@@ -15,6 +15,7 @@ export class DataModule {
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
+    this.settings = DEFAULT_DATA_SETTINGS;
   }
 
   async load() {
@@ -30,7 +31,7 @@ export class DataModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
+    await this.plugin.saveSettings(this.settings);
   }
 
   settingsDisplay(containerEl: HTMLElement): void {

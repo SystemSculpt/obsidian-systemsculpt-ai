@@ -1,10 +1,9 @@
 import { Modal } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
 import { handleStreamingResponse } from '../functions/handleStreamingResponse';
-import { showCustomNotice, hideCustomNotice } from '../../../modals';
+import { showCustomNotice } from '../../../modals';
 import { MarkdownView } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
-import { logger } from '../../../utils/logger';
 
 export class BlankTemplateModal extends Modal {
   private userPromptInput: HTMLTextAreaElement;
@@ -38,24 +37,20 @@ export class BlankTemplateModal extends Modal {
 
     const contextContainer = modalContent.createDiv('context-container');
 
-    // Pre-context area
     this.preContextArea = contextContainer.createEl('textarea', {
       cls: 'context-area pre-context-area',
     });
 
-    // Pre-context toggle
     this.preContextToggle = this.createToggle(
       contextContainer,
       'Include pre-context',
       'Include the context before the cursor position'
     );
 
-    // User prompt input
     this.userPromptInput = contextContainer.createEl('textarea', {
       cls: 'user-prompt-input',
     });
 
-    // Insert selected text if any
     const activeView =
       this.plugin.plugin.app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) {
@@ -63,7 +58,6 @@ export class BlankTemplateModal extends Modal {
       const selectedText = editor.getSelection();
       if (selectedText) {
         this.userPromptInput.value = `\n\n<SELECTED TEXT>\n${selectedText}\n</SELECTED TEXT>`;
-        // Set cursor at the beginning of the input for immediate typing
         setTimeout(() => {
           this.userPromptInput.setSelectionRange(0, 0);
           this.userPromptInput.focus();
@@ -71,14 +65,12 @@ export class BlankTemplateModal extends Modal {
       }
     }
 
-    // Post-context toggle
     this.postContextToggle = this.createToggle(
       contextContainer,
       'Include post-context',
       'Include the context after the cursor position'
     );
 
-    // Post-context area
     this.postContextArea = contextContainer.createEl('textarea', {
       cls: 'context-area post-context-area',
     });
@@ -96,7 +88,6 @@ export class BlankTemplateModal extends Modal {
     });
     generateButton.addEventListener('click', this.handleGenerate.bind(this));
 
-    // Register hotkeys
     this.scope.register(['Mod'], 'Enter', this.handleGenerate.bind(this));
   }
 
@@ -107,23 +98,18 @@ export class BlankTemplateModal extends Modal {
       const editor = activeView.editor;
       const cursor = editor.getCursor();
       const noteContent = editor.getValue();
-      const triggerKey = this.plugin.settings.triggerKey; // Ensure this is correctly fetched
+      const triggerKey = this.plugin.settings.triggerKey;
 
-      // Calculate the cursor offset position
       const cursorOffset = editor.posToOffset(cursor);
 
-      // Find the position of the last occurrence of the trigger key before the cursor
       const triggerKeyPosition = noteContent.lastIndexOf(
         triggerKey,
         cursorOffset - 1
       );
 
-      // Determine if the trigger key is right before the cursor
       const isTriggerKeyDirectlyBeforeCursor =
         triggerKeyPosition + triggerKey.length === cursorOffset;
 
-      // Adjust the start position for pre-context to exclude the trigger key if it's directly before the cursor
-      // Convert boolean to number (1 if true, 0 if false)
       const adjustment = isTriggerKeyDirectlyBeforeCursor
         ? triggerKey.length
         : 0;
@@ -169,11 +155,6 @@ export class BlankTemplateModal extends Modal {
     }
     const signal = this.plugin.abortController.signal;
 
-    logger.log(
-      'Checking blank template abort controller: ',
-      this.plugin.abortController
-    );
-    // Ensure context areas are updated with any user edits
     const preContext = this.preContextArea.value;
     const postContext = this.postContextArea.value;
     const userPrompt = this.userPromptInput.value.trim();
@@ -212,7 +193,7 @@ export class BlankTemplateModal extends Modal {
 
         editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
 
-        showCustomNotice('Generating...', 5000, true);
+        showCustomNotice('Generating...');
 
         let modelInstance;
         try {
@@ -225,9 +206,6 @@ export class BlankTemplateModal extends Modal {
 
           if (!modelInstance && models.length > 0) {
             modelInstance = models[0];
-            logger.warn(
-              `Default model not found. Using ${modelInstance.name} instead.`
-            );
           }
 
           if (modelInstance) {
@@ -242,7 +220,6 @@ export class BlankTemplateModal extends Modal {
             return;
           }
         } catch (error) {
-          logger.error('Error fetching models:', error);
           showCustomNotice(
             'Failed to fetch models. Please check your settings and try again.'
           );
@@ -259,7 +236,6 @@ export class BlankTemplateModal extends Modal {
             maxOutputTokens,
             (chunk: string) => {
               if (signal.aborted) {
-                logger.log('Request was aborted successfully.');
                 return;
               }
               handleStreamingResponse(chunk, editor, this.plugin);
@@ -267,12 +243,9 @@ export class BlankTemplateModal extends Modal {
             signal
           );
         } catch (error) {
-          logger.error('Error during streaming chat completion:', error);
         } finally {
-          hideCustomNotice();
-          this.plugin.abortController = null; // Reset the abortController
-          this.plugin.isGenerationCompleted = true; // Mark generation as completed
-          logger.log('Blank template generation completed.');
+          this.plugin.abortController = null;
+          this.plugin.isGenerationCompleted = true;
         }
       }
     }

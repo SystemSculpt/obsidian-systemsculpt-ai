@@ -1,8 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
-import { showCustomNotice, hideCustomNotice } from '../../../modals';
+import { showCustomNotice } from '../../../modals';
 import { TitleEditModal } from '../views/TitleEditModal';
-import { logger } from '../../../utils/logger';
 
 export async function generateTitleForChat(
   app: App,
@@ -12,7 +11,7 @@ export async function generateTitleForChat(
 ) {
   if (!chatFile) return;
   const noteContent = await app.vault.read(chatFile);
-  const notice = showCustomNotice('Generating Title...', 0, true);
+  const notice = showCustomNotice('Generating Title...');
 
   try {
     const generatedTitle = await brainModule.generateTitle(noteContent);
@@ -22,10 +21,7 @@ export async function generateTitleForChat(
     }
     showCustomNotice('Title generated successfully!');
   } catch (error) {
-    logger.error('Error generating title:', error);
     showCustomNotice(`Title generation failed: ${(error as Error).message}`);
-  } finally {
-    hideCustomNotice();
   }
 }
 
