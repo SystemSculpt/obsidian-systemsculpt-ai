@@ -1,6 +1,5 @@
 import { UnifiedAIService } from './UnifiedAIService';
 import { Model, AIProvider } from './Model';
-import { logger } from '../utils/logger';
 import { debounce } from 'obsidian';
 
 export class AIService {
@@ -73,25 +72,16 @@ export class AIService {
     },
     forceNewInstance: boolean = false
   ): Promise<AIService> {
-    logger.log('AIService.getInstance called');
     try {
       if (!AIService.instance || forceNewInstance) {
-        logger.log('Creating new AIService instance');
         AIService.instance = new AIService(settings);
-        logger.log('AIService instance created, initializing model cache');
         await AIService.instance.initializeModelCache();
-        logger.log(
-          'AIService.getInstance: AIService instance created and model cache initialized'
-        );
       } else {
-        logger.log('Updating existing AIService instance');
         AIService.instance.updateSettings(settings);
-        logger.log('AIService.getInstance: AIService instance updated');
       }
       return AIService.instance;
     } catch (error) {
-      logger.error('Error in AIService.getInstance:', error);
-      throw error; // Re-throw the error after logging
+      throw error;
     }
   }
 
@@ -126,7 +116,6 @@ export class AIService {
     localEndpoint?: string;
     temperature: number;
   }) {
-    logger.trace('Updating API keys');
     this.services.openai.updateApiKey(settings.openAIApiKey);
     this.services.groq.updateApiKey(settings.groqAPIKey);
     this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
@@ -151,7 +140,6 @@ export class AIService {
     if (!model) {
       throw new Error(`Model not found: ${modelId}`);
     }
-    logger.log('model found: ', model);
     return this.services[model.provider].createChatCompletion(
       systemPrompt,
       userMessage,
@@ -173,7 +161,6 @@ export class AIService {
     if (!model) {
       throw new Error(`Model not found: ${modelId}`);
     }
-    logger.log('model found: ', model);
     return this.services[
       model.provider
     ].createStreamingChatCompletionWithCallback(
@@ -199,7 +186,6 @@ export class AIService {
     if (!model) {
       throw new Error(`Model not found: ${modelId}`);
     }
-    logger.log('model found: ', model);
     return this.services[
       model.provider
     ].createStreamingConversationWithCallback(
@@ -218,8 +204,6 @@ export class AIService {
     showLocal: boolean,
     showOpenRouter: boolean
   ): Promise<Model[]> {
-    logger.trace('getModels called');
-
     await this.ensureModelCacheInitialized();
 
     let allModels: Model[] = [];
@@ -266,16 +250,10 @@ export class AIService {
     try {
       const url = new URL(endpoint);
       if (url.port && parseInt(url.port) < 1024) {
-        logger.warn('Local endpoint is using an unsafe port (< 1024)');
         return false;
       }
       return UnifiedAIService.validateApiKey('', endpoint, 'local');
     } catch (error: unknown) {
-      if (error instanceof Error) {
-        logger.error('Error validating local endpoint:', error.message);
-      } else {
-        logger.error('Unknown error validating local endpoint');
-      }
       return false;
     }
   }
@@ -289,9 +267,7 @@ export class AIService {
   }
 
   public async initializeModelCache(): Promise<void> {
-    logger.log('Initializing model cache');
     if (Object.keys(this.cachedModels).length > 0) {
-      logger.log('Model cache already initialized, skipping');
       return;
     }
 
@@ -303,26 +279,19 @@ export class AIService {
     }
 
     await Promise.all(fetchPromises);
-
-    logger.log('Model cache initialization completed');
   }
 
   private async fetchModelsForProvider(provider: AIProvider): Promise<void> {
-    logger.log(`Initializing models for provider: ${provider}`);
     try {
       const isEnabled = this.isProviderEnabled(provider);
       const hasValidApiKey = this.services[provider].hasValidApiKey();
       const hasValidEndpoint = this.hasValidEndpoint(provider);
 
       if (!isEnabled || !hasValidApiKey || !hasValidEndpoint) {
-        logger.log(
-          `Skipping ${provider} model fetch: Provider is disabled or no valid API key/endpoint provided`
-        );
         this.cachedModels[provider] = [];
         return;
       }
 
-      logger.log(`Fetching models for ${provider}`);
       const models = await Promise.race([
         this.services[provider].getModels(),
         new Promise<Model[]>((_, reject) =>
@@ -330,23 +299,7 @@ export class AIService {
         ),
       ]);
       this.cachedModels[provider] = models;
-      logger.log(
-        `Successfully fetched ${models.length} models for ${provider}`
-      );
     } catch (error: unknown) {
-      logger.error(`Error fetching ${provider} models:`, error);
-      if (error instanceof Error && 'status' in error) {
-        const statusError = error as { status: number };
-        if (statusError.status === 404) {
-          logger.error(
-            `${provider} API endpoint not found. Please check the API documentation and your settings.`
-          );
-        } else if (statusError.status === 401) {
-          logger.error(
-            `Invalid ${provider} API key. Please check your settings.`
-          );
-        }
-      }
       this.cachedModels[provider] = [];
     }
   }
@@ -371,9 +324,9 @@ export class AIService {
       case 'openai':
         return !!this.settings.apiEndpoint.trim();
       case 'groq':
-        return true; // Groq uses a fixed endpoint
+        return true;
       case 'openRouter':
-        return true; // OpenRouter uses a fixed endpoint
+        return true;
       case 'local':
         return !!this.settings.localEndpoint?.trim();
       default:

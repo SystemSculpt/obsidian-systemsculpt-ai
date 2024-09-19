@@ -6,7 +6,6 @@ import { TemplatesSuggest } from './TemplatesSuggest';
 import { checkLicenseValidity } from './functions/checkLicenseValidity';
 import { IGenerationModule } from '../../interfaces/IGenerationModule';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
-import { logger } from '../../utils/logger';
 import { MultiSuggest } from '../../utils/MultiSuggest';
 import { renderLicenseKeySetting } from './settings/LicenseKeySetting';
 
@@ -64,15 +63,14 @@ export class TemplatesModule implements IGenerationModule {
     this.registerDomEvent();
     setTimeout(async () => {
       await this.checkLicenseOnStartup();
-      setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000); // 3 hours in milliseconds
-    }, 5000); // Delay of 5 seconds after plugin initialization
+      setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000);
+    }, 5000);
     this.plugin.addCommand({
       id: 'trigger-template-suggestions',
       name: 'Trigger template suggestions',
       callback: () => this.triggerTemplateSuggestions(),
     });
 
-    // Wait for the BrainModule to initialize the AIService
     await this.plugin.brainModule.initializeAIService();
     await this.AIService.ensureModelCacheInitialized();
   }
@@ -87,7 +85,7 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
+    await this.plugin.saveSettings(this.settings);
   }
 
 
@@ -128,9 +126,6 @@ export class TemplatesModule implements IGenerationModule {
 
     const licenseKey = this.settings.licenseKey;
     if (!licenseKey || !licenseKey.includes('-') || licenseKey.includes(' ')) {
-      logger.log(
-        'License key format is invalid or missing. Skipping license check on startup.'
-      );
       return;
     }
 
@@ -142,7 +137,6 @@ export class TemplatesModule implements IGenerationModule {
 
   async checkForUpdate(): Promise<void> {
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
-      logger.log('No valid license key found. Skipping update check.');
       return;
     }
     if (await checkLicenseValidity(this)) {
@@ -151,23 +145,14 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   async checkAndUpdateTemplates(): Promise<void> {
-    // Check if the user is a Patreon member
     if (!this.settings.isPatreonMember) {
-      logger.log(
-        'User is not a Patreon member. Skipping template update check.'
-      );
       return;
     }
 
-    // First, check if the license key is empty
     if (!this.settings.licenseKey || this.settings.licenseKey.trim() === '') {
-      logger.log(
-        'No valid license key found. Please enter your license key in the settings. If you need a license key, please message on Patreon or Discord.'
-      );
       return;
     }
 
-    // Proceed with checking the server for the latest templates version
     const serverVersionResponse = await requestUrl({
       url: 'https://license.systemsculpt.com/templates-version',
     });
@@ -201,7 +186,6 @@ export class TemplatesModule implements IGenerationModule {
       text: 'Change your default AI templates location, what your default blank prompt does in the background, and more.',
     });
 
-    // Add Patreon member toggle with custom style
     const patreonSetting = new Setting(containerEl)
       .setName('Are you a Patreon member?')
       .setDesc('Toggle to show Patreon member options')
@@ -211,11 +195,10 @@ export class TemplatesModule implements IGenerationModule {
           .onChange(async (value: boolean) => {
             this.settings.isPatreonMember = value;
             await this.saveSettings();
-            this.settingsDisplay(containerEl); // Refresh the settings view
+            this.settingsDisplay(containerEl);
           });
       });
 
-    // Apply custom CSS class
     patreonSetting.settingEl.addClass('patreon-member-setting');
 
     if (this.settings.isPatreonMember) {
@@ -224,7 +207,6 @@ export class TemplatesModule implements IGenerationModule {
         text: "If you're a Patreon member, download the latest AI templates from SystemSculpt!",
       });
 
-      // Apply custom CSS class to info box
       infoBoxEl.addClass('patreon-sub-setting');
 
       this.renderLicenseKeySetting(containerEl);
@@ -245,11 +227,9 @@ export class TemplatesModule implements IGenerationModule {
             text: "Whenever you sync to the latest templates, all templates found in the SS-Sync folder will be overwritten. This means that if you want to modify one to your own liking, make sure to place it in the Templates folder, outside of the SS-Sync directory - it will be safe there and won't be overwritten.",
           });
 
-          // Apply custom CSS class to keepInMindBoxEl
           keepInMindBoxEl.addClass('patreon-sub-setting');
         });
 
-      // Apply custom CSS class to ssSyncSetting
       ssSyncSetting.settingEl.addClass('patreon-sub-setting');
     } else {
       const becomePatreonEl = containerEl.createDiv('info-box');
@@ -290,7 +270,7 @@ export class TemplatesModule implements IGenerationModule {
             this.settings.triggerKey = triggerKey;
             await this.saveSettings();
             text.setValue(triggerKey);
-            this.registerDomEvent(); // Re-register the event listener
+            this.registerDomEvent();
           }
         );
       })
@@ -301,8 +281,8 @@ export class TemplatesModule implements IGenerationModule {
           .onClick(async () => {
             this.settings.triggerKey = '/';
             await this.saveSettings();
-            this.settingsDisplay(containerEl); // Refresh the settings view
-            this.registerDomEvent(); // Re-register the event listener
+            this.settingsDisplay(containerEl);
+            this.registerDomEvent();
           });
       });
   }
@@ -320,7 +300,6 @@ export class TemplatesModule implements IGenerationModule {
             await this.saveSettings();
           });
 
-        // Add folder suggestion
         const inputEl = text.inputEl;
         const suggestionContent = this.getFolderSuggestions();
         const onSelectCallback = (selectedPath: string) => {

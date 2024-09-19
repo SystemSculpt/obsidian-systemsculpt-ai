@@ -26,6 +26,7 @@ export class TasksModule {
   constructor(plugin: SystemSculptPlugin, brain: BrainModule) {
     this.plugin = plugin;
     this.brain = brain;
+    this.settings = DEFAULT_TASKS_SETTINGS;
   }
 
   async load() {
@@ -71,7 +72,7 @@ export class TasksModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
+    await this.plugin.saveSettings(this.settings);
     updateTaskButtonStatusBar(this); // Update the status bar when settings are saved
   }
 

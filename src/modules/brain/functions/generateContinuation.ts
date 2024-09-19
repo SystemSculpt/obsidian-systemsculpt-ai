@@ -2,7 +2,6 @@ import { BrainModule } from '../BrainModule';
 import { MarkdownView, Editor } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
 import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
-import { logger } from '../../../utils/logger';
 
 export async function generateContinuation(
   plugin: BrainModule,
@@ -18,7 +17,6 @@ export async function generateContinuation(
 
     const noteContent = editor.getRange({ line: 0, ch: 0 }, { line, ch });
 
-    // Check if abort has been signaled before proceeding
     if (abortSignal.aborted) {
       return;
     }
@@ -27,7 +25,6 @@ export async function generateContinuation(
     let model = await plugin.getModelById(modelId);
 
     if (!model) {
-      logger.log('Model not found, trying to find an available model...');
       const models = await plugin.getEnabledModels();
 
       if (models.length > 0) {
@@ -42,8 +39,6 @@ export async function generateContinuation(
         return;
       }
     }
-
-    logger.log('Model found: ', model);
 
     await plugin.AIService.createStreamingChatCompletionWithCallback(
       plugin.settings.generalGenerationPrompt,

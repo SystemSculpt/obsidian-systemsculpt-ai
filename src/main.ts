@@ -14,7 +14,6 @@ import { ChatModule } from './modules/chat/ChatModule';
 import { ChatView, VIEW_TYPE_CHAT } from './modules/chat/ChatView';
 import { registerMp3ContextMenu } from './events';
 import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
-import { logger } from './utils/logger';
 
 export default class SystemSculptPlugin extends Plugin {
   settings!: SystemSculptSettings;
@@ -59,9 +58,7 @@ export default class SystemSculptPlugin extends Plugin {
     for (const module of modules) {
       try {
         await module.load();
-        logger.log(`${module.name} module loaded successfully.`);
       } catch (error) {
-        logger.error(`Failed to load ${module.name} module:`, error);
       }
     }
 
@@ -196,7 +193,11 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  async saveSettings() {
+  async saveSettings(moduleSettings?: Partial<SystemSculptSettings> | any) {
+    console.log('Saving settings...');
+    if (moduleSettings) {
+      this.settings = { ...this.settings, ...moduleSettings };
+    }
     await this.saveData(this.settings);
   }
 

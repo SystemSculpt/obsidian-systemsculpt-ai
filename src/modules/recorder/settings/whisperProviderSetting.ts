@@ -1,6 +1,5 @@
 import { Setting } from 'obsidian';
 import { RecorderModule } from '../RecorderModule';
-import { logger } from '../../../utils/logger';
 
 export function renderWhisperProviderSetting(
   containerEl: HTMLElement,
@@ -18,8 +17,6 @@ export function renderWhisperProviderSetting(
           if (value === 'openai' || value === 'groq') {
             plugin.settings.whisperProvider = value;
             await plugin.saveSettings();
-          } else {
-            logger.error('Invalid whisper provider selected:', value);
           }
         });
     });

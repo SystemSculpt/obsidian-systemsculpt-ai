@@ -1,8 +1,6 @@
 import { Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
-import { AIProvider } from '../../../api/Model';
-import { logger } from '../../../utils/logger';
 
 export class EndpointManager {
   private plugin: BrainModule;
@@ -58,12 +56,8 @@ export class EndpointManager {
         this.onAfterSave();
         apiEndpointItem.toggleClass('disabled', !value);
 
-        // Re-render API key settings when toggle changes
         this.renderAPISettings();
       });
-
-      // Log the initial state
-      console.log(`${endpoint.name} initial state:`, isEnabled);
     });
   }
 
@@ -103,8 +97,6 @@ export class EndpointManager {
         ]
       ) {
         this.renderAPISetting(provider);
-      } else {
-        console.log(`${provider.name} setting is disabled`);
       }
     });
   }
@@ -150,7 +142,6 @@ export class EndpointManager {
           });
         }
 
-        // Initial validation
         this.validateSettingAndUpdateStatus(
           this.plugin.settings[provider.settingKey] as string,
           apiSettingTextComponent,
@@ -166,7 +157,6 @@ export class EndpointManager {
             provider
           );
           await this.plugin.refreshAIService();
-          console.log('AI Service has been refreshed');
           this.onAfterSave();
         });
         button.setTooltip(
@@ -182,9 +172,7 @@ export class EndpointManager {
     settingKey: keyof BrainModule['settings']
   ): void {
     (this.plugin.settings[settingKey] as string) = value;
-    this.plugin.saveSettings().catch(error => {
-      logger.error('Error saving settings:', error);
-    });
+    this.plugin.saveSettings();
   }
 
   private debouncedReinitialize(
@@ -201,13 +189,11 @@ export class EndpointManager {
           validateFunction: AIService.validateLocalEndpoint,
         });
         await this.plugin.refreshAIService();
-        console.log('AI Service has been refreshed');
         this.onAfterSave();
       } catch (error) {
-        logger.error('Error refreshing:', error);
         this.updateStatus(textComponent, 'Error refreshing', false);
       }
-    }, 3000); // 3 seconds debounce
+    }, 3000);
   }
 
   private async validateSettingAndUpdateStatus(
@@ -261,13 +247,11 @@ export class EndpointManager {
         statusTextEl.classList.add('invalid');
       }
     } catch (error) {
-      logger.error(`Error validating ${provider.name} setting:`, error);
       statusTextEl.textContent = error instanceof Error && error.message === 'Validation timeout' ? 'Timeout' : 'Error';
       statusTextEl.classList.remove('validating', 'valid');
       statusTextEl.classList.add('invalid');
     }
 
-    // Update the AIService instance
     AIService.getInstance({
       openAIApiKey: this.plugin.settings.openAIApiKey,
       groqAPIKey: this.plugin.settings.groqAPIKey,
@@ -303,18 +287,4 @@ export class EndpointManager {
     return span;
   }
 
-  private getEndpointForProvider(providerName: AIProvider): string {
-    switch (providerName) {
-      case 'openai':
-        return this.plugin.settings.apiEndpoint;
-      case 'groq':
-        return 'https://api.groq.com';
-      case 'openRouter':
-        return 'https://openrouter.ai/api';
-      case 'local':
-        return this.plugin.settings.localEndpoint || '';
-      default:
-        return '';
-    }
-  }
 }

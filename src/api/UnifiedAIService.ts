@@ -1,6 +1,5 @@
 import { requestUrl } from 'obsidian';
 import { Model, AIProvider, AIServiceInterface } from './Model';
-import { logger } from '../utils/logger';
 
 export class UnifiedAIService implements AIServiceInterface {
   private apiKey: string;
@@ -44,15 +43,6 @@ export class UnifiedAIService implements AIServiceInterface {
       temperature: this.settings.temperature,
     });
 
-    logger.log(
-      'Model: ',
-      modelId,
-      'Max Output Tokens: ',
-      maxOutputTokens,
-      'Temperature: ',
-      this.settings.temperature
-    );
-
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.apiKey}`,
@@ -95,15 +85,6 @@ export class UnifiedAIService implements AIServiceInterface {
       max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
     });
-
-    logger.log(
-      'Model: ',
-      modelId,
-      'Max Output Tokens: ',
-      maxOutputTokens,
-      'Temperature: ',
-      this.settings.temperature
-    );
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -201,15 +182,6 @@ export class UnifiedAIService implements AIServiceInterface {
       temperature: this.settings.temperature,
     });
 
-    logger.log(
-      'Model: ',
-      modelId,
-      'Max Output Tokens: ',
-      maxOutputTokens,
-      'Temperature: ',
-      this.settings.temperature
-    );
-
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.apiKey}`,
@@ -272,29 +244,21 @@ export class UnifiedAIService implements AIServiceInterface {
   }
 
   private async getLocalModels(): Promise<Model[]> {
-    logger.log(`Attempting to fetch local models from endpoint: ${this.endpoint}/models`);
     try {
       const response = await requestUrl({
         url: `${this.endpoint}/models`,
         method: 'GET',
       });
-      logger.log(`Local models API response status: ${response.status}`);
       if (response.status === 200) {
         const data = response.json;
-        logger.log(`Successfully fetched local models data: ${JSON.stringify(data)}`);
         return this.parseModels(data);
       } else {
-        logger.error(`Failed to fetch local models. Status: ${response.status}, Response: ${JSON.stringify(response)}`);
       }
     } catch (error: unknown) {
       if (error instanceof Error) {
-        logger.error('Error fetching local models:', error.message);
-        logger.error('Error stack:', error.stack);
       } else {
-        logger.error('Unknown error fetching local models:', error);
       }
     }
-    logger.log('Returning empty array for local models due to error');
     return [];
   }
 
@@ -304,15 +268,9 @@ export class UnifiedAIService implements AIServiceInterface {
     }
 
     if (!this.hasValidApiKey() || !this.endpoint.trim()) {
-      logger.log(
-        `No valid API key or endpoint provided for ${this.provider}. Skipping model fetch.`
-      );
       return [];
     }
 
-    logger.log(
-      `Getting models for ${this.provider} from ${this.endpoint}/models`
-    );
     try {
       const response = await requestUrl({
         url: `${this.endpoint}/models`,
@@ -324,34 +282,16 @@ export class UnifiedAIService implements AIServiceInterface {
       if (response.status === 200) {
         const data = response.json;
         const parsedModels = this.parseModels(data);
-        logger.log(
-          `Successfully fetched ${parsedModels.length} models for ${this.provider}`
-        );
         return parsedModels;
       } else {
-        logger.error(
-          `Failed to fetch models for ${this.provider}: Status ${
-            response.status
-          }, Response: ${JSON.stringify(response.json)}`
-        );
         return [];
       }
     } catch (error) {
-      logger.error(`Error fetching models for ${this.provider}:`, error);
-      logger.error(
-        `Provider: ${this.provider}, Endpoint: ${this.endpoint}/models`
-      );
       if (error instanceof Error) {
         if ('status' in error) {
           const statusError = error as { status: number };
           if (statusError.status === 404) {
-            logger.error(
-              `${this.provider} API endpoint not found. Please check the API documentation and your settings.`
-            );
           } else if (statusError.status === 401) {
-            logger.error(
-              `Invalid ${this.provider} API key. Please check your settings.`
-            );
           }
         }
       }
@@ -511,9 +451,7 @@ export class UnifiedAIService implements AIServiceInterface {
           return openAIResponse.status === 200;
         } catch (error: unknown) {
           if (error instanceof Error) {
-            logger.error('Error validating local endpoint:', error.message);
           } else {
-            logger.error('Unknown error validating local endpoint');
           }
           return false;
         }
@@ -522,7 +460,6 @@ export class UnifiedAIService implements AIServiceInterface {
 
     if (!apiKey && provider !== 'local') return false;
 
-    logger.log(`Validating ${provider} API key`);
     try {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${apiKey}`,
@@ -541,20 +478,12 @@ export class UnifiedAIService implements AIServiceInterface {
       return response.status === 200;
     } catch (error: unknown) {
       if (error instanceof Error) {
-        logger.error(`Error validating ${provider} API key:`, error.message);
       } else {
-        logger.error(`Unknown error validating ${provider} API key`);
       }
       if (typeof error === 'object' && error !== null && 'status' in error) {
         const statusError = error as { status: number };
         if (statusError.status === 404) {
-          logger.error(
-            `${provider} API endpoint not found. Please check the API documentation and your settings.`
-          );
         } else if (statusError.status === 401) {
-          logger.error(
-            `Invalid ${provider} API key. Please check your settings.`
-          );
         }
       }
       return false;

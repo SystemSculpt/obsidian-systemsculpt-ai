@@ -16,7 +16,6 @@ import { transcribeSelectedFile } from './functions/transcribeSelectedFile';
 import { RecordingNotice } from './views/RecordingNotice';
 import { AIService } from '../../api/AIService';
 import { updateRecorderButtonStatusBar } from './functions/updateRecorderButtonStatusBar';
-import { logger } from '../../utils/logger';
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
@@ -28,7 +27,6 @@ export class RecorderModule {
   constructor(plugin: SystemSculptPlugin, AIService: AIService) {
     this.plugin = plugin;
     this.AIService = AIService;
-    logger.log('RecorderModule initialized');
   }
 
   async load() {
@@ -46,18 +44,16 @@ export class RecorderModule {
       callback: () => {},
     });
 
-    // Initialize status bar for Recorder Button
     if (!this.plugin.recorderToggleStatusBarItem) {
       this.plugin.recorderToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.recorderToggleStatusBarItem.setText('R'); // Set text to "R"
+      this.plugin.recorderToggleStatusBarItem.setText('R');
       this.plugin.recorderToggleStatusBarItem.addClass(
         'recorder-toggle-button'
       );
     }
 
-    updateRecorderButtonStatusBar(this); // Update the status bar on load
+    updateRecorderButtonStatusBar(this);
 
-    // Add click listener to toggle the Recording modal
     this.plugin.recorderToggleStatusBarItem.onClickEvent(() => {
       this.toggleRecording();
     });
@@ -72,8 +68,8 @@ export class RecorderModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
-    updateRecorderButtonStatusBar(this); // Update the status bar when settings are saved
+    await this.plugin.saveSettings(this.settings);
+    updateRecorderButtonStatusBar(this);
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -97,7 +93,7 @@ export class RecorderModule {
         this.plugin.app.workspace.trigger('refresh-files');
       } catch (error) {
         if (error instanceof Error && !error.message.includes('Folder already exists')) {
-          logger.error('Error ensuring recordings directory:', error);
+          console.error('Error ensuring recordings directory:', error);
         }
       }
     }
@@ -112,7 +108,6 @@ export class RecorderModule {
   }
 
   async toggleRecording(): Promise<void> {
-    logger.log('toggleRecording called');
     if (this.recordingNotice) {
       await this.stopRecording();
     } else {
@@ -121,18 +116,15 @@ export class RecorderModule {
   }
 
   async startRecording(): Promise<void> {
-    logger.log('startRecording called');
     await this.ensureRecordingsDirectory();
     await startRecording(this);
   }
 
   async stopRecording(): Promise<void> {
-    logger.log('stopRecording called');
     await stopRecording(this);
   }
 
   async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
-    logger.log('saveRecording called');
     const result = await saveRecording(this, arrayBuffer);
     if (!result) {
       throw new Error('Failed to save recording');
@@ -145,12 +137,10 @@ export class RecorderModule {
     recordingFile: TFile,
     skipPaste: boolean = false
   ): Promise<string> {
-    logger.log('handleTranscription called');
     return handleTranscription(this, arrayBuffer, recordingFile, skipPaste);
   }
 
   handleError(error: Error, message: string): void {
-    logger.error(message, error);
     showCustomNotice(`${message}. Please try again.`);
   }
 
@@ -166,7 +156,7 @@ export class RecorderModule {
     if (!this.recordingStatusBarItem) {
       this.recordingStatusBarItem = this.plugin.addStatusBarItem();
       this.recordingStatusBarItem.setText('Recording...');
-      this.recordingStatusBarItem.addClass('recorder-notice-toggle-button'); // Add this line
+      this.recordingStatusBarItem.addClass('recorder-notice-toggle-button');
       this.recordingStatusBarItem.addEventListener('click', () => {
         this.showRecordingNoticeWithoutStarting();
       });

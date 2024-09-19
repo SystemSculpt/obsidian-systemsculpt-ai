@@ -2,11 +2,10 @@ import { App, Modal, Setting } from 'obsidian';
 import { TasksModule } from '../TasksModule';
 import { LoadingModal } from '../../../modals';
 import { showCustomNotice } from '../../../modals';
-import { logger } from '../../../utils/logger';
 
 export class TaskModal extends Modal {
   plugin: TasksModule;
-  private taskDescriptionInput: HTMLTextAreaElement;
+  private taskDescriptionInput!: HTMLTextAreaElement;
 
   constructor(app: App, plugin: TasksModule) {
     super(app);
@@ -85,7 +84,7 @@ export class TaskModal extends Modal {
       const generatedTask = await this.plugin.generateTask(taskDescription);
       await this.plugin.insertGeneratedTask(generatedTask);
     } catch (error) {
-      logger.error('Error generating task:', error);
+      // @ts-ignore
       if (error.response && error.response.status === 401) {
         showCustomNotice(
           'Invalid API key. Please update your API key in the settings.'

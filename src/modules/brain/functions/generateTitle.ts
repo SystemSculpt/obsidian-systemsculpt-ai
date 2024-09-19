@@ -1,6 +1,5 @@
 import { BrainModule } from '../BrainModule';
 import { showCustomNotice } from '../../../modals';
-import { logger } from '../../../utils/logger';
 
 export async function generateTitle(
   plugin: BrainModule,
@@ -14,7 +13,6 @@ export async function generateTitle(
   let model = await plugin.getModelById(modelId);
 
   if (!model) {
-    logger.log('Model not found, trying to find an available model...');
     const models = await plugin.getEnabledModels();
 
     if (models.length > 0) {
@@ -40,7 +38,6 @@ export async function generateTitle(
 
     return sanitizeFileName(generatedTitle.trim());
   } catch (error) {
-    logger.error('Error generating title:', error);
     throw new Error(
       'Failed to generate title. Please check your API key and try again.'
     );
@@ -49,10 +46,10 @@ export async function generateTitle(
 
 function sanitizeFileName(fileName: string): string {
   return fileName
-    .replace(/[^\w\-. ]/g, '') // Remove invalid characters
-    .replace(/^\.+/, '') // Remove leading dots
-    .trim() // Trim leading/trailing whitespace
-    .replace(/\s+/g, ' '); // Replace multiple spaces with a single space
+    .replace(/[^\w\-. ]/g, '')
+    .replace(/^\.+/, '')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 function updateModelStatusBar(plugin: BrainModule, modelName: string): void {

@@ -8,7 +8,6 @@ import {
   TFolder,
 } from 'obsidian';
 import { showCustomNotice } from '../../../modals';
-import { logger } from '../../../utils/logger';
 
 async function createFolderIfNotExists(
   vault: any,
@@ -30,9 +29,9 @@ async function downloadFile(
   const { vault } = plugin.plugin.app;
   let file = vault.getAbstractFileByPath(filePath);
   if (file instanceof TFile) {
-    await vault.modify(file, fileContent); // Modify existing file with new content
+    await vault.modify(file, fileContent);
   } else {
-    file = await vault.create(filePath, fileContent); // Create new file if it doesn't exist
+    file = await vault.create(filePath, fileContent);
   }
 }
 
@@ -51,9 +50,6 @@ export async function downloadTemplatesFromServer(
   try {
     const licenseKey = plugin.settings.licenseKey.trim();
     if (!licenseKey) {
-      logger.log(
-        'License key is empty. Skipping template version check and update.'
-      );
       return;
     }
 
@@ -86,7 +82,6 @@ export async function downloadTemplatesFromServer(
       }
     }
   } catch (error) {
-    logger.error('Error downloading templates:', error);
     showCustomNotice(
       "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again."
     );
@@ -118,10 +113,8 @@ async function performTemplateSync(
 
   await createFolderIfNotExists(plugin.plugin.app.vault, ssSyncsPath);
 
-  // Check if the SS-Syncs directory is empty
   const isEmpty = await isFolderEmpty(plugin.plugin.app.vault, ssSyncsPath);
   if (!isEmpty) {
-    // Show a modal with Cancel/Overwrite options
     const userChoice = await new Promise<string>(resolve => {
       const modal = new ConfirmModal(
         plugin.plugin.app,
@@ -147,7 +140,6 @@ async function performTemplateSync(
     }
   }
 
-  // Update the local templates version and save settings
   plugin.settings.templatesVersion = latestVersion;
   await plugin.saveSettings();
 

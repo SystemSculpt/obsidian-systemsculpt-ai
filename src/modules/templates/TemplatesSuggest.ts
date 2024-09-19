@@ -12,9 +12,8 @@ import {
 } from 'obsidian';
 import { TemplatesModule } from './TemplatesModule';
 import { handleStreamingResponse } from './functions/handleStreamingResponse';
-import { showCustomNotice, hideCustomNotice } from '../../modals';
+import { showCustomNotice } from '../../modals';
 import { BlankTemplateModal } from './views/BlankTemplateModal';
-import { logger } from '../../utils/logger';
 
 export interface FrontMatter {
   name: string;
@@ -81,7 +80,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     file: TFile
   ): EditorSuggestTriggerInfo | null {
     if (!this.plugin.settings.triggerKey) {
-      return null; // Disable suggestions if trigger key is empty
+      return null;
     }
 
     const line = editor.getLine(cursor.line);
@@ -143,7 +142,6 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     this.lastQuery = context.query;
     const fuzzySearchResults = this.fuzzySearch(templateItems, context.query);
     
-    // Check if the query matches "Blank Template"
     if ('blank template'.includes(context.query.toLowerCase())) {
       return [blankTemplate, ...fuzzySearchResults];
     }
@@ -195,14 +193,12 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
           strIndex = j + 1;
           found = true;
 
-          // Bonus for consecutive matches
           if (j === prevMatchIndex + 1) {
             score += 3;
           } else {
             score += 2;
           }
 
-          // Bonus for matching at the start of a word
           if (j === 0 || str[j - 1] === ' ') {
             score += 2;
           }
@@ -307,12 +303,8 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
         if (!modelInstance && models.length > 0) {
           modelInstance = models[0];
-          logger.warn(
-            `Model "${model}" not found. Using ${modelInstance.id} instead.`
-          );
         }
       } catch (error) {
-        logger.error('Error fetching models:', error);
         showCustomNotice(
           'Failed to fetch models. Please check your settings and try again.'
         );
@@ -341,17 +333,16 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         let promptWithoutFrontmatter =
           parts.length > 2 ? parts.slice(2).join('---').trim() : prompt.trim();
 
-        showCustomNotice('Generating...', 5000, true);
+        showCustomNotice('Generating...');
 
         try {
           await this.plugin.AIService.createStreamingChatCompletionWithCallback(
             promptWithoutFrontmatter,
             noteContent,
             modelInstance.id,
-            maxOutputTokens || 0, // Provide a default value of 0 if maxOutputTokens is undefined
+            maxOutputTokens || 0,
             (chunk: string) => {
               if (signal.aborted) {
-                logger.log('Request was aborted successfully.');
                 return;
               }
               handleStreamingResponse(chunk, editor, this.plugin);
@@ -361,12 +352,9 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         } catch (error) {
           // @ts-ignore
           if (error.name === 'AbortError') {
-            logger.log('Request was aborted as expected.');
           } else {
-            logger.error('Error during streaming chat completion:', error);
           }
         } finally {
-          hideCustomNotice();
           this.plugin.abortController = null;
           this.plugin.isGenerationCompleted = true;
         }

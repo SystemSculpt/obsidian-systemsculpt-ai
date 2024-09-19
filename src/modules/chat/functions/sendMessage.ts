@@ -1,7 +1,6 @@
 import { TFile } from 'obsidian';
 import { ChatMessage } from '../ChatMessage';
 import { handleStreamingResponse } from './handleStreamingResponse';
-import { logger } from '../../../utils/logger';
 
 export async function sendMessage(
   inputEl: HTMLTextAreaElement,
@@ -30,17 +29,14 @@ export async function sendMessage(
     await updateChatFile(`\`\`\`\`\`user\n${messageText}\n\`\`\`\`\`\n\n`);
   }
 
-  console.log('Test 1');
   const aiService = brainModule.AIService;
   const modelId = brainModule.settings.defaultModelId;
   const maxOutputTokens = brainModule.getMaxOutputTokens();
   let accumulatedResponse = '';
-  console.log('Test 2');
 
   const systemPrompt = chatModule.settings.systemPrompt;
   const messageHistory = await constructMessageHistory();
 
-  // Add this function to handle PDF content
   const processPDFContent = async (msg: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }) => {
     if (msg.role === 'user' && typeof msg.content === 'string' && msg.content.includes('CONTEXT FILES:')) {
       const lines = msg.content.split('\n');
@@ -65,7 +61,6 @@ export async function sendMessage(
 
   showLoading();
 
-  // make sure role is 'assistant' for ai-models
   updatedMessageHistory.forEach(msg => {
     if (msg.role.startsWith('ai-')) {
       msg.role = 'assistant';
@@ -98,7 +93,6 @@ export async function sendMessage(
       `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
     );
   } catch (error) {
-    logger.error('Error streaming AI response:', error);
   } finally {
     hideLoading();
   }

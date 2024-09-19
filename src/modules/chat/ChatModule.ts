@@ -4,7 +4,6 @@ import { ChatSettingTab } from './settings/ChatSettingTab';
 import { ChatView, VIEW_TYPE_CHAT } from './ChatView';
 import { ChatFileManager } from './ChatFileManager';
 import { TFile, WorkspaceLeaf } from 'obsidian';
-import { logger } from '../../utils/logger';
 import { DocumentExtractor } from './DocumentExtractor';
 import { Notice } from 'obsidian';
 import { createHash } from 'crypto';
@@ -27,12 +26,10 @@ export class ChatModule {
   }
 
   async load() {
-    logger.log('ChatModule load method called');
     await this.loadSettings();
 
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
 
-    // Ensure attachments directory exists
     await this.plugin.app.vault.createFolder(this.settings.attachmentsPath).catch(() => {});
 
     this.plugin.addRibbonIcon(
@@ -43,7 +40,6 @@ export class ChatModule {
       }
     );
 
-    // Reinitialize existing ChatViews
     this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).forEach(leaf => {
       const view = leaf.view as ChatView;
       if (view instanceof ChatView) {
@@ -82,10 +78,8 @@ export class ChatModule {
           .find(view => view instanceof ChatView);
 
         if (!chatView) {
-          // If no chat view is open, open a new one
           this.openNewChat();
 
-          // Wait for the new chat view to be created
           setTimeout(() => {
             // @ts-ignore
             chatView = this.plugin.app.workspace.getActiveViewOfType(ChatView);
@@ -94,7 +88,6 @@ export class ChatModule {
             }
           }, 300);
         } else {
-          // If a chat view is already open, switch to it and show the actions modal
           const leaf =
             this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
           this.plugin.app.workspace.revealLeaf(leaf);
@@ -103,13 +96,12 @@ export class ChatModule {
       },
     });
 
-    // Add status bar item for chat
     if (
       this.settings.showChatButtonOnStatusBar &&
       !this.plugin.chatToggleStatusBarItem
     ) {
       this.plugin.chatToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.chatToggleStatusBarItem.setText('C'); // Set text to "C"
+      this.plugin.chatToggleStatusBarItem.setText('C');
       this.plugin.chatToggleStatusBarItem.addClass('chat-toggle-button');
     }
 
@@ -131,21 +123,18 @@ export class ChatModule {
   }
 
   async saveSettings() {
-    await this.plugin.saveData(this.settings);
+    await this.plugin.saveSettings(this.settings);
   }
 
   openNewChat() {
-    // Ensure the sidebar is expanded
     const rightSplit = this.plugin.app.workspace.rightSplit;
     if (rightSplit && rightSplit.collapsed) {
       rightSplit.expand();
     }
 
-    // Check for an existing chat view leaf
     let chatLeaf = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 
     if (!chatLeaf) {
-      // If no chat view exists, create a new leaf
       chatLeaf =
         this.plugin.app.workspace.getRightLeaf(false) ||
         this.plugin.app.workspace.getLeaf('tab');
@@ -160,12 +149,11 @@ export class ChatModule {
 
     this.plugin.app.workspace.revealLeaf(chatLeaf);
 
-    // Use requestAnimationFrame for smoother UI updates
     requestAnimationFrame(() => {
       const chatView = chatLeaf.view as ChatView;
       if (chatView) {
-        chatView.initializeChatView(); // This now includes updating token count and cost
-        chatView.clearChatView(); // Clear the chat view visually
+        chatView.initializeChatView();
+        chatView.clearChatView();
         chatView.focusInput();
       }
     });
@@ -203,7 +191,6 @@ export class ChatModule {
         chatView.setChatFile(file);
         chatView.loadChatFile(file);
 
-        // Add a slight delay to ensure the DOM is fully updated
         setTimeout(() => {
           chatView.focusInput();
           this.updateTokenCount(chatView);
@@ -212,7 +199,6 @@ export class ChatModule {
 
       this.saveLastOpenedChat(file.path);
     } else {
-      // Handle the case where we couldn't create a chat leaf
       console.error('Failed to create or find a chat leaf');
     }
   }
@@ -256,7 +242,6 @@ export class ChatModule {
       }
     };
 
-    // Register the context menu item
     this.plugin.registerEvent(
       this.plugin.app.workspace.on('file-menu', (menu, file) => {
         if (file instanceof TFile && ['pdf', 'docx', 'pptx'].includes(file.extension.toLowerCase())) {

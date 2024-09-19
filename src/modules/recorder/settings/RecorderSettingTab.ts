@@ -10,7 +10,8 @@ import { renderSaveTranscriptionToFileToggle } from './saveTranscriptionToFileSe
 import { renderTranscriptionsPathSetting } from './transcriptionsPathSetting';
 import { updateRecorderButtonStatusBar } from '../functions/updateRecorderButtonStatusBar';
 import { renderWhisperProviderSetting } from './whisperProviderSetting';
-
+import { renderCustomWhisperPromptSetting } from './customWhisperPromptSetting';
+import { renderPostProcessingPromptSetting } from './postProcessingPromptSetting';
 export class SystemSculptRecorderSettingTab extends PluginSettingTab {
   plugin: RecorderModule;
 
@@ -54,6 +55,8 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
     renderTranscriptionsPathSetting(containerEl, this.plugin);
     renderMicrophoneDropdown(containerEl, this.plugin);
     renderAutoTranscriptionToggle(containerEl, this.plugin);
+    renderCustomWhisperPromptSetting(containerEl, this.plugin);
+    renderPostProcessingPromptSetting(containerEl, this.plugin);
     renderSaveAudioClipsToggle(containerEl, this.plugin);
     renderSaveTranscriptionToFileToggle(containerEl, this.plugin);
     renderCopyToClipboardToggle(containerEl, this.plugin);
