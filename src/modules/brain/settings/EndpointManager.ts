@@ -2,6 +2,16 @@ import { Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 
+type ValidateFunction = (value: string, baseApiUrl?: string) => Promise<boolean>;
+
+interface APIProvider {
+  name: string;
+  settingKey: keyof BrainModule['settings'];
+  showSettingKey: keyof BrainModule['settings'];
+  validateFunction: ValidateFunction;
+  placeholder?: string;
+}
+
 export class EndpointManager {
   private plugin: BrainModule;
   private containerEl: HTMLElement;
@@ -62,12 +72,12 @@ export class EndpointManager {
   }
 
   private renderAPISettings(): void {
-    const apiProviders = [
+    const apiProviders: APIProvider[] = [
       {
         name: 'OpenAI',
         settingKey: 'openAIApiKey',
         showSettingKey: 'showopenAISetting',
-        validateFunction: AIService.validateOpenAIApiKey,
+        validateFunction: (apiKey: string, baseApiUrl?: string) => AIService.validateOpenAIApiKey(apiKey, baseApiUrl),
       },
       {
         name: 'Groq',
@@ -88,7 +98,15 @@ export class EndpointManager {
         validateFunction: AIService.validateLocalEndpoint,
         placeholder: 'http://localhost:1234',
       },
-    ] as const;
+    ];
+
+    // Render baseApiUrl setting
+    this.renderAPISetting({
+      name: 'OpenAI Base URL',
+      settingKey: 'baseApiUrl',
+      validateFunction: () => Promise.resolve(true), // No validation needed for base URL
+      placeholder: 'https://api.openai.com/v1',
+    });
 
     apiProviders.forEach(provider => {
       if (
@@ -104,18 +122,18 @@ export class EndpointManager {
   private renderAPISetting(provider: {
     name: string;
     settingKey: keyof BrainModule['settings'];
-    validateFunction: (value: string) => Promise<boolean>;
+    validateFunction: (value: string, baseApiUrl?: string) => Promise<boolean>;
     placeholder?: string;
   }): void {
     let apiSettingTextComponent: TextComponent;
 
     new Setting(this.containerEl)
       .setName(
-        `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : 'API Key'}`
+        `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? '' : 'API Key'}`
       )
       .setDesc(
         `Enter your ${provider.name} ${
-          provider.name === 'Local' ? 'endpoint URL' : 'API key'
+          provider.name === 'Local' ? 'endpoint URL' : provider.name === 'OpenAI Base URL' ? 'base URL' : 'API key'
         }`
       )
       .addText(text => {
@@ -132,7 +150,7 @@ export class EndpointManager {
             );
           });
 
-        if (provider.name !== 'Local') {
+        if (provider.name !== 'Local' && provider.name !== 'OpenAI Base URL') {
           text.inputEl.type = 'password';
           text.inputEl.addEventListener('focus', () => {
             text.inputEl.type = 'text';
@@ -161,7 +179,7 @@ export class EndpointManager {
         });
         button.setTooltip(
           `Re-check ${
-            provider.name === 'Local' ? 'Endpoint' : 'API Key'
+            provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? 'Base URL' : 'API Key'
           } and Refresh AI Service`
         );
       });
@@ -202,7 +220,7 @@ export class EndpointManager {
     provider: {
       name: string;
       settingKey: keyof BrainModule['settings'];
-      validateFunction: (value: string) => Promise<boolean>;
+      validateFunction: ValidateFunction;
     }
   ): Promise<void> {
     const statusTextEl =
@@ -223,13 +241,15 @@ export class EndpointManager {
       const validationPromise = (async () => {
         switch (provider.name) {
           case 'OpenAI':
-            return await AIService.validateOpenAIApiKey(value);
+            return await AIService.validateOpenAIApiKey(value, this.plugin.settings.baseApiUrl);
           case 'Groq':
             return await AIService.validateGroqAPIKey(value);
           case 'OpenRouter':
             return await AIService.validateOpenRouterApiKey(value);
           case 'Local':
             return await AIService.validateLocalEndpoint(value);
+          case 'OpenAI Base URL':
+            return true; // No validation needed for base URL
           default:
             return false;
         }
@@ -263,6 +283,7 @@ export class EndpointManager {
       showgroqSetting: this.plugin.settings.showgroqSetting,
       showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
+      baseApiUrl: this.plugin.settings.baseApiUrl,
     });
   }
 
@@ -286,5 +307,4 @@ export class EndpointManager {
     span.className = className;
     return span;
   }
-
 }

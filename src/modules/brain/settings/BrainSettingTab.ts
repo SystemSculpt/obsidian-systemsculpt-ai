@@ -44,9 +44,23 @@ export class BrainSettingTab extends PluginSettingTab {
       () => this.refreshTab()
     );
     endpointManager.renderEndpointSettings();
+    this.renderBaseApiUrlSetting();
     this.renderModelSettings();
     this.renderTemperatureSettings();
     this.renderPromptSettings();
+  }
+
+  private renderBaseApiUrlSetting(): void {
+    new Setting(this.containerEl)
+      .setName('OpenAI API Base URL')
+      .setDesc('Set the base URL for OpenAI API calls. Leave blank to use the default.')
+      .addText(text => text
+        .setPlaceholder('https://api.openai.com/v1')
+        .setValue(this.plugin.settings.baseApiUrl)
+        .onChange(async (value) => {
+          this.plugin.settings.baseApiUrl = value || 'https://api.openai.com/v1';
+          await this.plugin.saveSettings();
+        }));
   }
 
   private renderModelSettings(): void {

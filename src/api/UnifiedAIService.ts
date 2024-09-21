@@ -27,6 +27,10 @@ export class UnifiedAIService implements AIServiceInterface {
     this.apiKey = apiKey;
   }
 
+  updateBaseUrl(baseUrl: string): void {
+    this.endpoint = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+  }
+
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
