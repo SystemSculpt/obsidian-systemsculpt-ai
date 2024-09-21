@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { EndpointManager } from './EndpointManager';
 import { renderModelSelectionButton } from './ModelSetting';
@@ -10,6 +10,8 @@ import { renderTemperatureSetting } from './renderTemperatureSetting';
 
 export class BrainSettingTab extends PluginSettingTab {
   plugin: BrainModule;
+
+  private static DEFAULT_API_URL = 'https://api.openai.com/v1';
 
   constructor(app: App, plugin: BrainModule, containerEl: HTMLElement) {
     super(app, plugin.plugin);
@@ -50,15 +52,29 @@ export class BrainSettingTab extends PluginSettingTab {
     this.renderPromptSettings();
   }
 
+  private isValidUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  
   private renderBaseApiUrlSetting(): void {
     new Setting(this.containerEl)
       .setName('OpenAI API Base URL')
       .setDesc('Set the base URL for OpenAI API calls. Leave blank to use the default.')
       .addText(text => text
-        .setPlaceholder('https://api.openai.com/v1')
+        .setPlaceholder(BrainSettingTab.DEFAULT_API_URL)
         .setValue(this.plugin.settings.baseApiUrl)
         .onChange(async (value) => {
-          this.plugin.settings.baseApiUrl = value || 'https://api.openai.com/v1';
+          if (value && !this.isValidUrl(value)) {
+            // Display an error message to the user
+            new Notice('Invalid URL. Please enter a valid URL or leave blank for default.');
+            return;
+          }
+          this.plugin.settings.baseApiUrl = value || BrainSettingTab.DEFAULT_API_URL;
           await this.plugin.saveSettings();
         }));
   }
