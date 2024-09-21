@@ -2,7 +2,7 @@ import { Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 
-type ValidateFunction = (value: string, baseApiUrl?: string) => Promise<boolean>;
+type ValidateFunction = (value: string, baseOpenAIApiUrl?: string) => Promise<boolean>;
 
 interface APIProvider {
   name: string;
@@ -77,7 +77,7 @@ export class EndpointManager {
         name: 'OpenAI',
         settingKey: 'openAIApiKey',
         showSettingKey: 'showopenAISetting',
-        validateFunction: (apiKey: string, baseApiUrl?: string) => AIService.validateOpenAIApiKey(apiKey, baseApiUrl),
+        validateFunction: (apiKey: string, baseOpenAIApiUrl?: string) => AIService.validateOpenAIApiKey(apiKey, baseOpenAIApiUrl),
       },
       {
         name: 'Groq',
@@ -100,10 +100,10 @@ export class EndpointManager {
       },
     ];
 
-    // Render baseApiUrl setting
+    // Render baseOpenAIApiUrl setting
     this.renderAPISetting({
       name: 'OpenAI Base URL',
-      settingKey: 'baseApiUrl',
+      settingKey: 'baseOpenAIApiUrl',
       validateFunction: () => Promise.resolve(true), // No validation needed for base URL
       placeholder: 'https://api.openai.com/v1',
     });
@@ -122,7 +122,7 @@ export class EndpointManager {
   private renderAPISetting(provider: {
     name: string;
     settingKey: keyof BrainModule['settings'];
-    validateFunction: (value: string, baseApiUrl?: string) => Promise<boolean>;
+    validateFunction: (value: string, baseOpenAIApiUrl?: string) => Promise<boolean>;
     placeholder?: string;
   }): void {
     let apiSettingTextComponent: TextComponent;
@@ -241,7 +241,7 @@ export class EndpointManager {
       const validationPromise = (async () => {
         switch (provider.name) {
           case 'OpenAI':
-            return await AIService.validateOpenAIApiKey(value, this.plugin.settings.baseApiUrl);
+            return await AIService.validateOpenAIApiKey(value, this.plugin.settings.baseOpenAIApiUrl);
           case 'Groq':
             return await AIService.validateGroqAPIKey(value);
           case 'OpenRouter':
@@ -283,7 +283,7 @@ export class EndpointManager {
       showgroqSetting: this.plugin.settings.showgroqSetting,
       showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
-      baseApiUrl: this.plugin.settings.baseApiUrl,
+      baseOpenAIApiUrl: this.plugin.settings.baseOpenAIApiUrl,
     });
   }
 
