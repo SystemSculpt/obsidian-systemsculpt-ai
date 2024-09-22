@@ -2,6 +2,16 @@ import { Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { AIService } from '../../../api/AIService';
 
+type ValidateFunction = (value: string, baseOpenAIApiUrl?: string) => Promise<boolean>;
+
+interface APIProvider {
+  name: string;
+  settingKey: keyof BrainModule['settings'];
+  showSettingKey: keyof BrainModule['settings'];
+  validateFunction: ValidateFunction;
+  placeholder?: string;
+}
+
 export class EndpointManager {
   private plugin: BrainModule;
   private containerEl: HTMLElement;
@@ -62,12 +72,12 @@ export class EndpointManager {
   }
 
   private renderAPISettings(): void {
-    const apiProviders = [
+    const apiProviders: APIProvider[] = [
       {
         name: 'OpenAI',
         settingKey: 'openAIApiKey',
         showSettingKey: 'showopenAISetting',
-        validateFunction: AIService.validateOpenAIApiKey,
+        validateFunction: (apiKey: string, baseOpenAIApiUrl?: string) => AIService.validateOpenAIApiKey(apiKey, baseOpenAIApiUrl),
       },
       {
         name: 'Groq',
@@ -88,7 +98,7 @@ export class EndpointManager {
         validateFunction: AIService.validateLocalEndpoint,
         placeholder: 'http://localhost:1234',
       },
-    ] as const;
+    ];
 
     apiProviders.forEach(provider => {
       if (
@@ -99,23 +109,31 @@ export class EndpointManager {
         this.renderAPISetting(provider);
       }
     });
+
+    if (this.plugin.settings.showopenAISetting) {
+      this.renderSimpleAPISetting({
+        name: 'OpenAI Base URL',
+        settingKey: 'baseOpenAIApiUrl',
+        placeholder: 'https://api.openai.com/v1',
+      });
+    }
   }
 
   private renderAPISetting(provider: {
     name: string;
     settingKey: keyof BrainModule['settings'];
-    validateFunction: (value: string) => Promise<boolean>;
+    validateFunction: (value: string, baseOpenAIApiUrl?: string) => Promise<boolean>;
     placeholder?: string;
   }): void {
     let apiSettingTextComponent: TextComponent;
-
-    new Setting(this.containerEl)
+  
+    const setting = new Setting(this.containerEl)
       .setName(
-        `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : 'API Key'}`
+        `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? '' : 'API Key'}`
       )
       .setDesc(
         `Enter your ${provider.name} ${
-          provider.name === 'Local' ? 'endpoint URL' : 'API key'
+          provider.name === 'Local' ? 'endpoint URL' : provider.name === 'OpenAI Base URL' ? 'base URL' : 'API key'
         }`
       )
       .addText(text => {
@@ -131,8 +149,8 @@ export class EndpointManager {
               provider.settingKey
             );
           });
-
-        if (provider.name !== 'Local') {
+  
+        if (provider.name !== 'Local' && provider.name !== 'OpenAI Base URL') {
           text.inputEl.type = 'password';
           text.inputEl.addEventListener('focus', () => {
             text.inputEl.type = 'text';
@@ -141,7 +159,7 @@ export class EndpointManager {
             text.inputEl.type = 'password';
           });
         }
-
+  
         this.validateSettingAndUpdateStatus(
           this.plugin.settings[provider.settingKey] as string,
           apiSettingTextComponent,
@@ -161,9 +179,27 @@ export class EndpointManager {
         });
         button.setTooltip(
           `Re-check ${
-            provider.name === 'Local' ? 'Endpoint' : 'API Key'
+            provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? 'Base URL' : 'API Key'
           } and Refresh AI Service`
         );
+      });
+  }
+
+  private renderSimpleAPISetting(provider: {
+    name: string;
+    settingKey: keyof BrainModule['settings'];
+    placeholder?: string;
+  }): void {
+    new Setting(this.containerEl)
+      .setName(provider.name)
+      .setDesc(`Enter your ${provider.name}`)
+      .addText(text => {
+        text
+          .setPlaceholder(provider.placeholder || 'URL')
+          .setValue(this.plugin.settings[provider.settingKey] as string)
+          .onChange((value: string) => {
+            this.saveImmediately(value, provider.settingKey);
+          });
       });
   }
 
@@ -202,7 +238,7 @@ export class EndpointManager {
     provider: {
       name: string;
       settingKey: keyof BrainModule['settings'];
-      validateFunction: (value: string) => Promise<boolean>;
+      validateFunction: ValidateFunction;
     }
   ): Promise<void> {
     const statusTextEl =
@@ -223,7 +259,7 @@ export class EndpointManager {
       const validationPromise = (async () => {
         switch (provider.name) {
           case 'OpenAI':
-            return await AIService.validateOpenAIApiKey(value);
+            return await AIService.validateOpenAIApiKey(value, this.plugin.settings.baseOpenAIApiUrl);
           case 'Groq':
             return await AIService.validateGroqAPIKey(value);
           case 'OpenRouter':
@@ -263,6 +299,7 @@ export class EndpointManager {
       showgroqSetting: this.plugin.settings.showgroqSetting,
       showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
+      baseOpenAIApiUrl: this.plugin.settings.baseOpenAIApiUrl,
     });
   }
 
@@ -286,5 +323,5 @@ export class EndpointManager {
     span.className = className;
     return span;
   }
-
 }
+
