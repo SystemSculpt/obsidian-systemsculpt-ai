@@ -27,7 +27,7 @@ export class UnifiedAIService implements AIServiceInterface {
     this.apiKey = apiKey;
   }
 
-  updateBaseUrl(baseUrl: string): void {
+  updateOpenAIBaseUrl(baseUrl: string): void {
     this.endpoint = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
   }
 

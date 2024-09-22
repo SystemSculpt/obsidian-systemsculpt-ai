@@ -122,7 +122,7 @@ export class AIService {
     baseOpenAIApiUrl: string;
   }) {
     this.services.openai.updateApiKey(settings.openAIApiKey);
-    this.services.openai.updateBaseUrl(settings.baseOpenAIApiUrl);
+    this.services.openai.updateOpenAIBaseUrl(settings.baseOpenAIApiUrl);
     this.services.groq.updateApiKey(settings.groqAPIKey);
     this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
     Object.values(this.services).forEach(service =>
