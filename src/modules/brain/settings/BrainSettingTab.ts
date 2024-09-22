@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import { BrainModule } from '../BrainModule';
 import { EndpointManager } from './EndpointManager';
 import { renderModelSelectionButton } from './ModelSetting';
@@ -10,6 +10,8 @@ import { renderTemperatureSetting } from './renderTemperatureSetting';
 
 export class BrainSettingTab extends PluginSettingTab {
   plugin: BrainModule;
+
+  private static DEFAULT_API_URL = 'https://api.openai.com/v1';
 
   constructor(app: App, plugin: BrainModule, containerEl: HTMLElement) {
     super(app, plugin.plugin);
@@ -49,6 +51,15 @@ export class BrainSettingTab extends PluginSettingTab {
     this.renderPromptSettings();
   }
 
+  private isValidUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private renderModelSettings(): void {
     renderModelSelectionButton(this.containerEl, this.plugin);
     renderShowDefaultModelOnStatusBarSetting(this.containerEl, this.plugin);
@@ -75,3 +86,4 @@ export class BrainSettingTab extends PluginSettingTab {
     this.display();
   }
 }
+

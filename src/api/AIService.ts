@@ -17,6 +17,7 @@ export class AIService {
     showgroqSetting: boolean;
     showlocalEndpointSetting: boolean;
     showopenRouterSetting: boolean;
+    baseOpenAIApiUrl?: string;
   };
 
   private constructor(settings: {
@@ -30,12 +31,13 @@ export class AIService {
     showgroqSetting: boolean;
     showlocalEndpointSetting: boolean;
     showopenRouterSetting: boolean;
+    baseOpenAIApiUrl?: string;
   }) {
     this.settings = settings;
     this.services = {
       openai: new UnifiedAIService(
         settings.openAIApiKey,
-        'https://api.openai.com/v1',
+        settings.baseOpenAIApiUrl ?? 'https://api.openai.com/v1',
         'openai',
         { temperature: settings.temperature }
       ),
@@ -69,6 +71,7 @@ export class AIService {
       showgroqSetting: boolean;
       showlocalEndpointSetting: boolean;
       showopenRouterSetting: boolean;
+      baseOpenAIApiUrl?: string;
     },
     forceNewInstance: boolean = false
   ): Promise<AIService> {
@@ -98,6 +101,7 @@ export class AIService {
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
+    baseOpenAIApiUrl?: string;
   }) {
     this.updateApiKeysDebounced(settings);
   }
@@ -115,8 +119,10 @@ export class AIService {
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
+    baseOpenAIApiUrl?: string;
   }) {
     this.services.openai.updateApiKey(settings.openAIApiKey);
+    this.services.openai.updateOpenAIBaseUrl(settings.baseOpenAIApiUrl ?? 'https://api.openai.com/v1');
     this.services.groq.updateApiKey(settings.groqAPIKey);
     this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
     Object.values(this.services).forEach(service =>
@@ -229,10 +235,10 @@ export class AIService {
     return undefined;
   }
 
-  static async validateOpenAIApiKey(apiKey: string): Promise<boolean> {
+  static async validateOpenAIApiKey(apiKey: string, baseOpenAIApiUrl?: string): Promise<boolean> {
     return UnifiedAIService.validateApiKey(
       apiKey,
-      'https://api.openai.com/v1',
+      baseOpenAIApiUrl ?? 'https://api.openai.com/v1',
       'openai'
     );
   }
@@ -334,3 +340,4 @@ export class AIService {
     }
   }
 }
+

@@ -100,6 +100,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showgroqSetting,
       showlocalEndpointSetting,
       showopenRouterSetting,
+      baseOpenAIApiUrl,
     } = this.settings;
     this._AIService = await AIService.getInstance({
       openAIApiKey,
@@ -112,6 +113,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showgroqSetting,
       showlocalEndpointSetting,
       showopenRouterSetting,
+      baseOpenAIApiUrl,
     });
   }
 
@@ -204,6 +206,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
           showgroqSetting: this.settings.showgroqSetting,
           showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
           showopenRouterSetting: this.settings.showopenRouterSetting,
+          baseOpenAIApiUrl: this.settings.baseOpenAIApiUrl,
         },
         true
       );
