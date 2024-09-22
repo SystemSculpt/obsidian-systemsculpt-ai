@@ -44,5 +44,10 @@ export function renderPostProcessingPromptSetting(
             plugin.settingsDisplay(containerEl);
           });
       });
+
+    const infoBoxEl = containerEl.createDiv('info-box');
+    infoBoxEl.createEl('p', {
+      text: 'The post-processing prompt uses GPT models to improve the transcript by correcting misspellings, improving overall accuracy, and enhancing readability. It allows for more specific instructions and can handle a larger context window for better understanding of the transcription.',
+    });
   }
 }
