@@ -70,3 +70,4 @@ Rules:
   favoritedModels: [],
   baseOpenAIApiUrl: 'https://api.openai.com/v1',
 };
+
