@@ -46,7 +46,6 @@ export class BrainSettingTab extends PluginSettingTab {
       () => this.refreshTab()
     );
     endpointManager.renderEndpointSettings();
-    this.renderbaseOpenAIApiUrlSetting();
     this.renderModelSettings();
     this.renderTemperatureSettings();
     this.renderPromptSettings();
@@ -59,24 +58,6 @@ export class BrainSettingTab extends PluginSettingTab {
     } catch {
       return false;
     }
-  }
-
-  private renderbaseOpenAIApiUrlSetting(): void {
-    new Setting(this.containerEl)
-      .setName('OpenAI API Base URL')
-      .setDesc('Set the base URL for OpenAI API calls. Leave blank to use the default.')
-      .addText(text => text
-        .setPlaceholder(BrainSettingTab.DEFAULT_API_URL)
-        .setValue(this.plugin.settings.baseOpenAIApiUrl)
-        .onChange(async (value) => {
-          if (value && !this.isValidUrl(value)) {
-            // Display an error message to the user
-            new Notice('Invalid URL. Please enter a valid URL or leave blank for default.');
-            return;
-          }
-          this.plugin.settings.baseOpenAIApiUrl = value || BrainSettingTab.DEFAULT_API_URL;
-          await this.plugin.saveSettings();
-        }));
   }
 
   private renderModelSettings(): void {
@@ -105,3 +86,4 @@ export class BrainSettingTab extends PluginSettingTab {
     this.display();
   }
 }
+

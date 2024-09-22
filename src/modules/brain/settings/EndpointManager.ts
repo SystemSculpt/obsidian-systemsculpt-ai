@@ -100,14 +100,6 @@ export class EndpointManager {
       },
     ];
 
-    // Render baseOpenAIApiUrl setting
-    this.renderAPISetting({
-      name: 'OpenAI Base URL',
-      settingKey: 'baseOpenAIApiUrl',
-      validateFunction: () => Promise.resolve(true), // No validation needed for base URL
-      placeholder: 'https://api.openai.com/v1',
-    });
-
     apiProviders.forEach(provider => {
       if (
         this.plugin.settings[
@@ -117,6 +109,16 @@ export class EndpointManager {
         this.renderAPISetting(provider);
       }
     });
+
+    // Render baseOpenAIApiUrl setting only if OpenAI endpoint is enabled
+    if (this.plugin.settings.showopenAISetting) {
+      this.renderAPISetting({
+        name: 'OpenAI Base URL',
+        settingKey: 'baseOpenAIApiUrl',
+        validateFunction: () => Promise.resolve(true), // No validation needed for base URL
+        placeholder: 'https://api.openai.com/v1',
+      });
+    }
   }
 
   private renderAPISetting(provider: {
@@ -308,3 +310,4 @@ export class EndpointManager {
     return span;
   }
 }
+
