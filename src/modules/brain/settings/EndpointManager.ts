@@ -110,12 +110,10 @@ export class EndpointManager {
       }
     });
 
-    // Render baseOpenAIApiUrl setting only if OpenAI endpoint is enabled
     if (this.plugin.settings.showopenAISetting) {
-      this.renderAPISetting({
+      this.renderSimpleAPISetting({
         name: 'OpenAI Base URL',
         settingKey: 'baseOpenAIApiUrl',
-        validateFunction: () => Promise.resolve(true), // No validation needed for base URL
         placeholder: 'https://api.openai.com/v1',
       });
     }
@@ -128,8 +126,8 @@ export class EndpointManager {
     placeholder?: string;
   }): void {
     let apiSettingTextComponent: TextComponent;
-
-    new Setting(this.containerEl)
+  
+    const setting = new Setting(this.containerEl)
       .setName(
         `${provider.name} ${provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? '' : 'API Key'}`
       )
@@ -151,7 +149,7 @@ export class EndpointManager {
               provider.settingKey
             );
           });
-
+  
         if (provider.name !== 'Local' && provider.name !== 'OpenAI Base URL') {
           text.inputEl.type = 'password';
           text.inputEl.addEventListener('focus', () => {
@@ -161,7 +159,7 @@ export class EndpointManager {
             text.inputEl.type = 'password';
           });
         }
-
+  
         this.validateSettingAndUpdateStatus(
           this.plugin.settings[provider.settingKey] as string,
           apiSettingTextComponent,
@@ -184,6 +182,24 @@ export class EndpointManager {
             provider.name === 'Local' ? 'Endpoint' : provider.name === 'OpenAI Base URL' ? 'Base URL' : 'API Key'
           } and Refresh AI Service`
         );
+      });
+  }
+
+  private renderSimpleAPISetting(provider: {
+    name: string;
+    settingKey: keyof BrainModule['settings'];
+    placeholder?: string;
+  }): void {
+    new Setting(this.containerEl)
+      .setName(provider.name)
+      .setDesc(`Enter your ${provider.name}`)
+      .addText(text => {
+        text
+          .setPlaceholder(provider.placeholder || 'URL')
+          .setValue(this.plugin.settings[provider.settingKey] as string)
+          .onChange((value: string) => {
+            this.saveImmediately(value, provider.settingKey);
+          });
       });
   }
 
@@ -250,8 +266,6 @@ export class EndpointManager {
             return await AIService.validateOpenRouterApiKey(value);
           case 'Local':
             return await AIService.validateLocalEndpoint(value);
-          case 'OpenAI Base URL':
-            return true; // No validation needed for base URL
           default:
             return false;
         }
