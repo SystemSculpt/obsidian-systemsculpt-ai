@@ -28,6 +28,9 @@ export class UnifiedAIService implements AIServiceInterface {
   }
 
   updateOpenAIBaseUrl(baseUrl: string): void {
+    if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+      throw new Error('Invalid base URL. It must start with http:// or https://');
+    }
     this.endpoint = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
   }
 
