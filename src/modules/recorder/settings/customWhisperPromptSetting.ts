@@ -26,8 +26,8 @@ export function renderCustomWhisperPromptSetting(
 
   if (plugin.settings.enableCustomWhisperPrompt) {
     new Setting(containerEl)
-      .setName('Custom Whisper Prompt')
-      .setDesc('Customize the prompt used for Whisper transcription (max 244 tokens)')
+      .setName('Custom Whisper Vocabulary')
+      .setDesc('Customize the list of favored words or phrases for Whisper transcription (max 244 tokens)')
       .addTextArea(text => {
         text
           .setPlaceholder('Enter custom prompt')
@@ -63,7 +63,7 @@ export function renderCustomWhisperPromptSetting(
 
     const infoBoxEl = containerEl.createDiv('info-box');
     infoBoxEl.createEl('p', {
-      text: 'The custom Whisper prompt can help improve transcription accuracy by correcting specific words or acronyms, preserving context for split audio files, ensuring proper punctuation and filler words, and specifying preferred writing styles for certain languages. Note that Whisper only considers the first 244 tokens of the prompt.',
+      text: 'The custom Whisper vocabulary helps improve transcription accuracy by providing a list of favored words or phrases. This can correct specific words or acronyms, preserve context for split audio files, ensure proper punctuation and filler words, and specify preferred writing styles for certain languages. Note that Whisper only considers the first 244 tokens of the vocabulary list.',
     });
   }
 }
