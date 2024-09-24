@@ -141,7 +141,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   getItems(): (TFile | TFolder)[] {
-    const supportedExtensions = ['md', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
+    const supportedExtensions = ['md', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg', 'txt'];
     const allFiles = this.app.vault.getAllLoadedFiles();
     
     return allFiles.filter(file => 
@@ -195,6 +195,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
     } else {
       switch (item.item.extension) {
         case 'md':
+        case 'txt':
           titleEl.setText('📄 ');
           break;
         case 'pdf':

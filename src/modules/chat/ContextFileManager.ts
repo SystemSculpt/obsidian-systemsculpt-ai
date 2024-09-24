@@ -27,7 +27,7 @@ export class ContextFileManager {
   }
 
   private async processFile(file: TFile) {
-    const supportedExtensions = ['md', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
+    const supportedExtensions = ['md', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg', 'txt'];
     const fileExtension = file.extension.toLowerCase();
     
     if (supportedExtensions.includes(fileExtension)) {
@@ -245,6 +245,7 @@ export class ContextFileManager {
       const isPDF = file.extension.toLowerCase() === 'pdf';
       const isDocx = file.extension.toLowerCase() === 'docx';
       const isPptx = file.extension.toLowerCase() === 'pptx';
+      const isTxt = file.extension.toLowerCase() === 'txt'; 
   
       if (isImage) {
         const imgPreview = document.createElement('img');
@@ -257,7 +258,7 @@ export class ContextFileManager {
         audioIcon.className = 'context-file-preview audio-icon';
         audioIcon.innerHTML = `<svg viewBox="0 0 100 100" class="audio-icon" width="40" height="40"><path fill="currentColor" stroke="currentColor" d="M50 10 L25 30 L25 70 L50 90 L50 10 M55 30 A20 20 0 0 1 55 70 M65 20 A40 40 0 0 1 65 80"></path></svg>`;
         fileEl.appendChild(audioIcon);
-      } else if (isPDF || isDocx || isPptx || file.extension === 'md') {
+      } else if (isPDF || isDocx || isPptx || file.extension === 'md' || isTxt) {
         const icon = document.createElement('span');
         icon.className = `context-file-preview ${isPDF ? 'pdf-icon' : isDocx ? 'docx-icon' : isPptx ? 'pptx-icon' : 'md-icon'}`;
         icon.innerHTML = `<svg viewBox="0 0 100 100" class="${isPDF ? 'pdf-icon' : isDocx ? 'docx-icon' : isPptx ? 'pptx-icon' : 'md-icon'}" width="40" height="40">
