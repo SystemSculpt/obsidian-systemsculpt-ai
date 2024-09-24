@@ -22,6 +22,8 @@ export class DocumentExtractor {
       return this.processAudio(file);
     } else if (fileExtension === 'md') {
       return this.processMarkdown(file);
+    } else if (fileExtension === 'txt') { 
+      return this.processText(file);
     } else {
       throw new Error(`Unsupported file type: ${fileExtension}`);
     }
@@ -273,6 +275,14 @@ export class DocumentExtractor {
   }
 
   private async processMarkdown(file: TFile): Promise<{ markdown: string; images: { [key: string]: string } }> {
+    const content = await this.app.vault.read(file);
+    return {
+      markdown: content,
+      images: {}
+    };
+  }
+
+  private async processText(file: TFile): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const content = await this.app.vault.read(file);
     return {
       markdown: content,
