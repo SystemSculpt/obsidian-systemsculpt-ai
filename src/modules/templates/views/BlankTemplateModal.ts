@@ -345,6 +345,10 @@ export class BlankTemplateModal extends Modal {
         suggestionContent,
         (selectedTemplate: string) => {
           inputEl.value = selectedTemplate;
+          // Focus on the userPromptInput textarea after selecting a template
+          setTimeout(() => {
+            this.userPromptInput.focus();
+          }, 0);
         },
         this.plugin.plugin.app
       );
