@@ -12,6 +12,8 @@ import { updateRecorderButtonStatusBar } from '../functions/updateRecorderButton
 import { renderWhisperProviderSetting } from './whisperProviderSetting';
 import { renderCustomWhisperPromptSetting } from './customWhisperPromptSetting';
 import { renderPostProcessingPromptSetting } from './postProcessingPromptSetting';
+import { renderLanguageSetting } from './languageSetting';
+
 export class SystemSculptRecorderSettingTab extends PluginSettingTab {
   plugin: RecorderModule;
 
@@ -54,6 +56,7 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
     renderRecordingsPathSetting(containerEl, this.plugin);
     renderTranscriptionsPathSetting(containerEl, this.plugin);
     renderMicrophoneDropdown(containerEl, this.plugin);
+    renderLanguageSetting(containerEl, this.plugin);
     renderAutoTranscriptionToggle(containerEl, this.plugin);
     renderCustomWhisperPromptSetting(containerEl, this.plugin);
     renderPostProcessingPromptSetting(containerEl, this.plugin);

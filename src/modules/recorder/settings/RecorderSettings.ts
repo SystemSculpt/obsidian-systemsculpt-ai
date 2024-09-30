@@ -14,6 +14,7 @@ export interface SystemSculptRecorderSettings {
   customWhisperPrompt: string;
   enablePostProcessingPrompt: boolean;
   postProcessingPrompt: string;
+  language: string;
 }
 
 export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
@@ -32,4 +33,5 @@ export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
   customWhisperPrompt: 'SystemSculpt AI, GPT, GPT-4, GPT-4o, GPT-4o-mini, o1-preview, o1-mini, Anthropic, Claude, Claude Sonnet 3.5, Claude Opus, Claude Haiku, LLaMA',
   enablePostProcessingPrompt: false,
   postProcessingPrompt: 'Take the following transcript and summarize it in markdown format, with a main summary, a list of key points, and actionable takeaways.',
+  language: 'en',
 };

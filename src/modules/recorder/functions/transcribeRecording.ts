@@ -7,6 +7,8 @@ async function transcribeChunk(
   const formData = new FormData();
   formData.append('file', chunk, 'recording.mp3');
   formData.append('model', plugin.settings.whisperModel);
+  formData.append('language', plugin.settings.language); // Add language parameter
+
   if (plugin.settings.enableCustomWhisperPrompt && plugin.settings.customWhisperPrompt) {
     console.log('Adding custom prompt to transcription...');
     formData.append('prompt', plugin.settings.customWhisperPrompt);
@@ -92,6 +94,7 @@ async function transcribeWithGroq(
   const formData = new FormData();
   formData.append('file', blob, 'recording.mp3');
   formData.append('model', 'whisper-large-v3');
+  formData.append('language', plugin.settings.language); // Add language parameter
 
   const currentGroqApiKey = plugin.plugin.brainModule.settings.groqAPIKey;
 
