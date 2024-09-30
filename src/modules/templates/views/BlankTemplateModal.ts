@@ -1,9 +1,10 @@
-import { Modal } from 'obsidian';
+import { Modal, TFile, TFolder } from 'obsidian';
 import { TemplatesModule } from '../TemplatesModule';
 import { handleStreamingResponse } from '../functions/handleStreamingResponse';
 import { showCustomNotice } from '../../../modals';
 import { MarkdownView } from 'obsidian';
 import { BrainModule } from '../../brain/BrainModule';
+import { MultiSuggest } from '../../../utils/MultiSuggest';
 
 export class BlankTemplateModal extends Modal {
   private userPromptInput: HTMLTextAreaElement;
@@ -12,6 +13,7 @@ export class BlankTemplateModal extends Modal {
   private plugin: TemplatesModule;
   private preContextToggle: HTMLInputElement;
   private postContextToggle: HTMLInputElement;
+  private systemTemplateInput: HTMLInputElement;
 
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
@@ -21,6 +23,7 @@ export class BlankTemplateModal extends Modal {
     this.postContextArea = document.createElement('textarea');
     this.preContextToggle = document.createElement('input');
     this.postContextToggle = document.createElement('input');
+    this.systemTemplateInput = document.createElement('input');
   }
 
   onOpen(): void {
@@ -36,6 +39,18 @@ export class BlankTemplateModal extends Modal {
     });
 
     const contextContainer = modalContent.createDiv('context-container');
+
+    // Add system template input
+    const systemTemplateContainer = contextContainer.createDiv('system-template-container');
+    systemTemplateContainer.createEl('label', { text: 'System Template:', attr: { for: 'system-template-input' } });
+    this.systemTemplateInput = systemTemplateContainer.createEl('input', {
+      type: 'text',
+      placeholder: 'Enter system template name',
+      cls: 'system-template-input',
+    });
+
+    // Add directory suggestions for system template input
+    this.addDirectorySuggestions(this.systemTemplateInput);
 
     this.preContextArea = contextContainer.createEl('textarea', {
       cls: 'context-area pre-context-area',
@@ -158,6 +173,10 @@ export class BlankTemplateModal extends Modal {
     const preContext = this.preContextArea.value;
     const postContext = this.postContextArea.value;
     const userPrompt = this.userPromptInput.value.trim();
+    const systemTemplate = this.systemTemplateInput.value.trim();
+
+    console.log("Selected system template:", systemTemplate);
+    console.log("Templates path:", this.plugin.settings.templatesPath);
 
     if (userPrompt) {
       this.close();
@@ -172,6 +191,19 @@ export class BlankTemplateModal extends Modal {
 
         let contextPrompt = '';
         let postSystemPrompt = 'Format:\n';
+
+        if (systemTemplate) {
+          console.log("Attempting to get system template content");
+          const templateContent = await this.getSystemTemplateContent(systemTemplate);
+          console.log("Template content:", templateContent);
+          if (templateContent) {
+            postSystemPrompt = templateContent + '\n' + postSystemPrompt;
+          } else {
+            console.error(`System template "${systemTemplate}" not found.`);
+            showCustomNotice(`System template "${systemTemplate}" not found.`, 5000);
+            return;
+          }
+        }
 
         if (preContext) {
           contextPrompt += `<PRE-CONTEXT>\n${preContext}\n</PRE-CONTEXT>\n`;
@@ -260,5 +292,62 @@ export class BlankTemplateModal extends Modal {
   onClose(): void {
     const { contentEl } = this;
     contentEl.empty();
+  }
+
+  private async getSystemTemplateContent(templateName: string): Promise<string | null> {
+    const templatesPath = this.plugin.settings.templatesPath;
+    console.log("Templates path:", templatesPath);
+    
+    const templateFile = this.plugin.plugin.app.vault.getFiles().find(file => 
+      file.path.startsWith(templatesPath) && file.basename === templateName
+    );
+    
+    console.log("Template file found:", templateFile ? templateFile.path : "Not found");
+
+    if (templateFile) {
+      const content = await this.plugin.plugin.app.vault.read(templateFile);
+      const frontMatter = this.plugin.plugin.app.metadataCache.getFileCache(templateFile)?.frontmatter;
+      
+      if (frontMatter && frontMatter.prompt) {
+        console.log("Using frontmatter prompt");
+        return frontMatter.prompt;
+      }
+      
+      console.log("Using full file content");
+      return content;
+    }
+    
+    console.log("Template file not found");
+    return null;
+  }
+
+  private addDirectorySuggestions(inputEl: HTMLInputElement): void {
+    const templatesPath = this.plugin.settings.templatesPath;
+    const templateFolder = this.plugin.plugin.app.vault.getAbstractFileByPath(templatesPath);
+
+    if (templateFolder instanceof TFolder) {
+      const suggestionContent = new Set<string>();
+
+      const addTemplateFiles = (folder: TFolder) => {
+        for (const child of folder.children) {
+          if (child instanceof TFile && child.extension === 'md') {
+            suggestionContent.add(child.basename);
+          } else if (child instanceof TFolder) {
+            addTemplateFiles(child);
+          }
+        }
+      };
+
+      addTemplateFiles(templateFolder);
+
+      new MultiSuggest(
+        inputEl,
+        suggestionContent,
+        (selectedTemplate: string) => {
+          inputEl.value = selectedTemplate;
+        },
+        this.plugin.plugin.app
+      );
+    }
   }
 }
