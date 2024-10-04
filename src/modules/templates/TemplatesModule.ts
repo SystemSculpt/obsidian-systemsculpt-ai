@@ -17,6 +17,7 @@ export interface TemplatesSettings {
   showSSSyncTemplates: boolean;
   triggerKey: string;
   isPatreonMember: boolean;
+  copyResponseToClipboard: boolean;
 }
 
 export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
@@ -35,6 +36,7 @@ Rules:
   showSSSyncTemplates: true,
   triggerKey: '/',
   isPatreonMember: false,
+  copyResponseToClipboard: false,
 };
 
 export class TemplatesModule implements IGenerationModule {

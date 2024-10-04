@@ -14,6 +14,7 @@ export class BlankTemplateModal extends Modal {
   private preContextToggle: HTMLInputElement;
   private postContextToggle: HTMLInputElement;
   private systemTemplateInput: HTMLInputElement;
+  private copyToClipboardToggle: HTMLInputElement;
 
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
@@ -24,6 +25,7 @@ export class BlankTemplateModal extends Modal {
     this.preContextToggle = document.createElement('input');
     this.postContextToggle = document.createElement('input');
     this.systemTemplateInput = document.createElement('input');
+    this.copyToClipboardToggle = document.createElement('input');
   }
 
   onOpen(): void {
@@ -39,6 +41,19 @@ export class BlankTemplateModal extends Modal {
     });
 
     const contextContainer = modalContent.createDiv('context-container');
+
+    // Add Copy to Clipboard toggle
+    const copyToClipboardContainer = contextContainer.createDiv('copy-to-clipboard-container');
+    this.copyToClipboardToggle = this.createToggle(
+      copyToClipboardContainer,
+      'Copy response to clipboard',
+      'Automatically copy the generated response to the clipboard'
+    );
+    this.copyToClipboardToggle.checked = this.plugin.settings.copyResponseToClipboard;
+    this.copyToClipboardToggle.addEventListener('change', async () => {
+      this.plugin.settings.copyResponseToClipboard = this.copyToClipboardToggle.checked;
+      await this.plugin.saveSettings();
+    });
 
     // Add system template input
     const systemTemplateContainer = contextContainer.createDiv('system-template-container');
@@ -278,6 +293,11 @@ export class BlankTemplateModal extends Modal {
         } finally {
           this.plugin.abortController = null;
           this.plugin.isGenerationCompleted = true;
+        }
+
+        if (this.plugin.settings.copyResponseToClipboard) {
+          const generatedContent = editor.getRange(cursor, editor.getCursor());
+          await navigator.clipboard.writeText(generatedContent);
         }
       }
     }
