@@ -73,6 +73,13 @@ export class TemplatesModule implements IGenerationModule {
 
     await this.plugin.brainModule.initializeAIService();
     await this.AIService.ensureModelCacheInitialized();
+
+    this.plugin.addCommand({
+      id: 'open-blank-template-modal',
+      name: 'Open Blank Template Modal',
+      callback: () => this.openBlankTemplateModal(),
+      hotkeys: []
+    });
   }
 
   async loadSettings() {
@@ -362,5 +369,14 @@ export class TemplatesModule implements IGenerationModule {
             this.settingsDisplay(containerEl);
           });
       });
+  }
+
+  public openBlankTemplateModal(): void {
+    const activeView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView) {
+      new BlankTemplateModal(this).open();
+    } else {
+      showCustomNotice('Please open a note before using the Blank Template Modal.', 3000);
+    }
   }
 }
