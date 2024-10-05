@@ -18,6 +18,8 @@ export interface TemplatesSettings {
   triggerKey: string;
   isPatreonMember: boolean;
   copyResponseToClipboard: boolean;
+  rememberSelectedTemplate: boolean;
+  lastSelectedTemplate: string;
 }
 
 export const DEFAULT_TEMPLATES_SETTINGS: TemplatesSettings = {
@@ -37,6 +39,8 @@ Rules:
   triggerKey: '/',
   isPatreonMember: false,
   copyResponseToClipboard: false,
+  rememberSelectedTemplate: false,
+  lastSelectedTemplate: '',
 };
 
 export class TemplatesModule implements IGenerationModule {
@@ -254,6 +258,8 @@ export class TemplatesModule implements IGenerationModule {
     this.renderTriggerKeySetting(containerEl);
     this.renderTemplatesPathSetting(containerEl);
     this.renderBlankTemplatePromptSetting(containerEl);
+    this.renderRememberSelectedTemplateSetting(containerEl);
+    this.renderCopyToClipboardSetting(containerEl);
   }
 
   private renderLicenseKeySetting(containerEl: HTMLElement): void {
@@ -369,6 +375,37 @@ export class TemplatesModule implements IGenerationModule {
               DEFAULT_TEMPLATES_SETTINGS.blankTemplatePrompt;
             await this.saveSettings();
             this.settingsDisplay(containerEl);
+          });
+      });
+  }
+
+  private renderRememberSelectedTemplateSetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Remember selected template')
+      .setDesc('Automatically use the last selected template for future generations')
+      .addToggle(toggle => {
+        toggle
+          .setValue(this.settings.rememberSelectedTemplate)
+          .onChange(async (value: boolean) => {
+            this.settings.rememberSelectedTemplate = value;
+            if (!value) {
+              this.settings.lastSelectedTemplate = '';
+            }
+            await this.saveSettings();
+          });
+      });
+  }
+
+  private renderCopyToClipboardSetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Copy response to clipboard')
+      .setDesc('Automatically copy the generated response to the clipboard')
+      .addToggle(toggle => {
+        toggle
+          .setValue(this.settings.copyResponseToClipboard)
+          .onChange(async (value: boolean) => {
+            this.settings.copyResponseToClipboard = value;
+            await this.saveSettings();
           });
       });
   }

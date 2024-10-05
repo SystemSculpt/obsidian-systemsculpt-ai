@@ -129,3 +129,17 @@
   outline: none;
   border-color: var(--interactive-accent);
 }
+
+.blank-template-modal .remember-template-container,
+.blank-template-modal .copy-to-clipboard-container {
+  margin-bottom: 15px;
+}
+
+.blank-template-modal .toggle-container {
+  display: flex;
+  align-items: center;
+}
+
+.blank-template-modal .toggle-container input[type="checkbox"] {
+  margin-right: 10px;
+}

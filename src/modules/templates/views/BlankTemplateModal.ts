@@ -1,5 +1,5 @@
 import { Modal, TFile, TFolder } from 'obsidian';
-import { TemplatesModule } from '../TemplatesModule';
+import { TemplatesModule, TemplatesSettings } from '../TemplatesModule';
 import { handleStreamingResponse } from '../functions/handleStreamingResponse';
 import { showCustomNotice } from '../../../modals';
 import { MarkdownView } from 'obsidian';
@@ -15,6 +15,7 @@ export class BlankTemplateModal extends Modal {
   private postContextToggle: HTMLInputElement;
   private systemTemplateInput: HTMLInputElement;
   private copyToClipboardToggle: HTMLInputElement;
+  private rememberTemplateToggle: HTMLInputElement;
 
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
@@ -26,6 +27,7 @@ export class BlankTemplateModal extends Modal {
     this.postContextToggle = document.createElement('input');
     this.systemTemplateInput = document.createElement('input');
     this.copyToClipboardToggle = document.createElement('input');
+    this.rememberTemplateToggle = document.createElement('input');
   }
 
   onOpen(): void {
@@ -41,6 +43,19 @@ export class BlankTemplateModal extends Modal {
     });
 
     const contextContainer = modalContent.createDiv('context-container');
+
+    // Add Remember Template toggle
+    const rememberTemplateContainer = contextContainer.createDiv('remember-template-container');
+    this.rememberTemplateToggle = this.createToggle(
+      rememberTemplateContainer,
+      'Remember selected template',
+      'Automatically use the last selected template for future generations'
+    );
+    this.rememberTemplateToggle.checked = this.plugin.settings.rememberSelectedTemplate;
+    this.rememberTemplateToggle.addEventListener('change', async () => {
+      this.plugin.settings.rememberSelectedTemplate = this.rememberTemplateToggle.checked;
+      await this.plugin.saveSettings();
+    });
 
     // Add Copy to Clipboard toggle
     const copyToClipboardContainer = contextContainer.createDiv('copy-to-clipboard-container');
@@ -63,6 +78,11 @@ export class BlankTemplateModal extends Modal {
       placeholder: 'Enter system template name',
       cls: 'system-template-input',
     });
+
+    // Set the last selected template if the setting is enabled
+    if (this.plugin.settings.rememberSelectedTemplate && this.plugin.settings.lastSelectedTemplate) {
+      this.systemTemplateInput.value = this.plugin.settings.lastSelectedTemplate;
+    }
 
     // Add directory suggestions for system template input
     this.addDirectorySuggestions(this.systemTemplateInput);
@@ -189,6 +209,12 @@ export class BlankTemplateModal extends Modal {
     const postContext = this.postContextArea.value;
     const userPrompt = this.userPromptInput.value.trim();
     const systemTemplate = this.systemTemplateInput.value.trim();
+
+    // Save the selected template if the setting is enabled
+    if (this.plugin.settings.rememberSelectedTemplate) {
+      this.plugin.settings.lastSelectedTemplate = systemTemplate;
+      await this.plugin.saveSettings();
+    }
 
     console.log("Selected system template:", systemTemplate);
     console.log("Templates path:", this.plugin.settings.templatesPath);
@@ -365,6 +391,11 @@ export class BlankTemplateModal extends Modal {
         suggestionContent,
         (selectedTemplate: string) => {
           inputEl.value = selectedTemplate;
+          // Save the selected template if the setting is enabled
+          if (this.plugin.settings.rememberSelectedTemplate) {
+            this.plugin.settings.lastSelectedTemplate = selectedTemplate;
+            this.plugin.saveSettings();
+          }
           // Focus on the userPromptInput textarea after selecting a template
           setTimeout(() => {
             this.userPromptInput.focus();
