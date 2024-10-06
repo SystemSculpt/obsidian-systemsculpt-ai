@@ -1,5 +1,5 @@
-import { Modal, App } from 'obsidian';
-import { ChatView } from '../ChatView';
+import { Modal, App } from "obsidian";
+import { ChatView } from "../ChatView";
 
 export class ActionsModal extends Modal {
   private chatView: ChatView;
@@ -16,63 +16,63 @@ export class ActionsModal extends Modal {
     this.chatView = chatView;
     this.actions = [
       {
-        group: 'General',
+        group: "General",
         items: [
           {
-            name: 'New Chat',
+            name: "New Chat",
             callback: () => this.chatView.chatModule.openNewChat(),
           },
           {
-            name: 'Archive Chat',
+            name: "Archive Chat",
             callback: () => this.chatView.archiveChat(),
           },
           {
-            name: 'Delete Chat',
+            name: "Delete Chat",
             callback: () => this.chatView.deleteChat(),
           },
           {
-            name: 'Close Chat',
+            name: "Close Chat",
             callback: () => this.chatView.leaf.detach(),
           },
           {
-            name: 'Random Chat',
+            name: "Random Chat",
             callback: () => this.chatView.openRandomChat(),
           },
         ],
       },
       {
-        group: 'History',
+        group: "History",
         items: [
           {
-            name: 'Open Chat History',
+            name: "Open Chat History",
             callback: () => {
               this.chatView.chatHistoryManager.openChatHistory();
             },
           },
           {
-            name: 'Open Chat History File',
+            name: "Open Chat History File",
             callback: () => this.chatView.openChatHistoryFile(),
           },
         ],
       },
       {
-        group: 'Title',
+        group: "Title",
         items: [
           {
-            name: 'Edit Title',
+            name: "Edit Title",
             callback: () => this.chatView.handleEditTitle(),
           },
           {
-            name: 'Generate Title',
+            name: "Generate Title",
             callback: () => this.chatView.handleGenerateTitle(),
           },
         ],
       },
       {
-        group: 'Tokens',
+        group: "Tokens",
         items: [
           {
-            name: 'Estimate Cost',
+            name: "Estimate Cost",
             callback: () => this.chatView.openCostEstimator(),
           },
         ],
@@ -83,61 +83,61 @@ export class ActionsModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl('h2', { text: 'Chat Actions' });
+    contentEl.createEl("h2", { text: "Chat Actions" });
 
-    this.searchInput = contentEl.createEl('input', {
-      type: 'text',
-      placeholder: 'Search actions...',
-      cls: 'action-search-input',
+    this.searchInput = contentEl.createEl("input", {
+      type: "text",
+      placeholder: "Search actions...",
+      cls: "action-search-input",
     });
 
-    this.actionListContainer = contentEl.createEl('div', { cls: 'modal-list' });
+    this.actionListContainer = contentEl.createEl("div", { cls: "modal-list" });
     this.renderActionList();
     this.setupEventListeners();
 
     setTimeout(() => this.searchInput.focus(), 0);
   }
 
-  private renderActionList(filter: string = '') {
+  private renderActionList(filter: string = "") {
     this.actionListContainer.empty();
     const searchTerms = filter
       .toLowerCase()
       .split(/\s+/)
-      .filter(term => term.length > 0);
+      .filter((term) => term.length > 0);
 
-    this.actions.forEach(group => {
+    this.actions.forEach((group) => {
       const filteredItems = group.items.filter(
-        action =>
+        (action) =>
           searchTerms.length === 0 ||
-          searchTerms.every(term => action.name.toLowerCase().includes(term))
+          searchTerms.every((term) => action.name.toLowerCase().includes(term)),
       );
 
       if (filteredItems.length > 0) {
-        this.actionListContainer.createEl('h3', { text: group.group });
-        const groupContainer = this.actionListContainer.createEl('div', {
-          cls: 'modal-group',
+        this.actionListContainer.createEl("h3", { text: group.group });
+        const groupContainer = this.actionListContainer.createEl("div", {
+          cls: "modal-group",
         });
 
-        filteredItems.forEach(action => {
-          const actionItem = groupContainer.createEl('div', {
-            cls: 'modal-item',
+        filteredItems.forEach((action) => {
+          const actionItem = groupContainer.createEl("div", {
+            cls: "modal-item",
           });
-          const nameSpan = actionItem.createEl('span');
+          const nameSpan = actionItem.createEl("span");
           this.highlightText(nameSpan, action.name, searchTerms);
-          actionItem.addEventListener('click', () => this.selectAction(action));
+          actionItem.addEventListener("click", () => this.selectAction(action));
         });
       }
     });
 
     if (this.actionListContainer.childElementCount === 0) {
-      this.actionListContainer.createEl('div', {
-        text: 'No actions match your search.',
-        cls: 'no-results-message',
+      this.actionListContainer.createEl("div", {
+        text: "No actions match your search.",
+        cls: "no-results-message",
       });
     }
 
     this.selectedActionIndex = this.actionListContainer.querySelector(
-      '.modal-item'
+      ".modal-item",
     )
       ? 0
       : -1;
@@ -147,67 +147,67 @@ export class ActionsModal extends Modal {
   private highlightText(
     element: HTMLElement,
     text: string,
-    searchTerms: string[]
+    searchTerms: string[],
   ) {
     if (searchTerms.length === 0) {
       element.textContent = text;
       return;
     }
 
-    const regex = new RegExp(`(${searchTerms.join('|')})`, 'gi');
+    const regex = new RegExp(`(${searchTerms.join("|")})`, "gi");
     const parts = text.split(regex);
 
-    parts.forEach(part => {
-      const span = element.createEl('span');
+    parts.forEach((part) => {
+      const span = element.createEl("span");
       span.textContent = part;
-      if (searchTerms.some(term => part.toLowerCase().includes(term))) {
-        span.addClass('fuzzy-match');
+      if (searchTerms.some((term) => part.toLowerCase().includes(term))) {
+        span.addClass("fuzzy-match");
       }
     });
   }
 
   private setupEventListeners() {
-    this.searchInput.addEventListener('input', () => {
+    this.searchInput.addEventListener("input", () => {
       this.renderActionList(this.searchInput.value);
     });
 
     this.searchInput.addEventListener(
-      'keydown',
+      "keydown",
       async (event: KeyboardEvent) => {
         switch (event.key) {
-          case 'Enter':
+          case "Enter":
             event.preventDefault();
             await this.selectHighlightedAction();
             break;
-          case 'Tab':
+          case "Tab":
             event.preventDefault();
             this.navigateActionSelection(event.shiftKey ? -1 : 1);
             break;
-          case 'ArrowDown':
+          case "ArrowDown":
             event.preventDefault();
             this.navigateActionSelection(1);
             break;
-          case 'ArrowUp':
+          case "ArrowUp":
             event.preventDefault();
             this.navigateActionSelection(-1);
             break;
-          case 'Escape':
+          case "Escape":
             if (this.searchInput.value) {
               event.preventDefault();
-              this.searchInput.value = '';
+              this.searchInput.value = "";
               this.renderActionList();
             } else {
               this.close();
             }
             break;
         }
-      }
+      },
     );
   }
 
   private navigateActionSelection(direction: number) {
     const actionItems =
-      this.actionListContainer.querySelectorAll('.modal-item');
+      this.actionListContainer.querySelectorAll(".modal-item");
     if (actionItems.length === 0) return;
 
     this.selectedActionIndex += direction;
@@ -221,27 +221,27 @@ export class ActionsModal extends Modal {
 
   private updateSelectedAction() {
     const actionItems =
-      this.actionListContainer.querySelectorAll('.modal-item');
+      this.actionListContainer.querySelectorAll(".modal-item");
     actionItems.forEach((item, index) => {
       if (index === this.selectedActionIndex) {
-        item.addClass('selected');
-        item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        item.addClass("selected");
+        item.scrollIntoView({ block: "nearest", behavior: "smooth" });
       } else {
-        item.removeClass('selected');
+        item.removeClass("selected");
       }
     });
   }
 
   private async selectHighlightedAction() {
     const selectedItem = this.actionListContainer.querySelector(
-      '.modal-item.selected'
+      ".modal-item.selected",
     ) as HTMLElement;
     if (selectedItem) {
       const action = this.actions
-        .flatMap(group => group.items)
+        .flatMap((group) => group.items)
         .find(
-          action =>
-            action.name === selectedItem.querySelector('span')?.textContent
+          (action) =>
+            action.name === selectedItem.querySelector("span")?.textContent,
         );
       if (action) {
         await this.selectAction(action);

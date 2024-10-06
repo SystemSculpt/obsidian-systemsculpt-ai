@@ -1,16 +1,16 @@
-import { Setting } from 'obsidian';
-import { RecorderModule } from '../RecorderModule';
+import { Setting } from "obsidian";
+import { RecorderModule } from "../RecorderModule";
 
 export function renderPasteOnTranscriptionToggle(
   containerEl: HTMLElement,
-  plugin: RecorderModule
+  plugin: RecorderModule,
 ): void {
   new Setting(containerEl)
-    .setName('Paste into active note')
+    .setName("Paste into active note")
     .setDesc(
-      'Automatically paste the transcription into the active note at the cursor position'
+      "Automatically paste the transcription into the active note at the cursor position",
     )
-    .addToggle(toggle => {
+    .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.pasteIntoActiveNote)
         .onChange(async (value: boolean) => {

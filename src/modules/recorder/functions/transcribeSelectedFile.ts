@@ -1,11 +1,11 @@
-import { RecorderModule } from '../RecorderModule';
-import { TFile } from 'obsidian';
+import { RecorderModule } from "../RecorderModule";
+import { TFile } from "obsidian";
 
 export async function transcribeSelectedFile(
   plugin: RecorderModule,
-  file: TFile
+  file: TFile,
 ): Promise<void> {
-  if (file.extension !== 'mp3' && file.extension !== 'mp4') {
+  if (file.extension !== "mp3" && file.extension !== "mp4") {
     return;
   }
 

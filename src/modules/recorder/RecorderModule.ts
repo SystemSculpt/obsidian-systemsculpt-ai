@@ -1,21 +1,21 @@
-import SystemSculptPlugin from '../../main';
+import SystemSculptPlugin from "../../main";
 import {
   SystemSculptRecorderSettings,
   DEFAULT_RECORDER_SETTINGS,
-} from './settings/RecorderSettings';
-import { normalizePath, TFile } from 'obsidian';
-import { showCustomNotice } from '../../modals';
-import { SystemSculptRecorderSettingTab } from './settings/RecorderSettingTab';
-import { getMicrophones } from './functions/getMicrophones';
-import { getSelectedMicrophone } from './functions/getSelectedMicrophone';
-import { startRecording } from './functions/startRecording';
-import { stopRecording } from './functions/stopRecording';
-import { saveRecording } from './functions/saveRecording';
-import { handleTranscription } from './functions/handleTranscription';
-import { transcribeSelectedFile } from './functions/transcribeSelectedFile';
-import { RecordingNotice } from './views/RecordingNotice';
-import { AIService } from '../../api/AIService';
-import { updateRecorderButtonStatusBar } from './functions/updateRecorderButtonStatusBar';
+} from "./settings/RecorderSettings";
+import { normalizePath, TFile } from "obsidian";
+import { showCustomNotice } from "../../modals";
+import { SystemSculptRecorderSettingTab } from "./settings/RecorderSettingTab";
+import { getMicrophones } from "./functions/getMicrophones";
+import { getSelectedMicrophone } from "./functions/getSelectedMicrophone";
+import { startRecording } from "./functions/startRecording";
+import { stopRecording } from "./functions/stopRecording";
+import { saveRecording } from "./functions/saveRecording";
+import { handleTranscription } from "./functions/handleTranscription";
+import { transcribeSelectedFile } from "./functions/transcribeSelectedFile";
+import { RecordingNotice } from "./views/RecordingNotice";
+import { AIService } from "../../api/AIService";
+import { updateRecorderButtonStatusBar } from "./functions/updateRecorderButtonStatusBar";
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
@@ -33,22 +33,22 @@ export class RecorderModule {
     await this.loadSettings();
 
     this.plugin.addCommand({
-      id: 'record-audio-note',
-      name: 'Record audio note',
+      id: "record-audio-note",
+      name: "Record audio note",
       callback: () => this.toggleRecording(),
     });
 
     this.plugin.addCommand({
-      id: 'transcribe-selected-file',
-      name: 'Transcribe selected file',
+      id: "transcribe-selected-file",
+      name: "Transcribe selected file",
       callback: () => {},
     });
 
     if (!this.plugin.recorderToggleStatusBarItem) {
       this.plugin.recorderToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.recorderToggleStatusBarItem.setText('R');
+      this.plugin.recorderToggleStatusBarItem.setText("R");
       this.plugin.recorderToggleStatusBarItem.addClass(
-        'recorder-toggle-button'
+        "recorder-toggle-button",
       );
     }
 
@@ -63,7 +63,7 @@ export class RecorderModule {
     this.settings = Object.assign(
       {},
       DEFAULT_RECORDER_SETTINGS,
-      await this.plugin.loadData()
+      await this.plugin.loadData(),
     );
   }
 
@@ -76,7 +76,7 @@ export class RecorderModule {
     new SystemSculptRecorderSettingTab(
       this.plugin.app,
       this,
-      containerEl
+      containerEl,
     ).display();
   }
 
@@ -90,10 +90,13 @@ export class RecorderModule {
     if (!directory) {
       try {
         await vault.createFolder(normalizedPath);
-        this.plugin.app.workspace.trigger('refresh-files');
+        this.plugin.app.workspace.trigger("refresh-files");
       } catch (error) {
-        if (error instanceof Error && !error.message.includes('Folder already exists')) {
-          console.error('Error ensuring recordings directory:', error);
+        if (
+          error instanceof Error &&
+          !error.message.includes("Folder already exists")
+        ) {
+          console.error("Error ensuring recordings directory:", error);
         }
       }
     }
@@ -127,7 +130,7 @@ export class RecorderModule {
   async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
     const result = await saveRecording(this, arrayBuffer);
     if (!result) {
-      throw new Error('Failed to save recording');
+      throw new Error("Failed to save recording");
     }
     return result;
   }
@@ -135,7 +138,7 @@ export class RecorderModule {
   async handleTranscription(
     arrayBuffer: ArrayBuffer,
     recordingFile: TFile,
-    skipPaste: boolean = false
+    skipPaste: boolean = false,
   ): Promise<string> {
     return handleTranscription(this, arrayBuffer, recordingFile, skipPaste);
   }
@@ -155,9 +158,9 @@ export class RecorderModule {
   showRecordingStatusBar(): void {
     if (!this.recordingStatusBarItem) {
       this.recordingStatusBarItem = this.plugin.addStatusBarItem();
-      this.recordingStatusBarItem.setText('Recording...');
-      this.recordingStatusBarItem.addClass('recorder-notice-toggle-button');
-      this.recordingStatusBarItem.addEventListener('click', () => {
+      this.recordingStatusBarItem.setText("Recording...");
+      this.recordingStatusBarItem.addClass("recorder-notice-toggle-button");
+      this.recordingStatusBarItem.addEventListener("click", () => {
         this.showRecordingNoticeWithoutStarting();
       });
     }

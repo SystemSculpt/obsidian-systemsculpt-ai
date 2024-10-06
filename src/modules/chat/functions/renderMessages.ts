@@ -1,21 +1,23 @@
-import { marked } from 'marked';
-import { ChatMessage } from '../ChatMessage';
-import { handleDeleteMessage } from './handleDeleteMessage';
+import { marked } from "marked";
+import { ChatMessage } from "../ChatMessage";
+import { handleDeleteMessage } from "./handleDeleteMessage";
 
 const INITIAL_LOAD_LIMIT = 30000; // Characters
 const CHUNK_SIZE = 10000; // Characters
 
 function isScrolledToBottom(container: HTMLElement): boolean {
-  return container.scrollHeight - container.clientHeight <= container.scrollTop + 1;
+  return (
+    container.scrollHeight - container.clientHeight <= container.scrollTop + 1
+  );
 }
 
 export function renderMessages(
   chatMessages: ChatMessage[],
   messagesContainer: HTMLElement,
-  deleteMessageCallback: (index: number) => void
+  deleteMessageCallback: (index: number) => void,
 ) {
   if (!messagesContainer) return;
-  messagesContainer.innerHTML = '';
+  messagesContainer.innerHTML = "";
 
   let visibleMessages: ChatMessage[] = [];
   let visibleMessageIndices: number[] = [];
@@ -37,7 +39,7 @@ export function renderMessages(
       visibleMessages,
       visibleMessageIndices,
       messagesContainer,
-      deleteMessageCallback
+      deleteMessageCallback,
     );
   });
   messagesContainer.appendChild(loadMoreButton);
@@ -47,13 +49,13 @@ export function renderMessages(
     visibleMessages,
     visibleMessageIndices,
     messagesContainer,
-    deleteMessageCallback
+    deleteMessageCallback,
   );
 
   const loadMoreMessages = () => {
     const firstVisibleIndex = visibleMessageIndices[0];
     if (firstVisibleIndex === 0) {
-      loadMoreButton.style.display = 'none';
+      loadMoreButton.style.display = "none";
       return;
     }
 
@@ -84,18 +86,18 @@ function renderVisibleMessages(
   messages: ChatMessage[],
   indices: number[],
   container: HTMLElement,
-  deleteMessageCallback: (index: number) => void
+  deleteMessageCallback: (index: number) => void,
 ) {
   // Keep the "Load More" button if it exists
-  const loadMoreButton = container.querySelector('.load-more-button');
-  container.innerHTML = '';
+  const loadMoreButton = container.querySelector(".load-more-button");
+  container.innerHTML = "";
   if (loadMoreButton) {
     container.appendChild(loadMoreButton);
   }
 
   messages.forEach((message, arrayIndex) => {
     const originalIndex = indices[arrayIndex];
-    const messageEl = createMessageElement(message, originalIndex, index => {
+    const messageEl = createMessageElement(message, originalIndex, (index) => {
       deleteMessageCallback(index);
       // Remove the deleted message from our local arrays
       const localIndex = indices.indexOf(index);
@@ -107,32 +109,32 @@ function renderVisibleMessages(
         messages,
         indices,
         container,
-        deleteMessageCallback
+        deleteMessageCallback,
       );
     });
     container.appendChild(messageEl);
   });
 
   // Add click event listener for code blocks
-  const codeBlocks = container.querySelectorAll('pre');
+  const codeBlocks = container.querySelectorAll("pre");
   codeBlocks.forEach(addCodeBlockClickListener);
 }
 
 function createLoadMoreButton(onClick: () => void): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.className = 'load-more-button';
-  button.textContent = 'See Previous Messages';
-  button.addEventListener('click', onClick);
+  const button = document.createElement("button");
+  button.className = "load-more-button";
+  button.textContent = "See Previous Messages";
+  button.addEventListener("click", onClick);
   return button;
 }
 
 function createMessageElement(
   message: ChatMessage,
   index: number,
-  deleteMessageCallback: (index: number) => void
+  deleteMessageCallback: (index: number) => void,
 ): HTMLElement {
-  const messageEl = document.createElement('div');
-  const roleClass = message.role.startsWith('ai') ? 'ai' : message.role;
+  const messageEl = document.createElement("div");
+  const roleClass = message.role.startsWith("ai") ? "ai" : message.role;
   messageEl.className = `chat-message ${roleClass}`;
   messageEl.innerHTML = `
     ${marked(message.text)}
@@ -141,24 +143,24 @@ function createMessageElement(
       <button class="delete-button" title="Delete Message">🗑️</button>
     </div>
     ${
-      message.role.startsWith('ai')
-        ? `<span class="model-name">${message.model || 'AI'}</span>`
-        : ''
+      message.role.startsWith("ai")
+        ? `<span class="model-name">${message.model || "AI"}</span>`
+        : ""
     }
   `;
 
-  const copyButton = messageEl.querySelector('.copy-button');
+  const copyButton = messageEl.querySelector(".copy-button");
   if (copyButton) {
-    copyButton.addEventListener('click', () =>
-      handleCopyMessage(copyButton as HTMLElement, message.text)
+    copyButton.addEventListener("click", () =>
+      handleCopyMessage(copyButton as HTMLElement, message.text),
     );
   }
 
-  const deleteButton = messageEl.querySelector('.delete-button');
+  const deleteButton = messageEl.querySelector(".delete-button");
   if (deleteButton) {
-    deleteButton.addEventListener('click', () => {
+    deleteButton.addEventListener("click", () => {
       handleDeleteMessage(deleteButton as HTMLElement, () =>
-        deleteMessageCallback(index)
+        deleteMessageCallback(index),
       );
     });
   }
@@ -168,22 +170,22 @@ function createMessageElement(
 
 function handleCopyMessage(button: HTMLElement, text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    button.classList.add('copied');
-    button.innerHTML = '✅';
+    button.classList.add("copied");
+    button.innerHTML = "✅";
     setTimeout(() => {
-      button.classList.remove('copied');
-      button.innerHTML = '📋';
+      button.classList.remove("copied");
+      button.innerHTML = "📋";
     }, 2000);
   });
 }
 
 function addCodeBlockClickListener(codeBlock: Element) {
-  codeBlock.addEventListener('click', () => {
-    const code = codeBlock.textContent || '';
+  codeBlock.addEventListener("click", () => {
+    const code = codeBlock.textContent || "";
     navigator.clipboard.writeText(code).then(() => {
-      codeBlock.classList.add('copied');
+      codeBlock.classList.add("copied");
       setTimeout(() => {
-        codeBlock.classList.remove('copied');
+        codeBlock.classList.remove("copied");
       }, 2000);
     });
   });

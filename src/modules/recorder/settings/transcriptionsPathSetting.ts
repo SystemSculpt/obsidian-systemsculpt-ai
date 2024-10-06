@@ -1,20 +1,20 @@
-import { Setting, TFolder } from 'obsidian';
-import { RecorderModule } from '../RecorderModule';
-import { DEFAULT_RECORDER_SETTINGS } from './RecorderSettings';
-import { MultiSuggest } from '../../../utils/MultiSuggest';
+import { Setting, TFolder } from "obsidian";
+import { RecorderModule } from "../RecorderModule";
+import { DEFAULT_RECORDER_SETTINGS } from "./RecorderSettings";
+import { MultiSuggest } from "../../../utils/MultiSuggest";
 
 export function renderTranscriptionsPathSetting(
   containerEl: HTMLElement,
-  plugin: RecorderModule
+  plugin: RecorderModule,
 ): void {
   new Setting(containerEl)
-    .setName('Transcriptions path')
-    .setDesc('Path where the transcriptions will be stored')
-    .addText(text => {
+    .setName("Transcriptions path")
+    .setDesc("Path where the transcriptions will be stored")
+    .addText((text) => {
       text
-        .setPlaceholder('Enter path')
+        .setPlaceholder("Enter path")
         .setValue(plugin.settings.transcriptionsPath)
-        .onChange(async value => {
+        .onChange(async (value) => {
           plugin.settings.transcriptionsPath = value;
           await plugin.saveSettings();
         });
@@ -32,13 +32,13 @@ export function renderTranscriptionsPathSetting(
         inputEl,
         suggestionContent,
         onSelectCallback,
-        plugin.plugin.app
+        plugin.plugin.app,
       );
     })
-    .addExtraButton(button => {
+    .addExtraButton((button) => {
       button
-        .setIcon('reset')
-        .setTooltip('Reset to default path')
+        .setIcon("reset")
+        .setTooltip("Reset to default path")
         .onClick(async () => {
           plugin.settings.transcriptionsPath =
             DEFAULT_RECORDER_SETTINGS.transcriptionsPath;
@@ -51,7 +51,7 @@ export function renderTranscriptionsPathSetting(
 function getFolderSuggestions(plugin: RecorderModule): Set<string> {
   const folders = plugin.plugin.app.vault
     .getAllLoadedFiles()
-    .filter(file => file instanceof TFolder) as TFolder[];
-  const suggestionContent = new Set(folders.map(folder => folder.path));
+    .filter((file) => file instanceof TFolder) as TFolder[];
+  const suggestionContent = new Set(folders.map((folder) => folder.path));
   return suggestionContent;
 }

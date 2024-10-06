@@ -1,6 +1,6 @@
-import { UnifiedAIService } from './UnifiedAIService';
-import { Model, AIProvider } from './Model';
-import { debounce } from 'obsidian';
+import { UnifiedAIService } from "./UnifiedAIService";
+import { Model, AIProvider } from "./Model";
+import { debounce } from "obsidian";
 
 export class AIService {
   private static instance: AIService;
@@ -37,24 +37,24 @@ export class AIService {
     this.services = {
       openai: new UnifiedAIService(
         settings.openAIApiKey,
-        settings.baseOpenAIApiUrl ?? 'https://api.openai.com/v1',
-        'openai',
-        { temperature: settings.temperature }
+        settings.baseOpenAIApiUrl ?? "https://api.openai.com/v1",
+        "openai",
+        { temperature: settings.temperature },
       ),
       groq: new UnifiedAIService(
         settings.groqAPIKey,
-        'https://api.groq.com/openai/v1',
-        'groq',
-        { temperature: settings.temperature }
+        "https://api.groq.com/openai/v1",
+        "groq",
+        { temperature: settings.temperature },
       ),
-      local: new UnifiedAIService('', settings.localEndpoint || '', 'local', {
+      local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
         temperature: settings.temperature,
       }),
       openRouter: new UnifiedAIService(
         settings.openRouterAPIKey,
-        'https://openrouter.ai/api/v1',
-        'openRouter',
-        { temperature: settings.temperature }
+        "https://openrouter.ai/api/v1",
+        "openRouter",
+        { temperature: settings.temperature },
       ),
     };
   }
@@ -73,7 +73,7 @@ export class AIService {
       showopenRouterSetting: boolean;
       baseOpenAIApiUrl?: string;
     },
-    forceNewInstance: boolean = false
+    forceNewInstance: boolean = false,
   ): Promise<AIService> {
     try {
       if (!AIService.instance || forceNewInstance) {
@@ -109,7 +109,7 @@ export class AIService {
   private updateApiKeysDebounced = debounce(
     this.updateApiKeys.bind(this),
     1000,
-    true
+    true,
   );
 
   private updateApiKeys(settings: {
@@ -122,11 +122,13 @@ export class AIService {
     baseOpenAIApiUrl?: string;
   }) {
     this.services.openai.updateApiKey(settings.openAIApiKey);
-    this.services.openai.updateOpenAIBaseUrl(settings.baseOpenAIApiUrl ?? 'https://api.openai.com/v1');
+    this.services.openai.updateOpenAIBaseUrl(
+      settings.baseOpenAIApiUrl ?? "https://api.openai.com/v1",
+    );
     this.services.groq.updateApiKey(settings.groqAPIKey);
     this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
-    Object.values(this.services).forEach(service =>
-      service.updateSettings({ temperature: settings.temperature })
+    Object.values(this.services).forEach((service) =>
+      service.updateSettings({ temperature: settings.temperature }),
     );
   }
 
@@ -139,7 +141,7 @@ export class AIService {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number
+    maxOutputTokens: number,
   ): Promise<string> {
     await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
@@ -150,7 +152,7 @@ export class AIService {
       systemPrompt,
       userMessage,
       modelId,
-      maxOutputTokens
+      maxOutputTokens,
     );
   }
 
@@ -160,7 +162,7 @@ export class AIService {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
@@ -175,7 +177,7 @@ export class AIService {
       modelId,
       maxOutputTokens,
       callback,
-      abortSignal
+      abortSignal,
     );
   }
 
@@ -185,7 +187,7 @@ export class AIService {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     await this.ensureModelCacheInitialized();
     const model = await this.getModelById(modelId);
@@ -200,7 +202,7 @@ export class AIService {
       modelId,
       maxOutputTokens,
       callback,
-      abortSignal
+      abortSignal,
     );
   }
 
@@ -208,26 +210,26 @@ export class AIService {
     showOpenAI: boolean,
     showGroq: boolean,
     showLocal: boolean,
-    showOpenRouter: boolean
+    showOpenRouter: boolean,
   ): Promise<Model[]> {
     await this.ensureModelCacheInitialized();
 
     let allModels: Model[] = [];
 
     if (showOpenAI)
-      allModels = allModels.concat(this.cachedModels['openai'] || []);
-    if (showGroq) allModels = allModels.concat(this.cachedModels['groq'] || []);
+      allModels = allModels.concat(this.cachedModels["openai"] || []);
+    if (showGroq) allModels = allModels.concat(this.cachedModels["groq"] || []);
     if (showLocal)
-      allModels = allModels.concat(this.cachedModels['local'] || []);
+      allModels = allModels.concat(this.cachedModels["local"] || []);
     if (showOpenRouter)
-      allModels = allModels.concat(this.cachedModels['openRouter'] || []);
+      allModels = allModels.concat(this.cachedModels["openRouter"] || []);
 
     return allModels;
   }
 
   async getModelById(modelId: string): Promise<Model | undefined> {
     for (const models of Object.values(this.cachedModels)) {
-      const model = models.find(m => m.id === modelId);
+      const model = models.find((m) => m.id === modelId);
       if (model) {
         return model;
       }
@@ -235,19 +237,22 @@ export class AIService {
     return undefined;
   }
 
-  static async validateOpenAIApiKey(apiKey: string, baseOpenAIApiUrl?: string): Promise<boolean> {
+  static async validateOpenAIApiKey(
+    apiKey: string,
+    baseOpenAIApiUrl?: string,
+  ): Promise<boolean> {
     return UnifiedAIService.validateApiKey(
       apiKey,
-      baseOpenAIApiUrl ?? 'https://api.openai.com/v1',
-      'openai'
+      baseOpenAIApiUrl ?? "https://api.openai.com/v1",
+      "openai",
     );
   }
 
   static async validateGroqAPIKey(apiKey: string): Promise<boolean> {
     return UnifiedAIService.validateApiKey(
       apiKey,
-      'https://api.groq.com/openai/v1',
-      'groq'
+      "https://api.groq.com/openai/v1",
+      "groq",
     );
   }
 
@@ -258,7 +263,7 @@ export class AIService {
       if (url.port && parseInt(url.port) < 1024) {
         return false;
       }
-      return UnifiedAIService.validateApiKey('', endpoint, 'local');
+      return UnifiedAIService.validateApiKey("", endpoint, "local");
     } catch (error: unknown) {
       return false;
     }
@@ -267,8 +272,8 @@ export class AIService {
   static async validateOpenRouterApiKey(apiKey: string): Promise<boolean> {
     return UnifiedAIService.validateApiKey(
       apiKey,
-      'https://openrouter.ai/api/v1',
-      'openRouter'
+      "https://openrouter.ai/api/v1",
+      "openRouter",
     );
   }
 
@@ -277,7 +282,7 @@ export class AIService {
       return;
     }
 
-    const providers: AIProvider[] = ['local', 'openai', 'groq', 'openRouter'];
+    const providers: AIProvider[] = ["local", "openai", "groq", "openRouter"];
     const fetchPromises: Promise<void>[] = [];
 
     for (const provider of providers) {
@@ -301,7 +306,7 @@ export class AIService {
       const models = await Promise.race([
         this.services[provider].getModels(),
         new Promise<Model[]>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 10000)
+          setTimeout(() => reject(new Error("Timeout")), 10000),
         ),
       ]);
       this.cachedModels[provider] = models;
@@ -312,13 +317,13 @@ export class AIService {
 
   private isProviderEnabled(provider: AIProvider): boolean {
     switch (provider) {
-      case 'openai':
+      case "openai":
         return this.settings.showopenAISetting;
-      case 'groq':
+      case "groq":
         return this.settings.showgroqSetting;
-      case 'openRouter':
+      case "openRouter":
         return this.settings.showopenRouterSetting;
-      case 'local':
+      case "local":
         return this.settings.showlocalEndpointSetting;
       default:
         return false;
@@ -327,17 +332,16 @@ export class AIService {
 
   private hasValidEndpoint(provider: AIProvider): boolean {
     switch (provider) {
-      case 'openai':
+      case "openai":
         return !!this.settings.apiEndpoint.trim();
-      case 'groq':
+      case "groq":
         return true;
-      case 'openRouter':
+      case "openRouter":
         return true;
-      case 'local':
+      case "local":
         return !!this.settings.localEndpoint?.trim();
       default:
         return false;
     }
   }
 }
-

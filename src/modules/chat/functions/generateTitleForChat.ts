@@ -1,17 +1,17 @@
-import { App, TFile } from 'obsidian';
-import { BrainModule } from '../../brain/BrainModule';
-import { showCustomNotice } from '../../../modals';
-import { TitleEditModal } from '../views/TitleEditModal';
+import { App, TFile } from "obsidian";
+import { BrainModule } from "../../brain/BrainModule";
+import { showCustomNotice } from "../../../modals";
+import { TitleEditModal } from "../views/TitleEditModal";
 
 export async function generateTitleForChat(
   app: App,
   chatFile: TFile,
   brainModule: BrainModule,
-  updateChatTitle: (title: string) => void
+  updateChatTitle: (title: string) => void,
 ) {
   if (!chatFile) return;
   const noteContent = await app.vault.read(chatFile);
-  const notice = showCustomNotice('Generating Title...');
+  const notice = showCustomNotice("Generating Title...");
 
   try {
     const generatedTitle = await brainModule.generateTitle(noteContent);
@@ -19,7 +19,7 @@ export async function generateTitleForChat(
       await saveTitleEdit(app, chatFile, generatedTitle);
       updateChatTitle(generatedTitle);
     }
-    showCustomNotice('Title generated successfully!');
+    showCustomNotice("Title generated successfully!");
   } catch (error) {
     showCustomNotice(`Title generation failed: ${(error as Error).message}`);
   }
@@ -29,7 +29,7 @@ export function toggleEditTitle(
   app: App,
   chatFile: TFile,
   currentTitle: string,
-  updateChatTitle: (title: string) => void
+  updateChatTitle: (title: string) => void,
 ) {
   new TitleEditModal(app, currentTitle, async (newTitle: string) => {
     await saveTitleEdit(app, chatFile, newTitle);
@@ -40,7 +40,7 @@ export function toggleEditTitle(
 export async function saveTitleEdit(
   app: App,
   chatFile: TFile,
-  newTitle: string
+  newTitle: string,
 ) {
   if (newTitle && chatFile) {
     const newFilePath = `${chatFile.parent?.path}/${newTitle}.md`;
@@ -49,7 +49,7 @@ export async function saveTitleEdit(
 }
 
 export function updateChatTitle(containerEl: HTMLElement, title: string) {
-  const titleEl = containerEl.querySelector('.chat-title-text') as HTMLElement;
+  const titleEl = containerEl.querySelector(".chat-title-text") as HTMLElement;
   if (titleEl) {
     titleEl.textContent = title;
   }

@@ -1,4 +1,4 @@
-import { TemplatesModule } from '../TemplatesModule';
+import { TemplatesModule } from "../TemplatesModule";
 import {
   Modal,
   App,
@@ -6,12 +6,12 @@ import {
   requestUrl,
   TFile,
   TFolder,
-} from 'obsidian';
-import { showCustomNotice } from '../../../modals';
+} from "obsidian";
+import { showCustomNotice } from "../../../modals";
 
 async function createFolderIfNotExists(
   vault: any,
-  folderPath: string
+  folderPath: string,
 ): Promise<void> {
   const normalizedPath = normalizePath(folderPath);
   const folder = vault.getAbstractFileByPath(normalizedPath);
@@ -24,7 +24,7 @@ async function createFolderIfNotExists(
 async function downloadFile(
   plugin: TemplatesModule,
   filePath: string,
-  fileContent: string
+  fileContent: string,
 ): Promise<void> {
   const { vault } = plugin.plugin.app;
   let file = vault.getAbstractFileByPath(filePath);
@@ -45,7 +45,7 @@ async function isFolderEmpty(vault: any, folderPath: string): Promise<boolean> {
 }
 
 export async function downloadTemplatesFromServer(
-  plugin: TemplatesModule
+  plugin: TemplatesModule,
 ): Promise<void> {
   try {
     const licenseKey = plugin.settings.licenseKey.trim();
@@ -54,8 +54,8 @@ export async function downloadTemplatesFromServer(
     }
 
     const versionResponse = await requestUrl({
-      url: 'https://license.systemsculpt.com/templates-version',
-      method: 'GET',
+      url: "https://license.systemsculpt.com/templates-version",
+      method: "GET",
     });
 
     const latestVersion = versionResponse.json.version;
@@ -66,35 +66,35 @@ export async function downloadTemplatesFromServer(
     if (plugin.settings.templatesVersion !== latestVersion) {
       await performTemplateSync(plugin, latestVersion);
     } else {
-      const userChoice = await new Promise<string>(resolve => {
+      const userChoice = await new Promise<string>((resolve) => {
         const modal = new ConfirmModal(
           plugin.plugin.app,
           resolve,
-          'You already have the latest templates. Do you want to do a clean install of them?'
+          "You already have the latest templates. Do you want to do a clean install of them?",
         );
         modal.open();
       });
 
-      if (userChoice === 'overwrite') {
+      if (userChoice === "overwrite") {
         await performTemplateSync(plugin, latestVersion);
       } else {
-        showCustomNotice('Template sync cancelled.');
+        showCustomNotice("Template sync cancelled.");
       }
     }
   } catch (error) {
     showCustomNotice(
-      "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again."
+      "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again.",
     );
   }
 }
 
 async function performTemplateSync(
   plugin: TemplatesModule,
-  latestVersion: string
+  latestVersion: string,
 ): Promise<void> {
   const response = await requestUrl({
-    url: 'https://license.systemsculpt.com/templates',
-    method: 'GET',
+    url: "https://license.systemsculpt.com/templates",
+    method: "GET",
     headers: {
       Authorization: `Bearer ${plugin.settings.licenseKey}`,
     },
@@ -102,7 +102,7 @@ async function performTemplateSync(
 
   if (response.status === 401) {
     showCustomNotice(
-      'Invalid license key. Please enter a valid license key to sync templates.'
+      "Invalid license key. Please enter a valid license key to sync templates.",
     );
     return;
   }
@@ -115,17 +115,17 @@ async function performTemplateSync(
 
   const isEmpty = await isFolderEmpty(plugin.plugin.app.vault, ssSyncsPath);
   if (!isEmpty) {
-    const userChoice = await new Promise<string>(resolve => {
+    const userChoice = await new Promise<string>((resolve) => {
       const modal = new ConfirmModal(
         plugin.plugin.app,
         resolve,
-        'The SS-Syncs directory is not empty. Overwriting will replace all existing templates. If you have made any personal changes, please back them up and move them to a different directory.'
+        "The SS-Syncs directory is not empty. Overwriting will replace all existing templates. If you have made any personal changes, please back them up and move them to a different directory.",
       );
       modal.open();
     });
 
-    if (userChoice === 'cancel') {
-      showCustomNotice('Template sync cancelled.');
+    if (userChoice === "cancel") {
+      showCustomNotice("Template sync cancelled.");
       return;
     }
   }
@@ -133,9 +133,9 @@ async function performTemplateSync(
   for (const template of templates) {
     const fullPath = normalizePath(`${ssSyncsPath}/${template.path}`);
 
-    if (template.type === 'directory') {
+    if (template.type === "directory") {
       await createFolderIfNotExists(plugin.plugin.app.vault, fullPath);
-    } else if (template.type === 'file') {
+    } else if (template.type === "file") {
       await downloadFile(plugin, fullPath, template.content);
     }
   }
@@ -144,7 +144,7 @@ async function performTemplateSync(
   await plugin.saveSettings();
 
   showCustomNotice(
-    'SS-Sync Templates downloaded successfully! Thanks for your support on Patreon!'
+    "SS-Sync Templates downloaded successfully! Thanks for your support on Patreon!",
   );
 }
 
@@ -160,22 +160,22 @@ class ConfirmModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Overwrite SS-Syncs Templates?' });
-    contentEl.createEl('p', { text: this.message });
+    contentEl.createEl("h2", { text: "Overwrite SS-Syncs Templates?" });
+    contentEl.createEl("p", { text: this.message });
 
-    const buttonContainer = contentEl.createDiv('modal-button-container');
-    const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
-    const overwriteButton = buttonContainer.createEl('button', {
-      text: 'Overwrite',
+    const buttonContainer = contentEl.createDiv("modal-button-container");
+    const cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
+    const overwriteButton = buttonContainer.createEl("button", {
+      text: "Overwrite",
     });
 
-    cancelButton.addEventListener('click', () => {
-      this.resolve('cancel');
+    cancelButton.addEventListener("click", () => {
+      this.resolve("cancel");
       this.close();
     });
 
-    overwriteButton.addEventListener('click', () => {
-      this.resolve('overwrite');
+    overwriteButton.addEventListener("click", () => {
+      this.resolve("overwrite");
       this.close();
     });
   }

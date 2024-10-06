@@ -1,14 +1,14 @@
-import { Setting } from 'obsidian';
-import { RecorderModule } from '../RecorderModule';
+import { Setting } from "obsidian";
+import { RecorderModule } from "../RecorderModule";
 
 export function renderAutoTranscriptionToggle(
   containerEl: HTMLElement,
-  plugin: RecorderModule
+  plugin: RecorderModule,
 ): void {
   new Setting(containerEl)
-    .setName('Auto-transcription')
-    .setDesc('Automatically transcribe recordings')
-    .addToggle(toggle => {
+    .setName("Auto-transcription")
+    .setDesc("Automatically transcribe recordings")
+    .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.autoTranscriptionEnabled)
         .onChange(async (value: boolean) => {

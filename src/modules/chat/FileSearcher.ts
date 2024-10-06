@@ -1,6 +1,13 @@
-import { App, FuzzySuggestModal, TFile, FuzzyMatch, TFolder, SearchMatchPart } from 'obsidian';
-import { Vault } from 'obsidian';
-import { TAbstractFile } from 'obsidian';
+import {
+  App,
+  FuzzySuggestModal,
+  TFile,
+  FuzzyMatch,
+  TFolder,
+  SearchMatchPart,
+} from "obsidian";
+import { Vault } from "obsidian";
+import { TAbstractFile } from "obsidian";
 
 export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   chatsPath?: string;
@@ -19,12 +26,12 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   onOpen() {
-    console.log('FileSearcher: Modal opened');
+    console.log("FileSearcher: Modal opened");
     super.onOpen();
     this.addFilters();
     this.addNotice();
     this.addConfirmButton();
-    
+
     // Adjust the layout to accommodate the button
     // const contentEl = this.modalEl.querySelector('.modal-content');
     // if (contentEl) {
@@ -33,33 +40,50 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   onClose() {
-    console.log('FileSearcher: onClose called');
+    console.log("FileSearcher: onClose called");
     super.onClose();
   }
 
   private addFilters() {
-    const inputEl = this.modalEl.querySelector('.prompt-input') as HTMLInputElement;
+    const inputEl = this.modalEl.querySelector(
+      ".prompt-input",
+    ) as HTMLInputElement;
     if (inputEl) {
-      const filtersContainer = createEl('div', { cls: 'file-searcher-filters' });
-      
-      const includeFilesLabel = filtersContainer.createEl('label', { cls: 'file-searcher-filter' });
-      const includeFilesCheckbox = includeFilesLabel.createEl('input', { type: 'checkbox', cls: 'file-searcher-filter-checkbox' });
+      const filtersContainer = createEl("div", {
+        cls: "file-searcher-filters",
+      });
+
+      const includeFilesLabel = filtersContainer.createEl("label", {
+        cls: "file-searcher-filter",
+      });
+      const includeFilesCheckbox = includeFilesLabel.createEl("input", {
+        type: "checkbox",
+        cls: "file-searcher-filter-checkbox",
+      });
       includeFilesCheckbox.checked = this.includeFiles;
-      includeFilesLabel.appendText('Include Files');
+      includeFilesLabel.appendText("Include Files");
 
-      const includeFoldersLabel = filtersContainer.createEl('label', { cls: 'file-searcher-filter' });
-      const includeFoldersCheckbox = includeFoldersLabel.createEl('input', { type: 'checkbox', cls: 'file-searcher-filter-checkbox' });
+      const includeFoldersLabel = filtersContainer.createEl("label", {
+        cls: "file-searcher-filter",
+      });
+      const includeFoldersCheckbox = includeFoldersLabel.createEl("input", {
+        type: "checkbox",
+        cls: "file-searcher-filter-checkbox",
+      });
       includeFoldersCheckbox.checked = this.includeFolders;
-      includeFoldersLabel.appendText('Include Folders');
+      includeFoldersLabel.appendText("Include Folders");
 
-      inputEl.parentElement?.parentElement?.insertBefore(filtersContainer, inputEl.parentElement.nextSibling);
+      inputEl.parentElement?.parentElement?.insertBefore(
+        filtersContainer,
+        inputEl.parentElement.nextSibling,
+      );
 
-      includeFilesCheckbox.addEventListener('change', () => {
+      includeFilesCheckbox.addEventListener("change", () => {
         this.includeFiles = includeFilesCheckbox.checked;
         this.updateSuggestions();
       });
 
-      includeFoldersCheckbox.addEventListener('change', () => {
+      includeFoldersCheckbox.addEventListener("change", () => {
         this.includeFolders = includeFoldersCheckbox.checked;
         this.updateSuggestions();
       });
@@ -67,32 +91,42 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   private addNotice() {
-    const inputEl = this.modalEl.querySelector('.prompt-input') as HTMLInputElement;
+    const inputEl = this.modalEl.querySelector(
+      ".prompt-input",
+    ) as HTMLInputElement;
     if (inputEl && !this.noticeEl) {
-      this.noticeEl = createEl('div', { cls: 'file-searcher-notice' });
-      this.noticeEl.innerHTML = 'You can select multiple files and folders. <strong>Press Enter when done selecting</strong> to add them to the context files.';
-      const filtersContainer = this.modalEl.querySelector('.file-searcher-filters');
+      this.noticeEl = createEl("div", { cls: "file-searcher-notice" });
+      this.noticeEl.innerHTML =
+        "You can select multiple files and folders. <strong>Press Enter when done selecting</strong> to add them to the context files.";
+      const filtersContainer = this.modalEl.querySelector(
+        ".file-searcher-filters",
+      );
       if (filtersContainer) {
-        filtersContainer.insertAdjacentElement('afterend', this.noticeEl);
+        filtersContainer.insertAdjacentElement("afterend", this.noticeEl);
       } else {
-        inputEl.parentElement?.parentElement?.insertBefore(this.noticeEl, inputEl.parentElement.nextSibling);
+        inputEl.parentElement?.parentElement?.insertBefore(
+          this.noticeEl,
+          inputEl.parentElement.nextSibling,
+        );
       }
     }
   }
 
   private addConfirmButton() {
     if (!this.confirmButton) {
-      this.confirmButton = createEl('button', {
-        cls: 'file-searcher-confirm-button',
-        text: 'Select Which Files to Add',
+      this.confirmButton = createEl("button", {
+        cls: "file-searcher-confirm-button",
+        text: "Select Which Files to Add",
       });
-      
-      this.confirmButton.addEventListener('click', () => {
+
+      this.confirmButton.addEventListener("click", () => {
         this.addSelectedItems();
       });
 
       // Create a container for the button at the bottom of the modal
-      const buttonContainer = createEl('div', { cls: 'file-searcher-button-container' });
+      const buttonContainer = createEl("div", {
+        cls: "file-searcher-button-container",
+      });
       buttonContainer.appendChild(this.confirmButton);
       this.modalEl.appendChild(buttonContainer);
     }
@@ -104,13 +138,13 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
     if (this.confirmButton) {
       if (this.selectedItems.size === 0) {
         this.confirmButton.disabled = true;
-        this.confirmButton.classList.remove('active');
-        this.confirmButton.textContent = 'Select Which Files to Add';
+        this.confirmButton.classList.remove("active");
+        this.confirmButton.textContent = "Select Which Files to Add";
       } else {
         this.confirmButton.disabled = false;
-        this.confirmButton.classList.add('active');
+        this.confirmButton.classList.add("active");
         const fileCount = this.countSelectedFiles();
-        this.confirmButton.textContent = `Add ${fileCount} File${fileCount !== 1 ? 's' : ''} (Enter)`;
+        this.confirmButton.textContent = `Add ${fileCount} File${fileCount !== 1 ? "s" : ""} (Enter)`;
       }
     }
   }
@@ -141,12 +175,27 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   getItems(): (TFile | TFolder)[] {
-    const supportedExtensions = ['md', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp3', 'wav', 'm4a', 'ogg'];
+    const supportedExtensions = [
+      "md",
+      "pdf",
+      "png",
+      "jpg",
+      "jpeg",
+      "gif",
+      "mp3",
+      "wav",
+      "m4a",
+      "ogg",
+    ];
     const allFiles = this.app.vault.getAllLoadedFiles();
-    
-    return allFiles.filter(file => 
-      (this.includeFolders && file instanceof TFolder) ||
-      (this.includeFiles && file instanceof TFile && file.extension && supportedExtensions.includes(file.extension.toLowerCase()))
+
+    return allFiles.filter(
+      (file) =>
+        (this.includeFolders && file instanceof TFolder) ||
+        (this.includeFiles &&
+          file instanceof TFile &&
+          file.extension &&
+          supportedExtensions.includes(file.extension.toLowerCase())),
     ) as (TFile | TFolder)[];
   }
 
@@ -155,7 +204,9 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   updateSuggestions() {
-    const inputEl = this.modalEl.querySelector('.prompt-input') as HTMLInputElement;
+    const inputEl = this.modalEl.querySelector(
+      ".prompt-input",
+    ) as HTMLInputElement;
     if (inputEl) {
       const value = inputEl.value;
       //@ts-ignore
@@ -166,16 +217,25 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   getItemText(item: TFile | TFolder): string {
-    return item instanceof TFolder ? item.path : `${item.basename}\n${item.parent?.path || ''}`;
+    return item instanceof TFolder
+      ? item.path
+      : `${item.basename}\n${item.parent?.path || ""}`;
   }
 
   renderSuggestion(item: FuzzyMatch<TFile | TFolder>, el: HTMLElement) {
-    const content = el.createEl('div', { cls: 'suggestion-content' });
-    
-    const checkboxContainer = content.createEl('div', { cls: 'suggestion-checkbox-container' });
-    const checkbox = checkboxContainer.createEl('input', { type: 'checkbox', cls: 'suggestion-checkbox' });
-    const isSelected = this.selectedItems.has(item.item.path) || 
-                       (item.item instanceof TFolder && this.selectedDirectories.has(item.item.path));
+    const content = el.createEl("div", { cls: "suggestion-content" });
+
+    const checkboxContainer = content.createEl("div", {
+      cls: "suggestion-checkbox-container",
+    });
+    const checkbox = checkboxContainer.createEl("input", {
+      type: "checkbox",
+      cls: "suggestion-checkbox",
+    });
+    const isSelected =
+      this.selectedItems.has(item.item.path) ||
+      (item.item instanceof TFolder &&
+        this.selectedDirectories.has(item.item.path));
     checkbox.checked = isSelected;
     if (item.item instanceof TFolder) {
       const folderState = this.getFolderState(item.item);
@@ -184,52 +244,59 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
       }
     }
 
-    const textContainer = content.createEl('div', { cls: 'suggestion-text' });
-    const titleEl = textContainer.createEl('span', { cls: 'suggestion-title' });
-    const noteEl = textContainer.createEl('span', { cls: 'suggestion-note' });
+    const textContainer = content.createEl("div", { cls: "suggestion-text" });
+    const titleEl = textContainer.createEl("span", { cls: "suggestion-title" });
+    const noteEl = textContainer.createEl("span", { cls: "suggestion-note" });
 
     if (item.item instanceof TFolder) {
-      titleEl.setText('📁 ');
+      titleEl.setText("📁 ");
       this.highlightMatches(titleEl, item.item.name, item.match.matches);
       this.highlightMatches(noteEl, item.item.path, item.match.matches);
     } else {
       switch (item.item.extension) {
-        case 'md':
-          titleEl.setText('📄 ');
+        case "md":
+          titleEl.setText("📄 ");
           break;
-        case 'pdf':
-          titleEl.setText('📕 ');
+        case "pdf":
+          titleEl.setText("📕 ");
           break;
-        case 'png':
-        case 'jpg':
-        case 'jpeg':
-        case 'gif':
-          titleEl.setText('🖼️ ');
+        case "png":
+        case "jpg":
+        case "jpeg":
+        case "gif":
+          titleEl.setText("🖼️ ");
           break;
-        case 'mp3':
-        case 'wav':
-        case 'm4a':
-        case 'ogg':
-          titleEl.setText('🎵 ');
+        case "mp3":
+        case "wav":
+        case "m4a":
+        case "ogg":
+          titleEl.setText("🎵 ");
           break;
         default:
-          titleEl.setText('📎 ');
+          titleEl.setText("📎 ");
       }
       this.highlightMatches(titleEl, item.item.basename, item.match.matches);
-      titleEl.createSpan({ text: `.${item.item.extension}`, cls: 'suggestion-file-extension' });
-      this.highlightMatches(noteEl, item.item.parent?.path || '', item.match.matches);
+      titleEl.createSpan({
+        text: `.${item.item.extension}`,
+        cls: "suggestion-file-extension",
+      });
+      this.highlightMatches(
+        noteEl,
+        item.item.parent?.path || "",
+        item.match.matches,
+      );
     }
 
     // Add click listener to the checkbox
-    checkbox.addEventListener('click', (e) => {
-      console.log('FileSearcher: Checkbox clicked');
+    checkbox.addEventListener("click", (e) => {
+      console.log("FileSearcher: Checkbox clicked");
       e.stopPropagation();
       this.toggleSelection(item.item.path);
     });
 
     // Add click listener to the entire suggestion content (except checkbox)
-    content.addEventListener('click', (e) => {
-      console.log('FileSearcher: Suggestion clicked');
+    content.addEventListener("click", (e) => {
+      console.log("FileSearcher: Suggestion clicked");
       if (e.target !== checkbox) {
         e.preventDefault();
         e.stopPropagation();
@@ -269,7 +336,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   private addFilesInDirectory(folder: TFolder) {
-    folder.children.forEach(child => {
+    folder.children.forEach((child) => {
       if (child instanceof TFile) {
         this.selectedItems.add(child.path);
       } else if (child instanceof TFolder) {
@@ -279,7 +346,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   private removeFilesInDirectory(folder: TFolder) {
-    folder.children.forEach(child => {
+    folder.children.forEach((child) => {
       if (child instanceof TFile) {
         this.selectedItems.delete(child.path);
       } else if (child instanceof TFolder) {
@@ -288,22 +355,27 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
     });
   }
 
-  private getFolderState(folder: TFolder): { icon: string, partiallySelected: boolean } {
+  private getFolderState(folder: TFolder): {
+    icon: string;
+    partiallySelected: boolean;
+  } {
     const allFiles = this.getAllFilesInFolder(folder);
-    const selectedFiles = allFiles.filter(file => this.selectedItems.has(file.path));
+    const selectedFiles = allFiles.filter((file) =>
+      this.selectedItems.has(file.path),
+    );
 
     if (selectedFiles.length === 0) {
-      return { icon: '📁', partiallySelected: false };
+      return { icon: "📁", partiallySelected: false };
     } else if (selectedFiles.length === allFiles.length) {
-      return { icon: '📂', partiallySelected: false };
+      return { icon: "📂", partiallySelected: false };
     } else {
-      return { icon: '📂', partiallySelected: true };
+      return { icon: "📂", partiallySelected: true };
     }
   }
 
   private getAllFilesInFolder(folder: TFolder): TFile[] {
     let files: TFile[] = [];
-    folder.children.forEach(child => {
+    folder.children.forEach((child) => {
       if (child instanceof TFile) {
         files.push(child);
       } else if (child instanceof TFolder) {
@@ -314,37 +386,42 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
   }
 
   onChooseItem(item: TFile | TFolder, evt: MouseEvent | KeyboardEvent): void {
-    console.log('FileSearcher: onChooseItem called', { eventType: evt.type });
+    console.log("FileSearcher: onChooseItem called", { eventType: evt.type });
     evt.preventDefault();
     evt.stopPropagation();
 
     if (evt instanceof KeyboardEvent) {
-      if (evt.key === 'Enter') {
-        console.log('FileSearcher: Enter key pressed');
+      if (evt.key === "Enter") {
+        console.log("FileSearcher: Enter key pressed");
         this.addSelectedItems();
-      } else if (evt.key === 'Escape') {
-        console.log('FileSearcher: Escape key pressed');
+      } else if (evt.key === "Escape") {
+        console.log("FileSearcher: Escape key pressed");
         this.close();
       }
     } else if (evt instanceof MouseEvent) {
-      console.log('FileSearcher: Mouse event in onChooseItem');
+      console.log("FileSearcher: Mouse event in onChooseItem");
       // Do nothing on mouse click, as it's handled in renderSuggestion
     }
   }
 
   // Override the chooseItem method to prevent default behavior
   chooseItem(item: TFile | TFolder, evt: MouseEvent | KeyboardEvent): void {
-    console.log('FileSearcher: chooseItem called', { eventType: evt.type });
+    console.log("FileSearcher: chooseItem called", { eventType: evt.type });
     evt.preventDefault();
     evt.stopPropagation();
     // Do nothing here, let onChooseItem handle the logic
   }
 
   // Override selectSuggestion to handle keyboard navigation
-  selectSuggestion(value: FuzzyMatch<TFile | TFolder>, evt: MouseEvent | KeyboardEvent): void {
-    console.log('FileSearcher: selectSuggestion called', { eventType: evt.type });
+  selectSuggestion(
+    value: FuzzyMatch<TFile | TFolder>,
+    evt: MouseEvent | KeyboardEvent,
+  ): void {
+    console.log("FileSearcher: selectSuggestion called", {
+      eventType: evt.type,
+    });
     if (evt instanceof KeyboardEvent) {
-      if (evt.key === 'Enter') {
+      if (evt.key === "Enter") {
         this.addSelectedItems();
       } else {
         // Allow default keyboard navigation
@@ -358,13 +435,15 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
 
   // Override the close method to add additional logging
   close() {
-    console.log('FileSearcher: close method called');
+    console.log("FileSearcher: close method called");
     super.close();
   }
 
   private addSelectedItems() {
-    console.log('FileSearcher: Adding selected items');
-    const selectedFiles = this.getItems().filter(item => this.selectedItems.has(item.path));
+    console.log("FileSearcher: Adding selected items");
+    const selectedFiles = this.getItems().filter((item) =>
+      this.selectedItems.has(item.path),
+    );
     if (this.onChooseItems) {
       this.onChooseItems(selectedFiles);
     }
@@ -373,7 +452,11 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
 
   onChooseItems: ((items: (TFile | TFolder)[]) => void) | null = null;
 
-  private highlightMatches(element: HTMLElement, text: string, matches: SearchMatchPart[]) {
+  private highlightMatches(
+    element: HTMLElement,
+    text: string,
+    matches: SearchMatchPart[],
+  ) {
     let lastIndex = 0;
     for (const match of matches) {
       const [start, end] = match;
@@ -384,7 +467,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
       }
       const matchEnd = Math.min(end, text.length);
       const matchedText = text.slice(matchStart, matchEnd);
-      const span = element.createSpan({ cls: 'fuzzy-match' });
+      const span = element.createSpan({ cls: "fuzzy-match" });
       span.setText(matchedText);
       lastIndex = matchEnd;
     }

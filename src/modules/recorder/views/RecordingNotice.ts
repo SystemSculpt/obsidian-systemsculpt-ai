@@ -1,5 +1,5 @@
-import { App } from 'obsidian';
-import { RecorderModule } from '../RecorderModule';
+import { App } from "obsidian";
+import { RecorderModule } from "../RecorderModule";
 
 export class RecordingNotice {
   app: App;
@@ -19,27 +19,27 @@ export class RecordingNotice {
   }
 
   private createNoticeEl(): HTMLElement {
-    const noticeEl = document.createElement('div');
-    noticeEl.addClass('recording-notice');
+    const noticeEl = document.createElement("div");
+    noticeEl.addClass("recording-notice");
 
-    const headerEl = noticeEl.createDiv('recording-notice-header');
-    const hideButton = headerEl.createEl('button', { text: '-' });
-    const closeButton = headerEl.createEl('button', { text: 'X' });
-    hideButton.addEventListener('click', () => {
+    const headerEl = noticeEl.createDiv("recording-notice-header");
+    const hideButton = headerEl.createEl("button", { text: "-" });
+    const closeButton = headerEl.createEl("button", { text: "X" });
+    hideButton.addEventListener("click", () => {
       this.hideToStatusBar();
     });
-    closeButton.addEventListener('click', () => {
+    closeButton.addEventListener("click", () => {
       this.plugin.toggleRecording();
     });
 
-    const titleEl = noticeEl.createEl('h3', { text: 'Recording audio...' });
-    titleEl.addClass('recording-notice-title');
+    const titleEl = noticeEl.createEl("h3", { text: "Recording audio..." });
+    titleEl.addClass("recording-notice-title");
 
-    const canvasEl = noticeEl.createDiv('recording-notice-canvas');
-    const canvas = canvasEl.createEl('canvas');
+    const canvasEl = noticeEl.createDiv("recording-notice-canvas");
+    const canvas = canvasEl.createEl("canvas");
     canvas.width = 250;
     canvas.height = 50;
-    this.canvasContext = canvas.getContext('2d') as CanvasRenderingContext2D;
+    this.canvasContext = canvas.getContext("2d") as CanvasRenderingContext2D;
 
     return noticeEl;
   }
@@ -50,34 +50,34 @@ export class RecordingNotice {
   }
 
   showWithoutStartingRecording(): void {
-    let noticeContainer = document.body.querySelector('.notice-container');
+    let noticeContainer = document.body.querySelector(".notice-container");
     if (!noticeContainer) {
-      noticeContainer = document.createElement('div');
-      noticeContainer.className = 'notice-container';
+      noticeContainer = document.createElement("div");
+      noticeContainer.className = "notice-container";
       document.body.appendChild(noticeContainer);
     }
 
     if (noticeContainer) {
       noticeContainer.appendChild(this.noticeEl);
-      this.noticeEl.addClass('recording-notice-position');
+      this.noticeEl.addClass("recording-notice-position");
     }
   }
 
   show(): Promise<void> {
     return new Promise((resolve, reject) => {
-      let noticeContainer = document.body.querySelector('.notice-container');
+      let noticeContainer = document.body.querySelector(".notice-container");
       if (!noticeContainer) {
-        noticeContainer = document.createElement('div');
-        noticeContainer.className = 'notice-container';
+        noticeContainer = document.createElement("div");
+        noticeContainer.className = "notice-container";
         document.body.appendChild(noticeContainer);
       }
 
       if (noticeContainer) {
         noticeContainer.appendChild(this.noticeEl);
-        this.noticeEl.addClass('recording-notice-position');
+        this.noticeEl.addClass("recording-notice-position");
         this.startRecording().then(resolve).catch(reject);
       } else {
-        reject(new Error('Notice container not found'));
+        reject(new Error("Notice container not found"));
       }
     });
   }
@@ -89,7 +89,7 @@ export class RecordingNotice {
         audio: {
           deviceId: selectedMicrophone
             ? selectedMicrophone.deviceId
-            : 'default',
+            : "default",
         },
       });
       this.audioContext = new AudioContext();
@@ -122,8 +122,8 @@ export class RecordingNotice {
 
       this.canvasContext.beginPath();
       this.canvasContext.strokeStyle = getComputedStyle(
-        document.documentElement
-      ).getPropertyValue('--primary-color');
+        document.documentElement,
+      ).getPropertyValue("--primary-color");
       this.canvasContext.lineWidth = 2;
 
       const sliceWidth = width / bufferLength;
@@ -153,17 +153,17 @@ export class RecordingNotice {
     cancelAnimationFrame(this.rafId);
     this.audioSource.disconnect();
 
-    if (this.audioContext.state !== 'closed') {
+    if (this.audioContext.state !== "closed") {
       await this.audioContext.close();
     }
 
     if (this.mediaRecorder.stream) {
-      this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
     }
 
     return new Promise((resolve, reject) => {
       this.mediaRecorder.addEventListener(
-        'dataavailable',
+        "dataavailable",
         async (event: BlobEvent) => {
           try {
             const arrayBuffer = await event.data.arrayBuffer();
@@ -171,7 +171,7 @@ export class RecordingNotice {
           } catch (error) {
             reject(error);
           }
-        }
+        },
       );
       this.mediaRecorder.stop();
     });

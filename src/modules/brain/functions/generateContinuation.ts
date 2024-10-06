@@ -1,11 +1,11 @@
-import { BrainModule } from '../BrainModule';
-import { MarkdownView, Editor } from 'obsidian';
-import { showCustomNotice } from '../../../modals';
-import { handleStreamingResponse } from '../../templates/functions/handleStreamingResponse';
+import { BrainModule } from "../BrainModule";
+import { MarkdownView, Editor } from "obsidian";
+import { showCustomNotice } from "../../../modals";
+import { handleStreamingResponse } from "../../templates/functions/handleStreamingResponse";
 
 export async function generateContinuation(
   plugin: BrainModule,
-  abortSignal: AbortSignal
+  abortSignal: AbortSignal,
 ): Promise<void> {
   const activeView =
     plugin.plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -34,7 +34,7 @@ export async function generateContinuation(
         updateModelStatusBar(plugin, model.name);
       } else {
         showCustomNotice(
-          'No models available. Please check your model settings and ensure at least one provider is enabled.'
+          "No models available. Please check your model settings and ensure at least one provider is enabled.",
         );
         return;
       }
@@ -51,14 +51,14 @@ export async function generateContinuation(
         }
         handleStreamingResponse(chunk, editor, plugin);
       },
-      abortSignal
+      abortSignal,
     );
 
     if (abortSignal.aborted) {
       return;
     }
   } else {
-    showCustomNotice('No active note found to generate continuation');
+    showCustomNotice("No active note found to generate continuation");
   }
 }
 

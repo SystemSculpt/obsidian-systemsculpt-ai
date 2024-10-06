@@ -1,9 +1,9 @@
-import { RecorderModule } from '../RecorderModule';
-import { normalizePath, TFile } from 'obsidian';
+import { RecorderModule } from "../RecorderModule";
+import { normalizePath, TFile } from "obsidian";
 
 export async function saveRecording(
   plugin: RecorderModule,
-  arrayBuffer: ArrayBuffer
+  arrayBuffer: ArrayBuffer,
 ): Promise<TFile | null> {
   const { vault } = plugin.plugin.app;
   const { recordingsPath } = plugin.settings;
@@ -17,15 +17,15 @@ export async function saveRecording(
 
   const date = new Date();
   const formattedDate = `${date.getFullYear()}-${String(
-    date.getMonth() + 1
-  ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(
-    date.getHours()
-  ).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}-${String(
-    date.getSeconds()
-  ).padStart(2, '0')}`;
+    date.getMonth() + 1,
+  ).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(
+    date.getHours(),
+  ).padStart(2, "0")}-${String(date.getMinutes()).padStart(2, "0")}-${String(
+    date.getSeconds(),
+  ).padStart(2, "0")}`;
   const fileName = `Recording ${formattedDate}.mp3`;
   // replace spaces with -
-  const fileNameNoSpaces = fileName.replace(/ /g, '-');
+  const fileNameNoSpaces = fileName.replace(/ /g, "-");
   const filePath = normalizePath(`${recordingsPath}/${fileNameNoSpaces}`);
 
   const file = await vault.createBinary(filePath, arrayBuffer);

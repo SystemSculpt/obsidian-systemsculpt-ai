@@ -1,4 +1,4 @@
-export type AIProvider = 'openai' | 'groq' | 'openRouter' | 'local';
+export type AIProvider = "openai" | "groq" | "openRouter" | "local";
 
 export interface Model {
   id: string;
@@ -19,7 +19,7 @@ export interface AIServiceInterface {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number
+    maxOutputTokens: number,
   ): Promise<string>;
 
   createStreamingChatCompletionWithCallback(
@@ -28,7 +28,7 @@ export interface AIServiceInterface {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
   ): Promise<void>;
 
   createStreamingConversationWithCallback(
@@ -37,7 +37,7 @@ export interface AIServiceInterface {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
   ): Promise<void>;
 
   getModels(): Promise<Model[]>;

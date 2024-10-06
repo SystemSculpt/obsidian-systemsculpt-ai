@@ -1,5 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
-import SystemSculptPlugin from '../../main';
+import { App, PluginSettingTab, Setting } from "obsidian";
+import SystemSculptPlugin from "../../main";
 
 export interface DataSettings {
   // Define your data settings here
@@ -26,7 +26,7 @@ export class DataModule {
     this.settings = Object.assign(
       {},
       DEFAULT_DATA_SETTINGS,
-      await this.plugin.loadData()
+      await this.plugin.loadData(),
     );
   }
 
@@ -52,10 +52,10 @@ class DataSettingTab extends PluginSettingTab {
     let { containerEl } = this;
 
     containerEl.empty();
-    new Setting(containerEl).setName('Data').setHeading();
+    new Setting(containerEl).setName("Data").setHeading();
 
-    containerEl.createEl('p', {
-      text: 'Coming soon...',
+    containerEl.createEl("p", {
+      text: "Coming soon...",
     });
   }
 }

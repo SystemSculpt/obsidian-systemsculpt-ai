@@ -1,18 +1,18 @@
-import { Setting, TFile } from 'obsidian';
-import { TasksModule } from '../TasksModule';
-import { DEFAULT_TASKS_SETTINGS } from './TasksSettings';
-import { MultiSuggest } from '../../../utils/MultiSuggest';
+import { Setting, TFile } from "obsidian";
+import { TasksModule } from "../TasksModule";
+import { DEFAULT_TASKS_SETTINGS } from "./TasksSettings";
+import { MultiSuggest } from "../../../utils/MultiSuggest";
 
 export function renderTasksLocationSetting(
   containerEl: HTMLElement,
-  plugin: TasksModule
+  plugin: TasksModule,
 ): void {
   new Setting(containerEl)
-    .setName('Tasks location')
-    .setDesc('The file path where tasks will be stored')
-    .addText(text => {
+    .setName("Tasks location")
+    .setDesc("The file path where tasks will be stored")
+    .addText((text) => {
       text
-        .setPlaceholder('Enter tasks location')
+        .setPlaceholder("Enter tasks location")
         .setValue(plugin.settings.tasksLocation)
         .onChange(async (newValue: string) => {
           plugin.settings.tasksLocation = newValue;
@@ -32,13 +32,13 @@ export function renderTasksLocationSetting(
         inputEl,
         suggestionContent,
         onSelectCallback,
-        plugin.plugin.app
+        plugin.plugin.app,
       );
     })
-    .addExtraButton(button => {
+    .addExtraButton((button) => {
       button
-        .setIcon('reset')
-        .setTooltip('Reset to default tasks location')
+        .setIcon("reset")
+        .setTooltip("Reset to default tasks location")
         .onClick(async () => {
           plugin.settings.tasksLocation = DEFAULT_TASKS_SETTINGS.tasksLocation;
           await plugin.saveSettings();
@@ -49,7 +49,7 @@ export function renderTasksLocationSetting(
 
 function getFileSuggestions(plugin: TasksModule): Set<string> {
   const files = plugin.plugin.app.vault.getFiles();
-  const mdFiles = files.filter(file => file.path.endsWith('.md'));
-  const suggestionContent = new Set(mdFiles.map(file => file.path));
+  const mdFiles = files.filter((file) => file.path.endsWith(".md"));
+  const suggestionContent = new Set(mdFiles.map((file) => file.path));
   return suggestionContent;
 }

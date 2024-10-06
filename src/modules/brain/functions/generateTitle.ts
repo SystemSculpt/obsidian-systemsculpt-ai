@@ -1,9 +1,9 @@
-import { BrainModule } from '../BrainModule';
-import { showCustomNotice } from '../../../modals';
+import { BrainModule } from "../BrainModule";
+import { showCustomNotice } from "../../../modals";
 
 export async function generateTitle(
   plugin: BrainModule,
-  noteContent: string
+  noteContent: string,
 ): Promise<string> {
   const systemPrompt = plugin.settings.generateTitlePrompt;
   const userMessage = noteContent;
@@ -22,9 +22,9 @@ export async function generateTitle(
       updateModelStatusBar(plugin, model.name);
     } else {
       showCustomNotice(
-        'No models available. Please check your model settings and ensure at least one provider is enabled.'
+        "No models available. Please check your model settings and ensure at least one provider is enabled.",
       );
-      return '';
+      return "";
     }
   }
 
@@ -33,23 +33,23 @@ export async function generateTitle(
       systemPrompt,
       userMessage,
       model.id,
-      model.maxOutputTokens || 4096
+      model.maxOutputTokens || 4096,
     );
 
     return sanitizeFileName(generatedTitle.trim());
   } catch (error) {
     throw new Error(
-      'Failed to generate title. Please check your API key and try again.'
+      "Failed to generate title. Please check your API key and try again.",
     );
   }
 }
 
 function sanitizeFileName(fileName: string): string {
   return fileName
-    .replace(/[^\w\-. ]/g, '')
-    .replace(/^\.+/, '')
+    .replace(/[^\w\-. ]/g, "")
+    .replace(/^\.+/, "")
     .trim()
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, " ");
 }
 
 function updateModelStatusBar(plugin: BrainModule, modelName: string): void {

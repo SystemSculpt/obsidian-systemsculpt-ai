@@ -1,27 +1,27 @@
-import { RecorderModule } from '../RecorderModule';
-import { showCustomNotice } from '../../../modals';
-import { transcribeRecording } from './transcribeRecording';
-import { MarkdownView, TFile, normalizePath } from 'obsidian';
-import { ChatView } from '../../chat/ChatView';
-import { BrainModule } from '../../brain/BrainModule';
+import { RecorderModule } from "../RecorderModule";
+import { showCustomNotice } from "../../../modals";
+import { transcribeRecording } from "./transcribeRecording";
+import { MarkdownView, TFile, normalizePath } from "obsidian";
+import { ChatView } from "../../chat/ChatView";
+import { BrainModule } from "../../brain/BrainModule";
 
 export async function handleTranscription(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
   recordingFile: TFile,
-  skipPaste: boolean = false
+  skipPaste: boolean = false,
 ): Promise<string> {
   const whisperProvider = plugin.settings.whisperProvider;
   const apiKey =
-    whisperProvider === 'groq'
+    whisperProvider === "groq"
       ? plugin.plugin.brainModule.settings.groqAPIKey
       : plugin.plugin.brainModule.settings.openAIApiKey;
 
   if (!apiKey) {
     showCustomNotice(
-      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
+      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
     );
-    throw new Error('No API Key found');
+    throw new Error("No API Key found");
   }
 
   const updateProgress = (current: number, total: number) => {
@@ -29,26 +29,28 @@ export async function handleTranscription(
     if (total > 1) {
       message = `Large audio file detected. Transcribing chunk ${current} of ${total}...`;
     } else {
-      message = 'Transcribing...';
+      message = "Transcribing...";
     }
 
-    const noticeEl = document.querySelector('.custom-notice .custom-notice-message');
+    const noticeEl = document.querySelector(
+      ".custom-notice .custom-notice-message",
+    );
     if (noticeEl) {
-      noticeEl.innerHTML = '';
+      noticeEl.innerHTML = "";
 
-      if (message.includes('...')) {
-        const parts = message.split('...');
-        const textPart = document.createElement('span');
+      if (message.includes("...")) {
+        const parts = message.split("...");
+        const textPart = document.createElement("span");
         textPart.textContent = parts[0];
         noticeEl.appendChild(textPart);
 
-        const dotsSpan = document.createElement('span');
-        dotsSpan.classList.add('revolving-dots');
-        dotsSpan.textContent = '...';
+        const dotsSpan = document.createElement("span");
+        dotsSpan.classList.add("revolving-dots");
+        dotsSpan.textContent = "...";
         noticeEl.appendChild(dotsSpan);
 
-        if (parts.length > 1 && parts[1].trim() !== '') {
-          const extraSpan = document.createElement('span');
+        if (parts.length > 1 && parts[1].trim() !== "") {
+          const extraSpan = document.createElement("span");
           extraSpan.textContent = parts[1];
           noticeEl.appendChild(extraSpan);
         }
@@ -59,7 +61,11 @@ export async function handleTranscription(
   };
 
   try {
-    let transcription = await transcribeRecording(plugin, arrayBuffer, updateProgress);
+    let transcription = await transcribeRecording(
+      plugin,
+      arrayBuffer,
+      updateProgress,
+    );
 
     if (plugin.settings.enablePostProcessingPrompt) {
       transcription = await postProcessTranscription(plugin, transcription);
@@ -70,9 +76,11 @@ export async function handleTranscription(
     }
     if (plugin.settings.copyToClipboard && skipPaste) {
       navigator.clipboard.writeText(transcription);
-      showCustomNotice('Transcribed, post-processed, and copied to your clipboard!');
+      showCustomNotice(
+        "Transcribed, post-processed, and copied to your clipboard!",
+      );
     } else {
-      showCustomNotice('Transcription and post-processing completed!');
+      showCustomNotice("Transcription and post-processing completed!");
     }
 
     if (!skipPaste) {
@@ -82,10 +90,12 @@ export async function handleTranscription(
       if (activeView instanceof ChatView) {
         const chatView = activeView as ChatView;
         chatView.setChatInputValue(transcription);
-        showCustomNotice('Successfully pasted post-processed transcription into the chat input!');
+        showCustomNotice(
+          "Successfully pasted post-processed transcription into the chat input!",
+        );
       } else if (
         activeLeaf &&
-        activeLeaf.view.getViewType() === 'markdown' &&
+        activeLeaf.view.getViewType() === "markdown" &&
         plugin.settings.pasteIntoActiveNote
       ) {
         const markdownView = activeLeaf.view as MarkdownView;
@@ -93,7 +103,7 @@ export async function handleTranscription(
         if (editor) {
           editor.replaceSelection(transcription);
           showCustomNotice(
-            'Successfully pasted post-processed transcription into your note at the cursor position!'
+            "Successfully pasted post-processed transcription into your note at the cursor position!",
           );
         }
       }
@@ -101,13 +111,13 @@ export async function handleTranscription(
 
     return transcription;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('Invalid API Key')) {
+    if (error instanceof Error && error.message.includes("Invalid API Key")) {
       showCustomNotice(
-        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
+        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
       );
     } else {
       showCustomNotice(
-        `Error generating transcription: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your internet connection and try again.`
+        `Error generating transcription: ${error instanceof Error ? error.message : "Unknown error"}. Please check your internet connection and try again.`,
       );
     }
     throw error;
@@ -116,7 +126,7 @@ export async function handleTranscription(
 
 async function postProcessTranscription(
   plugin: RecorderModule,
-  transcription: string
+  transcription: string,
 ): Promise<string> {
   const systemPrompt = plugin.settings.postProcessingPrompt;
   const userMessage = transcription;
@@ -132,24 +142,27 @@ async function postProcessTranscription(
       await plugin.plugin.brainModule.saveSettings();
     } else {
       showCustomNotice(
-        'No models available for post-processing. Please check your model settings and ensure at least one provider is enabled.'
+        "No models available for post-processing. Please check your model settings and ensure at least one provider is enabled.",
       );
       return transcription;
     }
   }
 
   try {
-    const processedTranscription = await plugin.plugin.brainModule.AIService.createChatCompletion(
-      systemPrompt,
-      userMessage,
-      model.id,
-      model.maxOutputTokens || 4096
-    );
+    const processedTranscription =
+      await plugin.plugin.brainModule.AIService.createChatCompletion(
+        systemPrompt,
+        userMessage,
+        model.id,
+        model.maxOutputTokens || 4096,
+      );
 
     return processedTranscription.trim();
   } catch (error) {
-    console.error('Failed to post-process transcription:', error);
-    showCustomNotice('Failed to post-process transcription. Using original transcription.');
+    console.error("Failed to post-process transcription:", error);
+    showCustomNotice(
+      "Failed to post-process transcription. Using original transcription.",
+    );
     return transcription;
   }
 }
@@ -157,25 +170,25 @@ async function postProcessTranscription(
 async function saveTranscriptionToFile(
   plugin: RecorderModule,
   transcription: string,
-  recordingFile: TFile
+  recordingFile: TFile,
 ): Promise<void> {
   const { vault } = plugin.plugin.app;
   const { transcriptionsPath } = plugin.settings;
 
   const recordingFileName = recordingFile.basename;
   const transcriptionFileName = `Transcription ${recordingFileName
-    .replace('Recording-', '')
-    .replace(/\.(mp3|mp4)$/, '')}.md`;
+    .replace("Recording-", "")
+    .replace(/\.(mp3|mp4)$/, "")}.md`;
   let transcriptionFilePath = normalizePath(
-    `${transcriptionsPath}/${transcriptionFileName}`
+    `${transcriptionsPath}/${transcriptionFileName}`,
   );
 
   const transcriptionContent = `![${recordingFileName}](${recordingFile.path})\n${transcription}`;
 
-  const directories = transcriptionsPath.split('/');
-  let currentPath = '';
+  const directories = transcriptionsPath.split("/");
+  let currentPath = "";
   for (const directory of directories) {
-    currentPath += directory + '/';
+    currentPath += directory + "/";
     if (!(await vault.adapter.exists(currentPath))) {
       await vault.createFolder(currentPath);
     }
@@ -184,16 +197,16 @@ async function saveTranscriptionToFile(
   if (await vault.adapter.exists(transcriptionFilePath)) {
     const timestamp = new Date();
     const formattedTimestamp = `${timestamp.getFullYear()}-${String(
-      timestamp.getMonth() + 1
-    ).padStart(2, '0')}-${String(timestamp.getDate()).padStart(
+      timestamp.getMonth() + 1,
+    ).padStart(2, "0")}-${String(timestamp.getDate()).padStart(
       2,
-      '0'
-    )} ${String(timestamp.getHours()).padStart(2, '0')}-${String(
-      timestamp.getMinutes()
-    ).padStart(2, '0')}-${String(timestamp.getSeconds()).padStart(2, '0')}`;
+      "0",
+    )} ${String(timestamp.getHours()).padStart(2, "0")}-${String(
+      timestamp.getMinutes(),
+    ).padStart(2, "0")}-${String(timestamp.getSeconds()).padStart(2, "0")}`;
     const newTranscriptionFileName = `Transcription ${formattedTimestamp}.md`;
     transcriptionFilePath = normalizePath(
-      `${transcriptionsPath}/${newTranscriptionFileName}`
+      `${transcriptionsPath}/${newTranscriptionFileName}`,
     );
   }
 

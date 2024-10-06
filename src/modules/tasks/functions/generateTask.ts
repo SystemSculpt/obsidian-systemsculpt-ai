@@ -1,10 +1,10 @@
-import { TasksModule } from '../TasksModule';
-import { showCustomNotice } from '../../../modals';
-import { BrainModule } from '../../brain/BrainModule';
+import { TasksModule } from "../TasksModule";
+import { showCustomNotice } from "../../../modals";
+import { BrainModule } from "../../brain/BrainModule";
 
 export async function generateTask(
   plugin: TasksModule,
-  taskDescription: string
+  taskDescription: string,
 ): Promise<string> {
   const systemPrompt = plugin.settings.defaultTaskPrompt;
   const userMessage = taskDescription;
@@ -23,9 +23,9 @@ export async function generateTask(
       updateModelStatusBar(plugin.plugin.brainModule, model.name);
     } else {
       showCustomNotice(
-        'No models available. Please check your model settings and ensure at least one provider is enabled.'
+        "No models available. Please check your model settings and ensure at least one provider is enabled.",
       );
-      return '';
+      return "";
     }
   }
 
@@ -38,13 +38,13 @@ export async function generateTask(
       systemPrompt,
       userMessage,
       model.id,
-      maxOutputTokens
+      maxOutputTokens,
     );
 
     return generatedTask.trim();
   } catch (error) {
     throw new Error(
-      'Failed to generate task. Please check your API key and try again.'
+      "Failed to generate task. Please check your API key and try again.",
     );
   }
 }

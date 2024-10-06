@@ -1,10 +1,10 @@
-import { BrainModule } from '../BrainModule';
-import { MarkdownView, TFile } from 'obsidian';
-import { showCustomNotice } from '../../../modals';
-import { ChatView } from '../../chat/ChatView';
+import { BrainModule } from "../BrainModule";
+import { MarkdownView, TFile } from "obsidian";
+import { showCustomNotice } from "../../../modals";
+import { ChatView } from "../../chat/ChatView";
 
 export async function generateTitleForCurrentNote(
-  plugin: BrainModule
+  plugin: BrainModule,
 ): Promise<void> {
   const activeView =
     plugin.plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -23,17 +23,17 @@ export async function generateTitleForCurrentNote(
     }
     const noteContent = await plugin.plugin.app.vault.read(currentFile);
 
-    const notice = showCustomNotice('Generating Title...');
+    const notice = showCustomNotice("Generating Title...");
 
     try {
       const generatedTitle = await plugin.generateTitle(noteContent);
       await renameCurrentNote(plugin, currentFile, generatedTitle);
-      showCustomNotice('Title generated successfully!');
+      showCustomNotice("Title generated successfully!");
     } catch (error) {
       // @ts-ignore
       showCustomNotice(`Title generation failed: ${error.message}`);
       throw new Error(
-        'Failed to generate title. Please check your API key and try again.'
+        "Failed to generate title. Please check your API key and try again.",
       );
     } finally {
     }
@@ -43,7 +43,7 @@ export async function generateTitleForCurrentNote(
 async function renameCurrentNote(
   plugin: BrainModule,
   currentFile: TFile,
-  newTitle: string
+  newTitle: string,
 ): Promise<void> {
   if (!currentFile.parent) {
     return;

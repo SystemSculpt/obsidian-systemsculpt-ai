@@ -34,22 +34,22 @@ export const logger = {
   trace: (message: string, ...args: any[]) => {
     const stack = new Error().stack;
     if (stack) {
-      const callerLine = stack.split('\n')[2]; // Get the caller's line
+      const callerLine = stack.split("\n")[2]; // Get the caller's line
       const match = callerLine.match(
-        /at (?:(.+?)\s+\()?(?:(.+?):(\d+)(?::(\d+))?)\)?/
+        /at (?:(.+?)\s+\()?(?:(.+?):(\d+)(?::(\d+))?)\)?/,
       );
-      const filePath = match ? match[2] : 'unknown';
-      const lineNumber = match ? match[3] : 'unknown';
+      const filePath = match ? match[2] : "unknown";
+      const lineNumber = match ? match[3] : "unknown";
       console.log(
         `[SYSTEMSCULPT] ${new Date().toLocaleTimeString()} [${filePath}:${lineNumber}]`,
         message,
-        ...args
+        ...args,
       );
     } else {
       console.log(
         `[SYSTEMSCULPT] ${new Date().toLocaleTimeString()}`,
         message,
-        ...args
+        ...args,
       );
     }
   },

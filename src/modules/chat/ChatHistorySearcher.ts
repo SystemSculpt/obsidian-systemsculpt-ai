@@ -1,4 +1,4 @@
-import { App, TFile, FuzzySuggestModal, FuzzyMatch } from 'obsidian';
+import { App, TFile, FuzzySuggestModal, FuzzyMatch } from "obsidian";
 
 export class ChatHistorySearcher extends FuzzySuggestModal<TFile> {
   private chatHistoryPath: string;
@@ -9,11 +9,13 @@ export class ChatHistorySearcher extends FuzzySuggestModal<TFile> {
   }
 
   getItems(): TFile[] {
-    return this.app.vault.getFiles()
-      .filter(file => 
-        file.path.startsWith(this.chatHistoryPath) && 
-        file.extension === 'md' &&
-        !file.path.includes('/Archive/')
+    return this.app.vault
+      .getFiles()
+      .filter(
+        (file) =>
+          file.path.startsWith(this.chatHistoryPath) &&
+          file.extension === "md" &&
+          !file.path.includes("/Archive/"),
       )
       .sort((a, b) => b.stat.ctime - a.stat.ctime); // Sort by creation time, newest first
   }

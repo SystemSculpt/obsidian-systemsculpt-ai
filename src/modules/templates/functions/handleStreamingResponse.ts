@@ -1,30 +1,30 @@
-import { Editor } from 'obsidian';
-import { showCustomNotice } from '../../../modals';
-import { IGenerationModule } from '../../../interfaces/IGenerationModule';
-import { ChatMessage } from '../../chat/ChatMessage';
+import { Editor } from "obsidian";
+import { showCustomNotice } from "../../../modals";
+import { IGenerationModule } from "../../../interfaces/IGenerationModule";
+import { ChatMessage } from "../../chat/ChatMessage";
 
 export function handleStreamingResponse(
   chunk: string,
   editor: Editor,
-  plugin: IGenerationModule
+  plugin: IGenerationModule,
 ): void {
   const signal = plugin.abortController?.signal;
   if (signal?.aborted) {
     return;
   }
 
-  const dataLines = chunk.split('\n');
-  let incompleteJSON = '';
+  const dataLines = chunk.split("\n");
+  let incompleteJSON = "";
 
   for (const line of dataLines) {
-    if (line.trim() === '') {
+    if (line.trim() === "") {
       continue;
     }
 
-    if (line.startsWith('data:')) {
+    if (line.startsWith("data:")) {
       const dataStr = line.slice(5).trim();
-      if (dataStr === '[DONE]') {
-        showCustomNotice('Generation completed!', 5000);
+      if (dataStr === "[DONE]") {
+        showCustomNotice("Generation completed!", 5000);
         plugin.abortController = null;
         plugin.isGenerationCompleted = true;
         return;
@@ -32,7 +32,7 @@ export function handleStreamingResponse(
 
       try {
         const jsonStr = incompleteJSON + dataStr;
-        incompleteJSON = '';
+        incompleteJSON = "";
         const data = JSON.parse(jsonStr);
 
         if (data.choices && data.choices[0].delta.content) {
@@ -40,7 +40,7 @@ export function handleStreamingResponse(
           const startPos = editor.getCursor();
           editor.replaceSelection(content);
 
-          const lines = content.split('\n');
+          const lines = content.split("\n");
           let endPos = {
             line: startPos.line + lines.length - 1,
             ch:
@@ -54,18 +54,18 @@ export function handleStreamingResponse(
       } catch (error) {
         if (
           error instanceof SyntaxError &&
-          error.message.includes('Unexpected end of JSON input')
+          error.message.includes("Unexpected end of JSON input")
         ) {
           incompleteJSON += dataStr;
         } else if (
           // @ts-ignore
-          error.message.includes('Unterminated string in JSON at position')
+          error.message.includes("Unterminated string in JSON at position")
         ) {
         }
       }
     } else {
       if (plugin.addMessage) {
-        const aiMessage = new ChatMessage('ai', line.trim());
+        const aiMessage = new ChatMessage("ai", line.trim());
         plugin.addMessage(aiMessage);
       }
     }

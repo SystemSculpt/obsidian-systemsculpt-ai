@@ -9,11 +9,11 @@ import {
   TFile,
   TFolder,
   normalizePath,
-} from 'obsidian';
-import { TemplatesModule } from './TemplatesModule';
-import { handleStreamingResponse } from './functions/handleStreamingResponse';
-import { showCustomNotice } from '../../modals';
-import { BlankTemplateModal } from './views/BlankTemplateModal';
+} from "obsidian";
+import { TemplatesModule } from "./TemplatesModule";
+import { handleStreamingResponse } from "./functions/handleStreamingResponse";
+import { showCustomNotice } from "../../modals";
+import { BlankTemplateModal } from "./views/BlankTemplateModal";
 
 export interface FrontMatter {
   name: string;
@@ -32,7 +32,7 @@ interface TemplateItem {
 
 export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   plugin: TemplatesModule;
-  private lastQuery: string = '';
+  private lastQuery: string = "";
 
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
@@ -45,39 +45,39 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
     if (frontMatter) {
       return {
-        name: frontMatter.name || '',
-        description: frontMatter.description || '',
-        model: frontMatter.model || 'default',
+        name: frontMatter.name || "",
+        description: frontMatter.description || "",
+        model: frontMatter.model || "default",
         maxOutputTokens:
-          frontMatter['max tokens'] ||
-          frontMatter['max_tokens'] ||
-          frontMatter['max output tokens'] ||
-          frontMatter['max_output_tokens'] ||
+          frontMatter["max tokens"] ||
+          frontMatter["max_tokens"] ||
+          frontMatter["max output tokens"] ||
+          frontMatter["max_output_tokens"] ||
           undefined,
         tags:
-          typeof frontMatter.tags === 'string'
-            ? frontMatter.tags.split(',').map((tag: string) => tag.trim())
+          typeof frontMatter.tags === "string"
+            ? frontMatter.tags.split(",").map((tag: string) => tag.trim())
             : Array.isArray(frontMatter.tags)
-            ? frontMatter.tags
-            : [],
+              ? frontMatter.tags
+              : [],
         prompt: await this.app.vault.read(file),
       };
     }
 
     return {
-      name: '',
-      description: '',
-      model: '',
+      name: "",
+      description: "",
+      model: "",
       maxOutputTokens: 0,
       tags: [],
-      prompt: '',
+      prompt: "",
     };
   }
 
   onTrigger(
     cursor: EditorPosition,
     editor: Editor,
-    file: TFile
+    file: TFile,
   ): EditorSuggestTriggerInfo | null {
     if (!this.plugin.settings.triggerKey) {
       return null;
@@ -106,13 +106,13 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   async getSuggestions(context: EditorSuggestContext): Promise<TemplateItem[]> {
     const templateFiles = await this.getTemplateFiles(
       this.app,
-      this.plugin.settings.templatesPath
+      this.plugin.settings.templatesPath,
     );
-    const filteredTemplateFiles = templateFiles.filter(file =>
-      this.shouldIncludeTemplate(file)
+    const filteredTemplateFiles = templateFiles.filter((file) =>
+      this.shouldIncludeTemplate(file),
     );
     const templateItems: TemplateItem[] = await Promise.all(
-      filteredTemplateFiles.map(async file => {
+      filteredTemplateFiles.map(async (file) => {
         const frontMatter = await this.parseFrontMatter(file);
         const modelName = this.getModelName(frontMatter.model);
         return {
@@ -120,19 +120,19 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
           frontMatter,
           modelName,
         };
-      })
+      }),
     );
 
     const blankTemplate = {
       file: null,
       frontMatter: {
-        name: 'Blank Template',
-        description: 'Create a custom prompt',
-        model: '',
+        name: "Blank Template",
+        description: "Create a custom prompt",
+        model: "",
         tags: [],
-        prompt: '',
+        prompt: "",
       },
-      modelName: 'current',
+      modelName: "current",
     };
 
     if (!context.query) {
@@ -141,8 +141,8 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
     this.lastQuery = context.query;
     const fuzzySearchResults = this.fuzzySearch(templateItems, context.query);
-    
-    if ('blank template'.includes(context.query.toLowerCase())) {
+
+    if ("blank template".includes(context.query.toLowerCase())) {
       return [blankTemplate, ...fuzzySearchResults];
     }
 
@@ -150,10 +150,10 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   }
 
   private getModelName(model: string): string {
-    if (model === 'default') {
-      return 'current';
-    } else if (model === 'local') {
-      return 'local';
+    if (model === "default") {
+      return "current";
+    } else if (model === "local") {
+      return "local";
     } else {
       return model;
     }
@@ -162,12 +162,12 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   private fuzzySearch(items: TemplateItem[], query: string): TemplateItem[] {
     const lowercaseQuery = query.toLowerCase();
     return items
-      .map(item => ({
+      .map((item) => ({
         item,
         score: Math.max(
           this.fuzzyScore(item.frontMatter.name.toLowerCase(), lowercaseQuery),
           this.fuzzyScore(item.modelName.toLowerCase(), lowercaseQuery),
-          this.fuzzyScoreTags(item.frontMatter.tags, lowercaseQuery)
+          this.fuzzyScoreTags(item.frontMatter.tags, lowercaseQuery),
         ),
       }))
       .filter(({ score }) => score > 0)
@@ -176,7 +176,10 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   }
 
   private fuzzyScoreTags(tags: string[], query: string): number {
-    return Math.max(...tags.map(tag => this.fuzzyScore(tag.toLowerCase(), query)), 0);
+    return Math.max(
+      ...tags.map((tag) => this.fuzzyScore(tag.toLowerCase(), query)),
+      0,
+    );
   }
 
   private fuzzyScore(str: string, query: string): number {
@@ -199,7 +202,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
             score += 2;
           }
 
-          if (j === 0 || str[j - 1] === ' ') {
+          if (j === 0 || str[j - 1] === " ") {
             score += 2;
           }
 
@@ -219,7 +222,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       return true;
     }
     const ssSyncFolderPath = normalizePath(
-      `${this.plugin.settings.templatesPath}/SS-Sync`
+      `${this.plugin.settings.templatesPath}/SS-Sync`,
     );
     return !file.path.startsWith(ssSyncFolderPath);
   }
@@ -227,29 +230,29 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   renderSuggestion(item: TemplateItem, el: HTMLElement): void {
     const { name, description } = item.frontMatter;
 
-    el.addClass('template-suggestion');
+    el.addClass("template-suggestion");
     el.empty();
 
-    const contentEl = el.createDiv({ cls: 'template-content' });
-    const nameEl = contentEl.createEl('div', { cls: 'template-name' });
-    const descEl = contentEl.createEl('div', { cls: 'template-description' });
-    
-    const metaEl = el.createDiv({ cls: 'template-meta' });
-    const modelEl = metaEl.createEl('div', { cls: 'template-model' });
-    const tagsEl = metaEl.createEl('div', { cls: 'template-tags' });
+    const contentEl = el.createDiv({ cls: "template-content" });
+    const nameEl = contentEl.createEl("div", { cls: "template-name" });
+    const descEl = contentEl.createEl("div", { cls: "template-description" });
+
+    const metaEl = el.createDiv({ cls: "template-meta" });
+    const modelEl = metaEl.createEl("div", { cls: "template-model" });
+    const tagsEl = metaEl.createEl("div", { cls: "template-tags" });
 
     if (item.file === null) {
-      nameEl.setText('Blank Template');
-      descEl.setText('Create a custom prompt');
-      modelEl.setText('Model: current');
+      nameEl.setText("Blank Template");
+      descEl.setText("Create a custom prompt");
+      modelEl.setText("Model: current");
     } else {
       this.highlightMatches(nameEl, name);
       this.highlightMatches(descEl, description);
       modelEl.setText(`Model: ${item.modelName}`);
-      
+
       if (item.frontMatter.tags && item.frontMatter.tags.length > 0) {
-        item.frontMatter.tags.forEach(tag => {
-          tagsEl.createEl('span', { text: tag, cls: 'template-tag' });
+        item.frontMatter.tags.forEach((tag) => {
+          tagsEl.createEl("span", { text: tag, cls: "template-tag" });
         });
       }
     }
@@ -268,7 +271,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       if (index > lastIndex) {
         el.appendText(text.slice(lastIndex, index));
       }
-      el.createSpan({ text: text[index], cls: 'fuzzy-match' });
+      el.createSpan({ text: text[index], cls: "fuzzy-match" });
       lastIndex = index + 1;
     }
 
@@ -279,7 +282,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
   async selectSuggestion(
     item: TemplateItem,
-    evt: MouseEvent | KeyboardEvent
+    evt: MouseEvent | KeyboardEvent,
   ): Promise<void> {
     this.plugin.abortController = new AbortController();
     const signal = this.plugin.abortController.signal;
@@ -290,7 +293,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     } else {
       let { model, maxOutputTokens, prompt } = item.frontMatter;
 
-      if (model === 'default') {
+      if (model === "default") {
         model = this.plugin.plugin.brainModule.settings.defaultModelId;
       }
 
@@ -299,21 +302,21 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       try {
         const models = await this.plugin.plugin.brainModule.getEnabledModels();
 
-        modelInstance = models.find(m => m.id === model);
+        modelInstance = models.find((m) => m.id === model);
 
         if (!modelInstance && models.length > 0) {
           modelInstance = models[0];
         }
       } catch (error) {
         showCustomNotice(
-          'Failed to fetch models. Please check your settings and try again.'
+          "Failed to fetch models. Please check your settings and try again.",
         );
         return;
       }
 
       if (!modelInstance) {
         showCustomNotice(
-          'No models available. Please check your model settings and ensure at least one provider is enabled.'
+          "No models available. Please check your model settings and ensure at least one provider is enabled.",
         );
         return;
       }
@@ -325,15 +328,15 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         const line = cursor.line;
         const ch = cursor.ch;
 
-        editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
+        editor.replaceRange("", { line, ch: 0 }, { line, ch: cursor.ch });
 
         const noteContent = editor.getRange({ line: 0, ch: 0 }, { line, ch });
 
-        const parts = prompt.split('---');
+        const parts = prompt.split("---");
         let promptWithoutFrontmatter =
-          parts.length > 2 ? parts.slice(2).join('---').trim() : prompt.trim();
+          parts.length > 2 ? parts.slice(2).join("---").trim() : prompt.trim();
 
-        showCustomNotice('Generating...');
+        showCustomNotice("Generating...");
 
         try {
           await this.plugin.AIService.createStreamingChatCompletionWithCallback(
@@ -347,11 +350,11 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
               }
               handleStreamingResponse(chunk, editor, this.plugin);
             },
-            signal
+            signal,
           );
         } catch (error) {
           // @ts-ignore
-          if (error.name === 'AbortError') {
+          if (error.name === "AbortError") {
           } else {
           }
         } finally {
@@ -367,13 +370,13 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     const templateFolder = vault.getAbstractFileByPath(templatesPath);
 
     const recursivelyCollectTemplates = async (
-      folder: TFolder
+      folder: TFolder,
     ): Promise<TFile[]> => {
       let templates: TFile[] = [];
       for (const child of folder.children) {
         if (child instanceof TFolder) {
           templates = templates.concat(
-            await recursivelyCollectTemplates(child)
+            await recursivelyCollectTemplates(child),
           );
         } else if (child instanceof TFile) {
           const frontMatter = await this.parseFrontMatter(child);
@@ -400,38 +403,38 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     app: App,
     value: string,
     templateFile: TFile,
-    el: HTMLElement
+    el: HTMLElement,
   ): Promise<void> {
     const frontMatter = await this.parseFrontMatter(templateFile);
     const { name, description, model, maxOutputTokens, tags } = frontMatter;
 
     el.empty();
 
-    const nameEl = el.createEl('h2');
+    const nameEl = el.createEl("h2");
     nameEl.textContent = name;
-    nameEl.addClass('template-name');
+    nameEl.addClass("template-name");
 
-    const descriptionEl = el.createEl('p');
+    const descriptionEl = el.createEl("p");
     const truncatedDescription =
       description.length > 125
         ? `${description.substring(0, 125)}...`
         : description;
     descriptionEl.textContent = truncatedDescription;
-    descriptionEl.addClass('template-description');
+    descriptionEl.addClass("template-description");
 
-    const metaEl = el.createEl('div', { cls: 'template-meta' });
+    const metaEl = el.createEl("div", { cls: "template-meta" });
 
-    const modelEl = metaEl.createEl('span', { cls: 'template-meta-item' });
-    modelEl.textContent = model === 'default' ? 'current' : model;
+    const modelEl = metaEl.createEl("span", { cls: "template-meta-item" });
+    modelEl.textContent = model === "default" ? "current" : model;
 
-    const maxOutputTokensEl = metaEl.createEl('span', {
-      cls: 'template-meta-item',
+    const maxOutputTokensEl = metaEl.createEl("span", {
+      cls: "template-meta-item",
     });
     maxOutputTokensEl.textContent = `${maxOutputTokens} max`;
 
-    const tagsContainer = metaEl.createEl('div', { cls: 'template-tags' });
+    const tagsContainer = metaEl.createEl("div", { cls: "template-tags" });
     tags.forEach((tag: string, index: number) => {
-      const tagEl = tagsContainer.createEl('span', { cls: 'template-tag' });
+      const tagEl = tagsContainer.createEl("span", { cls: "template-tag" });
       tagEl.textContent = tag.trim();
     });
   }
@@ -439,7 +442,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   async searchAndOrderTemplates(
     app: App,
     templateFiles: TFile[],
-    query: string
+    query: string,
   ): Promise<TFile[]> {
     if (!query) {
       return templateFiles;
@@ -447,7 +450,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
     const lowerCaseQuery = query.toLowerCase();
     const scoredTemplates = await Promise.all(
-      templateFiles.map(async file => {
+      templateFiles.map(async (file) => {
         const { name, description } = await this.parseFrontMatter(file);
         const nameScore = name.toLowerCase().includes(lowerCaseQuery) ? 1 : 0;
         const descriptionScore = description
@@ -459,7 +462,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
           file,
           score: nameScore + descriptionScore,
         };
-      })
+      }),
     );
 
     return scoredTemplates

@@ -1,19 +1,19 @@
-import { Plugin, TFile, Notice, WorkspaceLeaf, Menu } from 'obsidian';
+import { Plugin, TFile, Notice, WorkspaceLeaf, Menu } from "obsidian";
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,
   SystemSculptSettingTab,
-} from './settings';
-import { TasksModule } from './modules/tasks/TasksModule';
-import { BrainModule } from './modules/brain/BrainModule';
-import { TemplatesModule } from './modules/templates/TemplatesModule';
-import { DataModule } from './modules/data/DataModule';
-import { RecorderModule } from './modules/recorder/RecorderModule';
-import { AboutModule } from './modules/about/AboutModule';
-import { ChatModule } from './modules/chat/ChatModule';
-import { ChatView, VIEW_TYPE_CHAT } from './modules/chat/ChatView';
-import { registerMp3ContextMenu } from './events';
-import { checkForUpdate } from './modules/brain/functions/checkForUpdate';
+} from "./settings";
+import { TasksModule } from "./modules/tasks/TasksModule";
+import { BrainModule } from "./modules/brain/BrainModule";
+import { TemplatesModule } from "./modules/templates/TemplatesModule";
+import { DataModule } from "./modules/data/DataModule";
+import { RecorderModule } from "./modules/recorder/RecorderModule";
+import { AboutModule } from "./modules/about/AboutModule";
+import { ChatModule } from "./modules/chat/ChatModule";
+import { ChatView, VIEW_TYPE_CHAT } from "./modules/chat/ChatView";
+import { registerMp3ContextMenu } from "./events";
+import { checkForUpdate } from "./modules/brain/functions/checkForUpdate";
 
 export default class SystemSculptPlugin extends Plugin {
   settings!: SystemSculptSettings;
@@ -46,20 +46,19 @@ export default class SystemSculptPlugin extends Plugin {
 
     // Load modules
     const modules = [
-      { name: 'Brain', load: () => this.brainModule.load() },
-      { name: 'Tasks', load: () => this.tasksModule.load() },
-      { name: 'Templates', load: () => this.templatesModule.load() },
-      { name: 'Data', load: () => this.dataModule.load() },
-      { name: 'Recorder', load: () => this.recorderModule.load() },
-      { name: 'About', load: () => this.aboutModule.load() },
-      { name: 'Chat', load: () => this.chatModule.load() },
+      { name: "Brain", load: () => this.brainModule.load() },
+      { name: "Tasks", load: () => this.tasksModule.load() },
+      { name: "Templates", load: () => this.templatesModule.load() },
+      { name: "Data", load: () => this.dataModule.load() },
+      { name: "Recorder", load: () => this.recorderModule.load() },
+      { name: "About", load: () => this.aboutModule.load() },
+      { name: "Chat", load: () => this.chatModule.load() },
     ];
 
     for (const module of modules) {
       try {
         await module.load();
-      } catch (error) {
-      }
+      } catch (error) {}
     }
 
     this.settingsTab = new SystemSculptSettingTab(this.app, this);
@@ -84,8 +83,8 @@ export default class SystemSculptPlugin extends Plugin {
   private addCommands() {
     // Add command to open SystemSculpt settings
     this.addCommand({
-      id: 'open-systemsculpt-settings',
-      name: 'Open SystemSculpt settings',
+      id: "open-systemsculpt-settings",
+      name: "Open SystemSculpt settings",
       callback: () => {
         //@ts-ignore
         this.app.setting.open();
@@ -96,8 +95,8 @@ export default class SystemSculptPlugin extends Plugin {
 
     // Add command to reload Obsidian
     this.addCommand({
-      id: 'reload-systemsculpt',
-      name: 'Reload SystemSculpt',
+      id: "reload-systemsculpt",
+      name: "Reload SystemSculpt",
       callback: () => {
         location.reload();
       },
@@ -107,13 +106,13 @@ export default class SystemSculptPlugin extends Plugin {
   private registerEvents() {
     // Register file open event to load chat files into Chat View
     this.registerEvent(
-      this.app.workspace.on('file-open', async file => {
+      this.app.workspace.on("file-open", async (file) => {
         if (
           file &&
           file instanceof TFile &&
           file.parent &&
           file.parent.path === this.chatModule.settings.chatsPath &&
-          file.extension === 'md'
+          file.extension === "md"
         ) {
           let chatLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 
@@ -134,16 +133,15 @@ export default class SystemSculptPlugin extends Plugin {
           chatView.setChatFile(file);
           await chatView.loadChatFile(file);
         }
-      })
+      }),
     );
-
 
     // Register file change event to update chat view when the chat file changes
     this.registerEvent(
-      this.app.vault.on('modify', async file => {
+      this.app.vault.on("modify", async (file) => {
         if (
           file instanceof TFile &&
-          file.path.startsWith('SystemSculpt/Chats')
+          file.path.startsWith("SystemSculpt/Chats")
         ) {
           const chatLeaf =
             this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
@@ -152,15 +150,15 @@ export default class SystemSculptPlugin extends Plugin {
             await chatView.onFileChange(file);
           }
         }
-      })
+      }),
     );
 
     // Register file rename event to update chat view when the file is renamed
     this.registerEvent(
-      this.app.vault.on('rename', async (file, oldPath) => {
+      this.app.vault.on("rename", async (file, oldPath) => {
         if (
           file instanceof TFile &&
-          file.path.startsWith('SystemSculpt/Chats')
+          file.path.startsWith("SystemSculpt/Chats")
         ) {
           const chatLeaf =
             this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
@@ -169,16 +167,19 @@ export default class SystemSculptPlugin extends Plugin {
             await chatView.onFileRename(file, oldPath);
           }
         }
-      })
+      }),
     );
   }
 
   private performAsyncChecks() {
     setTimeout(async () => {
       await checkForUpdate(this.brainModule);
-      setInterval(async () => {
-        await checkForUpdate(this.brainModule);
-      }, 1 * 60 * 60 * 1000); // recurring 1 hour check
+      setInterval(
+        async () => {
+          await checkForUpdate(this.brainModule);
+        },
+        1 * 60 * 60 * 1000,
+      ); // recurring 1 hour check
     }, 5000);
   }
 
@@ -194,7 +195,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async saveSettings(moduleSettings?: Partial<SystemSculptSettings> | any) {
-    console.log('Saving settings...');
+    console.log("Saving settings...");
     if (moduleSettings) {
       this.settings = { ...this.settings, ...moduleSettings };
     }
@@ -220,6 +221,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   onClickEvent(element: HTMLElement, callback: () => void) {
-    element.addEventListener('click', callback);
+    element.addEventListener("click", callback);
   }
 }

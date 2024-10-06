@@ -1,14 +1,14 @@
-import { Setting } from 'obsidian';
-import { RecorderModule } from '../RecorderModule';
+import { Setting } from "obsidian";
+import { RecorderModule } from "../RecorderModule";
 
 export function renderSaveTranscriptionToFileToggle(
   containerEl: HTMLElement,
-  plugin: RecorderModule
+  plugin: RecorderModule,
 ): void {
   new Setting(containerEl)
-    .setName('Save transcription to file')
-    .setDesc('Automatically save transcriptions to separate files')
-    .addToggle(toggle => {
+    .setName("Save transcription to file")
+    .setDesc("Automatically save transcriptions to separate files")
+    .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.saveTranscriptionToFile)
         .onChange(async (value: boolean) => {

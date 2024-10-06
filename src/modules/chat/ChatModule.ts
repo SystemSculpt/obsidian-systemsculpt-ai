@@ -1,14 +1,14 @@
-import SystemSculptPlugin from '../../main';
-import { ChatSettings, DEFAULT_CHAT_SETTINGS } from './settings/ChatSettings';
-import { ChatSettingTab } from './settings/ChatSettingTab';
-import { ChatView, VIEW_TYPE_CHAT } from './ChatView';
-import { ChatFileManager } from './ChatFileManager';
-import { TFile, WorkspaceLeaf } from 'obsidian';
-import { DocumentExtractor } from './DocumentExtractor';
-import { Notice } from 'obsidian';
-import { createHash } from 'crypto';
-import { ContextFileManager } from './ContextFileManager';
-import { RecorderModule } from '../recorder/RecorderModule';
+import SystemSculptPlugin from "../../main";
+import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "./settings/ChatSettings";
+import { ChatSettingTab } from "./settings/ChatSettingTab";
+import { ChatView, VIEW_TYPE_CHAT } from "./ChatView";
+import { ChatFileManager } from "./ChatFileManager";
+import { TFile, WorkspaceLeaf } from "obsidian";
+import { DocumentExtractor } from "./DocumentExtractor";
+import { Notice } from "obsidian";
+import { createHash } from "crypto";
+import { ContextFileManager } from "./ContextFileManager";
+import { RecorderModule } from "../recorder/RecorderModule";
 
 export class ChatModule {
   plugin: SystemSculptPlugin;
@@ -30,35 +30,43 @@ export class ChatModule {
 
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
 
-    await this.plugin.app.vault.createFolder(this.settings.attachmentsPath).catch(() => {});
+    await this.plugin.app.vault
+      .createFolder(this.settings.attachmentsPath)
+      .catch(() => {});
 
     this.plugin.addRibbonIcon(
-      'message-square-plus',
-      'New SystemSculpt AI Chat',
+      "message-square-plus",
+      "New SystemSculpt AI Chat",
       () => {
         this.openNewChat();
-      }
+      },
     );
 
-    this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).forEach(leaf => {
-      const view = leaf.view as ChatView;
-      if (view instanceof ChatView) {
-        view.setChatModule(this);
-      }
-    });
+    this.plugin.app.workspace
+      .getLeavesOfType(VIEW_TYPE_CHAT)
+      .forEach((leaf) => {
+        const view = leaf.view as ChatView;
+        if (view instanceof ChatView) {
+          view.setChatModule(this);
+        }
+      });
 
     this.plugin.addCommand({
-      id: 'open-new-chat',
-      name: 'Open New Chat',
+      id: "open-new-chat",
+      name: "Open New Chat",
       callback: () => this.openNewChat(),
     });
 
     this.plugin.addCommand({
-      id: 'open-chat-with-file',
-      name: 'Open Chat with Selected File',
+      id: "open-chat-with-file",
+      name: "Open Chat with Selected File",
       checkCallback: (checking: boolean) => {
         const file = this.plugin.app.workspace.getActiveFile();
-        if (file && file.extension === 'md' && this.chatFileManager.isDirectlyInChatsDirectory(file)) {
+        if (
+          file &&
+          file.extension === "md" &&
+          this.chatFileManager.isDirectlyInChatsDirectory(file)
+        ) {
           if (!checking) {
             this.openChatWithFile(file);
           }
@@ -69,13 +77,13 @@ export class ChatModule {
     });
 
     this.plugin.addCommand({
-      id: 'open-chat-actions',
-      name: 'Open Chat Actions',
+      id: "open-chat-actions",
+      name: "Open Chat Actions",
       callback: () => {
         let chatView = this.plugin.app.workspace
           .getLeavesOfType(VIEW_TYPE_CHAT)
-          .map(leaf => leaf.view as ChatView)
-          .find(view => view instanceof ChatView);
+          .map((leaf) => leaf.view as ChatView)
+          .find((view) => view instanceof ChatView);
 
         if (!chatView) {
           this.openNewChat();
@@ -101,8 +109,8 @@ export class ChatModule {
       !this.plugin.chatToggleStatusBarItem
     ) {
       this.plugin.chatToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.chatToggleStatusBarItem.setText('C');
-      this.plugin.chatToggleStatusBarItem.addClass('chat-toggle-button');
+      this.plugin.chatToggleStatusBarItem.setText("C");
+      this.plugin.chatToggleStatusBarItem.addClass("chat-toggle-button");
     }
 
     if (this.plugin.chatToggleStatusBarItem) {
@@ -118,7 +126,7 @@ export class ChatModule {
     this.settings = Object.assign(
       {},
       DEFAULT_CHAT_SETTINGS,
-      await this.plugin.loadData()
+      await this.plugin.loadData(),
     );
   }
 
@@ -137,7 +145,7 @@ export class ChatModule {
     if (!chatLeaf) {
       chatLeaf =
         this.plugin.app.workspace.getRightLeaf(false) ||
-        this.plugin.app.workspace.getLeaf('tab');
+        this.plugin.app.workspace.getLeaf("tab");
     }
 
     if (chatLeaf) {
@@ -171,7 +179,7 @@ export class ChatModule {
     if (leaves.length === 0) {
       chatLeaf = this.plugin.app.workspace.getRightLeaf(false);
       if (!chatLeaf) {
-        chatLeaf = this.plugin.app.workspace.getLeaf('tab');
+        chatLeaf = this.plugin.app.workspace.getLeaf("tab");
       }
     } else {
       chatLeaf = leaves[0];
@@ -199,7 +207,7 @@ export class ChatModule {
 
       this.saveLastOpenedChat(file.path);
     } else {
-      console.error('Failed to create or find a chat leaf');
+      console.error("Failed to create or find a chat leaf");
     }
   }
 
@@ -223,9 +231,9 @@ export class ChatModule {
 
   async calculateMD5(file: TFile): Promise<string> {
     const arrayBuffer = await this.plugin.app.vault.readBinary(file);
-    const hash = createHash('md5');
+    const hash = createHash("md5");
     hash.update(Buffer.from(arrayBuffer));
-    return hash.digest('hex');
+    return hash.digest("hex");
   }
 
   async extractDocument(file: TFile) {
@@ -237,28 +245,35 @@ export class ChatModule {
 
   registerExtractDocumentCommand() {
     const extractDocument = (file: TFile) => {
-      if (file && ['pdf', 'docx', 'pptx'].includes(file.extension.toLowerCase())) {
+      if (
+        file &&
+        ["pdf", "docx", "pptx"].includes(file.extension.toLowerCase())
+      ) {
         this.openChatAndAddFile(file);
       }
     };
 
     this.plugin.registerEvent(
-      this.plugin.app.workspace.on('file-menu', (menu, file) => {
-        if (file instanceof TFile && ['pdf', 'docx', 'pptx'].includes(file.extension.toLowerCase())) {
+      this.plugin.app.workspace.on("file-menu", (menu, file) => {
+        if (
+          file instanceof TFile &&
+          ["pdf", "docx", "pptx"].includes(file.extension.toLowerCase())
+        ) {
           menu.addItem((item) => {
             item
-              .setTitle('Extract Document with SystemSculpt')
-              .setIcon('file-text')
+              .setTitle("Extract Document with SystemSculpt")
+              .setIcon("file-text")
               .onClick(() => extractDocument(file));
           });
         }
-      })
+      }),
     );
   }
 
   private async openChatAndAddFile(file: TFile) {
-    const chatLeaf = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0] || 
-                     this.plugin.app.workspace.getRightLeaf(false);
+    const chatLeaf =
+      this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0] ||
+      this.plugin.app.workspace.getRightLeaf(false);
 
     if (chatLeaf) {
       await chatLeaf.setViewState({ type: VIEW_TYPE_CHAT, active: true });
@@ -268,10 +283,10 @@ export class ChatModule {
       if (chatView instanceof ChatView) {
         await chatView.addFileToContext(file);
       } else {
-        new Notice('Failed to open chat view');
+        new Notice("Failed to open chat view");
       }
     } else {
-      new Notice('Failed to create a new chat view');
+      new Notice("Failed to create a new chat view");
     }
   }
 }

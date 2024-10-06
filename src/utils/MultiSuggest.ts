@@ -1,4 +1,4 @@
-import { AbstractInputSuggest, App } from 'obsidian';
+import { AbstractInputSuggest, App } from "obsidian";
 
 export class MultiSuggest extends AbstractInputSuggest<string> {
   content: Set<string>;
@@ -7,7 +7,7 @@ export class MultiSuggest extends AbstractInputSuggest<string> {
     private inputEl: HTMLInputElement,
     content: Set<string>,
     private onSelectCb: (value: string) => void,
-    app: App
+    app: App,
   ) {
     super(app, inputEl);
     this.content = content;
@@ -15,8 +15,8 @@ export class MultiSuggest extends AbstractInputSuggest<string> {
 
   getSuggestions(inputStr: string): string[] {
     const lowerCaseInputStr = inputStr.toLocaleLowerCase();
-    return [...this.content].filter(content =>
-      content.toLocaleLowerCase().includes(lowerCaseInputStr)
+    return [...this.content].filter((content) =>
+      content.toLocaleLowerCase().includes(lowerCaseInputStr),
     );
   }
 

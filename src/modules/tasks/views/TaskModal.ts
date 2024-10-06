@@ -1,7 +1,7 @@
-import { App, Modal, Setting } from 'obsidian';
-import { TasksModule } from '../TasksModule';
-import { LoadingModal } from '../../../modals';
-import { showCustomNotice } from '../../../modals';
+import { App, Modal, Setting } from "obsidian";
+import { TasksModule } from "../TasksModule";
+import { LoadingModal } from "../../../modals";
+import { showCustomNotice } from "../../../modals";
 
 export class TaskModal extends Modal {
   plugin: TasksModule;
@@ -15,7 +15,7 @@ export class TaskModal extends Modal {
   async onOpen(): Promise<void> {
     let { contentEl } = this;
 
-    contentEl.createEl('h2', { text: 'Add Task' });
+    contentEl.createEl("h2", { text: "Add Task" });
 
     this.taskDescriptionInput = this.renderTaskDescriptionInput(contentEl);
     this.renderButtons(contentEl);
@@ -24,37 +24,37 @@ export class TaskModal extends Modal {
   }
 
   private renderTaskDescriptionInput(
-    contentEl: HTMLElement
+    contentEl: HTMLElement,
   ): HTMLTextAreaElement {
     const taskDescriptionSetting = new Setting(contentEl)
-      .setName('Task Description')
-      .setDesc('What you want to accomplish?')
-      .addTextArea(textarea => textarea);
-    taskDescriptionSetting.controlEl.classList.add('task-description-textarea');
+      .setName("Task Description")
+      .setDesc("What you want to accomplish?")
+      .addTextArea((textarea) => textarea);
+    taskDescriptionSetting.controlEl.classList.add("task-description-textarea");
 
-    const textarea = taskDescriptionSetting.controlEl.querySelector('textarea');
+    const textarea = taskDescriptionSetting.controlEl.querySelector("textarea");
     if (!textarea) {
-      throw new Error('Textarea element not found');
+      throw new Error("Textarea element not found");
     }
     return textarea;
   }
 
   private renderButtons(contentEl: HTMLElement): void {
     const buttonContainer = contentEl.createDiv();
-    buttonContainer.addClass('task-modal-button');
+    buttonContainer.addClass("task-modal-button");
 
-    const addTaskButton = buttonContainer.createEl('button', {
-      text: 'Add Task',
+    const addTaskButton = buttonContainer.createEl("button", {
+      text: "Add Task",
     });
-    addTaskButton.addEventListener('click', this.addTask.bind(this));
+    addTaskButton.addEventListener("click", this.addTask.bind(this));
   }
 
   private registerKeyboardShortcuts(): void {
-    this.scope.register(['Mod'], 'Enter', this.addTask.bind(this));
+    this.scope.register(["Mod"], "Enter", this.addTask.bind(this));
     this.scope.register(
-      ['Shift', 'Mod'],
-      'Enter',
-      this.addTaskAndReopen.bind(this)
+      ["Shift", "Mod"],
+      "Enter",
+      this.addTaskAndReopen.bind(this),
     );
   }
 
@@ -70,7 +70,7 @@ export class TaskModal extends Modal {
     const taskDescription = this.taskDescriptionInput.value.trim();
     if (taskDescription) {
       await this.generateAndInsertTask(taskDescription);
-      this.taskDescriptionInput.value = '';
+      this.taskDescriptionInput.value = "";
       this.taskDescriptionInput.focus();
     }
   }
@@ -87,11 +87,11 @@ export class TaskModal extends Modal {
       // @ts-ignore
       if (error.response && error.response.status === 401) {
         showCustomNotice(
-          'Invalid API key. Please update your API key in the settings.'
+          "Invalid API key. Please update your API key in the settings.",
         );
       } else {
         showCustomNotice(
-          'Failed to generate task. Please check your API key and try again.'
+          "Failed to generate task. Please check your API key and try again.",
         );
       }
     } finally {

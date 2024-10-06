@@ -1,15 +1,15 @@
-import { RecorderModule } from '../RecorderModule';
+import { RecorderModule } from "../RecorderModule";
 
 export async function getSelectedMicrophone(
-  plugin: RecorderModule
+  plugin: RecorderModule,
 ): Promise<MediaDeviceInfo | undefined> {
   const microphones = await plugin.getMicrophones();
   const selectedMic = microphones.find(
-    microphone =>
-      microphone.deviceId === plugin.settings.selectedMicrophone || 'default'
+    (microphone) =>
+      microphone.deviceId === plugin.settings.selectedMicrophone || "default",
   );
   if (!selectedMic) {
-    plugin.settings.selectedMicrophone = 'default';
+    plugin.settings.selectedMicrophone = "default";
     await plugin.saveSettings();
   }
   return selectedMic;

@@ -1,35 +1,38 @@
-import { RecorderModule } from '../RecorderModule';
+import { RecorderModule } from "../RecorderModule";
 
 async function transcribeChunk(
   plugin: RecorderModule,
-  chunk: Blob
+  chunk: Blob,
 ): Promise<string> {
   const formData = new FormData();
-  formData.append('file', chunk, 'recording.mp3');
-  formData.append('model', plugin.settings.whisperModel);
-  formData.append('language', plugin.settings.language); // Add language parameter
+  formData.append("file", chunk, "recording.mp3");
+  formData.append("model", plugin.settings.whisperModel);
+  formData.append("language", plugin.settings.language); // Add language parameter
 
-  if (plugin.settings.enableCustomWhisperPrompt && plugin.settings.customWhisperPrompt) {
-    console.log('Adding custom prompt to transcription...');
-    formData.append('prompt', plugin.settings.customWhisperPrompt);
+  if (
+    plugin.settings.enableCustomWhisperPrompt &&
+    plugin.settings.customWhisperPrompt
+  ) {
+    console.log("Adding custom prompt to transcription...");
+    formData.append("prompt", plugin.settings.customWhisperPrompt);
   }
 
   const currentOpenAIApiKey = plugin.plugin.brainModule.settings.openAIApiKey;
 
   const response = await fetch(
-    'https://api.openai.com/v1/audio/transcriptions',
+    "https://api.openai.com/v1/audio/transcriptions",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${currentOpenAIApiKey}`,
       },
       body: formData,
-    }
+    },
   );
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error('Transcription failed with response: ' + errorBody);
+    throw new Error("Transcription failed with response: " + errorBody);
   }
 
   const data = await response.json();
@@ -39,9 +42,9 @@ async function transcribeChunk(
 export async function transcribeRecording(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void
+  updateProgress: (current: number, total: number) => void,
 ): Promise<string> {
-  if (plugin.settings.whisperProvider === 'groq') {
+  if (plugin.settings.whisperProvider === "groq") {
     return transcribeWithGroq(plugin, arrayBuffer, updateProgress);
   } else {
     return transcribeWithOpenAI(plugin, arrayBuffer, updateProgress);
@@ -51,10 +54,10 @@ export async function transcribeRecording(
 async function transcribeWithOpenAI(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void
+  updateProgress: (current: number, total: number) => void,
 ): Promise<string> {
   let CHUNK_SIZE = 23 * 1024 * 1024;
-  const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+  const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
   const totalSize = blob.size;
   const chunks: Blob[] = [];
 
@@ -73,7 +76,7 @@ async function transcribeWithOpenAI(
       transcriptions.push(transcription);
     } catch (error) {
       // @ts-ignore
-      if (error.message.includes('Maximum content size limit')) {
+      if (error.message.includes("Maximum content size limit")) {
         CHUNK_SIZE = Math.floor(CHUNK_SIZE / 2);
         return await transcribeRecording(plugin, arrayBuffer, updateProgress);
       } else {
@@ -82,36 +85,36 @@ async function transcribeWithOpenAI(
     }
   }
 
-  return transcriptions.join(' ');
+  return transcriptions.join(" ");
 }
 
 async function transcribeWithGroq(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void
+  updateProgress: (current: number, total: number) => void,
 ): Promise<string> {
-  const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+  const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
   const formData = new FormData();
-  formData.append('file', blob, 'recording.mp3');
-  formData.append('model', 'whisper-large-v3');
-  formData.append('language', plugin.settings.language); // Add language parameter
+  formData.append("file", blob, "recording.mp3");
+  formData.append("model", "whisper-large-v3");
+  formData.append("language", plugin.settings.language); // Add language parameter
 
   const currentGroqApiKey = plugin.plugin.brainModule.settings.groqAPIKey;
 
   const response = await fetch(
-    'https://api.groq.com/openai/v1/audio/transcriptions',
+    "https://api.groq.com/openai/v1/audio/transcriptions",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${currentGroqApiKey}`,
       },
       body: formData,
-    }
+    },
   );
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error('Transcription failed with response: ' + errorBody);
+    throw new Error("Transcription failed with response: " + errorBody);
   }
 
   const data = await response.json();

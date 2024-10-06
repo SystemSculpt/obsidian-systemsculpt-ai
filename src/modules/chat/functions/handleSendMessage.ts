@@ -1,5 +1,5 @@
-import { ChatMessage } from '../ChatMessage';
-import { TFile } from 'obsidian';
+import { ChatMessage } from "../ChatMessage";
+import { TFile } from "obsidian";
 
 export async function handleSendMessage(
   inputEl: HTMLTextAreaElement,
@@ -8,14 +8,14 @@ export async function handleSendMessage(
   updateChatFile: (content: string) => Promise<void>,
   sendMessageToAI: () => Promise<void>,
   updateTokenCount: () => void,
-  chatFile: TFile | null
+  chatFile: TFile | null,
 ) {
   const messageText = inputEl.value.trim();
-  if (messageText === '') return;
+  if (messageText === "") return;
 
-  const userMessage = new ChatMessage('user', messageText);
+  const userMessage = new ChatMessage("user", messageText);
   addMessage(userMessage);
-  inputEl.value = '';
+  inputEl.value = "";
 
   if (!chatFile) {
     await createChatFile(messageText);

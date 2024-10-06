@@ -1,22 +1,25 @@
-import { App, TFile, moment } from 'obsidian';
-import { ChatMessage } from './ChatMessage';
-import { ChatModule } from './ChatModule';
+import { App, TFile, moment } from "obsidian";
+import { ChatMessage } from "./ChatMessage";
+import { ChatModule } from "./ChatModule";
 
 export class ChatFileManager {
-  constructor(private app: App, private chatModule: ChatModule) {}
+  constructor(
+    private app: App,
+    private chatModule: ChatModule,
+  ) {}
 
   async createChatFile(
     initialMessage: string,
-    contextFiles: TFile[]
+    contextFiles: TFile[],
   ): Promise<TFile> {
     const chatsPath = this.chatModule.settings.chatsPath;
     await this.app.vault.createFolder(chatsPath).catch(() => {});
     // Reason to ignore: works just fine, fixes seem to fuck things up tbh
     // @ts-ignore
-    const fileName = moment().format('YYYY-MM-DD HH-mm-ss');
+    const fileName = moment().format("YYYY-MM-DD HH-mm-ss");
     const filePath = `${chatsPath}/${fileName}.md`;
 
-    let contextFilesContent = '';
+    let contextFilesContent = "";
     for (const file of contextFiles) {
       contextFilesContent += `[[${file.path}]]\n`;
     }
@@ -28,12 +31,12 @@ export class ChatFileManager {
   async updateChatFile(chatFile: TFile, content: string): Promise<void> {
     if (chatFile) {
       const fileContent = await this.app.vault.read(chatFile);
-      const lines = fileContent.split('\n');
+      const lines = fileContent.split("\n");
       const lastLine = lines[lines.length - 1];
 
       let newContent = content;
-      if (lastLine.trim() !== '') {
-        newContent = '\n\n' + content;
+      if (lastLine.trim() !== "") {
+        newContent = "\n\n" + content;
       }
 
       await this.app.vault.append(chatFile, newContent);
@@ -49,8 +52,8 @@ export class ChatFileManager {
 
     while ((match = blockRegex.exec(content)) !== null) {
       const [, role, text] = match;
-      const model = role.startsWith('ai-') ? role.split('-')[1] : undefined;
-      messages.push(new ChatMessage(role as 'user' | 'ai', text.trim(), model));
+      const model = role.startsWith("ai-") ? role.split("-")[1] : undefined;
+      messages.push(new ChatMessage(role as "user" | "ai", text.trim(), model));
     }
 
     return messages;
@@ -59,13 +62,13 @@ export class ChatFileManager {
   async updateChatFileAfterDeletion(
     chatFile: TFile,
     deletedMessage: ChatMessage,
-    messageIndex: number
+    messageIndex: number,
   ): Promise<void> {
     const content = await this.app.vault.read(chatFile);
     const updatedContent = this.removeMessageFromContent(
       content,
       deletedMessage,
-      messageIndex
+      messageIndex,
     );
     await this.app.vault.modify(chatFile, updatedContent);
   }
@@ -73,11 +76,11 @@ export class ChatFileManager {
   removeMessageFromContent(
     content: string,
     deletedMessage: ChatMessage,
-    messageIndex: number
+    messageIndex: number,
   ): string {
-    const lines = content.split('\n');
+    const lines = content.split("\n");
     const messageStart = `\`\`\`\`\`${deletedMessage.role}`;
-    const messageEnd = '`````';
+    const messageEnd = "`````";
 
     let currentMessageCount = -1;
     let inMessageBlock = false;
@@ -85,7 +88,7 @@ export class ChatFileManager {
     let messageEndIndex = -1;
 
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('`````')) {
+      if (lines[i].trim().startsWith("`````")) {
         if (inMessageBlock) {
           messageEndIndex = i;
           if (currentMessageCount === messageIndex) {
@@ -102,7 +105,7 @@ export class ChatFileManager {
 
     if (messageStartIndex !== -1 && messageEndIndex !== -1) {
       lines.splice(messageStartIndex, messageEndIndex - messageStartIndex + 1);
-      return lines.join('\n');
+      return lines.join("\n");
     }
 
     return content;
@@ -113,7 +116,7 @@ export class ChatFileManager {
     const contextFiles: TFile[] = [];
 
     const contextFilesSection = content.match(
-      /# Context Files\n([\s\S]*?)\n# AI Chat History/
+      /# Context Files\n([\s\S]*?)\n# AI Chat History/,
     );
     if (contextFilesSection) {
       const contextFilesContent = contextFilesSection[1];
@@ -124,7 +127,7 @@ export class ChatFileManager {
         const linkText = match[1].trim();
         const contextFile = this.app.metadataCache.getFirstLinkpathDest(
           linkText,
-          file.path
+          file.path,
         ) as TFile;
         if (contextFile) {
           contextFiles.push(contextFile);

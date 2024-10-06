@@ -1,21 +1,21 @@
-import { App, TFile, MarkdownView } from 'obsidian';
-import { ChatHistorySearcher } from './ChatHistorySearcher';
-import { ChatMessage } from './ChatMessage';
-import { ChatView } from './ChatView';
-import { ContextFileManager } from './ContextFileManager';
+import { App, TFile, MarkdownView } from "obsidian";
+import { ChatHistorySearcher } from "./ChatHistorySearcher";
+import { ChatMessage } from "./ChatMessage";
+import { ChatView } from "./ChatView";
+import { ContextFileManager } from "./ContextFileManager";
 
 export class ChatHistoryManager {
   constructor(
     private app: App,
     private chatView: ChatView,
     private contextFileManager: ContextFileManager,
-    private chatModule: any
+    private chatModule: any,
   ) {}
 
   openChatHistory() {
     const chatHistorySearcher = new ChatHistorySearcher(
       this.app,
-      this.chatModule.settings.chatsPath
+      this.chatModule.settings.chatsPath,
     );
     chatHistorySearcher.open();
     chatHistorySearcher.onChooseItem = (file: TFile) => {
@@ -32,7 +32,7 @@ export class ChatHistoryManager {
 
   openChatHistoryFile() {
     if (this.chatView.chatFile) {
-      const leaves = this.app.workspace.getLeavesOfType('markdown');
+      const leaves = this.app.workspace.getLeavesOfType("markdown");
       for (const leaf of leaves) {
         const view = leaf.view;
         if (
@@ -44,7 +44,7 @@ export class ChatHistoryManager {
           return;
         }
       }
-      this.app.workspace.openLinkText(this.chatView.chatFile.path, '', true);
+      this.app.workspace.openLinkText(this.chatView.chatFile.path, "", true);
     }
   }
 
@@ -55,7 +55,7 @@ export class ChatHistoryManager {
 
     // Extract the "Context Files" section
     const contextFilesSection = content.match(
-      /# Context Files\n([\s\S]*?)\n# AI Chat History/
+      /# Context Files\n([\s\S]*?)\n# AI Chat History/,
     );
     if (contextFilesSection) {
       const contextFilesContent = contextFilesSection[1];
@@ -66,12 +66,12 @@ export class ChatHistoryManager {
         const linkText = match[1].trim();
         const contextFile = this.app.metadataCache.getFirstLinkpathDest(
           linkText,
-          file.path
+          file.path,
         ) as TFile;
         if (
           contextFile &&
           !this.chatView.contextFiles.some(
-            existingFile => existingFile.path === contextFile.path
+            (existingFile) => existingFile.path === contextFile.path,
           )
         ) {
           this.chatView.contextFiles.push(contextFile);
@@ -84,10 +84,10 @@ export class ChatHistoryManager {
     let match;
 
     while ((match = blockRegex.exec(content)) !== null) {
-      const role = match[1] as 'user' | 'ai';
+      const role = match[1] as "user" | "ai";
       const text = match[2].trim();
-      const model = role.startsWith('ai-') ? match[1].slice(3) : undefined;
-      messages.push(new ChatMessage(role as 'user' | 'ai', text, model));
+      const model = role.startsWith("ai-") ? match[1].slice(3) : undefined;
+      messages.push(new ChatMessage(role as "user" | "ai", text, model));
     }
 
     this.chatView.chatMessages = messages;

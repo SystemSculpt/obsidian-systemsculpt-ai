@@ -1,5 +1,5 @@
-import { TasksModule } from '../TasksModule';
-import { TFile } from 'obsidian';
+import { TasksModule } from "../TasksModule";
+import { TFile } from "obsidian";
 
 export async function viewTasks(plugin: TasksModule): Promise<void> {
   const { vault } = plugin.plugin.app;

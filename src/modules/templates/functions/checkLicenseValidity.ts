@@ -1,21 +1,21 @@
-import { TemplatesModule } from '../TemplatesModule';
-import { requestUrl } from 'obsidian';
-import { showCustomNotice } from '../../../modals';
+import { TemplatesModule } from "../TemplatesModule";
+import { requestUrl } from "obsidian";
+import { showCustomNotice } from "../../../modals";
 
 let attemptCount = 0;
 let lastAttemptTime = 0;
 
 export async function checkLicenseValidity(
   plugin: TemplatesModule,
-  showNotice: boolean = false
+  showNotice: boolean = false,
 ): Promise<boolean> {
   const licenseKey = plugin.settings.licenseKey;
 
-  if (!licenseKey || !licenseKey.includes('-') || licenseKey.includes(' ')) {
+  if (!licenseKey || !licenseKey.includes("-") || licenseKey.includes(" ")) {
     if (showNotice) {
       showCustomNotice(
-        'Invalid license key. Please enter a valid license key.',
-        5000
+        "Invalid license key. Please enter a valid license key.",
+        5000,
       );
     }
     return false;
@@ -28,8 +28,8 @@ export async function checkLicenseValidity(
   } else if (attemptCount >= 25) {
     if (showNotice) {
       showCustomNotice(
-        'You have exceeded the maximum number of attempts. Please try again later.',
-        5000
+        "You have exceeded the maximum number of attempts. Please try again later.",
+        5000,
       );
     }
     return false;
@@ -37,10 +37,10 @@ export async function checkLicenseValidity(
 
   try {
     const response = await requestUrl({
-      url: 'https://license.systemsculpt.com/check-license',
-      method: 'POST',
+      url: "https://license.systemsculpt.com/check-license",
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ licenseKey }),
     });
@@ -52,30 +52,30 @@ export async function checkLicenseValidity(
     } else if (response.status === 403) {
       if (showNotice) {
         showCustomNotice(
-          'Invalid license key. Please enter a valid license key.',
-          5000
+          "Invalid license key. Please enter a valid license key.",
+          5000,
         );
       }
       attemptCount++;
       return false;
     } else if (response.status === 429) {
       if (showNotice) {
-        showCustomNotice('Too many requests. Please try again later.', 5000);
+        showCustomNotice("Too many requests. Please try again later.", 5000);
       }
       return false;
     } else {
-      throw new Error('Server error');
+      throw new Error("Server error");
     }
   } catch (error) {
-    if (error instanceof Error && error.message.includes('429')) {
+    if (error instanceof Error && error.message.includes("429")) {
       if (showNotice) {
-        showCustomNotice('Too many requests. Please try again later.', 5000);
+        showCustomNotice("Too many requests. Please try again later.", 5000);
       }
     } else {
       if (showNotice) {
         showCustomNotice(
-          'An error occurred while checking the license key. Please try again later.',
-          5000
+          "An error occurred while checking the license key. Please try again later.",
+          5000,
         );
       }
     }

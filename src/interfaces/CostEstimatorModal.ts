@@ -1,5 +1,5 @@
-import { Modal, App, setIcon } from 'obsidian';
-import { Model } from '../api/Model';
+import { Modal, App, setIcon } from "obsidian";
+import { Model } from "../api/Model";
 
 export class CostEstimator extends Modal {
   private model: Model;
@@ -16,7 +16,7 @@ export class CostEstimator extends Modal {
   public static calculateCost(
     model: Model,
     tokenCount: number,
-    maxOutputTokens: number
+    maxOutputTokens: number,
   ): { minCost: number; maxCost: number } {
     if (!model.pricing) {
       return { minCost: 0, maxCost: 0 };
@@ -30,7 +30,7 @@ export class CostEstimator extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.addClass('cost-estimator-modal');
+    contentEl.addClass("cost-estimator-modal");
 
     this.createHeader(contentEl);
     this.createModelInfo(contentEl);
@@ -39,107 +39,107 @@ export class CostEstimator extends Modal {
   }
 
   private createHeader(contentEl: HTMLElement) {
-    const header = contentEl.createEl('div', { cls: 'modal-header' });
-    setIcon(header.createEl('span', { cls: 'modal-icon' }), 'calculator');
-    header.createEl('h2', { text: 'Cost Estimator', cls: 'modal-title' });
+    const header = contentEl.createEl("div", { cls: "modal-header" });
+    setIcon(header.createEl("span", { cls: "modal-icon" }), "calculator");
+    header.createEl("h2", { text: "Cost Estimator", cls: "modal-title" });
   }
 
   private createModelInfo(contentEl: HTMLElement) {
-    const modelInfo = contentEl.createEl('div', { cls: 'model-info' });
-    modelInfo.createEl('h3', { text: 'Selected Model' });
-    modelInfo.createEl('p', {
+    const modelInfo = contentEl.createEl("div", { cls: "model-info" });
+    modelInfo.createEl("h3", { text: "Selected Model" });
+    modelInfo.createEl("p", {
       text: this.model.name,
-      cls: 'model-name',
+      cls: "model-name",
     });
 
     if (this.model.pricing) {
       const pricePerMillionInput = this.model.pricing.prompt * 1000000;
       const pricePerMillionOutput = this.model.pricing.completion * 1000000;
 
-      const pricingInfo = modelInfo.createEl('div', { cls: 'pricing-info' });
-      pricingInfo.createEl('p', {
+      const pricingInfo = modelInfo.createEl("div", { cls: "pricing-info" });
+      pricingInfo.createEl("p", {
         text: `$${this.formatNumber(
-          pricePerMillionInput
+          pricePerMillionInput,
         )} per million input tokens`,
-        cls: 'pricing-detail',
+        cls: "pricing-detail",
       });
-      pricingInfo.createEl('p', {
+      pricingInfo.createEl("p", {
         text: `$${this.formatNumber(
-          pricePerMillionOutput
+          pricePerMillionOutput,
         )} per million output tokens`,
-        cls: 'pricing-detail',
+        cls: "pricing-detail",
       });
     }
   }
 
   private createTokenInfo(contentEl: HTMLElement) {
-    const tokenInfo = contentEl.createEl('div', {
-      cls: 'token-info-container',
+    const tokenInfo = contentEl.createEl("div", {
+      cls: "token-info-container",
     });
-    const leftTokenInfo = tokenInfo.createEl('div', {
-      cls: 'token-info left',
+    const leftTokenInfo = tokenInfo.createEl("div", {
+      cls: "token-info left",
     });
-    leftTokenInfo.createEl('span', { text: 'Current input tokens:' });
-    leftTokenInfo.createEl('span', {
+    leftTokenInfo.createEl("span", { text: "Current input tokens:" });
+    leftTokenInfo.createEl("span", {
       text: this.tokenCount.toString(),
-      cls: 'token-value',
+      cls: "token-value",
     });
 
-    const rightTokenInfo = tokenInfo.createEl('div', {
-      cls: 'token-info right',
+    const rightTokenInfo = tokenInfo.createEl("div", {
+      cls: "token-info right",
     });
-    rightTokenInfo.createEl('span', { text: 'Max output tokens:' });
-    rightTokenInfo.createEl('span', {
+    rightTokenInfo.createEl("span", { text: "Max output tokens:" });
+    rightTokenInfo.createEl("span", {
       text: this.maxOutputTokens.toString(),
-      cls: 'token-value',
+      cls: "token-value",
     });
   }
 
   private createCostEstimate(contentEl: HTMLElement) {
-    const costEstimate = contentEl.createEl('div', { cls: 'predicted-cost' });
-    costEstimate.createEl('h3', { text: 'Estimated Cost for Next Message' });
-    const costInfo = costEstimate.createEl('p', { cls: 'value' });
+    const costEstimate = contentEl.createEl("div", { cls: "predicted-cost" });
+    costEstimate.createEl("h3", { text: "Estimated Cost for Next Message" });
+    const costInfo = costEstimate.createEl("p", { cls: "value" });
 
-    if (this.model.provider === 'local') {
+    if (this.model.provider === "local") {
       costInfo.innerHTML =
-        'Local model detected. No cost calculation available.';
+        "Local model detected. No cost calculation available.";
     } else if (this.model.pricing) {
       const { prompt: inputCost, completion: outputCost } = this.model.pricing;
       const minCost = this.tokenCount * inputCost + outputCost;
       const maxCost =
         this.tokenCount * inputCost + this.maxOutputTokens * outputCost;
       costInfo.innerHTML = `$${this.formatNumber(
-        minCost
+        minCost,
       )} - $${this.formatNumber(maxCost)}`;
 
-      const disclaimer = contentEl.createEl('p', { cls: 'cost-notice' });
+      const disclaimer = contentEl.createEl("p", { cls: "cost-notice" });
       disclaimer.innerHTML =
-        'This is a rough estimate. Actual cost may vary based on the specific content and length of the message.';
+        "This is a rough estimate. Actual cost may vary based on the specific content and length of the message.";
     } else {
       costInfo.innerHTML =
-        'Pricing information is not available for this model.';
+        "Pricing information is not available for this model.";
     }
   }
 
   private formatNumber(num: number): string {
-    if (num === 0) return '0.00';
+    if (num === 0) return "0.00";
     if (num >= 1) return num.toFixed(2);
 
     const fixed = num.toFixed(10);
-    const [integer, decimal] = fixed.split('.');
+    const [integer, decimal] = fixed.split(".");
 
-    if (decimal.startsWith('00')) {
-      const significantIndex = decimal.split('').findIndex(d => d !== '0');
+    if (decimal.startsWith("00")) {
+      const significantIndex = decimal.split("").findIndex((d) => d !== "0");
       if (significantIndex === -1) {
         // If there are no non-zero digits, return with all zeros
-        return `${integer}.${'0'.repeat(10)}`;
+        return `${integer}.${"0".repeat(10)}`;
       }
       const significantDigits = decimal.slice(
         significantIndex,
-        significantIndex + 2
+        significantIndex + 2,
       );
-      return `${integer}.${'0'.repeat(
-        Math.max(0, significantIndex)
+      return `${integer}.${"0".repeat(
+        Math.max(0, significantIndex),
       )}${significantDigits}`;
     }
 

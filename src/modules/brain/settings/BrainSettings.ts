@@ -18,10 +18,10 @@ export interface BrainSettings {
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
-  localEndpoint: '',
-  openAIApiKey: '',
-  groqAPIKey: '',
-  defaultModelId: '',
+  localEndpoint: "",
+  openAIApiKey: "",
+  groqAPIKey: "",
+  defaultModelId: "",
   generateTitlePrompt: `You are TitleMaster, an AI specialized in generating clear, concise, and informative titles for Obsidian notes.
 
 Your role is to analyze the content of the provided note and create a title that:
@@ -61,13 +61,12 @@ Rules:
 - Your generation response should be purely the text to be added, without any additional labels or explanations.`,
   temperature: 0.2,
   showDefaultModelOnStatusBar: true,
-  apiEndpoint: 'https://api.openai.com',
+  apiEndpoint: "https://api.openai.com",
   showopenAISetting: true,
   showgroqSetting: true,
   showlocalEndpointSetting: true,
-  openRouterAPIKey: '',
+  openRouterAPIKey: "",
   showopenRouterSetting: true,
   favoritedModels: [],
-  baseOpenAIApiUrl: 'https://api.openai.com/v1',
+  baseOpenAIApiUrl: "https://api.openai.com/v1",
 };
-

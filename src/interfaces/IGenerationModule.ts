@@ -1,4 +1,4 @@
-import { ChatMessage } from '../modules/chat/ChatMessage';
+import { ChatMessage } from "../modules/chat/ChatMessage";
 
 export interface IGenerationModule {
   abortController: AbortController | null;

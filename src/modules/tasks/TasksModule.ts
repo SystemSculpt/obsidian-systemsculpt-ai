@@ -1,16 +1,16 @@
-import SystemSculptPlugin from '../../main';
-import { BrainModule } from '../brain/BrainModule';
+import SystemSculptPlugin from "../../main";
+import { BrainModule } from "../brain/BrainModule";
 import {
   SystemSculptTasksSettings,
   DEFAULT_TASKS_SETTINGS,
-} from './settings/TasksSettings';
-import { SystemSculptTasksSettingTab } from './settings/TasksSettingTab';
-import { viewTasks } from './functions/viewTasks';
-import { TaskModal } from './views/TaskModal';
-import { generateTask as generateTaskFunction } from './functions/generateTask';
-import { insertGeneratedTask as insertGeneratedTaskFunction } from './functions/insertGeneratedTask';
-import { updateTaskButtonStatusBar } from './functions/updateTaskButtonStatusBar';
-import { MarkdownView } from 'obsidian';
+} from "./settings/TasksSettings";
+import { SystemSculptTasksSettingTab } from "./settings/TasksSettingTab";
+import { viewTasks } from "./functions/viewTasks";
+import { TaskModal } from "./views/TaskModal";
+import { generateTask as generateTaskFunction } from "./functions/generateTask";
+import { insertGeneratedTask as insertGeneratedTaskFunction } from "./functions/insertGeneratedTask";
+import { updateTaskButtonStatusBar } from "./functions/updateTaskButtonStatusBar";
+import { MarkdownView } from "obsidian";
 
 export interface Task {
   description: string;
@@ -33,16 +33,16 @@ export class TasksModule {
     await this.loadSettings();
 
     this.plugin.addCommand({
-      id: 'open-task-modal',
-      name: 'Add task',
+      id: "open-task-modal",
+      name: "Add task",
       callback: async () => {
         new TaskModal(this.plugin.app, this).open();
       },
     });
 
     this.plugin.addCommand({
-      id: 'view-tasks',
-      name: 'View tasks',
+      id: "view-tasks",
+      name: "View tasks",
       callback: () => {
         this.viewTasks();
       },
@@ -51,8 +51,8 @@ export class TasksModule {
     // Initialize status bar for Task Button
     if (!this.plugin.taskToggleStatusBarItem) {
       this.plugin.taskToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.taskToggleStatusBarItem.addClass('task-toggle-button');
-      this.plugin.taskToggleStatusBarItem.setText('T'); // Set text to "T"
+      this.plugin.taskToggleStatusBarItem.addClass("task-toggle-button");
+      this.plugin.taskToggleStatusBarItem.setText("T"); // Set text to "T"
     }
 
     updateTaskButtonStatusBar(this); // Update the status bar on load
@@ -67,7 +67,7 @@ export class TasksModule {
     this.settings = Object.assign(
       {},
       DEFAULT_TASKS_SETTINGS,
-      await this.plugin.loadData()
+      await this.plugin.loadData(),
     );
   }
 
@@ -80,12 +80,12 @@ export class TasksModule {
     new SystemSculptTasksSettingTab(
       this.plugin.app,
       this,
-      containerEl
+      containerEl,
     ).display();
   }
 
   async viewTasks(): Promise<void> {
-    const leaves = this.plugin.app.workspace.getLeavesOfType('markdown');
+    const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
     for (const leaf of leaves) {
       const fileView = leaf.view as MarkdownView;
       if (fileView.file?.path === this.settings.tasksLocation) {
