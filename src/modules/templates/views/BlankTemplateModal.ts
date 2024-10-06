@@ -75,7 +75,7 @@ export class BlankTemplateModal extends Modal {
     systemTemplateContainer.createEl('label', { text: 'System Template:', attr: { for: 'system-template-input' } });
     this.systemTemplateInput = systemTemplateContainer.createEl('input', {
       type: 'text',
-      placeholder: 'Enter system template name',
+      placeholder: 'Enter system template name (LEAVE BLANK FOR NO SYSTEM TEMPLATE)',
       cls: 'system-template-input',
     });
 
@@ -139,6 +139,15 @@ export class BlankTemplateModal extends Modal {
     generateButton.addEventListener('click', this.handleGenerate.bind(this));
 
     this.scope.register(['Mod'], 'Enter', this.handleGenerate.bind(this));
+
+    // Set focus based on the "Remember selected template" setting
+    setTimeout(() => {
+      if (this.plugin.settings.rememberSelectedTemplate && this.plugin.settings.lastSelectedTemplate) {
+        this.userPromptInput.focus();
+      } else {
+        this.systemTemplateInput.focus();
+      }
+    }, 0);
   }
 
   private updateContextAreas(): void {
