@@ -1,10 +1,10 @@
-import { Modal, TFile, TFolder } from 'obsidian';
-import { TemplatesModule, TemplatesSettings } from '../TemplatesModule';
-import { handleStreamingResponse } from '../functions/handleStreamingResponse';
-import { showCustomNotice } from '../../../modals';
-import { MarkdownView } from 'obsidian';
-import { BrainModule } from '../../brain/BrainModule';
-import { MultiSuggest } from '../../../utils/MultiSuggest';
+import { Modal, TFile, TFolder } from "obsidian";
+import { TemplatesModule, TemplatesSettings } from "../TemplatesModule";
+import { handleStreamingResponse } from "../functions/handleStreamingResponse";
+import { showCustomNotice } from "../../../modals";
+import { MarkdownView } from "obsidian";
+import { BrainModule } from "../../brain/BrainModule";
+import { MultiSuggest } from "../../../utils/MultiSuggest";
 
 export class BlankTemplateModal extends Modal {
   private userPromptInput: HTMLTextAreaElement;
@@ -20,85 +20,103 @@ export class BlankTemplateModal extends Modal {
   constructor(plugin: TemplatesModule) {
     super(plugin.plugin.app);
     this.plugin = plugin;
-    this.userPromptInput = document.createElement('textarea');
-    this.preContextArea = document.createElement('textarea');
-    this.postContextArea = document.createElement('textarea');
-    this.preContextToggle = document.createElement('input');
-    this.postContextToggle = document.createElement('input');
-    this.systemTemplateInput = document.createElement('input');
-    this.copyToClipboardToggle = document.createElement('input');
-    this.rememberTemplateToggle = document.createElement('input');
+    this.userPromptInput = document.createElement("textarea");
+    this.preContextArea = document.createElement("textarea");
+    this.postContextArea = document.createElement("textarea");
+    this.preContextToggle = document.createElement("input");
+    this.postContextToggle = document.createElement("input");
+    this.systemTemplateInput = document.createElement("input");
+    this.copyToClipboardToggle = document.createElement("input");
+    this.rememberTemplateToggle = document.createElement("input");
   }
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass('blank-template-modal');
+    contentEl.addClass("blank-template-modal");
 
-    const modalContent = contentEl.createDiv('modal-content');
-    modalContent.createEl('h2', { text: 'Blank Template' });
+    const modalContent = contentEl.createDiv("modal-content");
+    modalContent.createEl("h2", { text: "Blank Template" });
 
-    const infoBox = modalContent.createDiv('info-box');
-    infoBox.createEl('p', {
-      text: 'The Blank Template allows you to generate content based on your custom prompt. Simply enter your prompt, and the AI will generate relevant content for you. This is useful for creating generic content, brainstorming ideas, or getting inspiration for your writing.',
+    const infoBox = modalContent.createDiv("info-box");
+    infoBox.createEl("p", {
+      text: "The Blank Template allows you to generate content based on your custom prompt. Simply enter your prompt, and the AI will generate relevant content for you. This is useful for creating generic content, brainstorming ideas, or getting inspiration for your writing.",
     });
 
-    const contextContainer = modalContent.createDiv('context-container');
+    const contextContainer = modalContent.createDiv("context-container");
 
     // Add Remember Template toggle
-    const rememberTemplateContainer = contextContainer.createDiv('remember-template-container');
+    const rememberTemplateContainer = contextContainer.createDiv(
+      "remember-template-container"
+    );
     this.rememberTemplateToggle = this.createToggle(
       rememberTemplateContainer,
-      'Remember selected template',
-      'Automatically use the last selected template for future generations'
+      "Remember selected template",
+      "Automatically use the last selected template for future generations"
     );
-    this.rememberTemplateToggle.checked = this.plugin.settings.rememberSelectedTemplate;
-    this.rememberTemplateToggle.addEventListener('change', async () => {
-      this.plugin.settings.rememberSelectedTemplate = this.rememberTemplateToggle.checked;
+    this.rememberTemplateToggle.checked =
+      this.plugin.settings.rememberSelectedTemplate;
+    this.rememberTemplateToggle.addEventListener("change", async () => {
+      this.plugin.settings.rememberSelectedTemplate =
+        this.rememberTemplateToggle.checked;
       await this.plugin.saveSettings();
     });
 
     // Add Copy to Clipboard toggle
-    const copyToClipboardContainer = contextContainer.createDiv('copy-to-clipboard-container');
+    const copyToClipboardContainer = contextContainer.createDiv(
+      "copy-to-clipboard-container"
+    );
     this.copyToClipboardToggle = this.createToggle(
       copyToClipboardContainer,
-      'Copy response to clipboard',
-      'Automatically copy the generated response to the clipboard'
+      "Copy response to clipboard",
+      "Automatically copy the generated response to the clipboard"
     );
-    this.copyToClipboardToggle.checked = this.plugin.settings.copyResponseToClipboard;
-    this.copyToClipboardToggle.addEventListener('change', async () => {
-      this.plugin.settings.copyResponseToClipboard = this.copyToClipboardToggle.checked;
+    this.copyToClipboardToggle.checked =
+      this.plugin.settings.copyResponseToClipboard;
+    this.copyToClipboardToggle.addEventListener("change", async () => {
+      this.plugin.settings.copyResponseToClipboard =
+        this.copyToClipboardToggle.checked;
       await this.plugin.saveSettings();
     });
 
     // Add system template input
-    const systemTemplateContainer = contextContainer.createDiv('system-template-container');
-    systemTemplateContainer.createEl('label', { text: 'System Template:', attr: { for: 'system-template-input' } });
-    this.systemTemplateInput = systemTemplateContainer.createEl('input', {
-      type: 'text',
-      placeholder: 'Enter system template name (LEAVE BLANK FOR NO SYSTEM TEMPLATE)',
-      cls: 'system-template-input',
+    const systemTemplateContainer = contextContainer.createDiv(
+      "system-template-container"
+    );
+    systemTemplateContainer.createEl("label", {
+      text: "System Template:",
+      attr: { for: "system-template-input" },
+    });
+    this.systemTemplateInput = systemTemplateContainer.createEl("input", {
+      type: "text",
+      placeholder:
+        "Enter system template name (LEAVE BLANK FOR NO SYSTEM TEMPLATE)",
+      cls: "system-template-input",
     });
 
     // Set the last selected template if the setting is enabled
-    if (this.plugin.settings.rememberSelectedTemplate && this.plugin.settings.lastSelectedTemplate) {
-      this.systemTemplateInput.value = this.plugin.settings.lastSelectedTemplate;
+    if (
+      this.plugin.settings.rememberSelectedTemplate &&
+      this.plugin.settings.lastSelectedTemplate
+    ) {
+      this.systemTemplateInput.value =
+        this.plugin.settings.lastSelectedTemplate;
     }
 
     // Add directory suggestions for system template input
     this.addDirectorySuggestions(this.systemTemplateInput);
 
-    this.preContextArea = contextContainer.createEl('textarea', {
-      cls: 'context-area pre-context-area',
+    this.preContextArea = contextContainer.createEl("textarea", {
+      cls: "context-area pre-context-area",
     });
 
     this.preContextToggle = this.createToggle(
       contextContainer,
-      'Include pre-context',
-      'Include the context before the cursor position'
+      "Include pre-context",
+      "Include the context before the cursor position"
     );
 
-    this.userPromptInput = contextContainer.createEl('textarea', {
-      cls: 'user-prompt-input',
+    this.userPromptInput = contextContainer.createEl("textarea", {
+      cls: "user-prompt-input",
     });
 
     const activeView =
@@ -117,32 +135,35 @@ export class BlankTemplateModal extends Modal {
 
     this.postContextToggle = this.createToggle(
       contextContainer,
-      'Include post-context',
-      'Include the context after the cursor position'
+      "Include post-context",
+      "Include the context after the cursor position"
     );
 
-    this.postContextArea = contextContainer.createEl('textarea', {
-      cls: 'context-area post-context-area',
+    this.postContextArea = contextContainer.createEl("textarea", {
+      cls: "context-area post-context-area",
     });
 
-    this.preContextToggle.addEventListener('change', () => {
+    this.preContextToggle.addEventListener("change", () => {
       this.updateContextAreas();
     });
-    this.postContextToggle.addEventListener('change', () => {
+    this.postContextToggle.addEventListener("change", () => {
       this.updateContextAreas();
     });
 
-    const buttonContainer = modalContent.createDiv('button-container');
-    const generateButton = buttonContainer.createEl('button', {
-      text: 'Generate',
+    const buttonContainer = modalContent.createDiv("button-container");
+    const generateButton = buttonContainer.createEl("button", {
+      text: "Generate",
     });
-    generateButton.addEventListener('click', this.handleGenerate.bind(this));
+    generateButton.addEventListener("click", this.handleGenerate.bind(this));
 
-    this.scope.register(['Mod'], 'Enter', this.handleGenerate.bind(this));
+    this.scope.register(["Mod"], "Enter", this.handleGenerate.bind(this));
 
     // Set focus based on the "Remember selected template" setting
     setTimeout(() => {
-      if (this.plugin.settings.rememberSelectedTemplate && this.plugin.settings.lastSelectedTemplate) {
+      if (
+        this.plugin.settings.rememberSelectedTemplate &&
+        this.plugin.settings.lastSelectedTemplate
+      ) {
         this.userPromptInput.focus();
       } else {
         this.systemTemplateInput.focus();
@@ -177,11 +198,11 @@ export class BlankTemplateModal extends Modal {
       const postContext = noteContent.substring(cursorOffset);
 
       this.preContextArea.style.display = this.preContextToggle.checked
-        ? 'block'
-        : 'none';
+        ? "block"
+        : "none";
       this.postContextArea.style.display = this.postContextToggle.checked
-        ? 'block'
-        : 'none';
+        ? "block"
+        : "none";
 
       if (this.preContextToggle.checked) {
         this.preContextArea.value = preContext;
@@ -197,11 +218,11 @@ export class BlankTemplateModal extends Modal {
     labelText: string,
     description: string
   ): HTMLInputElement {
-    const toggleContainer = container.createDiv('toggle-container');
-    const toggle = toggleContainer.createEl('input', {
-      type: 'checkbox',
+    const toggleContainer = container.createDiv("toggle-container");
+    const toggle = toggleContainer.createEl("input", {
+      type: "checkbox",
     });
-    const label = toggleContainer.createEl('label', {
+    const label = toggleContainer.createEl("label", {
       text: labelText,
     });
     label.title = description;
@@ -239,18 +260,23 @@ export class BlankTemplateModal extends Modal {
         const line = cursor.line;
         const ch = cursor.ch;
 
-        let contextPrompt = '';
-        let postSystemPrompt = 'Format:\n';
+        let contextPrompt = "";
+        let postSystemPrompt = "Format:\n";
 
         if (systemTemplate) {
           console.log("Attempting to get system template content");
-          const templateContent = await this.getSystemTemplateContent(systemTemplate);
+          const templateContent = await this.getSystemTemplateContent(
+            systemTemplate
+          );
           console.log("Template content:", templateContent);
           if (templateContent) {
-            postSystemPrompt = templateContent + '\n' + postSystemPrompt;
+            postSystemPrompt = templateContent + "\n" + postSystemPrompt;
           } else {
             console.error(`System template "${systemTemplate}" not found.`);
-            showCustomNotice(`System template "${systemTemplate}" not found.`, 5000);
+            showCustomNotice(
+              `System template "${systemTemplate}" not found.`,
+              5000
+            );
             return;
           }
         }
@@ -258,7 +284,7 @@ export class BlankTemplateModal extends Modal {
         if (preContext) {
           contextPrompt += `<PRE-CONTEXT>\n${preContext}\n</PRE-CONTEXT>\n`;
           postSystemPrompt +=
-            '- The user included "pre-context", which is text that is currently present before the user\'s cursor; it\'s text that will precede it.\n';
+            "- The user included \"pre-context\", which is text that is currently present before the user's cursor; it's text that will precede it.\n";
         }
         if (preContext || postContext) {
           contextPrompt += `<YOUR RESPONSE WILL GO HERE>\n`;
@@ -266,16 +292,16 @@ export class BlankTemplateModal extends Modal {
         if (postContext) {
           contextPrompt += `<POST-CONTEXT>\n${postContext}\n</POST-CONTEXT>\n`;
           postSystemPrompt +=
-            '- The user included "post-context", which is text that is currently present after the user\'s cursor; it\'s text that will succeed it.\n';
+            "- The user included \"post-context\", which is text that is currently present after the user's cursor; it's text that will succeed it.\n";
         }
         if (preContext || postContext) {
           postSystemPrompt +=
-            '- Make sure your response makes contextual sense to where it is being placed.';
+            "- Make sure your response makes contextual sense to where it is being placed.";
         }
 
-        editor.replaceRange('', { line, ch: 0 }, { line, ch: cursor.ch });
+        editor.replaceRange("", { line, ch: 0 }, { line, ch: cursor.ch });
 
-        showCustomNotice('Generating...');
+        showCustomNotice("Generating...");
 
         let modelInstance;
         try {
@@ -283,7 +309,8 @@ export class BlankTemplateModal extends Modal {
             await this.plugin.plugin.brainModule.getEnabledModels();
 
           modelInstance = models.find(
-            m => m.id === this.plugin.plugin.brainModule.settings.defaultModelId
+            (m) =>
+              m.id === this.plugin.plugin.brainModule.settings.defaultModelId
           );
 
           if (!modelInstance && models.length > 0) {
@@ -297,18 +324,19 @@ export class BlankTemplateModal extends Modal {
             );
           } else {
             showCustomNotice(
-              'No models available. Please check your model settings and ensure at least one provider is enabled.'
+              "No models available. Please check your model settings and ensure at least one provider is enabled."
             );
             return;
           }
         } catch (error) {
           showCustomNotice(
-            'Failed to fetch models. Please check your settings and try again.'
+            "Failed to fetch models. Please check your settings and try again."
           );
           return;
         }
 
-        const maxOutputTokens = this.plugin.plugin.brainModule.getMaxOutputTokens();
+        const maxOutputTokens =
+          this.plugin.plugin.brainModule.getMaxOutputTokens();
 
         try {
           await this.plugin.AIService.createStreamingChatCompletionWithCallback(
@@ -349,43 +377,55 @@ export class BlankTemplateModal extends Modal {
     contentEl.empty();
   }
 
-  private async getSystemTemplateContent(templateName: string): Promise<string | null> {
+  private async getSystemTemplateContent(
+    templateName: string
+  ): Promise<string | null> {
     const templatesPath = this.plugin.settings.templatesPath;
     console.log("Templates path:", templatesPath);
-    
-    const templateFile = this.plugin.plugin.app.vault.getFiles().find(file => 
-      file.path.startsWith(templatesPath) && file.basename === templateName
+
+    const templateFile = this.plugin.plugin.app.vault
+      .getFiles()
+      .find(
+        (file) =>
+          file.path.startsWith(templatesPath) && file.basename === templateName
+      );
+
+    console.log(
+      "Template file found:",
+      templateFile ? templateFile.path : "Not found"
     );
-    
-    console.log("Template file found:", templateFile ? templateFile.path : "Not found");
 
     if (templateFile) {
       const content = await this.plugin.plugin.app.vault.read(templateFile);
-      const frontMatter = this.plugin.plugin.app.metadataCache.getFileCache(templateFile)?.frontmatter;
-      
+      const frontMatter =
+        this.plugin.plugin.app.metadataCache.getFileCache(
+          templateFile
+        )?.frontmatter;
+
       if (frontMatter && frontMatter.prompt) {
         console.log("Using frontmatter prompt");
         return frontMatter.prompt;
       }
-      
+
       console.log("Using full file content");
       return content;
     }
-    
+
     console.log("Template file not found");
     return null;
   }
 
   private addDirectorySuggestions(inputEl: HTMLInputElement): void {
     const templatesPath = this.plugin.settings.templatesPath;
-    const templateFolder = this.plugin.plugin.app.vault.getAbstractFileByPath(templatesPath);
+    const templateFolder =
+      this.plugin.plugin.app.vault.getAbstractFileByPath(templatesPath);
 
     if (templateFolder instanceof TFolder) {
       const suggestionContent = new Set<string>();
 
       const addTemplateFiles = (folder: TFolder) => {
         for (const child of folder.children) {
-          if (child instanceof TFile && child.extension === 'md') {
+          if (child instanceof TFile && child.extension === "md") {
             suggestionContent.add(child.basename);
           } else if (child instanceof TFolder) {
             addTemplateFiles(child);
