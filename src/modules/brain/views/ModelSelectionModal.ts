@@ -9,6 +9,7 @@ export class ModelSelectionModal extends Modal {
   private searchInput!: HTMLInputElement;
   private modelListContainer!: HTMLElement;
   private selectedModelIndex: number = -1;
+  private providerCheckboxes: Record<string, HTMLInputElement> = {};
 
   constructor(app: App, plugin: BrainModule) {
     super(app);
@@ -35,6 +36,7 @@ export class ModelSelectionModal extends Modal {
     contentEl.createEl("h2", { text: "Select Model" });
 
     this.addRefreshButton();
+    this.addProviderCheckboxes();
 
     this.searchInput = contentEl.createEl("input", {
       type: "text",
@@ -88,12 +90,13 @@ export class ModelSelectionModal extends Modal {
 
     const searchTerms = filter.toLowerCase().split(/\s+/).filter(Boolean);
     const filterModel = (model: Model) =>
-      !searchTerms.length ||
-      searchTerms.every(
-        (term) =>
-          model.name.toLowerCase().includes(term) ||
-          model.id.toLowerCase().includes(term)
-      );
+      this.shouldDisplayModel(model) &&
+      (!searchTerms.length ||
+        searchTerms.every(
+          (term) =>
+            model.name.toLowerCase().includes(term) ||
+            model.id.toLowerCase().includes(term)
+        ));
 
     const renderGroup = (groupName: string, models: Model[]) => {
       if (models.length) {
@@ -101,15 +104,22 @@ export class ModelSelectionModal extends Modal {
       }
     };
 
-    renderGroup(
-      "Favorited",
-      this.models.filter((m) => m.favorite && filterModel(m))
-    );
-
-    ["local", "openai", "groq", "openRouter"].forEach((provider) =>
+    // Only render Favorited group if the checkbox is checked
+    if (this.providerCheckboxes["Favorited"].checked) {
       renderGroup(
-        this.getProviderName(provider),
-        this.models.filter((m) => m.provider === provider && filterModel(m))
+        "Favorited",
+        this.models.filter((m) => m.favorite && filterModel(m))
+      );
+    }
+
+    ["Local", "OpenAI", "Groq", "OpenRouter"].forEach((provider) =>
+      renderGroup(
+        provider,
+        this.models.filter(
+          (m) =>
+            m.provider.toLowerCase() === provider.toLowerCase() &&
+            filterModel(m)
+        )
       )
     );
 
@@ -355,6 +365,31 @@ export class ModelSelectionModal extends Modal {
     });
   }
 
+  private addProviderCheckboxes() {
+    const providers = ["Favorited", "OpenAI", "Groq", "OpenRouter", "Local"];
+    const checkboxContainer = this.contentEl.createEl("div", {
+      cls: "provider-checkboxes",
+    });
+
+    providers.forEach((provider) => {
+      const label = checkboxContainer.createEl("label", {
+        cls: "provider-checkbox-label",
+      });
+      const checkbox = label.createEl("input", {
+        type: "checkbox",
+        cls: "provider-checkbox",
+      });
+      checkbox.checked = true;
+      label.appendText(provider);
+
+      checkbox.addEventListener("change", () => {
+        this.renderModelList(this.searchInput.value);
+      });
+
+      this.providerCheckboxes[provider] = checkbox;
+    });
+  }
+
   private showRefreshingState() {
     this.modelListContainer.empty();
     const refreshingEl = this.modelListContainer.createEl("div", {
@@ -377,5 +412,25 @@ export class ModelSelectionModal extends Modal {
     await this.plugin.refreshModels();
     await this.loadModels();
     this.hideRefreshingState();
+  }
+
+  private shouldDisplayModel(model: Model): boolean {
+    const providerKey = this.getProviderCheckboxKey(model.provider);
+    return this.providerCheckboxes[providerKey].checked;
+  }
+
+  private getProviderCheckboxKey(provider: string): string {
+    switch (provider.toLowerCase()) {
+      case "local":
+        return "Local";
+      case "openai":
+        return "OpenAI";
+      case "groq":
+        return "Groq";
+      case "openrouter":
+        return "OpenRouter";
+      default:
+        return provider;
+    }
   }
 }

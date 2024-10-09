@@ -1742,6 +1742,25 @@ button:disabled {
   text-align: center;
   padding: 20px;
   color: var(--text-muted);
+}
+
+/* Provider checkbox styles */
+.provider-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.provider-checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.provider-checkbox {
+  margin-right: 5px;
 }/* Recording Notice */
 .recording-notice {
   background-color: var(--background-primary);
