@@ -359,13 +359,13 @@ export class UnifiedAIService implements AIServiceInterface {
         "gpt-4": 8192,
       };
       const priorityMaxOutputTokens: { [key: string]: number } = {
-        "gpt-4o": 4096,
-        "gpt-4o-mini": 16000,
-        "chatgpt-4o-latest": 32768,
+        "gpt-4o": 16384,
+        "gpt-4o-mini": 16384,
+        "chatgpt-4o-latest": 16384,
         "o1-preview": 32768,
         "o1-mini": 65536,
         "gpt-4-turbo": 4096,
-        "gpt-4": 4096,
+        "gpt-4": 8192,
       };
       const specialPricing: {
         [key: string]: { prompt: number; completion: number };
