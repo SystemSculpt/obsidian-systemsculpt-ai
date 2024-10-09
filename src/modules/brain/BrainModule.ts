@@ -100,7 +100,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showgroqSetting,
       showlocalEndpointSetting,
       showopenRouterSetting,
-      baseOpenAIApiUrl,
     } = this.settings;
     this._AIService = await AIService.getInstance({
       openAIApiKey,
@@ -113,7 +112,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       showgroqSetting,
       showlocalEndpointSetting,
       showopenRouterSetting,
-      baseOpenAIApiUrl,
     });
   }
 
@@ -206,7 +204,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
           showgroqSetting: this.settings.showgroqSetting,
           showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
           showopenRouterSetting: this.settings.showopenRouterSetting,
-          baseOpenAIApiUrl: this.settings.baseOpenAIApiUrl,
         },
         true
       );
@@ -332,6 +329,14 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         this.updateModelStatusBarText("No Models Detected");
       } else {
         const currentModel = this.getCurrentModel();
+        if (
+          !currentModel ||
+          !this.cachedModels.some((model) => model.id === currentModel.id)
+        ) {
+          // If the current model is not in the cached models, select the first available model
+          this.settings.defaultModelId = this.cachedModels[0].id;
+          await this.saveSettings();
+        }
         this.updateModelStatusBarText(
           this.settings.showDefaultModelOnStatusBar && currentModel
             ? `Model: ${currentModel.name}`

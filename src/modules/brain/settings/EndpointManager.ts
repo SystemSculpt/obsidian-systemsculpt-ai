@@ -113,14 +113,6 @@ export class EndpointManager {
         this.renderAPISetting(provider);
       }
     });
-
-    if (this.plugin.settings.showopenAISetting) {
-      this.renderSimpleAPISetting({
-        name: "OpenAI Base URL",
-        settingKey: "baseOpenAIApiUrl",
-        placeholder: "https://api.openai.com/v1",
-      });
-    }
   }
 
   private renderAPISetting(provider: {
@@ -288,11 +280,7 @@ export class EndpointManager {
       const validationPromise = (async () => {
         switch (provider.name) {
           case "OpenAI":
-            return await AIService.validateOpenAIApiKey(
-              value,
-              this.plugin.settings.baseOpenAIApiUrl ||
-                "https://api.openai.com/v1"
-            );
+            return await AIService.validateOpenAIApiKey(value);
           case "Groq":
             return await AIService.validateGroqAPIKey(value);
           case "OpenRouter":
@@ -335,7 +323,6 @@ export class EndpointManager {
       showgroqSetting: this.plugin.settings.showgroqSetting,
       showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
-      baseOpenAIApiUrl: this.plugin.settings.baseOpenAIApiUrl,
     });
   }
 

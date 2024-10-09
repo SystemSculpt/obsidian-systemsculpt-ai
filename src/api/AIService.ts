@@ -17,7 +17,6 @@ export class AIService {
     showgroqSetting: boolean;
     showlocalEndpointSetting: boolean;
     showopenRouterSetting: boolean;
-    baseOpenAIApiUrl?: string;
   };
 
   private constructor(settings: {
@@ -31,13 +30,12 @@ export class AIService {
     showgroqSetting: boolean;
     showlocalEndpointSetting: boolean;
     showopenRouterSetting: boolean;
-    baseOpenAIApiUrl?: string;
   }) {
     this.settings = settings;
     this.services = {
       openai: new UnifiedAIService(
         settings.openAIApiKey,
-        settings.baseOpenAIApiUrl ?? "https://api.openai.com/v1",
+        "https://api.openai.com/v1",
         "openai",
         { temperature: settings.temperature }
       ),
@@ -71,7 +69,6 @@ export class AIService {
       showgroqSetting: boolean;
       showlocalEndpointSetting: boolean;
       showopenRouterSetting: boolean;
-      baseOpenAIApiUrl?: string;
     },
     forceNewInstance: boolean = false
   ): Promise<AIService> {
@@ -101,7 +98,6 @@ export class AIService {
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
-    baseOpenAIApiUrl?: string;
   }) {
     this.updateApiKeysDebounced(settings);
   }
@@ -119,14 +115,8 @@ export class AIService {
     apiEndpoint: string;
     localEndpoint?: string;
     temperature: number;
-    baseOpenAIApiUrl?: string;
   }) {
     this.services.openai.updateApiKey(settings.openAIApiKey);
-    this.services.openai.updateOpenAIBaseUrl(
-      settings.baseOpenAIApiUrl && settings.baseOpenAIApiUrl.trim() !== ""
-        ? settings.baseOpenAIApiUrl
-        : "https://api.openai.com/v1"
-    );
     this.services.groq.updateApiKey(settings.groqAPIKey);
     this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
     Object.values(this.services).forEach((service) =>
@@ -305,14 +295,19 @@ export class AIService {
         return;
       }
 
+      console.log(`Fetching models for provider: ${provider}`);
+
       const models = await Promise.race([
         this.services[provider].getModels(),
-        new Promise<Model[]>((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), 10000)
+        new Promise<Model[]>(
+          (_, reject) => setTimeout(() => reject(new Error("Timeout")), 30000) // Increased timeout to 30 seconds
         ),
       ]);
+
+      console.log(`Successfully fetched models for provider: ${provider}`);
       this.cachedModels[provider] = models;
     } catch (error: unknown) {
+      console.error(`Error fetching models for provider ${provider}:`, error);
       this.cachedModels[provider] = [];
     }
   }
