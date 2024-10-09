@@ -366,7 +366,7 @@ export class ModelSelectionModal extends Modal {
   }
 
   private addProviderCheckboxes() {
-    const providers = ["Favorited", "OpenAI", "Groq", "OpenRouter", "Local"];
+    const providers = ["Favorited", "Local", "OpenAI", "Groq", "OpenRouter"];
     const checkboxContainer = this.contentEl.createEl("div", {
       cls: "provider-checkboxes",
     });
@@ -379,10 +379,14 @@ export class ModelSelectionModal extends Modal {
         type: "checkbox",
         cls: "provider-checkbox",
       });
-      checkbox.checked = true;
+      const settingKey =
+        `show${provider}Models` as keyof typeof this.plugin.settings;
+      checkbox.checked = this.plugin.settings[settingKey] as boolean;
       label.appendText(provider);
 
-      checkbox.addEventListener("change", () => {
+      checkbox.addEventListener("change", async () => {
+        this.plugin.settings[settingKey] = checkbox.checked as never;
+        await this.plugin.saveSettings();
         this.renderModelList(this.searchInput.value);
       });
 
@@ -416,7 +420,9 @@ export class ModelSelectionModal extends Modal {
 
   private shouldDisplayModel(model: Model): boolean {
     const providerKey = this.getProviderCheckboxKey(model.provider);
-    return this.providerCheckboxes[providerKey].checked;
+    const settingKey =
+      `show${providerKey}Models` as keyof typeof this.plugin.settings;
+    return this.plugin.settings[settingKey] as boolean;
   }
 
   private getProviderCheckboxKey(provider: string): string {

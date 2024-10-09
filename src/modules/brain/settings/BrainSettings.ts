@@ -14,6 +14,11 @@ export interface BrainSettings {
   openRouterAPIKey: string;
   showopenRouterSetting: boolean;
   favoritedModels: string[];
+  showFavoritedModels: boolean;
+  showLocalModels: boolean;
+  showOpenAIModels: boolean;
+  showGroqModels: boolean;
+  showOpenRouterModels: boolean;
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -67,4 +72,9 @@ Rules:
   openRouterAPIKey: "",
   showopenRouterSetting: true,
   favoritedModels: [],
+  showFavoritedModels: true,
+  showLocalModels: true,
+  showOpenAIModels: true,
+  showGroqModels: true,
+  showOpenRouterModels: true,
 };

@@ -27,6 +27,11 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   isGenerating: boolean = false;
   isGenerationCompleted: boolean = false;
   favoritedModels: string[] = [];
+  showFavoritedModels: boolean = true;
+  showLocalModels: boolean = true;
+  showOpenAIModels: boolean = true;
+  showGroqModels: boolean = true;
+  showOpenRouterModels: boolean = true;
   private isUpdatingDefaultModel: boolean = false;
   private _isReinitializing: boolean = false;
   private isInitialized: boolean = false;

@@ -335,17 +335,35 @@ export class UnifiedAIService implements AIServiceInterface {
         "gpt-3.5-turbo-1106",
         "gpt-4-0613",
         "gpt-3.5-turbo",
+        "gpt-4o-2024-08-06",
+        "gpt-4o-realtime-preview",
+        "o1-mini-2024-09-12",
+        "o1-preview-2024-09-12",
       ];
-      const priorityOrder = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4"];
+      const priorityOrder = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "chatgpt-4o-latest",
+        "o1-preview",
+        "o1-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+      ];
       const priorityContextLengths: { [key: string]: number } = {
         "gpt-4o": 128000,
         "gpt-4o-mini": 128000,
+        "chatgpt-4o-latest": 128000,
+        "o1-preview": 128000,
+        "o1-mini": 128000,
         "gpt-4-turbo": 128000,
         "gpt-4": 8192,
       };
       const priorityMaxOutputTokens: { [key: string]: number } = {
         "gpt-4o": 4096,
         "gpt-4o-mini": 16000,
+        "chatgpt-4o-latest": 32768,
+        "o1-preview": 32768,
+        "o1-mini": 65536,
         "gpt-4-turbo": 4096,
         "gpt-4": 4096,
       };
@@ -354,6 +372,9 @@ export class UnifiedAIService implements AIServiceInterface {
       } = {
         "gpt-4o": { prompt: 0.000005, completion: 0.000015 },
         "gpt-4o-mini": { prompt: 0.00000015, completion: 0.0000006 },
+        "chatgpt-4o-latest": { prompt: 0.000005, completion: 0.000015 },
+        "o1-preview": { prompt: 0.000015, completion: 0.00006 },
+        "o1-mini": { prompt: 0.000003, completion: 0.000012 },
         "gpt-4-turbo": { prompt: 0.00001, completion: 0.00003 },
         "gpt-4": { prompt: 0.00003, completion: 0.00006 },
       };
