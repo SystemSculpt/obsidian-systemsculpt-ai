@@ -205,3 +205,16 @@
     grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   }
 }
+
+.refresh-models-button {
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.refresh-models-button:hover {
+  background-color: var(--interactive-accent-hover);
+}

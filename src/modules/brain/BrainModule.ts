@@ -165,7 +165,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private registerViews() {
     this.plugin.registerView(
       VIEW_TYPE_CHAT,
-      (leaf) => new ChatView(leaf, this, this.plugin.chatModule),
+      (leaf) => new ChatView(leaf, this, this.plugin.chatModule)
     );
   }
 
@@ -173,7 +173,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     this.settings = Object.assign(
       {},
       DEFAULT_BRAIN_SETTINGS,
-      await this.plugin.loadData(),
+      await this.plugin.loadData()
     );
   }
 
@@ -208,7 +208,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
           showopenRouterSetting: this.settings.showopenRouterSetting,
           baseOpenAIApiUrl: this.settings.baseOpenAIApiUrl,
         },
-        true,
+        true
       );
 
       await this.updateDefaultModelAndStatusBar();
@@ -263,7 +263,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       !!enabledModels.openAIApiKey,
       !!enabledModels.groqAPIKey,
       !!enabledModels.localEndpoint,
-      !!enabledModels.openRouterAPIKey,
+      !!enabledModels.openRouterAPIKey
     );
 
     return allModels.filter((model) => {
@@ -291,7 +291,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     const models = await this.getEnabledModels();
 
     let currentModel = models.find(
-      (model) => model.id === this.settings.defaultModelId,
+      (model) => model.id === this.settings.defaultModelId
     );
     if (!currentModel && models.length > 0) {
       currentModel = models[0];
@@ -335,7 +335,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         this.updateModelStatusBarText(
           this.settings.showDefaultModelOnStatusBar && currentModel
             ? `Model: ${currentModel.name}`
-            : "",
+            : ""
         );
       }
     } catch (error) {
@@ -406,7 +406,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       const { minCost, maxCost } = CostEstimator.calculateCost(
         currentModel,
         tokenCount,
-        this.getMaxOutputTokens(),
+        this.getMaxOutputTokens()
       );
       this.emit("cost-estimate-updated", { minCost, maxCost });
     }
@@ -418,7 +418,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }
     return (
       this.cachedModels.find(
-        (model) => model.id === this.settings.defaultModelId,
+        (model) => model.id === this.settings.defaultModelId
       ) || this.cachedModels[0]
     );
   }
@@ -428,5 +428,20 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     if (activeLeaf && activeLeaf.view instanceof MarkdownView) {
       activeLeaf.view.editor.focus();
     }
+  }
+
+  public async refreshModels(): Promise<void> {
+    if (!this._AIService) {
+      throw new Error("AIService is not initialized");
+    }
+    this._AIService.clearModelCache();
+    const enabledModels = await this.getEndpointSettingValues();
+    await this._AIService.getModels(
+      !!enabledModels.openAIApiKey,
+      !!enabledModels.groqAPIKey,
+      !!enabledModels.localEndpoint,
+      !!enabledModels.openRouterAPIKey
+    );
+    this.emit("models-refreshed");
   }
 }

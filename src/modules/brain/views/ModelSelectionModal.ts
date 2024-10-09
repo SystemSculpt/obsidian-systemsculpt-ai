@@ -19,7 +19,7 @@ export class ModelSelectionModal extends Modal {
   async onOpen() {
     if (this.plugin.isReinitializing) {
       this.contentEl.setText(
-        "AI service is reinitializing. Please try again later.",
+        "AI service is reinitializing. Please try again later."
       );
       setTimeout(() => this.close(), 2000);
       return;
@@ -33,6 +33,8 @@ export class ModelSelectionModal extends Modal {
     contentEl.style.overflow = "auto";
     contentEl.style.marginTop = "20px";
     contentEl.createEl("h2", { text: "Select Model" });
+
+    this.addRefreshButton(); // Add this line
 
     this.searchInput = contentEl.createEl("input", {
       type: "text",
@@ -90,7 +92,7 @@ export class ModelSelectionModal extends Modal {
       searchTerms.every(
         (term) =>
           model.name.toLowerCase().includes(term) ||
-          model.id.toLowerCase().includes(term),
+          model.id.toLowerCase().includes(term)
       );
 
     const renderGroup = (groupName: string, models: Model[]) => {
@@ -101,14 +103,14 @@ export class ModelSelectionModal extends Modal {
 
     renderGroup(
       "Favorited",
-      this.models.filter((m) => m.favorite && filterModel(m)),
+      this.models.filter((m) => m.favorite && filterModel(m))
     );
 
     ["local", "openai", "groq", "openRouter"].forEach((provider) =>
       renderGroup(
         this.getProviderName(provider),
-        this.models.filter((m) => m.provider === provider && filterModel(m)),
-      ),
+        this.models.filter((m) => m.provider === provider && filterModel(m))
+      )
     );
 
     if (!this.modelListContainer.childElementCount) {
@@ -129,7 +131,7 @@ export class ModelSelectionModal extends Modal {
   private renderModelGroup(
     groupName: string,
     models: Model[],
-    searchTerms: string[],
+    searchTerms: string[]
   ) {
     this.modelListContainer.createEl("h3", { text: groupName });
     const groupContainer = this.modelListContainer.createEl("div", {
@@ -204,7 +206,7 @@ export class ModelSelectionModal extends Modal {
   private highlightText(
     element: HTMLElement,
     text: string,
-    searchTerms: string[],
+    searchTerms: string[]
   ) {
     if (searchTerms.length === 0) {
       element.textContent = text;
@@ -316,7 +318,7 @@ export class ModelSelectionModal extends Modal {
     this.plugin.refreshAIService();
     if (this.plugin.plugin.modelToggleStatusBarItem) {
       this.plugin.plugin.modelToggleStatusBarItem.setText(
-        `Model: ${model.name}`,
+        `Model: ${model.name}`
       );
     }
     this.plugin.plugin.settingsTab.display();
@@ -325,7 +327,7 @@ export class ModelSelectionModal extends Modal {
 
   private selectHighlightedModel() {
     const selectedItem = this.modelListContainer.querySelector(
-      ".modal-item.selected",
+      ".modal-item.selected"
     ) as HTMLElement;
     if (selectedItem) {
       const modelId = selectedItem.dataset.modelId;
@@ -340,5 +342,18 @@ export class ModelSelectionModal extends Modal {
   onClose() {
     const { contentEl } = this;
     contentEl.empty();
+  }
+
+  private addRefreshButton() {
+    const refreshButton = this.contentEl.createEl("button", {
+      text: "Refresh Models List",
+      cls: "refresh-models-button",
+    });
+    refreshButton.addEventListener("click", async () => {
+      this.renderLoadingState(this.modelListContainer);
+      await this.plugin.refreshModels();
+      await this.loadModels();
+      this.renderModelList();
+    });
   }
 }

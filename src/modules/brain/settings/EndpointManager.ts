@@ -152,17 +152,17 @@ export class EndpointManager {
         text
           .setPlaceholder(provider.placeholder || "API Key")
           .setValue(this.plugin.settings[provider.settingKey] as string)
-          .onChange((value: string) => {
-            // If the field is for OpenAI Base URL and it's empty, use the placeholder
-            if (provider.name === "OpenAI Base URL" && value.trim() === "") {
-              value = provider.placeholder || "";
-            }
-            this.saveImmediately(value, provider.settingKey);
-            this.debouncedReinitialize(
+          .onChange(async (value) => {
+            this.plugin.settings[provider.settingKey] = value as never;
+            await this.plugin.saveSettings();
+            await this.validateSettingAndUpdateStatus(
               value,
               apiSettingTextComponent,
-              provider.settingKey
+              provider
             );
+            await this.plugin.refreshAIService();
+            await this.plugin.refreshModels(); // Add this line
+            this.onAfterSave();
           });
 
         if (provider.name !== "Local" && provider.name !== "OpenAI Base URL") {

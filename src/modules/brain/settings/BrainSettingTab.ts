@@ -43,7 +43,7 @@ export class BrainSettingTab extends PluginSettingTab {
     const endpointManager = new EndpointManager(
       this.containerEl,
       this.plugin,
-      () => this.refreshTab(),
+      () => this.refreshTab()
     );
     endpointManager.renderEndpointSettings();
     this.renderModelSettings();
@@ -83,6 +83,8 @@ export class BrainSettingTab extends PluginSettingTab {
   }
 
   refreshTab(): void {
-    this.display();
+    this.plugin.refreshModels().then(() => {
+      this.display();
+    });
   }
 }
