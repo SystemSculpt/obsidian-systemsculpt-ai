@@ -11,7 +11,7 @@ export class UnifiedAIService implements AIServiceInterface {
     apiKey: string,
     endpoint: string,
     provider: AIProvider,
-    settings: { temperature: number },
+    settings: { temperature: number }
   ) {
     this.apiKey = apiKey;
     this.endpoint = endpoint.endsWith("/v1") ? endpoint : `${endpoint}/v1`;
@@ -28,9 +28,13 @@ export class UnifiedAIService implements AIServiceInterface {
   }
 
   updateOpenAIBaseUrl(baseUrl: string): void {
+    if (!baseUrl || baseUrl.trim() === "") {
+      baseUrl = "https://api.openai.com/v1";
+    }
     if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
       throw new Error(
-        "Invalid base URL. It must start with http:// or https://",
+        "Invalid base URL. It must start with http:// or https://. Your current value is: " +
+          baseUrl
       );
     }
     this.endpoint = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
@@ -40,7 +44,7 @@ export class UnifiedAIService implements AIServiceInterface {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
+    maxOutputTokens: number
   ): Promise<string> {
     const requestData = JSON.stringify({
       model: modelId,
@@ -82,7 +86,7 @@ export class UnifiedAIService implements AIServiceInterface {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal,
+    abortSignal?: AbortSignal
   ): Promise<void> {
     const requestData = JSON.stringify({
       model: modelId,
@@ -165,7 +169,7 @@ export class UnifiedAIService implements AIServiceInterface {
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
-    abortSignal?: AbortSignal,
+    abortSignal?: AbortSignal
   ): Promise<void> {
     const formattedMessages = [
       { role: "system", content: systemPrompt },
@@ -369,7 +373,7 @@ export class UnifiedAIService implements AIServiceInterface {
 
       const filteredModels = data.data.filter(
         (model: any) =>
-          !filteredWords.some((word) => model.id.toLowerCase().includes(word)),
+          !filteredWords.some((word) => model.id.toLowerCase().includes(word))
       );
 
       const sortedModels = filteredModels.sort((a: any, b: any) => {
@@ -403,7 +407,7 @@ export class UnifiedAIService implements AIServiceInterface {
         .filter(
           (model: any) =>
             model.id !== "whisper-large-v3" &&
-            !model.id.toLowerCase().includes("tool-use"),
+            !model.id.toLowerCase().includes("tool-use")
         )
         .map((model: any) => ({
           id: model.id,
@@ -443,7 +447,7 @@ export class UnifiedAIService implements AIServiceInterface {
   static async validateApiKey(
     apiKey: string,
     endpoint: string,
-    provider: AIProvider,
+    provider: AIProvider
   ): Promise<boolean> {
     if (provider === "local") {
       try {

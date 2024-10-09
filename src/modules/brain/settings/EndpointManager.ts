@@ -4,7 +4,7 @@ import { AIService } from "../../../api/AIService";
 
 type ValidateFunction = (
   value: string,
-  baseOpenAIApiUrl?: string,
+  baseOpenAIApiUrl?: string
 ) => Promise<boolean>;
 
 interface APIProvider {
@@ -24,7 +24,7 @@ export class EndpointManager {
   constructor(
     containerEl: HTMLElement,
     plugin: BrainModule,
-    onAfterSave: () => void,
+    onAfterSave: () => void
   ) {
     this.containerEl = containerEl;
     this.plugin = plugin;
@@ -38,7 +38,7 @@ export class EndpointManager {
 
   private renderAPIEndpointToggles(): void {
     const apiEndpointsContainer = this.containerEl.createDiv(
-      "api-endpoints-container",
+      "api-endpoints-container"
     );
     apiEndpointsContainer.createEl("h3", { text: "API Endpoints" });
 
@@ -128,7 +128,7 @@ export class EndpointManager {
     settingKey: keyof BrainModule["settings"];
     validateFunction: (
       value: string,
-      baseOpenAIApiUrl?: string,
+      baseOpenAIApiUrl?: string
     ) => Promise<boolean>;
     placeholder?: string;
   }): void {
@@ -136,7 +136,7 @@ export class EndpointManager {
 
     const setting = new Setting(this.containerEl)
       .setName(
-        `${provider.name} ${provider.name === "Local" ? "Endpoint" : provider.name === "OpenAI Base URL" ? "" : "API Key"}`,
+        `${provider.name} ${provider.name === "Local" ? "Endpoint" : provider.name === "OpenAI Base URL" ? "" : "API Key"}`
       )
       .setDesc(
         `Enter your ${provider.name} ${
@@ -145,7 +145,7 @@ export class EndpointManager {
             : provider.name === "OpenAI Base URL"
               ? "base URL"
               : "API key"
-        }`,
+        }`
       )
       .addText((text) => {
         apiSettingTextComponent = text;
@@ -153,11 +153,15 @@ export class EndpointManager {
           .setPlaceholder(provider.placeholder || "API Key")
           .setValue(this.plugin.settings[provider.settingKey] as string)
           .onChange((value: string) => {
+            // If the field is for OpenAI Base URL and it's empty, use the placeholder
+            if (provider.name === "OpenAI Base URL" && value.trim() === "") {
+              value = provider.placeholder || "";
+            }
             this.saveImmediately(value, provider.settingKey);
             this.debouncedReinitialize(
               value,
               apiSettingTextComponent,
-              provider.settingKey,
+              provider.settingKey
             );
           });
 
@@ -171,10 +175,20 @@ export class EndpointManager {
           });
         }
 
+        // Set initial value to placeholder if empty for OpenAI Base URL
+        if (
+          provider.name === "OpenAI Base URL" &&
+          (this.plugin.settings[provider.settingKey] as string).trim() === ""
+        ) {
+          (this.plugin.settings[provider.settingKey] as string) =
+            provider.placeholder || "";
+          text.setValue(provider.placeholder || "");
+        }
+
         this.validateSettingAndUpdateStatus(
           this.plugin.settings[provider.settingKey] as string,
           apiSettingTextComponent,
-          provider,
+          provider
         );
       })
       .addExtraButton((button) => {
@@ -183,7 +197,7 @@ export class EndpointManager {
           await this.validateSettingAndUpdateStatus(
             this.plugin.settings[provider.settingKey] as string,
             apiSettingTextComponent,
-            provider,
+            provider
           );
           await this.plugin.refreshAIService();
           this.onAfterSave();
@@ -195,7 +209,7 @@ export class EndpointManager {
               : provider.name === "OpenAI Base URL"
                 ? "Base URL"
                 : "API Key"
-          } and Refresh AI Service`,
+          } and Refresh AI Service`
         );
       });
   }
@@ -220,7 +234,7 @@ export class EndpointManager {
 
   private saveImmediately(
     value: string,
-    settingKey: keyof BrainModule["settings"],
+    settingKey: keyof BrainModule["settings"]
   ): void {
     (this.plugin.settings[settingKey] as string) = value;
     this.plugin.saveSettings();
@@ -229,7 +243,7 @@ export class EndpointManager {
   private debouncedReinitialize(
     value: string,
     textComponent: TextComponent,
-    settingKey: keyof BrainModule["settings"],
+    settingKey: keyof BrainModule["settings"]
   ): void {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(async () => {
@@ -254,7 +268,7 @@ export class EndpointManager {
       name: string;
       settingKey: keyof BrainModule["settings"];
       validateFunction: ValidateFunction;
-    },
+    }
   ): Promise<void> {
     const statusTextEl =
       textComponent.inputEl.nextElementSibling ||
@@ -269,14 +283,15 @@ export class EndpointManager {
     try {
       let isValid: boolean;
       const timeoutPromise = new Promise<boolean>((_, reject) =>
-        setTimeout(() => reject(new Error("Validation timeout")), 3000),
+        setTimeout(() => reject(new Error("Validation timeout")), 3000)
       );
       const validationPromise = (async () => {
         switch (provider.name) {
           case "OpenAI":
             return await AIService.validateOpenAIApiKey(
               value,
-              this.plugin.settings.baseOpenAIApiUrl,
+              this.plugin.settings.baseOpenAIApiUrl ||
+                "https://api.openai.com/v1"
             );
           case "Groq":
             return await AIService.validateGroqAPIKey(value);
@@ -327,7 +342,7 @@ export class EndpointManager {
   private updateStatus(
     textComponent: TextComponent,
     message: string,
-    isValid: boolean,
+    isValid: boolean
   ): void {
     const statusTextEl = textComponent.inputEl
       .nextElementSibling as HTMLElement;
