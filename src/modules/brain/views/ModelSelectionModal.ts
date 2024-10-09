@@ -48,7 +48,7 @@ export class ModelSelectionModal extends Modal {
     this.renderLoadingState(this.modelListContainer);
 
     try {
-      await this.refreshModels();
+      await this.loadModels();
       this.renderModelList();
       this.setupEventListeners();
     } catch (error) {
@@ -70,8 +70,13 @@ export class ModelSelectionModal extends Modal {
   }
 
   private async loadModels() {
-    const models = await this.plugin.getEnabledModels();
-    this.models = models;
+    const enabledModels = await this.plugin.getEndpointSettingValues();
+    this.models = await this.plugin.AIService.getModels(
+      enabledModels.openAIApiKey,
+      enabledModels.groqAPIKey,
+      enabledModels.localEndpoint,
+      enabledModels.openRouterAPIKey
+    );
 
     const favoritedModels = new Set(this.plugin.settings.favoritedModels || []);
     this.models.forEach((model) => {

@@ -365,8 +365,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     };
   }
 
-  private async getEndpointSettingValues() {
-    // first we check which settings are enabled
+  public async getEndpointSettingValues() {
     const enabledSettings = {
       openAIApiKey: this.settings.showopenAISetting,
       groqAPIKey: this.settings.showgroqSetting,
@@ -374,7 +373,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       localEndpoint: this.settings.showlocalEndpointSetting,
     };
 
-    // now we check which of the enabled settings have a value
     const enabledValues = {
       openAIApiKey: this.settings.openAIApiKey,
       groqAPIKey: this.settings.groqAPIKey,
@@ -382,24 +380,14 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       localEndpoint: this.settings.localEndpoint,
     };
 
-    // now if they are both true, we return true
-    // if they are both false, we return false
-    // if they are one true and one false, we return false
-
-    const openAIActive =
-      enabledSettings.openAIApiKey && enabledValues.openAIApiKey;
-    const groqActive = enabledSettings.groqAPIKey && enabledValues.groqAPIKey;
-    const openRouterActive =
-      enabledSettings.openRouterAPIKey && enabledValues.openRouterAPIKey;
-    const localActive =
-      enabledSettings.localEndpoint && enabledValues.localEndpoint;
-
     return {
-      // return as booleans
-      openAIApiKey: openAIActive,
-      groqAPIKey: groqActive,
-      openRouterAPIKey: openRouterActive,
-      localEndpoint: localActive,
+      openAIApiKey:
+        enabledSettings.openAIApiKey && !!enabledValues.openAIApiKey,
+      groqAPIKey: enabledSettings.groqAPIKey && !!enabledValues.groqAPIKey,
+      openRouterAPIKey:
+        enabledSettings.openRouterAPIKey && !!enabledValues.openRouterAPIKey,
+      localEndpoint:
+        enabledSettings.localEndpoint && !!enabledValues.localEndpoint,
     };
   }
 
@@ -444,13 +432,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     if (!this._AIService) {
       throw new Error("AIService is not initialized");
     }
-    this._AIService.clearModelCache();
     const enabledModels = await this.getEndpointSettingValues();
     await this._AIService.getModels(
-      !!enabledModels.openAIApiKey,
-      !!enabledModels.groqAPIKey,
-      !!enabledModels.localEndpoint,
-      !!enabledModels.openRouterAPIKey
+      enabledModels.openAIApiKey,
+      enabledModels.groqAPIKey,
+      enabledModels.localEndpoint,
+      enabledModels.openRouterAPIKey
     );
     this.emit("models-refreshed");
   }
