@@ -1,23 +1,26 @@
 /* Revolving dots animation */
 @keyframes revolving-dots {
   0% {
-    content: '...';
+    content: '';
   }
-  33% {
-    content: '..';
-  }
-  66% {
+  25% {
     content: '.';
   }
-  100% {
+  50% {
+    content: '..';
+  }
+  75% {
     content: '...';
+  }
+  100% {
+    content: '';
   }
 }
 
 .revolving-dots::after {
   display: inline-block;
-  animation: revolving-dots 1s infinite steps(3);
-  content: '...';
+  animation: revolving-dots 1s infinite steps(4);
+  content: '';
 }
 
 /* Modal list styles */
@@ -217,4 +220,10 @@
 
 .refresh-models-button:hover {
   background-color: var(--interactive-accent-hover);
+}
+
+.refreshing-models {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
 }

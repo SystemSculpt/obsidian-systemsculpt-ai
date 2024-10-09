@@ -34,7 +34,7 @@ export class ModelSelectionModal extends Modal {
     contentEl.style.marginTop = "20px";
     contentEl.createEl("h2", { text: "Select Model" });
 
-    this.addRefreshButton(); // Add this line
+    this.addRefreshButton();
 
     this.searchInput = contentEl.createEl("input", {
       type: "text",
@@ -46,7 +46,7 @@ export class ModelSelectionModal extends Modal {
     this.renderLoadingState(this.modelListContainer);
 
     try {
-      await this.loadModels();
+      await this.refreshModels();
       this.renderModelList();
       this.setupEventListeners();
     } catch (error) {
@@ -350,10 +350,32 @@ export class ModelSelectionModal extends Modal {
       cls: "refresh-models-button",
     });
     refreshButton.addEventListener("click", async () => {
-      this.renderLoadingState(this.modelListContainer);
-      await this.plugin.refreshModels();
-      await this.loadModels();
+      await this.refreshModels();
       this.renderModelList();
     });
+  }
+
+  private showRefreshingState() {
+    this.modelListContainer.empty();
+    const refreshingEl = this.modelListContainer.createEl("div", {
+      cls: "refreshing-models",
+    });
+    refreshingEl.textContent = "Refreshing models list";
+    refreshingEl.addClass("revolving-dots");
+  }
+
+  private hideRefreshingState() {
+    const refreshingEl =
+      this.modelListContainer.querySelector(".refreshing-models");
+    if (refreshingEl) {
+      refreshingEl.remove();
+    }
+  }
+
+  private async refreshModels() {
+    this.showRefreshingState();
+    await this.plugin.refreshModels();
+    await this.loadModels();
+    this.hideRefreshingState();
   }
 }
