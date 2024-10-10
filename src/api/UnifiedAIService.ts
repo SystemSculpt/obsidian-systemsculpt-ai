@@ -27,6 +27,14 @@ export class UnifiedAIService implements AIServiceInterface {
     return modelId === "o1-preview" || modelId === "o1-mini";
   }
 
+  private shouldConvertSystemToUser(modelId: string): boolean {
+    return modelId === "o1-preview" || modelId === "o1-mini";
+  }
+
+  private shouldUseHardcodedTemperature(modelId: string): boolean {
+    return modelId === "o1-preview" || modelId === "o1-mini";
+  }
+
   updateSettings(settings: { temperature: number }) {
     this.settings = settings;
   }
@@ -41,15 +49,27 @@ export class UnifiedAIService implements AIServiceInterface {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const requestData = JSON.stringify({
+    const messages = this.shouldConvertSystemToUser(modelId)
+      ? [
+          { role: "user", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ]
+      : [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ];
+
+    const requestData: any = {
       model: modelId,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-    });
+      messages: messages,
+      temperature: this.shouldUseHardcodedTemperature(modelId)
+        ? 1
+        : this.settings.temperature,
+    };
+
+    if (!this.shouldOmitMaxTokens(modelId)) {
+      requestData.max_tokens = maxOutputTokens;
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -64,7 +84,7 @@ export class UnifiedAIService implements AIServiceInterface {
     const response = await fetch(`${this.endpoint}/chat/completions`, {
       method: "POST",
       headers: headers,
-      body: requestData,
+      body: JSON.stringify(requestData),
     });
 
     if (!response.ok) {
@@ -83,14 +103,23 @@ export class UnifiedAIService implements AIServiceInterface {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    const messages = this.shouldConvertSystemToUser(modelId)
+      ? [
+          { role: "user", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ]
+      : [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ];
+
     const requestData: any = {
       model: modelId,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
+      messages: messages,
       stream: !this.isNonStreamingModel(modelId),
-      temperature: this.settings.temperature,
+      temperature: this.shouldUseHardcodedTemperature(modelId)
+        ? 1
+        : this.settings.temperature,
     };
 
     if (!this.shouldOmitMaxTokens(modelId)) {
@@ -175,7 +204,7 @@ export class UnifiedAIService implements AIServiceInterface {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const formattedMessages = [
+    let formattedMessages = [
       { role: "system", content: systemPrompt },
       ...messages.map((msg) => {
         if (typeof msg.content === "string") {
@@ -196,11 +225,19 @@ export class UnifiedAIService implements AIServiceInterface {
       }),
     ];
 
+    if (this.shouldConvertSystemToUser(modelId)) {
+      formattedMessages = formattedMessages.map((msg, index) =>
+        index === 0 ? { ...msg, role: "user" } : msg
+      );
+    }
+
     const requestData: any = {
       model: modelId,
       messages: formattedMessages,
       stream: !this.isNonStreamingModel(modelId),
-      temperature: this.settings.temperature,
+      temperature: this.shouldUseHardcodedTemperature(modelId)
+        ? 1
+        : this.settings.temperature,
     };
 
     if (!this.shouldOmitMaxTokens(modelId)) {
