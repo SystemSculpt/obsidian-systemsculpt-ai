@@ -6,11 +6,36 @@ import { ChatMessage } from "../../chat/ChatMessage";
 export function handleStreamingResponse(
   chunk: string,
   editor: Editor,
-  plugin: IGenerationModule,
+  plugin: IGenerationModule
 ): void {
   const signal = plugin.abortController?.signal;
   if (signal?.aborted) {
     return;
+  }
+
+  try {
+    const data = JSON.parse(chunk);
+    if (data.choices && data.choices[0].message) {
+      // Non-streaming response
+      const content = data.choices[0].message.content;
+      const startPos = editor.getCursor();
+      editor.replaceSelection(content);
+      const lines = content.split("\n");
+      let endPos = {
+        line: startPos.line + lines.length - 1,
+        ch:
+          lines.length === 1
+            ? startPos.ch + lines[lines.length - 1].length
+            : lines[lines.length - 1].length,
+      };
+      editor.setCursor(endPos);
+      showCustomNotice("Generation completed!", 5000);
+      plugin.abortController = null;
+      plugin.isGenerationCompleted = true;
+      return;
+    }
+  } catch (error) {
+    // If it's not a JSON, proceed with streaming response handling
   }
 
   const dataLines = chunk.split("\n");

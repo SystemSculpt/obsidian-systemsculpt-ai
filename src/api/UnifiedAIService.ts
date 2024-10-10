@@ -19,6 +19,14 @@ export class UnifiedAIService implements AIServiceInterface {
     this.settings = settings;
   }
 
+  private isNonStreamingModel(modelId: string): boolean {
+    return modelId === "o1-preview" || modelId === "o1-mini";
+  }
+
+  private shouldOmitMaxTokens(modelId: string): boolean {
+    return modelId === "o1-preview" || modelId === "o1-mini";
+  }
+
   updateSettings(settings: { temperature: number }) {
     this.settings = settings;
   }
@@ -75,16 +83,19 @@ export class UnifiedAIService implements AIServiceInterface {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const requestData = JSON.stringify({
+    const requestData: any = {
       model: modelId,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      stream: true,
-      max_tokens: maxOutputTokens,
+      stream: !this.isNonStreamingModel(modelId),
       temperature: this.settings.temperature,
-    });
+    };
+
+    if (!this.shouldOmitMaxTokens(modelId)) {
+      requestData.max_tokens = maxOutputTokens;
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -99,11 +110,17 @@ export class UnifiedAIService implements AIServiceInterface {
     const req = await fetch(`${this.endpoint}/chat/completions`, {
       method: "POST",
       headers: headers,
-      body: requestData,
+      body: JSON.stringify(requestData),
     });
 
     if (!req.ok) {
       throw new Error(`API request failed with status ${req.status}`);
+    }
+
+    if (this.isNonStreamingModel(modelId)) {
+      const data = await req.json();
+      callback(JSON.stringify(data));
+      return;
     }
 
     if (!req.body) {
@@ -179,13 +196,16 @@ export class UnifiedAIService implements AIServiceInterface {
       }),
     ];
 
-    const requestData = JSON.stringify({
+    const requestData: any = {
       model: modelId,
       messages: formattedMessages,
-      stream: true,
-      max_tokens: maxOutputTokens,
+      stream: !this.isNonStreamingModel(modelId),
       temperature: this.settings.temperature,
-    });
+    };
+
+    if (!this.shouldOmitMaxTokens(modelId)) {
+      requestData.max_tokens = maxOutputTokens;
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -197,16 +217,22 @@ export class UnifiedAIService implements AIServiceInterface {
       headers["X-Title"] = "SystemSculpt AI for Obsidian";
     }
 
-    console.log("Request payload:", requestData);
+    console.log("Request payload:", JSON.stringify(requestData));
 
     const req = await fetch(`${this.endpoint}/chat/completions`, {
       method: "POST",
       headers: headers,
-      body: requestData,
+      body: JSON.stringify(requestData),
     });
 
     if (!req.ok) {
       throw new Error(`API request failed with status ${req.status}`);
+    }
+
+    if (this.isNonStreamingModel(modelId)) {
+      const data = await req.json();
+      callback(JSON.stringify(data));
+      return;
     }
 
     if (!req.body) {

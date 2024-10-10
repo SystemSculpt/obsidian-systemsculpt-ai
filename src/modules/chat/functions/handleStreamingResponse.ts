@@ -3,8 +3,20 @@ import { ChatMessage } from "../ChatMessage";
 export function handleStreamingResponse(
   chunk: string,
   appendToLastMessage: (content: string) => void,
-  addMessage: (message: ChatMessage) => void,
+  addMessage: (message: ChatMessage) => void
 ): string {
+  try {
+    const data = JSON.parse(chunk);
+    if (data.choices && data.choices[0].message) {
+      // Non-streaming response
+      const content = data.choices[0].message.content;
+      appendToLastMessage(content);
+      return content;
+    }
+  } catch (error) {
+    // If it's not a JSON, proceed with streaming response handling
+  }
+
   const dataLines = chunk.split("\n");
   let incompleteJSON = "";
   let accumulatedContent = "";
@@ -41,7 +53,7 @@ export function handleStreamingResponse(
           incompleteJSON += dataStr;
         } else if (
           (error as Error).message.includes(
-            "Unterminated string in JSON at position",
+            "Unterminated string in JSON at position"
           )
         ) {
         } else {
