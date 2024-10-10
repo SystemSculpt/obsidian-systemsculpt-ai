@@ -44,7 +44,7 @@ export class ChatView extends ItemView {
   constructor(
     leaf: WorkspaceLeaf,
     brainModule: BrainModule,
-    chatModule: ChatModule,
+    chatModule: ChatModule
   ) {
     super(leaf);
     this.chatMessages = [];
@@ -71,11 +71,11 @@ export class ChatView extends ItemView {
 
   private updateCostEstimate(minCost: number, maxCost: number) {
     const costEstimateEl = this.containerEl.querySelector(
-      ".cost-estimate",
+      ".cost-estimate"
     ) as HTMLElement;
     if (costEstimateEl) {
       costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
-        minCost,
+        minCost
       )} - $${formatNumber(maxCost)}`;
     }
   }
@@ -87,7 +87,7 @@ export class ChatView extends ItemView {
       this.app,
       this,
       this.contextFileManager,
-      this.chatModule,
+      this.chatModule
     );
     this.chatFileManager = new ChatFileManager(this.app, this.chatModule);
   }
@@ -100,7 +100,7 @@ export class ChatView extends ItemView {
 
   private attachFilePasteListener() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.addEventListener("paste", this.handleFilePaste.bind(this));
@@ -121,7 +121,7 @@ export class ChatView extends ItemView {
       this.initializeLoadingContainer();
       this.resetLoadingContainer();
       this.showLoadingContainer(
-        `Processing ${files.length} file${files.length > 1 ? "s" : ""}...`,
+        `Processing ${files.length} file${files.length > 1 ? "s" : ""}...`
       );
 
       for (let i = 0; i < files.length; i++) {
@@ -188,7 +188,7 @@ export class ChatView extends ItemView {
     } catch (error) {
       console.error("Error processing file:", error);
       this.updateLoadingText(
-        `Error processing file: ${(error as Error).message}`,
+        `Error processing file: ${(error as Error).message}`
       );
     } finally {
       this.hideLoadingContainer();
@@ -223,7 +223,7 @@ export class ChatView extends ItemView {
 
   private attachContextFilesButtonListener() {
     const contextFilesButton = this.containerEl.querySelector(
-      ".context-files-header",
+      ".context-files-header"
     ) as HTMLElement;
     if (contextFilesButton) {
       contextFilesButton.addEventListener("click", (e) => {
@@ -236,7 +236,7 @@ export class ChatView extends ItemView {
 
   private attachChatTitleListener() {
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text",
+      ".chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.style.cursor = "pointer";
@@ -268,7 +268,7 @@ export class ChatView extends ItemView {
         (file) =>
           file.path.startsWith(this.chatModule.settings.chatsPath) &&
           !file.path.includes("/Archive/") &&
-          file.extension === "md",
+          file.extension === "md"
       )
       .sort((a, b) => a.basename.localeCompare(b.basename));
 
@@ -297,7 +297,7 @@ export class ChatView extends ItemView {
       await this.app.fileManager.renameFile(currentChatFile, newFilePath);
 
       this.updateLoadingText(
-        `Archived '${currentChatFile.basename}' successfully!`,
+        `Archived '${currentChatFile.basename}' successfully!`
       );
 
       const nextChatFile = this.getNextChatFile();
@@ -306,7 +306,7 @@ export class ChatView extends ItemView {
         await this.visualReload();
       } else {
         await this.handleNoMoreChats(
-          "All tidy! You've archived all your chats; here's a fresh start.",
+          "All tidy! You've archived all your chats; here's a fresh start."
         );
       }
     } catch (error) {
@@ -314,7 +314,7 @@ export class ChatView extends ItemView {
       this.updateLoadingText(
         `Failed to archive '${currentChatFile.basename}'. Error: ${
           (error as Error).message
-        }`,
+        }`
       );
       this.chatFile = currentChatFile;
     }
@@ -329,7 +329,7 @@ export class ChatView extends ItemView {
     try {
       await this.app.vault.delete(currentChatFile);
       this.updateLoadingText(
-        `Deleted '${currentChatFile.basename}' successfully!`,
+        `Deleted '${currentChatFile.basename}' successfully!`
       );
 
       const nextChatFile = this.getNextChatFile();
@@ -338,7 +338,7 @@ export class ChatView extends ItemView {
         await this.visualReload();
       } else {
         await this.handleNoMoreChats(
-          "All clean! You've deleted all your chats; here's a fresh start.",
+          "All clean! You've deleted all your chats; here's a fresh start."
         );
       }
     } catch (error) {
@@ -346,7 +346,7 @@ export class ChatView extends ItemView {
       this.updateLoadingText(
         `Failed to delete '${currentChatFile.basename}'. Error: ${
           (error as Error).message
-        }`,
+        }`
       );
       this.chatFile = currentChatFile;
     }
@@ -366,13 +366,13 @@ export class ChatView extends ItemView {
         (file) =>
           file.path.startsWith(this.chatModule.settings.chatsPath) &&
           !file.path.includes("/Archive/") &&
-          file.extension === "md",
+          file.extension === "md"
       );
 
     if (chatFiles.length === 0) {
       this.chatModule.openNewChat();
       this.updateLoadingText(
-        "You don't seem to have any chat history yet; here's a new chat for you!",
+        "You don't seem to have any chat history yet; here's a new chat for you!"
       );
       return;
     }
@@ -401,7 +401,7 @@ export class ChatView extends ItemView {
 
   openFileSearcher(
     inputEl?: HTMLTextAreaElement,
-    addToContextFiles: boolean = false,
+    addToContextFiles: boolean = false
   ) {
     attachFileSearcherListeners(this, inputEl, addToContextFiles);
   }
@@ -437,16 +437,16 @@ export class ChatView extends ItemView {
 
   private initializeLoadingContainer() {
     this.loadingContainer = this.containerEl.querySelector(
-      ".loading-container",
+      ".loading-container"
     ) as HTMLElement;
     this.loadingText = this.loadingContainer.querySelector(
-      ".loading-text",
+      ".loading-text"
     ) as HTMLElement;
     this.progressText = this.loadingContainer.querySelector(
-      ".progress-text",
+      ".progress-text"
     ) as HTMLElement;
     this.progressBarFill = this.loadingContainer.querySelector(
-      ".progress-bar-fill",
+      ".progress-bar-fill"
     ) as HTMLElement;
   }
 
@@ -485,7 +485,7 @@ export class ChatView extends ItemView {
     if (files.length > 0) {
       this.resetLoadingContainer();
       this.showLoadingContainer(
-        `Processing ${files.length} file${files.length > 1 ? "s" : ""}...`,
+        `Processing ${files.length} file${files.length > 1 ? "s" : ""}...`
       );
 
       for (let i = 0; i < files.length; i++) {
@@ -518,7 +518,7 @@ export class ChatView extends ItemView {
         } catch (error) {
           console.error("Error processing file:", error);
           this.updateLoadingText(
-            `Error processing file: ${(error as Error).message}`,
+            `Error processing file: ${(error as Error).message}`
           );
         } finally {
           this.hideLoadingContainer();
@@ -539,7 +539,7 @@ export class ChatView extends ItemView {
     this.contextFiles = [];
 
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text",
+      ".chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.textContent = moment().format("YYYY-MM-DD HH-mm-ss");
@@ -560,7 +560,7 @@ export class ChatView extends ItemView {
         this.containerEl,
         this.chatMessages.length,
         currentModel,
-        maxOutputTokens,
+        maxOutputTokens
       );
     }
   }
@@ -578,7 +578,7 @@ export class ChatView extends ItemView {
     }
 
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = "";
@@ -612,7 +612,7 @@ export class ChatView extends ItemView {
   setChatFile(file: TFile) {
     this.chatFile = file;
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text",
+      ".chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.textContent = file.basename;
@@ -626,7 +626,7 @@ export class ChatView extends ItemView {
 
   private attachInputChangeListener() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.addEventListener("input", () => {
@@ -637,13 +637,13 @@ export class ChatView extends ItemView {
 
   public async updateTokenCountAndCost() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     const inputValue = inputEl ? inputEl.value : "";
     const tokenCount = await this.tokenManager.getTokenCount(
       this.chatMessages,
       this.contextFiles,
-      inputValue,
+      inputValue
     );
     const currentModel = this.brainModule.getCurrentModel();
     const maxOutputTokens = this.brainModule.getMaxOutputTokens();
@@ -652,19 +652,19 @@ export class ChatView extends ItemView {
       this.containerEl,
       this.chatMessages.length,
       currentModel,
-      maxOutputTokens,
+      maxOutputTokens
     );
   }
 
   async getTokenCount(): Promise<number> {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     const inputText = inputEl ? inputEl.value : "";
     return this.tokenManager.getTokenCount(
       this.chatMessages,
       this.contextFiles,
-      inputText,
+      inputText
     );
   }
 
@@ -675,7 +675,7 @@ export class ChatView extends ItemView {
 
   public updateTokenCountWithInput(inputValue: string) {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = inputValue;
@@ -704,7 +704,7 @@ export class ChatView extends ItemView {
     }));
 
     const contextFilesContent = await this.tokenManager.getContextFilesContent(
-      this.contextFiles,
+      this.contextFiles
     );
 
     if (contextFilesContent.text || contextFilesContent.images.length > 0) {
@@ -753,23 +753,51 @@ export class ChatView extends ItemView {
       messagesContainer.appendChild(loadingEl);
       this.scrollToBottom();
     }
+
+    const inputContainer = this.containerEl.querySelector(
+      ".chat-input-container"
+    ) as HTMLElement;
+    const loadingSpinner = document.createElement("div");
+    loadingSpinner.className = "chat-input-loading";
+    loadingSpinner.innerHTML = `
+      <div class="loading-spinner"></div>
+      <span>AI is thinking...</span>
+    `;
+    inputContainer.style.display = "none";
+    inputContainer.parentElement?.insertBefore(loadingSpinner, inputContainer);
   }
 
   hideLoading() {
     const loadingEl = this.containerEl.querySelector(
-      ".chat-message.ai.loading",
+      ".chat-message.ai.loading"
     );
     if (loadingEl) {
       loadingEl.remove();
     }
+
+    const loadingSpinner = this.containerEl.querySelector(
+      ".chat-input-loading"
+    );
+    if (loadingSpinner) {
+      loadingSpinner.remove();
+    }
+
+    const inputContainer = this.containerEl.querySelector(
+      ".chat-input-container"
+    ) as HTMLElement;
+    if (inputContainer) {
+      inputContainer.style.display = "flex";
+    }
+
+    this.focusInput();
   }
 
   private toggleLoadingState(isLoading: boolean) {
     const loadingContainer = this.containerEl.querySelector(
-      ".loading-container",
+      ".loading-container"
     ) as HTMLElement;
     const chatInputContainer = this.containerEl.querySelector(
-      ".chat-input-container",
+      ".chat-input-container"
     ) as HTMLElement;
     if (loadingContainer && chatInputContainer) {
       chatInputContainer.style.display = isLoading ? "none" : "flex";
@@ -809,7 +837,7 @@ export class ChatView extends ItemView {
       renderMessages(
         this.chatMessages,
         messagesContainer,
-        this.deleteMessage.bind(this),
+        this.deleteMessage.bind(this)
       );
 
       if (!this.userScrolledUp) {
@@ -830,13 +858,13 @@ export class ChatView extends ItemView {
 
   async updateChatFileAfterDeletion(
     deletedMessage: ChatMessage,
-    index: number,
+    index: number
   ) {
     if (this.chatFile) {
       await this.chatFileManager.updateChatFileAfterDeletion(
         this.chatFile,
         deletedMessage,
-        index,
+        index
       );
       await this.loadChatFile(this.chatFile);
     }
@@ -854,7 +882,7 @@ export class ChatView extends ItemView {
     }
     this.chatFile = await this.chatModule.chatFileManager.createChatFile(
       initialMessage,
-      this.contextFiles,
+      this.contextFiles
     );
     return this.chatFile;
   }
@@ -883,7 +911,7 @@ export class ChatView extends ItemView {
   focusInput(initialLoad: boolean = false) {
     if (initialLoad) {
       const inputEl = this.containerEl.querySelector(
-        ".chat-input",
+        ".chat-input"
       ) as HTMLTextAreaElement;
       if (inputEl) {
         inputEl.focus();
@@ -897,7 +925,7 @@ export class ChatView extends ItemView {
 
   setChatInputValue(value: string) {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = value;
@@ -908,19 +936,19 @@ export class ChatView extends ItemView {
     const tokenCount = await this.tokenManager.getTokenCount(
       this.chatMessages,
       this.contextFiles,
-      "",
+      ""
     );
     const currentModel = this.brainModule.getCurrentModel();
     if (currentModel) {
       const costEstimator = new CostEstimator(
         this.app,
         currentModel,
-        tokenCount,
+        tokenCount
       );
       costEstimator.open();
     } else {
       new Notice(
-        "Couldn't find the current model. Please check your settings.",
+        "Couldn't find the current model. Please check your settings."
       );
     }
   }
@@ -935,7 +963,7 @@ export class ChatView extends ItemView {
         this.app,
         this.chatFile,
         this.chatFile.basename,
-        (newTitle: string) => this.updateChatTitle(newTitle),
+        (newTitle: string) => this.updateChatTitle(newTitle)
       );
     }
   }
@@ -946,7 +974,7 @@ export class ChatView extends ItemView {
         this.app,
         this.chatFile,
         this.brainModule,
-        (newTitle: string) => this.updateChatTitle(newTitle),
+        (newTitle: string) => this.updateChatTitle(newTitle)
       );
     }
   }
@@ -967,14 +995,14 @@ export class ChatView extends ItemView {
     this.contextFileManager.renderContextFiles();
 
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text",
+      ".chat-title-text"
     ) as HTMLElement;
     if (titleEl && this.chatFile) {
       titleEl.textContent = this.chatFile.basename;
     }
 
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = "";
@@ -1002,7 +1030,7 @@ export class ChatView extends ItemView {
 
   private appendFileLinkToInput(fileName: string) {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input",
+      ".chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       const fileExtension = fileName.split(".").pop()?.toLowerCase() || "";
@@ -1022,7 +1050,7 @@ export class ChatView extends ItemView {
         inputEl.value = newValue;
         inputEl.setSelectionRange(
           cursorPosition + linkText.length,
-          cursorPosition + linkText.length,
+          cursorPosition + linkText.length
         );
       }
 
@@ -1041,7 +1069,7 @@ export class ChatView extends ItemView {
     } catch (error) {
       console.error("Error processing file:", error);
       this.updateLoadingText(
-        `Error processing file: ${(error as Error).message}`,
+        `Error processing file: ${(error as Error).message}`
       );
     } finally {
       this.hideLoadingContainer();
@@ -1060,6 +1088,26 @@ export class ChatView extends ItemView {
           messagesContainer.scrollTop + 1;
         this.userScrolledUp = !isScrolledToBottom;
       });
+    }
+  }
+
+  private disableInput() {
+    const inputEl = this.containerEl.querySelector(
+      ".chat-input"
+    ) as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.disabled = true;
+      inputEl.style.opacity = "0.5";
+    }
+  }
+
+  private enableInput() {
+    const inputEl = this.containerEl.querySelector(
+      ".chat-input"
+    ) as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.disabled = false;
+      inputEl.style.opacity = "1";
     }
   }
 }

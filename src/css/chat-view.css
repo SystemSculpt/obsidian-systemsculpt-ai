@@ -922,3 +922,27 @@
   font-size: 0.9em;
   margin-left: 0.3em;
 }
+
+.chat-input-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.chat-input-loading .loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--text-muted);
+  border-top: 2px solid var(--text-normal);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+.chat-input-loading span {
+  color: var(--text-muted);
+}
