@@ -365,7 +365,11 @@ export class ModelSelectionModal extends Modal {
       cls: "refresh-models-button",
     });
     refreshButton.addEventListener("click", async () => {
+      refreshButton.textContent = "Refreshing models...";
+      refreshButton.disabled = true;
       await this.refreshModels();
+      refreshButton.textContent = "Refresh Models List";
+      refreshButton.disabled = false;
       this.renderModelList();
     });
   }
@@ -418,9 +422,19 @@ export class ModelSelectionModal extends Modal {
 
   private async refreshModels() {
     this.showRefreshingState();
-    await this.plugin.refreshModels();
-    await this.loadModels();
-    this.hideRefreshingState();
+    try {
+      await this.plugin.refreshModels();
+      await this.loadModels();
+    } catch (error) {
+      console.error("Error refreshing models:", error);
+      this.modelListContainer.empty();
+      this.modelListContainer.createEl("div", {
+        text: "Error refreshing models. Please try again later.",
+        cls: "error-message",
+      });
+    } finally {
+      this.hideRefreshingState();
+    }
   }
 
   private shouldDisplayModel(model: Model): boolean {

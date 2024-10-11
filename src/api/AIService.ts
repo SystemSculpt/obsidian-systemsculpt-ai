@@ -198,25 +198,18 @@ export class AIService {
     );
   }
 
-  async getModels(
-    showOpenAI: boolean,
-    showGroq: boolean,
-    showLocal: boolean,
-    showOpenRouter: boolean
+  public async getModels(
+    openAIApiKey: boolean,
+    groqAPIKey: boolean,
+    localEndpoint: boolean,
+    openRouterAPIKey: boolean,
+    forceRefresh: boolean = false
   ): Promise<Model[]> {
-    await this.ensureModelCacheInitialized();
+    if (forceRefresh || Object.keys(this.cachedModels).length === 0) {
+      await this.initializeModelCache(forceRefresh);
+    }
 
-    let allModels: Model[] = [];
-
-    if (showOpenAI)
-      allModels = allModels.concat(this.cachedModels["openai"] || []);
-    if (showGroq) allModels = allModels.concat(this.cachedModels["groq"] || []);
-    if (showLocal)
-      allModels = allModels.concat(this.cachedModels["local"] || []);
-    if (showOpenRouter)
-      allModels = allModels.concat(this.cachedModels["openRouter"] || []);
-
-    return allModels;
+    return Object.values(this.cachedModels).flat();
   }
 
   async getModelById(modelId: string): Promise<Model | undefined> {
@@ -269,8 +262,10 @@ export class AIService {
     );
   }
 
-  public async initializeModelCache(): Promise<void> {
-    if (Object.keys(this.cachedModels).length > 0) {
+  public async initializeModelCache(
+    forceRefresh: boolean = false
+  ): Promise<void> {
+    if (Object.keys(this.cachedModels).length > 0 && !forceRefresh) {
       return;
     }
 

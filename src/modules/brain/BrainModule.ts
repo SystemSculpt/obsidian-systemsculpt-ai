@@ -433,11 +433,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       throw new Error("AIService is not initialized");
     }
     const enabledModels = await this.getEndpointSettingValues();
-    await this._AIService.getModels(
+    this.cachedModels = await this._AIService.getModels(
       enabledModels.openAIApiKey,
       enabledModels.groqAPIKey,
       enabledModels.localEndpoint,
-      enabledModels.openRouterAPIKey
+      enabledModels.openRouterAPIKey,
+      true // Force refresh
     );
     this.emit("models-refreshed");
   }
