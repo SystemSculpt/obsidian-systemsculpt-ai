@@ -134,6 +134,23 @@
   padding: 15px;
   background-color: var(--background-primary-alt);
   border-top: 1px solid var(--background-modifier-border);
+  min-height: 120px; /* Adjust this value to match your desired height */
+}
+
+.chat-input-wrapper,
+.chat-input-loading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.chat-input-wrapper {
+  justify-content: space-between;
+}
+
+.chat-input-loading {
+  justify-content: center;
+  align-items: center;
 }
 
 .chat-input {
@@ -150,6 +167,7 @@
   font-size: 14px;
   line-height: 1.4;
   margin-bottom: 10px;
+  flex: 1;
 }
 
 .chat-input:focus {
@@ -945,4 +963,8 @@
 
 .chat-input-loading span {
   color: var(--text-muted);
+}
+
+.hidden {
+  display: none;
 }

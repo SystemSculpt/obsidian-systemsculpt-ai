@@ -16,15 +16,21 @@ export const chatTemplate = `
       <div class="context-files"></div>
     </div>
     <div class="chat-input-container">
-      <textarea class="chat-input" placeholder="Type a message..."></textarea>
-      <div class="chat-input-footer">
-        <div class="token-and-cost-container">
-          <span class="token-count" style="display: none;">Tokens: 0</span>
-          <span class="cost-estimate" style="display: none;">Estimated Cost: $0.00 - $0.00</span>
+      <div class="chat-input-wrapper">
+        <textarea class="chat-input" placeholder="Type a message..."></textarea>
+        <div class="chat-input-footer">
+          <div class="token-and-cost-container">
+            <span class="token-count" style="display: none;">Tokens: 0</span>
+            <span class="cost-estimate" style="display: none;">Estimated Cost: $0.00 - $0.00</span>
+          </div>
+          <div class="send-button-container">
+            <button class="chat-send-button" title="Send Message">Send</button>
+          </div>
         </div>
-        <div class="send-button-container">
-          <button class="chat-send-button" title="Send Message">Send</button>
-        </div>
+      </div>
+      <div class="chat-input-loading hidden">
+        <div class="loading-spinner"></div>
+        <span>AI is thinking...</span>
       </div>
     </div>
     <div class="loading-overlay">

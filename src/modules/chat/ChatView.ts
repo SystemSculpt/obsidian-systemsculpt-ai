@@ -757,14 +757,16 @@ export class ChatView extends ItemView {
     const inputContainer = this.containerEl.querySelector(
       ".chat-input-container"
     ) as HTMLElement;
-    const loadingSpinner = document.createElement("div");
-    loadingSpinner.className = "chat-input-loading";
-    loadingSpinner.innerHTML = `
-      <div class="loading-spinner"></div>
-      <span>AI is thinking...</span>
-    `;
-    inputContainer.style.display = "none";
-    inputContainer.parentElement?.insertBefore(loadingSpinner, inputContainer);
+    const loadingSpinner = inputContainer.querySelector(".chat-input-loading");
+    if (loadingSpinner) {
+      loadingSpinner.classList.remove("hidden");
+    }
+    const chatInputWrapper = inputContainer.querySelector(
+      ".chat-input-wrapper"
+    );
+    if (chatInputWrapper) {
+      chatInputWrapper.classList.add("hidden");
+    }
   }
 
   hideLoading() {
@@ -775,18 +777,18 @@ export class ChatView extends ItemView {
       loadingEl.remove();
     }
 
-    const loadingSpinner = this.containerEl.querySelector(
-      ".chat-input-loading"
-    );
-    if (loadingSpinner) {
-      loadingSpinner.remove();
-    }
-
     const inputContainer = this.containerEl.querySelector(
       ".chat-input-container"
     ) as HTMLElement;
-    if (inputContainer) {
-      inputContainer.style.display = "flex";
+    const loadingSpinner = inputContainer.querySelector(".chat-input-loading");
+    if (loadingSpinner) {
+      loadingSpinner.classList.add("hidden");
+    }
+    const chatInputWrapper = inputContainer.querySelector(
+      ".chat-input-wrapper"
+    );
+    if (chatInputWrapper) {
+      chatInputWrapper.classList.remove("hidden");
     }
 
     this.focusInput();
