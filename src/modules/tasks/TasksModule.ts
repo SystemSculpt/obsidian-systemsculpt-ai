@@ -51,6 +51,7 @@ export class TasksModule {
     // Initialize status bar for Task Button
     if (!this.plugin.taskToggleStatusBarItem) {
       this.plugin.taskToggleStatusBarItem = this.plugin.addStatusBarItem();
+      this.plugin.taskToggleStatusBarItem.addClass("status-bar-button");
       this.plugin.taskToggleStatusBarItem.addClass("task-toggle-button");
       this.plugin.taskToggleStatusBarItem.setText("T"); // Set text to "T"
     }
@@ -67,7 +68,7 @@ export class TasksModule {
     this.settings = Object.assign(
       {},
       DEFAULT_TASKS_SETTINGS,
-      await this.plugin.loadData(),
+      await this.plugin.loadData()
     );
   }
 
@@ -80,7 +81,7 @@ export class TasksModule {
     new SystemSculptTasksSettingTab(
       this.plugin.app,
       this,
-      containerEl,
+      containerEl
     ).display();
   }
 

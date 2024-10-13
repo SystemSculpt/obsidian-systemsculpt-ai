@@ -39,7 +39,7 @@ export class ChatModule {
       "New SystemSculpt AI Chat",
       () => {
         this.openNewChat();
-      },
+      }
     );
 
     this.plugin.app.workspace
@@ -110,6 +110,7 @@ export class ChatModule {
     ) {
       this.plugin.chatToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.chatToggleStatusBarItem.setText("C");
+      this.plugin.chatToggleStatusBarItem.addClass("status-bar-button");
       this.plugin.chatToggleStatusBarItem.addClass("chat-toggle-button");
     }
 
@@ -126,7 +127,7 @@ export class ChatModule {
     this.settings = Object.assign(
       {},
       DEFAULT_CHAT_SETTINGS,
-      await this.plugin.loadData(),
+      await this.plugin.loadData()
     );
   }
 
@@ -266,7 +267,7 @@ export class ChatModule {
               .onClick(() => extractDocument(file));
           });
         }
-      }),
+      })
     );
   }
 

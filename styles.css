@@ -2033,96 +2033,78 @@ button:disabled {
     transform: scale(2);
   }
 }
-/* Model Toggle Button */
-.update-button,
-.max-tokens-toggle-button,
-.model-toggle-button,
-.task-toggle-button,
-.recorder-toggle-button,
-.recorder-notice-toggle-button,
-.chat-toggle-button {
+/* Common button styles */
+.status-bar-button {
+  --button-padding: 4px 10px;
+  --button-margin: 0 1px;
+  --button-border-radius: 3px;
+  --button-font-size: 12px;
+  --button-transition: all 0.2s ease;
+  --button-border-color: var(--interactive-accent);
+  --button-border-width: 1px;
+  --button-hover-bg: var(--interactive-hover);
+  --button-active-bg: var(--interactive-accent);
+
   cursor: pointer;
-  padding: 2px 10px;
-  margin: 0 1px;
-  border: 1px solid var(--interactive-accent);
-  border-radius: 3px;
+  padding: var(--button-padding);
+  margin: var(--button-margin);
+  border: var(--button-border-width) solid var(--button-border-color);
+  border-radius: var(--button-border-radius);
   background-color: var(--background-secondary-alt);
   color: var(--text-normal);
-  transition: background-color 0.2s, box-shadow 0.2s;
+  transition: var(--button-transition);
   display: flex;
   align-items: center;
-  justify-content: center; /* Center the letter */
-  font-size: 14px; /* Ensure consistent font size */
-  height: 100%; /* Ensure the button takes the full height of the status bar */
+  justify-content: center;
+  font-size: var(--button-font-size);
+  line-height: 1;
+  height: auto;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
+/* Button order */
+.update-button { order: -99; }
+.recorder-notice-toggle-button { order: -98; }
+.model-toggle-button { order: -5; }
+.max-tokens-toggle-button { order: -4; }
+.chat-toggle-button { order: -3; }
+.task-toggle-button { order: -2; }
+.recorder-toggle-button { order: -1; }
+
+/* Specific button styles */
 .update-button {
-  order: -99;
+  border-color: var(--text-error);
+  background-color: var(--background-secondary);
 }
 
 .recorder-notice-toggle-button {
-  order: -98;
-  border: 1px solid red;
-  background-color: var(--background-secondary-alt);
-  color: var(--text-normal);
+  border-color: var(--text-error);
 }
 
-.model-toggle-button {
-  order: -5;
-}
-
-.max-tokens-toggle-button {
-  order: -4;
-}
-
-.chat-toggle-button {
-  order: -3; /* Order between tokens and task buttons */
-}
-
-.task-toggle-button {
-  order: -2;
-}
-
-.recorder-toggle-button {
-  order: -1;
-}
-
-.max-tokens-toggle-button:hover,
-.model-toggle-button:hover,
-.task-toggle-button:hover,
-.recorder-toggle-button:hover,
-.recorder-notice-toggle-button:hover,
-.chat-toggle-button:hover {
-  background-color: var(--background-secondary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 1);
-  border: 1px solid purple;
-}
-
-.update-button {
-  border: 1px solid red;
-  background-color: var(--background-secondary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 1);
+/* Hover styles */
+.status-bar-button:hover {
+  background-color: var(--button-hover-bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
 }
 
 .update-button:hover {
-  border: 1px solid green;
-  background-color: var(--background-secondary-alt);
+  border-color: var(--text-success);
+  background-color: var(--background-modifier-success);
 }
 
-.update-button:active,
-.max-tokens-toggle-button:active,
-.model-toggle-button:active,
-.task-toggle-button:active,
-.recorder-toggle-button:active,
-.recorder-notice-toggle-button:active,
-.chat-toggle-button:active {
-  background-color: var(--background-primary);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0);
+/* Active styles */
+.status-bar-button:active {
+  background-color: var(--button-active-bg);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
 }
 
-.update-button.disabled {
+/* Disabled state */
+.status-bar-button.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
 }
 /* Task Modal */
 .task-modal-button {

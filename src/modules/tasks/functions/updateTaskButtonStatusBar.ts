@@ -3,9 +3,9 @@ import { TasksModule } from "../TasksModule";
 export function updateTaskButtonStatusBar(plugin: TasksModule): void {
   if (plugin.plugin.taskToggleStatusBarItem) {
     if (plugin.settings.showTaskButtonOnStatusBar) {
-      plugin.plugin.taskToggleStatusBarItem.style.display = "inline-block";
+      plugin.plugin.taskToggleStatusBarItem.removeClass("hidden");
     } else {
-      plugin.plugin.taskToggleStatusBarItem.style.display = "none";
+      plugin.plugin.taskToggleStatusBarItem.addClass("hidden");
     }
   }
 }

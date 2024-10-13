@@ -47,8 +47,9 @@ export class RecorderModule {
     if (!this.plugin.recorderToggleStatusBarItem) {
       this.plugin.recorderToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.recorderToggleStatusBarItem.setText("R");
+      this.plugin.recorderToggleStatusBarItem.addClass("status-bar-button");
       this.plugin.recorderToggleStatusBarItem.addClass(
-        "recorder-toggle-button",
+        "recorder-toggle-button"
       );
     }
 
@@ -63,7 +64,7 @@ export class RecorderModule {
     this.settings = Object.assign(
       {},
       DEFAULT_RECORDER_SETTINGS,
-      await this.plugin.loadData(),
+      await this.plugin.loadData()
     );
   }
 
@@ -76,7 +77,7 @@ export class RecorderModule {
     new SystemSculptRecorderSettingTab(
       this.plugin.app,
       this,
-      containerEl,
+      containerEl
     ).display();
   }
 
@@ -138,7 +139,7 @@ export class RecorderModule {
   async handleTranscription(
     arrayBuffer: ArrayBuffer,
     recordingFile: TFile,
-    skipPaste: boolean = false,
+    skipPaste: boolean = false
   ): Promise<string> {
     return handleTranscription(this, arrayBuffer, recordingFile, skipPaste);
   }

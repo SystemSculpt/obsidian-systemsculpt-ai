@@ -63,7 +63,7 @@ export class ChatSettingTab extends PluginSettingTab {
               | "selfhosted";
             await this.plugin.saveSettings();
             this.display(); // Refresh the settings page
-          }),
+          })
       );
 
     if (this.plugin.settings.apiEndpoint === "selfhosted") {
@@ -77,7 +77,7 @@ export class ChatSettingTab extends PluginSettingTab {
             .onChange(async (value) => {
               this.plugin.settings.markerEndpoint = value;
               await this.plugin.saveSettings();
-            }),
+            })
         );
     }
 
@@ -112,7 +112,7 @@ export class ChatSettingTab extends PluginSettingTab {
             .onChange(async (value) => {
               this.plugin.settings.langs = value;
               await this.plugin.saveSettings();
-            }),
+            })
         );
     }
 
@@ -125,7 +125,7 @@ export class ChatSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.createFolder = value;
             await this.plugin.saveSettings();
-          }),
+          })
       );
 
     new Setting(containerEl)
@@ -137,7 +137,7 @@ export class ChatSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.createAssetSubfolder = value;
             await this.plugin.saveSettings();
-          }),
+          })
       );
 
     new Setting(containerEl)
@@ -152,10 +152,11 @@ export class ChatSettingTab extends PluginSettingTab {
               this.plugin.plugin.chatToggleStatusBarItem =
                 this.plugin.plugin.addStatusBarItem();
               this.plugin.plugin.chatToggleStatusBarItem.setText("C");
-              this.plugin.plugin.chatToggleStatusBarItem.style.display =
-                "inline-block";
               this.plugin.plugin.chatToggleStatusBarItem.addClass(
-                "chat-toggle-button",
+                "status-bar-button"
+              );
+              this.plugin.plugin.chatToggleStatusBarItem.addClass(
+                "chat-toggle-button"
               );
               this.plugin.plugin.chatToggleStatusBarItem.onClickEvent(() => {
                 this.plugin.openNewChat();
@@ -163,10 +164,9 @@ export class ChatSettingTab extends PluginSettingTab {
             }
 
             if (value) {
-              this.plugin.plugin.chatToggleStatusBarItem.style.display =
-                "inline-block";
+              this.plugin.plugin.chatToggleStatusBarItem.removeClass("hidden");
             } else {
-              this.plugin.plugin.chatToggleStatusBarItem.style.display = "none";
+              this.plugin.plugin.chatToggleStatusBarItem.addClass("hidden");
             }
             await this.plugin.saveSettings();
           });
