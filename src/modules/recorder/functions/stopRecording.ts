@@ -15,9 +15,13 @@ export async function stopRecording(plugin: RecorderModule): Promise<void> {
     plugin.recordingNotice = null;
 
     if (arrayBuffer) {
-      const recordingFile = await plugin.saveRecording(arrayBuffer);
+      const { file: recordingFile, isTemporary } =
+        await plugin.saveRecording(arrayBuffer);
       if (recordingFile && plugin.settings.autoTranscriptionEnabled) {
         await plugin.handleTranscription(arrayBuffer, recordingFile);
+      }
+      if (isTemporary) {
+        await plugin.plugin.app.vault.delete(recordingFile);
       }
     }
   }

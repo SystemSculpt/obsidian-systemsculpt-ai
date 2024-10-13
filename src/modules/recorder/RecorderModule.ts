@@ -128,7 +128,9 @@ export class RecorderModule {
     await stopRecording(this);
   }
 
-  async saveRecording(arrayBuffer: ArrayBuffer): Promise<TFile> {
+  async saveRecording(
+    arrayBuffer: ArrayBuffer
+  ): Promise<{ file: TFile; isTemporary: boolean }> {
     const result = await saveRecording(this, arrayBuffer);
     if (!result) {
       throw new Error("Failed to save recording");
