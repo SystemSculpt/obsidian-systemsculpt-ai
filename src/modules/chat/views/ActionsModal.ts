@@ -38,6 +38,10 @@ export class ActionsModal extends Modal {
             name: "Random Chat",
             callback: () => this.chatView.openRandomChat(),
           },
+          {
+            name: "Save Chat as Note",
+            callback: () => this.chatView.saveChatAsNote(),
+          },
         ],
       },
       {
@@ -109,7 +113,7 @@ export class ActionsModal extends Modal {
       const filteredItems = group.items.filter(
         (action) =>
           searchTerms.length === 0 ||
-          searchTerms.every((term) => action.name.toLowerCase().includes(term)),
+          searchTerms.every((term) => action.name.toLowerCase().includes(term))
       );
 
       if (filteredItems.length > 0) {
@@ -137,7 +141,7 @@ export class ActionsModal extends Modal {
     }
 
     this.selectedActionIndex = this.actionListContainer.querySelector(
-      ".modal-item",
+      ".modal-item"
     )
       ? 0
       : -1;
@@ -147,7 +151,7 @@ export class ActionsModal extends Modal {
   private highlightText(
     element: HTMLElement,
     text: string,
-    searchTerms: string[],
+    searchTerms: string[]
   ) {
     if (searchTerms.length === 0) {
       element.textContent = text;
@@ -201,7 +205,7 @@ export class ActionsModal extends Modal {
             }
             break;
         }
-      },
+      }
     );
   }
 
@@ -234,14 +238,14 @@ export class ActionsModal extends Modal {
 
   private async selectHighlightedAction() {
     const selectedItem = this.actionListContainer.querySelector(
-      ".modal-item.selected",
+      ".modal-item.selected"
     ) as HTMLElement;
     if (selectedItem) {
       const action = this.actions
         .flatMap((group) => group.items)
         .find(
           (action) =>
-            action.name === selectedItem.querySelector("span")?.textContent,
+            action.name === selectedItem.querySelector("span")?.textContent
         );
       if (action) {
         await this.selectAction(action);

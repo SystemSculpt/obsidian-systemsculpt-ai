@@ -22,6 +22,7 @@ import {
 import { FileSearcher } from "./FileSearcher";
 import { formatNumber } from "./utils";
 import { CostEstimator } from "../../interfaces/CostEstimatorModal";
+import { SaveChatAsNoteModal } from "./views/SaveChatAsNoteModal";
 
 export const VIEW_TYPE_CHAT = "chat-view";
 
@@ -794,23 +795,6 @@ export class ChatView extends ItemView {
     this.focusInput();
   }
 
-  private toggleLoadingState(isLoading: boolean) {
-    const loadingContainer = this.containerEl.querySelector(
-      ".loading-container"
-    ) as HTMLElement;
-    const chatInputContainer = this.containerEl.querySelector(
-      ".chat-input-container"
-    ) as HTMLElement;
-    if (loadingContainer && chatInputContainer) {
-      chatInputContainer.style.display = isLoading ? "none" : "flex";
-      loadingContainer.style.display = isLoading ? "flex" : "none";
-      loadingContainer.classList.toggle("visible", isLoading);
-      if (!isLoading) {
-        this.focusInput();
-      }
-    }
-  }
-
   appendToLastMessage(content: string) {
     const lastMessage = this.chatMessages[this.chatMessages.length - 1];
     if (lastMessage && lastMessage.role === "ai") {
@@ -1025,39 +1009,6 @@ export class ChatView extends ItemView {
     await this.contextFileManager.addFileToContextFiles(file);
     this.updateTokenCount();
     this.scrollToBottom();
-
-    // Remove the file menu trigger
-    // this.app.workspace.trigger('file-menu');
-  }
-
-  private appendFileLinkToInput(fileName: string) {
-    const inputEl = this.containerEl.querySelector(
-      ".chat-input"
-    ) as HTMLTextAreaElement;
-    if (inputEl) {
-      const fileExtension = fileName.split(".").pop()?.toLowerCase() || "";
-      let linkText = "";
-
-      if (["pdf", "docx", "pptx"].includes(fileExtension)) {
-        linkText = `[[${fileName}]]`;
-      }
-
-      if (linkText) {
-        const currentValue = inputEl.value;
-        const cursorPosition = inputEl.selectionStart;
-        const newValue =
-          currentValue.slice(0, cursorPosition) +
-          linkText +
-          currentValue.slice(cursorPosition);
-        inputEl.value = newValue;
-        inputEl.setSelectionRange(
-          cursorPosition + linkText.length,
-          cursorPosition + linkText.length
-        );
-      }
-
-      this.updateTokenCountAndCost();
-    }
   }
 
   public async addFileToContext(file: TFile) {
@@ -1093,23 +1044,38 @@ export class ChatView extends ItemView {
     }
   }
 
-  private disableInput() {
-    const inputEl = this.containerEl.querySelector(
-      ".chat-input"
-    ) as HTMLTextAreaElement;
-    if (inputEl) {
-      inputEl.disabled = true;
-      inputEl.style.opacity = "0.5";
+  async saveChatAsNote() {
+    if (this.chatMessages.length === 0) {
+      new Notice("No chat messages to save.");
+      return;
     }
-  }
 
-  private enableInput() {
-    const inputEl = this.containerEl.querySelector(
-      ".chat-input"
-    ) as HTMLTextAreaElement;
-    if (inputEl) {
-      inputEl.disabled = false;
-      inputEl.style.opacity = "1";
-    }
+    const fileName = `Chat Note ${moment().format("YYYY-MM-DD HH-mm-ss")}.md`;
+    const folderPath = this.app.fileManager.getNewFileParent("").path;
+
+    new SaveChatAsNoteModal(
+      this.app,
+      fileName,
+      folderPath,
+      async (newFileName: string, newFolderPath: string) => {
+        let noteContent = "# Chat History\n\n";
+
+        for (const message of this.chatMessages) {
+          const role = message.role === "user" ? "User" : message.model || "AI";
+          noteContent += `###### ${role}\n${message.text}\n\n`;
+        }
+
+        const filePath = `${newFolderPath}/${newFileName}`;
+
+        try {
+          const newFile = await this.app.vault.create(filePath, noteContent);
+          new Notice(`Chat saved as note: ${newFileName}`);
+          this.app.workspace.openLinkText(newFile.path, "", true);
+        } catch (error) {
+          console.error("Error saving chat as note:", error);
+          new Notice("Failed to save chat as note. Check console for details.");
+        }
+      }
+    ).open();
   }
 }
