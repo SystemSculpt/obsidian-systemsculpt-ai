@@ -9,7 +9,7 @@ export async function handleTranscription(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
   recordingFile: TFile,
-  skipPaste: boolean = false,
+  skipPaste: boolean = false
 ): Promise<string> {
   const whisperProvider = plugin.settings.whisperProvider;
   const apiKey =
@@ -19,7 +19,7 @@ export async function handleTranscription(
 
   if (!apiKey) {
     showCustomNotice(
-      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
+      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
     );
     throw new Error("No API Key found");
   }
@@ -33,7 +33,7 @@ export async function handleTranscription(
     }
 
     const noticeEl = document.querySelector(
-      ".custom-notice .custom-notice-message",
+      ".custom-notice .custom-notice-message"
     );
     if (noticeEl) {
       noticeEl.innerHTML = "";
@@ -64,20 +64,26 @@ export async function handleTranscription(
     let transcription = await transcribeRecording(
       plugin,
       arrayBuffer,
-      updateProgress,
+      updateProgress
     );
 
+    let finalTranscription = transcription;
+
     if (plugin.settings.enablePostProcessingPrompt) {
-      transcription = await postProcessTranscription(plugin, transcription);
+      const processedTranscription = await postProcessTranscription(
+        plugin,
+        transcription
+      );
+      finalTranscription = `## Raw Transcription\n\n${transcription}\n\n## Processed Transcription\n\n${processedTranscription}`;
     }
 
     if (plugin.settings.saveTranscriptionToFile) {
-      await saveTranscriptionToFile(plugin, transcription, recordingFile);
+      await saveTranscriptionToFile(plugin, finalTranscription, recordingFile);
     }
     if (plugin.settings.copyToClipboard && skipPaste) {
-      navigator.clipboard.writeText(transcription);
+      navigator.clipboard.writeText(finalTranscription);
       showCustomNotice(
-        "Transcribed, post-processed, and copied to your clipboard!",
+        "Transcribed, post-processed, and copied to your clipboard!"
       );
     } else {
       showCustomNotice("Transcription and post-processing completed!");
@@ -89,9 +95,9 @@ export async function handleTranscription(
 
       if (activeView instanceof ChatView) {
         const chatView = activeView as ChatView;
-        chatView.setChatInputValue(transcription);
+        chatView.setChatInputValue(finalTranscription);
         showCustomNotice(
-          "Successfully pasted post-processed transcription into the chat input!",
+          "Successfully pasted post-processed transcription into the chat input!"
         );
       } else if (
         activeLeaf &&
@@ -101,23 +107,23 @@ export async function handleTranscription(
         const markdownView = activeLeaf.view as MarkdownView;
         const editor = markdownView.editor;
         if (editor) {
-          editor.replaceSelection(transcription);
+          editor.replaceSelection(finalTranscription);
           showCustomNotice(
-            "Successfully pasted post-processed transcription into your note at the cursor position!",
+            "Successfully pasted post-processed transcription into your note at the cursor position!"
           );
         }
       }
     }
 
-    return transcription;
+    return finalTranscription;
   } catch (error) {
     if (error instanceof Error && error.message.includes("Invalid API Key")) {
       showCustomNotice(
-        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`,
+        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
       );
     } else {
       showCustomNotice(
-        `Error generating transcription: ${error instanceof Error ? error.message : "Unknown error"}. Please check your internet connection and try again.`,
+        `Error generating transcription: ${error instanceof Error ? error.message : "Unknown error"}. Please check your internet connection and try again.`
       );
     }
     throw error;
@@ -126,7 +132,7 @@ export async function handleTranscription(
 
 async function postProcessTranscription(
   plugin: RecorderModule,
-  transcription: string,
+  transcription: string
 ): Promise<string> {
   const systemPrompt = plugin.settings.postProcessingPrompt;
   const userMessage = transcription;
@@ -142,7 +148,7 @@ async function postProcessTranscription(
       await plugin.plugin.brainModule.saveSettings();
     } else {
       showCustomNotice(
-        "No models available for post-processing. Please check your model settings and ensure at least one provider is enabled.",
+        "No models available for post-processing. Please check your model settings and ensure at least one provider is enabled."
       );
       return transcription;
     }
@@ -154,14 +160,14 @@ async function postProcessTranscription(
         systemPrompt,
         userMessage,
         model.id,
-        model.maxOutputTokens || 4096,
+        model.maxOutputTokens || 4096
       );
 
     return processedTranscription.trim();
   } catch (error) {
     console.error("Failed to post-process transcription:", error);
     showCustomNotice(
-      "Failed to post-process transcription. Using original transcription.",
+      "Failed to post-process transcription. Using original transcription."
     );
     return transcription;
   }
@@ -170,7 +176,7 @@ async function postProcessTranscription(
 async function saveTranscriptionToFile(
   plugin: RecorderModule,
   transcription: string,
-  recordingFile: TFile,
+  recordingFile: TFile
 ): Promise<void> {
   const { vault } = plugin.plugin.app;
   const { transcriptionsPath } = plugin.settings;
@@ -180,7 +186,7 @@ async function saveTranscriptionToFile(
     .replace("Recording-", "")
     .replace(/\.(mp3|mp4)$/, "")}.md`;
   let transcriptionFilePath = normalizePath(
-    `${transcriptionsPath}/${transcriptionFileName}`,
+    `${transcriptionsPath}/${transcriptionFileName}`
   );
 
   const transcriptionContent = `![${recordingFileName}](${recordingFile.path})\n${transcription}`;
@@ -197,16 +203,16 @@ async function saveTranscriptionToFile(
   if (await vault.adapter.exists(transcriptionFilePath)) {
     const timestamp = new Date();
     const formattedTimestamp = `${timestamp.getFullYear()}-${String(
-      timestamp.getMonth() + 1,
+      timestamp.getMonth() + 1
     ).padStart(2, "0")}-${String(timestamp.getDate()).padStart(
       2,
-      "0",
+      "0"
     )} ${String(timestamp.getHours()).padStart(2, "0")}-${String(
-      timestamp.getMinutes(),
+      timestamp.getMinutes()
     ).padStart(2, "0")}-${String(timestamp.getSeconds()).padStart(2, "0")}`;
     const newTranscriptionFileName = `Transcription ${formattedTimestamp}.md`;
     transcriptionFilePath = normalizePath(
-      `${transcriptionsPath}/${newTranscriptionFileName}`,
+      `${transcriptionsPath}/${newTranscriptionFileName}`
     );
   }
 
