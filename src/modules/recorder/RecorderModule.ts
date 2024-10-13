@@ -190,4 +190,16 @@ export class RecorderModule {
     }
     this.hideRecordingStatusBar();
   }
+
+  forceStopRecording(): void {
+    if (this.recordingNotice) {
+      this.recordingNotice.forceStop();
+      this.recordingNotice.hide();
+      this.recordingNotice = null;
+    }
+    if (this.recordingStatusBarItem) {
+      this.recordingStatusBarItem.hide();
+    }
+    showCustomNotice("Recording forcefully stopped.");
+  }
 }

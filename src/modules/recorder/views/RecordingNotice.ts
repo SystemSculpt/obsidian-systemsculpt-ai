@@ -24,10 +24,23 @@ export class RecordingNotice {
 
     const headerEl = noticeEl.createDiv("recording-notice-header");
     const hideButton = headerEl.createEl("button", { text: "-" });
-    const closeButton = headerEl.createEl("button", { text: "X" });
+    const stopButton = headerEl.createEl("button", {
+      text: "Stop",
+      title: "Stop recording",
+    });
+    const closeButton = headerEl.createEl("button", {
+      text: "X",
+      title: "Close recording interface",
+    });
+
     hideButton.addEventListener("click", () => {
       this.hideToStatusBar();
     });
+
+    stopButton.addEventListener("click", () => {
+      this.plugin.stopRecording();
+    });
+
     closeButton.addEventListener("click", () => {
       this.plugin.toggleRecording();
     });
@@ -122,7 +135,7 @@ export class RecordingNotice {
 
       this.canvasContext.beginPath();
       this.canvasContext.strokeStyle = getComputedStyle(
-        document.documentElement,
+        document.documentElement
       ).getPropertyValue("--primary-color");
       this.canvasContext.lineWidth = 2;
 
@@ -171,7 +184,7 @@ export class RecordingNotice {
           } catch (error) {
             reject(error);
           }
-        },
+        }
       );
       this.mediaRecorder.stop();
     });
@@ -181,5 +194,18 @@ export class RecordingNotice {
     if (this.noticeEl.parentNode) {
       this.noticeEl.parentNode.removeChild(this.noticeEl);
     }
+  }
+
+  forceStop(): void {
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      this.mediaRecorder.stop();
+    }
+    if (this.audioContext && this.audioContext.state !== "closed") {
+      this.audioContext.close();
+    }
+    if (this.mediaRecorder && this.mediaRecorder.stream) {
+      this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+    }
+    cancelAnimationFrame(this.rafId);
   }
 }
