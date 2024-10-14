@@ -26,7 +26,7 @@ export class DataModule {
     this.settings = Object.assign(
       {},
       DEFAULT_DATA_SETTINGS,
-      await this.plugin.loadData(),
+      await this.plugin.loadData()
     );
   }
 

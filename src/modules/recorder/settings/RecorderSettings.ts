@@ -15,6 +15,7 @@ export interface SystemSculptRecorderSettings {
   enablePostProcessingPrompt: boolean;
   postProcessingPrompt: string;
   language: string;
+  includeLinkToRecording: boolean;
 }
 
 export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
@@ -36,4 +37,5 @@ export const DEFAULT_RECORDER_SETTINGS: SystemSculptRecorderSettings = {
   postProcessingPrompt:
     "Take the following transcript and summarize it in markdown format, with a main summary, a list of key points, and actionable takeaways.",
   language: "en",
+  includeLinkToRecording: true,
 };

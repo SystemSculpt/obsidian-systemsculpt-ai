@@ -30,12 +30,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   display(): void {
-    let { containerEl } = this;
+    const { containerEl } = this;
 
     containerEl.empty();
 
-    const linksContainer = this.renderLinksContainer();
-    const tabContainer = this.renderTabContainer();
+    this.renderLinksContainer();
+    this.renderTabContainer();
 
     const searchContainer = containerEl.createDiv(
       "systemsculpt-search-container"

@@ -13,6 +13,7 @@ import { renderWhisperProviderSetting } from "./whisperProviderSetting";
 import { renderCustomWhisperPromptSetting } from "./customWhisperPromptSetting";
 import { renderPostProcessingPromptSetting } from "./postProcessingPromptSetting";
 import { renderLanguageSetting } from "./languageSetting";
+import { renderIncludeLinkToRecordingToggle } from "./includeLinkToRecordingSetting";
 
 export class SystemSculptRecorderSettingTab extends PluginSettingTab {
   plugin: RecorderModule;
@@ -64,5 +65,6 @@ export class SystemSculptRecorderSettingTab extends PluginSettingTab {
     renderSaveTranscriptionToFileToggle(containerEl, this.plugin);
     renderCopyToClipboardToggle(containerEl, this.plugin);
     renderPasteOnTranscriptionToggle(containerEl, this.plugin);
+    renderIncludeLinkToRecordingToggle(containerEl, this.plugin);
   }
 }

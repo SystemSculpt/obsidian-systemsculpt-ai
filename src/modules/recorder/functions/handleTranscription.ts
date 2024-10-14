@@ -77,10 +77,15 @@ export async function handleTranscription(
       finalTranscription = `## Raw Transcription\n\n${transcription}\n\n## Processed Transcription\n\n${processedTranscription}`;
     }
 
+    if (plugin.settings.includeLinkToRecording) {
+      const recordingLink = `![[${recordingFile.path}]]`;
+      finalTranscription = `${recordingLink}\n\n${finalTranscription}`;
+    }
+
     if (plugin.settings.saveTranscriptionToFile) {
       await saveTranscriptionToFile(plugin, finalTranscription, recordingFile);
     }
-    if (plugin.settings.copyToClipboard && skipPaste) {
+    if (plugin.settings.copyToClipboard) {
       navigator.clipboard.writeText(finalTranscription);
       showCustomNotice(
         "Transcribed, post-processed, and copied to your clipboard!"

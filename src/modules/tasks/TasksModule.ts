@@ -12,12 +12,6 @@ import { insertGeneratedTask as insertGeneratedTaskFunction } from "./functions/
 import { updateTaskButtonStatusBar } from "./functions/updateTaskButtonStatusBar";
 import { MarkdownView } from "obsidian";
 
-export interface Task {
-  description: string;
-  subtasks: { description: string; completed: boolean }[];
-  completed: boolean;
-}
-
 export class TasksModule {
   plugin: SystemSculptPlugin;
   brain: BrainModule;
