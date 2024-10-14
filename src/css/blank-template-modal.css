@@ -1,6 +1,6 @@
 /* Blank Template Modal */
 
-.blank-template-modal {
+.systemsculpt-blank-template-modal {
   max-width: 600px;
   width: 100%;
   border-radius: 10px;
@@ -9,18 +9,18 @@
   padding: 20px;
 }
 
-.blank-template-modal .modal-content {
+.systemsculpt-blank-template-modal .systemsculpt-modal-content {
   display: flex;
   flex-direction: column;
 }
 
-.blank-template-modal .modal-content h2 {
+.systemsculpt-blank-template-modal .systemsculpt-modal-content h2 {
   font-size: 24px;
   margin-bottom: 20px;
   color: var(--text-title-h2);
 }
 
-.blank-template-modal .info-box {
+.systemsculpt-blank-template-modal .systemsculpt-info-box {
   background-color: var(--background-secondary-alt);
   border: 1px solid var(--background-modifier-border);
   border-radius: 5px;
@@ -28,22 +28,22 @@
   margin-bottom: 20px;
 }
 
-.blank-template-modal .info-box p {
+.systemsculpt-blank-template-modal .systemsculpt-info-box p {
   margin: 0;
   color: var(--text-muted);
 }
 
-.blank-template-modal .prompt-container {
+.systemsculpt-blank-template-modal .systemsculpt-prompt-container {
   margin-bottom: 20px;
 }
 
-.blank-template-modal .prompt-container label {
+.systemsculpt-blank-template-modal .systemsculpt-prompt-container label {
   font-size: 18px;
   margin-bottom: 10px;
   color: var(--text-normal);
 }
 
-.blank-template-modal .user-prompt-input {
+.systemsculpt-blank-template-modal .systemsculpt-user-prompt-input {
   width: 100%;
   min-height: 50px; /* Ensure this is larger than context areas */
   border-radius: 5px;
@@ -57,12 +57,12 @@
   margin-top: 2.5px;
 }
 
-.blank-template-modal .button-container {
+.systemsculpt-blank-template-modal .systemsculpt-button-container {
   display: flex;
   justify-content: flex-end;
 }
 
-.blank-template-modal .button-container button {
+.systemsculpt-blank-template-modal .systemsculpt-button-container button {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
   border: none;
@@ -73,11 +73,11 @@
   transition: background-color 0.2s ease;
 }
 
-.blank-template-modal .button-container button:hover {
+.systemsculpt-blank-template-modal .systemsculpt-button-container button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.context-area {
+.systemsculpt-context-area {
   width: 100%;
   border-radius: 5px;
   border: 1px solid var(--background-modifier-border);
@@ -92,30 +92,30 @@
   min-height: 100px;
 }
 
-.pre-context-area {
+.systemsculpt-pre-context-area {
   margin-bottom: 10px; /* Space below the pre-context area */
   font-size: 10px; /* Smaller text size */
   max-height: 3em; /* Limit to 3 rows of text */
 }
 
-.post-context-area {
+.systemsculpt-post-context-area {
   margin-top: 10px; /* Space above the post-context area */
   font-size: 10px; /* Smaller text size */
   max-height: 3em; /* Limit to 3 rows of text */
 }
 
-.blank-template-modal .system-template-container {
+.systemsculpt-blank-template-modal .systemsculpt-system-template-container {
   margin-bottom: 15px;
 }
 
-.blank-template-modal .system-template-container label {
+.systemsculpt-blank-template-modal .systemsculpt-system-template-container label {
   display: block;
   font-size: 14px;
   margin-bottom: 5px;
   color: var(--text-normal);
 }
 
-.blank-template-modal .system-template-input {
+.systemsculpt-blank-template-modal .systemsculpt-system-template-input {
   width: 100%;
   padding: 8px;
   border-radius: 4px;
@@ -125,21 +125,21 @@
   font-size: 14px;
 }
 
-.blank-template-modal .system-template-input:focus {
+.systemsculpt-blank-template-modal .systemsculpt-system-template-input:focus {
   outline: none;
   border-color: var(--interactive-accent);
 }
 
-.blank-template-modal .remember-template-container,
-.blank-template-modal .copy-to-clipboard-container {
+.systemsculpt-blank-template-modal .systemsculpt-remember-template-container,
+.systemsculpt-blank-template-modal .systemsculpt-copy-to-clipboard-container {
   margin-bottom: 15px;
 }
 
-.blank-template-modal .toggle-container {
+.systemsculpt-blank-template-modal .systemsculpt-toggle-container {
   display: flex;
   align-items: center;
 }
 
-.blank-template-modal .toggle-container input[type="checkbox"] {
+.systemsculpt-blank-template-modal .systemsculpt-toggle-container input[type="checkbox"] {
   margin-right: 10px;
 }

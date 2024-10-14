@@ -47,9 +47,11 @@ export class RecorderModule {
     if (!this.plugin.recorderToggleStatusBarItem) {
       this.plugin.recorderToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.recorderToggleStatusBarItem.setText("R");
-      this.plugin.recorderToggleStatusBarItem.addClass("status-bar-button");
       this.plugin.recorderToggleStatusBarItem.addClass(
-        "recorder-toggle-button"
+        "systemsculpt-status-bar-button"
+      );
+      this.plugin.recorderToggleStatusBarItem.addClass(
+        "systemsculpt-recorder-toggle-button"
       );
     }
 
@@ -162,7 +164,9 @@ export class RecorderModule {
     if (!this.recordingStatusBarItem) {
       this.recordingStatusBarItem = this.plugin.addStatusBarItem();
       this.recordingStatusBarItem.setText("Recording...");
-      this.recordingStatusBarItem.addClass("recorder-notice-toggle-button");
+      this.recordingStatusBarItem.addClass(
+        "systemsculpt-recorder-notice-toggle-button"
+      );
       this.recordingStatusBarItem.addEventListener("click", () => {
         this.showRecordingNoticeWithoutStarting();
       });

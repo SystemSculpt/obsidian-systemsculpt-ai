@@ -93,7 +93,7 @@ export class TemplatesModule implements IGenerationModule {
     this.settings = Object.assign(
       {},
       DEFAULT_TEMPLATES_SETTINGS,
-      savedSettings,
+      savedSettings
     );
   }
 
@@ -123,7 +123,7 @@ export class TemplatesModule implements IGenerationModule {
               }
             }
           }
-        },
+        }
       );
     }
   }
@@ -177,7 +177,7 @@ export class TemplatesModule implements IGenerationModule {
 
     if (this.settings.templatesVersion !== serverVersion) {
       showCustomNotice(
-        "A new version of the templates is available. Please update manually through the settings.",
+        "A new version of the templates is available. Please update manually through the settings."
       );
     }
   }
@@ -215,15 +215,15 @@ export class TemplatesModule implements IGenerationModule {
           });
       });
 
-    patreonSetting.settingEl.addClass("patreon-member-setting");
+    patreonSetting.settingEl.addClass("systemsculpt-patreon-member-setting");
 
     if (this.settings.isPatreonMember) {
-      const infoBoxEl = containerEl.createDiv("info-box");
+      const infoBoxEl = containerEl.createDiv("systemsculpt-info-box");
       infoBoxEl.createEl("p", {
         text: "If you're a Patreon member, download the latest AI templates from SystemSculpt!",
       });
 
-      infoBoxEl.addClass("patreon-sub-setting");
+      infoBoxEl.addClass("systemsculpt-patreon-sub-setting");
 
       this.renderLicenseKeySetting(containerEl);
 
@@ -238,17 +238,19 @@ export class TemplatesModule implements IGenerationModule {
               await this.saveSettings();
             });
 
-          const keepInMindBoxEl = containerEl.createDiv("info-box");
+          const keepInMindBoxEl = containerEl.createDiv(
+            "systemsculpt-info-box"
+          );
           keepInMindBoxEl.createEl("p", {
             text: "Whenever you sync to the latest templates, all templates found in the SS-Sync folder will be overwritten. This means that if you want to modify one to your own liking, make sure to place it in the Templates folder, outside of the SS-Sync directory - it will be safe there and won't be overwritten.",
           });
 
-          keepInMindBoxEl.addClass("patreon-sub-setting");
+          keepInMindBoxEl.addClass("systemsculpt-patreon-sub-setting");
         });
 
-      ssSyncSetting.settingEl.addClass("patreon-sub-setting");
+      ssSyncSetting.settingEl.addClass("systemsculpt-patreon-sub-setting");
     } else {
-      const becomePatreonEl = containerEl.createDiv("info-box");
+      const becomePatreonEl = containerEl.createDiv("systemsculpt-info-box");
       const becomePatreonButton = becomePatreonEl.createEl("button", {
         cls: "",
         text: "Click here to become a Patreon member for only $10 bucks!",
@@ -273,7 +275,7 @@ export class TemplatesModule implements IGenerationModule {
     new Setting(containerEl)
       .setName("Trigger key")
       .setDesc(
-        "The key that triggers the template suggestion modal (single character only, leave empty to disable)",
+        "The key that triggers the template suggestion modal (single character only, leave empty to disable)"
       )
       .addText((text) => {
         text
@@ -289,7 +291,7 @@ export class TemplatesModule implements IGenerationModule {
             await this.saveSettings();
             text.setValue(triggerKey);
             this.registerDomEvent();
-          },
+          }
         );
       })
       .addExtraButton((button) => {
@@ -330,7 +332,7 @@ export class TemplatesModule implements IGenerationModule {
           inputEl,
           suggestionContent,
           onSelectCallback,
-          this.plugin.app,
+          this.plugin.app
         );
       })
       .addExtraButton((button) => {
@@ -383,12 +385,12 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   private renderRememberSelectedTemplateSetting(
-    containerEl: HTMLElement,
+    containerEl: HTMLElement
   ): void {
     new Setting(containerEl)
       .setName("Remember selected template")
       .setDesc(
-        "Automatically use the last selected template for future generations",
+        "Automatically use the last selected template for future generations"
       )
       .addToggle((toggle) => {
         toggle
@@ -425,7 +427,7 @@ export class TemplatesModule implements IGenerationModule {
     } else {
       showCustomNotice(
         "Please open a note before using the Blank Template Modal.",
-        3000,
+        3000
       );
     }
   }

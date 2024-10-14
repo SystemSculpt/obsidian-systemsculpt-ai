@@ -37,14 +37,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     const linksContainer = this.renderLinksContainer();
     const tabContainer = this.renderTabContainer();
 
-    const searchContainer = containerEl.createDiv("search-container");
+    const searchContainer = containerEl.createDiv(
+      "systemsculpt-search-container"
+    );
     const searchInput = searchContainer.createEl("input", {
       type: "text",
       placeholder: "Search settings...",
-      cls: "settings-search-input",
+      cls: "systemsculpt-settings-search-input",
     });
 
-    const alphaRibbon = containerEl.createDiv("alpha-ribbon");
+    const alphaRibbon = containerEl.createDiv("systemsculpt-alpha-ribbon");
     alphaRibbon.createSpan({ text: "SystemSculpt AI is currently in alpha. " });
     const linkEl = alphaRibbon.createEl("a", {
       text: "Click here to report a bug or request a feature.",
@@ -66,7 +68,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   private addSearchFunctionality(
     searchInput: HTMLInputElement,
-    settingsContainer: HTMLElement,
+    settingsContainer: HTMLElement
   ): void {
     const allSettings: {
       module: string;
@@ -83,7 +85,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         // Focus on the search input after refreshing
         setTimeout(() => {
           const newSearchInput = this.containerEl.querySelector(
-            ".settings-search-input",
+            ".systemsculpt-settings-search-input"
           ) as HTMLInputElement;
           if (newSearchInput) {
             newSearchInput.focus();
@@ -105,7 +107,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       desc: string;
       element: HTMLElement;
     }[],
-    settingsContainer: HTMLElement,
+    settingsContainer: HTMLElement
   ): void {
     const modules = [
       "brain",
@@ -125,8 +127,10 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
       moduleContainer.querySelectorAll(".setting-item").forEach((item) => {
         if (item instanceof HTMLElement) {
-          const nameEl = item.querySelector(".setting-item-name");
-          const descEl = item.querySelector(".setting-item-description");
+          const nameEl = item.querySelector(".systemsculpt-setting-item-name");
+          const descEl = item.querySelector(
+            ".systemsculpt-setting-item-description"
+          );
           if (nameEl?.textContent && descEl?.textContent) {
             const settingName = nameEl.textContent.trim();
             if (!settingName.toLowerCase().includes("settings")) {
@@ -151,7 +155,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       desc: string;
       element: HTMLElement;
     }[],
-    settingsContainer: HTMLElement,
+    settingsContainer: HTMLElement
   ): void {
     const searchTerms = searchTerm
       .split(/\s+/)
@@ -162,19 +166,21 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     allSettings.forEach((setting) => {
       const nameMatches = searchTerms.every((term) =>
-        setting.name.toLowerCase().includes(term.toLowerCase()),
+        setting.name.toLowerCase().includes(term.toLowerCase())
       );
       const descMatches = searchTerms.every((term) =>
-        setting.desc.toLowerCase().includes(term.toLowerCase()),
+        setting.desc.toLowerCase().includes(term.toLowerCase())
       );
 
       if (nameMatches || descMatches) {
         // Append the original setting element to the container
         settingsContainer.appendChild(setting.element);
 
-        const nameEl = setting.element.querySelector(".setting-item-name");
+        const nameEl = setting.element.querySelector(
+          ".systemsculpt-setting-item-name"
+        );
         const descEl = setting.element.querySelector(
-          ".setting-item-description",
+          ".systemsculpt-setting-item-description"
         );
 
         if (nameEl) {
@@ -193,7 +199,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private highlightText(
     element: HTMLElement,
     text: string,
-    searchTerms: string[],
+    searchTerms: string[]
   ) {
     element.empty();
     if (searchTerms.length === 0) {
@@ -209,23 +215,27 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       span.textContent = part;
       if (
         searchTerms.some((term) =>
-          part.toLowerCase().includes(term.toLowerCase()),
+          part.toLowerCase().includes(term.toLowerCase())
         )
       ) {
-        span.addClass("fuzzy-match");
+        span.addClass("systemsculpt-fuzzy-match");
       }
     });
   }
 
   private toggleTabContainer(show: boolean): void {
-    const tabContainer = this.containerEl.querySelector(".tab-container");
+    const tabContainer = this.containerEl.querySelector(
+      ".systemsculpt-tab-container"
+    );
     if (tabContainer instanceof HTMLElement) {
       tabContainer.style.display = show ? "flex" : "none";
     }
   }
 
   private renderTabContainer(): HTMLElement {
-    const tabContainer = this.containerEl.createDiv("tab-container");
+    const tabContainer = this.containerEl.createDiv(
+      "systemsculpt-tab-container"
+    );
 
     this.renderTab(tabContainer, "brain", "Brain");
     this.renderTab(tabContainer, "tasks", "Tasks");
@@ -240,16 +250,18 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private renderTab(
     tabContainer: HTMLElement,
     tabId: string,
-    tabLabel: string,
+    tabLabel: string
   ): void {
-    const tab = tabContainer.createDiv("tab");
+    const tab = tabContainer.createDiv("systemsculpt-tab");
     tab.dataset.tabId = tabId;
     tab.createSpan({ text: tabLabel });
     tab.addEventListener("click", () => this.showTab(tabId));
   }
 
   private renderLinksContainer(): HTMLElement {
-    const linksContainer = this.containerEl.createDiv("links-container");
+    const linksContainer = this.containerEl.createDiv(
+      "systemsculpt-links-container"
+    );
 
     const links = [
       { text: "Website", url: "https://systemsculpt.com" },
@@ -263,7 +275,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       const linkEl = linksContainer.createEl("a", {
         text: link.text,
         href: link.url,
-        cls: "settings-link",
+        cls: "systemsculpt-settings-link",
       });
       linkEl.setAttr("target", "_blank");
       linkEl.setAttr("rel", "noopener noreferrer");
@@ -273,16 +285,18 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   private renderSettingsContainer(): HTMLElement {
-    return this.containerEl.createDiv("settings-container");
+    return this.containerEl.createDiv("systemsculpt-settings-container");
   }
 
   showTab(tabId: string): void {
-    const tabContainer = this.containerEl.querySelector(".tab-container");
+    const tabContainer = this.containerEl.querySelector(
+      ".systemsculpt-tab-container"
+    );
     if (!tabContainer) return;
 
     const tabs = tabContainer.childNodes;
     const settingsContainer = this.containerEl.querySelector(
-      ".settings-container",
+      ".systemsculpt-settings-container"
     ) as HTMLElement;
     if (!settingsContainer) return;
 
@@ -290,7 +304,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     // Hide all module containers
     const moduleContainers = settingsContainer.querySelectorAll(
-      'div[class$="-settings"]',
+      'div[class$="-settings"]'
     );
     moduleContainers.forEach((container) => {
       (container as HTMLElement).style.display = "none";
@@ -298,7 +312,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     // Show the selected module container
     const selectedContainer = settingsContainer.querySelector(
-      `.${tabId}-settings`,
+      `.${tabId}-settings`
     ) as HTMLElement;
     if (selectedContainer) {
       selectedContainer.style.display = "block";
@@ -311,9 +325,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private setActiveTab(tabs: NodeListOf<ChildNode>, activeTabId: string): void {
     tabs.forEach((tab) => {
       if (tab instanceof HTMLElement && tab.dataset.tabId === activeTabId) {
-        tab.classList.add("active");
+        tab.classList.add("systemsculpt-active");
       } else if (tab instanceof HTMLElement) {
-        tab.classList.remove("active");
+        tab.classList.remove("systemsculpt-active");
       }
     });
   }

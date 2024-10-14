@@ -1,4 +1,4 @@
-.alpha-ribbon {
+.systemsculpt-alpha-ribbon {
   background-color: var(--background-secondary-alt);
   color: var(--text-muted);
   padding: 8px 16px;
@@ -11,13 +11,13 @@
   border: 1px solid var(--background-modifier-border);
 }
 
-.alpha-ribbon a {
+.systemsculpt-alpha-ribbon a {
   color: var(--text-accent);
   text-decoration: underline;
   font-weight: bold;
 }
 
-.alpha-ribbon a:hover {
+.systemsculpt-alpha-ribbon a:hover {
   text-decoration: none;
   color: var(--text-accent-hover);
 }

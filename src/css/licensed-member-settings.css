@@ -1,6 +1,6 @@
 /* Remove all existing styles and replace with these simplified styles */
 
-.patreon-sub-setting-button {
+.systemsculpt-patreon-sub-setting-button {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
   padding: 10px;
@@ -9,11 +9,11 @@
   transition: background-color 0.2s ease;
 }
 
-.patreon-sub-setting-button:hover {
+.systemsculpt-patreon-sub-setting-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.info-box {
+.systemsculpt-info-box {
   background-color: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;

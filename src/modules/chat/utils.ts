@@ -11,7 +11,7 @@ export async function getTokenCount(
   app: any,
   chatMessages: ChatMessage[],
   contextFiles: TFile[],
-  inputText: string,
+  inputText: string
 ): Promise<number> {
   const messageHistory = chatMessages
     .map((msg) => `${msg.role}\n${msg.text}`)
@@ -24,7 +24,7 @@ export async function getTokenCount(
 
 export async function getContextFilesContent(
   app: any,
-  contextFiles: TFile[],
+  contextFiles: TFile[]
 ): Promise<string> {
   if (contextFiles.length === 0) return "";
   let contextContent = "";
@@ -37,7 +37,7 @@ export async function getContextFilesContent(
       const extractedMarkdownPath =
         `${extractedFolder}/extracted_content.md`.replace(/^\/+/, "");
       const extractedMarkdownFile = app.vault.getAbstractFileByPath(
-        extractedMarkdownPath,
+        extractedMarkdownPath
       );
       if (extractedMarkdownFile instanceof TFile) {
         const content = await app.vault.read(extractedMarkdownFile);
@@ -47,7 +47,7 @@ export async function getContextFilesContent(
       }
     } else if (
       ["png", "jpg", "jpeg", "gif", "mp3", "wav", "m4a", "ogg"].includes(
-        fileExtension,
+        fileExtension
       )
     ) {
       contextContent += `### ${file.basename}\n[File content not included for token calculation]\n`;
@@ -66,17 +66,19 @@ export function displayTokenCount(
   containerEl: HTMLElement,
   chatMessagesLength: number,
   model: Model,
-  maxOutputTokens: number,
+  maxOutputTokens: number
 ) {
-  const tokenCountEl = containerEl.querySelector(".token-count") as HTMLElement;
+  const tokenCountEl = containerEl.querySelector(
+    ".systemsculpt-token-count"
+  ) as HTMLElement;
   const costEstimateEl = containerEl.querySelector(
-    ".cost-estimate",
+    ".systemsculpt-cost-estimate"
   ) as HTMLElement;
   const dollarButton = containerEl.querySelector(
-    ".dollar-button",
+    ".systemsculpt-dollar-button"
   ) as HTMLElement;
   const titleContainerEl = containerEl.querySelector(
-    ".chat-title-container",
+    ".systemsculpt-chat-title-container"
   ) as HTMLElement;
 
   if (tokenCountEl) {
@@ -88,11 +90,11 @@ export function displayTokenCount(
       const { minCost, maxCost } = CostEstimator.calculateCost(
         model,
         tokenCount,
-        maxOutputTokens,
+        maxOutputTokens
       );
       costEstimateEl.style.display = "inline";
       costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
-        minCost,
+        minCost
       )} - $${formatNumber(maxCost)}`;
     } else {
       costEstimateEl.style.display = "none";
@@ -116,10 +118,10 @@ export function formatNumber(num: number): string {
     }
     const significantDigits = decimal.slice(
       significantIndex,
-      significantIndex + 2,
+      significantIndex + 2
     );
     return `${integer}.${"0".repeat(
-      Math.max(0, significantIndex),
+      Math.max(0, significantIndex)
     )}${significantDigits}`;
   }
 

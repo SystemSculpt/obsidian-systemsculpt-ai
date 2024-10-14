@@ -38,10 +38,12 @@ class AboutSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("About SystemSculpt").setHeading();
 
     // Documentation Section
-    const docContainer = containerEl.createDiv("about-doc-container");
+    const docContainer = containerEl.createDiv(
+      "systemsculpt-about-doc-container"
+    );
     docContainer.createEl("h3", {
       text: "Documentation & Resources",
-      cls: "about-section-header",
+      cls: "systemsculpt-about-section-header",
     });
 
     const docButtons = [
@@ -68,10 +70,12 @@ class AboutSettingTab extends PluginSettingTab {
     this.createButtonGroup(docContainer, docButtons, "");
 
     // Personal Links Section
-    const personalContainer = containerEl.createDiv("about-personal-container");
+    const personalContainer = containerEl.createDiv(
+      "systemsculpt-about-personal-container"
+    );
     personalContainer.createEl("h3", {
       text: "Connect & Support",
-      cls: "about-section-header",
+      cls: "systemsculpt-about-section-header",
     });
 
     const personalButtons = [
@@ -89,9 +93,11 @@ class AboutSettingTab extends PluginSettingTab {
   private createButtonGroup(
     container: HTMLElement,
     buttons: { name: string; url: string }[],
-    buttonClass: string,
+    buttonClass: string
   ): void {
-    const buttonContainer = container.createDiv("about-button-container");
+    const buttonContainer = container.createDiv(
+      "systemsculpt-about-button-container"
+    );
     buttons.forEach((button) => {
       const buttonEl = buttonContainer.createEl("button", {
         text: button.name,
@@ -104,7 +110,9 @@ class AboutSettingTab extends PluginSettingTab {
   }
 
   private async renderHallOfFame(containerEl: HTMLElement): Promise<void> {
-    const hallOfFameEl = containerEl.createDiv("about-hall-of-fame");
+    const hallOfFameEl = containerEl.createDiv(
+      "systemsculpt-about-hall-of-fame"
+    );
 
     const uniqueSupporters = members.reduce<{ name: string }[]>(
       (acc, current) => {
@@ -113,38 +121,42 @@ class AboutSettingTab extends PluginSettingTab {
         }
         return acc;
       },
-      [],
+      []
     );
 
     this.renderSupportersSection(
       hallOfFameEl,
       "SystemSculpt Supporters",
-      uniqueSupporters,
+      uniqueSupporters
     );
   }
 
   private renderSupportersSection(
     containerEl: HTMLElement,
     title: string,
-    supporters: { name: string }[],
+    supporters: { name: string }[]
   ): void {
-    const sectionEl = containerEl.createDiv("supporters-section");
+    const sectionEl = containerEl.createDiv("systemsculpt-supporters-section");
     const titleEl = sectionEl.createEl("h3", { text: title });
-    titleEl.addClass("ss-h3");
+    titleEl.addClass("systemsculpt-ss-h3");
 
     const descriptionEl = sectionEl.createEl("p", {
       text: "This section is dedicated to all Patreon members! Your support as a Patreon member allows me to dedicate more time to developing SystemSculpt productivity tools. Thank you!",
     });
-    descriptionEl.addClass("supporters-description");
+    descriptionEl.addClass("systemsculpt-supporters-description");
 
     const sponsorDescriptionEl = sectionEl.createEl("p", {
       text: "By sponsoring or donating, you allow me to put more time into this and other Obsidian tools to benefit your productivity.",
-      cls: "about-description",
+      cls: "systemsculpt-about-description",
     });
 
-    const listEl = sectionEl.createEl("div", { cls: "supporter-list" });
+    const listEl = sectionEl.createEl("div", {
+      cls: "systemsculpt-supporter-list",
+    });
     supporters.forEach((supporter) => {
-      const itemEl = listEl.createEl("span", { cls: "supporter-item" });
+      const itemEl = listEl.createEl("span", {
+        cls: "systemsculpt-supporter-item",
+      });
       itemEl.setText(supporter.name);
     });
   }

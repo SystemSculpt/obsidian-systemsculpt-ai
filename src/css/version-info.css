@@ -1,9 +1,9 @@
-.version-info-container {
+.systemsculpt-version-info-container {
   display: flex;
   margin-bottom: 10px;
 }
 
-.version-info-text {
+.systemsculpt-version-info-text {
   display: inline-block;
   padding: 2px 6px;
   font-size: 12px;
@@ -12,10 +12,10 @@
   text-align: center;
 }
 
-.version-info-text.up-to-date {
+.systemsculpt-version-info-text.systemsculpt-up-to-date {
   background-color: #5cb85c; /* Bootstrap's success color */
 }
 
-.version-info-text.outdated {
+.systemsculpt-version-info-text.systemsculpt-outdated {
   background-color: #d9534f; /* Bootstrap's danger color */
 }

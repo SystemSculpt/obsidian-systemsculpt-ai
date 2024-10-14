@@ -156,8 +156,12 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private initializeModelStatusBar() {
     if (!this.plugin.modelToggleStatusBarItem) {
       this.plugin.modelToggleStatusBarItem = this.plugin.addStatusBarItem();
-      this.plugin.modelToggleStatusBarItem.addClass("status-bar-button");
-      this.plugin.modelToggleStatusBarItem.addClass("model-toggle-button");
+      this.plugin.modelToggleStatusBarItem.addClass(
+        "systemsculpt-status-bar-button"
+      );
+      this.plugin.modelToggleStatusBarItem.addClass(
+        "systemsculpt-model-toggle-button"
+      );
     }
     this.plugin.modelToggleStatusBarItem.onClickEvent(async () => {
       if (!this.isReinitializing) {

@@ -7,7 +7,7 @@ export async function generateTitleForChat(
   app: App,
   chatFile: TFile,
   brainModule: BrainModule,
-  updateChatTitle: (title: string) => void,
+  updateChatTitle: (title: string) => void
 ) {
   if (!chatFile) return;
   const noteContent = await app.vault.read(chatFile);
@@ -29,7 +29,7 @@ export function toggleEditTitle(
   app: App,
   chatFile: TFile,
   currentTitle: string,
-  updateChatTitle: (title: string) => void,
+  updateChatTitle: (title: string) => void
 ) {
   new TitleEditModal(app, currentTitle, async (newTitle: string) => {
     await saveTitleEdit(app, chatFile, newTitle);
@@ -40,7 +40,7 @@ export function toggleEditTitle(
 export async function saveTitleEdit(
   app: App,
   chatFile: TFile,
-  newTitle: string,
+  newTitle: string
 ) {
   if (newTitle && chatFile) {
     const newFilePath = `${chatFile.parent?.path}/${newTitle}.md`;
@@ -49,7 +49,9 @@ export async function saveTitleEdit(
 }
 
 export function updateChatTitle(containerEl: HTMLElement, title: string) {
-  const titleEl = containerEl.querySelector(".chat-title-text") as HTMLElement;
+  const titleEl = containerEl.querySelector(
+    ".systemsculpt-chat-title-text"
+  ) as HTMLElement;
   if (titleEl) {
     titleEl.textContent = title;
   }

@@ -5,7 +5,7 @@ import { base64ToArrayBuffer } from "obsidian";
 export class ContextFileManager {
   constructor(
     private app: App,
-    private chatView: any,
+    private chatView: any
   ) {}
 
   private processingQueue: TFile[] = [];
@@ -48,7 +48,7 @@ export class ContextFileManager {
 
     if (supportedExtensions.includes(fileExtension)) {
       const existingFile = this.chatView.contextFiles.find(
-        (contextFile: TFile) => contextFile.path === file.path,
+        (contextFile: TFile) => contextFile.path === file.path
       );
 
       if (existingFile) {
@@ -58,7 +58,7 @@ export class ContextFileManager {
 
         if (existingHash === newHash) {
           this.chatView.updateLoadingText(
-            `File ${file.name} is already in the context files.`,
+            `File ${file.name} is already in the context files.`
           );
           return;
         } else {
@@ -81,7 +81,7 @@ export class ContextFileManager {
     } else {
       const supportedExtensionsString = supportedExtensions.join(", ");
       this.chatView.updateLoadingText(
-        `We don't handle ${fileExtension} files yet. We only support ${supportedExtensionsString} files.`,
+        `We don't handle ${fileExtension} files yet. We only support ${supportedExtensionsString} files.`
       );
     }
 
@@ -96,7 +96,7 @@ export class ContextFileManager {
       const transcriptionFilePath = `${extractionFolderPath}/${transcriptionFileName}`;
 
       const transcriptionFileExists = await this.app.vault.adapter.exists(
-        transcriptionFilePath,
+        transcriptionFilePath
       );
 
       if (transcriptionFileExists) {
@@ -105,23 +105,23 @@ export class ContextFileManager {
         if (userChoice === "use-existing") {
           const existingTranscriptionFile =
             this.app.vault.getAbstractFileByPath(
-              transcriptionFilePath,
+              transcriptionFilePath
             ) as TFile;
           if (existingTranscriptionFile) {
             this.chatView.contextFiles.push(existingTranscriptionFile);
             this.renderContextFiles();
             await this.updateChatFileWithContext(
               existingTranscriptionFile,
-              "add",
+              "add"
             );
             this.chatView.updateLoadingText(
-              `Using existing transcription for: ${file.name}`,
+              `Using existing transcription for: ${file.name}`
             );
             return;
           }
         } else if (userChoice === "cancel") {
           this.chatView.updateLoadingText(
-            `Cancelled processing of: ${file.name}`,
+            `Cancelled processing of: ${file.name}`
           );
           return;
         }
@@ -133,7 +133,7 @@ export class ContextFileManager {
         await this.chatView.chatModule.recorderModule.handleTranscription(
           arrayBuffer,
           file,
-          true,
+          true
         );
 
       await this.app.vault.createFolder(extractionFolderPath).catch(() => {}); // Create folder if it doesn't exist
@@ -145,7 +145,7 @@ export class ContextFileManager {
 
       // Add the transcription file to the context files
       const transcriptionFile = this.app.vault.getAbstractFileByPath(
-        transcriptionFilePath,
+        transcriptionFilePath
       ) as TFile;
       if (transcriptionFile) {
         this.chatView.contextFiles.push(transcriptionFile);
@@ -154,14 +154,14 @@ export class ContextFileManager {
       }
     } catch (error) {
       this.chatView.updateLoadingText(
-        `Error processing audio file: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Error processing audio file: ${error instanceof Error ? error.message : "Unknown error"}`
       );
       console.error("Error processing audio file:", error);
     }
   }
 
   private async showTranscriptionExistsDialog(
-    fileName: string,
+    fileName: string
   ): Promise<"use-existing" | "transcribe-again" | "cancel"> {
     return new Promise((resolve) => {
       const modal = new TranscriptionExistsModal(
@@ -169,7 +169,7 @@ export class ContextFileManager {
         fileName,
         (result) => {
           resolve(result);
-        },
+        }
       );
       modal.open();
     });
@@ -180,7 +180,7 @@ export class ContextFileManager {
     try {
       const documentExtractor = new DocumentExtractor(
         this.chatView.chatModule,
-        this.app,
+        this.app
       );
       console.log(`Document extractor created`);
       const extractedContent = await documentExtractor.extractDocument(file);
@@ -192,33 +192,33 @@ export class ContextFileManager {
     } catch (error) {
       console.error(`Error processing document:`, error);
       this.chatView.updateLoadingText(
-        `Error processing document: ${(error as Error).message}`,
+        `Error processing document: ${(error as Error).message}`
       );
     }
   }
 
   public async saveExtractedContent(
     file: TFile,
-    extractedContent: { markdown: string; images: { [key: string]: string } },
+    extractedContent: { markdown: string; images: { [key: string]: string } }
   ) {
     const extractionFolderPath = `${file.parent?.path || ""}/${file.basename}`;
     await this.app.vault.createFolder(extractionFolderPath).catch(() => {}); // Create folder if it doesn't exist
     await this.createOrOverwriteMarkdownFile(
       extractedContent.markdown,
       extractionFolderPath,
-      file,
+      file
     );
     await this.createOrOverwriteImageFiles(
       extractedContent.images,
       extractionFolderPath,
-      file,
+      file
     );
   }
 
   private async createOrOverwriteMarkdownFile(
     markdown: string,
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     const fileName = "extracted_content.md";
     const filePath = `${folderPath}/${fileName}`;
@@ -236,7 +236,7 @@ export class ContextFileManager {
   private async createOrOverwriteImageFiles(
     images: { [key: string]: string },
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     for (const [imageName, imageBase64] of Object.entries(images)) {
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
@@ -261,14 +261,14 @@ export class ContextFileManager {
       if (content.includes("# Context Files")) {
         updatedContent = content.replace(
           "# Context Files",
-          `# Context Files\n${contextTag}`,
+          `# Context Files\n${contextTag}`
         );
       } else {
         updatedContent = `# Context Files\n${contextTag}\n${content}`;
       }
     } else {
       const contextFilesSection = content.match(
-        /# Context Files\n([\s\S]*?)\n# AI Chat History/,
+        /# Context Files\n([\s\S]*?)\n# AI Chat History/
       );
       if (contextFilesSection) {
         const contextFilesContent = contextFilesSection[1];
@@ -278,7 +278,7 @@ export class ContextFileManager {
           .join("\n");
         updatedContent = content.replace(
           contextFilesSection[0],
-          `# Context Files\n${updatedContextFilesContent}\n# AI Chat History`,
+          `# Context Files\n${updatedContextFilesContent}\n# AI Chat History`
         );
       } else {
         updatedContent = content.replace(contextTag, "");
@@ -293,26 +293,27 @@ export class ContextFileManager {
   }
 
   renderContextFiles() {
-    const contextFilesContainer =
-      this.chatView.containerEl.querySelector(".context-files");
+    const contextFilesContainer = this.chatView.containerEl.querySelector(
+      ".systemsculpt-context-files"
+    );
     if (!contextFilesContainer) return;
     contextFilesContainer.innerHTML = "";
 
     if (this.chatView.contextFiles.length === 0) {
-      contextFilesContainer.classList.remove("has-files");
+      contextFilesContainer.classList.remove("systemsculpt-has-files");
       return;
     }
 
-    contextFilesContainer.classList.add("has-files");
+    contextFilesContainer.classList.add("systemsculpt-has-files");
     this.chatView.contextFiles.forEach((file: TFile, index: number) => {
       const fileEl = document.createElement("div");
-      fileEl.className = "context-file";
+      fileEl.className = "systemsculpt-context-file";
 
       const isImage = ["png", "jpg", "jpeg", "gif"].includes(
-        file.extension.toLowerCase(),
+        file.extension.toLowerCase()
       );
       const isAudio = ["mp3", "wav", "m4a", "ogg"].includes(
-        file.extension.toLowerCase(),
+        file.extension.toLowerCase()
       );
       const isPDF = file.extension.toLowerCase() === "pdf";
       const isDocx = file.extension.toLowerCase() === "docx";
@@ -320,19 +321,20 @@ export class ContextFileManager {
 
       if (isImage) {
         const imgPreview = document.createElement("img");
-        imgPreview.className = "context-file-preview";
+        imgPreview.className = "systemsculpt-context-file-preview";
         imgPreview.src = this.app.vault.getResourcePath(file);
         imgPreview.alt = file.name;
         fileEl.appendChild(imgPreview);
       } else if (isAudio) {
         const audioIcon = document.createElement("span");
-        audioIcon.className = "context-file-preview audio-icon";
-        audioIcon.innerHTML = `<svg viewBox="0 0 100 100" class="audio-icon" width="40" height="40"><path fill="currentColor" stroke="currentColor" d="M50 10 L25 30 L25 70 L50 90 L50 10 M55 30 A20 20 0 0 1 55 70 M65 20 A40 40 0 0 1 65 80"></path></svg>`;
+        audioIcon.className =
+          "systemsculpt-context-file-preview systemsculpt-audio-icon";
+        audioIcon.innerHTML = `<svg viewBox="0 0 100 100" class="systemsculpt-audio-icon" width="40" height="40"><path fill="currentColor" stroke="currentColor" d="M50 10 L25 30 L25 70 L50 90 L50 10 M55 30 A20 20 0 0 1 55 70 M65 20 A40 40 0 0 1 65 80"></path></svg>`;
         fileEl.appendChild(audioIcon);
       } else if (isPDF || isDocx || isPptx || file.extension === "md") {
         const icon = document.createElement("span");
-        icon.className = `context-file-preview ${isPDF ? "pdf-icon" : isDocx ? "docx-icon" : isPptx ? "pptx-icon" : "md-icon"}`;
-        icon.innerHTML = `<svg viewBox="0 0 100 100" class="${isPDF ? "pdf-icon" : isDocx ? "docx-icon" : isPptx ? "pptx-icon" : "md-icon"}" width="40" height="40">
+        icon.className = `systemsculpt-context-file-preview ${isPDF ? "systemsculpt-pdf-icon" : isDocx ? "systemsculpt-docx-icon" : isPptx ? "systemsculpt-pptx-icon" : "systemsculpt-md-icon"}`;
+        icon.innerHTML = `<svg viewBox="0 0 100 100" class="${isPDF ? "systemsculpt-pdf-icon" : isDocx ? "systemsculpt-docx-icon" : isPptx ? "systemsculpt-pptx-icon" : "systemsculpt-md-icon"}" width="40" height="40">
           <path fill="currentColor" d="M20 10 v80 h60 v-60 l-20 -20 h-40 z" />
           <path fill="currentColor" d="M60 10 v20 h20" opacity="0.5" />
           <text x="50" y="65" font-size="30" text-anchor="middle" fill="white">${isPDF ? "PDF" : isDocx ? "DOCX" : isPptx ? "PPTX" : "MD"}</text>
@@ -341,13 +343,13 @@ export class ContextFileManager {
       }
 
       const filePathEl = document.createElement("div");
-      filePathEl.className = "context-file-path";
+      filePathEl.className = "systemsculpt-context-file-path";
       filePathEl.title = file.path;
       filePathEl.innerHTML = `<span>${file.path}</span>`;
       fileEl.appendChild(filePathEl);
 
       const removeButton = document.createElement("button");
-      removeButton.className = "remove-context-file";
+      removeButton.className = "systemsculpt-remove-context-file";
       removeButton.innerHTML = "🗑️";
       removeButton.title = "Remove Context File";
       fileEl.appendChild(removeButton);
@@ -387,7 +389,7 @@ export class ContextFileManager {
   }
 
   private async showFileExistsDialog(
-    fileName: string,
+    fileName: string
   ): Promise<"replace" | "keep-both" | "cancel"> {
     return new Promise((resolve) => {
       const modal = new FileExistsModal(this.app, fileName, (result) => {
@@ -405,7 +407,7 @@ export class ContextFileManager {
 
     while (
       this.chatView.contextFiles.some(
-        (file: TFile) => file.name === newFileName,
+        (file: TFile) => file.name === newFileName
       )
     ) {
       counter++;
@@ -417,7 +419,7 @@ export class ContextFileManager {
 
   private async copyFileWithNewName(
     file: TFile,
-    newFileName: string,
+    newFileName: string
   ): Promise<TFile> {
     const newPath = file.parent
       ? `${file.parent.path}/${newFileName}`
@@ -428,7 +430,7 @@ export class ContextFileManager {
 
   async addDirectoryToContextFiles(folder: TFolder) {
     const files = folder.children.filter(
-      (child) => child instanceof TFile,
+      (child) => child instanceof TFile
     ) as TFile[];
     for (const file of files) {
       await this.addFileToContextFiles(file);
@@ -443,7 +445,7 @@ class FileExistsModal extends Modal {
   constructor(
     app: App,
     private fileName: string,
-    onSubmit: (result: "replace" | "keep-both" | "cancel") => void,
+    onSubmit: (result: "replace" | "keep-both" | "cancel") => void
   ) {
     super(app);
     this.onSubmit = onSubmit;
@@ -457,12 +459,12 @@ class FileExistsModal extends Modal {
     });
 
     const buttonContainer = contentEl.createEl("div", {
-      cls: "modal-button-container",
+      cls: "systemsculpt-modal-button-container",
     });
 
     const replaceButton = buttonContainer.createEl("button", {
       text: "Replace",
-      cls: "mod-warning",
+      cls: "systemsculpt-mod-warning",
     });
     replaceButton.addEventListener("click", () => {
       this.result = "replace";
@@ -493,13 +495,13 @@ class FileExistsModal extends Modal {
 class TranscriptionExistsModal extends Modal {
   private result: "use-existing" | "transcribe-again" | "cancel" = "cancel";
   private onSubmit: (
-    result: "use-existing" | "transcribe-again" | "cancel",
+    result: "use-existing" | "transcribe-again" | "cancel"
   ) => void;
 
   constructor(
     app: App,
     private fileName: string,
-    onSubmit: (result: "use-existing" | "transcribe-again" | "cancel") => void,
+    onSubmit: (result: "use-existing" | "transcribe-again" | "cancel") => void
   ) {
     super(app);
     this.onSubmit = onSubmit;
@@ -513,12 +515,12 @@ class TranscriptionExistsModal extends Modal {
     });
 
     const buttonContainer = contentEl.createEl("div", {
-      cls: "modal-button-container",
+      cls: "systemsculpt-modal-button-container",
     });
 
     const useExistingButton = buttonContainer.createEl("button", {
       text: "Use Existing",
-      cls: "mod-cta",
+      cls: "systemsculpt-mod-cta",
     });
     useExistingButton.addEventListener("click", () => {
       this.result = "use-existing";

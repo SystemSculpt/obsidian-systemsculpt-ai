@@ -4,7 +4,7 @@ import { DEFAULT_BRAIN_SETTINGS } from "./BrainSettings";
 
 export function renderGeneralGenerationPromptSetting(
   containerEl: HTMLElement,
-  plugin: BrainModule,
+  plugin: BrainModule
 ): void {
   new Setting(containerEl)
     .setName("General generation prompt")
@@ -31,7 +31,7 @@ export function renderGeneralGenerationPromptSetting(
           plugin.settingsDisplay(containerEl);
         });
     });
-  const infoBoxEl = containerEl.createDiv("info-box");
+  const infoBoxEl = containerEl.createDiv("systemsculpt-info-box");
   infoBoxEl.createEl("p", {
     text: "You can hotkey this (I personally hotkey it to CMD+Shift+G). It uses the entire note's contents as context to continue the generation forward. Useful for quick end-of-note things like summaries, action items, ideas, brainstorming, etc.",
   });

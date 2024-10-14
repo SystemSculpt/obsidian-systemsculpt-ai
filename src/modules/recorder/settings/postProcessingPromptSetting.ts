@@ -4,7 +4,7 @@ import { DEFAULT_RECORDER_SETTINGS } from "./RecorderSettings";
 
 export function renderPostProcessingPromptSetting(
   containerEl: HTMLElement,
-  plugin: RecorderModule,
+  plugin: RecorderModule
 ): void {
   new Setting(containerEl)
     .setName("Enable Post-Processing Prompt")
@@ -46,7 +46,7 @@ export function renderPostProcessingPromptSetting(
           });
       });
 
-    const infoBoxEl = containerEl.createDiv("info-box");
+    const infoBoxEl = containerEl.createDiv("systemsculpt-info-box");
     infoBoxEl.createEl("p", {
       text: "The post-processing prompt uses GPT models to improve the transcript by correcting misspellings, improving overall accuracy, and enhancing readability. It allows for more specific instructions and can handle a larger context window for better understanding of the transcription.",
     });

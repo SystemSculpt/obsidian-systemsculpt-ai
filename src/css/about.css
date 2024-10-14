@@ -1,54 +1,20 @@
-/* About Section */
-.about-header {
-  position: relative;
-  padding: 40px;
-  text-align: center;
-  overflow: hidden;
-}
-
-.about-header h2 {
-  bottom: 20px;
-  font-size: 36px;
-  color: var(--text-normal);
-  position: relative;
-  z-index: 1;
-  animation: fadeInUp 1s ease;
-}
-
-.header-background {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    45deg,
-    var(--primary-color),
-    var(--secondary-color)
-  );
-  transform: skewY(-5deg);
-  transform-origin: top left;
-  z-index: 0;
-  opacity: 0.8;
-}
-
-.about-description {
+.systemsculpt-about-description {
   margin-bottom: 20px;
 }
 
-.about-doc-container,
-.about-personal-container {
+.systemsculpt-about-doc-container,
+.systemsculpt-about-personal-container {
   margin-bottom: 30px;
 }
 
-.about-section-header {
+.systemsculpt-about-section-header {
   font-size: 18px;
   color: var(--text-normal);
   margin-bottom: 10px;
 }
 
-.about-button-container,
-.supporter-list {
+.systemsculpt-about-button-container,
+.systemsculpt-supporter-list {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
@@ -56,9 +22,8 @@
   margin-bottom: 20px;
 }
 
-.about-button,
-.about-doc-button,
-.supporter-item {
+.systemsculpt-about-button,
+.systemsculpt-supporter-item {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
   border: none;
@@ -74,12 +39,11 @@
   transition: background-color 0.3s ease;
 }
 
-.about-button:hover,
-.about-doc-button:hover {
+.systemsculpt-about-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.supporter-list {
+.systemsculpt-supporter-list {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 20px;
@@ -87,7 +51,7 @@
   margin-bottom: 30px;
 }
 
-.supporter-item {
+.systemsculpt-supporter-item {
   background-color: var(--background-secondary-alt);
   color: var(--text-muted);
   border: none;
@@ -105,18 +69,12 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.supporter-contribution {
-  margin-top: 12px;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
 /* Hall of Fame styles */
-.about-hall-of-fame {
+.systemsculpt-about-hall-of-fame {
   text-align: center;
 }
 
-.supporters-description {
+.systemsculpt-supporters-description {
   font-style: italic;
   color: var(--text-muted);
   margin-top: 0;
@@ -124,7 +82,7 @@
   font-size: 14px;
 }
 
-.ss-h3 {
+.systemsculpt-ss-h3 {
   font-size: 20px;
   color: var(--text-accent);
   text-transform: uppercase;
@@ -136,18 +94,18 @@
 
 /* Media query for smaller screens */
 @media (max-width: 768px) {
-  .about-button-container,
-  .supporter-list {
+  .systemsculpt-about-button-container,
+  .systemsculpt-supporter-list {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .supporter-list {
+  .systemsculpt-supporter-list {
     gap: 15px;
   }
 }
 
 @media (max-width: 480px) {
-  .supporter-list {
+  .systemsculpt-supporter-list {
     grid-template-columns: 1fr;
   }
 }

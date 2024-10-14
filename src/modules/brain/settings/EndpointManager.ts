@@ -38,13 +38,16 @@ export class EndpointManager {
 
   private renderAPIEndpointToggles(): void {
     const apiEndpointsContainer = this.containerEl.createDiv(
-      "api-endpoints-container"
+      "systemsculpt-api-endpoints-container"
     );
     apiEndpointsContainer.createEl("h3", { text: "API Endpoints" });
 
-    const apiEndpointsList =
-      apiEndpointsContainer.createDiv("api-endpoints-list");
-    const apiEndpointsGroup = apiEndpointsList.createDiv("api-endpoints-group");
+    const apiEndpointsList = apiEndpointsContainer.createDiv(
+      "systemsculpt-api-endpoints-list"
+    );
+    const apiEndpointsGroup = apiEndpointsList.createDiv(
+      "systemsculpt-api-endpoints-group"
+    );
 
     const apiEndpoints = [
       { id: "openAI", name: "OpenAI" },
@@ -54,8 +57,12 @@ export class EndpointManager {
     ];
 
     apiEndpoints.forEach((endpoint) => {
-      const apiEndpointItem = apiEndpointsGroup.createDiv("modal-item");
-      const apiEndpointName = apiEndpointItem.createDiv("modal-name");
+      const apiEndpointItem = apiEndpointsGroup.createDiv(
+        "systemsculpt-modal-item"
+      );
+      const apiEndpointName = apiEndpointItem.createDiv(
+        "systemsculpt-modal-name"
+      );
       apiEndpointName.setText(endpoint.name);
 
       const toggleComponent = new ToggleComponent(apiEndpointItem);
@@ -67,7 +74,7 @@ export class EndpointManager {
         (this.plugin.settings[settingKey] as boolean) = value;
         await this.plugin.saveSettings();
         this.onAfterSave();
-        apiEndpointItem.toggleClass("disabled", !value);
+        apiEndpointItem.toggleClass("systemsculpt-disabled", !value);
 
         this.renderAPISettings();
       });
@@ -264,13 +271,14 @@ export class EndpointManager {
   ): Promise<void> {
     const statusTextEl =
       textComponent.inputEl.nextElementSibling ||
-      this.createSpan("api-key-status");
+      this.createSpan("systemsculpt-api-key-status");
     if (!textComponent.inputEl.nextElementSibling) {
       textComponent.inputEl.insertAdjacentElement("afterend", statusTextEl);
     }
 
     statusTextEl.textContent = "Validating...";
-    statusTextEl.className = "api-key-status validating";
+    statusTextEl.className =
+      "systemsculpt-api-key-status systemsculpt-validating";
 
     try {
       let isValid: boolean;
@@ -296,20 +304,29 @@ export class EndpointManager {
 
       if (isValid) {
         statusTextEl.textContent = "Online";
-        statusTextEl.classList.remove("validating", "invalid");
-        statusTextEl.classList.add("valid");
+        statusTextEl.classList.remove(
+          "systemsculpt-validating",
+          "systemsculpt-invalid"
+        );
+        statusTextEl.classList.add("systemsculpt-valid");
       } else {
         statusTextEl.textContent = "Offline";
-        statusTextEl.classList.remove("validating", "valid");
-        statusTextEl.classList.add("invalid");
+        statusTextEl.classList.remove(
+          "systemsculpt-validating",
+          "systemsculpt-valid"
+        );
+        statusTextEl.classList.add("systemsculpt-invalid");
       }
     } catch (error) {
       statusTextEl.textContent =
         error instanceof Error && error.message === "Validation timeout"
           ? "Timeout"
           : "Error";
-      statusTextEl.classList.remove("validating", "valid");
-      statusTextEl.classList.add("invalid");
+      statusTextEl.classList.remove(
+        "systemsculpt-validating",
+        "systemsculpt-valid"
+      );
+      statusTextEl.classList.add("systemsculpt-invalid");
     }
 
     AIService.getInstance({
@@ -335,8 +352,8 @@ export class EndpointManager {
       .nextElementSibling as HTMLElement;
     if (statusTextEl) {
       statusTextEl.textContent = message;
-      statusTextEl.className = `api-key-status ${
-        isValid ? "valid" : "invalid"
+      statusTextEl.className = `systemsculpt-api-key-status ${
+        isValid ? "systemsculpt-valid" : "systemsculpt-invalid"
       }`;
     }
   }

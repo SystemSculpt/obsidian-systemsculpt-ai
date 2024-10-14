@@ -5,16 +5,18 @@ import { FileSearcher } from "../FileSearcher";
 
 export function attachEventListeners(chatView: ChatView) {
   const container = chatView.containerEl;
-  const inputEl = container.querySelector(".chat-input") as HTMLTextAreaElement;
+  const inputEl = container.querySelector(
+    ".systemsculpt-chat-input"
+  ) as HTMLTextAreaElement;
   const sendButtonEl = container.querySelector(
-    ".chat-send-button",
+    ".systemsculpt-chat-send-button"
   ) as HTMLButtonElement;
 
   sendButtonEl.addEventListener("click", () =>
-    handleSendMessage(chatView, inputEl),
+    handleSendMessage(chatView, inputEl)
   );
   inputEl.addEventListener("keydown", (event) =>
-    handleInputKeydown(event, chatView, inputEl),
+    handleInputKeydown(event, chatView, inputEl)
   );
   inputEl.addEventListener("input", () => handleInputChange(chatView, inputEl));
 
@@ -23,7 +25,7 @@ export function attachEventListeners(chatView: ChatView) {
 
 async function handleSendMessage(
   chatView: ChatView,
-  inputEl: HTMLTextAreaElement,
+  inputEl: HTMLTextAreaElement
 ) {
   const isFirstMessage = !chatView.chatFile;
 
@@ -39,14 +41,14 @@ async function handleSendMessage(
     chatView.constructMessageHistory.bind(chatView),
     chatView.appendToLastMessage.bind(chatView),
     chatView.showLoading.bind(chatView),
-    chatView.hideLoading.bind(chatView),
+    chatView.hideLoading.bind(chatView)
   );
 }
 
 function handleInputKeydown(
   event: KeyboardEvent,
   chatView: ChatView,
-  inputEl: HTMLTextAreaElement,
+  inputEl: HTMLTextAreaElement
 ) {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -63,7 +65,7 @@ function handleInputChange(chatView: ChatView, inputEl: HTMLTextAreaElement) {
 
 function attachHeaderButtonListeners(chatView: ChatView) {
   const actionsButton = chatView.containerEl.querySelector(
-    ".actions-button",
+    ".systemsculpt-actions-button"
   ) as HTMLElement;
 
   if (actionsButton) {
@@ -74,7 +76,7 @@ function attachHeaderButtonListeners(chatView: ChatView) {
 export function attachFileSearcherListeners(
   chatView: ChatView,
   inputEl?: HTMLTextAreaElement,
-  addToContextFiles: boolean = false,
+  addToContextFiles: boolean = false
 ) {
   console.log("Attaching FileSearcher listeners");
   const fileSearcher = new FileSearcher(chatView.app);

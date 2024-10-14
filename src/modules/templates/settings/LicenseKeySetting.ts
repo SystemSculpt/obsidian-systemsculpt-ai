@@ -6,7 +6,7 @@ import { showCustomNotice } from "../../../modals";
 
 export function renderLicenseKeySetting(
   containerEl: HTMLElement,
-  plugin: TemplatesModule,
+  plugin: TemplatesModule
 ): void {
   let inputElement: HTMLInputElement; // Define a variable to hold the input element
 
@@ -27,7 +27,7 @@ export function renderLicenseKeySetting(
       button
         .setButtonText("Sync Templates")
         .setTooltip(
-          "Sync templates from the server using the provided license key",
+          "Sync templates from the server using the provided license key"
         )
         .onClick(async () => {
           button.setDisabled(true); // Disable the button
@@ -37,8 +37,8 @@ export function renderLicenseKeySetting(
             plugin.settings.licenseKey.trim() === ""
           ) {
             showCustomNotice(
-              "No valid license key found. Please enter your license key.",
-              5000,
+              "No systemsculpt-valid license key found. Please enter your license key.",
+              5000
             );
             return;
           }
@@ -46,8 +46,8 @@ export function renderLicenseKeySetting(
           const isValid = await checkLicenseValidity(plugin, true);
           if (!isValid) {
             showCustomNotice(
-              "Invalid license key. Please contact Mike on Patreon or Discord to obtain a valid license key.",
-              5000,
+              "Invalid license key. Please contact Mike on Patreon or Discord to obtain a systemsculpt-valid license key.",
+              5000
             );
             return;
           }
@@ -57,5 +57,5 @@ export function renderLicenseKeySetting(
     });
 
   // Apply custom CSS class
-  licenseKeySetting.settingEl.addClass("patreon-sub-setting");
+  licenseKeySetting.settingEl.addClass("systemsculpt-patreon-sub-setting");
 }

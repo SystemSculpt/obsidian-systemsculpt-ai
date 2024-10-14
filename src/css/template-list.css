@@ -1,16 +1,16 @@
-.template-name {
+.systemsculpt-template-name {
   margin-top: 5px;
   font-size: 16px;
   margin-bottom: 5px;
 }
 
-.template-description {
+.systemsculpt-template-description {
   margin-top: 0px;
   font-size: 12px;
   margin-bottom: 8px;
 }
 
-.template-meta {
+.systemsculpt-template-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -19,7 +19,7 @@
   margin-bottom: 3px;
 }
 
-.template-meta-item {
+.systemsculpt-template-meta-item {
   margin-right: 2px;
   padding: 2px 6px;
   background-color: var(--background-secondary-alt);
@@ -28,7 +28,7 @@
   color: var(--color-green);
 }
 
-.template-tags {
+.systemsculpt-template-tags {
   display: flex;
   flex-wrap: wrap;
   width: 100%; /* This ensures it takes the full width and moves to a new line */
@@ -36,7 +36,7 @@
   margin-bottom: 0;
 }
 
-.template-tag {
+.systemsculpt-template-tag {
   margin-right: 2px;
   margin-bottom: 2px; /* Ensures tags are close to each other vertically */
   padding: 2px 6px;

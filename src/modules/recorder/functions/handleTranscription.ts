@@ -33,7 +33,7 @@ export async function handleTranscription(
     }
 
     const noticeEl = document.querySelector(
-      ".custom-notice .custom-notice-message"
+      ".systemsculpt-custom-notice .systemsculpt-custom-notice-message"
     );
     if (noticeEl) {
       noticeEl.innerHTML = "";

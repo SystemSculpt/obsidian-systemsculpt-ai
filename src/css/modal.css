@@ -1,5 +1,5 @@
 /* Modal */
-.modal-content-centered {
+.systemsculpt-modal-content-centered {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -7,6 +7,6 @@
   height: 100%;
 }
 
-.modal-header {
+.systemsculpt-modal-header {
   text-align: center;
 }

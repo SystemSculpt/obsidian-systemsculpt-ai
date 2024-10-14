@@ -72,7 +72,7 @@ export class ChatView extends ItemView {
 
   private updateCostEstimate(minCost: number, maxCost: number) {
     const costEstimateEl = this.containerEl.querySelector(
-      ".cost-estimate"
+      ".systemsculpt-cost-estimate"
     ) as HTMLElement;
     if (costEstimateEl) {
       costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
@@ -101,7 +101,7 @@ export class ChatView extends ItemView {
 
   private attachFilePasteListener() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.addEventListener("paste", this.handleFilePaste.bind(this));
@@ -148,7 +148,9 @@ export class ChatView extends ItemView {
     if (this.loadingText) {
       this.loadingText.textContent = text;
     }
-    const loadingOverlay = this.containerEl.querySelector(".loading-overlay");
+    const loadingOverlay = this.containerEl.querySelector(
+      ".systemsculpt-loading-overlay"
+    );
     if (loadingOverlay) {
       loadingOverlay.classList.add("visible");
     }
@@ -165,7 +167,9 @@ export class ChatView extends ItemView {
   }
 
   private hideLoadingContainer() {
-    const loadingOverlay = this.containerEl.querySelector(".loading-overlay");
+    const loadingOverlay = this.containerEl.querySelector(
+      ".systemsculpt-loading-overlay"
+    );
     if (loadingOverlay) {
       loadingOverlay.classList.remove("visible");
     }
@@ -224,7 +228,7 @@ export class ChatView extends ItemView {
 
   private attachContextFilesButtonListener() {
     const contextFilesButton = this.containerEl.querySelector(
-      ".context-files-header"
+      ".systemsculpt-context-files-header"
     ) as HTMLElement;
     if (contextFilesButton) {
       contextFilesButton.addEventListener("click", (e) => {
@@ -237,7 +241,7 @@ export class ChatView extends ItemView {
 
   private attachChatTitleListener() {
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text"
+      ".systemsculpt-chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.style.cursor = "pointer";
@@ -438,16 +442,16 @@ export class ChatView extends ItemView {
 
   private initializeLoadingContainer() {
     this.loadingContainer = this.containerEl.querySelector(
-      ".loading-container"
+      ".systemsculpt-loading-container"
     ) as HTMLElement;
     this.loadingText = this.loadingContainer.querySelector(
-      ".loading-text"
+      ".systemsculpt-loading-text"
     ) as HTMLElement;
     this.progressText = this.loadingContainer.querySelector(
-      ".progress-text"
+      ".systemsculpt-progress-text"
     ) as HTMLElement;
     this.progressBarFill = this.loadingContainer.querySelector(
-      ".progress-bar-fill"
+      ".systemsculpt-progress-bar-fill"
     ) as HTMLElement;
   }
 
@@ -540,7 +544,7 @@ export class ChatView extends ItemView {
     this.contextFiles = [];
 
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text"
+      ".systemsculpt-chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.textContent = moment().format("YYYY-MM-DD HH-mm-ss");
@@ -567,19 +571,22 @@ export class ChatView extends ItemView {
   }
 
   public clearChatView() {
-    const messagesContainer = this.containerEl.querySelector(".chat-messages");
+    const messagesContainer = this.containerEl.querySelector(
+      ".systemsculpt-chat-messages"
+    );
     if (messagesContainer) {
       messagesContainer.innerHTML = "";
     }
 
-    const contextFilesContainer =
-      this.containerEl.querySelector(".context-files");
+    const contextFilesContainer = this.containerEl.querySelector(
+      ".systemsculpt-context-files"
+    );
     if (contextFilesContainer) {
       contextFilesContainer.innerHTML = "";
     }
 
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = "";
@@ -589,13 +596,13 @@ export class ChatView extends ItemView {
   }
 
   handleExitButtonClick(exitButton: HTMLElement) {
-    if (exitButton.classList.contains("confirm-exit")) {
+    if (exitButton.classList.contains("systemsculpt-confirm-exit")) {
       this.leaf.detach();
     } else {
-      exitButton.classList.add("confirm-exit");
+      exitButton.classList.add("systemsculpt-confirm-exit");
       exitButton.innerHTML = "You sure? ❌";
       setTimeout(() => {
-        exitButton.classList.remove("confirm-exit");
+        exitButton.classList.remove("systemsculpt-confirm-exit");
         exitButton.innerHTML = "❌";
       }, 3000);
     }
@@ -613,7 +620,7 @@ export class ChatView extends ItemView {
   setChatFile(file: TFile) {
     this.chatFile = file;
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text"
+      ".systemsculpt-chat-title-text"
     ) as HTMLElement;
     if (titleEl) {
       titleEl.textContent = file.basename;
@@ -627,7 +634,7 @@ export class ChatView extends ItemView {
 
   private attachInputChangeListener() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.addEventListener("input", () => {
@@ -638,7 +645,7 @@ export class ChatView extends ItemView {
 
   public async updateTokenCountAndCost() {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     const inputValue = inputEl ? inputEl.value : "";
     const tokenCount = await this.tokenManager.getTokenCount(
@@ -659,7 +666,7 @@ export class ChatView extends ItemView {
 
   async getTokenCount(): Promise<number> {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     const inputText = inputEl ? inputEl.value : "";
     return this.tokenManager.getTokenCount(
@@ -676,7 +683,7 @@ export class ChatView extends ItemView {
 
   public updateTokenCountWithInput(inputValue: string) {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = inputValue;
@@ -741,13 +748,16 @@ export class ChatView extends ItemView {
   }
 
   showLoading() {
-    const messagesContainer = this.containerEl.querySelector(".chat-messages");
+    const messagesContainer = this.containerEl.querySelector(
+      ".systemsculpt-chat-messages"
+    );
     if (messagesContainer instanceof HTMLElement) {
       const loadingEl = document.createElement("div");
-      loadingEl.className = "chat-message ai loading";
+      loadingEl.className =
+        "systemsculpt-chat-message systemsculpt-ai systemsculpt-loading";
       loadingEl.innerHTML = `
-        <div class="chat-message-content">
-          <div class="loading-spinner"></div>
+        <div class="systemsculpt-chat-message-content">
+          <div class="systemsculpt-loading-spinner"></div>
           <span>AI is thinking...</span>
         </div>
       `;
@@ -756,14 +766,16 @@ export class ChatView extends ItemView {
     }
 
     const inputContainer = this.containerEl.querySelector(
-      ".chat-input-container"
+      ".systemsculpt-chat-input-container"
     ) as HTMLElement;
-    const loadingSpinner = inputContainer.querySelector(".chat-input-loading");
+    const loadingSpinner = inputContainer.querySelector(
+      ".systemsculpt-chat-input-loading"
+    );
     if (loadingSpinner) {
       loadingSpinner.classList.remove("hidden");
     }
     const chatInputWrapper = inputContainer.querySelector(
-      ".chat-input-wrapper"
+      ".systemsculpt-chat-input-wrapper"
     );
     if (chatInputWrapper) {
       chatInputWrapper.classList.add("hidden");
@@ -772,21 +784,23 @@ export class ChatView extends ItemView {
 
   hideLoading() {
     const loadingEl = this.containerEl.querySelector(
-      ".chat-message.ai.loading"
+      ".systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading"
     );
     if (loadingEl) {
       loadingEl.remove();
     }
 
     const inputContainer = this.containerEl.querySelector(
-      ".chat-input-container"
+      ".systemsculpt-chat-input-container"
     ) as HTMLElement;
-    const loadingSpinner = inputContainer.querySelector(".chat-input-loading");
+    const loadingSpinner = inputContainer.querySelector(
+      ".systemsculpt-chat-input-loading"
+    );
     if (loadingSpinner) {
       loadingSpinner.classList.add("hidden");
     }
     const chatInputWrapper = inputContainer.querySelector(
-      ".chat-input-wrapper"
+      ".systemsculpt-chat-input-wrapper"
     );
     if (chatInputWrapper) {
       chatInputWrapper.classList.remove("hidden");
@@ -818,7 +832,9 @@ export class ChatView extends ItemView {
   }
 
   renderMessages() {
-    const messagesContainer = this.containerEl.querySelector(".chat-messages");
+    const messagesContainer = this.containerEl.querySelector(
+      ".systemsculpt-chat-messages"
+    );
     if (messagesContainer instanceof HTMLElement) {
       renderMessages(
         this.chatMessages,
@@ -897,7 +913,7 @@ export class ChatView extends ItemView {
   focusInput(initialLoad: boolean = false) {
     if (initialLoad) {
       const inputEl = this.containerEl.querySelector(
-        ".chat-input"
+        ".systemsculpt-chat-input"
       ) as HTMLTextAreaElement;
       if (inputEl) {
         inputEl.focus();
@@ -911,7 +927,7 @@ export class ChatView extends ItemView {
 
   setChatInputValue(value: string) {
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = value;
@@ -981,14 +997,14 @@ export class ChatView extends ItemView {
     this.contextFileManager.renderContextFiles();
 
     const titleEl = this.containerEl.querySelector(
-      ".chat-title-text"
+      ".systemsculpt-chat-title-text"
     ) as HTMLElement;
     if (titleEl && this.chatFile) {
       titleEl.textContent = this.chatFile.basename;
     }
 
     const inputEl = this.containerEl.querySelector(
-      ".chat-input"
+      ".systemsculpt-chat-input"
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = "";
@@ -998,7 +1014,9 @@ export class ChatView extends ItemView {
   }
 
   scrollToBottom() {
-    const messagesContainer = this.containerEl.querySelector(".chat-messages");
+    const messagesContainer = this.containerEl.querySelector(
+      ".systemsculpt-chat-messages"
+    );
     if (messagesContainer instanceof HTMLElement) {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
@@ -1033,7 +1051,9 @@ export class ChatView extends ItemView {
   }
 
   attachScrollListener() {
-    const messagesContainer = this.containerEl.querySelector(".chat-messages");
+    const messagesContainer = this.containerEl.querySelector(
+      ".systemsculpt-chat-messages"
+    );
     if (messagesContainer instanceof HTMLElement) {
       messagesContainer.addEventListener("scroll", () => {
         const isScrolledToBottom =

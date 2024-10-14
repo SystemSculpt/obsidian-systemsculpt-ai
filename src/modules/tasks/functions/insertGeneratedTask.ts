@@ -4,7 +4,7 @@ import { showCustomNotice } from "../../../modals";
 
 export async function insertGeneratedTask(
   plugin: TasksModule,
-  generatedTask: string,
+  generatedTask: string
 ): Promise<void> {
   const { vault } = plugin.plugin.app;
   const { tasksLocation } = plugin.settings;
@@ -38,7 +38,7 @@ export async function insertGeneratedTask(
       showCustomNotice("Task added successfully!");
     } else {
       showCustomNotice(
-        "Failed to add task. The specified file is not a valid TFile.",
+        "Failed to add task. The specified file is not a systemsculpt-valid TFile."
       );
     }
   } catch (error) {

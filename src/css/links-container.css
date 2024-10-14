@@ -1,5 +1,5 @@
 /* Links Container */
-.links-container {
+.systemsculpt-links-container {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -11,7 +11,7 @@
   margin-bottom: 5px;
 }
 
-.settings-link {
+.systemsculpt-settings-link {
   flex: 0 1 calc(16.666% - 10px); /* 6 links per row, accounting for gap */
   min-width: 100px; /* Minimum width for each link */
   max-width: 250px; /* Maximum width for each link */
@@ -29,7 +29,7 @@
   border-radius: 4px;
 }
 
-.settings-link:hover {
+.systemsculpt-settings-link:hover {
   color: var(--text-normal);
   background-color: var(--background-modifier-hover);
 }

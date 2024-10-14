@@ -8,7 +8,7 @@ export class TitleEditModal extends Modal {
   constructor(
     app: App,
     currentTitle: string,
-    onSave: (newTitle: string) => void,
+    onSave: (newTitle: string) => void
   ) {
     super(app);
     this.currentTitle = currentTitle;
@@ -17,13 +17,13 @@ export class TitleEditModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.addClass("title-edit-modal"); // Add this line to apply the modal styles
+    contentEl.addClass("systemsculpt-title-edit-modal"); // Add this line to apply the modal styles
 
     contentEl.createEl("h2", { text: "Edit Title" });
 
     const inputEl = contentEl.createEl("textarea", {
       text: this.currentTitle,
-      cls: "title-edit-input",
+      cls: "systemsculpt-title-edit-input",
     });
 
     // Select the entire text in the textarea
@@ -45,7 +45,7 @@ export class TitleEditModal extends Modal {
         showCustomNotice(
           "You cannot use the " +
             invalidCharacter +
-            " character within a title.",
+            " character within a title."
         );
         inputEl.value = inputEl.value.replace(invalidChars, "");
       }
@@ -53,7 +53,7 @@ export class TitleEditModal extends Modal {
 
     const saveButton = contentEl.createEl("button", {
       text: "Save",
-      cls: "save-button",
+      cls: "systemsculpt-save-button",
     });
 
     saveButton.addEventListener("click", () => {

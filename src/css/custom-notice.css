@@ -1,5 +1,5 @@
 /* Custom Notice */
-.custom-notice {
+.systemsculpt-custom-notice {
   border: 1px solid var(--interactive-accent);
   background-color: var(--background-secondary);
   color: var(--text-normal);
@@ -19,17 +19,17 @@
   left: auto;
 }
 
-.custom-notice:hover {
+.systemsculpt-custom-notice:hover {
   transform: translateY(-5px);
   box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
 }
 
-.custom-notice-content {
+.systemsculpt-custom-notice-content {
   display: flex;
   align-items: center;
 }
 
-.custom-notice-message {
+.systemsculpt-custom-notice-message {
   margin-right: 10px;
   font-size: 16px;
   font-weight: 500;

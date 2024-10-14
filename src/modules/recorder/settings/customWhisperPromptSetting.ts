@@ -9,7 +9,7 @@ function getWhisperTokenCount(text: string): number {
 
 export function renderCustomWhisperPromptSetting(
   containerEl: HTMLElement,
-  plugin: RecorderModule,
+  plugin: RecorderModule
 ): void {
   new Setting(containerEl)
     .setName("Enable Custom Transcription Prompt")
@@ -28,7 +28,7 @@ export function renderCustomWhisperPromptSetting(
     new Setting(containerEl)
       .setName("Custom Whisper Vocabulary")
       .setDesc(
-        "Customize the list of favored words or phrases for Whisper transcription (max 244 tokens)",
+        "Customize the list of favored words or phrases for Whisper transcription (max 244 tokens)"
       )
       .addTextArea((text) => {
         text
@@ -58,13 +58,15 @@ export function renderCustomWhisperPromptSetting(
           });
       });
 
-    const tokenCountEl = containerEl.createDiv({ cls: "info-box-token-count" });
+    const tokenCountEl = containerEl.createDiv({
+      cls: "systemsculpt-info-box-token-count",
+    });
     tokenCountEl.style.textAlign = "right";
     tokenCountEl.style.marginBottom = "8px";
 
     updateTokenCount(plugin.settings.customWhisperPrompt, tokenCountEl);
 
-    const infoBoxEl = containerEl.createDiv("info-box");
+    const infoBoxEl = containerEl.createDiv("systemsculpt-info-box");
     infoBoxEl.createEl("p", {
       text: "The custom Whisper vocabulary helps improve transcription accuracy by providing a list of favored words or phrases. This can correct specific words or acronyms, preserve context for split audio files, ensure proper punctuation and filler words, and specify preferred writing styles for certain languages. Note that Whisper only considers the first 244 tokens of the vocabulary list.",
     });

@@ -32,26 +32,28 @@ export class BlankTemplateModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("blank-template-modal");
+    contentEl.addClass("systemsculpt-blank-template-modal");
 
-    const modalContent = contentEl.createDiv("modal-content");
+    const modalContent = contentEl.createDiv("systemsculpt-modal-content");
     modalContent.createEl("h2", { text: "Blank Template" });
 
-    const infoBox = modalContent.createDiv("info-box");
+    const infoBox = modalContent.createDiv("systemsculpt-info-box");
     infoBox.createEl("p", {
       text: "The Blank Template allows you to generate content based on your custom prompt. Simply enter your prompt, and the AI will generate relevant content for you. This is useful for creating generic content, brainstorming ideas, or getting inspiration for your writing.",
     });
 
-    const contextContainer = modalContent.createDiv("context-container");
+    const contextContainer = modalContent.createDiv(
+      "systemsculpt-context-container"
+    );
 
     // Add Remember Template toggle
     const rememberTemplateContainer = contextContainer.createDiv(
-      "remember-template-container",
+      "systemsculpt-remember-template-container"
     );
     this.rememberTemplateToggle = this.createToggle(
       rememberTemplateContainer,
       "Remember selected template",
-      "Automatically use the last selected template for future generations",
+      "Automatically use the last selected template for future generations"
     );
     this.rememberTemplateToggle.checked =
       this.plugin.settings.rememberSelectedTemplate;
@@ -63,12 +65,12 @@ export class BlankTemplateModal extends Modal {
 
     // Add Copy to Clipboard toggle
     const copyToClipboardContainer = contextContainer.createDiv(
-      "copy-to-clipboard-container",
+      "systemsculpt-copy-to-clipboard-container"
     );
     this.copyToClipboardToggle = this.createToggle(
       copyToClipboardContainer,
       "Copy response to clipboard",
-      "Automatically copy the generated response to the clipboard",
+      "Automatically copy the generated response to the clipboard"
     );
     this.copyToClipboardToggle.checked =
       this.plugin.settings.copyResponseToClipboard;
@@ -80,7 +82,7 @@ export class BlankTemplateModal extends Modal {
 
     // Add system template input
     const systemTemplateContainer = contextContainer.createDiv(
-      "system-template-container",
+      "systemsculpt-system-template-container"
     );
     systemTemplateContainer.createEl("label", {
       text: "System Template:",
@@ -89,7 +91,7 @@ export class BlankTemplateModal extends Modal {
     this.systemTemplateInput = systemTemplateContainer.createEl("input", {
       type: "text",
       placeholder: "Enter system template name (optional)",
-      cls: "system-template-input",
+      cls: "systemsculpt-system-template-input",
     });
 
     // Set the last selected template if the setting is enabled
@@ -105,17 +107,17 @@ export class BlankTemplateModal extends Modal {
     this.addDirectorySuggestions(this.systemTemplateInput);
 
     this.preContextArea = contextContainer.createEl("textarea", {
-      cls: "context-area pre-context-area",
+      cls: "systemsculpt-context-area systemsculpt-pre-context-area",
     });
 
     this.preContextToggle = this.createToggle(
       contextContainer,
       "Include pre-context",
-      "Include the context before the cursor position",
+      "Include the context before the cursor position"
     );
 
     this.userPromptInput = contextContainer.createEl("textarea", {
-      cls: "user-prompt-input",
+      cls: "systemsculpt-user-prompt-input",
     });
 
     const activeView =
@@ -135,11 +137,11 @@ export class BlankTemplateModal extends Modal {
     this.postContextToggle = this.createToggle(
       contextContainer,
       "Include post-context",
-      "Include the context after the cursor position",
+      "Include the context after the cursor position"
     );
 
     this.postContextArea = contextContainer.createEl("textarea", {
-      cls: "context-area post-context-area",
+      cls: "systemsculpt-context-area systemsculpt-post-context-area",
     });
 
     this.preContextToggle.addEventListener("change", () => {
@@ -149,9 +151,12 @@ export class BlankTemplateModal extends Modal {
       this.updateContextAreas();
     });
 
-    const buttonContainer = modalContent.createDiv("button-container");
+    const buttonContainer = modalContent.createDiv(
+      "systemsculpt-button-container"
+    );
     const generateButton = buttonContainer.createEl("button", {
       text: "Generate",
+      cls: "systemsculpt-generate-button",
     });
     generateButton.addEventListener("click", this.handleGenerate.bind(this));
 
@@ -183,7 +188,7 @@ export class BlankTemplateModal extends Modal {
 
       const triggerKeyPosition = noteContent.lastIndexOf(
         triggerKey,
-        cursorOffset - 1,
+        cursorOffset - 1
       );
 
       const isTriggerKeyDirectlyBeforeCursor =
@@ -215,14 +220,18 @@ export class BlankTemplateModal extends Modal {
   private createToggle(
     container: HTMLElement,
     labelText: string,
-    description: string,
+    description: string
   ): HTMLInputElement {
-    const toggleContainer = container.createDiv("toggle-container");
+    const toggleContainer = container.createDiv(
+      "systemsculpt-toggle-container"
+    );
     const toggle = toggleContainer.createEl("input", {
       type: "checkbox",
+      cls: "systemsculpt-toggle",
     });
     const label = toggleContainer.createEl("label", {
       text: labelText,
+      cls: "systemsculpt-toggle-label",
     });
     label.title = description;
     return toggle;
@@ -273,7 +282,7 @@ export class BlankTemplateModal extends Modal {
             console.error(`System template "${systemTemplate}" not found.`);
             showCustomNotice(
               `System template "${systemTemplate}" not found.`,
-              5000,
+              5000
             );
             return;
           }
@@ -308,7 +317,7 @@ export class BlankTemplateModal extends Modal {
 
           modelInstance = models.find(
             (m) =>
-              m.id === this.plugin.plugin.brainModule.settings.defaultModelId,
+              m.id === this.plugin.plugin.brainModule.settings.defaultModelId
           );
 
           if (!modelInstance && models.length > 0) {
@@ -318,17 +327,17 @@ export class BlankTemplateModal extends Modal {
           if (modelInstance) {
             this.updateStatusBar(
               this.plugin.plugin.brainModule,
-              modelInstance.name,
+              modelInstance.name
             );
           } else {
             showCustomNotice(
-              "No models available. Please check your model settings and ensure at least one provider is enabled.",
+              "No models available. Please check your model settings and ensure at least one provider is enabled."
             );
             return;
           }
         } catch (error) {
           showCustomNotice(
-            "Failed to fetch models. Please check your settings and try again.",
+            "Failed to fetch models. Please check your settings and try again."
           );
           return;
         }
@@ -348,7 +357,7 @@ export class BlankTemplateModal extends Modal {
               }
               handleStreamingResponse(chunk, editor, this.plugin);
             },
-            signal,
+            signal
           );
         } catch (error) {
         } finally {
@@ -376,7 +385,7 @@ export class BlankTemplateModal extends Modal {
   }
 
   private async getSystemTemplateContent(
-    templateName: string,
+    templateName: string
   ): Promise<string | null> {
     const templatesPath = this.plugin.settings.templatesPath;
     console.log("Templates path:", templatesPath);
@@ -385,19 +394,19 @@ export class BlankTemplateModal extends Modal {
       .getFiles()
       .find(
         (file) =>
-          file.path.startsWith(templatesPath) && file.basename === templateName,
+          file.path.startsWith(templatesPath) && file.basename === templateName
       );
 
     console.log(
       "Template file found:",
-      templateFile ? templateFile.path : "Not found",
+      templateFile ? templateFile.path : "Not found"
     );
 
     if (templateFile) {
       const content = await this.plugin.plugin.app.vault.read(templateFile);
       const frontMatter =
         this.plugin.plugin.app.metadataCache.getFileCache(
-          templateFile,
+          templateFile
         )?.frontmatter;
 
       if (frontMatter && frontMatter.prompt) {
@@ -448,7 +457,7 @@ export class BlankTemplateModal extends Modal {
             this.userPromptInput.focus();
           }, 0);
         },
-        this.plugin.plugin.app,
+        this.plugin.plugin.app
       );
     }
   }

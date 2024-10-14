@@ -1,4 +1,4 @@
-.chat-container {
+.systemsculpt-chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -10,7 +10,7 @@
   position: relative;
 }
 
-.chat-header {
+.systemsculpt-chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -20,25 +20,25 @@
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.chat-title-container {
+.systemsculpt-chat-title-container {
   display: flex;
   align-items: center;
   flex-grow: 1;
   margin-right: 15px;
 }
 
-.chat-title-text {
+.systemsculpt-chat-title-text {
   font-weight: bold;
   cursor: pointer;
   transition: color 0.3s ease;
   text-decoration: underline;
 }
 
-.chat-title-text:hover {
+.systemsculpt-chat-title-text:hover {
   color: var(--text-accent);
 }
 
-.actions-button {
+.systemsculpt-actions-button {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -47,32 +47,32 @@
   transition: color 0.3s;
 }
 
-.actions-button:hover {
+.systemsculpt-actions-button:hover {
   color: var(--interactive-accent);
 }
 
-.chat-title-container.loading {
+.systemsculpt-chat-title-container.systemsculpt-loading {
   justify-content: flex-start;
 }
 
-.chat-title-container.loading::before {
+.systemsculpt-chat-title-container.systemsculpt-loading::before {
   content: 'Generating title...';
   font-size: 14px;
   color: var(--text-muted);
   margin-right: 10px;
 }
 
-.chat-title-container.loading .loading-spinner {
+.systemsculpt-chat-title-container.systemsculpt-loading .systemsculpt-loading-spinner {
   display: inline-block;
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top: 2px solid var(--interactive-accent);
   border-radius: 50%;
   width: 20px;
   height: 20px;
-  animation: spin 1s linear infinite;
+  animation: systemsculpt-spin 1s linear infinite;
 }
 
-.edit-title-input {
+.systemsculpt-edit-title-input {
   width: 100%;
   padding: 5px;
   font-size: 14px;
@@ -85,8 +85,8 @@
   overflow: auto;
 }
 
-.token-count,
-.cost-estimate {
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
   font-size: 12px;
   background-color: var(--background-secondary);
   padding: 5px 10px;
@@ -97,7 +97,7 @@
   margin-left: 10px;
 }
 
-.token-container {
+.systemsculpt-token-container {
   text-align: right;
   margin-bottom: 10px;
   display: flex;
@@ -107,18 +107,18 @@
 }
 
 @media (max-width: 600px) {
-  .token-container {
+  .systemsculpt-token-container {
     flex-direction: column;
     align-items: flex-end;
   }
 
-  .token-count,
-  .cost-estimate {
+  .systemsculpt-token-count,
+  .systemsculpt-cost-estimate {
     margin-left: 0;
   }
 }
 
-.chat-messages {
+.systemsculpt-chat-messages {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -128,7 +128,7 @@
   padding: 20px;
 }
 
-.chat-input-container {
+.systemsculpt-chat-input-container {
   display: flex;
   flex-direction: column;
   padding: 15px;
@@ -137,23 +137,23 @@
   min-height: 120px; /* Adjust this value to match your desired height */
 }
 
-.chat-input-wrapper,
-.chat-input-loading {
+.systemsculpt-chat-input-wrapper,
+.systemsculpt-chat-input-loading {
   display: flex;
   flex-direction: column;
   flex: 1;
 }
 
-.chat-input-wrapper {
+.systemsculpt-chat-input-wrapper {
   justify-content: space-between;
 }
 
-.chat-input-loading {
+.systemsculpt-chat-input-loading {
   justify-content: center;
   align-items: center;
 }
 
-.chat-input {
+.systemsculpt-chat-input {
   width: 100%;
   min-height: 30px;
   max-height: 250px;
@@ -170,19 +170,19 @@
   flex: 1;
 }
 
-.chat-input:focus {
+.systemsculpt-chat-input:focus {
   outline: none;
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 2px var(--interactive-accent);
 }
 
-.chat-input-footer {
+.systemsculpt-chat-input-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.token-and-cost-container {
+.systemsculpt-token-and-cost-container {
   flex-grow: 1;
   display: flex;
   flex-wrap: wrap;
@@ -191,17 +191,17 @@
   color: var(--text-muted);
 }
 
-.token-count,
-.cost-estimate {
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
   margin-right: 10px;
 }
 
-.send-button-container {
+.systemsculpt-send-button-container {
   display: flex;
   justify-content: flex-end;
 }
 
-.chat-send-button {
+.systemsculpt-chat-send-button {
   padding: 5px 10px;
   background-color: var(--interactive-accent);
   border: none;
@@ -210,15 +210,15 @@
   transition: background-color 0.3s ease;
 }
 
-.chat-send-button:hover {
+.systemsculpt-chat-send-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.actions-button:hover {
+.systemsculpt-actions-button:hover {
   cursor: pointer;
 }
 
-.chat-message.user {
+.systemsculpt-chat-message.systemsculpt-user {
   background-color: var(--background-primary);
   color: var(--text-normal);
   padding: 10px;
@@ -231,7 +231,7 @@
   user-select: text;
 }
 
-.chat-message {
+.systemsculpt-chat-message {
   position: relative;
   padding: 10px;
   margin: 10px 0;
@@ -241,7 +241,7 @@
   user-select: text;
 }
 
-.chat-message pre {
+.systemsculpt-chat-message pre {
   background-color: rgba(0, 0, 0, 0.5);
   font-size: 75%;
   padding: 10px;
@@ -252,15 +252,15 @@
   border: 2px solid transparent;
 }
 
-.chat-message pre:hover {
+.systemsculpt-chat-message pre:hover {
   box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
 }
 
-.chat-message pre.copied {
-  animation: greenGlow 1s ease;
+.systemsculpt-chat-message pre.systemsculpt-copied {
+  animation: systemsculpt-greenGlow 1s ease;
 }
 
-@keyframes greenGlow {
+@keyframes systemsculpt-greenGlow {
   0% {
     border-color: transparent;
   }
@@ -272,13 +272,13 @@
   }
 }
 
-.message-actions {
+.systemsculpt-message-actions {
   position: relative;
   opacity: 1;
   text-align: right;
 }
 
-.copy-button {
+.systemsculpt-copy-button {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -286,7 +286,7 @@
   transition: background-color 0.3s, color 0.3s;
 }
 
-.delete-button {
+.systemsculpt-delete-button {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -295,21 +295,21 @@
   margin-left: 5px;
 }
 
-.copy-button.copied {
+.systemsculpt-copy-button.systemsculpt-copied {
   background-color: green;
   color: white;
 }
 
-.delete-button.confirm-delete {
+.systemsculpt-delete-button.systemsculpt-confirm-delete {
   background-color: red;
   color: white;
 }
 
-.delete-button:hover {
+.systemsculpt-delete-button:hover {
   color: white;
 }
 
-.chat-message.ai {
+.systemsculpt-chat-message.systemsculpt-ai {
   background-color: var(--background-secondary);
   color: var(--text-normal);
   padding: 10px;
@@ -320,7 +320,7 @@
   user-select: text;
 }
 
-.chat-message .model-name {
+.systemsculpt-chat-message .systemsculpt-model-name {
   display: block;
   font-size: 12px;
   color: var(--text-faint);
@@ -332,25 +332,25 @@
   border-radius: 4px;
 }
 
-.chat-message.ai .model-name {
+.systemsculpt-chat-message.systemsculpt-ai .systemsculpt-model-name {
   color: var(--interactive-accent);
 }
 
-.context-files-container {
+.systemsculpt-context-files-container {
   padding: 15px;
   background-color: var(--background-primary-alt);
   border-top: 1px solid var(--background-modifier-border);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.context-buttons-container {
+.systemsculpt-context-buttons-container {
   display: flex;
   justify-content: space-between;
   margin-bottom: 10px;
 }
 
-.context-files-header,
-.auto-context-button {
+.systemsculpt-context-files-header,
+.systemsculpt-auto-context-button {
   flex: 1;
   margin: 0 5px;
   padding: 5px;
@@ -361,19 +361,19 @@
   transition: background-color 0.3s;
 }
 
-.context-files-header:hover,
-.auto-context-button:hover {
+.systemsculpt-context-files-header:hover,
+.systemsculpt-auto-context-button:hover {
   background-color: var(--interactive-hover);
 }
 
-.context-files-header h3,
-.auto-context-button h3 {
+.systemsculpt-context-files-header h3,
+.systemsculpt-auto-context-button h3 {
   margin: 0;
   font-size: 14px;
   color: var(--text-normal);
 }
 
-.context-files {
+.systemsculpt-context-files {
   border: 1px solid var(--background-modifier-border);
   background-color: var(--background-primary);
   border-radius: 4px;
@@ -383,11 +383,11 @@
   overflow-y: auto;
 }
 
-.context-files.has-files {
+.systemsculpt-context-files.systemsculpt-has-files {
   display: block;
 }
 
-.context-file {
+.systemsculpt-context-file {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -397,7 +397,7 @@
   position: relative;
 }
 
-.context-file-preview {
+.systemsculpt-context-file-preview {
   width: 40px;
   height: 40px;
   object-fit: cover;
@@ -405,15 +405,15 @@
   border-radius: 4px;
 }
 
-.audio-icon,
-.pdf-icon {
+.systemsculpt-audio-icon,
+.systemsculpt-pdf-icon {
   width: 40px;
   height: 40px;
   margin-right: 10px;
   color: var(--text-normal);
 }
 
-.context-file-remove {
+.systemsculpt-context-file-remove {
   position: absolute;
   top: 0;
   left: 0;
@@ -432,15 +432,15 @@
   transition: opacity 0.3s ease;
 }
 
-.context-file:hover .context-file-remove {
+.systemsculpt-context-file:hover .systemsculpt-context-file-remove {
   opacity: 1;
 }
 
-.context-file:last-child {
+.systemsculpt-context-file:last-child {
   border-bottom: none;
 }
 
-.context-file-path {
+.systemsculpt-context-file-path {
   flex: 1;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -449,25 +449,25 @@
   text-align: left;
 }
 
-.context-file-path::-webkit-scrollbar {
+.systemsculpt-context-file-path::-webkit-scrollbar {
   height: 6px;
 }
 
-.context-file-path::-webkit-scrollbar-track {
+.systemsculpt-context-file-path::-webkit-scrollbar-track {
   background: var(--scrollbar-bg);
 }
 
-.context-file-path::-webkit-scrollbar-thumb {
+.systemsculpt-context-file-path::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb-bg);
   border-radius: 3px;
 }
 
-.context-file-path span {
+.systemsculpt-context-file-path span {
   direction: ltr;
   display: inline-block;
 }
 
-.context-file .remove-context-file {
+.systemsculpt-context-file .systemsculpt-remove-context-file {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -478,11 +478,11 @@
   margin-left: 5px;
 }
 
-.context-file .remove-context-file:hover {
+.systemsculpt-context-file .systemsculpt-remove-context-file:hover {
   color: var(--interactive-accent);
 }
 
-.loading-overlay {
+.systemsculpt-loading-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -498,12 +498,12 @@
   transition: opacity 0.3s, visibility 0.3s;
 }
 
-.loading-overlay.visible {
+.systemsculpt-loading-overlay.systemsculpt-visible {
   opacity: 1;
   visibility: visible;
 }
 
-.loading-container {
+.systemsculpt-loading-container {
   background-color: var(--background-primary);
   padding: 20px;
   border-radius: 8px;
@@ -511,18 +511,18 @@
   text-align: center;
 }
 
-.loading-text {
+.systemsculpt-loading-text {
   font-size: 16px;
   color: var(--text-normal);
   margin-bottom: 10px;
 }
 
-@keyframes spin {
+@keyframes systemsculpt-spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-.title-edit-modal {
+.systemsculpt-title-edit-modal {
   display: flex;
   flex-direction: column;
   padding: 20px;
@@ -534,13 +534,13 @@
   margin: auto;
 }
 
-.title-edit-modal h2 {
+.systemsculpt-title-edit-modal h2 {
   margin-bottom: 15px;
   color: var(--text-normal);
   text-align: center;
 }
 
-.title-edit-input {
+.systemsculpt-title-edit-input {
   width: 100%;
   padding: 10px;
   font-size: 14px;
@@ -554,7 +554,7 @@
   margin-bottom: 15px;
 }
 
-.save-button {
+.systemsculpt-save-button {
   padding: 10px;
   font-size: 14px;
   background-color: var(--interactive-accent);
@@ -565,11 +565,11 @@
   transition: background-color 0.3s ease;
 }
 
-.save-button:hover {
+.systemsculpt-save-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.archive-popup {
+.systemsculpt-archive-popup {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -584,19 +584,19 @@
   align-items: center;
 }
 
-.archive-popup h3 {
+.systemsculpt-archive-popup h3 {
   margin-bottom: 15px;
   color: var(--text-normal);
   text-align: center;
 }
 
-.archive-popup-buttons {
+.systemsculpt-archive-popup-buttons {
   display: flex;
   justify-content: space-between;
   width: 100%;
 }
 
-.archive-popup-button {
+.systemsculpt-archive-popup-button {
   padding: 10px;
   font-size: 14px;
   border: none;
@@ -607,25 +607,25 @@
   margin: 0 5px;
 }
 
-.archive-popup-button.archive {
+.systemsculpt-archive-popup-button.systemsculpt-archive {
   background-color: var(--interactive-accent);
   color: white;
 }
 
-.archive-popup-button.delete {
+.systemsculpt-archive-popup-button.systemsculpt-delete {
   background-color: red;
   color: white;
 }
 
-.archive-popup-button:hover {
+.systemsculpt-archive-popup-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.archive-popup-button.delete:hover {
+.systemsculpt-archive-popup-button.systemsculpt-delete:hover {
   background-color: darkred;
 }
 
-.archive-popup-overlay {
+.systemsculpt-archive-popup-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -635,20 +635,20 @@
   z-index: 999;
 }
 
-.suggestion-content {
+.systemsculpt-suggestion-content {
   display: flex;
   align-items: center;
   padding: 5px;
 }
 
-.suggestion-checkbox-container {
+.systemsculpt-suggestion-checkbox-container {
   flex: 0 0 30px;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
-.suggestion-checkbox {
+.systemsculpt-suggestion-checkbox {
   appearance: none;
   -webkit-appearance: none;
   width: 18px;
@@ -660,12 +660,12 @@
   transition: background-color 0.3s, border-color 0.3s;
 }
 
-.suggestion-checkbox:checked {
+.systemsculpt-suggestion-checkbox:checked {
   background-color: var(--interactive-accent);
   border-color: var(--interactive-accent);
 }
 
-.suggestion-checkbox:checked::after {
+.systemsculpt-suggestion-checkbox:checked::after {
   content: '✓';
   position: absolute;
   top: 50%;
@@ -675,17 +675,17 @@
   font-size: 12px;
 }
 
-.suggestion-checkbox:focus {
+.systemsculpt-suggestion-checkbox:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--background-modifier-border);
 }
 
-.suggestion-checkbox:indeterminate {
+.systemsculpt-suggestion-checkbox:indeterminate {
   background-color: var(--interactive-accent);
   opacity: 0.5;
 }
 
-.suggestion-checkbox:indeterminate::after {
+.systemsculpt-suggestion-checkbox:indeterminate::after {
   content: '-';
   position: absolute;
   top: 50%;
@@ -695,50 +695,50 @@
   font-size: 12px;
 }
 
-.suggestion-text {
+.systemsculpt-suggestion-text {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
   margin-left: 10px;
 }
 
-.suggestion-title {
+.systemsculpt-suggestion-title {
   font-weight: bold;
   margin-bottom: 2px;
 }
 
-.suggestion-note {
+.systemsculpt-suggestion-note {
   font-size: 0.8em;
   color: var(--text-muted);
 }
 
-.fuzzy-match {
+.systemsculpt-fuzzy-match {
   color: var(--text-accent);
   text-decoration: underline;
 }
 
-.context-file-path {
+.systemsculpt-context-file-path {
   color: var(--text-normal);
   text-decoration: underline;
   cursor: pointer;
   transition: color 0.3s ease;
 }
 
-.context-file-path:hover {
+.systemsculpt-context-file-path:hover {
   color: var(--text-accent);
 }
 
-.chat-title-text {
+.systemsculpt-chat-title-text {
   cursor: pointer;
   transition: color 0.3s ease;
   text-decoration: underline;
 }
 
-.chat-title-text:hover {
+.systemsculpt-chat-title-text:hover {
   color: var(--text-accent);
 }
 
-.load-more-button {
+.systemsculpt-load-more-button {
   width: 100%;
   padding: 10px;
   background-color: var(--background-secondary);
@@ -748,51 +748,51 @@
   text-align: center;
 }
 
-.load-more-button:hover {
+.systemsculpt-load-more-button:hover {
   background-color: var(--background-modifier-hover);
 }
 
 @media (max-width: 768px) {
-  .chat-container {
+  .systemsculpt-chat-container {
     border-radius: 0;
   }
 
-  .chat-input-container {
+  .systemsculpt-chat-input-container {
     padding: 10px;
   }
 
-  .chat-input {
+  .systemsculpt-chat-input {
     font-size: 16px;
   }
 
-  .chat-send-button {
+  .systemsculpt-chat-send-button {
     padding: 10px 20px;
     font-size: 16px;
   }
 }
 
 @media (max-width: 480px) {
-  .chat-header {
+  .systemsculpt-chat-header {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .actions-button {
+  .systemsculpt-actions-button {
     margin-top: 10px;
   }
 
-  .chat-title {
+  .systemsculpt-chat-title {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .token-count {
+  .systemsculpt-token-count {
     margin-top: 5px;
     margin-left: 0;
   }
 }
 
-.chat-message.ai.loading {
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading {
   display: flex;
   align-items: center;
   padding: 10px;
@@ -801,26 +801,26 @@
   margin-bottom: 10px;
 }
 
-.chat-message.ai.loading .loading-spinner {
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading .systemsculpt-loading-spinner {
   width: 20px;
   height: 20px;
   border: 2px solid var(--text-muted);
   border-top: 2px solid var(--text-normal);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: systemsculpt-spin 1s linear infinite;
   margin-right: 10px;
 }
 
-.chat-message.ai.loading span {
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading span {
   color: var(--text-muted);
 }
 
-@keyframes spin {
+@keyframes systemsculpt-spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-.file-searcher-filters {
+.systemsculpt-file-searcher-filters {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -833,7 +833,7 @@
   box-sizing: border-box;
 }
 
-.file-searcher-confirm-button {
+.systemsculpt-file-searcher-confirm-button {
   display: block;
   width: calc(100% - 24px); /* Subtract padding from width */
   padding: 6px 12px; /* Increase vertical padding */
@@ -856,23 +856,23 @@
   z-index: 1; /* Ensure button is above other content */
 }
 
-.file-searcher-confirm-button.active {
+.systemsculpt-file-searcher-confirm-button.systemsculpt-active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
   cursor: pointer;
 }
 
-.file-searcher-confirm-button.active:hover {
+.systemsculpt-file-searcher-confirm-button.systemsculpt-active:hover {
   background-color: var(--interactive-accent-hover);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.file-searcher-confirm-button:disabled {
+.systemsculpt-file-searcher-confirm-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.file-searcher-filter {
+.systemsculpt-file-searcher-filter {
   display: flex;
   align-items: center;
   margin: 0 8px;
@@ -880,11 +880,11 @@
   color: var(--text-muted);
 }
 
-.file-searcher-filter-checkbox {
+.systemsculpt-file-searcher-filter-checkbox {
   margin-right: 4px;
 }
 
-.file-searcher-notice {
+.systemsculpt-file-searcher-notice {
   padding: 8px 12px;
   margin-top: 8px;
   background-color: var(--background-secondary);
@@ -897,7 +897,7 @@
   box-sizing: border-box;
 }
 
-.file-searcher-filters {
+.systemsculpt-file-searcher-filters {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -910,7 +910,7 @@
   box-sizing: border-box;
 }
 
-.file-searcher-filter {
+.systemsculpt-file-searcher-filter {
   display: flex;
   align-items: center;
   margin: 0 8px;
@@ -918,11 +918,11 @@
   color: var(--text-muted);
 }
 
-.file-searcher-filter-checkbox {
+.systemsculpt-file-searcher-filter-checkbox {
   margin-right: 4px;
 }
 
-.file-searcher-notice {
+.systemsculpt-file-searcher-notice {
   padding: 8px 12px;
   margin-top: 0px;
   background-color: var(--background-secondary);
@@ -935,13 +935,13 @@
   box-sizing: border-box;
 }
 
-.suggestion-file-extension {
+.systemsculpt-suggestion-file-extension {
   opacity: 0.7;
   font-size: 0.9em;
   margin-left: 0.3em;
 }
 
-.chat-input-loading {
+.systemsculpt-chat-input-loading {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -951,7 +951,7 @@
   margin-top: 10px;
 }
 
-.chat-input-loading .loading-spinner {
+.systemsculpt-chat-input-loading .systemsculpt-loading-spinner {
   width: 20px;
   height: 20px;
   border: 2px solid var(--text-muted);
@@ -961,10 +961,10 @@
   margin-right: 10px;
 }
 
-.chat-input-loading span {
+.systemsculpt-chat-input-loading span {
   color: var(--text-muted);
 }
 
-.hidden {
+.systemsculpt-hidden {
   display: none;
 }

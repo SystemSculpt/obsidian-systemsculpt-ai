@@ -11,7 +11,7 @@ import { showCustomNotice } from "../../../modals";
 
 async function createFolderIfNotExists(
   vault: any,
-  folderPath: string,
+  folderPath: string
 ): Promise<void> {
   const normalizedPath = normalizePath(folderPath);
   const folder = vault.getAbstractFileByPath(normalizedPath);
@@ -24,7 +24,7 @@ async function createFolderIfNotExists(
 async function downloadFile(
   plugin: TemplatesModule,
   filePath: string,
-  fileContent: string,
+  fileContent: string
 ): Promise<void> {
   const { vault } = plugin.plugin.app;
   let file = vault.getAbstractFileByPath(filePath);
@@ -45,7 +45,7 @@ async function isFolderEmpty(vault: any, folderPath: string): Promise<boolean> {
 }
 
 export async function downloadTemplatesFromServer(
-  plugin: TemplatesModule,
+  plugin: TemplatesModule
 ): Promise<void> {
   try {
     const licenseKey = plugin.settings.licenseKey.trim();
@@ -70,7 +70,7 @@ export async function downloadTemplatesFromServer(
         const modal = new ConfirmModal(
           plugin.plugin.app,
           resolve,
-          "You already have the latest templates. Do you want to do a clean install of them?",
+          "You already have the latest templates. Do you want to do a clean install of them?"
         );
         modal.open();
       });
@@ -83,14 +83,14 @@ export async function downloadTemplatesFromServer(
     }
   } catch (error) {
     showCustomNotice(
-      "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again.",
+      "Failed to download templates. Please check your SystemSculpt Patreon's license key and try again."
     );
   }
 }
 
 async function performTemplateSync(
   plugin: TemplatesModule,
-  latestVersion: string,
+  latestVersion: string
 ): Promise<void> {
   const response = await requestUrl({
     url: "https://license.systemsculpt.com/templates",
@@ -102,7 +102,7 @@ async function performTemplateSync(
 
   if (response.status === 401) {
     showCustomNotice(
-      "Invalid license key. Please enter a valid license key to sync templates.",
+      "Invalid license key. Please enter a systemsculpt-valid license key to sync templates."
     );
     return;
   }
@@ -119,7 +119,7 @@ async function performTemplateSync(
       const modal = new ConfirmModal(
         plugin.plugin.app,
         resolve,
-        "The SS-Syncs directory is not empty. Overwriting will replace all existing templates. If you have made any personal changes, please back them up and move them to a different directory.",
+        "The SS-Syncs directory is not empty. Overwriting will replace all existing templates. If you have made any personal changes, please back them up and move them to a different directory."
       );
       modal.open();
     });
@@ -144,7 +144,7 @@ async function performTemplateSync(
   await plugin.saveSettings();
 
   showCustomNotice(
-    "SS-Sync Templates downloaded successfully! Thanks for your support on Patreon!",
+    "SS-Sync Templates downloaded successfully! Thanks for your support on Patreon!"
   );
 }
 

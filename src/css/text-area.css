@@ -1,4 +1,4 @@
-.setting-item textarea {
+.systemsculpt-setting-item textarea {
   width: 100%;
   min-height: 250px;
   border-radius: 5px;
@@ -11,7 +11,7 @@
   resize: vertical;
 }
 
-.setting-item textarea:focus {
+.systemsculpt-setting-item textarea:focus {
   outline: none;
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 2px var(--interactive-accent-hover);

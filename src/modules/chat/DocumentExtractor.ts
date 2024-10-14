@@ -20,7 +20,7 @@ export class DocumentExtractor {
   }
 
   async extractDocument(
-    file: TFile,
+    file: TFile
   ): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const fileExtension = file.extension.toLowerCase();
 
@@ -38,7 +38,7 @@ export class DocumentExtractor {
   }
 
   private async extractComplexDocument(
-    file: TFile,
+    file: TFile
   ): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const fileContent = await this.app.vault.readBinary(file);
     return this.convertFileContent(fileContent, file);
@@ -46,7 +46,7 @@ export class DocumentExtractor {
 
   private async convertFileContent(
     fileContent: ArrayBuffer,
-    file: TFile,
+    file: TFile
   ): Promise<any> {
     const boundary =
       "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
@@ -55,7 +55,7 @@ export class DocumentExtractor {
     parts.push(
       `--${boundary}\r\n` +
         `Content-Disposition: form-data; name="file"; filename="${file.name}"\r\n` +
-        `Content-Type: ${this.getContentType(file.extension)}\r\n\r\n`,
+        `Content-Type: ${this.getContentType(file.extension)}\r\n\r\n`
     );
     parts.push(new Uint8Array(fileContent));
     parts.push("\r\n");
@@ -63,35 +63,35 @@ export class DocumentExtractor {
     parts.push(
       `--${boundary}\r\n` +
         'Content-Disposition: form-data; name="extract_images"\r\n\r\n' +
-        "true\r\n",
+        "true\r\n"
     );
 
     parts.push(
       `--${boundary}\r\n` +
         'Content-Disposition: form-data; name="force_ocr"\r\n\r\n' +
-        "true\r\n",
+        "true\r\n"
     );
 
     parts.push(
       `--${boundary}\r\n` +
         'Content-Disposition: form-data; name="paginate"\r\n\r\n' +
-        "true\r\n",
+        "true\r\n"
     );
 
     parts.push(
       `--${boundary}\r\n` +
         'Content-Disposition: form-data; name="langs"\r\n\r\n' +
-        `${this.chatModule.settings.langs}\r\n`,
+        `${this.chatModule.settings.langs}\r\n`
     );
 
     parts.push(`--${boundary}--\r\n`);
 
     const bodyParts = parts.map((part) =>
-      typeof part === "string" ? new TextEncoder().encode(part) : part,
+      typeof part === "string" ? new TextEncoder().encode(part) : part
     );
     const bodyLength = bodyParts.reduce(
       (acc, part) => acc + part.byteLength,
-      0,
+      0
     );
     const body = new Uint8Array(bodyLength);
     let offset = 0;
@@ -157,7 +157,7 @@ export class DocumentExtractor {
   private async processConversionResult(
     data: any,
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     if (Array.isArray(data) && data.length === 1) {
       data = data[0];
@@ -169,12 +169,12 @@ export class DocumentExtractor {
     await this.createOrOverwriteMarkdownFile(
       data.markdown,
       folderPath,
-      originalFile,
+      originalFile
     );
     await this.createOrOverwriteImageFiles(
       data.images,
       folderPath,
-      originalFile,
+      originalFile
     );
 
     try {
@@ -189,7 +189,7 @@ export class DocumentExtractor {
   private async createOrOverwriteMarkdownFile(
     markdown: string,
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     const fileName = "extracted_content.md";
     const filePath = `${folderPath}/${fileName}`;
@@ -207,7 +207,7 @@ export class DocumentExtractor {
   private async createOrOverwriteImageFiles(
     images: { [key: string]: string },
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     for (const [imageName, imageBase64] of Object.entries(images)) {
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
@@ -217,12 +217,12 @@ export class DocumentExtractor {
       if (existingFile instanceof TFile) {
         await this.chatModule.plugin.app.vault.modifyBinary(
           existingFile,
-          imageArrayBuffer,
+          imageArrayBuffer
         );
       } else {
         await this.chatModule.plugin.app.vault.createBinary(
           imagePath,
-          imageArrayBuffer,
+          imageArrayBuffer
         );
       }
     }
@@ -232,7 +232,7 @@ export class DocumentExtractor {
   private async addMetadataToMarkdownFile(
     metadata: { [key: string]: any } | null | undefined,
     folderPath: string,
-    originalFile: TFile,
+    originalFile: TFile
   ) {
     if (!metadata) {
       console.warn("No metadata available to add to the markdown file.");
@@ -249,13 +249,13 @@ export class DocumentExtractor {
         file,
         (fm) => {
           return frontmatter + fm;
-        },
+        }
       );
     }
   }
 
   private generateFrontmatter(
-    metadata: { [key: string]: any } | null | undefined,
+    metadata: { [key: string]: any } | null | undefined
   ): string {
     if (!metadata) {
       return "";
@@ -309,7 +309,7 @@ export class DocumentExtractor {
   }
 
   private async processImage(
-    file: TFile,
+    file: TFile
   ): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const content = await this.app.vault.readBinary(file);
     const base64Image = arrayBufferToBase64(content);
@@ -320,12 +320,12 @@ export class DocumentExtractor {
   }
 
   private async processAudio(
-    file: TFile,
+    file: TFile
   ): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const extractionFolderPath = `${file.parent?.path || ""}/${file.basename}`;
     const transcriptionFilePath = `${extractionFolderPath}/extracted_content.md`;
     const transcriptionFile = this.app.vault.getAbstractFileByPath(
-      transcriptionFilePath,
+      transcriptionFilePath
     ) as TFile;
 
     if (transcriptionFile) {
@@ -343,7 +343,7 @@ export class DocumentExtractor {
   }
 
   private async processMarkdown(
-    file: TFile,
+    file: TFile
   ): Promise<{ markdown: string; images: { [key: string]: string } }> {
     const content = await this.app.vault.read(file);
     return {
@@ -361,7 +361,7 @@ class ConfirmationModal extends Modal {
     app: App,
     private title: string,
     private message: string,
-    onSubmit: (result: boolean) => void,
+    onSubmit: (result: boolean) => void
   ) {
     super(app);
     this.onSubmit = onSubmit;
@@ -373,11 +373,11 @@ class ConfirmationModal extends Modal {
     contentEl.createEl("p", { text: this.message });
 
     const buttonContainer = contentEl.createEl("div", {
-      cls: "modal-button-container",
+      cls: "systemsculpt-modal-button-container",
     });
     const okButton = buttonContainer.createEl("button", {
       text: "OK",
-      cls: "mod-cta",
+      cls: "systemsculpt-mod-cta",
     });
     const cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
 

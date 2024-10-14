@@ -29,7 +29,7 @@ export class ModelSelectionModal extends Modal {
 
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.addClass("model-selection-modal");
+    contentEl.addClass("systemsculpt-model-selection-modal");
     contentEl.style.maxHeight = "500px";
     contentEl.style.overflow = "auto";
     contentEl.style.marginTop = "20px";
@@ -41,10 +41,12 @@ export class ModelSelectionModal extends Modal {
     this.searchInput = contentEl.createEl("input", {
       type: "text",
       placeholder: "Search models...",
-      cls: "model-search-input",
+      cls: "systemsculpt-model-search-input",
     });
 
-    this.modelListContainer = contentEl.createEl("div", { cls: "modal-list" });
+    this.modelListContainer = contentEl.createEl("div", {
+      cls: "systemsculpt-modal-list",
+    });
     this.renderLoadingState(this.modelListContainer);
 
     try {
@@ -56,7 +58,7 @@ export class ModelSelectionModal extends Modal {
       this.modelListContainer.empty();
       this.modelListContainer.createEl("div", {
         text: "Error loading models. Please try again later.",
-        cls: "error-message",
+        cls: "systemsculpt-error-message",
       });
     }
 
@@ -64,9 +66,11 @@ export class ModelSelectionModal extends Modal {
   }
 
   private renderLoadingState(container: HTMLElement) {
-    const loadingEl = container.createEl("div", { cls: "loading-models" });
+    const loadingEl = container.createEl("div", {
+      cls: "systemsculpt-loading-models",
+    });
     loadingEl.textContent = "Loading models";
-    loadingEl.addClass("revolving-dots");
+    loadingEl.addClass("systemsculpt-revolving-dots");
   }
 
   private async loadModels() {
@@ -131,12 +135,12 @@ export class ModelSelectionModal extends Modal {
     if (!this.modelListContainer.childElementCount) {
       this.modelListContainer.createEl("div", {
         text: "No models match your search.",
-        cls: "no-results-message",
+        cls: "systemsculpt-no-results-message",
       });
     }
 
     this.selectedModelIndex = filter
-      ? this.modelListContainer.querySelector(".modal-item")
+      ? this.modelListContainer.querySelector(".systemsculpt-modal-item")
         ? 0
         : -1
       : -1;
@@ -150,17 +154,21 @@ export class ModelSelectionModal extends Modal {
   ) {
     this.modelListContainer.createEl("h3", { text: groupName });
     const groupContainer = this.modelListContainer.createEl("div", {
-      cls: "modal-group",
+      cls: "systemsculpt-modal-group",
     });
 
     models.forEach((model) => {
-      const modelItem = groupContainer.createEl("div", { cls: "modal-item" });
-      const nameSpan = modelItem.createEl("span", { cls: "model-name" });
+      const modelItem = groupContainer.createEl("div", {
+        cls: "systemsculpt-modal-item",
+      });
+      const nameSpan = modelItem.createEl("span", {
+        cls: "systemsculpt-model-name",
+      });
       this.highlightText(nameSpan, model.name, searchTerms);
 
       if (model.provider !== "local") {
         const contextLengthSpan = modelItem.createEl("span", {
-          cls: "model-context-length",
+          cls: "systemsculpt-model-context-length",
         });
         contextLengthSpan.textContent = model.contextLength
           ? `Context: ${this.formatContextLength(model.contextLength)}`
@@ -168,7 +176,7 @@ export class ModelSelectionModal extends Modal {
       }
 
       const starIcon = modelItem.createEl("span", {
-        cls: "model-favorite-star",
+        cls: "systemsculpt-model-favorite-star",
       });
       this.updateFavoriteIcon(starIcon, model.favorite ?? false);
 
@@ -200,11 +208,11 @@ export class ModelSelectionModal extends Modal {
   private updateFavoriteIcon(element: HTMLElement, isFavorite: boolean) {
     if (isFavorite) {
       setIcon(element, "star");
-      element.classList.add("is-favorite");
+      element.classList.add("systemsculpt-is-favorite");
       element.style.fontVariationSettings = "'FILL' 1";
     } else {
       setIcon(element, "star");
-      element.classList.remove("is-favorite");
+      element.classList.remove("systemsculpt-is-favorite");
       element.style.fontVariationSettings = "'FILL' 0";
     }
   }
@@ -235,7 +243,7 @@ export class ModelSelectionModal extends Modal {
       const span = element.createEl("span");
       span.textContent = part;
       if (searchTerms.some((term) => part.toLowerCase() === term)) {
-        span.addClass("fuzzy-match");
+        span.addClass("systemsculpt-fuzzy-match");
       }
     });
   }
@@ -314,7 +322,7 @@ export class ModelSelectionModal extends Modal {
     const modelItems = this.modelListContainer.querySelectorAll(".modal-item");
     modelItems.forEach((item, index) => {
       if (index === this.selectedModelIndex) {
-        item.addClass("selected");
+        item.addClass("systemsculpt-selected");
         item.scrollIntoView({ block: "nearest", behavior: "smooth" });
       } else {
         item.removeClass("selected");
@@ -362,7 +370,7 @@ export class ModelSelectionModal extends Modal {
   private addRefreshButton() {
     const refreshButton = this.contentEl.createEl("button", {
       text: "Refresh Models List",
-      cls: "refresh-models-button",
+      cls: "systemsculpt-refresh-models-button",
     });
     refreshButton.addEventListener("click", async () => {
       refreshButton.textContent = "Refreshing models...";
@@ -377,16 +385,16 @@ export class ModelSelectionModal extends Modal {
   private addProviderCheckboxes() {
     const providers = ["Favorited", "Local", "OpenAI", "Groq", "OpenRouter"];
     const checkboxContainer = this.contentEl.createEl("div", {
-      cls: "provider-checkboxes",
+      cls: "systemsculpt-provider-checkboxes",
     });
 
     providers.forEach((provider) => {
       const label = checkboxContainer.createEl("label", {
-        cls: "provider-checkbox-label",
+        cls: "systemsculpt-provider-checkbox-label",
       });
       const checkbox = label.createEl("input", {
         type: "checkbox",
-        cls: "provider-checkbox",
+        cls: "systemsculpt-provider-checkbox",
       });
       const settingKey =
         `show${provider}Models` as keyof typeof this.plugin.settings;
@@ -406,15 +414,16 @@ export class ModelSelectionModal extends Modal {
   private showRefreshingState() {
     this.modelListContainer.empty();
     const refreshingEl = this.modelListContainer.createEl("div", {
-      cls: "refreshing-models",
+      cls: "systemsculpt-refreshing-models",
     });
     refreshingEl.textContent = "Refreshing models list";
-    refreshingEl.addClass("revolving-dots");
+    refreshingEl.addClass("systemsculpt-revolving-dots");
   }
 
   private hideRefreshingState() {
-    const refreshingEl =
-      this.modelListContainer.querySelector(".refreshing-models");
+    const refreshingEl = this.modelListContainer.querySelector(
+      ".systemsculpt-refreshing-models"
+    );
     if (refreshingEl) {
       refreshingEl.remove();
     }
@@ -430,7 +439,7 @@ export class ModelSelectionModal extends Modal {
       this.modelListContainer.empty();
       this.modelListContainer.createEl("div", {
         text: "Error refreshing models. Please try again later.",
-        cls: "error-message",
+        cls: "systemsculpt-error-message",
       });
     } finally {
       this.hideRefreshingState();

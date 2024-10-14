@@ -71,7 +71,9 @@ export class BrainSettingTab extends PluginSettingTab {
   }
 
   private addTemperatureInfoBox(): void {
-    const temperatureInfoBox = this.containerEl.createDiv("info-box");
+    const temperatureInfoBox = this.containerEl.createDiv(
+      "systemsculpt-info-box"
+    );
     temperatureInfoBox.createEl("p", {
       text: "If your LLM temperature is at or above 1.0, it may lead to over-creative results, which potentially runs the risk of producing gibberish or random text in some cases. It is recommended to stay under 1.0.",
     });

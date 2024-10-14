@@ -20,9 +20,9 @@ export class RecordingNotice {
 
   private createNoticeEl(): HTMLElement {
     const noticeEl = document.createElement("div");
-    noticeEl.addClass("recording-notice");
+    noticeEl.addClass("systemsculpt-recording-notice");
 
-    const headerEl = noticeEl.createDiv("recording-notice-header");
+    const headerEl = noticeEl.createDiv("systemsculpt-recording-notice-header");
     const hideButton = headerEl.createEl("button", { text: "-" });
     const stopButton = headerEl.createEl("button", {
       text: "Stop",
@@ -46,9 +46,9 @@ export class RecordingNotice {
     });
 
     const titleEl = noticeEl.createEl("h3", { text: "Recording audio..." });
-    titleEl.addClass("recording-notice-title");
+    titleEl.addClass("systemsculpt-recording-notice-title");
 
-    const canvasEl = noticeEl.createDiv("recording-notice-canvas");
+    const canvasEl = noticeEl.createDiv("systemsculpt-recording-notice-canvas");
     const canvas = canvasEl.createEl("canvas");
     canvas.width = 250;
     canvas.height = 50;
@@ -63,31 +63,35 @@ export class RecordingNotice {
   }
 
   showWithoutStartingRecording(): void {
-    let noticeContainer = document.body.querySelector(".notice-container");
+    let noticeContainer = document.body.querySelector(
+      ".systemsculpt-notice-container"
+    );
     if (!noticeContainer) {
       noticeContainer = document.createElement("div");
-      noticeContainer.className = "notice-container";
+      noticeContainer.className = "systemsculpt-notice-container";
       document.body.appendChild(noticeContainer);
     }
 
     if (noticeContainer) {
       noticeContainer.appendChild(this.noticeEl);
-      this.noticeEl.addClass("recording-notice-position");
+      this.noticeEl.addClass("systemsculpt-recording-notice-position");
     }
   }
 
   show(): Promise<void> {
     return new Promise((resolve, reject) => {
-      let noticeContainer = document.body.querySelector(".notice-container");
+      let noticeContainer = document.body.querySelector(
+        ".systemsculpt-notice-container"
+      );
       if (!noticeContainer) {
         noticeContainer = document.createElement("div");
-        noticeContainer.className = "notice-container";
+        noticeContainer.className = "systemsculpt-notice-container";
         document.body.appendChild(noticeContainer);
       }
 
       if (noticeContainer) {
         noticeContainer.appendChild(this.noticeEl);
-        this.noticeEl.addClass("recording-notice-position");
+        this.noticeEl.addClass("systemsculpt-recording-notice-position");
         this.startRecording().then(resolve).catch(reject);
       } else {
         reject(new Error("Notice container not found"));

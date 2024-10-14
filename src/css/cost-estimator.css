@@ -1,32 +1,32 @@
-.cost-estimator-modal {
+.systemsculpt-cost-estimator-modal {
   max-width: 500px;
   padding: 20px;
 }
 
-.cost-estimator-modal .modal-header {
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-header {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
 }
 
-.cost-estimator-modal .modal-icon {
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-icon {
   margin-right: 10px;
   color: var(--text-accent);
 }
 
-.cost-estimator-modal .modal-title {
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-title {
   margin: 0;
 }
 
-.cost-estimator-modal h3 {
+.systemsculpt-cost-estimator-modal h3 {
   margin-top: 20px;
   margin-bottom: 10px;
   color: var(--text-accent);
 }
 
-.cost-estimator-modal .model-info,
-.cost-estimator-modal .token-info,
-.cost-estimator-modal .predicted-cost {
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
   background-color: var(--background-primary-alt);
   color: var(--text-normal);
   padding: 15px;
@@ -40,37 +40,37 @@
   text-align: center;
 }
 
-.cost-estimator-modal .model-info,
-.cost-estimator-modal .predicted-cost {
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
   justify-content: space-evenly;
 }
 
-.cost-estimator-modal .model-name,
-.cost-estimator-modal .predicted-cost .value {
+.systemsculpt-cost-estimator-modal .systemsculpt-model-name,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost .systemsculpt-value {
   font-size: 1.5em;
   font-weight: bold;
   color: var(--text-accent);
   margin: 0 0 10px 0;
 }
 
-.cost-estimator-modal .pricing-info {
+.systemsculpt-cost-estimator-modal .systemsculpt-pricing-info {
   margin-top: 10px;
 }
 
-.cost-estimator-modal .pricing-detail {
+.systemsculpt-cost-estimator-modal .systemsculpt-pricing-detail {
   font-size: 0.9em;
   color: var(--text-muted);
   margin: 5px 0;
 }
 
-.cost-estimator-modal .token-info-container {
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info-container {
   display: flex;
   justify-content: space-between;
   margin: 10px auto;
   gap: 20px;
 }
 
-.cost-estimator-modal .token-info {
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info {
   flex: 1;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   font-size: 1em;
@@ -81,23 +81,23 @@
   justify-content: center;
 }
 
-.cost-estimator-modal .token-info .token-value {
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info .systemsculpt-token-value {
   font-size: 1.2em;
   font-weight: bold;
   margin-top: 5px;
 }
 
-.cost-estimator-modal .predicted-cost {
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
   border: 2px solid var(--text-accent);
 }
 
-.cost-estimator-modal .model-info h3,
-.cost-estimator-modal .predicted-cost h3 {
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info h3,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost h3 {
   margin: 0 0 10px 0;
   color: var(--text-normal);
 }
 
-.cost-estimator-modal .cost-notice {
+.systemsculpt-cost-estimator-modal .systemsculpt-cost-notice {
   font-size: 0.9em;
   color: var(--text-muted);
   text-align: center;

@@ -110,8 +110,12 @@ export class ChatModule {
     ) {
       this.plugin.chatToggleStatusBarItem = this.plugin.addStatusBarItem();
       this.plugin.chatToggleStatusBarItem.setText("C");
-      this.plugin.chatToggleStatusBarItem.addClass("status-bar-button");
-      this.plugin.chatToggleStatusBarItem.addClass("chat-toggle-button");
+      this.plugin.chatToggleStatusBarItem.addClass(
+        "systemsculpt-status-bar-button"
+      );
+      this.plugin.chatToggleStatusBarItem.addClass(
+        "systemsculpt-chat-toggle-button"
+      );
     }
 
     if (this.plugin.chatToggleStatusBarItem) {

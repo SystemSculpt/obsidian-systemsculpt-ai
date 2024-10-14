@@ -77,7 +77,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   onTrigger(
     cursor: EditorPosition,
     editor: Editor,
-    file: TFile,
+    file: TFile
   ): EditorSuggestTriggerInfo | null {
     if (!this.plugin.settings.triggerKey) {
       return null;
@@ -106,10 +106,10 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   async getSuggestions(context: EditorSuggestContext): Promise<TemplateItem[]> {
     const templateFiles = await this.getTemplateFiles(
       this.app,
-      this.plugin.settings.templatesPath,
+      this.plugin.settings.templatesPath
     );
     const filteredTemplateFiles = templateFiles.filter((file) =>
-      this.shouldIncludeTemplate(file),
+      this.shouldIncludeTemplate(file)
     );
     const templateItems: TemplateItem[] = await Promise.all(
       filteredTemplateFiles.map(async (file) => {
@@ -120,7 +120,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
           frontMatter,
           modelName,
         };
-      }),
+      })
     );
 
     const blankTemplate = {
@@ -167,7 +167,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         score: Math.max(
           this.fuzzyScore(item.frontMatter.name.toLowerCase(), lowercaseQuery),
           this.fuzzyScore(item.modelName.toLowerCase(), lowercaseQuery),
-          this.fuzzyScoreTags(item.frontMatter.tags, lowercaseQuery),
+          this.fuzzyScoreTags(item.frontMatter.tags, lowercaseQuery)
         ),
       }))
       .filter(({ score }) => score > 0)
@@ -178,7 +178,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   private fuzzyScoreTags(tags: string[], query: string): number {
     return Math.max(
       ...tags.map((tag) => this.fuzzyScore(tag.toLowerCase(), query)),
-      0,
+      0
     );
   }
 
@@ -222,7 +222,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       return true;
     }
     const ssSyncFolderPath = normalizePath(
-      `${this.plugin.settings.templatesPath}/SS-Sync`,
+      `${this.plugin.settings.templatesPath}/SS-Sync`
     );
     return !file.path.startsWith(ssSyncFolderPath);
   }
@@ -230,16 +230,24 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   renderSuggestion(item: TemplateItem, el: HTMLElement): void {
     const { name, description } = item.frontMatter;
 
-    el.addClass("template-suggestion");
+    el.addClass("systemsculpt-template-suggestion");
     el.empty();
 
-    const contentEl = el.createDiv({ cls: "template-content" });
-    const nameEl = contentEl.createEl("div", { cls: "template-name" });
-    const descEl = contentEl.createEl("div", { cls: "template-description" });
+    const contentEl = el.createDiv({ cls: "systemsculpt-template-content" });
+    const nameEl = contentEl.createEl("div", {
+      cls: "systemsculpt-template-name",
+    });
+    const descEl = contentEl.createEl("div", {
+      cls: "systemsculpt-template-description",
+    });
 
-    const metaEl = el.createDiv({ cls: "template-meta" });
-    const modelEl = metaEl.createEl("div", { cls: "template-model" });
-    const tagsEl = metaEl.createEl("div", { cls: "template-tags" });
+    const metaEl = el.createDiv({ cls: "systemsculpt-template-meta" });
+    const modelEl = metaEl.createEl("div", {
+      cls: "systemsculpt-template-model",
+    });
+    const tagsEl = metaEl.createEl("div", {
+      cls: "systemsculpt-template-tags",
+    });
 
     if (item.file === null) {
       nameEl.setText("Blank Template");
@@ -252,7 +260,10 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
       if (item.frontMatter.tags && item.frontMatter.tags.length > 0) {
         item.frontMatter.tags.forEach((tag) => {
-          tagsEl.createEl("span", { text: tag, cls: "template-tag" });
+          tagsEl.createEl("span", {
+            text: tag,
+            cls: "systemsculpt-template-tag",
+          });
         });
       }
     }
@@ -271,7 +282,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       if (index > lastIndex) {
         el.appendText(text.slice(lastIndex, index));
       }
-      el.createSpan({ text: text[index], cls: "fuzzy-match" });
+      el.createSpan({ text: text[index], cls: "systemsculpt-fuzzy-match" });
       lastIndex = index + 1;
     }
 
@@ -282,7 +293,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
   async selectSuggestion(
     item: TemplateItem,
-    evt: MouseEvent | KeyboardEvent,
+    evt: MouseEvent | KeyboardEvent
   ): Promise<void> {
     this.plugin.abortController = new AbortController();
     const signal = this.plugin.abortController.signal;
@@ -309,14 +320,14 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         }
       } catch (error) {
         showCustomNotice(
-          "Failed to fetch models. Please check your settings and try again.",
+          "Failed to fetch models. Please check your settings and try again."
         );
         return;
       }
 
       if (!modelInstance) {
         showCustomNotice(
-          "No models available. Please check your model settings and ensure at least one provider is enabled.",
+          "No models available. Please check your model settings and ensure at least one provider is enabled."
         );
         return;
       }
@@ -350,7 +361,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
               }
               handleStreamingResponse(chunk, editor, this.plugin);
             },
-            signal,
+            signal
           );
         } catch (error) {
           // @ts-ignore
@@ -370,13 +381,13 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     const templateFolder = vault.getAbstractFileByPath(templatesPath);
 
     const recursivelyCollectTemplates = async (
-      folder: TFolder,
+      folder: TFolder
     ): Promise<TFile[]> => {
       let templates: TFile[] = [];
       for (const child of folder.children) {
         if (child instanceof TFolder) {
           templates = templates.concat(
-            await recursivelyCollectTemplates(child),
+            await recursivelyCollectTemplates(child)
           );
         } else if (child instanceof TFile) {
           const frontMatter = await this.parseFrontMatter(child);
@@ -403,7 +414,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     app: App,
     value: string,
     templateFile: TFile,
-    el: HTMLElement,
+    el: HTMLElement
   ): Promise<void> {
     const frontMatter = await this.parseFrontMatter(templateFile);
     const { name, description, model, maxOutputTokens, tags } = frontMatter;
@@ -412,7 +423,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
 
     const nameEl = el.createEl("h2");
     nameEl.textContent = name;
-    nameEl.addClass("template-name");
+    nameEl.addClass("systemsculpt-template-name");
 
     const descriptionEl = el.createEl("p");
     const truncatedDescription =
@@ -420,21 +431,27 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         ? `${description.substring(0, 125)}...`
         : description;
     descriptionEl.textContent = truncatedDescription;
-    descriptionEl.addClass("template-description");
+    descriptionEl.addClass("systemsculpt-template-description");
 
-    const metaEl = el.createEl("div", { cls: "template-meta" });
+    const metaEl = el.createEl("div", { cls: "systemsculpt-template-meta" });
 
-    const modelEl = metaEl.createEl("span", { cls: "template-meta-item" });
+    const modelEl = metaEl.createEl("span", {
+      cls: "systemsculpt-template-meta-item",
+    });
     modelEl.textContent = model === "default" ? "current" : model;
 
     const maxOutputTokensEl = metaEl.createEl("span", {
-      cls: "template-meta-item",
+      cls: "systemsculpt-template-meta-item",
     });
     maxOutputTokensEl.textContent = `${maxOutputTokens} max`;
 
-    const tagsContainer = metaEl.createEl("div", { cls: "template-tags" });
+    const tagsContainer = metaEl.createEl("div", {
+      cls: "systemsculpt-template-tags",
+    });
     tags.forEach((tag: string, index: number) => {
-      const tagEl = tagsContainer.createEl("span", { cls: "template-tag" });
+      const tagEl = tagsContainer.createEl("span", {
+        cls: "systemsculpt-template-tag",
+      });
       tagEl.textContent = tag.trim();
     });
   }
@@ -442,7 +459,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   async searchAndOrderTemplates(
     app: App,
     templateFiles: TFile[],
-    query: string,
+    query: string
   ): Promise<TFile[]> {
     if (!query) {
       return templateFiles;
@@ -462,7 +479,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
           file,
           score: nameScore + descriptionScore,
         };
-      }),
+      })
     );
 
     return scoredTemplates

@@ -2,13 +2,13 @@ import { requestUrl } from "obsidian";
 
 export async function displayVersionInfo(
   containerEl: HTMLElement,
-  plugin: any,
+  plugin: any
 ): Promise<void> {
   const versionInfoContainer = containerEl.createDiv({
-    cls: "version-info-container",
+    cls: "systemsculpt-version-info-container",
   });
   const versionInfoText = versionInfoContainer.createEl("span", {
-    cls: "version-info-text",
+    cls: "systemsculpt-version-info-text",
     text: "Checking version...",
   });
 
@@ -17,14 +17,14 @@ export async function displayVersionInfo(
 
   if (installedVersion === latestVersion) {
     versionInfoText.setText(
-      "You are running the latest SystemSculpt AI release.",
+      "You are running the latest SystemSculpt AI release."
     );
-    versionInfoText.addClass("up-to-date");
+    versionInfoText.addClass("systemsculpt-up-to-date");
   } else {
     versionInfoText.setText(
-      "There is a new SystemSculpt AI release available, please update!",
+      "There is a new SystemSculpt AI release available, please update!"
     );
-    versionInfoText.addClass("outdated");
+    versionInfoText.addClass("systemsculpt-outdated");
   }
 }
 

@@ -92,10 +92,12 @@ export class ActionsModal extends Modal {
     this.searchInput = contentEl.createEl("input", {
       type: "text",
       placeholder: "Search actions...",
-      cls: "action-search-input",
+      cls: "systemsculpt-action-search-input",
     });
 
-    this.actionListContainer = contentEl.createEl("div", { cls: "modal-list" });
+    this.actionListContainer = contentEl.createEl("div", {
+      cls: "systemsculpt-modal-list",
+    });
     this.renderActionList();
     this.setupEventListeners();
 
@@ -119,12 +121,12 @@ export class ActionsModal extends Modal {
       if (filteredItems.length > 0) {
         this.actionListContainer.createEl("h3", { text: group.group });
         const groupContainer = this.actionListContainer.createEl("div", {
-          cls: "modal-group",
+          cls: "systemsculpt-modal-group",
         });
 
         filteredItems.forEach((action) => {
           const actionItem = groupContainer.createEl("div", {
-            cls: "modal-item",
+            cls: "systemsculpt-modal-item",
           });
           const nameSpan = actionItem.createEl("span");
           this.highlightText(nameSpan, action.name, searchTerms);
@@ -136,12 +138,12 @@ export class ActionsModal extends Modal {
     if (this.actionListContainer.childElementCount === 0) {
       this.actionListContainer.createEl("div", {
         text: "No actions match your search.",
-        cls: "no-results-message",
+        cls: "systemsculpt-no-results-message",
       });
     }
 
     this.selectedActionIndex = this.actionListContainer.querySelector(
-      ".modal-item"
+      ".systemsculpt-modal-item"
     )
       ? 0
       : -1;
@@ -165,7 +167,7 @@ export class ActionsModal extends Modal {
       const span = element.createEl("span");
       span.textContent = part;
       if (searchTerms.some((term) => part.toLowerCase().includes(term))) {
-        span.addClass("fuzzy-match");
+        span.addClass("systemsculpt-fuzzy-match");
       }
     });
   }
@@ -210,8 +212,9 @@ export class ActionsModal extends Modal {
   }
 
   private navigateActionSelection(direction: number) {
-    const actionItems =
-      this.actionListContainer.querySelectorAll(".modal-item");
+    const actionItems = this.actionListContainer.querySelectorAll(
+      ".systemsculpt-modal-item"
+    );
     if (actionItems.length === 0) return;
 
     this.selectedActionIndex += direction;
@@ -224,21 +227,22 @@ export class ActionsModal extends Modal {
   }
 
   private updateSelectedAction() {
-    const actionItems =
-      this.actionListContainer.querySelectorAll(".modal-item");
+    const actionItems = this.actionListContainer.querySelectorAll(
+      ".systemsculpt-modal-item"
+    );
     actionItems.forEach((item, index) => {
       if (index === this.selectedActionIndex) {
-        item.addClass("selected");
+        item.addClass("systemsculpt-selected");
         item.scrollIntoView({ block: "nearest", behavior: "smooth" });
       } else {
-        item.removeClass("selected");
+        item.removeClass("systemsculpt-selected");
       }
     });
   }
 
   private async selectHighlightedAction() {
     const selectedItem = this.actionListContainer.querySelector(
-      ".modal-item.selected"
+      ".systemsculpt-modal-item.systemsculpt-selected"
     ) as HTMLElement;
     if (selectedItem) {
       const action = this.actions

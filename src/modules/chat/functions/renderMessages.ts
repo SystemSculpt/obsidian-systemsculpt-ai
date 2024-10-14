@@ -14,7 +14,7 @@ function isScrolledToBottom(container: HTMLElement): boolean {
 export function renderMessages(
   chatMessages: ChatMessage[],
   messagesContainer: HTMLElement,
-  deleteMessageCallback: (index: number) => void,
+  deleteMessageCallback: (index: number) => void
 ) {
   if (!messagesContainer) return;
   messagesContainer.innerHTML = "";
@@ -39,7 +39,7 @@ export function renderMessages(
       visibleMessages,
       visibleMessageIndices,
       messagesContainer,
-      deleteMessageCallback,
+      deleteMessageCallback
     );
   });
   messagesContainer.appendChild(loadMoreButton);
@@ -49,7 +49,7 @@ export function renderMessages(
     visibleMessages,
     visibleMessageIndices,
     messagesContainer,
-    deleteMessageCallback,
+    deleteMessageCallback
   );
 
   const loadMoreMessages = () => {
@@ -86,10 +86,12 @@ function renderVisibleMessages(
   messages: ChatMessage[],
   indices: number[],
   container: HTMLElement,
-  deleteMessageCallback: (index: number) => void,
+  deleteMessageCallback: (index: number) => void
 ) {
   // Keep the "Load More" button if it exists
-  const loadMoreButton = container.querySelector(".load-more-button");
+  const loadMoreButton = container.querySelector(
+    ".systemsculpt-load-more-button"
+  );
   container.innerHTML = "";
   if (loadMoreButton) {
     container.appendChild(loadMoreButton);
@@ -109,20 +111,20 @@ function renderVisibleMessages(
         messages,
         indices,
         container,
-        deleteMessageCallback,
+        deleteMessageCallback
       );
     });
     container.appendChild(messageEl);
   });
 
   // Add click event listener for code blocks
-  const codeBlocks = container.querySelectorAll("pre");
+  const codeBlocks = container.querySelectorAll("pre.systemsculpt-code-block");
   codeBlocks.forEach(addCodeBlockClickListener);
 }
 
 function createLoadMoreButton(onClick: () => void): HTMLButtonElement {
   const button = document.createElement("button");
-  button.className = "load-more-button";
+  button.className = "systemsculpt-load-more-button";
   button.textContent = "See Previous Messages";
   button.addEventListener("click", onClick);
   return button;
@@ -131,36 +133,38 @@ function createLoadMoreButton(onClick: () => void): HTMLButtonElement {
 function createMessageElement(
   message: ChatMessage,
   index: number,
-  deleteMessageCallback: (index: number) => void,
+  deleteMessageCallback: (index: number) => void
 ): HTMLElement {
   const messageEl = document.createElement("div");
-  const roleClass = message.role.startsWith("ai") ? "ai" : message.role;
-  messageEl.className = `chat-message ${roleClass}`;
+  const roleClass = message.role.startsWith("ai")
+    ? "systemsculpt-ai"
+    : `systemsculpt-${message.role}`;
+  messageEl.className = `systemsculpt-chat-message ${roleClass}`;
   messageEl.innerHTML = `
     ${marked(message.text)}
-    <div class="message-actions">
-      <button class="copy-button" title="Copy Message">📋</button>
-      <button class="delete-button" title="Delete Message">🗑️</button>
+    <div class="systemsculpt-message-actions">
+      <button class="systemsculpt-copy-button" title="Copy Message">📋</button>
+      <button class="systemsculpt-delete-button" title="Delete Message">🗑️</button>
     </div>
     ${
       message.role.startsWith("ai")
-        ? `<span class="model-name">${message.model || "AI"}</span>`
+        ? `<span class="systemsculpt-model-name">${message.model || "AI"}</span>`
         : ""
     }
   `;
 
-  const copyButton = messageEl.querySelector(".copy-button");
+  const copyButton = messageEl.querySelector(".systemsculpt-copy-button");
   if (copyButton) {
     copyButton.addEventListener("click", () =>
-      handleCopyMessage(copyButton as HTMLElement, message.text),
+      handleCopyMessage(copyButton as HTMLElement, message.text)
     );
   }
 
-  const deleteButton = messageEl.querySelector(".delete-button");
+  const deleteButton = messageEl.querySelector(".systemsculpt-delete-button");
   if (deleteButton) {
     deleteButton.addEventListener("click", () => {
       handleDeleteMessage(deleteButton as HTMLElement, () =>
-        deleteMessageCallback(index),
+        deleteMessageCallback(index)
       );
     });
   }
@@ -170,10 +174,10 @@ function createMessageElement(
 
 function handleCopyMessage(button: HTMLElement, text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    button.classList.add("copied");
+    button.classList.add("systemsculpt-copied");
     button.innerHTML = "✅";
     setTimeout(() => {
-      button.classList.remove("copied");
+      button.classList.remove("systemsculpt-copied");
       button.innerHTML = "📋";
     }, 2000);
   });
@@ -183,9 +187,9 @@ function addCodeBlockClickListener(codeBlock: Element) {
   codeBlock.addEventListener("click", () => {
     const code = codeBlock.textContent || "";
     navigator.clipboard.writeText(code).then(() => {
-      codeBlock.classList.add("copied");
+      codeBlock.classList.add("systemsculpt-copied");
       setTimeout(() => {
-        codeBlock.classList.remove("copied");
+        codeBlock.classList.remove("systemsculpt-copied");
       }, 2000);
     });
   });

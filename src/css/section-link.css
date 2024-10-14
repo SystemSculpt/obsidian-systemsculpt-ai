@@ -1,5 +1,5 @@
 /* Section Link */
-.section-link {
+.systemsculpt-section-link {
   display: inline-block;
   padding: 0px 20px;
   font-size: 18px;
@@ -9,12 +9,12 @@
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
-.section-link:hover {
+.systemsculpt-section-link:hover {
   transform: translateY(-3px);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
 }
 
-.section-link {
+.systemsculpt-section-link {
   display: block;
   text-align: center;
   margin-bottom: 20px;

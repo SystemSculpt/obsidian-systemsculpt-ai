@@ -16,7 +16,7 @@ export class CostEstimator extends Modal {
   public static calculateCost(
     model: Model,
     tokenCount: number,
-    maxOutputTokens: number,
+    maxOutputTokens: number
   ): { minCost: number; maxCost: number } {
     if (!model.pricing) {
       return { minCost: 0, maxCost: 0 };
@@ -30,7 +30,7 @@ export class CostEstimator extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.addClass("cost-estimator-modal");
+    contentEl.addClass("systemsculpt-cost-estimator-modal");
 
     this.createHeader(contentEl);
     this.createModelInfo(contentEl);
@@ -39,66 +39,80 @@ export class CostEstimator extends Modal {
   }
 
   private createHeader(contentEl: HTMLElement) {
-    const header = contentEl.createEl("div", { cls: "modal-header" });
-    setIcon(header.createEl("span", { cls: "modal-icon" }), "calculator");
-    header.createEl("h2", { text: "Cost Estimator", cls: "modal-title" });
+    const header = contentEl.createEl("div", {
+      cls: "systemsculpt-modal-header",
+    });
+    setIcon(
+      header.createEl("span", { cls: "systemsculpt-modal-icon" }),
+      "calculator"
+    );
+    header.createEl("h2", {
+      text: "Cost Estimator",
+      cls: "systemsculpt-modal-title",
+    });
   }
 
   private createModelInfo(contentEl: HTMLElement) {
-    const modelInfo = contentEl.createEl("div", { cls: "model-info" });
+    const modelInfo = contentEl.createEl("div", {
+      cls: "systemsculpt-model-info",
+    });
     modelInfo.createEl("h3", { text: "Selected Model" });
     modelInfo.createEl("p", {
       text: this.model.name,
-      cls: "model-name",
+      cls: "systemsculpt-model-name",
     });
 
     if (this.model.pricing) {
       const pricePerMillionInput = this.model.pricing.prompt * 1000000;
       const pricePerMillionOutput = this.model.pricing.completion * 1000000;
 
-      const pricingInfo = modelInfo.createEl("div", { cls: "pricing-info" });
-      pricingInfo.createEl("p", {
-        text: `$${this.formatNumber(
-          pricePerMillionInput,
-        )} per million input tokens`,
-        cls: "pricing-detail",
+      const pricingInfo = modelInfo.createEl("div", {
+        cls: "systemsculpt-pricing-info",
       });
       pricingInfo.createEl("p", {
         text: `$${this.formatNumber(
-          pricePerMillionOutput,
+          pricePerMillionInput
+        )} per million input tokens`,
+        cls: "systemsculpt-pricing-detail",
+      });
+      pricingInfo.createEl("p", {
+        text: `$${this.formatNumber(
+          pricePerMillionOutput
         )} per million output tokens`,
-        cls: "pricing-detail",
+        cls: "systemsculpt-pricing-detail",
       });
     }
   }
 
   private createTokenInfo(contentEl: HTMLElement) {
     const tokenInfo = contentEl.createEl("div", {
-      cls: "token-info-container",
+      cls: "systemsculpt-token-info-container",
     });
     const leftTokenInfo = tokenInfo.createEl("div", {
-      cls: "token-info left",
+      cls: "systemsculpt-token-info systemsculpt-left",
     });
     leftTokenInfo.createEl("span", { text: "Current input tokens:" });
     leftTokenInfo.createEl("span", {
       text: this.tokenCount.toString(),
-      cls: "token-value",
+      cls: "systemsculpt-token-value",
     });
 
     const rightTokenInfo = tokenInfo.createEl("div", {
-      cls: "token-info right",
+      cls: "systemsculpt-token-info systemsculpt-right",
     });
     rightTokenInfo.createEl("span", { text: "Max output tokens:" });
     rightTokenInfo.createEl("span", {
       text: this.maxOutputTokens.toString(),
-      cls: "token-value",
+      cls: "systemsculpt-token-value",
     });
   }
 
   private createCostEstimate(contentEl: HTMLElement) {
-    const costEstimate = contentEl.createEl("div", { cls: "predicted-cost" });
+    const costEstimate = contentEl.createEl("div", {
+      cls: "systemsculpt-predicted-cost",
+    });
     costEstimate.createEl("h3", { text: "Estimated Cost for Next Message" });
-    const costInfo = costEstimate.createEl("p", { cls: "value" });
+    const costInfo = costEstimate.createEl("p", { cls: "systemsculpt-value" });
 
     if (this.model.provider === "local") {
       costInfo.innerHTML =
@@ -109,10 +123,12 @@ export class CostEstimator extends Modal {
       const maxCost =
         this.tokenCount * inputCost + this.maxOutputTokens * outputCost;
       costInfo.innerHTML = `$${this.formatNumber(
-        minCost,
+        minCost
       )} - $${this.formatNumber(maxCost)}`;
 
-      const disclaimer = contentEl.createEl("p", { cls: "cost-notice" });
+      const disclaimer = contentEl.createEl("p", {
+        cls: "systemsculpt-cost-notice",
+      });
       disclaimer.innerHTML =
         "This is a rough estimate. Actual cost may vary based on the specific content and length of the message.";
     } else {
@@ -136,10 +152,10 @@ export class CostEstimator extends Modal {
       }
       const significantDigits = decimal.slice(
         significantIndex,
-        significantIndex + 2,
+        significantIndex + 2
       );
       return `${integer}.${"0".repeat(
-        Math.max(0, significantIndex),
+        Math.max(0, significantIndex)
       )}${significantDigits}`;
     }
 

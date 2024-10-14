@@ -1,5 +1,5 @@
 /* Revolving dots animation */
-@keyframes revolving-dots {
+@keyframes systemsculpt-revolving-dots {
   0% {
     content: '';
   }
@@ -17,14 +17,14 @@
   }
 }
 
-.revolving-dots::after {
+.systemsculpt-revolving-dots::after {
   display: inline-block;
-  animation: revolving-dots 1s infinite steps(4);
+  animation: systemsculpt-revolving-dots 1s infinite steps(4);
   content: '';
 }
 
 /* Modal list styles */
-.modal-list {
+.systemsculpt-modal-list {
   margin-top: 0;
   display: flex;
   flex-direction: column;
@@ -32,7 +32,7 @@
   margin-bottom: 10px;
 }
 
-.modal-list h3 {
+.systemsculpt-modal-list h3 {
   margin: 15px 0 0px;
   padding: 0 5px;
   font-size: 14px;
@@ -42,32 +42,32 @@
 }
 
 /* Custom scrollbar styles */
-.model-selection-modal {
+.systemsculpt-model-selection-modal {
   padding-right: 12px; /* Increased padding to accommodate wider scrollbar */
   margin-top: 20px; /* Add top margin to modal content */
 }
 
-.model-selection-modal::-webkit-scrollbar {
+.systemsculpt-model-selection-modal::-webkit-scrollbar {
   width: 12px; /* Increased width */
 }
 
-.model-selection-modal::-webkit-scrollbar-track {
+.systemsculpt-model-selection-modal::-webkit-scrollbar-track {
   background: var(--background-secondary-alt);
   border-radius: 6px;
 }
 
-.model-selection-modal::-webkit-scrollbar-thumb {
+.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb {
   background: var(--interactive-accent); /* Changed to a more visible color */
   border-radius: 6px;
   border: 3px solid var(--background-secondary-alt); /* Added border for contrast */
 }
 
-.model-selection-modal::-webkit-scrollbar-thumb:hover {
+.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb:hover {
   background: var(--interactive-accent-hover);
 }
 
 /* Adjust modal group layout */
-.modal-group {
+.systemsculpt-modal-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
@@ -76,7 +76,7 @@
   margin-right: 10px; /* Add right margin */
 }
 
-.modal-item {
+.systemsculpt-modal-item {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -92,17 +92,17 @@
   position: relative;
 }
 
-.model-name {
+.systemsculpt-model-name {
   font-size: 0.9em;
   margin-bottom: 2px;
 }
 
-.model-context-length {
+.systemsculpt-model-context-length {
   font-size: 0.7em;
   color: var(--text-muted);
 }
 
-.model-favorite-star {
+.systemsculpt-model-favorite-star {
   position: absolute;
   bottom: 5px;
   right: 5px;
@@ -113,46 +113,46 @@
   margin: -5px;
 }
 
-.model-favorite-star:not(.is-favorite):hover {
+.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite):hover {
   color: var(--text-accent);
 }
 
-.model-favorite-star.is-favorite {
+.systemsculpt-model-favorite-star.systemsculpt-is-favorite {
   color: var(--text-accent);
   filter: drop-shadow(0 0 3px var(--text-accent))
     drop-shadow(0 0 1px var(--text-accent));
 }
 
-.model-favorite-star:not(.is-favorite) {
+.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite) {
   font-variation-settings: 'FILL' 0;
 }
 
-.model-favorite-star:hover {
+.systemsculpt-model-favorite-star:hover {
   transform: scale(1.2);
 }
 
-.model-favorite-star.is-favorite:hover {
+.systemsculpt-model-favorite-star.systemsculpt-is-favorite:hover {
   color: var(--text-muted);
 }
 
-.modal-item:hover {
+.systemsculpt-modal-item:hover {
   background-color: var(--background-secondary);
 }
 
-.modal-item.disabled {
+.systemsculpt-modal-item.systemsculpt-disabled {
   color: var(--text-muted);
 }
 
-.modal-item .checkbox-container {
+.systemsculpt-modal-item .systemsculpt-checkbox-container {
   margin-left: auto;
 }
 
 /* Additional styles */
-.modal-list-setting {
+.systemsculpt-modal-list-setting {
   margin-top: 0;
 }
 
-.model-search-input {
+.systemsculpt-model-search-input {
   width: 100%;
   margin-bottom: 10px;
   padding: 5px;
@@ -160,29 +160,29 @@
   border: 1px solid var(--background-modifier-border);
 }
 
-.modal-item.selected {
+.systemsculpt-modal-item.systemsculpt-selected {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
 
-.fuzzy-match {
+.systemsculpt-fuzzy-match {
   font-weight: bold;
   text-decoration: underline;
 }
 
-.modal-item.selected .fuzzy-match {
+.systemsculpt-modal-item.systemsculpt-selected .systemsculpt-fuzzy-match {
   color: inherit;
   background-color: transparent;
 }
 
-.no-results-message {
+.systemsculpt-no-results-message {
   text-align: center;
   padding: 20px;
   color: var(--text-muted);
 }
 
 /* API Endpoints specific styles */
-.api-endpoints-list {
+.systemsculpt-api-endpoints-list {
   margin-top: 0;
   display: flex;
   flex-direction: column;
@@ -190,7 +190,7 @@
   margin-bottom: 10px;
 }
 
-.api-endpoints-group {
+.systemsculpt-api-endpoints-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
@@ -199,17 +199,17 @@
   margin: 0 auto;
 }
 
-.api-endpoints-group .modal-item {
+.systemsculpt-api-endpoints-group .systemsculpt-modal-item {
   width: 100%;
 }
 
 @media (max-width: 600px) {
-  .api-endpoints-group {
+  .systemsculpt-api-endpoints-group {
     grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   }
 }
 
-.refresh-models-button {
+.systemsculpt-refresh-models-button {
   margin-bottom: 10px;
   padding: 5px 10px;
   border: none;
@@ -218,31 +218,31 @@
   transition: background-color 0.2s ease;
 }
 
-.refresh-models-button:hover {
+.systemsculpt-refresh-models-button:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.refreshing-models {
+.systemsculpt-refreshing-models {
   text-align: center;
   padding: 20px;
   color: var(--text-muted);
 }
 
 /* Provider checkbox styles */
-.provider-checkboxes {
+.systemsculpt-provider-checkboxes {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 15px;
 }
 
-.provider-checkbox-label {
+.systemsculpt-provider-checkbox-label {
   display: flex;
   align-items: center;
   cursor: pointer;
   user-select: none;
 }
 
-.provider-checkbox {
+.systemsculpt-provider-checkbox {
   margin-right: 5px;
 }

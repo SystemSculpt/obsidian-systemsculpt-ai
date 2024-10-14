@@ -4,7 +4,7 @@ import { DEFAULT_TASKS_SETTINGS } from "./TasksSettings";
 
 export function renderTaskPromptSetting(
   containerEl: HTMLElement,
-  plugin: TasksModule,
+  plugin: TasksModule
 ): void {
   new Setting(containerEl)
     .setName("Task prompt")
@@ -30,7 +30,7 @@ export function renderTaskPromptSetting(
           await plugin.saveSettings();
           plugin.settingsDisplay(containerEl);
         });
-      const infoBoxEl = containerEl.createDiv("info-box");
+      const infoBoxEl = containerEl.createDiv("systemsculpt-info-box");
       infoBoxEl.createEl("p", {
         text: "This is the system prompt that runs alongside whatever task you input. It is used to generate the actual tasks. If you prefer a different task structure, this is where you would input your custom instructions.",
       });
