@@ -46,7 +46,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
 
   private addFilters() {
     const inputEl = this.modalEl.querySelector(
-      ".systemsculpt-prompt-input"
+      ".prompt-input"
     ) as HTMLInputElement;
     if (inputEl) {
       const filtersContainer = createEl("div", {
@@ -92,7 +92,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
 
   private addNotice() {
     const inputEl = this.modalEl.querySelector(
-      ".systemsculpt-prompt-input"
+      ".prompt-input"
     ) as HTMLInputElement;
     if (inputEl && !this.noticeEl) {
       this.noticeEl = createEl("div", {
@@ -207,7 +207,7 @@ export class FileSearcher extends FuzzySuggestModal<TFile | TFolder> {
 
   updateSuggestions() {
     const inputEl = this.modalEl.querySelector(
-      ".systemsculpt-prompt-input"
+      ".prompt-input"
     ) as HTMLInputElement;
     if (inputEl) {
       const value = inputEl.value;

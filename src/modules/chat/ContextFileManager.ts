@@ -348,7 +348,7 @@ export class ContextFileManager {
       filePathEl.innerHTML = `<span>${file.path}</span>`;
       fileEl.appendChild(filePathEl);
 
-      const removeButton = document.createElement("button");
+      const removeButton = document.createElement("systemsculpt-button");
       removeButton.className = "systemsculpt-remove-context-file";
       removeButton.innerHTML = "🗑️";
       removeButton.title = "Remove Context File";
@@ -388,46 +388,6 @@ export class ContextFileManager {
     this.app.workspace.openLinkText(file.path, "", true);
   }
 
-  private async showFileExistsDialog(
-    fileName: string
-  ): Promise<"replace" | "keep-both" | "cancel"> {
-    return new Promise((resolve) => {
-      const modal = new FileExistsModal(this.app, fileName, (result) => {
-        resolve(result);
-      });
-      modal.open();
-    });
-  }
-
-  private getUniqueFileName(fileName: string): string {
-    const name = fileName.substring(0, fileName.lastIndexOf("."));
-    const extension = fileName.substring(fileName.lastIndexOf("."));
-    let counter = 1;
-    let newFileName = `${name} ${counter}${extension}`;
-
-    while (
-      this.chatView.contextFiles.some(
-        (file: TFile) => file.name === newFileName
-      )
-    ) {
-      counter++;
-      newFileName = `${name} ${counter}${extension}`;
-    }
-
-    return newFileName;
-  }
-
-  private async copyFileWithNewName(
-    file: TFile,
-    newFileName: string
-  ): Promise<TFile> {
-    const newPath = file.parent
-      ? `${file.parent.path}/${newFileName}`
-      : newFileName;
-    await this.app.vault.copy(file, newPath);
-    return this.app.vault.getAbstractFileByPath(newPath) as TFile;
-  }
-
   async addDirectoryToContextFiles(folder: TFolder) {
     const files = folder.children.filter(
       (child) => child instanceof TFile
@@ -435,60 +395,6 @@ export class ContextFileManager {
     for (const file of files) {
       await this.addFileToContextFiles(file);
     }
-  }
-}
-
-class FileExistsModal extends Modal {
-  private result: "replace" | "keep-both" | "cancel" = "cancel";
-  private onSubmit: (result: "replace" | "keep-both" | "cancel") => void;
-
-  constructor(
-    app: App,
-    private fileName: string,
-    onSubmit: (result: "replace" | "keep-both" | "cancel") => void
-  ) {
-    super(app);
-    this.onSubmit = onSubmit;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.createEl("h2", { text: "File Already Exists" });
-    contentEl.createEl("p", {
-      text: `A file named "${this.fileName}" already exists in the context files. What would you like to do?`,
-    });
-
-    const buttonContainer = contentEl.createEl("div", {
-      cls: "systemsculpt-modal-button-container",
-    });
-
-    const replaceButton = buttonContainer.createEl("button", {
-      text: "Replace",
-      cls: "systemsculpt-mod-warning",
-    });
-    replaceButton.addEventListener("click", () => {
-      this.result = "replace";
-      this.close();
-    });
-
-    const keepBothButton = buttonContainer.createEl("button", {
-      text: "Keep Both",
-    });
-    keepBothButton.addEventListener("click", () => {
-      this.result = "keep-both";
-      this.close();
-    });
-
-    const cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
-    cancelButton.addEventListener("click", () => {
-      this.result = "cancel";
-      this.close();
-    });
-  }
-
-  onClose() {
-    this.onSubmit(this.result);
-    this.contentEl.empty();
   }
 }
 

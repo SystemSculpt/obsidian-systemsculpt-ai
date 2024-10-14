@@ -248,21 +248,6 @@ export class ModelSelectionModal extends Modal {
     });
   }
 
-  private getProviderName(provider: string): string {
-    switch (provider) {
-      case "local":
-        return "Local";
-      case "openai":
-        return "OpenAI";
-      case "groq":
-        return "Groq";
-      case "openRouter":
-        return "OpenRouter";
-      default:
-        return provider.charAt(0).toUpperCase() + provider.slice(1);
-    }
-  }
-
   private formatContextLength(contextLength: number): string {
     if (contextLength >= 1000) {
       return `${(contextLength / 1000).toFixed(0)}K`;
