@@ -3,7 +3,6 @@ import { showCustomNotice } from "../../../modals";
 import { transcribeRecording } from "./transcribeRecording";
 import { MarkdownView, TFile, normalizePath } from "obsidian";
 import { ChatView } from "../../chat/ChatView";
-import { BrainModule } from "../../brain/BrainModule";
 
 export async function handleTranscription(
   plugin: RecorderModule,
@@ -24,75 +23,43 @@ export async function handleTranscription(
     throw new Error("No API Key found");
   }
 
-  const updateProgress = (current: number, total: number) => {
-    let message: string;
-    if (total > 1) {
-      message = `Large audio file detected. Transcribing chunk ${current} of ${total}...`;
-    } else {
-      message = "Transcribing...";
-    }
-
-    const noticeEl = document.querySelector(
-      ".systemsculpt-custom-notice .systemsculpt-custom-notice-message"
-    );
-    if (noticeEl) {
-      noticeEl.innerHTML = "";
-
-      if (message.includes("...")) {
-        const parts = message.split("...");
-        const textPart = document.createElement("span");
-        textPart.textContent = parts[0];
-        noticeEl.appendChild(textPart);
-
-        const dotsSpan = document.createElement("span");
-        dotsSpan.classList.add("revolving-dots");
-        dotsSpan.textContent = "...";
-        noticeEl.appendChild(dotsSpan);
-
-        if (parts.length > 1 && parts[1].trim() !== "") {
-          const extraSpan = document.createElement("span");
-          extraSpan.textContent = parts[1];
-          noticeEl.appendChild(extraSpan);
-        }
-      } else {
-        noticeEl.textContent = message;
-      }
-    }
-  };
-
   try {
+    showCustomNotice("Transcribing audio...");
     let transcription = await transcribeRecording(
       plugin,
       arrayBuffer,
-      updateProgress
+      () => {} // Empty function as we don't need to update progress anymore
     );
 
     let finalTranscription = transcription;
 
     if (plugin.settings.enablePostProcessingPrompt) {
+      showCustomNotice("Processing transcription...");
       const processedTranscription = await postProcessTranscription(
         plugin,
         transcription
       );
-      finalTranscription = `## Raw Transcription\n\n${transcription}\n\n## Processed Transcription\n\n${processedTranscription}`;
-    }
 
-    if (plugin.settings.includeLinkToRecording) {
+      if (plugin.settings.includeLinkToRecording) {
+        const recordingLink = `![[${recordingFile.path}]]`;
+        finalTranscription = `## Raw Transcription\n${recordingLink}\n${transcription}\n\n## Processed Transcription\n${processedTranscription}`;
+      } else {
+        finalTranscription = `## Raw Transcription\n${transcription}\n\n## Processed Transcription\n${processedTranscription}`;
+      }
+    } else if (plugin.settings.includeLinkToRecording) {
       const recordingLink = `![[${recordingFile.path}]]`;
-      finalTranscription = `${recordingLink}\n\n${finalTranscription}`;
+      finalTranscription = `## Raw Transcription\n${recordingLink}\n${transcription}`;
     }
 
     if (plugin.settings.saveTranscriptionToFile) {
       await saveTranscriptionToFile(plugin, finalTranscription, recordingFile);
     }
+
     if (plugin.settings.copyToClipboard) {
       navigator.clipboard.writeText(finalTranscription);
-      showCustomNotice(
-        "Transcribed, post-processed, and copied to your clipboard!"
-      );
-    } else {
-      showCustomNotice("Transcription and post-processing completed!");
     }
+
+    showCustomNotice("Transcription completed!");
 
     if (!skipPaste) {
       const activeLeaf = plugin.plugin.app.workspace.activeLeaf;
@@ -101,9 +68,6 @@ export async function handleTranscription(
       if (activeView instanceof ChatView) {
         const chatView = activeView as ChatView;
         chatView.setChatInputValue(finalTranscription);
-        showCustomNotice(
-          "Successfully pasted post-processed transcription into the chat input!"
-        );
       } else if (
         activeLeaf &&
         activeLeaf.view.getViewType() === "markdown" &&
@@ -113,9 +77,6 @@ export async function handleTranscription(
         const editor = markdownView.editor;
         if (editor) {
           editor.replaceSelection(finalTranscription);
-          showCustomNotice(
-            "Successfully pasted post-processed transcription into your note at the cursor position!"
-          );
         }
       }
     }
