@@ -325,7 +325,7 @@ export class ModelSelectionModal extends Modal {
         item.addClass("systemsculpt-selected");
         item.scrollIntoView({ block: "nearest", behavior: "smooth" });
       } else {
-        item.removeClass("selected");
+        item.removeClass("systemsculpt-selected");
       }
     });
 

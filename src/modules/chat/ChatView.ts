@@ -772,13 +772,13 @@ export class ChatView extends ItemView {
       ".systemsculpt-chat-input-loading"
     );
     if (loadingSpinner) {
-      loadingSpinner.classList.remove("hidden");
+      loadingSpinner.classList.remove("systemsculpt-hidden");
     }
     const chatInputWrapper = inputContainer.querySelector(
       ".systemsculpt-chat-input-wrapper"
     );
     if (chatInputWrapper) {
-      chatInputWrapper.classList.add("hidden");
+      chatInputWrapper.classList.add("systemsculpt-hidden");
     }
   }
 
@@ -797,13 +797,13 @@ export class ChatView extends ItemView {
       ".systemsculpt-chat-input-loading"
     );
     if (loadingSpinner) {
-      loadingSpinner.classList.add("hidden");
+      loadingSpinner.classList.add("systemsculpt-hidden");
     }
     const chatInputWrapper = inputContainer.querySelector(
       ".systemsculpt-chat-input-wrapper"
     );
     if (chatInputWrapper) {
-      chatInputWrapper.classList.remove("hidden");
+      chatInputWrapper.classList.remove("systemsculpt-hidden");
     }
 
     this.focusInput();

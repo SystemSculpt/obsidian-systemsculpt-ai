@@ -3,7 +3,7 @@
 }
 
 .systemsculpt-about-doc-container,
-.about-personal-container {
+.systemsculpt-about-personal-container {
   margin-bottom: 30px;
 }
 
@@ -43,13 +43,6 @@
   background-color: var(--interactive-accent-hover);
 }
 
-.systemsculpt-supporter-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  width: 100%;
-  margin-bottom: 30px;
-}
 
 .systemsculpt-supporter-item {
   background-color: var(--background-secondary-alt);
@@ -1271,8 +1264,9 @@
 }
 
 .systemsculpt-hidden {
-  display: none;
-}.systemsculpt-cost-estimator-modal {
+  display: none !important;
+}
+.systemsculpt-cost-estimator-modal {
   max-width: 500px;
   padding: 20px;
 }

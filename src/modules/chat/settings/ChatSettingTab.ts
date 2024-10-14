@@ -153,10 +153,10 @@ export class ChatSettingTab extends PluginSettingTab {
                 this.plugin.plugin.addStatusBarItem();
               this.plugin.plugin.chatToggleStatusBarItem.setText("C");
               this.plugin.plugin.chatToggleStatusBarItem.addClass(
-                "status-bar-button"
+                "systemsculpt-status-bar-button"
               );
               this.plugin.plugin.chatToggleStatusBarItem.addClass(
-                "chat-toggle-button"
+                "systemsculpt-chat-toggle-button"
               );
               this.plugin.plugin.chatToggleStatusBarItem.onClickEvent(() => {
                 this.plugin.openNewChat();
@@ -164,9 +164,13 @@ export class ChatSettingTab extends PluginSettingTab {
             }
 
             if (value) {
-              this.plugin.plugin.chatToggleStatusBarItem.removeClass("hidden");
+              this.plugin.plugin.chatToggleStatusBarItem.removeClass(
+                "systemsculpt-hidden"
+              );
             } else {
-              this.plugin.plugin.chatToggleStatusBarItem.addClass("hidden");
+              this.plugin.plugin.chatToggleStatusBarItem.addClass(
+                "systemsculpt-hidden"
+              );
             }
             await this.plugin.saveSettings();
           });
