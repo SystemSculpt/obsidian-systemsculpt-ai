@@ -13,6 +13,12 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Customizable AI settings (max output tokens, temperature)
 - AI-powered title generation and text continuation
 - API endpoint management for different AI services
+- Model favoriting and filtering options
+- Customizable system prompts for various generation tasks
+- Real-time model status indicators and cost estimation
+- Advanced model selection interface with search and filtering capabilities
+- Support for favoriting models and displaying them in a separate group
+- Ability to show/hide models from different providers (OpenAI, Groq, OpenRouter, Local)
 
 ### [Chat Module](https://www.systemsculpt.com/docs/chat-module-docs/chat-overview)
 
@@ -21,6 +27,13 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Local conversation storage and token count tracking
 - Customizable system prompts
 - Chat file management and archiving
+- Support for multiple API endpoints regarding PDF/doc/pptx files (Datalab and Selfhosted)
+- PDF text and image extraction using Marker API
+- Customizable attachments folder location
+- Option to create new folders for each PDF conversion
+- Asset subfolder creation for images
+- Configurable chat button on status bar
+- OCR language support for image processing
 
 ### [Recorder Module](https://www.systemsculpt.com/docs/recorder-module-docs/recorder-overview)
 
@@ -29,14 +42,26 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Customizable storage for recordings and transcriptions
 - Transcription of existing audio files
 - Microphone selection and status bar controls
+- Custom Whisper vocabulary for improved transcription accuracy
+- Post-processing prompt for transcription enhancement
+- Language selection for transcription
+- Options for saving audio clips and managing transcriptions
+- Customizable file paths for recordings and transcriptions
+- Toggle for automatic transcription after recording
 
 ### [Templates Module](https://www.systemsculpt.com/docs/templates-module-docs/templates-overview)
 
 - AI-generated and customizable note templates
-- Template syncing for licensed users
+- Template syncing for licensed users (Patreon members)
 - Intelligent template suggestions and blank template functionality
 - Integration with multiple AI models
 - Custom template creation with frontmatter support
+- Customizable templates path
+- Option to show/hide SS-Sync templates in suggestions
+- Configurable trigger key for template suggestions
+- Ability to copy AI responses to clipboard
+- Option to remember the last selected template
+- Customizable blank template prompt
 
 ### [Tasks Module](https://www.systemsculpt.com/docs/tasks-module-docs/tasks-overview)
 
@@ -44,6 +69,10 @@ SystemSculpt AI offers a suite of powerful modules, each designed to enhance spe
 - Customizable task prompts and storage locations
 - Quick task creation interface with batch creation support
 - Integration with Obsidian's native task handling
+- Customizable default task prompt for AI-generated tasks
+- Hotkey support for quick task viewing and addition
+- Automatic task list creation and management
+- Intelligent task breakdown with optional sub-tasks
 
 ## Getting Started
 
