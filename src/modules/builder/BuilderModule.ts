@@ -4,7 +4,7 @@ import {
   DEFAULT_BUILDER_SETTINGS,
 } from "./settings/BuilderSettings";
 import { BuilderSettingTab } from "./settings/BuilderSettingTab";
-import { TFile, Notice, WorkspaceLeaf } from "obsidian";
+import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem } from "obsidian";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -123,7 +123,8 @@ export class BuilderModule {
       console.log("Hello! Button is working!");
     });
 
-    // You can add more buttons here in the future
+    // Add the plus button to focused nodes
+    this.addPlusButtonToFocusedNodes(canvasView);
   }
 
   private removeBuilderMenuFromCanvas(canvasView?: any) {
@@ -134,6 +135,86 @@ export class BuilderModule {
     );
     if (existingBuilderMenu) {
       existingBuilderMenu.remove();
+    }
+  }
+
+  private addPlusButtonToFocusedNodes(canvasView: any) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (
+          mutation.type === "attributes" &&
+          mutation.attributeName === "class"
+        ) {
+          const node = mutation.target as HTMLElement;
+          if (
+            node.classList.contains("canvas-node") &&
+            node.classList.contains("is-focused")
+          ) {
+            this.addPlusButtonToNode(node);
+          } else {
+            this.removePlusButtonFromNode(node);
+          }
+        }
+      });
+    });
+
+    const canvasNodes = canvasView.containerEl.querySelectorAll(".canvas-node");
+    canvasNodes.forEach((node: HTMLElement) => {
+      observer.observe(node, { attributes: true });
+    });
+  }
+
+  private addPlusButtonToNode(node: HTMLElement) {
+    if (node.querySelector(".systemsculpt-plus-button")) return;
+
+    const plusButton = document.createElement("button");
+    plusButton.className = "systemsculpt-plus-button";
+    plusButton.textContent = "+";
+    plusButton.style.position = "absolute";
+    plusButton.style.bottom = "-40px";
+    plusButton.style.right = "-50px";
+    plusButton.style.zIndex = "1001";
+
+    plusButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showContextMenu(e, node);
+    });
+
+    node.appendChild(plusButton);
+  }
+
+  private showContextMenu(event: MouseEvent, node: HTMLElement) {
+    const menu = new Menu();
+
+    menu.addItem((item: MenuItem) => {
+      item.setTitle("Action 1").onClick(() => {
+        console.log("Action 1 clicked");
+        // Add your logic for Action 1 here
+      });
+    });
+
+    menu.addItem((item: MenuItem) => {
+      item.setTitle("Action 2").onClick(() => {
+        console.log("Action 2 clicked");
+        // Add your logic for Action 2 here
+      });
+    });
+
+    menu.addItem((item: MenuItem) => {
+      item.setTitle("Action 3").onClick(() => {
+        console.log("Action 3 clicked");
+        // Add your logic for Action 3 here
+      });
+    });
+
+    menu.showAtMouseEvent(event);
+  }
+
+  private removePlusButtonFromNode(node: HTMLElement) {
+    const plusButton = node.querySelector(".systemsculpt-plus-button");
+    if (plusButton) {
+      plusButton.remove();
     }
   }
 }

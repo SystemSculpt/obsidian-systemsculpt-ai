@@ -6,7 +6,8 @@
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
-.systemsculpt-builder-ai-button {
+.systemsculpt-builder-ai-button,
+.systemsculpt-plus-button {
   background-color: var(--interactive-normal);
   color: var(--text-normal);
   border: 1px solid var(--background-modifier-border);
@@ -19,11 +20,32 @@
   font-weight: var(--font-medium);
 }
 
-.systemsculpt-builder-ai-button:hover {
+.systemsculpt-builder-ai-button:hover,
+.systemsculpt-plus-button:hover {
   background-color: var(--interactive-hover);
 }
 
-.systemsculpt-builder-ai-button:active {
+.systemsculpt-builder-ai-button:active,
+.systemsculpt-plus-button:active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
+}
+
+.systemsculpt-options-menu {
+  position: absolute;
+  bottom: -40px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-secondary);
+  border-radius: 5px;
+  padding: 5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+}
+
+.systemsculpt-action-button {
+  margin: 2px 0;
+  width: 100%;
+  text-align: left;
 }
