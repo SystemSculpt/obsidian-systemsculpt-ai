@@ -14,6 +14,7 @@ import { ChatModule } from "./modules/chat/ChatModule";
 import { ChatView, VIEW_TYPE_CHAT } from "./modules/chat/ChatView";
 import { registerMp3ContextMenu } from "./events";
 import { checkForUpdate } from "./modules/brain/functions/checkForUpdate";
+import { BuilderModule } from "./modules/builder/BuilderModule";
 
 export default class SystemSculptPlugin extends Plugin {
   settings!: SystemSculptSettings;
@@ -29,6 +30,7 @@ export default class SystemSculptPlugin extends Plugin {
   recorderToggleStatusBarItem: HTMLElement | null = null;
   chatToggleStatusBarItem: HTMLElement | null = null;
   settingsTab!: SystemSculptSettingTab;
+  builderModule!: BuilderModule;
 
   async onload() {
     await this.loadSettings();
@@ -43,6 +45,7 @@ export default class SystemSculptPlugin extends Plugin {
     this.recorderModule = new RecorderModule(this, this.brainModule.AIService);
     this.aboutModule = new AboutModule(this);
     this.chatModule = new ChatModule(this);
+    this.builderModule = new BuilderModule(this);
 
     // Load modules
     const modules = [
@@ -53,6 +56,7 @@ export default class SystemSculptPlugin extends Plugin {
       { name: "Recorder", load: () => this.recorderModule.load() },
       { name: "About", load: () => this.aboutModule.load() },
       { name: "Chat", load: () => this.chatModule.load() },
+      { name: "Builder", load: () => this.builderModule.load() },
     ];
 
     for (const module of modules) {
@@ -133,7 +137,7 @@ export default class SystemSculptPlugin extends Plugin {
           chatView.setChatFile(file);
           await chatView.loadChatFile(file);
         }
-      }),
+      })
     );
 
     // Register file change event to update chat view when the chat file changes
@@ -150,7 +154,7 @@ export default class SystemSculptPlugin extends Plugin {
             await chatView.onFileChange(file);
           }
         }
-      }),
+      })
     );
 
     // Register file rename event to update chat view when the file is renamed
@@ -167,7 +171,7 @@ export default class SystemSculptPlugin extends Plugin {
             await chatView.onFileRename(file, oldPath);
           }
         }
-      }),
+      })
     );
   }
 
@@ -178,7 +182,7 @@ export default class SystemSculptPlugin extends Plugin {
         async () => {
           await checkForUpdate(this.brainModule);
         },
-        1 * 60 * 60 * 1000,
+        1 * 60 * 60 * 1000
       ); // recurring 1 hour check
     }, 5000);
   }

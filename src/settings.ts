@@ -115,6 +115,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       "recorder",
       "templates",
       "chat",
+      "builder",
       "about",
     ];
 
@@ -242,6 +243,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.renderTab(tabContainer, "recorder", "Recorder");
     this.renderTab(tabContainer, "templates", "Templates");
     this.renderTab(tabContainer, "chat", "Chat");
+    this.renderTab(tabContainer, "builder", "Builder");
     this.renderTab(tabContainer, "about", "About");
 
     return tabContainer;
@@ -318,6 +320,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       selectedContainer.style.display = "block";
       if (tabId === "about") {
         this.plugin.aboutModule.settingsDisplay(selectedContainer);
+      }
+      if (tabId === "builder") {
+        this.plugin.builderModule.settingsDisplay(selectedContainer);
       }
     }
   }
