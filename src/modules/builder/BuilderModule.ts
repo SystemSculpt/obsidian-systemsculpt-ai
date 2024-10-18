@@ -4,7 +4,7 @@ import {
   DEFAULT_BUILDER_SETTINGS,
 } from "./settings/BuilderSettings";
 import { BuilderSettingTab } from "./settings/BuilderSettingTab";
-import { TFile, Notice } from "obsidian";
+import { TFile, Notice, WorkspaceLeaf } from "obsidian";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -18,6 +18,13 @@ export class BuilderModule {
   async load() {
     await this.loadSettings();
     this.addCommands();
+
+    // Add event listener for when the active leaf changes
+    this.plugin.registerEvent(
+      this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
+        this.handleActiveLeafChange(leaf);
+      })
+    );
   }
 
   async loadSettings() {
@@ -70,10 +77,63 @@ export class BuilderModule {
     const initialContent = {
       nodes: [],
       edges: [],
+      systemsculptAIBuilder: true, // This is our unique identifier
+      version: "1.0", // Adding a version for future compatibility
     };
     await this.plugin.app.vault.modify(
       file,
       JSON.stringify(initialContent, null, 2)
     );
+  }
+
+  private handleActiveLeafChange(leaf: WorkspaceLeaf | null) {
+    if (leaf && leaf.view.getViewType() === "canvas") {
+      const canvasView = leaf.view as any;
+      if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
+        this.addBuilderMenuToCanvas(canvasView);
+      } else {
+        this.removeBuilderMenuFromCanvas(canvasView);
+      }
+    } else {
+      // If the new active leaf is not a canvas, remove the menu if it exists
+      this.removeBuilderMenuFromCanvas();
+    }
+  }
+
+  private addBuilderMenuToCanvas(canvasView: any) {
+    const canvasContainer =
+      canvasView.containerEl.querySelector(".canvas-wrapper");
+    if (!canvasContainer) return;
+
+    // Remove existing builder menu if it's there
+    this.removeBuilderMenuFromCanvas(canvasView);
+
+    const builderMenu = canvasContainer.createDiv("systemsculpt-builder-menu");
+    builderMenu.style.position = "absolute";
+    builderMenu.style.top = "10px";
+    builderMenu.style.left = "10px";
+    builderMenu.style.zIndex = "1000";
+
+    const aiButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-ai-button",
+      text: "SSAI Settings",
+    });
+
+    aiButton.addEventListener("click", () => {
+      console.log("Hello! Button is working!");
+    });
+
+    // You can add more buttons here in the future
+  }
+
+  private removeBuilderMenuFromCanvas(canvasView?: any) {
+    const container = canvasView ? canvasView.containerEl : document;
+
+    const existingBuilderMenu = container.querySelector(
+      ".systemsculpt-builder-menu"
+    );
+    if (existingBuilderMenu) {
+      existingBuilderMenu.remove();
+    }
   }
 }
