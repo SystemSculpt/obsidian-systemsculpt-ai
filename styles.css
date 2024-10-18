@@ -342,7 +342,18 @@
   width: 100%;
   text-align: left;
 }
-/* Disabled Button */
+
+.systemsculpt-node-input {
+  border: 2px solid #4CAF50;
+}
+
+.systemsculpt-node-processing {
+  border: 2px solid #FFC107;
+}
+
+.systemsculpt-node-output {
+  border: 2px solid #FF5722;
+}/* Disabled Button */
 .systemsculpt-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;

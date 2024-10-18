@@ -9,6 +9,7 @@ import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem } from "obsidian";
 export class BuilderModule {
   plugin: SystemSculptPlugin;
   settings: BuilderSettings;
+  lastActiveCanvasView: any | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -77,8 +78,8 @@ export class BuilderModule {
     const initialContent = {
       nodes: [],
       edges: [],
-      systemsculptAIBuilder: true, // This is our unique identifier
-      version: "1.0", // Adding a version for future compatibility
+      systemsculptAIBuilder: true,
+      version: "1.0",
     };
     await this.plugin.app.vault.modify(
       file,
@@ -89,13 +90,15 @@ export class BuilderModule {
   private handleActiveLeafChange(leaf: WorkspaceLeaf | null) {
     if (leaf && leaf.view.getViewType() === "canvas") {
       const canvasView = leaf.view as any;
+      this.lastActiveCanvasView = canvasView;
       if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
         this.addBuilderMenuToCanvas(canvasView);
       } else {
         this.removeBuilderMenuFromCanvas(canvasView);
       }
+      console.log("Active canvas view set:", this.lastActiveCanvasView);
     } else {
-      // If the new active leaf is not a canvas, remove the menu if it exists
+      this.lastActiveCanvasView = null;
       this.removeBuilderMenuFromCanvas();
     }
   }
@@ -188,23 +191,20 @@ export class BuilderModule {
     const menu = new Menu();
 
     menu.addItem((item: MenuItem) => {
-      item.setTitle("Action 1").onClick(() => {
-        console.log("Action 1 clicked");
-        // Add your logic for Action 1 here
+      item.setTitle("Add Input Node").onClick(() => {
+        this.addNode(node, "input");
       });
     });
 
     menu.addItem((item: MenuItem) => {
-      item.setTitle("Action 2").onClick(() => {
-        console.log("Action 2 clicked");
-        // Add your logic for Action 2 here
+      item.setTitle("Add Processing Node").onClick(() => {
+        this.addNode(node, "processing");
       });
     });
 
     menu.addItem((item: MenuItem) => {
-      item.setTitle("Action 3").onClick(() => {
-        console.log("Action 3 clicked");
-        // Add your logic for Action 3 here
+      item.setTitle("Add Output Node").onClick(() => {
+        this.addNode(node, "output");
       });
     });
 
@@ -216,5 +216,107 @@ export class BuilderModule {
     if (plusButton) {
       plusButton.remove();
     }
+  }
+
+  private addNode(
+    parentNode: HTMLElement,
+    nodeType: "input" | "processing" | "output"
+  ) {
+    console.log("Adding node. Parent node:", parentNode);
+    console.log("Node type:", nodeType);
+
+    const canvasView = this.getCanvasView(parentNode);
+    if (!canvasView) {
+      console.error("No active canvas view found");
+      return;
+    }
+
+    console.log("Canvas view:", canvasView);
+
+    const newNodeData = this.createNodeData(nodeType);
+
+    // Get the parent node's position
+    const transformStyle = parentNode.style.transform;
+    const matches = transformStyle.match(
+      /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/
+    );
+
+    let parentNodePosition = { x: 0, y: 0 };
+    if (matches && matches.length === 3) {
+      parentNodePosition = {
+        x: parseFloat(matches[1]),
+        y: parseFloat(matches[2]),
+      };
+    } else {
+      console.error("Unable to parse parent node position");
+    }
+
+    console.log("Parent node position:", parentNodePosition);
+
+    // Set the position for the new node
+    newNodeData.pos = {
+      x: parentNodePosition.x + 300,
+      y: parentNodePosition.y,
+    };
+
+    console.log("New node data:", newNodeData);
+
+    // Add the new node to the canvas
+    if (
+      canvasView.canvas &&
+      typeof canvasView.canvas.createTextNode === "function"
+    ) {
+      const newNode = canvasView.canvas.createTextNode(newNodeData);
+      console.log("New node created:", newNode);
+
+      // Trigger a canvas update
+      canvasView.canvas.requestSave();
+    } else {
+      console.error("Canvas or createTextNode method not found");
+    }
+  }
+
+  private getCanvasView(node: HTMLElement): any {
+    if (this.lastActiveCanvasView) {
+      return this.lastActiveCanvasView;
+    }
+
+    let current = node;
+    while (current && !current.classList.contains("canvas-wrapper")) {
+      // @ts-ignore
+      current = current.parentElement;
+    }
+    if (current) {
+      const canvasView = (current as any).__vue__;
+      if (canvasView) {
+        this.lastActiveCanvasView = canvasView;
+        return canvasView;
+      }
+    }
+    console.error("Canvas view not found");
+    return null;
+  }
+
+  private createNodeData(nodeType: "input" | "processing" | "output") {
+    const nodeColors = {
+      input: "#b5e8d5",
+      processing: "#f8d775",
+      output: "#f3a683",
+    };
+
+    return {
+      text: `# ${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node\n\nAdd your content here`,
+      size: {
+        width: 250,
+        height: 120,
+      },
+      pos: {
+        x: 0,
+        y: 0,
+      },
+      color: nodeColors[nodeType],
+      systemsculptNodeType: nodeType,
+      class: `systemsculpt-node-${nodeType}`,
+    };
   }
 }
