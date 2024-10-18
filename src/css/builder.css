@@ -1,0 +1,29 @@
+.systemsculpt-builder-menu {
+  display: flex;
+  background-color: var(--background-secondary);
+  border-radius: 5px;
+  padding: 5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.systemsculpt-builder-ai-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 0 5px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+}
+
+.systemsculpt-builder-ai-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-builder-ai-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
