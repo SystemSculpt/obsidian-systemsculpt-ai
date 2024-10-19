@@ -306,7 +306,7 @@ export class BuilderModule {
 
     // Add gear button
     const gearButton = this.createToolbarButton("⚙️", () => {
-      console.log("Gear icon button works");
+      this.showNodeSettingsModal(node);
     });
 
     toolbar.appendChild(plusButton);
@@ -322,7 +322,11 @@ export class BuilderModule {
     const button = document.createElement("button");
     button.className = "systemsculpt-toolbar-button";
     button.textContent = text;
-    button.addEventListener("click", onClick);
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onClick(e);
+    });
     return button;
   }
 
@@ -482,5 +486,68 @@ export class BuilderModule {
     ) {
       canvasView.canvas.requestSave();
     }
+  }
+
+  private showNodeSettingsModal(node: HTMLElement) {
+    const nodeType = this.getNodeType(node);
+    const modal = new Modal(this.plugin.app);
+    modal.titleEl.setText(
+      `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node Settings`
+    );
+
+    const content = modal.contentEl.createDiv("systemsculpt-node-settings");
+
+    // Add settings based on node type
+    switch (nodeType) {
+      case "input":
+        this.createInputNodeSettings(content);
+        break;
+      case "processing":
+        this.createProcessingNodeSettings(content);
+        break;
+      case "output":
+        this.createOutputNodeSettings(content);
+        break;
+    }
+
+    modal.open();
+  }
+
+  private getNodeType(node: HTMLElement): "input" | "processing" | "output" {
+    if (node.classList.contains("systemsculpt-node-input")) return "input";
+    if (node.classList.contains("systemsculpt-node-processing"))
+      return "processing";
+    if (node.classList.contains("systemsculpt-node-output")) return "output";
+    return "input"; // Default to input if no class is found
+  }
+
+  private createInputNodeSettings(container: HTMLElement) {
+    container.createEl("h3", { text: "Input Source" });
+    const select = container.createEl("select");
+    select.createEl("option", { value: "file", text: "File" });
+    select.createEl("option", { value: "user_input", text: "User Input" });
+    select.createEl("option", { value: "api", text: "API" });
+  }
+
+  private createProcessingNodeSettings(container: HTMLElement) {
+    container.createEl("h3", { text: "Processing Type" });
+    const select = container.createEl("select");
+    select.createEl("option", {
+      value: "text_analysis",
+      text: "Text Analysis",
+    });
+    select.createEl("option", {
+      value: "data_transformation",
+      text: "Data Transformation",
+    });
+    select.createEl("option", { value: "ai_model", text: "AI Model" });
+  }
+
+  private createOutputNodeSettings(container: HTMLElement) {
+    container.createEl("h3", { text: "Output Destination" });
+    const select = container.createEl("select");
+    select.createEl("option", { value: "file", text: "File" });
+    select.createEl("option", { value: "display", text: "Display" });
+    select.createEl("option", { value: "api", text: "API" });
   }
 }

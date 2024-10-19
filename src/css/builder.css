@@ -142,3 +142,27 @@
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
+
+.systemsculpt-node-settings {
+  padding: 20px;
+}
+
+.systemsculpt-node-settings h3 {
+  margin-bottom: 10px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-node-settings select {
+  width: 100%;
+  padding: 5px;
+  margin-bottom: 15px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-node-settings select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
