@@ -375,6 +375,9 @@ export class BuilderModule {
 
     const newNodeData = this.createNodeData(nodeType);
 
+    // Assign a unique ID to the new node
+    this.assignUniqueNodeId(newNodeData);
+
     // Get the parent node's position
     const transformStyle = parentNode.style.transform;
     const matches = transformStyle.match(
@@ -491,22 +494,39 @@ export class BuilderModule {
   private showNodeSettingsModal(node: HTMLElement) {
     const nodeType = this.getNodeType(node);
     const modal = new Modal(this.plugin.app);
-    modal.titleEl.setText(
-      `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node Settings`
+
+    // Create a container for the title and Node ID
+    const titleContainer = modal.titleEl.createDiv(
+      "systemsculpt-node-settings-title-container"
     );
+
+    // Add the main title
+    titleContainer.createEl("h2", {
+      text: `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node Settings`,
+      cls: "systemsculpt-node-settings-title",
+    });
+
+    // Ensure the node has a unique ID
+    const nodeId = this.assignUniqueNodeId(node);
+
+    // Add the Node ID in small type
+    titleContainer.createEl("p", {
+      text: `Node ID: ${nodeId}`,
+      cls: "systemsculpt-node-id",
+    });
 
     const content = modal.contentEl.createDiv("systemsculpt-node-settings");
 
     // Add settings based on node type
     switch (nodeType) {
       case "input":
-        this.createInputNodeSettings(content);
+        this.createInputNodeSettings(content, nodeId);
         break;
       case "processing":
-        this.createProcessingNodeSettings(content);
+        this.createProcessingNodeSettings(content, nodeId);
         break;
       case "output":
-        this.createOutputNodeSettings(content);
+        this.createOutputNodeSettings(content, nodeId);
         break;
     }
 
@@ -521,7 +541,7 @@ export class BuilderModule {
     return "input"; // Default to input if no class is found
   }
 
-  private createInputNodeSettings(container: HTMLElement) {
+  private createInputNodeSettings(container: HTMLElement, nodeId: string) {
     container.createEl("h3", { text: "Input Source" });
     const select = container.createEl("select");
     select.createEl("option", { value: "file", text: "File" });
@@ -529,7 +549,7 @@ export class BuilderModule {
     select.createEl("option", { value: "api", text: "API" });
   }
 
-  private createProcessingNodeSettings(container: HTMLElement) {
+  private createProcessingNodeSettings(container: HTMLElement, nodeId: string) {
     container.createEl("h3", { text: "Processing Type" });
     const select = container.createEl("select");
     select.createEl("option", {
@@ -543,11 +563,18 @@ export class BuilderModule {
     select.createEl("option", { value: "ai_model", text: "AI Model" });
   }
 
-  private createOutputNodeSettings(container: HTMLElement) {
+  private createOutputNodeSettings(container: HTMLElement, nodeId: string) {
     container.createEl("h3", { text: "Output Destination" });
     const select = container.createEl("select");
     select.createEl("option", { value: "file", text: "File" });
     select.createEl("option", { value: "display", text: "Display" });
     select.createEl("option", { value: "api", text: "API" });
+  }
+
+  private assignUniqueNodeId(node: any): string {
+    if (!node.id) {
+      node.id = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+    return node.id;
   }
 }

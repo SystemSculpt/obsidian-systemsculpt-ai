@@ -459,6 +459,21 @@
   outline: none;
   border-color: var(--interactive-accent);
 }
+
+.systemsculpt-node-settings-title-container {
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+.systemsculpt-node-settings-title {
+  margin-bottom: 5px;
+}
+
+.systemsculpt-node-id {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin: 0;
+}
 /* Disabled Button */
 .systemsculpt-button:disabled {
   opacity: 0.7;
