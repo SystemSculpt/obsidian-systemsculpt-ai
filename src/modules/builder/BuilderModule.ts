@@ -4,7 +4,7 @@ import {
   DEFAULT_BUILDER_SETTINGS,
 } from "./settings/BuilderSettings";
 import { BuilderSettingTab } from "./settings/BuilderSettingTab";
-import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem } from "obsidian";
+import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem, Modal } from "obsidian";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -140,8 +140,74 @@ export class BuilderModule {
       console.log("Hello! Button is working!");
     });
 
+    const infoButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-info-button",
+      text: "Node Types Info",
+    });
+
+    infoButton.addEventListener("click", () => {
+      this.showNodeTypesInfo();
+    });
+
     // Add the plus button to focused nodes
     this.addPlusButtonToFocusedNodes(canvasView);
+  }
+
+  private showNodeTypesInfo() {
+    const modal = new Modal(this.plugin.app);
+    modal.titleEl.setText("SystemSculpt AI Builder Node Types");
+
+    const content = document.createDocumentFragment();
+    content.appendChild(
+      this.createNodeTypeInfo(
+        "Input Nodes",
+        "Input nodes are the starting points of your AI workflow. They represent the data or information you want to process.",
+        ["Vault files", "User input or variables", "Output responses"]
+      )
+    );
+    content.appendChild(
+      this.createNodeTypeInfo(
+        "Processing Nodes",
+        "Processing nodes perform operations on the data from input nodes or other processing nodes. They represent the core AI and data manipulation tasks.",
+        ["System prompts"]
+      )
+    );
+    content.appendChild(
+      this.createNodeTypeInfo(
+        "Output Nodes",
+        "Output nodes represent the final results or actions of your AI workflow. They determine how the processed information is used or presented.",
+        ["Save results to a file"]
+      )
+    );
+
+    modal.contentEl.appendChild(content);
+    modal.open();
+  }
+
+  private createNodeTypeInfo(
+    title: string,
+    description: string,
+    examples: string[]
+  ): HTMLElement {
+    const container = document.createElement("div");
+    container.addClass("systemsculpt-node-info");
+
+    const titleEl = container.createEl("h3");
+    titleEl.setText(title);
+
+    const descEl = container.createEl("p");
+    descEl.setText(description);
+
+    const examplesTitle = container.createEl("h4");
+    examplesTitle.setText("Examples:");
+
+    const examplesList = container.createEl("ul");
+    examples.forEach((example) => {
+      const li = examplesList.createEl("li");
+      li.setText(example);
+    });
+
+    return container;
   }
 
   private removeBuilderMenuFromCanvas(canvasView?: any) {
