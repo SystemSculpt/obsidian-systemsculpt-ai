@@ -181,3 +181,41 @@
   color: var(--text-muted);
   margin: 0;
 }
+
+.systemsculpt-builder-separator {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-builder-label {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.systemsculpt-builder-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 5px 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.systemsculpt-builder-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-builder-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}

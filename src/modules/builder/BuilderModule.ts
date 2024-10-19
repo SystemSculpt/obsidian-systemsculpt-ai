@@ -175,7 +175,7 @@ export class BuilderModule {
     builderMenu.style.zIndex = "1000";
 
     const aiButton = builderMenu.createEl("button", {
-      cls: "systemsculpt-builder-ai-button",
+      cls: "systemsculpt-builder-button",
       text: "SSAI Settings",
     });
 
@@ -184,12 +184,48 @@ export class BuilderModule {
     });
 
     const infoButton = builderMenu.createEl("button", {
-      cls: "systemsculpt-builder-info-button",
+      cls: "systemsculpt-builder-button",
       text: "Node Types Info",
     });
 
     infoButton.addEventListener("click", () => {
       this.showNodeTypesInfo();
+    });
+
+    // Add separator
+    builderMenu.createEl("hr", { cls: "systemsculpt-builder-separator" });
+
+    // Add "Add Node" label
+    builderMenu.createEl("div", {
+      cls: "systemsculpt-builder-label",
+      text: "Add Node",
+    });
+
+    // Add Input Node button
+    const inputNodeButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-button",
+      text: "Input Node",
+    });
+    inputNodeButton.addEventListener("click", () => {
+      this.addNode(null, "input");
+    });
+
+    // Add Processing Node button
+    const processingNodeButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-button",
+      text: "Processing Node",
+    });
+    processingNodeButton.addEventListener("click", () => {
+      this.addNode(null, "processing");
+    });
+
+    // Add Output Node button
+    const outputNodeButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-button",
+      text: "Output Node",
+    });
+    outputNodeButton.addEventListener("click", () => {
+      this.addNode(null, "output");
     });
 
     // Add the plus button to focused nodes
@@ -378,7 +414,7 @@ export class BuilderModule {
   }
 
   private addNode(
-    parentNode: HTMLElement,
+    parentNode: HTMLElement | null,
     nodeType: "input" | "processing" | "output"
   ) {
     console.log("Adding node. Parent node:", parentNode);
@@ -397,20 +433,22 @@ export class BuilderModule {
     // Assign a unique ID to the new node
     const nodeId = this.assignUniqueNodeId(newNodeData);
 
-    // Get the parent node's position
-    const transformStyle = parentNode.style.transform;
-    const matches = transformStyle.match(
-      /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/
-    );
-
+    // Get the parent node's position or use default position
     let parentNodePosition = { x: 0, y: 0 };
-    if (matches && matches.length === 3) {
-      parentNodePosition = {
-        x: parseFloat(matches[1]),
-        y: parseFloat(matches[2]),
-      };
-    } else {
-      console.error("Unable to parse parent node position");
+    if (parentNode) {
+      const transformStyle = parentNode.style.transform;
+      const matches = transformStyle.match(
+        /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/
+      );
+
+      if (matches && matches.length === 3) {
+        parentNodePosition = {
+          x: parseFloat(matches[1]),
+          y: parseFloat(matches[2]),
+        };
+      } else {
+        console.error("Unable to parse parent node position");
+      }
     }
 
     console.log("Parent node position:", parentNodePosition);
@@ -464,23 +502,33 @@ export class BuilderModule {
     }
   }
 
-  private getCanvasView(node: HTMLElement): any {
+  private getCanvasView(node: HTMLElement | null): any | null {
     if (this.lastActiveCanvasView) {
       return this.lastActiveCanvasView;
     }
 
-    let current = node;
-    while (current && !current.classList.contains("canvas-wrapper")) {
-      // @ts-ignore
-      current = current.parentElement;
-    }
-    if (current) {
-      const canvasView = (current as any).__vue__;
-      if (canvasView) {
-        this.lastActiveCanvasView = canvasView;
-        return canvasView;
+    if (node) {
+      let current: HTMLElement | null = node;
+      while (current && !current.classList.contains("canvas-wrapper")) {
+        current = current.parentElement;
+      }
+      if (current) {
+        const canvasView = (current as any).__vue__;
+        if (canvasView) {
+          this.lastActiveCanvasView = canvasView;
+          return canvasView;
+        }
       }
     }
+
+    // If no node is provided or canvas view is not found, try to get the active canvas view
+    const activeLeaf = this.plugin.app.workspace.activeLeaf;
+    if (activeLeaf && activeLeaf.view.getViewType() === "canvas") {
+      const canvasView = activeLeaf.view as any;
+      this.lastActiveCanvasView = canvasView;
+      return canvasView;
+    }
+
     console.error("Canvas view not found");
     return null;
   }
