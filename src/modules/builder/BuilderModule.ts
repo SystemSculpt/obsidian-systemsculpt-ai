@@ -133,8 +133,12 @@ export class BuilderModule {
       canvasView.canvas.nodes.forEach((node: any) => {
         if (node.unknownData && node.unknownData.systemsculptNodeType) {
           const nodeType = node.unknownData.systemsculptNodeType;
+          const nodeId =
+            node.unknownData.systemsculptNodeId ||
+            this.assignUniqueNodeId(node);
           if (node.nodeEl) {
             node.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
+            node.nodeEl.setAttribute("data-systemsculpt-node-id", nodeId);
           }
         }
       });
@@ -376,7 +380,7 @@ export class BuilderModule {
     const newNodeData = this.createNodeData(nodeType);
 
     // Assign a unique ID to the new node
-    this.assignUniqueNodeId(newNodeData);
+    const nodeId = this.assignUniqueNodeId(newNodeData);
 
     // Get the parent node's position
     const transformStyle = parentNode.style.transform;
@@ -412,9 +416,9 @@ export class BuilderModule {
       const newNode = canvasView.canvas.createTextNode(newNodeData);
       console.log("New node created:", newNode);
 
-      // Add the class directly to the new node after a short delay
+      // Add the class and save node data directly to the new node after a short delay
       setTimeout(() => {
-        this.addClassToNewNode(newNode, nodeType);
+        this.addClassAndDataToNewNode(newNode, nodeType, nodeId);
         this.saveCanvasData(canvasView);
       }, 100);
 
@@ -425,16 +429,23 @@ export class BuilderModule {
     }
   }
 
-  private addClassToNewNode(newNode: any, nodeType: string) {
+  private addClassAndDataToNewNode(
+    newNode: any,
+    nodeType: string,
+    nodeId: string
+  ) {
     if (newNode && newNode.nodeEl) {
       newNode.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
       if (!newNode.unknownData) {
         newNode.unknownData = {};
       }
       newNode.unknownData.systemsculptNodeType = nodeType;
-      console.log(`Class added to node: systemsculpt-node-${nodeType}`);
+      newNode.unknownData.systemsculptNodeId = nodeId;
+      console.log(
+        `Class and data added to node: systemsculpt-node-${nodeType}, ID: ${nodeId}`
+      );
     } else {
-      console.error("Unable to add class to new node:", newNode);
+      console.error("Unable to add class and data to new node:", newNode);
     }
   }
 
@@ -506,8 +517,10 @@ export class BuilderModule {
       cls: "systemsculpt-node-settings-title",
     });
 
-    // Ensure the node has a unique ID
-    const nodeId = this.assignUniqueNodeId(node);
+    // Get the node's unique ID
+    const nodeId =
+      node.getAttribute("data-systemsculpt-node-id") ||
+      this.assignUniqueNodeId(node);
 
     // Add the Node ID in small type
     titleContainer.createEl("p", {
@@ -572,9 +585,13 @@ export class BuilderModule {
   }
 
   private assignUniqueNodeId(node: any): string {
-    if (!node.id) {
-      node.id = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    if (!node.unknownData || !node.unknownData.systemsculptNodeId) {
+      const nodeId = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      if (!node.unknownData) {
+        node.unknownData = {};
+      }
+      node.unknownData.systemsculptNodeId = nodeId;
     }
-    return node.id;
+    return node.unknownData.systemsculptNodeId;
   }
 }
