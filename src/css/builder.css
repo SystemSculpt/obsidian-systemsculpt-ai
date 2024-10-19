@@ -50,3 +50,32 @@
   text-align: left;
 }
 
+.systemsculpt-node-input {
+  border: 2px solid #4CAF50 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-processing {
+  border: 2px solid #FFC107 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-output {
+  border: 2px solid #FF5722 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-input.is-focused {
+  box-shadow: 0 0 10px #4CAF50, 0 0 20px #4CAF50;
+}
+
+.systemsculpt-node-processing.is-focused {
+  box-shadow: 0 0 10px #FFC107, 0 0 20px #FFC107;
+}
+
+.systemsculpt-node-output.is-focused {
+  box-shadow: 0 0 10px #FF5722, 0 0 20px #FF5722;
+}

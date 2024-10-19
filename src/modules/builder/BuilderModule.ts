@@ -93,6 +93,7 @@ export class BuilderModule {
       this.lastActiveCanvasView = canvasView;
       if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
         this.addBuilderMenuToCanvas(canvasView);
+        this.applyNodeClasses(canvasView);
       } else {
         this.removeBuilderMenuFromCanvas(canvasView);
       }
@@ -100,6 +101,19 @@ export class BuilderModule {
     } else {
       this.lastActiveCanvasView = null;
       this.removeBuilderMenuFromCanvas();
+    }
+  }
+
+  private applyNodeClasses(canvasView: any) {
+    if (canvasView.canvas && canvasView.canvas.nodes) {
+      canvasView.canvas.nodes.forEach((node: any) => {
+        if (node.unknownData && node.unknownData.systemsculptNodeType) {
+          const nodeType = node.unknownData.systemsculptNodeType;
+          if (node.nodeEl) {
+            node.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
+          }
+        }
+      });
     }
   }
 
@@ -269,10 +283,29 @@ export class BuilderModule {
       const newNode = canvasView.canvas.createTextNode(newNodeData);
       console.log("New node created:", newNode);
 
+      // Add the class directly to the new node after a short delay
+      setTimeout(() => {
+        this.addClassToNewNode(newNode, nodeType);
+        this.saveCanvasData(canvasView);
+      }, 100);
+
       // Trigger a canvas update
       canvasView.canvas.requestSave();
     } else {
       console.error("Canvas or createTextNode method not found");
+    }
+  }
+
+  private addClassToNewNode(newNode: any, nodeType: string) {
+    if (newNode && newNode.nodeEl) {
+      newNode.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
+      if (!newNode.unknownData) {
+        newNode.unknownData = {};
+      }
+      newNode.unknownData.systemsculptNodeType = nodeType;
+      console.log(`Class added to node: systemsculpt-node-${nodeType}`);
+    } else {
+      console.error("Unable to add class to new node:", newNode);
     }
   }
 
@@ -316,7 +349,16 @@ export class BuilderModule {
       },
       color: nodeColors[nodeType],
       systemsculptNodeType: nodeType,
-      class: `systemsculpt-node-${nodeType}`,
+      id: `systemsculpt-${nodeType}-${Date.now()}`,
     };
+  }
+
+  private saveCanvasData(canvasView: any) {
+    if (
+      canvasView.canvas &&
+      typeof canvasView.canvas.requestSave === "function"
+    ) {
+      canvasView.canvas.requestSave();
+    }
   }
 }
