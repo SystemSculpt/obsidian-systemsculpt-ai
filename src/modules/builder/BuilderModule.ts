@@ -94,6 +94,7 @@ export class BuilderModule {
       if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
         this.addBuilderMenuToCanvas(canvasView);
         this.applyNodeClasses(canvasView);
+        this.addPlusButtonsToCustomNodes(canvasView);
       } else {
         this.removeBuilderMenuFromCanvas(canvasView);
       }
@@ -150,7 +151,7 @@ export class BuilderModule {
     });
 
     // Add the plus button to focused nodes
-    this.addPlusButtonToFocusedNodes(canvasView);
+    this.addPlusButtonsToCustomNodes(canvasView);
   }
 
   private showNodeTypesInfo() {
@@ -221,29 +222,43 @@ export class BuilderModule {
     }
   }
 
-  private addPlusButtonToFocusedNodes(canvasView: any) {
+  private addPlusButtonsToCustomNodes(canvasView: any) {
+    const canvasNodes = canvasView.containerEl.querySelectorAll(".canvas-node");
+    canvasNodes.forEach((node: HTMLElement) => {
+      if (
+        node.classList.contains("systemsculpt-node-input") ||
+        node.classList.contains("systemsculpt-node-processing") ||
+        node.classList.contains("systemsculpt-node-output")
+      ) {
+        this.addPlusButtonToNode(node);
+      }
+    });
+
+    // Set up an observer to add plus buttons to new nodes
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
-        if (
-          mutation.type === "attributes" &&
-          mutation.attributeName === "class"
-        ) {
-          const node = mutation.target as HTMLElement;
-          if (
-            node.classList.contains("canvas-node") &&
-            node.classList.contains("is-focused")
-          ) {
-            this.addPlusButtonToNode(node);
-          } else {
-            this.removePlusButtonFromNode(node);
-          }
+        if (mutation.type === "childList") {
+          mutation.addedNodes.forEach((addedNode) => {
+            if (
+              addedNode instanceof HTMLElement &&
+              addedNode.classList.contains("canvas-node")
+            ) {
+              if (
+                addedNode.classList.contains("systemsculpt-node-input") ||
+                addedNode.classList.contains("systemsculpt-node-processing") ||
+                addedNode.classList.contains("systemsculpt-node-output")
+              ) {
+                this.addPlusButtonToNode(addedNode);
+              }
+            }
+          });
         }
       });
     });
 
-    const canvasNodes = canvasView.containerEl.querySelectorAll(".canvas-node");
-    canvasNodes.forEach((node: HTMLElement) => {
-      observer.observe(node, { attributes: true });
+    observer.observe(canvasView.containerEl, {
+      childList: true,
+      subtree: true,
     });
   }
 
@@ -289,13 +304,6 @@ export class BuilderModule {
     });
 
     menu.showAtMouseEvent(event);
-  }
-
-  private removePlusButtonFromNode(node: HTMLElement) {
-    const plusButton = node.querySelector(".systemsculpt-plus-button");
-    if (plusButton) {
-      plusButton.remove();
-    }
   }
 
   private addNode(
