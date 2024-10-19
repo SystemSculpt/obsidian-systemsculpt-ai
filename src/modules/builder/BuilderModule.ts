@@ -130,19 +130,34 @@ export class BuilderModule {
 
   private applyNodeClasses(canvasView: any) {
     if (canvasView.canvas && canvasView.canvas.nodes) {
+      const existingIds = new Set();
       canvasView.canvas.nodes.forEach((node: any) => {
         if (node.unknownData && node.unknownData.systemsculptNodeType) {
           const nodeType = node.unknownData.systemsculptNodeType;
-          const nodeId =
-            node.unknownData.systemsculptNodeId ||
-            this.assignUniqueNodeId(node);
+          let nodeId = node.unknownData.systemsculptNodeId;
+
+          // Check if the ID already exists or is not set
+          if (!nodeId || existingIds.has(nodeId)) {
+            nodeId = this.generateUniqueNodeId();
+            node.unknownData.systemsculptNodeId = nodeId;
+          }
+
+          existingIds.add(nodeId);
+
           if (node.nodeEl) {
             node.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
             node.nodeEl.setAttribute("data-systemsculpt-node-id", nodeId);
           }
         }
       });
+
+      // Save the updated canvas data
+      this.saveCanvasData(canvasView);
     }
+  }
+
+  private generateUniqueNodeId(): string {
+    return `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   private addBuilderMenuToCanvas(canvasView: any) {
@@ -586,7 +601,7 @@ export class BuilderModule {
 
   private assignUniqueNodeId(node: any): string {
     if (!node.unknownData || !node.unknownData.systemsculptNodeId) {
-      const nodeId = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const nodeId = this.generateUniqueNodeId();
       if (!node.unknownData) {
         node.unknownData = {};
       }
