@@ -20,10 +20,29 @@ export class BuilderModule {
     await this.loadSettings();
     this.addCommands();
 
+    // Apply custom visuals to all canvas views on plugin load
+    this.applyCustomVisualsToAllCanvasViews();
+
     // Add event listener for when the active leaf changes
     this.plugin.registerEvent(
       this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
         this.handleActiveLeafChange(leaf);
+      })
+    );
+
+    // Add event listener for layout changes
+    this.plugin.registerEvent(
+      this.plugin.app.workspace.on("layout-change", () => {
+        this.applyCustomVisualsToAllCanvasViews();
+      })
+    );
+
+    // Add event listener for file changes
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("modify", (file) => {
+        if (file instanceof TFile && file.extension === "canvas") {
+          this.applyCustomVisualsToAllCanvasViews();
+        }
       })
     );
   }
@@ -87,21 +106,25 @@ export class BuilderModule {
     );
   }
 
-  private handleActiveLeafChange(leaf: WorkspaceLeaf | null) {
-    if (leaf && leaf.view.getViewType() === "canvas") {
+  private applyCustomVisualsToAllCanvasViews() {
+    const canvasViews = this.plugin.app.workspace.getLeavesOfType("canvas");
+    canvasViews.forEach((leaf) => {
       const canvasView = leaf.view as any;
-      this.lastActiveCanvasView = canvasView;
       if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
         this.addBuilderMenuToCanvas(canvasView);
         this.applyNodeClasses(canvasView);
         this.addPlusButtonsToCustomNodes(canvasView);
-      } else {
-        this.removeBuilderMenuFromCanvas(canvasView);
       }
+    });
+  }
+
+  private handleActiveLeafChange(leaf: WorkspaceLeaf | null) {
+    if (leaf && leaf.view.getViewType() === "canvas") {
+      const canvasView = leaf.view as any;
+      this.lastActiveCanvasView = canvasView;
       console.log("Active canvas view set:", this.lastActiveCanvasView);
     } else {
       this.lastActiveCanvasView = null;
-      this.removeBuilderMenuFromCanvas();
     }
   }
 
