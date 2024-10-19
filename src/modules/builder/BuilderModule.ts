@@ -433,22 +433,12 @@ export class BuilderModule {
     // Assign a unique ID to the new node
     const nodeId = this.assignUniqueNodeId(newNodeData);
 
-    // Get the parent node's position or use default position
+    // Get the parent node's position or use the position of the most recently added node
     let parentNodePosition = { x: 0, y: 0 };
     if (parentNode) {
-      const transformStyle = parentNode.style.transform;
-      const matches = transformStyle.match(
-        /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/
-      );
-
-      if (matches && matches.length === 3) {
-        parentNodePosition = {
-          x: parseFloat(matches[1]),
-          y: parseFloat(matches[2]),
-        };
-      } else {
-        console.error("Unable to parse parent node position");
-      }
+      parentNodePosition = this.getNodePosition(parentNode);
+    } else {
+      parentNodePosition = this.getMostRecentNodePosition(canvasView);
     }
 
     console.log("Parent node position:", parentNodePosition);
@@ -656,5 +646,41 @@ export class BuilderModule {
       node.unknownData.systemsculptNodeId = nodeId;
     }
     return node.unknownData.systemsculptNodeId;
+  }
+
+  private getNodePosition(node: HTMLElement): { x: number; y: number } {
+    const transformStyle = node.style.transform;
+    const matches = transformStyle.match(
+      /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/
+    );
+
+    if (matches && matches.length === 3) {
+      return {
+        x: parseFloat(matches[1]),
+        y: parseFloat(matches[2]),
+      };
+    } else {
+      console.error("Unable to parse node position");
+      return { x: 0, y: 0 };
+    }
+  }
+
+  private getMostRecentNodePosition(canvasView: any): { x: number; y: number } {
+    let mostRecentTimestamp = 0;
+    let mostRecentPosition = { x: 0, y: 0 };
+
+    canvasView.canvas.nodes.forEach((node: any) => {
+      if (node.unknownData && node.unknownData.systemsculptNodeId) {
+        const timestamp = parseInt(
+          node.unknownData.systemsculptNodeId.split("-")[1]
+        );
+        if (timestamp > mostRecentTimestamp) {
+          mostRecentTimestamp = timestamp;
+          mostRecentPosition = this.getNodePosition(node.nodeEl);
+        }
+      }
+    });
+
+    return mostRecentPosition;
   }
 }
