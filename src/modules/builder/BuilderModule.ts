@@ -245,7 +245,7 @@ export class BuilderModule {
     }
   }
 
-  private addPlusButtonsToCustomNodes(canvasView: any) {
+  private addNodeToolbarToCustomNodes(canvasView: any) {
     const canvasNodes = canvasView.containerEl.querySelectorAll(".canvas-node");
     canvasNodes.forEach((node: HTMLElement) => {
       if (
@@ -253,11 +253,11 @@ export class BuilderModule {
         node.classList.contains("systemsculpt-node-processing") ||
         node.classList.contains("systemsculpt-node-output")
       ) {
-        this.addPlusButtonToNode(node);
+        this.addNodeToolbar(node);
       }
     });
 
-    // Set up an observer to add plus buttons to new nodes
+    // Set up an observer to add toolbars to new nodes
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === "childList") {
@@ -271,7 +271,7 @@ export class BuilderModule {
                 addedNode.classList.contains("systemsculpt-node-processing") ||
                 addedNode.classList.contains("systemsculpt-node-output")
               ) {
-                this.addPlusButtonToNode(addedNode);
+                this.addNodeToolbar(addedNode);
               }
             }
           });
@@ -285,24 +285,49 @@ export class BuilderModule {
     });
   }
 
-  private addPlusButtonToNode(node: HTMLElement) {
-    if (node.querySelector(".systemsculpt-plus-button")) return;
+  private addNodeToolbar(node: HTMLElement) {
+    if (node.querySelector(".systemsculpt-node-toolbar")) return;
 
-    const plusButton = document.createElement("button");
-    plusButton.className = "systemsculpt-plus-button";
-    plusButton.textContent = "+";
-    plusButton.style.position = "absolute";
-    plusButton.style.bottom = "-40px";
-    plusButton.style.right = "-50px";
-    plusButton.style.zIndex = "1001";
+    const toolbar = document.createElement("div");
+    toolbar.className = "systemsculpt-node-toolbar";
+    toolbar.style.position = "absolute";
+    toolbar.style.bottom = "-40px";
+    toolbar.style.right = "-50px";
+    toolbar.style.zIndex = "1001";
+    toolbar.style.display = "flex";
+    toolbar.style.gap = "5px";
 
-    plusButton.addEventListener("click", (e) => {
+    // Add plus button
+    const plusButton = this.createToolbarButton("+", (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.showContextMenu(e, node);
     });
 
-    node.appendChild(plusButton);
+    // Add gear button
+    const gearButton = this.createToolbarButton("⚙️", () => {
+      console.log("Gear icon button works");
+    });
+
+    toolbar.appendChild(plusButton);
+    toolbar.appendChild(gearButton);
+
+    node.appendChild(toolbar);
+  }
+
+  private createToolbarButton(
+    text: string,
+    onClick: (e: MouseEvent) => void
+  ): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.className = "systemsculpt-toolbar-button";
+    button.textContent = text;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  private addPlusButtonsToCustomNodes(canvasView: any) {
+    this.addNodeToolbarToCustomNodes(canvasView);
   }
 
   private showContextMenu(event: MouseEvent, node: HTMLElement) {

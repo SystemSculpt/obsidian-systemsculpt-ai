@@ -304,7 +304,6 @@
 }
 
 .systemsculpt-builder-ai-button,
-.systemsculpt-plus-button,
 .systemsculpt-builder-info-button {
   background-color: var(--interactive-normal);
   color: var(--text-normal);
@@ -322,12 +321,12 @@
 }
 
 .systemsculpt-builder-ai-button:hover,
-.systemsculpt-plus-button:hover {
+.systemsculpt-builder-info-button:hover {
   background-color: var(--interactive-hover);
 }
 
 .systemsculpt-builder-ai-button:active,
-.systemsculpt-plus-button:active {
+.systemsculpt-builder-info-button:active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
@@ -406,6 +405,35 @@
 
 .systemsculpt-node-info ul {
   margin-left: 20px;
+}
+
+.systemsculpt-node-toolbar {
+  display: flex;
+  gap: 5px;
+}
+
+.systemsculpt-toolbar-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  width: auto;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.systemsculpt-toolbar-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-toolbar-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 /* Disabled Button */
 .systemsculpt-button:disabled {
