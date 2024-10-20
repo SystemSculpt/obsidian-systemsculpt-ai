@@ -125,8 +125,20 @@ export class BuilderModule {
         this.builderMenu.addBuilderMenuToCanvas(canvasView);
         this.applyNodeClasses(canvasView);
         this.addPlusButtonsToCustomNodes(canvasView);
+        this.applyNodeOverlaysToExistingNodes(canvasView);
       }
     });
+  }
+
+  private applyNodeOverlaysToExistingNodes(canvasView: any) {
+    if (canvasView.canvas && canvasView.canvas.nodes) {
+      canvasView.canvas.nodes.forEach((node: any) => {
+        if (node.unknownData && node.unknownData.systemsculptNodeType) {
+          const nodeType = node.unknownData.systemsculptNodeType;
+          this.nodeCreator.applyNodeOverlay(node, nodeType);
+        }
+      });
+    }
   }
 
   private handleActiveLeafChange(leaf: WorkspaceLeaf | null) {

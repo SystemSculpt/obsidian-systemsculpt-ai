@@ -51,7 +51,7 @@ export class NodeCreator {
 
       setTimeout(() => {
         this.addClassAndDataToNewNode(newNode, nodeType, nodeId);
-        this.replaceNodeContentWithOverlay(newNode, nodeType);
+        this.applyNodeOverlay(newNode, nodeType);
         this.saveCanvasData(canvasView);
       }, 100);
 
@@ -163,9 +163,9 @@ export class NodeCreator {
     return nodeId;
   }
 
-  private replaceNodeContentWithOverlay(newNode: any, nodeType: string) {
-    if (newNode && newNode.nodeEl) {
-      const contentEl = newNode.nodeEl.querySelector(".canvas-node-content");
+  public applyNodeOverlay(node: any, nodeType: string) {
+    if (node && node.nodeEl) {
+      const contentEl = node.nodeEl.querySelector(".canvas-node-content");
       if (contentEl) {
         // Remove all child elements
         while (contentEl.firstChild) {
