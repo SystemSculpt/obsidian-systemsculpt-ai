@@ -133,7 +133,7 @@ export class NodeSettings {
     return this.nodeData.get(nodeId)!;
   }
 
-  private updateNodeData(nodeId: string, newData: Partial<NodeData>) {
+  public updateNodeData(nodeId: string, newData: Partial<NodeData>) {
     const currentData = this.getNodeData(nodeId);
     this.nodeData.set(nodeId, { ...currentData, ...newData });
     this.saveNodeData();

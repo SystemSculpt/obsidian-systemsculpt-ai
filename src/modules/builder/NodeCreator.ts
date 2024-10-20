@@ -180,7 +180,13 @@ export class NodeCreator {
         const nodeData = this.nodeSettings.getNodeData(nodeId);
 
         // Create and append the NodeOverlay
-        const overlay = new NodeOverlay(nodeType, nodeData, this.vault);
+        const overlay = new NodeOverlay(
+          nodeType,
+          nodeData,
+          this.vault,
+          this.nodeSettings,
+          nodeId
+        );
         contentEl.appendChild(await overlay.getElement());
 
         // Make the content uneditable

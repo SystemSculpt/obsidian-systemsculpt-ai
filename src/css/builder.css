@@ -358,3 +358,34 @@
   cursor: default;
   user-select: none;
 }
+
+.systemsculpt-node-setting select,
+.systemsculpt-node-setting input {
+  width: 100%;
+  padding: 2px 5px;
+  margin-top: 2px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-node-setting select:focus,
+.systemsculpt-node-setting input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-node-setting {
+  margin-bottom: 8px;
+}
+
+.systemsculpt-node-setting-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-file-content {
+  font-size: 0.8em;
+  line-height: 1.2;
+}
