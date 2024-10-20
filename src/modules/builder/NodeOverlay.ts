@@ -90,7 +90,7 @@ export class NodeOverlay {
     select.style.width = "100%";
     select.style.padding = "2px";
 
-    const options = ["File", "User Input", "API"];
+    const options = ["File", "User Input"];
     options.forEach((option) => {
       const optionEl = document.createElement("option");
       optionEl.value = option.toLowerCase().replace(" ", "_");
@@ -173,19 +173,12 @@ export class NodeOverlay {
     select.style.width = "100%";
     select.style.padding = "2px";
 
-    const options = [
-      "Text Analysis",
-      "Data Transformation",
-      "AI Model Execution",
-    ];
-    options.forEach((option) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = option.toLowerCase().replace(" ", "_");
-      optionEl.textContent = option;
-      select.appendChild(optionEl);
-    });
+    const option = document.createElement("option");
+    option.value = "ai_processing_text";
+    option.textContent = "AI Processing (Text)";
+    select.appendChild(option);
 
-    select.value = nodeData.processingType || "text_analysis";
+    select.value = nodeData.processingType || "ai_processing_text";
     select.addEventListener("change", (e) => {
       const target = e.target as HTMLSelectElement;
       this.updateNodeData({ processingType: target.value });
@@ -201,7 +194,7 @@ export class NodeOverlay {
     select.style.width = "100%";
     select.style.padding = "2px";
 
-    const options = ["File", "Display in UI", "Trigger Action"];
+    const options = ["File", "Display in UI"];
     options.forEach((option) => {
       const optionEl = document.createElement("option");
       optionEl.value = option.toLowerCase().replace(" ", "_");
