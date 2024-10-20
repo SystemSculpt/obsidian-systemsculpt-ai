@@ -292,35 +292,35 @@ export class NodeOverlay {
 
   private addModelSelectionSetting(container: HTMLElement, nodeData: any) {
     const settingEl = this.createSettingElement("AI Model:");
-    const modelInfoContainer = settingEl.createEl("div", {
-      cls: "systemsculpt-model-info-container",
-    });
+    const inputContainer = document.createElement("div");
+    inputContainer.style.display = "flex";
 
-    const modelNameSpan = modelInfoContainer.createEl("span", {
-      cls: "systemsculpt-model-name",
-      text: nodeData.modelId
-        ? `Model: ${nodeData.modelId}`
-        : "No model selected",
-    });
+    const input = document.createElement("input");
+    input.type = "text";
+    input.style.width = "100%";
+    input.style.padding = "2px";
+    input.value = nodeData.modelId || "";
+    input.readOnly = true;
 
-    const changeModelButton = modelInfoContainer.createEl("button", {
-      cls: "systemsculpt-change-model-button",
-      text: "Change Model",
-    });
+    const chooseModelButton = document.createElement("button");
+    chooseModelButton.textContent = "Choose Model";
+    chooseModelButton.style.marginLeft = "5px";
 
-    changeModelButton.addEventListener("click", () => {
+    chooseModelButton.addEventListener("click", () => {
       new NodeModelSelectionModal(
         this.nodeSettings.app,
         this.nodeSettings.plugin,
         (selectedModel) => {
-          nodeData.modelId = selectedModel.id;
-          modelNameSpan.textContent = `Model: ${selectedModel.name}`;
+          input.value = selectedModel.name;
           this.updateNodeData({ modelId: selectedModel.id });
         }
       ).open();
     });
 
-    settingEl.appendChild(modelInfoContainer);
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(chooseModelButton);
+
+    settingEl.appendChild(inputContainer);
     container.appendChild(settingEl);
   }
 
