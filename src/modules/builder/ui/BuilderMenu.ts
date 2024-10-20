@@ -1,4 +1,4 @@
-import { Menu, MenuItem, Modal, Notice, setIcon, App } from "obsidian";
+import { Modal, setIcon, App } from "obsidian";
 
 export class BuilderMenu {
   private app: App;
