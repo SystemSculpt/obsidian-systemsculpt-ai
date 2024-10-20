@@ -1,6 +1,6 @@
 import { TFile, Vault } from "obsidian";
 import { NodeSettings } from "./NodeSettings";
-import { MultiSuggest } from "../../utils/MultiSuggest";
+import { FileChooserModal } from "./FileChooserModal";
 
 export class NodeOverlay {
   private element: HTMLElement;
@@ -16,7 +16,7 @@ export class NodeOverlay {
     nodeSettings: NodeSettings,
     nodeId: string
   ) {
-    this.element = document.createElement("div");
+    this.element = document.createElement("div") as HTMLElement;
     this.element.className = "systemsculpt-node-overlay";
     this.element.style.width = "100%";
     this.element.style.height = "100%";
@@ -30,7 +30,7 @@ export class NodeOverlay {
     this.nodeId = nodeId;
     this.nodeType = nodeType;
 
-    const titleEl = document.createElement("h3");
+    const titleEl = document.createElement("h3") as HTMLElement;
     titleEl.textContent = `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node`;
     titleEl.className = "systemsculpt-node-title";
     titleEl.style.margin = "0 0 10px 0";
@@ -66,13 +66,13 @@ export class NodeOverlay {
   }
 
   private createSettingElement(label: string): HTMLElement {
-    const settingEl = document.createElement("div");
+    const settingEl = document.createElement("div") as HTMLDivElement;
     settingEl.className = "systemsculpt-node-setting";
     settingEl.style.marginBottom = "10px";
     settingEl.style.fontSize = "12px";
     settingEl.style.lineHeight = "1.4";
 
-    const labelEl = document.createElement("label");
+    const labelEl = document.createElement("label") as HTMLLabelElement;
     labelEl.className = "systemsculpt-node-setting-label";
     labelEl.textContent = label;
     labelEl.style.display = "block";
@@ -115,24 +115,42 @@ export class NodeOverlay {
     input.style.width = "100%";
     input.style.padding = "2px";
     input.value = nodeData.inputFile || "";
+    input.readOnly = true;
 
-    const files = this.vault.getFiles();
-    const fileSuggestions = new Set(files.map((file) => file.path));
+    const chooseFileButton = document.createElement("button");
+    chooseFileButton.textContent = "Choose File";
+    chooseFileButton.style.marginLeft = "5px";
 
-    new MultiSuggest(
-      input,
-      fileSuggestions,
-      (selectedPath: string) => {
-        this.updateNodeData({ inputFile: selectedPath });
-      },
-      this.nodeSettings.app
-    );
+    chooseFileButton.addEventListener("click", () => {
+      new FileChooserModal(this.nodeSettings.app, (file: TFile) => {
+        input.value = file.path;
+        this.updateNodeData({ inputFile: file.path });
+        this.updateFileContent(settingEl, file);
+      }).open();
+    });
 
-    settingEl.appendChild(input);
+    const inputContainer = document.createElement("div");
+    inputContainer.style.display = "flex";
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(chooseFileButton);
+
+    settingEl.appendChild(inputContainer);
     container.appendChild(settingEl);
 
     if (nodeData.inputFile) {
-      const fileContentEl = document.createElement("div");
+      const file = this.vault.getAbstractFileByPath(nodeData.inputFile);
+      if (file instanceof TFile) {
+        this.updateFileContent(settingEl, file);
+      }
+    }
+  }
+
+  private async updateFileContent(settingEl: HTMLElement, file: TFile) {
+    let fileContentEl = settingEl.querySelector(
+      ".systemsculpt-file-content"
+    ) as HTMLDivElement;
+    if (!fileContentEl) {
+      fileContentEl = document.createElement("div") as HTMLDivElement;
       fileContentEl.className = "systemsculpt-file-content";
       fileContentEl.style.marginTop = "5px";
       fileContentEl.style.fontSize = "11px";
@@ -141,18 +159,12 @@ export class NodeOverlay {
       fileContentEl.style.overflow = "auto";
       fileContentEl.style.whiteSpace = "pre-wrap";
       fileContentEl.style.wordBreak = "break-all";
-
-      const file = this.vault.getAbstractFileByPath(nodeData.inputFile);
-      if (file instanceof TFile) {
-        const content = await this.vault.cachedRead(file);
-        fileContentEl.textContent =
-          content.slice(0, 200) + (content.length > 200 ? "..." : "");
-      } else {
-        fileContentEl.textContent = "File not found";
-      }
-
       settingEl.appendChild(fileContentEl);
     }
+
+    const content = await this.vault.cachedRead(file);
+    fileContentEl.textContent =
+      content.slice(0, 200) + (content.length > 200 ? "..." : "");
   }
 
   private addProcessingTypeSetting(container: HTMLElement, nodeData: any) {
