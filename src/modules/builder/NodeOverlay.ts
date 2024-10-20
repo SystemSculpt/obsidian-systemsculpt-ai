@@ -1,9 +1,13 @@
+import { TFile, Vault } from "obsidian";
+
 export class NodeOverlay {
   private element: HTMLElement;
+  private vault: Vault;
 
-  constructor(nodeType: string, nodeData: any) {
+  constructor(nodeType: string, nodeData: any, vault: Vault) {
     this.element = document.createElement("div");
     this.element.className = "systemsculpt-node-overlay";
+    this.vault = vault;
 
     const titleEl = document.createElement("h3");
     titleEl.textContent = `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node`;
@@ -22,14 +26,9 @@ export class NodeOverlay {
           "Input Source",
           nodeData.inputSource || "Not set"
         );
-        this.addSetting(
-          settingsEl,
-          "Input File",
-          nodeData.inputFile || "Not set"
-        );
+        this.addInputFileSetting(settingsEl, nodeData.inputFile);
         break;
       case "processing":
-        // Add processing node specific settings here
         this.addSetting(
           settingsEl,
           "Processing Type",
@@ -37,7 +36,6 @@ export class NodeOverlay {
         );
         break;
       case "output":
-        // Add output node specific settings here
         this.addSetting(
           settingsEl,
           "Output Type",
@@ -65,6 +63,44 @@ export class NodeOverlay {
     settingEl.appendChild(valueEl);
 
     container.appendChild(settingEl);
+  }
+
+  private async addInputFileSetting(
+    container: HTMLElement,
+    filePath: string | undefined
+  ) {
+    const settingEl = document.createElement("div");
+    settingEl.className =
+      "systemsculpt-node-setting systemsculpt-input-file-setting";
+
+    const labelEl = document.createElement("span");
+    labelEl.className = "systemsculpt-node-setting-label";
+    labelEl.textContent = "Input File:";
+
+    const valueEl = document.createElement("span");
+    valueEl.className = "systemsculpt-node-setting-value";
+    valueEl.textContent = filePath || "Not set";
+
+    settingEl.appendChild(labelEl);
+    settingEl.appendChild(valueEl);
+
+    container.appendChild(settingEl);
+
+    if (filePath) {
+      const fileContentEl = document.createElement("div");
+      fileContentEl.className = "systemsculpt-file-content";
+
+      const file = this.vault.getAbstractFileByPath(filePath);
+      if (file instanceof TFile) {
+        const content = await this.vault.cachedRead(file);
+        fileContentEl.textContent =
+          content.slice(0, 200) + (content.length > 200 ? "..." : "");
+      } else {
+        fileContentEl.textContent = "File not found";
+      }
+
+      container.appendChild(fileContentEl);
+    }
   }
 
   public getElement(): HTMLElement {

@@ -24,7 +24,10 @@ export class BuilderModule {
       this.saveSettings()
     );
     this.builderMenu = new BuilderMenu(this.plugin.app, this);
-    this.nodeCreator = new NodeCreator(this.nodeSettings);
+    this.nodeCreator = new NodeCreator(
+      this.nodeSettings,
+      this.plugin.app.vault
+    );
     this.loadSettings();
   }
 

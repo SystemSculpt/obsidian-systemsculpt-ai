@@ -1,11 +1,14 @@
 import { NodeSettings } from "./NodeSettings";
 import { NodeOverlay } from "./NodeOverlay";
+import { Vault } from "obsidian";
 
 export class NodeCreator {
   private nodeSettings: NodeSettings;
+  private vault: Vault;
 
-  constructor(nodeSettings: NodeSettings) {
+  constructor(nodeSettings: NodeSettings, vault: Vault) {
     this.nodeSettings = nodeSettings;
+    this.vault = vault;
   }
 
   public addNode(
@@ -163,7 +166,7 @@ export class NodeCreator {
     return nodeId;
   }
 
-  public applyNodeOverlay(node: any, nodeType: string) {
+  public async applyNodeOverlay(node: any, nodeType: string) {
     if (node && node.nodeEl) {
       const contentEl = node.nodeEl.querySelector(".canvas-node-content");
       if (contentEl) {
@@ -177,8 +180,8 @@ export class NodeCreator {
         const nodeData = this.nodeSettings.getNodeData(nodeId);
 
         // Create and append the NodeOverlay
-        const overlay = new NodeOverlay(nodeType, nodeData);
-        contentEl.appendChild(overlay.getElement());
+        const overlay = new NodeOverlay(nodeType, nodeData, this.vault);
+        contentEl.appendChild(await overlay.getElement());
 
         // Make the content uneditable
         contentEl.setAttribute("contenteditable", "false");
