@@ -65,15 +65,13 @@ export class NodeSettings {
   }
 
   public assignUniqueNodeId(node: any): string {
-    if (!node.unknownData || !node.unknownData.systemsculptNodeId) {
-      const nodeId = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      if (!node.unknownData) {
-        node.unknownData = {};
-      }
-      node.unknownData.systemsculptNodeId = nodeId;
-      this.updateNodeData(nodeId, {}); // Initialize empty data for the new node
+    const nodeId = `systemsculpt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    if (!node.unknownData) {
+      node.unknownData = {};
     }
-    return node.unknownData.systemsculptNodeId;
+    node.unknownData.systemsculptNodeId = nodeId;
+    this.updateNodeData(nodeId, {}); // Initialize empty data for the new node
+    return nodeId;
   }
 
   private createInputNodeSettings(container: HTMLElement, nodeId: string) {

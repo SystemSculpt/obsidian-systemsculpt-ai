@@ -23,7 +23,7 @@ export class NodeCreator {
     console.log("Canvas view:", canvasView);
 
     const newNodeData = this.createNodeData(nodeType);
-    const nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
+    const nodeId = this.ensureUniqueNodeId(canvasView, newNodeData);
 
     let parentNodePosition = { x: 0, y: 0 };
     if (parentNode) {
@@ -71,7 +71,6 @@ export class NodeCreator {
         y: 0,
       },
       systemsculptNodeType: nodeType,
-      id: `systemsculpt-${nodeType}-${Date.now()}`,
     };
   }
 
@@ -139,5 +138,20 @@ export class NodeCreator {
     ) {
       canvasView.canvas.requestSave();
     }
+  }
+
+  private ensureUniqueNodeId(canvasView: any, newNodeData: any): string {
+    let nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
+    const existingNodeIds = new Set(
+      canvasView.canvas.nodes.map((node: any) => node.id)
+    );
+
+    while (existingNodeIds.has(nodeId)) {
+      console.log(`Duplicate node ID found: ${nodeId}. Regenerating...`);
+      nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
+    }
+
+    console.log(`Unique node ID assigned: ${nodeId}`);
+    return nodeId;
   }
 }
