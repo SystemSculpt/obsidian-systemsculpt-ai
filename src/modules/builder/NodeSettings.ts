@@ -1,4 +1,5 @@
 import { App } from "obsidian";
+import SystemSculptPlugin from "../../main";
 
 interface NodeData {
   inputSource?: string;
@@ -8,11 +9,13 @@ interface NodeData {
 
 export class NodeSettings {
   public app: App;
+  public plugin: SystemSculptPlugin;
   private nodeData: Map<string, NodeData> = new Map();
   private saveCallback: () => void;
 
-  constructor(app: App, saveCallback: () => void) {
+  constructor(app: App, plugin: SystemSculptPlugin, saveCallback: () => void) {
     this.app = app;
+    this.plugin = plugin;
     this.saveCallback = saveCallback;
   }
 

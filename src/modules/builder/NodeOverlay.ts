@@ -2,6 +2,7 @@ import { TFile, Vault, TFolder } from "obsidian";
 import { NodeSettings } from "./NodeSettings";
 import { FileChooserModal } from "./FileChooserModal";
 import { DirectoryChooserModal } from "./DirectoryChooserModal";
+import { NodeModelSelectionModal } from "./ui/NodeModelSelectionModal";
 
 export class NodeOverlay {
   private element: HTMLElement;
@@ -187,6 +188,9 @@ export class NodeOverlay {
 
     settingEl.appendChild(select);
     container.appendChild(settingEl);
+
+    // Add the model selection setting
+    this.addModelSelectionSetting(container, nodeData);
   }
 
   private addOutputTypeSetting(container: HTMLElement, nodeData: any) {
@@ -284,6 +288,40 @@ export class NodeOverlay {
 
   private updateNodeData(newData: Partial<any>) {
     this.nodeSettings.updateNodeData(this.nodeId, newData);
+  }
+
+  private addModelSelectionSetting(container: HTMLElement, nodeData: any) {
+    const settingEl = this.createSettingElement("AI Model:");
+    const modelInfoContainer = settingEl.createEl("div", {
+      cls: "systemsculpt-model-info-container",
+    });
+
+    const modelNameSpan = modelInfoContainer.createEl("span", {
+      cls: "systemsculpt-model-name",
+      text: nodeData.modelId
+        ? `Model: ${nodeData.modelId}`
+        : "No model selected",
+    });
+
+    const changeModelButton = modelInfoContainer.createEl("button", {
+      cls: "systemsculpt-change-model-button",
+      text: "Change Model",
+    });
+
+    changeModelButton.addEventListener("click", () => {
+      new NodeModelSelectionModal(
+        this.nodeSettings.app,
+        this.nodeSettings.plugin,
+        (selectedModel) => {
+          nodeData.modelId = selectedModel.id;
+          modelNameSpan.textContent = `Model: ${selectedModel.name}`;
+          this.updateNodeData({ modelId: selectedModel.id });
+        }
+      ).open();
+    });
+
+    settingEl.appendChild(modelInfoContainer);
+    container.appendChild(settingEl);
   }
 
   public getElement(): HTMLElement {

@@ -20,7 +20,7 @@ export class BuilderModule {
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_BUILDER_SETTINGS;
-    this.nodeSettings = new NodeSettings(this.plugin.app, () =>
+    this.nodeSettings = new NodeSettings(this.plugin.app, this.plugin, () =>
       this.saveSettings()
     );
     this.builderMenu = new BuilderMenu(this.plugin.app, this);
