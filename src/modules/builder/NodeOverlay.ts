@@ -17,6 +17,13 @@ export class NodeOverlay {
   ) {
     this.element = document.createElement("div");
     this.element.className = "systemsculpt-node-overlay";
+    this.element.style.width = "100%";
+    this.element.style.height = "100%";
+    this.element.style.display = "flex";
+    this.element.style.flexDirection = "column";
+    this.element.style.padding = "10px";
+    this.element.style.boxSizing = "border-box";
+    this.element.style.overflow = "hidden";
     this.vault = vault;
     this.nodeSettings = nodeSettings;
     this.nodeId = nodeId;
@@ -25,11 +32,20 @@ export class NodeOverlay {
     const titleEl = document.createElement("h3");
     titleEl.textContent = `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node`;
     titleEl.className = "systemsculpt-node-title";
+    titleEl.style.margin = "0 0 10px 0";
+    titleEl.style.padding = "0";
+    titleEl.style.fontSize = "16px";
+    titleEl.style.fontWeight = "bold";
+    titleEl.style.whiteSpace = "nowrap";
+    titleEl.style.overflow = "hidden";
+    titleEl.style.textOverflow = "ellipsis";
 
     this.element.appendChild(titleEl);
 
     const settingsEl = document.createElement("div");
     settingsEl.className = "systemsculpt-node-settings";
+    settingsEl.style.flex = "1";
+    settingsEl.style.overflow = "auto";
 
     // Display settings based on node type
     switch (nodeType) {
@@ -48,61 +64,54 @@ export class NodeOverlay {
     this.element.appendChild(settingsEl);
   }
 
-  private addInputSourceSetting(container: HTMLElement, nodeData: any) {
+  private createSettingElement(label: string, value: string): HTMLElement {
     const settingEl = document.createElement("div");
     settingEl.className = "systemsculpt-node-setting";
+    settingEl.style.marginBottom = "5px";
+    settingEl.style.fontSize = "12px";
+    settingEl.style.lineHeight = "1.4";
 
     const labelEl = document.createElement("span");
     labelEl.className = "systemsculpt-node-setting-label";
-    labelEl.textContent = "Input Source:";
+    labelEl.textContent = label;
+    labelEl.style.fontWeight = "bold";
+    labelEl.style.marginRight = "5px";
 
-    const select = document.createElement("select");
-    select.className = "systemsculpt-node-setting-value";
-    ["file", "user_input", "api"].forEach((option) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = option;
-      optionEl.textContent = option.charAt(0).toUpperCase() + option.slice(1);
-      select.appendChild(optionEl);
-    });
-
-    select.value = nodeData.inputSource || "file";
-    select.addEventListener("change", () => {
-      this.updateNodeData({ inputSource: select.value });
-    });
+    const valueEl = document.createElement("span");
+    valueEl.className = "systemsculpt-node-setting-value";
+    valueEl.textContent = value;
 
     settingEl.appendChild(labelEl);
-    settingEl.appendChild(select);
+    settingEl.appendChild(valueEl);
 
+    return settingEl;
+  }
+
+  private addInputSourceSetting(container: HTMLElement, nodeData: any) {
+    const settingEl = this.createSettingElement(
+      "Input Source:",
+      nodeData.inputSource || "File"
+    );
     container.appendChild(settingEl);
   }
 
   private async addInputFileSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = document.createElement("div");
-    settingEl.className =
-      "systemsculpt-node-setting systemsculpt-input-file-setting";
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "systemsculpt-node-setting-label";
-    labelEl.textContent = "Input File:";
-
-    const inputEl = document.createElement("input");
-    inputEl.type = "text";
-    inputEl.className = "systemsculpt-node-setting-value";
-    inputEl.value = nodeData.inputFile || "";
-    inputEl.placeholder = "Enter file path...";
-
-    inputEl.addEventListener("change", () => {
-      this.updateNodeData({ inputFile: inputEl.value });
-    });
-
-    settingEl.appendChild(labelEl);
-    settingEl.appendChild(inputEl);
-
+    const settingEl = this.createSettingElement(
+      "Input File:",
+      nodeData.inputFile || "Not set"
+    );
     container.appendChild(settingEl);
 
     if (nodeData.inputFile) {
       const fileContentEl = document.createElement("div");
       fileContentEl.className = "systemsculpt-file-content";
+      fileContentEl.style.marginTop = "5px";
+      fileContentEl.style.fontSize = "11px";
+      fileContentEl.style.lineHeight = "1.3";
+      fileContentEl.style.maxHeight = "60px";
+      fileContentEl.style.overflow = "auto";
+      fileContentEl.style.whiteSpace = "pre-wrap";
+      fileContentEl.style.wordBreak = "break-all";
 
       const file = this.vault.getAbstractFileByPath(nodeData.inputFile);
       if (file instanceof TFile) {
@@ -118,61 +127,18 @@ export class NodeOverlay {
   }
 
   private addProcessingTypeSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = document.createElement("div");
-    settingEl.className = "systemsculpt-node-setting";
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "systemsculpt-node-setting-label";
-    labelEl.textContent = "Processing Type:";
-
-    const select = document.createElement("select");
-    select.className = "systemsculpt-node-setting-value";
-    ["text_analysis", "data_transformation", "ai_model"].forEach((option) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = option;
-      optionEl.textContent = option
-        .split("_")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ");
-      select.appendChild(optionEl);
-    });
-
-    select.value = nodeData.processingType || "text_analysis";
-    select.addEventListener("change", () => {
-      this.updateNodeData({ processingType: select.value });
-    });
-
-    settingEl.appendChild(labelEl);
-    settingEl.appendChild(select);
-
+    const settingEl = this.createSettingElement(
+      "Processing Type:",
+      nodeData.processingType || "Text Analysis"
+    );
     container.appendChild(settingEl);
   }
 
   private addOutputTypeSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = document.createElement("div");
-    settingEl.className = "systemsculpt-node-setting";
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "systemsculpt-node-setting-label";
-    labelEl.textContent = "Output Type:";
-
-    const select = document.createElement("select");
-    select.className = "systemsculpt-node-setting-value";
-    ["file", "display", "api"].forEach((option) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = option;
-      optionEl.textContent = option.charAt(0).toUpperCase() + option.slice(1);
-      select.appendChild(optionEl);
-    });
-
-    select.value = nodeData.outputType || "file";
-    select.addEventListener("change", () => {
-      this.updateNodeData({ outputType: select.value });
-    });
-
-    settingEl.appendChild(labelEl);
-    settingEl.appendChild(select);
-
+    const settingEl = this.createSettingElement(
+      "Output Type:",
+      nodeData.outputType || "File"
+    );
     container.appendChild(settingEl);
   }
 
