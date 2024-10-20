@@ -231,16 +231,7 @@ export class BuilderModule {
       this.showContextMenu(e, node);
     });
 
-    const gearButton = this.createToolbarButton("⚙️", () => {
-      this.nodeSettings.showNodeSettingsModal(
-        node,
-        (n) => this.nodeSettings.getNodeType(n),
-        (n) => this.nodeSettings.assignUniqueNodeId(n)
-      );
-    });
-
     toolbar.appendChild(plusButton);
-    toolbar.appendChild(gearButton);
 
     node.appendChild(toolbar);
   }
