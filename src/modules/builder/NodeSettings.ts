@@ -126,7 +126,7 @@ export class NodeSettings {
     // Implement output node settings
   }
 
-  private getNodeData(nodeId: string): NodeData {
+  public getNodeData(nodeId: string): NodeData {
     if (!this.nodeData.has(nodeId)) {
       this.nodeData.set(nodeId, {});
     }

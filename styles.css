@@ -594,19 +594,46 @@
   justify-content: flex-start;
   padding: 10px;
   box-sizing: border-box;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
 }
 
 .systemsculpt-node-title {
-  margin: 0;
+  margin: 0 0 10px 0;
   padding: 0;
   font-size: 16px;
   font-weight: bold;
+  color: var(--text-normal);
+}
+
+.systemsculpt-node-settings {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.systemsculpt-node-setting {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.systemsculpt-node-setting-label {
+  font-weight: bold;
+  color: var(--text-muted);
+}
+
+.systemsculpt-node-setting-value {
+  color: var(--text-normal);
 }
 
 .canvas-node-content[contenteditable="false"] {
   cursor: default;
   user-select: none;
-}/* Disabled Button */
+}
+/* Disabled Button */
 .systemsculpt-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;

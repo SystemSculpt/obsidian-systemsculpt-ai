@@ -172,8 +172,12 @@ export class NodeCreator {
           contentEl.removeChild(contentEl.firstChild);
         }
 
+        // Get node data from the NodeSettings
+        const nodeId = node.unknownData.systemsculptNodeId;
+        const nodeData = this.nodeSettings.getNodeData(nodeId);
+
         // Create and append the NodeOverlay
-        const overlay = new NodeOverlay(nodeType);
+        const overlay = new NodeOverlay(nodeType, nodeData);
         contentEl.appendChild(overlay.getElement());
 
         // Make the content uneditable
