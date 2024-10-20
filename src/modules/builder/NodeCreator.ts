@@ -24,10 +24,8 @@ export class NodeCreator {
 
     const newNodeData = this.createNodeData(nodeType);
 
-    // Assign a unique ID to the new node
     const nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
 
-    // Get the parent node's position or use the position of the most recently added node
     let parentNodePosition = { x: 0, y: 0 };
     if (parentNode) {
       parentNodePosition = this.getNodePosition(parentNode);
@@ -37,7 +35,6 @@ export class NodeCreator {
 
     console.log("Parent node position:", parentNodePosition);
 
-    // Set the position for the new node
     newNodeData.pos = {
       x: parentNodePosition.x + 275,
       y: parentNodePosition.y,
@@ -45,7 +42,6 @@ export class NodeCreator {
 
     console.log("New node data:", newNodeData);
 
-    // Add the new node to the canvas
     if (
       canvasView.canvas &&
       typeof canvasView.canvas.createTextNode === "function"
@@ -53,13 +49,11 @@ export class NodeCreator {
       const newNode = canvasView.canvas.createTextNode(newNodeData);
       console.log("New node created:", newNode);
 
-      // Add the class and save node data directly to the new node after a short delay
       setTimeout(() => {
         this.addClassAndDataToNewNode(newNode, nodeType, nodeId);
         this.saveCanvasData(canvasView);
       }, 100);
 
-      // Trigger a canvas update
       canvasView.canvas.requestSave();
     } else {
       console.error("Canvas or createTextNode method not found");

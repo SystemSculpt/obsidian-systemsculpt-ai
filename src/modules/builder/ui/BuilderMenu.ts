@@ -2,7 +2,7 @@ import { Modal, setIcon, App } from "obsidian";
 
 export class BuilderMenu {
   private app: App;
-  private plugin: any; // Replace `any` with the actual plugin type if available
+  private plugin: any;
 
   constructor(app: App, plugin: any) {
     this.app = app;
@@ -14,14 +14,12 @@ export class BuilderMenu {
       canvasView.containerEl.querySelector(".canvas-wrapper");
     if (!canvasContainer) return;
 
-    // Remove existing builder menu if it's there
     this.removeBuilderMenuFromCanvas(canvasView);
 
     const builderMenu = canvasContainer.createDiv({
       cls: "systemsculpt-builder-menu",
     });
 
-    // General label
     builderMenu.createEl("div", {
       cls: "systemsculpt-builder-label",
       text: "General",
@@ -45,16 +43,13 @@ export class BuilderMenu {
       this.showNodeTypesInfo();
     });
 
-    // Add separator
     builderMenu.createEl("hr", { cls: "systemsculpt-builder-separator" });
 
-    // Add "Add Node" label
     builderMenu.createEl("div", {
       cls: "systemsculpt-builder-label",
       text: "Add Node",
     });
 
-    // Add Input Node button
     const inputNodeButton = builderMenu.createEl("button", {
       cls: "systemsculpt-builder-button",
       text: "Input Node",
@@ -63,7 +58,6 @@ export class BuilderMenu {
       this.plugin.addNode(null, "input");
     });
 
-    // Add Processing Node button
     const processingNodeButton = builderMenu.createEl("button", {
       cls: "systemsculpt-builder-button",
       text: "Processing Node",
@@ -72,7 +66,6 @@ export class BuilderMenu {
       this.plugin.addNode(null, "processing");
     });
 
-    // Add Output Node button
     const outputNodeButton = builderMenu.createEl("button", {
       cls: "systemsculpt-builder-button",
       text: "Output Node",
@@ -81,7 +74,6 @@ export class BuilderMenu {
       this.plugin.addNode(null, "output");
     });
 
-    // Add the plus button to focused nodes
     this.plugin.addPlusButtonsToCustomNodes(canvasView);
   }
 

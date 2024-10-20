@@ -29,24 +29,20 @@ export class BuilderModule {
     await this.loadSettings();
     this.addCommands();
 
-    // Apply custom visuals to all canvas views on plugin load
     this.applyCustomVisualsToAllCanvasViews();
 
-    // Add event listener for when the active leaf changes
     this.plugin.registerEvent(
       this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
         this.handleActiveLeafChange(leaf);
       })
     );
 
-    // Add event listener for layout changes
     this.plugin.registerEvent(
       this.plugin.app.workspace.on("layout-change", () => {
         this.applyCustomVisualsToAllCanvasViews();
       })
     );
 
-    // Add event listener for file changes
     this.plugin.registerEvent(
       this.plugin.app.vault.on("modify", (file) => {
         if (file instanceof TFile && file.extension === "canvas") {
@@ -84,7 +80,6 @@ export class BuilderModule {
     const fileName = `SystemSculpt AI Builder Canvas ${Date.now()}.canvas`;
     const filePath = `${this.settings.builderCanvasDirectory}/${fileName}`;
 
-    // Ensure the directory exists
     await this.plugin.app.vault.adapter.mkdir(
       this.settings.builderCanvasDirectory
     );
@@ -95,7 +90,6 @@ export class BuilderModule {
       const leaf = this.plugin.app.workspace.getLeaf(true);
       await leaf.openFile(file, { active: true });
 
-      // Optionally, you can add some initial content to the canvas
       await this.initializeCanvasContent(file);
 
       new Notice("SystemSculpt AI Builder Canvas created");
@@ -145,7 +139,6 @@ export class BuilderModule {
           const nodeType = node.unknownData.systemsculptNodeType;
           let nodeId = node.unknownData.systemsculptNodeId;
 
-          // Check if the ID already exists or is not set
           if (!nodeId || existingIds.has(nodeId)) {
             nodeId = this.nodeSettings.assignUniqueNodeId(node);
             node.unknownData.systemsculptNodeId = nodeId;
@@ -160,7 +153,6 @@ export class BuilderModule {
         }
       });
 
-      // Save the updated canvas data
       this.saveCanvasData(canvasView);
     }
   }
@@ -177,7 +169,6 @@ export class BuilderModule {
       }
     });
 
-    // Set up an observer to add toolbars to new nodes
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === "childList") {
@@ -211,14 +202,12 @@ export class BuilderModule {
     const toolbar = document.createElement("div");
     toolbar.className = "systemsculpt-node-toolbar";
 
-    // Add plus button
     const plusButton = this.createToolbarButton("+", (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.showContextMenu(e, node);
     });
 
-    // Add gear button
     const gearButton = this.createToolbarButton("⚙️", () => {
       this.nodeSettings.showNodeSettingsModal(
         node,
@@ -304,7 +293,6 @@ export class BuilderModule {
       }
     }
 
-    // If no node is provided or canvas view is not found, try to get the active canvas view
     const activeLeaf = this.plugin.app.workspace.activeLeaf;
     if (activeLeaf && activeLeaf.view.getViewType() === "canvas") {
       const canvasView = activeLeaf.view as any;

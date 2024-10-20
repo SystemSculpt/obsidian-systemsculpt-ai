@@ -16,23 +16,19 @@ export class NodeSettings {
     const nodeType = getNodeType(node);
     const modal = new Modal(this.app);
 
-    // Create a container for the title and Node ID
     const titleContainer = modal.titleEl.createDiv(
       "systemsculpt-node-settings-title-container"
     );
 
-    // Add the main title
     titleContainer.createEl("h2", {
       text: `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node Settings`,
       cls: "systemsculpt-node-settings-title",
     });
 
-    // Get the node's unique ID
     const nodeId =
       node.getAttribute("data-systemsculpt-node-id") ||
       assignUniqueNodeId(node);
 
-    // Add the Node ID in small type
     titleContainer.createEl("p", {
       text: `Node ID: ${nodeId}`,
       cls: "systemsculpt-node-id",
@@ -40,7 +36,6 @@ export class NodeSettings {
 
     const content = modal.contentEl.createDiv("systemsculpt-node-settings");
 
-    // Add settings based on node type
     switch (nodeType) {
       case "input":
         this.createInputNodeSettings(content, nodeId);
@@ -61,7 +56,7 @@ export class NodeSettings {
     if (node.classList.contains("systemsculpt-node-processing"))
       return "processing";
     if (node.classList.contains("systemsculpt-node-output")) return "output";
-    return "input"; // Default to input if no class is found
+    return "input";
   }
 
   public assignUniqueNodeId(node: any): string {

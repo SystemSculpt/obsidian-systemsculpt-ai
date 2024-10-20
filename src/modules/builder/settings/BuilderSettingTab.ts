@@ -38,7 +38,6 @@ export class BuilderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
 
-        // Add folder suggestion
         const inputEl = text.inputEl;
         const suggestionContent = this.getFolderSuggestions();
         const onSelectCallback = (selectedPath: string) => {

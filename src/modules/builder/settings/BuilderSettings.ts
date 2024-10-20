@@ -1,5 +1,4 @@
 export interface BuilderSettings {
-  // Define your builder settings here
   exampleSetting: string;
   builderCanvasDirectory: string;
 }
