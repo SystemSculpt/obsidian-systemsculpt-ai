@@ -17,14 +17,12 @@ export class BuilderMenu {
     // Remove existing builder menu if it's there
     this.removeBuilderMenuFromCanvas(canvasView);
 
-    const builderMenu = canvasContainer.createDiv("systemsculpt-builder-menu");
-    builderMenu.style.position = "absolute";
-    builderMenu.style.top = "10px";
-    builderMenu.style.left = "10px";
-    builderMenu.style.zIndex = "1000";
+    const builderMenu = canvasContainer.createDiv({
+      cls: "systemsculpt-builder-menu",
+    });
 
     // General label
-    const generalLabel = builderMenu.createEl("div", {
+    builderMenu.createEl("div", {
       cls: "systemsculpt-builder-label",
       text: "General",
     });

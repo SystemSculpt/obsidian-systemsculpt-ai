@@ -292,6 +292,10 @@
   margin-right: 10px;
 }
 .systemsculpt-builder-menu {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -435,6 +439,10 @@
 }
 
 .systemsculpt-node-toolbar {
+  position: absolute;
+  bottom: -40px;
+  right: -50px;
+  z-index: 1001;
   display: flex;
   gap: 5px;
 }
@@ -538,6 +546,18 @@
 .systemsculpt-builder-button:active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
+}
+
+.systemsculpt-node-color-input {
+  background-color: #b5e8d5;
+}
+
+.systemsculpt-node-color-processing {
+  background-color: #f8d775;
+}
+
+.systemsculpt-node-color-output {
+  background-color: #f3a683;
 }
 /* Disabled Button */
 .systemsculpt-button:disabled {

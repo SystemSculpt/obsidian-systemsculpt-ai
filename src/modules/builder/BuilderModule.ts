@@ -210,12 +210,6 @@ export class BuilderModule {
 
     const toolbar = document.createElement("div");
     toolbar.className = "systemsculpt-node-toolbar";
-    toolbar.style.position = "absolute";
-    toolbar.style.bottom = "-40px";
-    toolbar.style.right = "-50px";
-    toolbar.style.zIndex = "1001";
-    toolbar.style.display = "flex";
-    toolbar.style.gap = "5px";
 
     // Add plus button
     const plusButton = this.createToolbarButton("+", (e) => {

@@ -67,12 +67,6 @@ export class NodeCreator {
   }
 
   private createNodeData(nodeType: "input" | "processing" | "output") {
-    const nodeColors = {
-      input: "#b5e8d5",
-      processing: "#f8d775",
-      output: "#f3a683",
-    };
-
     return {
       text: `# ${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node\n\nAdd your content here`,
       size: {
@@ -83,7 +77,6 @@ export class NodeCreator {
         x: 0,
         y: 0,
       },
-      color: nodeColors[nodeType],
       systemsculptNodeType: nodeType,
       id: `systemsculpt-${nodeType}-${Date.now()}`,
     };
@@ -96,6 +89,7 @@ export class NodeCreator {
   ) {
     if (newNode && newNode.nodeEl) {
       newNode.nodeEl.classList.add(`systemsculpt-node-${nodeType}`);
+      newNode.nodeEl.classList.add(`systemsculpt-node-color-${nodeType}`);
       if (!newNode.unknownData) {
         newNode.unknownData = {};
       }
