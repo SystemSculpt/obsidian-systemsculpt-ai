@@ -4,7 +4,15 @@ import {
   DEFAULT_BUILDER_SETTINGS,
 } from "./settings/BuilderSettings";
 import { BuilderSettingTab } from "./settings/BuilderSettingTab";
-import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem, Modal } from "obsidian";
+import {
+  TFile,
+  Notice,
+  WorkspaceLeaf,
+  Menu,
+  MenuItem,
+  Modal,
+  setIcon,
+} from "obsidian";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -174,6 +182,12 @@ export class BuilderModule {
     builderMenu.style.left = "10px";
     builderMenu.style.zIndex = "1000";
 
+    // General label
+    const generalLabel = builderMenu.createEl("div", {
+      cls: "systemsculpt-builder-label",
+      text: "General",
+    });
+
     const aiButton = builderMenu.createEl("button", {
       cls: "systemsculpt-builder-button",
       text: "SSAI Settings",
@@ -235,53 +249,77 @@ export class BuilderModule {
   private showNodeTypesInfo() {
     const modal = new Modal(this.plugin.app);
     modal.titleEl.setText("SystemSculpt AI Builder Node Types");
+    modal.titleEl.addClass("systemsculpt-node-info-title");
 
     const content = document.createDocumentFragment();
-    content.appendChild(
-      this.createNodeTypeInfo(
-        "Input Nodes",
-        "Input nodes are the starting points of your AI workflow. They represent the data or information you want to process.",
-        ["Vault files", "User input or variables", "Output responses"]
-      )
-    );
-    content.appendChild(
-      this.createNodeTypeInfo(
-        "Processing Nodes",
-        "Processing nodes perform operations on the data from input nodes or other processing nodes. They represent the core AI and data manipulation tasks.",
-        ["System prompts"]
-      )
-    );
-    content.appendChild(
-      this.createNodeTypeInfo(
-        "Output Nodes",
-        "Output nodes represent the final results or actions of your AI workflow. They determine how the processed information is used or presented.",
-        ["Save results to a file"]
-      )
-    );
+
+    const nodeTypes = [
+      {
+        title: "Input Nodes",
+        description:
+          "Input nodes are the starting points of your AI workflow. They represent the data or information you want to process.",
+        examples: [
+          "Vault files",
+          "User input or variables",
+          "Output responses",
+        ],
+        icon: "file-input",
+      },
+      {
+        title: "Processing Nodes",
+        description:
+          "Processing nodes perform operations on the data from input nodes or other processing nodes. They represent the core AI and data manipulation tasks.",
+        examples: [
+          "System prompts",
+          "Data transformation",
+          "AI model execution",
+        ],
+        icon: "cpu",
+      },
+      {
+        title: "Output Nodes",
+        description:
+          "Output nodes represent the final results or actions of your AI workflow. They determine how the processed information is used or presented.",
+        examples: [
+          "Save results to a file",
+          "Display in the UI",
+          "Trigger external actions",
+        ],
+        icon: "file-output",
+      },
+    ];
+
+    nodeTypes.forEach((nodeType) => {
+      content.appendChild(this.createNodeTypeInfo(nodeType));
+    });
 
     modal.contentEl.appendChild(content);
     modal.open();
   }
 
-  private createNodeTypeInfo(
-    title: string,
-    description: string,
-    examples: string[]
-  ): HTMLElement {
+  private createNodeTypeInfo(nodeType: {
+    title: string;
+    description: string;
+    examples: string[];
+    icon: string;
+  }): HTMLElement {
     const container = document.createElement("div");
     container.addClass("systemsculpt-node-info");
 
-    const titleEl = container.createEl("h3");
-    titleEl.setText(title);
+    const header = container.createEl("div", {
+      cls: "systemsculpt-node-info-header",
+    });
+    setIcon(
+      header.createSpan({ cls: "systemsculpt-node-info-icon" }),
+      nodeType.icon
+    );
+    header.createEl("h3", { text: nodeType.title });
 
-    const descEl = container.createEl("p");
-    descEl.setText(description);
+    const descEl = container.createEl("p", { text: nodeType.description });
 
-    const examplesTitle = container.createEl("h4");
-    examplesTitle.setText("Examples:");
-
+    const examplesTitle = container.createEl("h4", { text: "Examples:" });
     const examplesList = container.createEl("ul");
-    examples.forEach((example) => {
+    nodeType.examples.forEach((example) => {
       const li = examplesList.createEl("li");
       li.setText(example);
     });
@@ -445,7 +483,7 @@ export class BuilderModule {
 
     // Set the position for the new node
     newNodeData.pos = {
-      x: parentNodePosition.x + 300,
+      x: parentNodePosition.x + 275,
       y: parentNodePosition.y,
     };
 

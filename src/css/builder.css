@@ -92,26 +92,53 @@
 }
 
 .systemsculpt-node-info {
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 20px;
   margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-node-info-title {
+  text-align: center;
+  margin-bottom: 20px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-node-info-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-node-info-icon {
+  margin-right: 10px;
+  color: var(--text-accent);
 }
 
 .systemsculpt-node-info h3 {
-  margin-bottom: 10px;
+  margin: 0;
   color: var(--text-normal);
 }
 
-.systemsculpt-node-info h4 {
-  margin-top: 10px;
-  margin-bottom: 5px;
+.systemsculpt-node-info p {
+  margin-bottom: 15px;
   color: var(--text-muted);
 }
 
-.systemsculpt-node-info p {
+.systemsculpt-node-info h4 {
+  margin-top: 15px;
   margin-bottom: 10px;
+  color: var(--text-accent);
 }
 
 .systemsculpt-node-info ul {
   margin-left: 20px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-node-info li {
+  margin-bottom: 5px;
 }
 
 .systemsculpt-node-toolbar {
