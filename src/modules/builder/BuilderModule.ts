@@ -92,6 +92,9 @@ export class BuilderModule {
 
       await this.initializeCanvasContent(file);
 
+      // Add this line to add the builder menu to the new canvas
+      this.builderMenu.addBuilderMenuToCanvas(leaf.view);
+
       new Notice("SystemSculpt AI Builder Canvas created");
     }
   }
