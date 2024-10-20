@@ -1,6 +1,7 @@
-import { TFile, Vault } from "obsidian";
+import { TFile, Vault, TFolder } from "obsidian";
 import { NodeSettings } from "./NodeSettings";
 import { FileChooserModal } from "./FileChooserModal";
+import { DirectoryChooserModal } from "./DirectoryChooserModal";
 
 export class NodeOverlay {
   private element: HTMLElement;
@@ -206,10 +207,79 @@ export class NodeOverlay {
     select.addEventListener("change", (e) => {
       const target = e.target as HTMLSelectElement;
       this.updateNodeData({ outputType: target.value });
+      this.toggleOutputFileSettings(container, target.value);
     });
 
     settingEl.appendChild(select);
     container.appendChild(settingEl);
+
+    // Add Output Filename and Output Directory settings
+    this.addOutputFileSettings(container, nodeData);
+
+    // Initially show/hide file settings based on the current output type
+    this.toggleOutputFileSettings(container, select.value);
+  }
+
+  private addOutputFileSettings(container: HTMLElement, nodeData: any) {
+    // Output Filename setting
+    const filenameSetting = this.createSettingElement("Output Filename:");
+    const filenameInput = document.createElement("input");
+    filenameInput.type = "text";
+    filenameInput.style.width = "100%";
+    filenameInput.style.padding = "2px";
+    filenameInput.value = nodeData.outputFilename || "output.md";
+    filenameInput.addEventListener("change", (e) => {
+      const target = e.target as HTMLInputElement;
+      this.updateNodeData({ outputFilename: target.value });
+    });
+    filenameSetting.appendChild(filenameInput);
+    container.appendChild(filenameSetting);
+
+    // Output Directory setting
+    const directorySetting = this.createSettingElement("Output Directory:");
+    const directoryInput = document.createElement("input");
+    directoryInput.type = "text";
+    directoryInput.style.width = "calc(100% - 110px)";
+    directoryInput.style.padding = "2px";
+    directoryInput.value = nodeData.outputDirectory || "";
+    directoryInput.readOnly = true;
+
+    const chooseDirectoryButton = document.createElement("button");
+    chooseDirectoryButton.textContent = "Choose Directory";
+    chooseDirectoryButton.style.marginLeft = "5px";
+    chooseDirectoryButton.style.width = "125px";
+
+    chooseDirectoryButton.addEventListener("click", () => {
+      new DirectoryChooserModal(this.nodeSettings.app, (folder: TFolder) => {
+        directoryInput.value = folder.path;
+        this.updateNodeData({ outputDirectory: folder.path });
+      }).open();
+    });
+
+    const directoryContainer = document.createElement("div");
+    directoryContainer.style.display = "flex";
+    directoryContainer.appendChild(directoryInput);
+    directoryContainer.appendChild(chooseDirectoryButton);
+
+    directorySetting.appendChild(directoryContainer);
+    container.appendChild(directorySetting);
+  }
+
+  private toggleOutputFileSettings(container: HTMLElement, outputType: string) {
+    const filenameSetting = container.querySelector(
+      ".systemsculpt-node-setting:nth-last-child(2)"
+    ) as HTMLElement;
+    const directorySetting = container.querySelector(
+      ".systemsculpt-node-setting:last-child"
+    ) as HTMLElement;
+
+    if (outputType === "file") {
+      filenameSetting.style.display = "block";
+      directorySetting.style.display = "block";
+    } else {
+      filenameSetting.style.display = "none";
+      directorySetting.style.display = "none";
+    }
   }
 
   private updateNodeData(newData: Partial<any>) {
