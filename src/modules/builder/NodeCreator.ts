@@ -23,7 +23,6 @@ export class NodeCreator {
     console.log("Canvas view:", canvasView);
 
     const newNodeData = this.createNodeData(nodeType);
-
     const nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
 
     let parentNodePosition = { x: 0, y: 0 };

@@ -266,3 +266,28 @@
 .systemsculpt-node-color-output {
   background-color: #f3a683;
 }
+
+.systemsculpt-file-picker-container {
+  margin-top: 10px;
+}
+
+.systemsculpt-file-picker-container label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.systemsculpt-file-picker-container input {
+  width: 100%;
+  padding: 5px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.systemsculpt-file-picker-container input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}

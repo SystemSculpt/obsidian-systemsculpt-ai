@@ -1,17 +1,26 @@
-import { Modal, App } from "obsidian";
+import { Modal, App, TFile } from "obsidian";
+import { MultiSuggest } from "../../utils/MultiSuggest";
+
+interface NodeData {
+  inputSource?: string;
+  inputFile?: string;
+  // Add more properties as needed for different node types
+}
 
 export class NodeSettings {
   private app: App;
+  private nodeData: Map<string, NodeData> = new Map();
+  private saveCallback: () => void;
 
-  constructor(app: App) {
+  constructor(app: App, saveCallback: () => void) {
     this.app = app;
+    this.saveCallback = saveCallback;
   }
 
   public showNodeSettingsModal(
     node: HTMLElement,
     getNodeType: (node: HTMLElement) => string,
-    assignUniqueNodeId: (node: any) => string,
-    saveCanvasData: (canvasView: any) => void
+    assignUniqueNodeId: (node: any) => string
   ) {
     const nodeType = getNodeType(node);
     const modal = new Modal(this.app);
@@ -19,11 +28,7 @@ export class NodeSettings {
     const titleContainer = modal.titleEl.createDiv(
       "systemsculpt-node-settings-title-container"
     );
-
-    titleContainer.createEl("h2", {
-      text: `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node Settings`,
-      cls: "systemsculpt-node-settings-title",
-    });
+    titleContainer.createEl("h2", { text: `${nodeType} Node Settings` });
 
     const nodeId =
       node.getAttribute("data-systemsculpt-node-id") ||
@@ -56,7 +61,7 @@ export class NodeSettings {
     if (node.classList.contains("systemsculpt-node-processing"))
       return "processing";
     if (node.classList.contains("systemsculpt-node-output")) return "output";
-    return "input";
+    return "input"; // Default to input if no matching class is found
   }
 
   public assignUniqueNodeId(node: any): string {
@@ -66,37 +71,85 @@ export class NodeSettings {
         node.unknownData = {};
       }
       node.unknownData.systemsculptNodeId = nodeId;
+      this.updateNodeData(nodeId, {}); // Initialize empty data for the new node
     }
     return node.unknownData.systemsculptNodeId;
   }
 
   private createInputNodeSettings(container: HTMLElement, nodeId: string) {
+    const data = this.getNodeData(nodeId);
+
     container.createEl("h3", { text: "Input Source" });
     const select = container.createEl("select");
     select.createEl("option", { value: "file", text: "File" });
     select.createEl("option", { value: "user_input", text: "User Input" });
     select.createEl("option", { value: "api", text: "API" });
+
+    select.value = data.inputSource || "file";
+
+    const filePickerContainer = container.createEl("div", {
+      cls: "systemsculpt-file-picker-container",
+    });
+    filePickerContainer.createEl("label", { text: "Select Input File:" });
+    const filePickerInput = filePickerContainer.createEl("input", {
+      type: "text",
+      placeholder: "Choose a file...",
+      value: data.inputFile || "",
+    });
+
+    const files = this.app.vault.getFiles();
+    const fileSuggestions = new Set(files.map((file) => file.path));
+
+    new MultiSuggest(
+      filePickerInput,
+      fileSuggestions,
+      (selectedPath: string) => {
+        this.updateNodeData(nodeId, { inputFile: selectedPath });
+      },
+      this.app
+    );
+
+    select.addEventListener("change", (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.updateNodeData(nodeId, { inputSource: target.value });
+      filePickerContainer.style.display =
+        target.value === "file" ? "block" : "none";
+    });
+
+    filePickerContainer.style.display =
+      select.value === "file" ? "block" : "none";
   }
 
   private createProcessingNodeSettings(container: HTMLElement, nodeId: string) {
-    container.createEl("h3", { text: "Processing Type" });
-    const select = container.createEl("select");
-    select.createEl("option", {
-      value: "text_analysis",
-      text: "Text Analysis",
-    });
-    select.createEl("option", {
-      value: "data_transformation",
-      text: "Data Transformation",
-    });
-    select.createEl("option", { value: "ai_model", text: "AI Model" });
+    // Implement processing node settings
   }
 
   private createOutputNodeSettings(container: HTMLElement, nodeId: string) {
-    container.createEl("h3", { text: "Output Destination" });
-    const select = container.createEl("select");
-    select.createEl("option", { value: "file", text: "File" });
-    select.createEl("option", { value: "display", text: "Display" });
-    select.createEl("option", { value: "api", text: "API" });
+    // Implement output node settings
+  }
+
+  private getNodeData(nodeId: string): NodeData {
+    if (!this.nodeData.has(nodeId)) {
+      this.nodeData.set(nodeId, {});
+    }
+    return this.nodeData.get(nodeId)!;
+  }
+
+  private updateNodeData(nodeId: string, newData: Partial<NodeData>) {
+    const currentData = this.getNodeData(nodeId);
+    this.nodeData.set(nodeId, { ...currentData, ...newData });
+    this.saveNodeData();
+  }
+
+  private saveNodeData() {
+    this.saveCallback();
+  }
+
+  public loadNodeData(data: { [nodeId: string]: NodeData }) {
+    this.nodeData = new Map(Object.entries(data));
+  }
+
+  public getAllNodeData(): { [nodeId: string]: NodeData } {
+    return Object.fromEntries(this.nodeData);
   }
 }

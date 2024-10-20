@@ -20,9 +20,12 @@ export class BuilderModule {
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_BUILDER_SETTINGS;
-    this.nodeSettings = new NodeSettings(this.plugin.app);
+    this.nodeSettings = new NodeSettings(this.plugin.app, () =>
+      this.saveSettings()
+    );
     this.builderMenu = new BuilderMenu(this.plugin.app, this);
     this.nodeCreator = new NodeCreator(this.nodeSettings);
+    this.loadSettings();
   }
 
   async load() {
@@ -58,10 +61,12 @@ export class BuilderModule {
       DEFAULT_BUILDER_SETTINGS,
       await this.plugin.loadData()
     );
+    this.nodeSettings.loadNodeData(this.settings.nodeData || {});
   }
 
   async saveSettings() {
-    await this.plugin.saveSettings(this.settings);
+    this.settings.nodeData = this.nodeSettings.getAllNodeData();
+    await this.plugin.saveData(this.settings);
   }
 
   settingsDisplay(containerEl: HTMLElement): void {
@@ -214,9 +219,8 @@ export class BuilderModule {
     const gearButton = this.createToolbarButton("⚙️", () => {
       this.nodeSettings.showNodeSettingsModal(
         node,
-        this.nodeSettings.getNodeType.bind(this.nodeSettings),
-        this.nodeSettings.assignUniqueNodeId.bind(this.nodeSettings),
-        this.saveCanvasData.bind(this)
+        (n) => this.nodeSettings.getNodeType(n),
+        (n) => this.nodeSettings.assignUniqueNodeId(n)
       );
     });
 
