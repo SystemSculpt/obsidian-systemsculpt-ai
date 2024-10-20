@@ -584,7 +584,29 @@
   outline: none;
   border-color: var(--interactive-accent);
 }
-/* Disabled Button */
+
+.systemsculpt-node-overlay {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.systemsculpt-node-title {
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.canvas-node-content[contenteditable="false"] {
+  cursor: default;
+  user-select: none;
+}/* Disabled Button */
 .systemsculpt-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;

@@ -1,4 +1,5 @@
 import { NodeSettings } from "./NodeSettings";
+import { NodeOverlay } from "./NodeOverlay";
 
 export class NodeCreator {
   private nodeSettings: NodeSettings;
@@ -50,6 +51,7 @@ export class NodeCreator {
 
       setTimeout(() => {
         this.addClassAndDataToNewNode(newNode, nodeType, nodeId);
+        this.replaceNodeContentWithOverlay(newNode, nodeType);
         this.saveCanvasData(canvasView);
       }, 100);
 
@@ -61,7 +63,7 @@ export class NodeCreator {
 
   private createNodeData(nodeType: "input" | "processing" | "output") {
     return {
-      text: `# ${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} Node\n\nAdd your content here`,
+      text: "", // Empty text content
       size: {
         width: 250,
         height: 120,
@@ -142,9 +144,15 @@ export class NodeCreator {
 
   private ensureUniqueNodeId(canvasView: any, newNodeData: any): string {
     let nodeId = this.nodeSettings.assignUniqueNodeId(newNodeData);
-    const existingNodeIds = new Set(
-      canvasView.canvas.nodes.map((node: any) => node.id)
-    );
+    const existingNodeIds = new Set();
+
+    if (canvasView.canvas && Array.isArray(canvasView.canvas.nodes)) {
+      canvasView.canvas.nodes.forEach((node: any) => {
+        if (node.id) {
+          existingNodeIds.add(node.id);
+        }
+      });
+    }
 
     while (existingNodeIds.has(nodeId)) {
       console.log(`Duplicate node ID found: ${nodeId}. Regenerating...`);
@@ -153,5 +161,24 @@ export class NodeCreator {
 
     console.log(`Unique node ID assigned: ${nodeId}`);
     return nodeId;
+  }
+
+  private replaceNodeContentWithOverlay(newNode: any, nodeType: string) {
+    if (newNode && newNode.nodeEl) {
+      const contentEl = newNode.nodeEl.querySelector(".canvas-node-content");
+      if (contentEl) {
+        // Remove all child elements
+        while (contentEl.firstChild) {
+          contentEl.removeChild(contentEl.firstChild);
+        }
+
+        // Create and append the NodeOverlay
+        const overlay = new NodeOverlay(nodeType);
+        contentEl.appendChild(overlay.getElement());
+
+        // Make the content uneditable
+        contentEl.setAttribute("contenteditable", "false");
+      }
+    }
   }
 }
