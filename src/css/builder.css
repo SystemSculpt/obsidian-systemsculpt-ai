@@ -292,34 +292,6 @@
   border-color: var(--interactive-accent);
 }
 
-.systemsculpt-node-overlay {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-node-title {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-node-settings {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-node-setting {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-node-setting-label {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-node-setting-value {
-  /* Remove any existing styles for this class */
-}
-
-.systemsculpt-file-content {
-  /* Remove any existing styles for this class */
-}
-
 .canvas-node-content[contenteditable="false"] {
   cursor: default;
   user-select: none;

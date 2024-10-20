@@ -1,5 +1,6 @@
 import { TFile, Vault } from "obsidian";
 import { NodeSettings } from "./NodeSettings";
+import { MultiSuggest } from "../../utils/MultiSuggest";
 
 export class NodeOverlay {
   private element: HTMLElement;
@@ -64,42 +65,70 @@ export class NodeOverlay {
     this.element.appendChild(settingsEl);
   }
 
-  private createSettingElement(label: string, value: string): HTMLElement {
+  private createSettingElement(label: string): HTMLElement {
     const settingEl = document.createElement("div");
     settingEl.className = "systemsculpt-node-setting";
-    settingEl.style.marginBottom = "5px";
+    settingEl.style.marginBottom = "10px";
     settingEl.style.fontSize = "12px";
     settingEl.style.lineHeight = "1.4";
 
-    const labelEl = document.createElement("span");
+    const labelEl = document.createElement("label");
     labelEl.className = "systemsculpt-node-setting-label";
     labelEl.textContent = label;
+    labelEl.style.display = "block";
+    labelEl.style.marginBottom = "3px";
     labelEl.style.fontWeight = "bold";
-    labelEl.style.marginRight = "5px";
-
-    const valueEl = document.createElement("span");
-    valueEl.className = "systemsculpt-node-setting-value";
-    valueEl.textContent = value;
 
     settingEl.appendChild(labelEl);
-    settingEl.appendChild(valueEl);
 
     return settingEl;
   }
 
   private addInputSourceSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = this.createSettingElement(
-      "Input Source:",
-      nodeData.inputSource || "File"
-    );
+    const settingEl = this.createSettingElement("Input Source:");
+    const select = document.createElement("select");
+    select.style.width = "100%";
+    select.style.padding = "2px";
+
+    const options = ["File", "User Input", "API"];
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.toLowerCase().replace(" ", "_");
+      optionEl.textContent = option;
+      select.appendChild(optionEl);
+    });
+
+    select.value = nodeData.inputSource || "file";
+    select.addEventListener("change", (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.updateNodeData({ inputSource: target.value });
+    });
+
+    settingEl.appendChild(select);
     container.appendChild(settingEl);
   }
 
   private async addInputFileSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = this.createSettingElement(
-      "Input File:",
-      nodeData.inputFile || "Not set"
+    const settingEl = this.createSettingElement("Input File:");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.style.width = "100%";
+    input.style.padding = "2px";
+    input.value = nodeData.inputFile || "";
+
+    const files = this.vault.getFiles();
+    const fileSuggestions = new Set(files.map((file) => file.path));
+
+    new MultiSuggest(
+      input,
+      fileSuggestions,
+      (selectedPath: string) => {
+        this.updateNodeData({ inputFile: selectedPath });
+      },
+      this.nodeSettings.app
     );
+
+    settingEl.appendChild(input);
     container.appendChild(settingEl);
 
     if (nodeData.inputFile) {
@@ -122,23 +151,59 @@ export class NodeOverlay {
         fileContentEl.textContent = "File not found";
       }
 
-      container.appendChild(fileContentEl);
+      settingEl.appendChild(fileContentEl);
     }
   }
 
   private addProcessingTypeSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = this.createSettingElement(
-      "Processing Type:",
-      nodeData.processingType || "Text Analysis"
-    );
+    const settingEl = this.createSettingElement("Processing Type:");
+    const select = document.createElement("select");
+    select.style.width = "100%";
+    select.style.padding = "2px";
+
+    const options = [
+      "Text Analysis",
+      "Data Transformation",
+      "AI Model Execution",
+    ];
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.toLowerCase().replace(" ", "_");
+      optionEl.textContent = option;
+      select.appendChild(optionEl);
+    });
+
+    select.value = nodeData.processingType || "text_analysis";
+    select.addEventListener("change", (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.updateNodeData({ processingType: target.value });
+    });
+
+    settingEl.appendChild(select);
     container.appendChild(settingEl);
   }
 
   private addOutputTypeSetting(container: HTMLElement, nodeData: any) {
-    const settingEl = this.createSettingElement(
-      "Output Type:",
-      nodeData.outputType || "File"
-    );
+    const settingEl = this.createSettingElement("Output Type:");
+    const select = document.createElement("select");
+    select.style.width = "100%";
+    select.style.padding = "2px";
+
+    const options = ["File", "Display in UI", "Trigger Action"];
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.toLowerCase().replace(" ", "_");
+      optionEl.textContent = option;
+      select.appendChild(optionEl);
+    });
+
+    select.value = nodeData.outputType || "file";
+    select.addEventListener("change", (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.updateNodeData({ outputType: target.value });
+    });
+
+    settingEl.appendChild(select);
     container.appendChild(settingEl);
   }
 

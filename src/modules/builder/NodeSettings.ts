@@ -8,7 +8,7 @@ interface NodeData {
 }
 
 export class NodeSettings {
-  private app: App;
+  public app: App; // Make this public so it can be accessed by NodeOverlay
   private nodeData: Map<string, NodeData> = new Map();
   private saveCallback: () => void;
 
