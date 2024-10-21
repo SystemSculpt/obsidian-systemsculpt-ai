@@ -3,6 +3,7 @@ import { NodeSettings } from "./NodeSettings";
 import { FileChooserModal } from "./FileChooserModal";
 import { DirectoryChooserModal } from "./DirectoryChooserModal";
 import { NodeModelSelectionModal } from "./ui/NodeModelSelectionModal";
+import { SystemPromptModal } from "./ui/SystemPromptModal";
 
 export class NodeOverlay {
   private element: HTMLElement;
@@ -194,6 +195,12 @@ export class NodeOverlay {
 
     // Add the temperature setting
     this.addTemperatureSetting(container, nodeData);
+
+    // Add the system prompt setting
+    this.addSystemPromptSetting(container, nodeData);
+
+    // Add the additional prompt setting
+    this.addAdditionalPromptSetting(container, nodeData);
   }
 
   private addOutputTypeSetting(container: HTMLElement, nodeData: any) {
@@ -354,6 +361,56 @@ export class NodeOverlay {
     sliderContainer.appendChild(slider);
     sliderContainer.appendChild(valueDisplay);
     settingEl.appendChild(sliderContainer);
+    container.appendChild(settingEl);
+  }
+
+  private addSystemPromptSetting(container: HTMLElement, nodeData: any) {
+    const settingEl = this.createSettingElement("System Prompt:");
+    const inputContainer = document.createElement("div");
+    inputContainer.style.display = "flex";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.style.width = "100%";
+    input.style.padding = "2px";
+    input.value = nodeData.systemPrompt || "";
+    input.readOnly = true;
+
+    const choosePromptButton = document.createElement("button");
+    choosePromptButton.textContent = "Choose Prompt";
+    choosePromptButton.style.marginLeft = "5px";
+
+    choosePromptButton.addEventListener("click", () => {
+      new SystemPromptModal(
+        this.nodeSettings.app,
+        this.nodeSettings.plugin.templatesModule,
+        (selectedPrompt) => {
+          input.value = selectedPrompt;
+          this.updateNodeData({ systemPrompt: selectedPrompt });
+        }
+      ).open();
+    });
+
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(choosePromptButton);
+
+    settingEl.appendChild(inputContainer);
+    container.appendChild(settingEl);
+  }
+
+  private addAdditionalPromptSetting(container: HTMLElement, nodeData: any) {
+    const settingEl = this.createSettingElement("Additional Prompt:");
+    const textarea = document.createElement("textarea");
+    textarea.style.width = "100%";
+    textarea.style.padding = "2px";
+    textarea.style.minHeight = "100px";
+    textarea.value = nodeData.additionalPrompt || "";
+    textarea.addEventListener("change", (e) => {
+      const target = e.target as HTMLTextAreaElement;
+      this.updateNodeData({ additionalPrompt: target.value });
+    });
+
+    settingEl.appendChild(textarea);
     container.appendChild(settingEl);
   }
 
