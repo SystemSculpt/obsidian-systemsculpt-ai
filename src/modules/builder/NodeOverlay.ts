@@ -191,6 +191,9 @@ export class NodeOverlay {
 
     // Add the model selection setting
     this.addModelSelectionSetting(container, nodeData);
+
+    // Add the temperature setting
+    this.addTemperatureSetting(container, nodeData);
   }
 
   private addOutputTypeSetting(container: HTMLElement, nodeData: any) {
@@ -321,6 +324,36 @@ export class NodeOverlay {
     inputContainer.appendChild(chooseModelButton);
 
     settingEl.appendChild(inputContainer);
+    container.appendChild(settingEl);
+  }
+
+  private addTemperatureSetting(container: HTMLElement, nodeData: any) {
+    const settingEl = this.createSettingElement("Temperature:");
+    const sliderContainer = document.createElement("div");
+    sliderContainer.style.display = "flex";
+    sliderContainer.style.alignItems = "center";
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "2";
+    slider.step = "0.1";
+    slider.value = nodeData.temperature || "0.2";
+    slider.style.flex = "1";
+
+    const valueDisplay = document.createElement("span");
+    valueDisplay.textContent = slider.value;
+    valueDisplay.style.marginLeft = "10px";
+
+    slider.addEventListener("input", (e) => {
+      const target = e.target as HTMLInputElement;
+      valueDisplay.textContent = target.value;
+      this.updateNodeData({ temperature: parseFloat(target.value) });
+    });
+
+    sliderContainer.appendChild(slider);
+    sliderContainer.appendChild(valueDisplay);
+    settingEl.appendChild(sliderContainer);
     container.appendChild(settingEl);
   }
 
