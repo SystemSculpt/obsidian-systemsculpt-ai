@@ -9,6 +9,7 @@ import { NodeSettings } from "./NodeSettings";
 import { BuilderMenu } from "./ui/BuilderMenu";
 import { NodeCreator } from "./NodeCreator";
 import { CanvasViewportManager } from "./CanvasViewportManager";
+import { EdgeStyleManager } from "./edge/EdgeStyleManager";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -161,23 +162,8 @@ export class BuilderModule {
   }
 
   private setupEdgeObserver(canvasView: any) {
-    // Initial style application
-    this.applyCustomEdgeStyles(canvasView);
-
-    // Set up observer for edge changes
-    const observer = new MutationObserver((mutations) => {
-      this.applyCustomEdgeStyles(canvasView);
-    });
-
-    // Observe the edge container element
-    if (canvasView.canvas?.edgeContainerEl) {
-      observer.observe(canvasView.canvas.edgeContainerEl, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["style", "d"],
-      });
-    }
+    const edgeManager = new EdgeStyleManager(canvasView);
+    edgeManager.setupEdgeObserver();
   }
 
   private applyNodeOverlaysToExistingNodes(canvasView: any) {
@@ -371,45 +357,5 @@ export class BuilderModule {
     ) {
       canvasView.canvas.requestSave();
     }
-  }
-
-  private getEdgeColor(sourceNode: any, targetNode: any): string {
-    if (
-      sourceNode?.unknownData?.systemsculptNodeType === "input" &&
-      targetNode?.unknownData?.systemsculptNodeType === "processing"
-    ) {
-      return "#4CAF50"; // Green color
-    }
-    if (
-      sourceNode?.unknownData?.systemsculptNodeType === "processing" &&
-      targetNode?.unknownData?.systemsculptNodeType === "output"
-    ) {
-      return "#FFC107"; // Yellow color
-    }
-    return "#999"; // Default color
-  }
-
-  private applyCustomEdgeStyles(canvasView: any) {
-    if (!canvasView.canvas?.edges) return;
-
-    canvasView.canvas.edges.forEach((edge: any) => {
-      const sourceNode = canvasView.canvas.nodes.get(edge.from.node.id);
-      const targetNode = canvasView.canvas.nodes.get(edge.to.node.id);
-
-      const color = this.getEdgeColor(sourceNode, targetNode);
-
-      // Find and style the display path
-      if (edge.path?.display) {
-        edge.path.display.style.stroke = color;
-        edge.path.display.style.strokeWidth = "2px";
-      }
-
-      // Also style the interaction path
-      if (edge.path?.interaction) {
-        edge.path.interaction.style.stroke = color;
-        edge.path.interaction.style.strokeWidth = "4px";
-        edge.path.interaction.style.opacity = "0.5";
-      }
-    });
   }
 }
