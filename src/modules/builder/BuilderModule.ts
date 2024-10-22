@@ -60,6 +60,17 @@ export class BuilderModule {
       return false;
     }
 
+    // Check if a node is selected or if the user is focused on an input element
+    const activeElement = document.activeElement;
+    if (
+      canvasView.canvas.selection.size > 0 ||
+      activeElement instanceof HTMLInputElement ||
+      activeElement instanceof HTMLTextAreaElement ||
+      activeElement instanceof HTMLSelectElement
+    ) {
+      return false;
+    }
+
     // Update the current viewport position
     this.updateViewportPosition(canvasView.canvas);
 
