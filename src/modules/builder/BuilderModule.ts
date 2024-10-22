@@ -8,6 +8,7 @@ import { TFile, Notice, WorkspaceLeaf, Menu, MenuItem } from "obsidian";
 import { NodeSettings } from "./NodeSettings";
 import { BuilderMenu } from "./ui/BuilderMenu";
 import { NodeCreator } from "./NodeCreator";
+import { CanvasViewportManager } from "./CanvasViewportManager";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -16,14 +17,7 @@ export class BuilderModule {
   nodeSettings: NodeSettings;
   builderMenu: BuilderMenu;
   nodeCreator: NodeCreator;
-  private viewportPosition: { x: number; y: number; zoom: number } = {
-    x: 0,
-    y: 0,
-    zoom: 1,
-  };
-  private zoomStep: number = 0.1; // Adjust this value to change zoom speed
-  private minZoom: number = -2; // Adjust this value to set the minimum zoom level
-  private maxZoom: number = 2; // Adjust this value to set the maximum zoom level
+  private canvasViewportManager: CanvasViewportManager;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -36,122 +30,9 @@ export class BuilderModule {
       this.nodeSettings,
       this.plugin.app.vault
     );
+    this.canvasViewportManager = new CanvasViewportManager();
     this.loadSettings();
-    this.viewportPosition = { x: 0, y: 0, zoom: 1 };
-  }
-
-  private handleCanvasKeyEvent(evt: KeyboardEvent): boolean {
-    const activeLeaf = this.plugin.app.workspace.activeLeaf;
-    if (!activeLeaf || activeLeaf.view.getViewType() !== "canvas") {
-      return false;
-    }
-
-    const canvasView = activeLeaf.view as any;
-    if (!canvasView.canvas) {
-      console.error("Canvas not found in view");
-      return false;
-    }
-
-    if (
-      !canvasView.canvas.data ||
-      !canvasView.canvas.data.systemsculptAIBuilder
-    ) {
-      console.log("Not a SystemSculpt AI Builder canvas");
-      return false;
-    }
-
-    // Check if a node is selected or if the user is focused on an input element
-    const activeElement = document.activeElement;
-    if (
-      canvasView.canvas.selection.size > 0 ||
-      activeElement instanceof HTMLInputElement ||
-      activeElement instanceof HTMLTextAreaElement ||
-      activeElement instanceof HTMLSelectElement
-    ) {
-      return false;
-    }
-
-    // Update the current viewport position
-    this.updateViewportPosition(canvasView.canvas);
-
-    const key = evt.key.toLowerCase();
-    const step = 10; // Adjust this value to change the movement speed
-
-    if (evt.shiftKey) {
-      switch (key) {
-        case "j":
-        case "arrowdown":
-          this.zoomCanvas(canvasView.canvas, -this.zoomStep);
-          return true;
-        case "k":
-        case "arrowup":
-          this.zoomCanvas(canvasView.canvas, this.zoomStep);
-          return true;
-      }
-    } else {
-      switch (key) {
-        case "h":
-        case "arrowleft":
-          this.moveCanvas(canvasView.canvas, -step, 0);
-          return true;
-        case "j":
-        case "arrowdown":
-          this.moveCanvas(canvasView.canvas, 0, step);
-          return true;
-        case "k":
-        case "arrowup":
-          this.moveCanvas(canvasView.canvas, 0, -step);
-          return true;
-        case "l":
-        case "arrowright":
-          this.moveCanvas(canvasView.canvas, step, 0);
-          return true;
-      }
-    }
-
-    return false;
-  }
-
-  private updateViewportPosition(canvas: any) {
-    if (
-      canvas &&
-      typeof canvas.x === "number" &&
-      typeof canvas.y === "number" &&
-      typeof canvas.zoom === "number"
-    ) {
-      this.viewportPosition = {
-        x: canvas.x,
-        y: canvas.y,
-        zoom: canvas.zoom,
-      };
-    }
-  }
-
-  private moveCanvas(canvas: any, dx: number, dy: number) {
-    if (canvas && typeof canvas.setViewport === "function") {
-      const newX = this.viewportPosition.x + dx;
-      const newY = this.viewportPosition.y + dy;
-
-      console.log("Moving canvas to:", {
-        x: newX,
-        y: newY,
-        zoom: this.viewportPosition.zoom,
-      });
-
-      try {
-        canvas.setViewport(newX, newY, this.viewportPosition.zoom);
-        this.viewportPosition = {
-          x: newX,
-          y: newY,
-          zoom: this.viewportPosition.zoom,
-        };
-        console.log("Canvas moved successfully");
-      } catch (error) {
-        console.error("Error moving canvas:", error);
-      }
-    } else {
-      console.error("Canvas or setViewport function not found");
-    }
+    this.canvasViewportManager.viewportPosition = { x: 0, y: 0, zoom: 1 };
   }
 
   async load() {
@@ -181,7 +62,8 @@ export class BuilderModule {
     );
 
     this.plugin.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-      if (this.handleCanvasKeyEvent(evt)) {
+      const activeLeaf = this.plugin.app.workspace.activeLeaf;
+      if (this.canvasViewportManager.handleCanvasKeyEvent(evt, activeLeaf)) {
         evt.preventDefault();
         evt.stopPropagation();
       }
@@ -193,7 +75,9 @@ export class BuilderModule {
         if (leaf && leaf.view.getViewType() === "canvas") {
           const canvasView = leaf.view as any;
           if (canvasView.canvas) {
-            this.updateViewportPosition(canvasView.canvas);
+            this.canvasViewportManager.updateViewportPosition(
+              canvasView.canvas
+            );
           }
         }
       })
@@ -271,8 +155,29 @@ export class BuilderModule {
         this.applyNodeClasses(canvasView);
         this.addPlusButtonsToCustomNodes(canvasView);
         this.applyNodeOverlaysToExistingNodes(canvasView);
+        this.setupEdgeObserver(canvasView);
       }
     });
+  }
+
+  private setupEdgeObserver(canvasView: any) {
+    // Initial style application
+    this.applyCustomEdgeStyles(canvasView);
+
+    // Set up observer for edge changes
+    const observer = new MutationObserver((mutations) => {
+      this.applyCustomEdgeStyles(canvasView);
+    });
+
+    // Observe the edge container element
+    if (canvasView.canvas?.edgeContainerEl) {
+      observer.observe(canvasView.canvas.edgeContainerEl, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["style", "d"],
+      });
+    }
   }
 
   private applyNodeOverlaysToExistingNodes(canvasView: any) {
@@ -468,32 +373,43 @@ export class BuilderModule {
     }
   }
 
-  private zoomCanvas(canvas: any, zoomDelta: number) {
-    if (canvas && typeof canvas.setViewport === "function") {
-      const newZoom = Math.max(
-        this.minZoom,
-        Math.min(this.maxZoom, this.viewportPosition.zoom + zoomDelta)
-      );
-
-      console.log("Zooming canvas to:", {
-        x: this.viewportPosition.x,
-        y: this.viewportPosition.y,
-        zoom: newZoom,
-      });
-
-      try {
-        canvas.setViewport(
-          this.viewportPosition.x,
-          this.viewportPosition.y,
-          newZoom
-        );
-        this.viewportPosition.zoom = newZoom;
-        console.log("Canvas zoomed successfully");
-      } catch (error) {
-        console.error("Error zooming canvas:", error);
-      }
-    } else {
-      console.error("Canvas or setViewport function not found");
+  private getEdgeColor(sourceNode: any, targetNode: any): string {
+    if (
+      sourceNode?.unknownData?.systemsculptNodeType === "input" &&
+      targetNode?.unknownData?.systemsculptNodeType === "processing"
+    ) {
+      return "#4CAF50"; // Green color
     }
+    if (
+      sourceNode?.unknownData?.systemsculptNodeType === "processing" &&
+      targetNode?.unknownData?.systemsculptNodeType === "output"
+    ) {
+      return "#FFC107"; // Yellow color
+    }
+    return "#999"; // Default color
+  }
+
+  private applyCustomEdgeStyles(canvasView: any) {
+    if (!canvasView.canvas?.edges) return;
+
+    canvasView.canvas.edges.forEach((edge: any) => {
+      const sourceNode = canvasView.canvas.nodes.get(edge.from.node.id);
+      const targetNode = canvasView.canvas.nodes.get(edge.to.node.id);
+
+      const color = this.getEdgeColor(sourceNode, targetNode);
+
+      // Find and style the display path
+      if (edge.path?.display) {
+        edge.path.display.style.stroke = color;
+        edge.path.display.style.strokeWidth = "2px";
+      }
+
+      // Also style the interaction path
+      if (edge.path?.interaction) {
+        edge.path.interaction.style.stroke = color;
+        edge.path.interaction.style.strokeWidth = "4px";
+        edge.path.interaction.style.opacity = "0.5";
+      }
+    });
   }
 }
