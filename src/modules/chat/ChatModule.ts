@@ -9,6 +9,7 @@ import { Notice } from "obsidian";
 import { createHash } from "crypto";
 import { ContextFileManager } from "./ContextFileManager";
 import { RecorderModule } from "../recorder/RecorderModule";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export class ChatModule {
   plugin: SystemSculptPlugin;
@@ -26,6 +27,7 @@ export class ChatModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
 
     this.chatFileManager = new ChatFileManager(this.plugin.app, this);
@@ -125,6 +127,7 @@ export class ChatModule {
     }
 
     this.registerExtractDocumentCommand();
+    logModuleLoadTime("Chat", startTime);
   }
 
   async loadSettings() {

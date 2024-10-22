@@ -10,6 +10,7 @@ import { BuilderMenu } from "./ui/BuilderMenu";
 import { NodeCreator } from "./NodeCreator";
 import { CanvasViewportManager } from "./CanvasViewportManager";
 import { EdgeStyleManager } from "./edge/EdgeStyleManager";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export class BuilderModule {
   plugin: SystemSculptPlugin;
@@ -37,7 +38,9 @@ export class BuilderModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
+
     this.addCommands();
 
     this.applyCustomVisualsToAllCanvasViews();
@@ -83,6 +86,7 @@ export class BuilderModule {
         }
       })
     );
+    logModuleLoadTime("Builder", startTime);
   }
 
   async loadSettings() {

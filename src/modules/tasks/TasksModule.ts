@@ -1,5 +1,6 @@
 import SystemSculptPlugin from "../../main";
 import { BrainModule } from "../brain/BrainModule";
+import { logModuleLoadTime } from "../../utils/timing";
 import {
   SystemSculptTasksSettings,
   DEFAULT_TASKS_SETTINGS,
@@ -24,6 +25,7 @@ export class TasksModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
 
     this.plugin.addCommand({
@@ -60,6 +62,7 @@ export class TasksModule {
     this.plugin.taskToggleStatusBarItem.onClickEvent(async () => {
       new TaskModal(this.plugin.app, this).open();
     });
+    logModuleLoadTime("Tasks", startTime);
   }
 
   async loadSettings() {

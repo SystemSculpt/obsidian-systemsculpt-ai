@@ -18,6 +18,7 @@ import { ModelSelectionModal } from "./views/ModelSelectionModal";
 import { EventEmitter } from "events";
 import { ButtonComponent } from "obsidian";
 import { CostEstimator } from "../../interfaces/CostEstimatorModal";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export class BrainModule extends EventEmitter implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -73,11 +74,13 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   }
 
   public async load() {
+    const startTime = performance.now();
     if (this.isInitialized) return;
     if (this.initializationPromise) return this.initializationPromise;
 
     this.initializationPromise = this.initialize();
     await this.initializationPromise;
+    logModuleLoadTime("Brain", startTime);
   }
 
   private async initialize() {

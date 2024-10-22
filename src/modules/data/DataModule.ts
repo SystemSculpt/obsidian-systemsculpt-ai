@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import SystemSculptPlugin from "../../main";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export interface DataSettings {
   // Define your data settings here
@@ -19,7 +20,9 @@ export class DataModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
+    logModuleLoadTime("Data", startTime);
   }
 
   async loadSettings() {

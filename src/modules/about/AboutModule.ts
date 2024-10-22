@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import SystemSculptPlugin from "../../main";
+import { logModuleLoadTime } from "../../utils/timing";
 import { members } from "./AboutData";
 
 export class AboutModule {
@@ -9,7 +10,10 @@ export class AboutModule {
     this.plugin = plugin;
   }
 
-  async load() {}
+  async load() {
+    const startTime = performance.now();
+    logModuleLoadTime("About", startTime);
+  }
 
   settingsDisplay(containerEl: HTMLElement): void {
     new AboutSettingTab(this.plugin.app, this, containerEl).display();

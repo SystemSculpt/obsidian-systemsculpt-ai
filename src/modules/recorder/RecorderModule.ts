@@ -16,6 +16,7 @@ import { transcribeSelectedFile } from "./functions/transcribeSelectedFile";
 import { RecordingNotice } from "./views/RecordingNotice";
 import { AIService } from "../../api/AIService";
 import { updateRecorderButtonStatusBar } from "./functions/updateRecorderButtonStatusBar";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export class RecorderModule {
   plugin: SystemSculptPlugin;
@@ -30,6 +31,7 @@ export class RecorderModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
 
     this.plugin.addCommand({
@@ -60,6 +62,7 @@ export class RecorderModule {
     this.plugin.recorderToggleStatusBarItem.onClickEvent(() => {
       this.toggleRecording();
     });
+    logModuleLoadTime("Recorder", startTime);
   }
 
   async loadSettings() {

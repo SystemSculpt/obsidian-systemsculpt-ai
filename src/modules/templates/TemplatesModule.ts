@@ -8,6 +8,7 @@ import { IGenerationModule } from "../../interfaces/IGenerationModule";
 import { BlankTemplateModal } from "./views/BlankTemplateModal";
 import { MultiSuggest } from "../../utils/MultiSuggest";
 import { renderLicenseKeySetting } from "./settings/LicenseKeySetting";
+import { logModuleLoadTime } from "../../utils/timing";
 
 export interface TemplatesSettings {
   templatesPath: string;
@@ -64,7 +65,9 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   async load() {
+    const startTime = performance.now();
     await this.loadSettings();
+
     this.registerCodeMirror();
     this.registerDomEvent();
     setTimeout(async () => {
@@ -77,8 +80,9 @@ export class TemplatesModule implements IGenerationModule {
       callback: () => this.triggerTemplateSuggestions(),
     });
 
-    await this.plugin.brainModule.initializeAIService();
+    // await this.plugin.brainModule.initializeAIService();
     await this.AIService.ensureModelCacheInitialized();
+    logModuleLoadTime("Templates", startTime);
 
     this.plugin.addCommand({
       id: "open-blank-template-modal",
