@@ -18,6 +18,8 @@ export class AIService {
     showlocalEndpointSetting: boolean;
     showopenRouterSetting: boolean;
   };
+  private modelInitializationInProgress: boolean = false;
+  private modelInitializationPromise: Promise<void> | null = null;
 
   private constructor(settings: {
     openAIApiKey: string;
@@ -57,32 +59,28 @@ export class AIService {
     };
   }
 
-  public static async getInstance(
-    settings: {
-      openAIApiKey: string;
-      groqAPIKey: string;
-      openRouterAPIKey: string;
-      apiEndpoint: string;
-      localEndpoint?: string;
-      temperature: number;
-      showopenAISetting: boolean;
-      showgroqSetting: boolean;
-      showlocalEndpointSetting: boolean;
-      showopenRouterSetting: boolean;
-    },
-    forceNewInstance: boolean = false
-  ): Promise<AIService> {
-    try {
-      if (!AIService.instance || forceNewInstance) {
-        AIService.instance = new AIService(settings);
-        await AIService.instance.initializeModelCache();
-      } else {
-        AIService.instance.updateSettings(settings);
-      }
-      return AIService.instance;
-    } catch (error) {
-      throw error;
+  public static async getInstance(settings: {
+    openAIApiKey: string;
+    groqAPIKey: string;
+    openRouterAPIKey: string;
+    apiEndpoint: string;
+    localEndpoint?: string;
+    temperature: number;
+    showopenAISetting: boolean;
+    showgroqSetting: boolean;
+    showlocalEndpointSetting: boolean;
+    showopenRouterSetting: boolean;
+  }): Promise<AIService> {
+    if (!AIService.instance) {
+      AIService.instance = new AIService(settings);
+    } else {
+      AIService.instance.updateApiKeys(settings);
     }
+
+    // Initialize cache in background instead of waiting
+    AIService.instance.initializeModelCache().catch(console.error);
+
+    return AIService.instance;
   }
 
   public async ensureModelCacheInitialized(): Promise<void> {
@@ -265,10 +263,27 @@ export class AIService {
   public async initializeModelCache(
     forceRefresh: boolean = false
   ): Promise<void> {
-    if (Object.keys(this.cachedModels).length > 0 && !forceRefresh) {
+    if (this.modelInitializationInProgress && !forceRefresh) {
+      await this.modelInitializationPromise;
       return;
     }
 
+    if (!forceRefresh && Object.keys(this.cachedModels).length > 0) {
+      return;
+    }
+
+    this.modelInitializationInProgress = true;
+    this.modelInitializationPromise = this.performModelInitialization();
+
+    try {
+      await this.modelInitializationPromise;
+    } finally {
+      this.modelInitializationInProgress = false;
+      this.modelInitializationPromise = null;
+    }
+  }
+
+  private async performModelInitialization(): Promise<void> {
     const providers: AIProvider[] = ["local", "openai", "groq", "openRouter"];
     const fetchPromises: Promise<void>[] = [];
 
@@ -295,7 +310,7 @@ export class AIService {
       const models = await Promise.race([
         this.services[provider].getModels(),
         new Promise<Model[]>(
-          (_, reject) => setTimeout(() => reject(new Error("Timeout")), 30000) // Increased timeout to 30 seconds
+          (_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000) // Reduced to 10 seconds
         ),
       ]);
 
