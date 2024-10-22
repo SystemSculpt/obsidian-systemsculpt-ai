@@ -65,7 +65,7 @@ export function displayTokenCount(
   tokenCount: number,
   containerEl: HTMLElement,
   chatMessagesLength: number,
-  model: Model,
+  model: Model | null | undefined,
   maxOutputTokens: number
 ) {
   const tokenCountEl = containerEl.querySelector(
@@ -85,8 +85,9 @@ export function displayTokenCount(
     tokenCountEl.style.display = "inline";
     tokenCountEl.textContent = `Tokens: ${tokenCount}`;
   }
+
   if (costEstimateEl) {
-    if (model.pricing) {
+    if (model && model.pricing) {
       const { minCost, maxCost } = CostEstimator.calculateCost(
         model,
         tokenCount,
@@ -100,8 +101,10 @@ export function displayTokenCount(
       costEstimateEl.style.display = "none";
     }
   }
+
   if (titleContainerEl) titleContainerEl.style.display = "flex";
-  if (dollarButton) dollarButton.style.display = "inline";
+  if (dollarButton)
+    dollarButton.style.display = model?.pricing ? "inline" : "none";
 }
 
 export function formatNumber(num: number): string {
