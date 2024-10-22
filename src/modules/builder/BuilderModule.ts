@@ -20,6 +20,7 @@ export class BuilderModule {
   builderMenu: BuilderMenu;
   nodeCreator: NodeCreator;
   private canvasViewportManager: CanvasViewportManager;
+  private overlayCheckInterval: number | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -42,8 +43,10 @@ export class BuilderModule {
     await this.loadSettings();
 
     this.addCommands();
-
     this.applyCustomVisualsToAllCanvasViews();
+
+    // Start the overlay check
+    this.startOverlayCheck();
 
     this.plugin.registerEvent(
       this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
@@ -86,6 +89,7 @@ export class BuilderModule {
         }
       })
     );
+
     logModuleLoadTime("Builder", startTime);
   }
 
@@ -360,6 +364,49 @@ export class BuilderModule {
       typeof canvasView.canvas.requestSave === "function"
     ) {
       canvasView.canvas.requestSave();
+    }
+  }
+
+  private startOverlayCheck() {
+    // Clear any existing interval
+    if (this.overlayCheckInterval) {
+      window.clearInterval(this.overlayCheckInterval);
+    }
+
+    // Check every 2 seconds
+    this.overlayCheckInterval = window.setInterval(() => {
+      const canvasViews = this.plugin.app.workspace.getLeavesOfType("canvas");
+      canvasViews.forEach((leaf) => {
+        const canvasView = leaf.view as any;
+        if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
+          this.checkAndLoadMissingOverlays(canvasView);
+        }
+      });
+    }, 2000);
+  }
+
+  private checkAndLoadMissingOverlays(canvasView: any) {
+    if (canvasView.canvas && canvasView.canvas.nodes) {
+      canvasView.canvas.nodes.forEach((node: any) => {
+        if (
+          node.unknownData?.systemsculptNodeType &&
+          node.nodeEl &&
+          !node.nodeEl.querySelector(".systemsculpt-node-overlay")
+        ) {
+          console.log(
+            `Reloading missing overlay for node type: ${node.unknownData.systemsculptNodeType}`
+          );
+          const nodeType = node.unknownData.systemsculptNodeType;
+          this.nodeCreator.applyNodeOverlay(node, nodeType);
+        }
+      });
+    }
+  }
+
+  unload() {
+    if (this.overlayCheckInterval) {
+      window.clearInterval(this.overlayCheckInterval);
+      this.overlayCheckInterval = null;
     }
   }
 }
