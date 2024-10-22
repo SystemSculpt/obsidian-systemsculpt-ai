@@ -1,4 +1,5 @@
 import { EdgeColors } from "./EdgeColors";
+import { Notice } from "obsidian";
 
 export class EdgeStyleManager {
   private canvasView: any;
@@ -31,10 +32,37 @@ export class EdgeStyleManager {
       const sourceNode = this.canvasView.canvas.nodes.get(edge.from.node.id);
       const targetNode = this.canvasView.canvas.nodes.get(edge.to.node.id);
 
-      const color = this.getEdgeColor(sourceNode, targetNode);
+      // Only check connections when both nodes exist (connection is complete)
+      if (sourceNode && targetNode) {
+        const color = this.getEdgeColor(sourceNode, targetNode);
 
-      this.styleEdgePaths(edge, color);
+        if (color === EdgeColors.DEFAULT) {
+          this.handleInvalidConnection(edge, sourceNode, targetNode);
+        } else {
+          this.styleEdgePaths(edge, color);
+        }
+      } else {
+        // For in-progress connections, use a neutral color
+        this.styleEdgePaths(edge, EdgeColors.DEFAULT);
+      }
     });
+  }
+
+  private handleInvalidConnection(edge: any, sourceNode: any, targetNode: any) {
+    const sourceType = sourceNode?.unknownData?.systemsculptNodeType;
+    const targetType = targetNode?.unknownData?.systemsculptNodeType;
+
+    // Remove the edge
+    if (
+      this.canvasView.canvas &&
+      typeof this.canvasView.canvas.removeEdge === "function"
+    ) {
+      this.canvasView.canvas.removeEdge(edge);
+
+      new Notice(
+        `Invalid connection: Cannot connect ${sourceType || "unknown"} node to ${targetType || "unknown"} node. Only Input→Processing and Processing→Output connections are allowed.`
+      );
+    }
   }
 
   private styleEdgePaths(edge: any, color: string) {
