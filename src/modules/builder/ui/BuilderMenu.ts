@@ -43,6 +43,15 @@ export class BuilderMenu {
       this.showNodeTypesInfo();
     });
 
+    const movementInfoButton = builderMenu.createEl("button", {
+      cls: "systemsculpt-builder-info-button",
+      text: "Movement Info",
+    });
+
+    movementInfoButton.addEventListener("click", () => {
+      this.showMovementInfo();
+    });
+
     builderMenu.createEl("hr", { cls: "systemsculpt-builder-separator" });
 
     builderMenu.createEl("div", {
@@ -167,5 +176,73 @@ export class BuilderMenu {
     if (existingBuilderMenu) {
       existingBuilderMenu.remove();
     }
+  }
+
+  private showMovementInfo() {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("SystemSculpt AI Builder Movement Controls");
+    modal.titleEl.addClass("systemsculpt-node-info-title");
+
+    const content = document.createDocumentFragment();
+
+    const movementInfo = [
+      {
+        title: "Navigation",
+        description: "Move around the canvas using keyboard controls.",
+        controls: [
+          { key: "H or Left Arrow", action: "Move left" },
+          { key: "J or Down Arrow", action: "Move down" },
+          { key: "K or Up Arrow", action: "Move up" },
+          { key: "L or Right Arrow", action: "Move right" },
+        ],
+        icon: "move",
+      },
+      {
+        title: "Zooming",
+        description: "Zoom in and out of the canvas.",
+        controls: [
+          { key: "Shift + K or Shift + Up Arrow", action: "Zoom in" },
+          { key: "Shift + J or Shift + Down Arrow", action: "Zoom out" },
+        ],
+        icon: "zoom-in",
+      },
+    ];
+
+    movementInfo.forEach((info) => {
+      content.appendChild(this.createMovementInfoSection(info));
+    });
+
+    modal.contentEl.appendChild(content);
+    modal.open();
+  }
+
+  private createMovementInfoSection(info: {
+    title: string;
+    description: string;
+    controls: { key: string; action: string }[];
+    icon: string;
+  }): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "systemsculpt-node-info";
+
+    const header = container.createEl("div", {
+      cls: "systemsculpt-node-info-header",
+    });
+    setIcon(
+      header.createSpan({ cls: "systemsculpt-node-info-icon" }),
+      info.icon
+    );
+    header.createEl("h3", { text: info.title });
+
+    const descEl = container.createEl("p", { text: info.description });
+
+    const controlsTitle = container.createEl("h4", { text: "Controls:" });
+    const controlsList = container.createEl("ul");
+    info.controls.forEach((control) => {
+      const li = controlsList.createEl("li");
+      li.innerHTML = `<strong>${control.key}</strong>: ${control.action}`;
+    });
+
+    return container;
   }
 }
