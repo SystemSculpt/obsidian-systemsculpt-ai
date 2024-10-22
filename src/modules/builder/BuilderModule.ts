@@ -373,7 +373,7 @@ export class BuilderModule {
       window.clearInterval(this.overlayCheckInterval);
     }
 
-    // Check every 2 seconds
+    // Check every 1 second
     this.overlayCheckInterval = window.setInterval(() => {
       const canvasViews = this.plugin.app.workspace.getLeavesOfType("canvas");
       canvasViews.forEach((leaf) => {
@@ -382,7 +382,7 @@ export class BuilderModule {
           this.checkAndLoadMissingOverlays(canvasView);
         }
       });
-    }, 2000);
+    }, 1000);
   }
 
   private checkAndLoadMissingOverlays(canvasView: any) {
