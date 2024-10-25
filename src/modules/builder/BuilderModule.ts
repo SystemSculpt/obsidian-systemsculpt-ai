@@ -373,16 +373,40 @@ export class BuilderModule {
       window.clearInterval(this.overlayCheckInterval);
     }
 
-    // Check every 1 second
-    this.overlayCheckInterval = window.setInterval(() => {
-      const canvasViews = this.plugin.app.workspace.getLeavesOfType("canvas");
-      canvasViews.forEach((leaf) => {
-        const canvasView = leaf.view as any;
-        if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
-          this.checkAndLoadMissingOverlays(canvasView);
+    const checkOverlays = () => {
+      const activeLeaf = this.plugin.app.workspace.activeLeaf;
+      if (!activeLeaf || activeLeaf.view.getViewType() !== "canvas") {
+        return; // Skip if active leaf is not a canvas
+      }
+
+      const canvasView = activeLeaf.view as any;
+      if (canvasView.canvas && canvasView.canvas.data.systemsculptAIBuilder) {
+        this.checkAndLoadMissingOverlays(canvasView);
+      }
+    };
+
+    // Initial check
+    checkOverlays();
+
+    // Start interval only if we're on a canvas view
+    const activeLeaf = this.plugin.app.workspace.activeLeaf;
+    if (activeLeaf && activeLeaf.view.getViewType() === "canvas") {
+      this.overlayCheckInterval = window.setInterval(checkOverlays, 1000);
+    }
+
+    // Update interval when active leaf changes
+    this.plugin.registerEvent(
+      this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
+        if (this.overlayCheckInterval) {
+          window.clearInterval(this.overlayCheckInterval);
+          this.overlayCheckInterval = null;
         }
-      });
-    }, 1000);
+
+        if (leaf && leaf.view.getViewType() === "canvas") {
+          this.overlayCheckInterval = window.setInterval(checkOverlays, 1000);
+        }
+      })
+    );
   }
 
   private checkAndLoadMissingOverlays(canvasView: any) {
