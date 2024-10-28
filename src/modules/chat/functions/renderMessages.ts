@@ -5,6 +5,12 @@ import { handleDeleteMessage } from "./handleDeleteMessage";
 const INITIAL_LOAD_LIMIT = 30000; // Characters
 const CHUNK_SIZE = 10000; // Characters
 
+// Add this near the top of the file, after the imports
+const renderer = new marked.Renderer();
+renderer.code = (code, language) => {
+  return `<pre class="systemsculpt-code-block" data-language="${language || ""}">${code}</pre>`;
+};
+
 function isScrolledToBottom(container: HTMLElement): boolean {
   return (
     container.scrollHeight - container.clientHeight <= container.scrollTop + 1
@@ -140,6 +146,9 @@ function createMessageElement(
     ? "systemsculpt-ai"
     : `systemsculpt-${message.role}`;
   messageEl.className = `systemsculpt-chat-message ${roleClass}`;
+
+  // Use the custom renderer
+  marked.setOptions({ renderer });
   messageEl.innerHTML = `
     ${marked(message.text)}
     <div class="systemsculpt-message-actions">
@@ -184,13 +193,20 @@ function handleCopyMessage(button: HTMLElement, text: string) {
 }
 
 function addCodeBlockClickListener(codeBlock: Element) {
-  codeBlock.addEventListener("click", () => {
-    const code = codeBlock.textContent || "";
-    navigator.clipboard.writeText(code).then(() => {
+  codeBlock.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const code = codeBlock.textContent?.trim() || "";
+
+    try {
+      await navigator.clipboard.writeText(code);
       codeBlock.classList.add("systemsculpt-copied");
+
+      // Remove the class after animation completes
       setTimeout(() => {
         codeBlock.classList.remove("systemsculpt-copied");
-      }, 2000);
-    });
+      }, 1000);
+    } catch (err) {
+      console.error("Failed to copy code to clipboard:", err);
+    }
   });
 }

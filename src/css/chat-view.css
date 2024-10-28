@@ -246,38 +246,82 @@
 }
 
 .systemsculpt-chat-message pre {
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--background-secondary-alt);
   font-size: 75%;
-  padding: 10px;
-  border-radius: 10px;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
-  transition: box-shadow 0.1s ease, border-color 0.1s ease;
+  padding: 15px;
+  padding-top: 35px;  /* Added extra top padding for the copy button */
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
   cursor: pointer;
   border: 2px solid transparent;
   overflow-x: auto;
   white-space: pre;
   max-width: 100%;
   word-wrap: normal;
+  position: relative;
 }
 
+/* Modified copy indicator to always show */
+.systemsculpt-chat-message pre::after {
+  content: "Click to copy";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: var(--background-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  opacity: 1;  /* Changed from 0 to 1 to always show */
+  color: var(--text-muted);
+}
+
+/* Enhanced hover state */
 .systemsculpt-chat-message pre:hover {
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+  border-color: var(--interactive-accent);
 }
 
+.systemsculpt-chat-message pre:hover::after {
+  opacity: 1;
+}
+
+/* Enhanced copy animation */
 .systemsculpt-chat-message pre.systemsculpt-copied {
-  animation: systemsculpt-greenGlow 1s ease;
+  animation: systemsculpt-copyEffect 1s ease;
 }
 
-@keyframes systemsculpt-greenGlow {
+.systemsculpt-chat-message pre.systemsculpt-copied::after {
+  content: "Copied! ✓";
+  background-color: #4caf50;
+  color: white;
+  opacity: 1;
+}
+
+@keyframes systemsculpt-copyEffect {
   0% {
+    background-color: var(--background-secondary-alt);
     border-color: transparent;
   }
-  50% {
+  20% {
+    background-color: rgba(76, 175, 80, 0.1);
+    border-color: #4caf50;
+  }
+  60% {
+    background-color: rgba(76, 175, 80, 0.1);
     border-color: #4caf50;
   }
   100% {
+    background-color: var(--background-secondary-alt);
     border-color: transparent;
   }
+}
+
+/* Add a subtle active state */
+.systemsculpt-chat-message pre:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .systemsculpt-message-actions {
@@ -992,3 +1036,4 @@
   border: 1px solid var(--background-modifier-border);
   min-width: 60px;  /* Ensures columns don't collapse too much */
 }
+
