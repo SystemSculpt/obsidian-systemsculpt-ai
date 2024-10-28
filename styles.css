@@ -642,6 +642,7 @@
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   position: relative;
+  max-width: 100%;
 }
 
 .systemsculpt-chat-header {
@@ -760,6 +761,8 @@
   background-color: var(--background-primary);
   color: var(--text-normal);
   padding: 20px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .systemsculpt-chat-input-container {
@@ -873,6 +876,7 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
   user-select: text;
+  max-width: 100%;
 }
 
 .systemsculpt-chat-message pre {
@@ -884,6 +888,10 @@
   transition: box-shadow 0.1s ease, border-color 0.1s ease;
   cursor: pointer;
   border: 2px solid transparent;
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+  word-wrap: normal;
 }
 
 .systemsculpt-chat-message pre:hover {
@@ -1601,6 +1609,22 @@
 
 .systemsculpt-hidden {
   display: none !important;
+}
+
+.systemsculpt-chat-message table {
+  display: block;  /* Changes table to block to enable scrolling */
+  overflow-x: auto;  /* Enables horizontal scrolling */
+  max-width: 100%;  /* Ensures table doesn't exceed container width */
+  white-space: nowrap;  /* Prevents text wrapping in cells */
+  border-collapse: collapse;  /* Standard table styling */
+  margin: 10px 0;
+}
+
+.systemsculpt-chat-message td,
+.systemsculpt-chat-message th {
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  min-width: 60px;  /* Ensures columns don't collapse too much */
 }
 .systemsculpt-cost-estimator-modal {
   max-width: 500px;
