@@ -11,16 +11,22 @@ export async function handleTranscription(
   skipPaste: boolean = false
 ): Promise<string> {
   const whisperProvider = plugin.settings.whisperProvider;
-  const apiKey =
-    whisperProvider === "groq"
-      ? plugin.plugin.brainModule.settings.groqAPIKey
-      : plugin.plugin.brainModule.settings.openAIApiKey;
 
-  if (!apiKey) {
-    showCustomNotice(
-      `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
-    );
-    throw new Error("No API Key found");
+  if (whisperProvider !== "local") {
+    let apiKey = "";
+
+    if (whisperProvider === "groq") {
+      apiKey = plugin.plugin.brainModule.settings.groqAPIKey;
+    } else if (whisperProvider === "openai") {
+      apiKey = plugin.plugin.brainModule.settings.openAIApiKey;
+    }
+
+    if (!apiKey) {
+      showCustomNotice(
+        `No ${whisperProvider.toUpperCase()} API Key found. Please set your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
+      );
+      throw new Error("No API Key found");
+    }
   }
 
   try {
@@ -28,9 +34,65 @@ export async function handleTranscription(
     let transcription = await transcribeRecording(
       plugin,
       arrayBuffer,
-      () => {} // Empty function as we don't need to update progress anymore
+      (current, total) => {
+        console.log(`Transcription progress: ${current}/${total}`);
+      }
     );
 
+    console.log("Received transcription:", transcription);
+
+    if (!transcription || typeof transcription !== "string") {
+      console.error("Invalid transcription response:", transcription);
+      throw new Error("Invalid transcription response from server");
+    }
+
+    // Check if we're in a ChatView
+    const activeLeaf = plugin.plugin.app.workspace.activeLeaf;
+    const activeView = activeLeaf?.view;
+    const isInChatView = activeView instanceof ChatView;
+
+    // If in ChatView, return just the transcription text
+    if (isInChatView) {
+      if (plugin.settings.copyToClipboard) {
+        navigator.clipboard.writeText(transcription);
+      }
+
+      // Get the chat input element
+      const chatView = activeView as ChatView;
+      const inputEl = chatView.containerEl.querySelector(
+        ".systemsculpt-chat-input"
+      ) as HTMLTextAreaElement;
+
+      if (inputEl) {
+        const start = inputEl.selectionStart;
+        const end = inputEl.selectionEnd;
+        const currentValue = inputEl.value;
+
+        // If cursor position is detected, insert at cursor
+        if (typeof start === "number" && typeof end === "number") {
+          const newValue =
+            currentValue.substring(0, start) +
+            transcription +
+            currentValue.substring(end);
+          inputEl.value = newValue;
+          // Move cursor to end of inserted text
+          inputEl.selectionStart = start + transcription.length;
+          inputEl.selectionEnd = start + transcription.length;
+        } else {
+          // If no cursor position, append to end
+          inputEl.value =
+            currentValue + (currentValue.length > 0 ? " " : "") + transcription;
+        }
+
+        // Focus the input
+        inputEl.focus();
+      }
+
+      showCustomNotice("Transcription completed!");
+      return transcription;
+    }
+
+    // Otherwise, proceed with normal formatting
     let finalTranscription = transcription;
 
     if (plugin.settings.enablePostProcessingPrompt) {
@@ -83,13 +145,25 @@ export async function handleTranscription(
 
     return finalTranscription;
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Invalid API Key")) {
-      showCustomNotice(
-        `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
-      );
+    console.error("Transcription error:", error);
+
+    if (error instanceof Error) {
+      if (error.message.includes("Invalid API Key")) {
+        showCustomNotice(
+          `Invalid ${whisperProvider.toUpperCase()} API Key. Please check your ${whisperProvider.toUpperCase()} API Key in the Brain settings.`
+        );
+      } else if (error.message.includes("Failed to fetch")) {
+        showCustomNotice(
+          `Connection error: Could not reach ${whisperProvider} server. Please check your connection and server status.`
+        );
+      } else {
+        showCustomNotice(
+          `Error generating transcription: ${error.message}. Please check the console for more details.`
+        );
+      }
     } else {
       showCustomNotice(
-        `Error generating transcription: ${error instanceof Error ? error.message : "Unknown error"}. Please check your internet connection and try again.`
+        "An unexpected error occurred during transcription. Please check the console for more details."
       );
     }
     throw error;

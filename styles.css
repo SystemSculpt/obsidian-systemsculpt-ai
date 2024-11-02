@@ -896,20 +896,18 @@
   position: relative;
 }
 
-/* Modified copy indicator to stay fixed while scrolling horizontally */
+/* Modified copy indicator to always show */
 .systemsculpt-chat-message pre::after {
   content: "Click to copy";
-  position: fixed;  /* Changed from absolute to fixed */
-  top: initial;     /* Remove top positioning */
-  right: initial;   /* Remove right positioning */
-  transform: translate(-40px, -27px); /* Position relative to the cursor */
+  position: absolute;
+  top: 8px;
+  right: 8px;
   background-color: var(--background-secondary);
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
-  opacity: 1;
+  opacity: 1;  /* Changed from 0 to 1 to always show */
   color: var(--text-muted);
-  pointer-events: none; /* Prevent button from interfering with scrolling */
 }
 
 /* Enhanced hover state */

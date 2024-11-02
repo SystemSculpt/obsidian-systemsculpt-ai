@@ -2,7 +2,7 @@ import { RecorderModule } from "../RecorderModule";
 
 async function transcribeChunk(
   plugin: RecorderModule,
-  chunk: Blob,
+  chunk: Blob
 ): Promise<string> {
   const formData = new FormData();
   formData.append("file", chunk, "recording.mp3");
@@ -27,7 +27,7 @@ async function transcribeChunk(
         Authorization: `Bearer ${currentOpenAIApiKey}`,
       },
       body: formData,
-    },
+    }
   );
 
   if (!response.ok) {
@@ -42,19 +42,22 @@ async function transcribeChunk(
 export async function transcribeRecording(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
-  if (plugin.settings.whisperProvider === "groq") {
-    return transcribeWithGroq(plugin, arrayBuffer, updateProgress);
-  } else {
-    return transcribeWithOpenAI(plugin, arrayBuffer, updateProgress);
+  switch (plugin.settings.whisperProvider) {
+    case "groq":
+      return transcribeWithGroq(plugin, arrayBuffer, updateProgress);
+    case "local":
+      return transcribeWithLocal(plugin, arrayBuffer, updateProgress);
+    default:
+      return transcribeWithOpenAI(plugin, arrayBuffer, updateProgress);
   }
 }
 
 async function transcribeWithOpenAI(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
   let CHUNK_SIZE = 23 * 1024 * 1024;
   const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
@@ -91,7 +94,7 @@ async function transcribeWithOpenAI(
 async function transcribeWithGroq(
   plugin: RecorderModule,
   arrayBuffer: ArrayBuffer,
-  updateProgress: (current: number, total: number) => void,
+  updateProgress: (current: number, total: number) => void
 ): Promise<string> {
   const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
   const formData = new FormData();
@@ -109,7 +112,7 @@ async function transcribeWithGroq(
         Authorization: `Bearer ${currentGroqApiKey}`,
       },
       body: formData,
-    },
+    }
   );
 
   if (!response.ok) {
@@ -119,4 +122,82 @@ async function transcribeWithGroq(
 
   const data = await response.json();
   return data.text;
+}
+
+async function transcribeWithLocal(
+  plugin: RecorderModule,
+  arrayBuffer: ArrayBuffer,
+  updateProgress: (current: number, total: number) => void
+): Promise<string> {
+  try {
+    updateProgress(0, 1);
+    const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+    const formData = new FormData();
+    formData.append("file", blob, "recording.mp3");
+    formData.append("model", "mlx-community/whisper-large-v3-turbo");
+    formData.append("language", plugin.settings.language);
+
+    if (
+      plugin.settings.enableCustomWhisperPrompt &&
+      plugin.settings.customWhisperPrompt
+    ) {
+      formData.append("prompt", plugin.settings.customWhisperPrompt);
+    }
+
+    let endpoint = plugin.settings.localWhisperEndpoint;
+    if (!endpoint.startsWith("http")) {
+      endpoint = `http://${endpoint}`;
+    }
+    endpoint = endpoint.replace("0.0.0.0", "127.0.0.1");
+
+    console.log("Sending request to local endpoint:", endpoint);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+    try {
+      const response = await fetch(`${endpoint}/v1/audio/transcriptions`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      console.log("Response status:", response.status);
+      console.log("Response headers:", Object.fromEntries(response.headers));
+
+      const responseText = await response.text();
+      console.log("Raw response:", responseText);
+
+      if (!response.ok) {
+        throw new Error(`Local transcription failed: ${responseText}`);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+        throw new Error(`Invalid JSON response: ${responseText}`);
+      }
+
+      if (!data.text) {
+        console.error("Invalid response structure:", data);
+        throw new Error(`Missing text in response: ${JSON.stringify(data)}`);
+      }
+
+      updateProgress(1, 1);
+      return data.text;
+    } catch (fetchError: unknown) {
+      clearTimeout(timeoutId);
+      if (fetchError instanceof Error && fetchError.name === "AbortError") {
+        throw new Error("Request timed out after 30 seconds");
+      }
+      throw fetchError;
+    }
+  } catch (error) {
+    console.error("Local transcription error:", error);
+    throw error;
+  }
 }
