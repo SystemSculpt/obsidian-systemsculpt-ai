@@ -22,7 +22,7 @@ export interface BrainSettings {
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
-  localEndpoint: "",
+  localEndpoint: "http://localhost:1234",
   openAIApiKey: "",
   groqAPIKey: "",
   defaultModelId: "",
