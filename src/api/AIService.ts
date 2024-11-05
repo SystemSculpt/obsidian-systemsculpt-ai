@@ -1,10 +1,16 @@
 import { UnifiedAIService } from "./UnifiedAIService";
 import { OpenAIProvider } from "./providers/OpenAIProvider";
+import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
 import { Model, AIProvider } from "./Model";
 
 export class AIService {
   private static instance: AIService;
-  private services: { [key in AIProvider]: UnifiedAIService | OpenAIProvider };
+  private services: {
+    [key in AIProvider]:
+      | UnifiedAIService
+      | OpenAIProvider
+      | OpenRouterAIProvider;
+  };
   private cachedModels: { [key: string]: Model[] } = {};
   private settings: {
     openAIApiKey: string;
@@ -38,16 +44,13 @@ export class AIService {
       openai: new OpenAIProvider(settings.openAIApiKey, "", {
         temperature: settings.temperature,
       }),
+      openRouter: new OpenRouterAIProvider(settings.openRouterAPIKey, "", {
+        temperature: settings.temperature,
+      }),
       groq: new UnifiedAIService(
         settings.groqAPIKey,
         "https://api.groq.com/openai/v1",
         "groq",
-        { temperature: settings.temperature }
-      ),
-      openRouter: new UnifiedAIService(
-        settings.openRouterAPIKey,
-        "https://openrouter.ai/api/v1",
-        "openRouter",
         { temperature: settings.temperature }
       ),
       local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
