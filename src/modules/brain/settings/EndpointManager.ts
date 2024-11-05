@@ -5,6 +5,7 @@ import { OpenAIProvider } from "../../../api/providers/OpenAIProvider";
 import { GroqAIProvider } from "../../../api/providers/GroqAIProvider";
 import { OpenRouterAIProvider } from "../../../api/providers/OpenRouterAIProvider";
 import { LocalAIProvider } from "../../../api/providers/LocalAIProvider";
+import { AnthropicAIProvider } from "../../../api/providers/AnthropicAIProvider";
 
 type ValidateFunction = (value: string) => Promise<boolean>;
 
@@ -54,6 +55,7 @@ export class EndpointManager {
       { id: "openAI", name: "OpenAI" },
       { id: "groq", name: "Groq" },
       { id: "openRouter", name: "OpenRouter" },
+      { id: "anthropic", name: "Anthropic" },
       { id: "localEndpoint", name: "Local" },
     ];
 
@@ -104,6 +106,13 @@ export class EndpointManager {
         showSettingKey: "showopenRouterSetting",
         validateFunction: (value: string) =>
           OpenRouterAIProvider.validateApiKey(value),
+      },
+      {
+        name: "Anthropic",
+        settingKey: "anthropicApiKey",
+        showSettingKey: "showAnthropicSetting",
+        validateFunction: (value: string) =>
+          AnthropicAIProvider.validateApiKey(value),
       },
       {
         name: "Local",
@@ -298,6 +307,8 @@ export class EndpointManager {
             return await provider.validateFunction(value);
           case "OpenRouter":
             return await provider.validateFunction(value);
+          case "Anthropic":
+            return await provider.validateFunction(value);
           case "Local":
             return await provider.validateFunction(value);
           default:
@@ -339,11 +350,13 @@ export class EndpointManager {
       groqAPIKey: this.plugin.settings.groqAPIKey,
       openRouterAPIKey: this.plugin.settings.openRouterAPIKey,
       localEndpoint: this.plugin.settings.localEndpoint,
+      anthropicApiKey: this.plugin.settings.anthropicApiKey,
       temperature: this.plugin.settings.temperature,
       showopenAISetting: this.plugin.settings.showopenAISetting,
       showgroqSetting: this.plugin.settings.showgroqSetting,
       showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
       showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
+      showAnthropicSetting: this.plugin.settings.showAnthropicSetting,
     });
   }
 

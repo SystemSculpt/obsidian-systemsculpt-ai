@@ -19,6 +19,9 @@ export interface BrainSettings {
   showOpenAIModels: boolean;
   showGroqModels: boolean;
   showOpenRouterModels: boolean;
+  anthropicApiKey: string;
+  showAnthropicSetting: boolean;
+  showAnthropicModels: boolean;
 }
 
 export const DEFAULT_BRAIN_SETTINGS: BrainSettings = {
@@ -77,4 +80,7 @@ Rules:
   showOpenAIModels: true,
   showGroqModels: true,
   showOpenRouterModels: true,
+  anthropicApiKey: "",
+  showAnthropicSetting: false,
+  showAnthropicModels: true,
 };

@@ -2,6 +2,7 @@ import { OpenAIProvider } from "./providers/OpenAIProvider";
 import { GroqAIProvider } from "./providers/GroqAIProvider";
 import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
 import { LocalAIProvider } from "./providers/LocalAIProvider";
+import { AnthropicAIProvider } from "./providers/AnthropicAIProvider";
 import { Model, AIProvider, AIServiceInterface } from "./Model";
 import { BaseAIProvider } from "./providers/BaseAIProvider";
 
@@ -9,7 +10,22 @@ type AIProviderType =
   | OpenAIProvider
   | GroqAIProvider
   | OpenRouterAIProvider
-  | LocalAIProvider;
+  | LocalAIProvider
+  | AnthropicAIProvider;
+
+interface AIServiceSettings {
+  openAIApiKey: string;
+  groqAPIKey: string;
+  openRouterAPIKey: string;
+  localEndpoint: string;
+  anthropicApiKey: string;
+  temperature: number;
+  showopenAISetting?: boolean;
+  showgroqSetting?: boolean;
+  showlocalEndpointSetting?: boolean;
+  showopenRouterSetting?: boolean;
+  showAnthropicSetting?: boolean;
+}
 
 export class AIService implements AIServiceInterface {
   private static instance: AIService | null = null;
@@ -17,17 +33,7 @@ export class AIService implements AIServiceInterface {
     [key in AIProvider]?: AIProviderType;
   } = {};
 
-  static async getInstance(settings: {
-    openAIApiKey: string;
-    groqAPIKey: string;
-    openRouterAPIKey: string;
-    localEndpoint: string;
-    temperature: number;
-    showopenAISetting?: boolean;
-    showgroqSetting?: boolean;
-    showlocalEndpointSetting?: boolean;
-    showopenRouterSetting?: boolean;
-  }): Promise<AIService> {
+  static async getInstance(settings: AIServiceSettings): Promise<AIService> {
     if (!this.instance) {
       this.instance = new AIService(settings);
     } else {
@@ -37,13 +43,7 @@ export class AIService implements AIServiceInterface {
     return this.instance;
   }
 
-  private constructor(settings: {
-    openAIApiKey: string;
-    groqAPIKey: string;
-    openRouterAPIKey: string;
-    localEndpoint: string;
-    temperature: number;
-  }) {
+  private constructor(settings: AIServiceSettings) {
     this.services = {
       openai: new OpenAIProvider(settings.openAIApiKey, "", {
         temperature: settings.temperature,
@@ -52,6 +52,9 @@ export class AIService implements AIServiceInterface {
         temperature: settings.temperature,
       }),
       openRouter: new OpenRouterAIProvider(settings.openRouterAPIKey, "", {
+        temperature: settings.temperature,
+      }),
+      anthropic: new AnthropicAIProvider(settings.anthropicApiKey, "", {
         temperature: settings.temperature,
       }),
       local: new LocalAIProvider("", settings.localEndpoint, {

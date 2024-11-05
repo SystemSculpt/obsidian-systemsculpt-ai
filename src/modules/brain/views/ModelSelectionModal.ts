@@ -74,13 +74,8 @@ export class ModelSelectionModal extends Modal {
   }
 
   private async loadModels() {
-    const enabledModels = await this.plugin.getEndpointSettingValues();
-    this.models = await this.plugin.AIService.getModels(
-      enabledModels.openAIApiKey,
-      enabledModels.groqAPIKey,
-      enabledModels.localEndpoint,
-      enabledModels.openRouterAPIKey
-    );
+    await this.plugin.getEndpointSettingValues();
+    this.models = await this.plugin.AIService.getModels();
 
     const favoritedModels = new Set(this.plugin.settings.favoritedModels || []);
     this.models.forEach((model) => {
@@ -121,7 +116,7 @@ export class ModelSelectionModal extends Modal {
       );
     }
 
-    ["Local", "OpenAI", "Groq", "OpenRouter"].forEach((provider) =>
+    ["Local", "OpenAI", "Groq", "OpenRouter", "Anthropic"].forEach((provider) =>
       renderGroup(
         provider,
         this.models.filter(
@@ -368,7 +363,14 @@ export class ModelSelectionModal extends Modal {
   }
 
   private addProviderCheckboxes() {
-    const providers = ["Favorited", "Local", "OpenAI", "Groq", "OpenRouter"];
+    const providers = [
+      "Favorited",
+      "Local",
+      "OpenAI",
+      "Groq",
+      "OpenRouter",
+      "Anthropic",
+    ];
     const checkboxContainer = this.contentEl.createEl("div", {
       cls: "systemsculpt-provider-checkboxes",
     });
@@ -448,6 +450,8 @@ export class ModelSelectionModal extends Modal {
         return "Groq";
       case "openrouter":
         return "OpenRouter";
+      case "anthropic":
+        return "Anthropic";
       default:
         return provider;
     }
