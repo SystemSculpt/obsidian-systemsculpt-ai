@@ -1,8 +1,8 @@
-import { MarkdownView, requestUrl, Setting, TFolder } from "obsidian";
+import { MarkdownView, requestUrl, Setting, TFolder, TFile } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { AIService } from "../../api/AIService";
 import { showCustomNotice } from "../../modals";
-import { TemplatesSuggest } from "./TemplatesSuggest";
+import { TemplatesSuggest, FrontMatter } from "./TemplatesSuggest";
 import { checkLicenseValidity } from "./functions/checkLicenseValidity";
 import { IGenerationModule } from "../../interfaces/IGenerationModule";
 import { BlankTemplateModal } from "./views/BlankTemplateModal";
@@ -51,6 +51,8 @@ export class TemplatesModule implements IGenerationModule {
   abortController: AbortController | null = null;
   isGenerationCompleted: boolean = false;
   private firstLicenseCheckDone: boolean = false;
+  private _templateSuggest: TemplatesSuggest | null = null;
+  private templateCache: Map<string, any> = new Map();
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -64,32 +66,31 @@ export class TemplatesModule implements IGenerationModule {
     return this._AIService as AIService;
   }
 
+  get templateSuggest() {
+    if (!this._templateSuggest) {
+      this._templateSuggest = new TemplatesSuggest(this, this.templateCache);
+    }
+    return this._templateSuggest;
+  }
+
   async load() {
     const startTime = performance.now();
+
+    // Only load settings initially
     await this.loadSettings();
 
-    this.registerCodeMirror();
-    this.registerDomEvent();
-    setTimeout(async () => {
+    // Register commands immediately
+    this.addCommands();
+
+    // Defer heavy operations
+    queueMicrotask(async () => {
+      await this.initializeTemplates();
+      this.registerCodeMirror();
+      this.registerDomEvent();
       await this.checkLicenseOnStartup();
-      setInterval(() => this.checkForUpdate(), 3 * 60 * 60 * 1000);
-    }, 5000);
-    this.plugin.addCommand({
-      id: "trigger-template-suggestions",
-      name: "Trigger template suggestions",
-      callback: () => this.triggerTemplateSuggestions(),
     });
 
-    // await this.plugin.brainModule.initializeAIService();
-    await this.AIService.ensureModelCacheInitialized();
     logModuleLoadTime("Templates", startTime);
-
-    this.plugin.addCommand({
-      id: "open-blank-template-modal",
-      name: "Open Blank Template Modal",
-      callback: () => this.openBlankTemplateModal(),
-      hotkeys: [],
-    });
   }
 
   async loadSettings() {
@@ -106,7 +107,7 @@ export class TemplatesModule implements IGenerationModule {
   }
 
   registerCodeMirror() {
-    this.plugin.registerEditorSuggest(new TemplatesSuggest(this));
+    this.plugin.registerEditorSuggest(this.templateSuggest);
   }
 
   registerDomEvent() {
@@ -434,5 +435,93 @@ export class TemplatesModule implements IGenerationModule {
         3000
       );
     }
+  }
+
+  private async initializeTemplates() {
+    // Pre-cache templates in background
+    const templateFiles = await this.getTemplateFiles();
+    for (const file of templateFiles) {
+      const frontMatter = await this.parseFrontMatter(file);
+      this.templateCache.set(file.path, frontMatter);
+    }
+  }
+
+  private addCommands() {
+    this.plugin.addCommand({
+      id: "trigger-template-suggestions",
+      name: "Trigger template suggestions",
+      callback: () => this.triggerTemplateSuggestions(),
+    });
+
+    this.plugin.addCommand({
+      id: "open-blank-template-modal",
+      name: "Open Blank Template Modal",
+      callback: () => this.openBlankTemplateModal(),
+      hotkeys: [],
+    });
+  }
+
+  private async getTemplateFiles(): Promise<TFile[]> {
+    const templatesPath = this.settings.templatesPath;
+    const folder = this.plugin.app.vault.getAbstractFileByPath(templatesPath);
+
+    if (!(folder instanceof TFolder)) {
+      return [];
+    }
+
+    const files: TFile[] = [];
+    const collectFiles = (folder: TFolder) => {
+      for (const child of folder.children) {
+        if (child instanceof TFile && child.extension === "md") {
+          files.push(child);
+        } else if (child instanceof TFolder) {
+          collectFiles(child);
+        }
+      }
+    };
+
+    collectFiles(folder);
+    return files;
+  }
+
+  private async parseFrontMatter(file: TFile): Promise<FrontMatter> {
+    const cached = this.templateCache.get(file.path);
+    if (cached) return cached;
+
+    const content = await this.plugin.app.vault.read(file);
+    const cache = this.plugin.app.metadataCache.getFileCache(file);
+    const frontMatter = cache?.frontmatter;
+
+    if (frontMatter) {
+      const result = {
+        name: frontMatter.name || "",
+        description: frontMatter.description || "",
+        model: frontMatter.model || "default",
+        maxOutputTokens:
+          frontMatter["max tokens"] ||
+          frontMatter["max_tokens"] ||
+          frontMatter["max output tokens"] ||
+          frontMatter["max_output_tokens"] ||
+          undefined,
+        tags:
+          typeof frontMatter.tags === "string"
+            ? frontMatter.tags.split(",").map((tag: string) => tag.trim())
+            : Array.isArray(frontMatter.tags)
+              ? frontMatter.tags
+              : [],
+        prompt: content,
+      };
+      this.templateCache.set(file.path, result);
+      return result;
+    }
+
+    return {
+      name: "",
+      description: "",
+      model: "default",
+      maxOutputTokens: undefined,
+      tags: [],
+      prompt: content,
+    };
   }
 }

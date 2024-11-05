@@ -33,13 +33,21 @@ interface TemplateItem {
 export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
   plugin: TemplatesModule;
   private lastQuery: string = "";
+  private templateCache: Map<string, FrontMatter>;
 
-  constructor(plugin: TemplatesModule) {
+  constructor(
+    plugin: TemplatesModule,
+    templateCache: Map<string, FrontMatter>
+  ) {
     super(plugin.plugin.app);
     this.plugin = plugin;
+    this.templateCache = templateCache;
   }
 
   async parseFrontMatter(file: TFile): Promise<FrontMatter> {
+    const cached = this.templateCache.get(file.path);
+    if (cached) return cached;
+
     const fileCache = this.app.metadataCache.getFileCache(file);
     const frontMatter = fileCache?.frontmatter;
 
