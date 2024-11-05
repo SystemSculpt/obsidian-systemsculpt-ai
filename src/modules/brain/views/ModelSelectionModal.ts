@@ -286,7 +286,9 @@ export class ModelSelectionModal extends Modal {
   }
 
   private navigateModelSelection(direction: number) {
-    const modelItems = this.modelListContainer.querySelectorAll(".modal-item");
+    const modelItems = this.modelListContainer.querySelectorAll(
+      ".systemsculpt-modal-item"
+    );
     if (modelItems.length === 0) return;
 
     this.selectedModelIndex += direction;
@@ -299,7 +301,9 @@ export class ModelSelectionModal extends Modal {
   }
 
   private updateSelectedModel() {
-    const modelItems = this.modelListContainer.querySelectorAll(".modal-item");
+    const modelItems = this.modelListContainer.querySelectorAll(
+      ".systemsculpt-modal-item"
+    );
     modelItems.forEach((item, index) => {
       if (index === this.selectedModelIndex) {
         item.addClass("systemsculpt-selected");
@@ -330,7 +334,7 @@ export class ModelSelectionModal extends Modal {
 
   private selectHighlightedModel() {
     const selectedItem = this.modelListContainer.querySelector(
-      ".modal-item.selected"
+      ".systemsculpt-modal-item.systemsculpt-selected"
     ) as HTMLElement;
     if (selectedItem) {
       const modelId = selectedItem.dataset.modelId;

@@ -17,34 +17,27 @@ export class AnthropicAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-    };
-
-    const response = await fetch(`${this.endpoint}/v1/messages`, {
+    const response = await requestUrl({
+      url: `${this.endpoint}/messages`,
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-api-key": this.apiKey,
         "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
-      body: JSON.stringify(requestData),
+      body: JSON.stringify({
+        model: modelId,
+        max_tokens: maxOutputTokens,
+        messages: [
+          {
+            role: "user",
+            content: `${systemPrompt}\n\n${userMessage}`,
+          },
+        ],
+      }),
     });
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.content[0].text;
+    return response.json.content[0].text;
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -55,50 +48,54 @@ export class AnthropicAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/v1/messages`, {
+    const response = await fetch(`${this.endpoint}/messages`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-api-key": this.apiKey,
         "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
-      body: JSON.stringify(requestData),
+      body: JSON.stringify({
+        model: modelId,
+        max_tokens: maxOutputTokens,
+        stream: true,
+        messages: [
+          {
+            role: "user",
+            content: `${systemPrompt}\n\n${userMessage}`,
+          },
+        ],
+      }),
       signal: abortSignal,
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
+    if (!response.ok || !response.body) {
+      throw new Error(`API request failed with status ${response.status}`);
     }
 
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
     let buffer = "";
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
+      const chunk = decoder.decode(value);
+      buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (line.startsWith("data: ")) {
-          callback(line);
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "content_block_delta" && data.delta?.text) {
+              callback(data.delta.text);
+            }
+          } catch (error) {
+            console.warn("Error parsing SSE message:", error);
+          }
         }
       }
     }
@@ -112,82 +109,119 @@ export class AnthropicAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const allMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages,
+    const anthropicMessages = [
+      {
+        role: "user",
+        content: systemPrompt,
+      },
+      ...messages.map((msg) => ({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content: msg.content,
+      })),
     ];
 
-    const requestData = {
-      model: modelId,
-      messages: allMessages,
-      max_tokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/v1/messages`, {
+    const response = await fetch(`${this.endpoint}/messages`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-api-key": this.apiKey,
         "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
-      body: JSON.stringify(requestData),
+      body: JSON.stringify({
+        model: modelId,
+        max_tokens: maxOutputTokens,
+        stream: true,
+        messages: anthropicMessages,
+      }),
       signal: abortSignal,
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
+    if (!response.ok || !response.body) {
+      throw new Error(`API request failed with status ${response.status}`);
     }
 
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
     let buffer = "";
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
+      const chunk = decoder.decode(value);
+      buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (line.startsWith("data: ")) {
-          callback(line);
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "content_block_delta" && data.delta?.text) {
+              callback(data.delta.text);
+            }
+          } catch (error) {
+            console.warn("Error parsing SSE message:", error);
+          }
         }
       }
     }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
-    if (!this.hasValidApiKey()) {
-      return [];
-    }
+    // if (!this.apiKey) {
+    //   console.debug("Anthropic: No API key");
+    //   return [];
+    // }
 
-    const response = await requestUrl({
-      url: `${this.endpoint}/v1/models`,
-      method: "GET",
-      headers: {
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-    });
+    // try {
+    //   const isValid = await AnthropicAIProvider.validateApiKey(this.apiKey);
+    //   if (!isValid) {
+    //     console.debug("Anthropic: Invalid API key");
+    //     return [];
+    //   }
+    // } catch (error) {
+    //   console.warn(
+    //     "Anthropic: Unable to validate API key, proceeding to load models"
+    //   );
+    //   // Proceed to return models even if validation fails (e.g., no network)
+    // }
 
-    return response.json.models
-      .filter((model: any) => model.id.startsWith("claude"))
-      .map((model: any) => ({
-        id: model.id,
-        name: model.id,
+    return [
+      {
+        id: "claude-3-5-haiku-latest",
+        name: "Claude 3.5 Haiku (Latest)",
         provider: "anthropic" as AIProvider,
-        contextLength: model.context_window || undefined,
-        maxOutputTokens: model.max_tokens || 4096,
+        contextLength: 200000,
+        maxOutputTokens: 8192,
         pricing: {
-          prompt: model.pricing?.prompt || 0,
-          completion: model.pricing?.completion || 0,
+          prompt: 0.0000002,
+          completion: 0.000001,
         },
-      }));
+      },
+      {
+        id: "claude-3-5-sonnet-latest",
+        name: "Claude 3.5 Sonnet (Latest)",
+        provider: "anthropic" as AIProvider,
+        contextLength: 200000,
+        maxOutputTokens: 8192,
+        pricing: {
+          prompt: 0.000003,
+          completion: 0.000015,
+        },
+      },
+      {
+        id: "claude-3-opus-latest",
+        name: "Claude 3 Opus",
+        provider: "anthropic" as AIProvider,
+        contextLength: 200000,
+        maxOutputTokens: 4096,
+        pricing: {
+          prompt: 0.000015,
+          completion: 0.000075,
+        },
+      },
+    ];
   }
 
   static async validateApiKey(apiKey: string): Promise<boolean> {
