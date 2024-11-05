@@ -41,6 +41,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private cachedModels: Model[] = [];
   private modelInitializationPromise: Promise<void> | null = null;
   private modelLoadTimeout: NodeJS.Timeout | null = null;
+  public currentLoadingProvider: string | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     super();
@@ -111,8 +112,21 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
   private async initializeModels(): Promise<void> {
     try {
-      await this._AIService?.initializeModelCache();
-      await this.updateDefaultModelAndStatusBar();
+      if (this._AIService) {
+        const providers = [
+          "OpenAI",
+          "Anthropic",
+          "Groq",
+          "OpenRouter",
+          "Local",
+        ];
+        for (const provider of providers) {
+          this.updateModelLoadingStatus(provider);
+          await this._AIService.initializeModelCache(provider.toLowerCase());
+        }
+        this.updateModelLoadingStatus(null);
+        await this.updateDefaultModelAndStatusBar();
+      }
     } catch (error) {
       console.error("Error initializing models:", error);
       this.updateModelStatusBarText("Error loading models");
@@ -230,7 +244,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       });
 
       // Trigger model cache refresh in background
-      this._AIService.initializeModelCache(true).catch(console.error);
+      this._AIService.initializeModelCache().catch(console.error);
     } catch (error) {
       this.updateModelStatusBarText("Error: Check settings");
       this.updateModelSelectionButton("Error: Check settings", false);
@@ -290,6 +304,8 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
           return enabledModels.localEndpoint;
         case "openRouter":
           return enabledModels.openRouterAPIKey;
+        case "anthropic":
+          return enabledModels.anthropicApiKey;
         default:
           return false;
       }
@@ -370,21 +386,13 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }
   }
 
-  private async getEnabledModelSettings() {
-    return {
-      showopenAISetting: this.settings.showopenAISetting,
-      showgroqSetting: this.settings.showgroqSetting,
-      showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
-      showopenRouterSetting: this.settings.showopenRouterSetting,
-    };
-  }
-
   public async getEndpointSettingValues() {
     const enabledSettings = {
       openAIApiKey: this.settings.showopenAISetting,
       groqAPIKey: this.settings.showgroqSetting,
       openRouterAPIKey: this.settings.showopenRouterSetting,
       localEndpoint: this.settings.showlocalEndpointSetting,
+      anthropicApiKey: this.settings.showAnthropicSetting,
     };
 
     const enabledValues = {
@@ -392,6 +400,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       groqAPIKey: this.settings.groqAPIKey,
       openRouterAPIKey: this.settings.openRouterAPIKey,
       localEndpoint: this.settings.localEndpoint,
+      anthropicApiKey: this.settings.anthropicApiKey,
     };
 
     return {
@@ -402,6 +411,8 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         enabledSettings.openRouterAPIKey && !!enabledValues.openRouterAPIKey,
       localEndpoint:
         enabledSettings.localEndpoint && !!enabledValues.localEndpoint,
+      anthropicApiKey:
+        enabledSettings.anthropicApiKey && !!enabledValues.anthropicApiKey,
     };
   }
 
@@ -464,5 +475,14 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       this._AIService.clearModelCache();
       this.loadModelsWithTimeout();
     }
+  }
+
+  private updateModelLoadingStatus(provider: string | null) {
+    this.currentLoadingProvider = provider;
+    const text = provider
+      ? `Loading ${provider} models...`
+      : "Loading models...";
+    this.updateModelStatusBarText(text);
+    this.updateModelSelectionButton(text, true);
   }
 }

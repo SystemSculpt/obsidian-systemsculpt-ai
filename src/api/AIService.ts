@@ -32,6 +32,7 @@ export class AIService implements AIServiceInterface {
   private services: {
     [key in AIProvider]?: AIProviderType;
   } = {};
+  private modelCacheInitialized: boolean = false;
 
   static async getInstance(settings: AIServiceSettings): Promise<AIService> {
     if (!this.instance) {
@@ -107,17 +108,41 @@ export class AIService implements AIServiceInterface {
     }
   }
 
-  async initializeModelCache(silent: boolean = false): Promise<void> {
-    try {
-      const models = await this.getModels();
-      if (models.length === 0 && !silent) {
-        console.warn("No models found during initialization");
+  public async initializeModelCache(
+    provider?: string,
+    force: boolean = false
+  ): Promise<void> {
+    if (force || !this.modelCacheInitialized) {
+      if (provider) {
+        switch (provider) {
+          case "openai":
+            if (this.services.openai) await this.services.openai.getModels();
+            break;
+          case "anthropic":
+            if (this.services.anthropic)
+              await this.services.anthropic.getModels();
+            break;
+          case "groq":
+            if (this.services.groq) await this.services.groq.getModels();
+            break;
+          case "openrouter":
+            if (this.services.openRouter)
+              await this.services.openRouter.getModels();
+            break;
+          case "local":
+            if (this.services.local) await this.services.local.getModels();
+            break;
+        }
+      } else {
+        await Promise.all([
+          this.services.openai?.getModels(),
+          this.services.anthropic?.getModels(),
+          this.services.groq?.getModels(),
+          this.services.openRouter?.getModels(),
+          this.services.local?.getModels(),
+        ]);
       }
-    } catch (error) {
-      if (!silent) {
-        console.error("Error initializing model cache:", error);
-        throw error;
-      }
+      this.modelCacheInitialized = true;
     }
   }
 

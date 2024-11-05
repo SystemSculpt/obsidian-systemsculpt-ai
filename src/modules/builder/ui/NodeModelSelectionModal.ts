@@ -93,7 +93,7 @@ export class NodeModelSelectionModal extends Modal {
       }
     };
 
-    ["Local", "OpenAI", "Groq", "OpenRouter"].forEach((provider) =>
+    ["Local", "OpenAI", "Groq", "OpenRouter", "Anthropic"].forEach((provider) =>
       renderGroup(
         provider,
         this.models.filter(

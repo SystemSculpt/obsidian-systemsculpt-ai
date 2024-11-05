@@ -69,7 +69,9 @@ export class ModelSelectionModal extends Modal {
     const loadingEl = container.createEl("div", {
       cls: "systemsculpt-loading-models",
     });
-    loadingEl.textContent = "Loading models";
+    loadingEl.textContent = this.plugin.currentLoadingProvider
+      ? `Loading ${this.plugin.currentLoadingProvider} models...`
+      : "Loading models...";
     loadingEl.addClass("systemsculpt-revolving-dots");
   }
 
