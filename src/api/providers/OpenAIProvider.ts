@@ -27,6 +27,7 @@ export class OpenAIProvider extends BaseAIProvider {
     "gpt-4o-realtime-preview",
     "o1-mini-2024-09-12",
     "o1-preview-2024-09-12",
+    "gpt-4o-audio-preview",
   ];
 
   private readonly priorityOrder = [
@@ -299,20 +300,14 @@ export class OpenAIProvider extends BaseAIProvider {
     }
   }
 
-  async getModels(): Promise<Model[]> {
-    console.log("getModels - Current endpoint:", this.endpoint);
-    console.log("getModels - Has valid API key:", this.hasValidApiKey());
-
+  protected async getModelsImpl(): Promise<Model[]> {
     if (!this.hasValidApiKey() || !this.endpoint?.trim()) {
-      console.log("getModels - Returning early due to invalid key or endpoint");
       return [];
     }
 
     try {
-      const url = `${this.endpoint}/models`;
-      console.log("getModels - Attempting to fetch from URL:", url);
       const response = await requestUrl({
-        url,
+        url: `${this.endpoint}/models`,
         method: "GET",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
@@ -322,49 +317,51 @@ export class OpenAIProvider extends BaseAIProvider {
       if (response.status !== 200) return [];
 
       const data = response.json;
-      return this.parseModels(data);
+      const filteredModels = data.data.filter(
+        (model: any) =>
+          !this.filteredWords.some((word) =>
+            model.id.toLowerCase().includes(word)
+          )
+      );
+
+      const sortedModels = filteredModels.sort((a: any, b: any) => {
+        const aIndex = this.priorityOrder.findIndex(
+          (prefix) => a.id === prefix
+        );
+        const bIndex = this.priorityOrder.findIndex(
+          (prefix) => b.id === prefix
+        );
+        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+        if (aIndex !== -1) return -1;
+        if (bIndex !== -1) return 1;
+        return a.id.localeCompare(b.id);
+      });
+
+      return sortedModels.map((model: any) => ({
+        id: model.id,
+        name: model.id,
+        provider: "openai" as AIProvider,
+        contextLength:
+          this.priorityContextLengths[model.id] ||
+          model.context_window ||
+          undefined,
+        maxOutputTokens:
+          this.priorityMaxOutputTokens[model.id] ||
+          model.context_window ||
+          4096,
+        pricing:
+          this.specialPricing[model.id] ||
+          (model.pricing
+            ? {
+                prompt: parseFloat(model.pricing.prompt),
+                completion: parseFloat(model.pricing.completion),
+              }
+            : { prompt: 0, completion: 0 }),
+      }));
     } catch (error) {
       console.error("Failed to fetch OpenAI models:", error);
       return [];
     }
-  }
-
-  private parseModels(data: any): Model[] {
-    const filteredModels = data.data.filter(
-      (model: any) =>
-        !this.filteredWords.some((word) =>
-          model.id.toLowerCase().includes(word)
-        )
-    );
-
-    const sortedModels = filteredModels.sort((a: any, b: any) => {
-      const aIndex = this.priorityOrder.findIndex((prefix) => a.id === prefix);
-      const bIndex = this.priorityOrder.findIndex((prefix) => b.id === prefix);
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-      if (aIndex !== -1) return -1;
-      if (bIndex !== -1) return 1;
-      return a.id.localeCompare(b.id);
-    });
-
-    return sortedModels.map((model: any) => ({
-      id: model.id,
-      name: model.id,
-      provider: "openai" as AIProvider,
-      contextLength:
-        this.priorityContextLengths[model.id] ||
-        model.context_window ||
-        undefined,
-      maxOutputTokens:
-        this.priorityMaxOutputTokens[model.id] || model.context_window || 4096,
-      pricing:
-        this.specialPricing[model.id] ||
-        (model.pricing
-          ? {
-              prompt: parseFloat(model.pricing.prompt),
-              completion: parseFloat(model.pricing.completion),
-            }
-          : { prompt: 0, completion: 0 }),
-    }));
   }
 
   static async validateApiKey(

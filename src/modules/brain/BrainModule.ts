@@ -40,6 +40,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   public modelSelectionButton: ButtonComponent | null = null;
   private cachedModels: Model[] = [];
   private modelInitializationPromise: Promise<void> | null = null;
+  private modelLoadTimeout: NodeJS.Timeout | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     super();
@@ -81,6 +82,9 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     this.initializationPromise = this.initialize();
     await this.initializationPromise;
     logModuleLoadTime("Brain", startTime);
+
+    // Start model loading in background
+    this.loadModelsWithTimeout();
   }
 
   private async initialize() {
@@ -434,13 +438,27 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }
   }
 
-  public async refreshModels(): Promise<void> {
-    if (!this._AIService) {
-      throw new Error("AIService is not initialized");
+  private loadModelsWithTimeout() {
+    if (this.modelLoadTimeout) {
+      clearTimeout(this.modelLoadTimeout);
     }
 
-    this.modelInitializationPromise = null;
-    this.cachedModels = await this._AIService.getModels();
-    this.emit("models-refreshed");
+    this.modelLoadTimeout = setTimeout(async () => {
+      try {
+        if (this._AIService) {
+          this.cachedModels = await this._AIService.getModels();
+          this.emit("models-refreshed");
+        }
+      } catch (error) {
+        console.error("Failed to load models:", error);
+      }
+    }, 2000);
+  }
+
+  async refreshModels() {
+    if (this._AIService) {
+      this._AIService.clearModelCache();
+      this.loadModelsWithTimeout();
+    }
   }
 }

@@ -183,7 +183,7 @@ export class LocalAIProvider extends BaseAIProvider {
     }
   }
 
-  async getModels(): Promise<Model[]> {
+  protected async getModelsImpl(): Promise<Model[]> {
     try {
       // Try Ollama endpoint first
       const ollamaResponse = await requestUrl({

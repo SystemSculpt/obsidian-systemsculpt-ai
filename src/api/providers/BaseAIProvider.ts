@@ -5,6 +5,8 @@ export abstract class BaseAIProvider {
   protected endpoint: string;
   protected settings: { temperature: number };
   protected provider: AIProvider;
+  protected cachedModels: Model[] | null = null;
+  protected modelLoadPromise: Promise<Model[]> | null = null;
 
   constructor(
     apiKey: string,
@@ -43,7 +45,28 @@ export abstract class BaseAIProvider {
     abortSignal?: AbortSignal
   ): Promise<void>;
 
-  abstract getModels(): Promise<Model[]>;
+  protected abstract getModelsImpl(): Promise<Model[]>;
+
+  protected async loadModelsInBackground(): Promise<Model[]> {
+    try {
+      if (this.cachedModels) return this.cachedModels;
+      if (this.modelLoadPromise) return this.modelLoadPromise;
+
+      this.modelLoadPromise = this.getModelsImpl();
+      const models = await this.modelLoadPromise;
+      this.cachedModels = models;
+      this.modelLoadPromise = null;
+      return models;
+    } catch (error) {
+      console.error("Failed to load models:", error);
+      return [];
+    }
+  }
+
+  async getModels(): Promise<Model[]> {
+    if (this.cachedModels) return this.cachedModels;
+    return this.loadModelsInBackground();
+  }
 
   updateSettings(settings: { temperature: number }) {
     this.settings = settings;
@@ -59,5 +82,10 @@ export abstract class BaseAIProvider {
 
   getSettings(): { temperature: number } {
     return this.settings;
+  }
+
+  clearModelCache(): void {
+    this.cachedModels = null;
+    this.modelLoadPromise = null;
   }
 }

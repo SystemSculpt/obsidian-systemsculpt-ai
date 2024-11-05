@@ -5,14 +5,16 @@ import { LocalAIProvider } from "./providers/LocalAIProvider";
 import { Model, AIProvider, AIServiceInterface } from "./Model";
 import { BaseAIProvider } from "./providers/BaseAIProvider";
 
+type AIProviderType =
+  | OpenAIProvider
+  | GroqAIProvider
+  | OpenRouterAIProvider
+  | LocalAIProvider;
+
 export class AIService implements AIServiceInterface {
   private static instance: AIService | null = null;
   private services: {
-    [key in AIProvider]?:
-      | OpenAIProvider
-      | GroqAIProvider
-      | OpenRouterAIProvider
-      | LocalAIProvider;
+    [key in AIProvider]?: AIProviderType;
   } = {};
 
   static async getInstance(settings: {
@@ -88,7 +90,7 @@ export class AIService implements AIServiceInterface {
       });
     } else if (typeof providerOrKey !== "string" && apiKey) {
       // Original implementation - update specific provider
-      this.services[providerOrKey]?.updateApiKey(apiKey);
+      this.services[providerOrKey as AIProvider]?.updateApiKey(apiKey);
     }
   }
 
@@ -180,5 +182,13 @@ export class AIService implements AIServiceInterface {
     const provider = this.services[model.provider];
     if (!provider) throw new Error(`Provider ${model.provider} not found`);
     return provider;
+  }
+
+  clearModelCache(): void {
+    Object.values(this.services).forEach((provider) => {
+      if (provider) {
+        provider.clearModelCache();
+      }
+    });
   }
 }

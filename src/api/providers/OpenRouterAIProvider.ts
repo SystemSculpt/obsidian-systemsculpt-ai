@@ -190,7 +190,7 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     }
   }
 
-  async getModels(): Promise<Model[]> {
+  protected async getModelsImpl(): Promise<Model[]> {
     if (!this.hasValidApiKey()) {
       return [];
     }

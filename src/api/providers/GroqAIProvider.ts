@@ -184,7 +184,7 @@ export class GroqAIProvider extends BaseAIProvider {
     }
   }
 
-  async getModels(): Promise<Model[]> {
+  protected async getModelsImpl(): Promise<Model[]> {
     if (!this.hasValidApiKey()) {
       return [];
     }
@@ -201,7 +201,9 @@ export class GroqAIProvider extends BaseAIProvider {
       .filter(
         (model: any) =>
           model.id !== "whisper-large-v3" &&
-          !model.id.toLowerCase().includes("tool-use")
+          !model.id.toLowerCase().includes("tool-use") &&
+          !model.id.toLowerCase().includes("whisper") &&
+          !model.id.toLowerCase().includes("llava")
       )
       .map((model: any) => ({
         id: model.id,
