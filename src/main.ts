@@ -15,6 +15,7 @@ import { ChatView, VIEW_TYPE_CHAT } from "./modules/chat/ChatView";
 import { registerMp3ContextMenu } from "./events";
 import { checkForUpdate } from "./modules/brain/functions/checkForUpdate";
 import { BuilderModule } from "./modules/builder/BuilderModule";
+import { AIService } from "./api/AIService";
 
 export default class SystemSculptPlugin extends Plugin {
   settings!: SystemSculptSettings;
@@ -31,9 +32,18 @@ export default class SystemSculptPlugin extends Plugin {
   chatToggleStatusBarItem: HTMLElement | null = null;
   settingsTab!: SystemSculptSettingTab;
   builderModule!: BuilderModule;
+  public aiService!: AIService;
 
   async onload() {
     await this.loadSettings();
+
+    this.aiService = await AIService.getInstance({
+      openAIApiKey: this.settings.openAIApiKey,
+      groqAPIKey: this.settings.groqAPIKey,
+      openRouterAPIKey: this.settings.openRouterAPIKey,
+      localEndpoint: this.settings.localEndpoint,
+      temperature: this.settings.temperature,
+    });
 
     // Initialize modules with dependencies
     this.brainModule = new BrainModule(this);

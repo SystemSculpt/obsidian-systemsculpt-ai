@@ -1,47 +1,47 @@
-import { UnifiedAIService } from "./UnifiedAIService";
 import { OpenAIProvider } from "./providers/OpenAIProvider";
-import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
 import { GroqAIProvider } from "./providers/GroqAIProvider";
-import { Model, AIProvider } from "./Model";
+import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
+import { LocalAIProvider } from "./providers/LocalAIProvider";
+import { Model, AIProvider, AIServiceInterface } from "./Model";
+import { BaseAIProvider } from "./providers/BaseAIProvider";
 
-export class AIService {
-  private static instance: AIService;
+export class AIService implements AIServiceInterface {
+  private static instance: AIService | null = null;
   private services: {
-    [key in AIProvider]:
-      | UnifiedAIService
+    [key in AIProvider]?:
       | OpenAIProvider
+      | GroqAIProvider
       | OpenRouterAIProvider
-      | GroqAIProvider;
-  };
-  private cachedModels: { [key: string]: Model[] } = {};
-  private settings: {
+      | LocalAIProvider;
+  } = {};
+
+  static async getInstance(settings: {
     openAIApiKey: string;
     groqAPIKey: string;
     openRouterAPIKey: string;
-    apiEndpoint: string;
-    localEndpoint?: string;
+    localEndpoint: string;
     temperature: number;
-    showopenAISetting: boolean;
-    showgroqSetting: boolean;
-    showlocalEndpointSetting: boolean;
-    showopenRouterSetting: boolean;
-  };
-  private modelInitializationInProgress: boolean = false;
-  private modelInitializationPromise: Promise<void> | null = null;
+    showopenAISetting?: boolean;
+    showgroqSetting?: boolean;
+    showlocalEndpointSetting?: boolean;
+    showopenRouterSetting?: boolean;
+  }): Promise<AIService> {
+    if (!this.instance) {
+      this.instance = new AIService(settings);
+    } else {
+      // Update existing instance settings
+      this.instance.updateSettings(settings);
+    }
+    return this.instance;
+  }
 
   private constructor(settings: {
     openAIApiKey: string;
     groqAPIKey: string;
     openRouterAPIKey: string;
-    apiEndpoint: string;
-    localEndpoint?: string;
+    localEndpoint: string;
     temperature: number;
-    showopenAISetting: boolean;
-    showgroqSetting: boolean;
-    showlocalEndpointSetting: boolean;
-    showopenRouterSetting: boolean;
   }) {
-    this.settings = settings;
     this.services = {
       openai: new OpenAIProvider(settings.openAIApiKey, "", {
         temperature: settings.temperature,
@@ -52,61 +52,72 @@ export class AIService {
       openRouter: new OpenRouterAIProvider(settings.openRouterAPIKey, "", {
         temperature: settings.temperature,
       }),
-      local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
+      local: new LocalAIProvider("", settings.localEndpoint, {
         temperature: settings.temperature,
       }),
     };
   }
 
-  public static async getInstance(settings: {
-    openAIApiKey: string;
-    groqAPIKey: string;
-    openRouterAPIKey: string;
-    apiEndpoint: string;
-    localEndpoint?: string;
-    temperature: number;
-    showopenAISetting: boolean;
-    showgroqSetting: boolean;
-    showlocalEndpointSetting: boolean;
-    showopenRouterSetting: boolean;
-  }): Promise<AIService> {
-    if (!AIService.instance) {
-      AIService.instance = new AIService(settings);
-    } else {
-      AIService.instance.updateApiKeys(settings);
+  getProvider(provider: AIProvider) {
+    return this.services[provider];
+  }
+
+  async getModels(): Promise<Model[]> {
+    const allModels: Model[] = [];
+    for (const provider of Object.values(this.services)) {
+      if (provider) {
+        const models = await provider.getModels();
+        allModels.push(...models);
+      }
     }
-
-    // Initialize cache in background instead of waiting
-    AIService.instance.initializeModelCache().catch(console.error);
-
-    return AIService.instance;
+    return allModels;
   }
 
-  public async ensureModelCacheInitialized(): Promise<void> {
-    if (Object.keys(this.cachedModels).length === 0) {
-      await this.initializeModelCache();
+  updateSettings(settings: { temperature: number }) {
+    Object.values(this.services).forEach((provider) => {
+      provider?.updateSettings(settings);
+    });
+  }
+
+  updateApiKey(apiKey: string): void;
+  updateApiKey(providerOrKey: AIProvider | string, apiKey?: string): void {
+    if (typeof providerOrKey === "string" && !apiKey) {
+      // Interface implementation - update all providers
+      Object.values(this.services).forEach((provider) => {
+        provider?.updateApiKey(providerOrKey);
+      });
+    } else if (typeof providerOrKey !== "string" && apiKey) {
+      // Original implementation - update specific provider
+      this.services[providerOrKey]?.updateApiKey(apiKey);
     }
   }
 
-  private updateApiKeys(settings: {
-    openAIApiKey: string;
-    groqAPIKey: string;
-    openRouterAPIKey: string;
-    apiEndpoint: string;
-    localEndpoint?: string;
-    temperature: number;
-  }) {
-    this.services.openai.updateApiKey(settings.openAIApiKey);
-    this.services.groq.updateApiKey(settings.groqAPIKey);
-    this.services.openRouter.updateApiKey(settings.openRouterAPIKey);
-    Object.values(this.services).forEach((service) =>
-      service.updateSettings({ temperature: settings.temperature })
-    );
+  updateLocalEndpoint(endpoint: string) {
+    if (this.services.local) {
+      this.services.local = new LocalAIProvider(
+        "",
+        endpoint,
+        this.services.local.getSettings()
+      );
+    }
   }
 
-  clearModelCache() {
-    this.cachedModels = {};
-    this.initializeModelCache();
+  async initializeModelCache(silent: boolean = false): Promise<void> {
+    try {
+      const models = await this.getModels();
+      if (models.length === 0 && !silent) {
+        console.warn("No models found during initialization");
+      }
+    } catch (error) {
+      if (!silent) {
+        console.error("Error initializing model cache:", error);
+        throw error;
+      }
+    }
+  }
+
+  async ensureModelCacheInitialized(): Promise<void> {
+    await this.initializeModelCache();
   }
 
   async createChatCompletion(
@@ -115,12 +126,8 @@ export class AIService {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    await this.ensureModelCacheInitialized();
-    const model = await this.getModelById(modelId);
-    if (!model) {
-      throw new Error(`Model not found: ${modelId}`);
-    }
-    return this.services[model.provider].createChatCompletion(
+    const provider = await this.getProviderForModel(modelId);
+    return provider.createChatCompletion(
       systemPrompt,
       userMessage,
       modelId,
@@ -136,14 +143,8 @@ export class AIService {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    await this.ensureModelCacheInitialized();
-    const model = await this.getModelById(modelId);
-    if (!model) {
-      throw new Error(`Model not found: ${modelId}`);
-    }
-    return this.services[
-      model.provider
-    ].createStreamingChatCompletionWithCallback(
+    const provider = await this.getProviderForModel(modelId);
+    return provider.createStreamingChatCompletionWithCallback(
       systemPrompt,
       userMessage,
       modelId,
@@ -161,14 +162,8 @@ export class AIService {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    await this.ensureModelCacheInitialized();
-    const model = await this.getModelById(modelId);
-    if (!model) {
-      throw new Error(`Model not found: ${modelId}`);
-    }
-    return this.services[
-      model.provider
-    ].createStreamingConversationWithCallback(
+    const provider = await this.getProviderForModel(modelId);
+    return provider.createStreamingConversationWithCallback(
       systemPrompt,
       messages,
       modelId,
@@ -178,150 +173,12 @@ export class AIService {
     );
   }
 
-  public async getModels(
-    openAIApiKey: boolean,
-    groqAPIKey: boolean,
-    localEndpoint: boolean,
-    openRouterAPIKey: boolean,
-    forceRefresh: boolean = false
-  ): Promise<Model[]> {
-    if (forceRefresh || Object.keys(this.cachedModels).length === 0) {
-      await this.initializeModelCache(forceRefresh);
-    }
-
-    return Object.values(this.cachedModels).flat();
-  }
-
-  async getModelById(modelId: string): Promise<Model | undefined> {
-    for (const models of Object.values(this.cachedModels)) {
-      const model = models.find((m) => m.id === modelId);
-      if (model) {
-        return model;
-      }
-    }
-    return undefined;
-  }
-
-  static async validateOpenAIApiKey(
-    apiKey: string,
-    baseOpenAIApiUrl?: string
-  ): Promise<boolean> {
-    return OpenAIProvider.validateApiKey(
-      apiKey,
-      baseOpenAIApiUrl ?? "https://api.openai.com/v1"
-    );
-  }
-
-  static async validateGroqAPIKey(apiKey: string): Promise<boolean> {
-    return GroqAIProvider.validateApiKey(apiKey);
-  }
-
-  static async validateLocalEndpoint(endpoint: string): Promise<boolean> {
-    if (!endpoint) return false;
-    try {
-      const url = new URL(endpoint);
-      if (url.port && parseInt(url.port) < 1024) {
-        return false;
-      }
-      return UnifiedAIService.validateApiKey("", endpoint, "local");
-    } catch (error: unknown) {
-      return false;
-    }
-  }
-
-  static async validateOpenRouterApiKey(apiKey: string): Promise<boolean> {
-    return OpenRouterAIProvider.validateApiKey(apiKey);
-  }
-
-  public async initializeModelCache(
-    forceRefresh: boolean = false
-  ): Promise<void> {
-    if (this.modelInitializationInProgress && !forceRefresh) {
-      await this.modelInitializationPromise;
-      return;
-    }
-
-    if (!forceRefresh && Object.keys(this.cachedModels).length > 0) {
-      return;
-    }
-
-    this.modelInitializationInProgress = true;
-    this.modelInitializationPromise = this.performModelInitialization();
-
-    try {
-      await this.modelInitializationPromise;
-    } finally {
-      this.modelInitializationInProgress = false;
-      this.modelInitializationPromise = null;
-    }
-  }
-
-  private async performModelInitialization(): Promise<void> {
-    const providers: AIProvider[] = ["local", "openai", "groq", "openRouter"];
-    const fetchPromises: Promise<void>[] = [];
-
-    for (const provider of providers) {
-      fetchPromises.push(this.fetchModelsForProvider(provider));
-    }
-
-    await Promise.all(fetchPromises);
-  }
-
-  private async fetchModelsForProvider(provider: AIProvider): Promise<void> {
-    try {
-      const isEnabled = this.isProviderEnabled(provider);
-      const hasValidApiKey = this.services[provider].hasValidApiKey();
-      const hasValidEndpoint = this.hasValidEndpoint(provider);
-
-      if (!isEnabled || !hasValidApiKey || !hasValidEndpoint) {
-        this.cachedModels[provider] = [];
-        return;
-      }
-
-      console.log(`Fetching models for provider: ${provider}`);
-
-      const models = await Promise.race([
-        this.services[provider].getModels(),
-        new Promise<Model[]>(
-          (_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000) // Reduced to 10 seconds
-        ),
-      ]);
-
-      console.log(`Successfully fetched models for provider: ${provider}`);
-      this.cachedModels[provider] = models;
-    } catch (error: unknown) {
-      console.error(`Error fetching models for provider ${provider}:`, error);
-      this.cachedModels[provider] = [];
-    }
-  }
-
-  private isProviderEnabled(provider: AIProvider): boolean {
-    switch (provider) {
-      case "openai":
-        return this.settings.showopenAISetting;
-      case "groq":
-        return this.settings.showgroqSetting;
-      case "openRouter":
-        return this.settings.showopenRouterSetting;
-      case "local":
-        return this.settings.showlocalEndpointSetting;
-      default:
-        return false;
-    }
-  }
-
-  private hasValidEndpoint(provider: AIProvider): boolean {
-    switch (provider) {
-      case "openai":
-        return !!this.settings.apiEndpoint.trim();
-      case "groq":
-        return true;
-      case "openRouter":
-        return true;
-      case "local":
-        return !!this.settings.localEndpoint?.trim();
-      default:
-        return false;
-    }
+  private async getProviderForModel(modelId: string): Promise<BaseAIProvider> {
+    const models = await this.getModels();
+    const model = models.find((model: Model) => model.id === modelId);
+    if (!model) throw new Error(`Model ${modelId} not found`);
+    const provider = this.services[model.provider];
+    if (!provider) throw new Error(`Provider ${model.provider} not found`);
+    return provider;
   }
 }

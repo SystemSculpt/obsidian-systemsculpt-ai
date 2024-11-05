@@ -56,4 +56,8 @@ export abstract class BaseAIProvider {
   hasValidApiKey(): boolean {
     return !!this.apiKey && this.apiKey.length > 0;
   }
+
+  getSettings(): { temperature: number } {
+    return this.settings;
+  }
 }

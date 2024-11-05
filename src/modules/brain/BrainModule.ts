@@ -86,42 +86,14 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private async initialize() {
     try {
       await this.loadSettings();
-
-      // Initialize AIService without waiting for model cache
-      const {
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        apiEndpoint,
-        localEndpoint,
-        temperature,
-        showopenAISetting,
-        showgroqSetting,
-        showlocalEndpointSetting,
-        showopenRouterSetting,
-      } = this.settings;
-
-      this._AIService = await AIService.getInstance({
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        apiEndpoint,
-        localEndpoint,
-        temperature,
-        showopenAISetting,
-        showgroqSetting,
-        showlocalEndpointSetting,
-        showopenRouterSetting,
-      });
+      this._AIService = this.plugin.aiService;
 
       this.registerCommands();
       this.initializeStatusBars();
       this.registerViews();
 
-      // Update status bar initially
       this.updateModelStatusBarText("Loading models...");
 
-      // Initialize models only once
       if (!this.modelInitializationPromise) {
         this.modelInitializationPromise = this.initializeModels();
       }
@@ -225,17 +197,28 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       this.updateModelStatusBarText("Reloading Models...");
       this.updateModelSelectionButton("Reloading Models...", true);
 
+      const {
+        openAIApiKey,
+        groqAPIKey,
+        openRouterAPIKey,
+        localEndpoint,
+        temperature,
+        showopenAISetting,
+        showgroqSetting,
+        showlocalEndpointSetting,
+        showopenRouterSetting,
+      } = this.settings;
+
       this._AIService = await AIService.getInstance({
-        openAIApiKey: this.settings.openAIApiKey,
-        groqAPIKey: this.settings.groqAPIKey,
-        openRouterAPIKey: this.settings.openRouterAPIKey,
-        apiEndpoint: this.settings.apiEndpoint,
-        localEndpoint: this.settings.localEndpoint,
-        temperature: this.settings.temperature,
-        showopenAISetting: this.settings.showopenAISetting,
-        showgroqSetting: this.settings.showgroqSetting,
-        showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
-        showopenRouterSetting: this.settings.showopenRouterSetting,
+        openAIApiKey,
+        groqAPIKey,
+        openRouterAPIKey,
+        localEndpoint,
+        temperature,
+        showopenAISetting,
+        showgroqSetting,
+        showlocalEndpointSetting,
+        showopenRouterSetting,
       });
 
       // Trigger model cache refresh in background
@@ -287,14 +270,9 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       throw new Error("AIService is not initialized");
     }
     const enabledModels = await this.getEndpointSettingValues();
-    const allModels = await this._AIService.getModels(
-      !!enabledModels.openAIApiKey,
-      !!enabledModels.groqAPIKey,
-      !!enabledModels.localEndpoint,
-      !!enabledModels.openRouterAPIKey
-    );
+    const allModels = await this._AIService.getModels();
 
-    return allModels.filter((model) => {
+    return allModels.filter((model: Model) => {
       switch (model.provider) {
         case "openai":
           return enabledModels.openAIApiKey;
@@ -461,15 +439,8 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       throw new Error("AIService is not initialized");
     }
 
-    this.modelInitializationPromise = null; // Reset the promise
-    const enabledModels = await this.getEndpointSettingValues();
-    this.cachedModels = await this._AIService.getModels(
-      enabledModels.openAIApiKey,
-      enabledModels.groqAPIKey,
-      enabledModels.localEndpoint,
-      enabledModels.openRouterAPIKey,
-      true // Force refresh
-    );
+    this.modelInitializationPromise = null;
+    this.cachedModels = await this._AIService.getModels();
     this.emit("models-refreshed");
   }
 }
