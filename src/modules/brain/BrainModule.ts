@@ -206,11 +206,13 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         groqAPIKey,
         openRouterAPIKey,
         localEndpoint,
+        anthropicApiKey,
         temperature,
         showopenAISetting,
         showgroqSetting,
         showlocalEndpointSetting,
         showopenRouterSetting,
+        showAnthropicSetting,
       } = this.settings;
 
       this._AIService = await AIService.getInstance({
@@ -218,11 +220,13 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         groqAPIKey,
         openRouterAPIKey,
         localEndpoint,
+        anthropicApiKey,
         temperature,
         showopenAISetting,
         showgroqSetting,
         showlocalEndpointSetting,
         showopenRouterSetting,
+        showAnthropicSetting,
       });
 
       // Trigger model cache refresh in background

@@ -66,13 +66,7 @@ export class NodeModelSelectionModal extends Modal {
 
   private async loadModels() {
     const brainModule = this.plugin.brainModule;
-    const enabledModels = await brainModule.getEndpointSettingValues();
-    this.models = await brainModule.AIService.getModels(
-      enabledModels.openAIApiKey,
-      enabledModels.groqAPIKey,
-      enabledModels.localEndpoint,
-      enabledModels.openRouterAPIKey
-    );
+    this.models = await brainModule.getEnabledModels();
   }
 
   private renderModelList(filter: string = "") {
