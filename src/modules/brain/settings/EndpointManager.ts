@@ -1,11 +1,12 @@
 import { Setting, TextComponent, ToggleComponent } from "obsidian";
 import { BrainModule } from "../BrainModule";
 import { AIService } from "../../../api/AIService";
+import { OpenAIProvider } from "../../../api/providers/OpenAIProvider";
+import { GroqAIProvider } from "../../../api/providers/GroqAIProvider";
+import { OpenRouterAIProvider } from "../../../api/providers/OpenRouterAIProvider";
+import { LocalAIProvider } from "../../../api/providers/LocalAIProvider";
 
-type ValidateFunction = (
-  value: string,
-  baseOpenAIApiUrl?: string
-) => Promise<boolean>;
+type ValidateFunction = (value: string) => Promise<boolean>;
 
 interface APIProvider {
   name: string;
@@ -87,26 +88,29 @@ export class EndpointManager {
         name: "OpenAI",
         settingKey: "openAIApiKey",
         showSettingKey: "showopenAISetting",
-        validateFunction: (apiKey: string, baseOpenAIApiUrl?: string) =>
-          AIService.validateOpenAIApiKey(apiKey, baseOpenAIApiUrl),
+        validateFunction: (value: string) =>
+          OpenAIProvider.validateApiKey(value, "https://api.openai.com/v1"),
       },
       {
         name: "Groq",
         settingKey: "groqAPIKey",
         showSettingKey: "showgroqSetting",
-        validateFunction: AIService.validateGroqAPIKey,
+        validateFunction: (value: string) =>
+          GroqAIProvider.validateApiKey(value),
       },
       {
         name: "OpenRouter",
         settingKey: "openRouterAPIKey",
         showSettingKey: "showopenRouterSetting",
-        validateFunction: AIService.validateOpenRouterApiKey,
+        validateFunction: (value: string) =>
+          OpenRouterAIProvider.validateApiKey(value),
       },
       {
         name: "Local",
         settingKey: "localEndpoint",
         showSettingKey: "showlocalEndpointSetting",
-        validateFunction: AIService.validateLocalEndpoint,
+        validateFunction: (value: string) =>
+          LocalAIProvider.validateApiKey("", value),
         placeholder: "http://localhost:1234",
       },
     ];
@@ -250,7 +254,8 @@ export class EndpointManager {
         await this.validateSettingAndUpdateStatus(value, textComponent, {
           name: settingKey,
           settingKey,
-          validateFunction: AIService.validateLocalEndpoint,
+          validateFunction: async (apiKey: string, endpoint?: string) =>
+            LocalAIProvider.validateApiKey("", endpoint || ""),
         });
         await this.plugin.refreshAIService();
         this.onAfterSave();
@@ -288,13 +293,13 @@ export class EndpointManager {
       const validationPromise = (async () => {
         switch (provider.name) {
           case "OpenAI":
-            return await AIService.validateOpenAIApiKey(value);
+            return await provider.validateFunction(value);
           case "Groq":
-            return await AIService.validateGroqAPIKey(value);
+            return await provider.validateFunction(value);
           case "OpenRouter":
-            return await AIService.validateOpenRouterApiKey(value);
+            return await provider.validateFunction(value);
           case "Local":
-            return await AIService.validateLocalEndpoint(value);
+            return await provider.validateFunction(value);
           default:
             return false;
         }
@@ -333,7 +338,6 @@ export class EndpointManager {
       openAIApiKey: this.plugin.settings.openAIApiKey,
       groqAPIKey: this.plugin.settings.groqAPIKey,
       openRouterAPIKey: this.plugin.settings.openRouterAPIKey,
-      apiEndpoint: this.plugin.settings.apiEndpoint,
       localEndpoint: this.plugin.settings.localEndpoint,
       temperature: this.plugin.settings.temperature,
       showopenAISetting: this.plugin.settings.showopenAISetting,
