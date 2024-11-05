@@ -1,6 +1,7 @@
 import { UnifiedAIService } from "./UnifiedAIService";
 import { OpenAIProvider } from "./providers/OpenAIProvider";
 import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
+import { GroqAIProvider } from "./providers/GroqAIProvider";
 import { Model, AIProvider } from "./Model";
 
 export class AIService {
@@ -9,7 +10,8 @@ export class AIService {
     [key in AIProvider]:
       | UnifiedAIService
       | OpenAIProvider
-      | OpenRouterAIProvider;
+      | OpenRouterAIProvider
+      | GroqAIProvider;
   };
   private cachedModels: { [key: string]: Model[] } = {};
   private settings: {
@@ -44,15 +46,12 @@ export class AIService {
       openai: new OpenAIProvider(settings.openAIApiKey, "", {
         temperature: settings.temperature,
       }),
+      groq: new GroqAIProvider(settings.groqAPIKey, "", {
+        temperature: settings.temperature,
+      }),
       openRouter: new OpenRouterAIProvider(settings.openRouterAPIKey, "", {
         temperature: settings.temperature,
       }),
-      groq: new UnifiedAIService(
-        settings.groqAPIKey,
-        "https://api.groq.com/openai/v1",
-        "groq",
-        { temperature: settings.temperature }
-      ),
       local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
         temperature: settings.temperature,
       }),
@@ -214,11 +213,7 @@ export class AIService {
   }
 
   static async validateGroqAPIKey(apiKey: string): Promise<boolean> {
-    return UnifiedAIService.validateApiKey(
-      apiKey,
-      "https://api.groq.com/openai/v1",
-      "groq"
-    );
+    return GroqAIProvider.validateApiKey(apiKey);
   }
 
   static async validateLocalEndpoint(endpoint: string): Promise<boolean> {
@@ -235,11 +230,7 @@ export class AIService {
   }
 
   static async validateOpenRouterApiKey(apiKey: string): Promise<boolean> {
-    return UnifiedAIService.validateApiKey(
-      apiKey,
-      "https://openrouter.ai/api/v1",
-      "openRouter"
-    );
+    return OpenRouterAIProvider.validateApiKey(apiKey);
   }
 
   public async initializeModelCache(
