@@ -1,10 +1,10 @@
 import { UnifiedAIService } from "./UnifiedAIService";
+import { OpenAIProvider } from "./providers/OpenAIProvider";
 import { Model, AIProvider } from "./Model";
-import { debounce } from "obsidian";
 
 export class AIService {
   private static instance: AIService;
-  private services: { [key in AIProvider]: UnifiedAIService };
+  private services: { [key in AIProvider]: UnifiedAIService | OpenAIProvider };
   private cachedModels: { [key: string]: Model[] } = {};
   private settings: {
     openAIApiKey: string;
@@ -35,27 +35,24 @@ export class AIService {
   }) {
     this.settings = settings;
     this.services = {
-      openai: new UnifiedAIService(
-        settings.openAIApiKey,
-        "https://api.openai.com/v1",
-        "openai",
-        { temperature: settings.temperature }
-      ),
+      openai: new OpenAIProvider(settings.openAIApiKey, "", {
+        temperature: settings.temperature,
+      }),
       groq: new UnifiedAIService(
         settings.groqAPIKey,
         "https://api.groq.com/openai/v1",
         "groq",
         { temperature: settings.temperature }
       ),
-      local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
-        temperature: settings.temperature,
-      }),
       openRouter: new UnifiedAIService(
         settings.openRouterAPIKey,
         "https://openrouter.ai/api/v1",
         "openRouter",
         { temperature: settings.temperature }
       ),
+      local: new UnifiedAIService("", settings.localEndpoint || "", "local", {
+        temperature: settings.temperature,
+      }),
     };
   }
 
@@ -88,23 +85,6 @@ export class AIService {
       await this.initializeModelCache();
     }
   }
-
-  private updateSettings(settings: {
-    openAIApiKey: string;
-    groqAPIKey: string;
-    openRouterAPIKey: string;
-    apiEndpoint: string;
-    localEndpoint?: string;
-    temperature: number;
-  }) {
-    this.updateApiKeysDebounced(settings);
-  }
-
-  private updateApiKeysDebounced = debounce(
-    this.updateApiKeys.bind(this),
-    1000,
-    true
-  );
 
   private updateApiKeys(settings: {
     openAIApiKey: string;
@@ -224,10 +204,9 @@ export class AIService {
     apiKey: string,
     baseOpenAIApiUrl?: string
   ): Promise<boolean> {
-    return UnifiedAIService.validateApiKey(
+    return OpenAIProvider.validateApiKey(
       apiKey,
-      baseOpenAIApiUrl ?? "https://api.openai.com/v1",
-      "openai"
+      baseOpenAIApiUrl ?? "https://api.openai.com/v1"
     );
   }
 
