@@ -13,7 +13,7 @@ export class SaveChatAsNoteModal extends Modal {
     onSave: (fileName: string, folderPath: string) => void
   ) {
     super(app);
-    this.fileName = fileName;
+    this.fileName = fileName.replace(/\.md$/, "");
     this.folderPath = folderPath;
     this.onSave = onSave;
   }
@@ -28,7 +28,7 @@ export class SaveChatAsNoteModal extends Modal {
       .addText((text) =>
         text
           .setValue(this.fileName)
-          .onChange((value) => (this.fileName = value))
+          .onChange((value) => (this.fileName = value.replace(/\.md$/, "")))
       );
 
     new Setting(contentEl).setName("Folder path").addText((text) => {
@@ -56,7 +56,8 @@ export class SaveChatAsNoteModal extends Modal {
         .setButtonText("Save")
         .setCta()
         .onClick(() => {
-          this.onSave(this.fileName, this.folderPath);
+          const finalFileName = `${this.fileName.trim()}.md`;
+          this.onSave(finalFileName, this.folderPath);
           this.close();
         })
     );
