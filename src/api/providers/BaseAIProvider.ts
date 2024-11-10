@@ -88,4 +88,9 @@ export abstract class BaseAIProvider {
     this.cachedModels = null;
     this.modelLoadPromise = null;
   }
+
+  protected async getTokenCount(text: string): Promise<number> {
+    // Simple approximation: ~4 chars per token
+    return Math.ceil(text.length / 4);
+  }
 }

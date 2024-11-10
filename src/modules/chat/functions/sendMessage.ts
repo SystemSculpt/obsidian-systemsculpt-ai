@@ -21,7 +21,7 @@ export async function sendMessage(
   >,
   appendToLastMessage: (content: string) => void,
   showLoading: () => void,
-  hideLoading: () => void,
+  hideLoading: () => void
 ) {
   const messageText = inputEl.value.trim();
   if (messageText === "") return;
@@ -39,7 +39,6 @@ export async function sendMessage(
   const aiService = brainModule.AIService;
   const modelId = brainModule.settings.defaultModelId;
   const maxOutputTokens = brainModule.getMaxOutputTokens();
-  let accumulatedResponse = "";
 
   const systemPrompt = chatModule.settings.systemPrompt;
   const messageHistory = await constructMessageHistory();
@@ -62,7 +61,7 @@ export async function sendMessage(
             const pdfFileName = line.slice(4, -4);
             const extractedFolder = `${chatModule.settings.attachmentsPath}/${pdfFileName}`;
             const extractedMarkdownFile = app.vault.getAbstractFileByPath(
-              `${extractedFolder}/extracted_content.md`,
+              `${extractedFolder}/extracted_content.md`
             );
             if (extractedMarkdownFile instanceof TFile) {
               const content = await app.vault.read(extractedMarkdownFile);
@@ -70,7 +69,7 @@ export async function sendMessage(
             }
           }
           return line;
-        }),
+        })
       );
       return { ...msg, content: processedLines.join("\n") };
     }
@@ -78,7 +77,7 @@ export async function sendMessage(
   };
 
   const updatedMessageHistory = await Promise.all(
-    messageHistory.map(processPDFContent),
+    messageHistory.map(processPDFContent)
   );
 
   showLoading();
@@ -90,29 +89,23 @@ export async function sendMessage(
   });
 
   try {
+    let accumulatedResponse = "";
     await aiService.createStreamingConversationWithCallback(
       systemPrompt,
       updatedMessageHistory,
       modelId,
       maxOutputTokens,
       async (chunk: string) => {
-        accumulatedResponse += handleStreamingResponse(
-          chunk,
-          (content: string) => {
-            appendToLastMessage(content);
-          },
-          (message: ChatMessage) => {
-            addMessage(message);
-          },
-        );
-      },
+        accumulatedResponse += chunk;
+        appendToLastMessage(chunk);
+      }
     );
 
     const modelInfo = await brainModule.getModelById(modelId);
     const modelName = modelInfo ? modelInfo.name : "unknown model";
 
     await updateChatFile(
-      `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`,
+      `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
     );
   } catch (error) {
   } finally {

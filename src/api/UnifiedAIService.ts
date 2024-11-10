@@ -1,11 +1,18 @@
 import { requestUrl } from "obsidian";
 import { Model, AIProvider, AIServiceInterface } from "./Model";
+import { BaseAIProvider } from "./providers/BaseAIProvider";
+import { OpenAIProvider } from "./providers/OpenAIProvider";
+import { GroqAIProvider } from "./providers/GroqAIProvider";
+import { OpenRouterAIProvider } from "./providers/OpenRouterAIProvider";
+import { LocalAIProvider } from "./providers/LocalAIProvider";
+import { AnthropicAIProvider } from "./providers/AnthropicAIProvider";
 
 export class UnifiedAIService implements AIServiceInterface {
   private apiKey: string;
   private endpoint: string;
   private settings: { temperature: number };
   private provider: AIProvider;
+  private services: { [key: string]: BaseAIProvider };
 
   constructor(
     apiKey: string,
@@ -17,6 +24,21 @@ export class UnifiedAIService implements AIServiceInterface {
     this.endpoint = endpoint.endsWith("/v1") ? endpoint : `${endpoint}/v1`;
     this.provider = provider;
     this.settings = settings;
+    this.services = {
+      openai: new OpenAIProvider(this.apiKey, this.endpoint, this.settings),
+      groq: new GroqAIProvider(this.apiKey, this.endpoint, this.settings),
+      openRouter: new OpenRouterAIProvider(
+        this.apiKey,
+        this.endpoint,
+        this.settings
+      ),
+      local: new LocalAIProvider(this.apiKey, this.endpoint, this.settings),
+      anthropic: new AnthropicAIProvider(
+        this.apiKey,
+        this.endpoint,
+        this.settings
+      ),
+    };
   }
 
   private isNonStreamingModel(modelId: string): boolean {
@@ -103,92 +125,17 @@ export class UnifiedAIService implements AIServiceInterface {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const messages = this.shouldConvertSystemToUser(modelId)
-      ? [
-          { role: "user", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ]
-      : [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ];
+    const provider = this.getProvider();
+    if (!provider) throw new Error("No provider configured");
 
-    const requestData: any = {
-      model: modelId,
-      messages: messages,
-      stream: !this.isNonStreamingModel(modelId),
-      temperature: this.shouldUseHardcodedTemperature(modelId)
-        ? 1
-        : this.settings.temperature,
-    };
-
-    if (!this.shouldOmitMaxTokens(modelId)) {
-      requestData.max_tokens = maxOutputTokens;
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
-    };
-
-    if (this.provider === "openRouter") {
-      headers["HTTP-Referer"] = "https://SystemSculpt.com";
-      headers["X-Title"] = "SystemSculpt AI for Obsidian";
-    }
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify(requestData),
-    });
-
-    if (!req.ok) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
-
-    if (this.isNonStreamingModel(modelId)) {
-      const data = await req.json();
-      callback(JSON.stringify(data));
-      return;
-    }
-
-    if (!req.body) {
-      throw new Error("API request failed with status 404");
-    }
-
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let done = false;
-    let buffer = "";
-    let lastContent = "";
-
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            callback(line);
-          }
-        }
-      }
-    }
+    await provider.createStreamingChatCompletionWithCallback(
+      systemPrompt,
+      userMessage,
+      modelId,
+      maxOutputTokens,
+      callback,
+      abortSignal
+    );
   }
 
   async createStreamingConversationWithCallback(
@@ -204,111 +151,28 @@ export class UnifiedAIService implements AIServiceInterface {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    let formattedMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((msg) => {
-        if (typeof msg.content === "string") {
-          return msg;
-        } else {
-          return {
-            role: msg.role,
-            content: msg.content.map((item) => {
-              if (item.type === "text") {
-                return { type: "text", text: item.text };
-              } else if (item.type === "image_url") {
-                return { type: "image_url", image_url: item.image_url };
-              }
-              return item;
-            }),
-          };
-        }
-      }),
-    ];
+    const provider = this.getProvider();
+    if (!provider) throw new Error("No provider configured");
 
-    if (this.shouldConvertSystemToUser(modelId)) {
-      formattedMessages = formattedMessages.map((msg, index) =>
-        index === 0 ? { ...msg, role: "user" } : msg
-      );
-    }
+    // Convert complex messages to simple format if needed
+    const simplifiedMessages = messages.map((msg) => ({
+      role: msg.role,
+      content:
+        typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? msg.content.map((c) => c.text || "").join(" ")
+            : "",
+    }));
 
-    const requestData: any = {
-      model: modelId,
-      messages: formattedMessages,
-      stream: !this.isNonStreamingModel(modelId),
-      temperature: this.shouldUseHardcodedTemperature(modelId)
-        ? 1
-        : this.settings.temperature,
-    };
-
-    if (!this.shouldOmitMaxTokens(modelId)) {
-      requestData.max_tokens = maxOutputTokens;
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
-    };
-
-    if (this.provider === "openRouter") {
-      headers["HTTP-Referer"] = "https://SystemSculpt.com";
-      headers["X-Title"] = "SystemSculpt AI for Obsidian";
-    }
-
-    console.log("Request payload:", JSON.stringify(requestData));
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify(requestData),
-    });
-
-    if (!req.ok) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
-
-    if (this.isNonStreamingModel(modelId)) {
-      const data = await req.json();
-      callback(JSON.stringify(data));
-      return;
-    }
-
-    if (!req.body) {
-      throw new Error("API request failed with status 404");
-    }
-
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let done = false;
-    let buffer = "";
-    let lastContent = "";
-
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            callback(line);
-          }
-        }
-      }
-    }
+    await provider.createStreamingConversationWithCallback(
+      systemPrompt,
+      simplifiedMessages,
+      modelId,
+      maxOutputTokens,
+      callback,
+      abortSignal
+    );
   }
 
   private async getLocalModels(): Promise<Model[]> {
@@ -577,5 +441,11 @@ export class UnifiedAIService implements AIServiceInterface {
       }
       return false;
     }
+  }
+
+  private getProvider(): BaseAIProvider {
+    const provider = this.services[this.provider];
+    if (!provider) throw new Error(`Provider ${this.provider} not found`);
+    return provider;
   }
 }

@@ -3,22 +3,30 @@ import SystemSculptPlugin from "./main";
 
 export interface SystemSculptSettings {
   openAIApiKey: string;
-  apiEndpoint: string;
   groqAPIKey: string;
-  localEndpoint: string;
   openRouterAPIKey: string;
+  localEndpoint: string;
+  anthropicApiKey: string;
   temperature: number;
-  showTaskButtonOnStatusBar: boolean;
+  showopenAISetting: boolean;
+  showgroqSetting: boolean;
+  showlocalEndpointSetting: boolean;
+  showopenRouterSetting: boolean;
+  showAnthropicSetting: boolean;
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   openAIApiKey: "",
-  apiEndpoint: "https://api.openai.com",
   groqAPIKey: "",
-  localEndpoint: "http://localhost:1234",
   openRouterAPIKey: "",
+  localEndpoint: "http://localhost:1234",
+  anthropicApiKey: "",
   temperature: 0.5,
-  showTaskButtonOnStatusBar: true,
+  showopenAISetting: true,
+  showgroqSetting: true,
+  showlocalEndpointSetting: true,
+  showopenRouterSetting: true,
+  showAnthropicSetting: true,
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {
@@ -116,6 +124,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       "templates",
       "chat",
       "builder",
+      "anki",
       "about",
     ];
 
@@ -244,6 +253,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.renderTab(tabContainer, "templates", "Templates");
     this.renderTab(tabContainer, "chat", "Chat");
     this.renderTab(tabContainer, "builder", "Builder");
+    this.renderTab(tabContainer, "anki", "Anki");
     this.renderTab(tabContainer, "about", "About");
 
     return tabContainer;
@@ -323,6 +333,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       }
       if (tabId === "builder") {
         this.plugin.builderModule.settingsDisplay(selectedContainer);
+      }
+      if (tabId === "anki") {
+        this.plugin.ankiModule.settingsDisplay(selectedContainer);
       }
     }
   }

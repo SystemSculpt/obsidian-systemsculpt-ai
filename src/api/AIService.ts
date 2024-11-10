@@ -5,6 +5,9 @@ import { LocalAIProvider } from "./providers/LocalAIProvider";
 import { AnthropicAIProvider } from "./providers/AnthropicAIProvider";
 import { Model, AIProvider, AIServiceInterface } from "./Model";
 import { BaseAIProvider } from "./providers/BaseAIProvider";
+import { OpenAI } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
+import { BrainSettings } from "../modules/brain/settings/BrainSettings";
 
 type AIProviderType =
   | OpenAIProvider
@@ -46,21 +49,31 @@ export class AIService implements AIServiceInterface {
 
   private constructor(settings: AIServiceSettings) {
     this.services = {
-      openai: new OpenAIProvider(settings.openAIApiKey, "", {
-        temperature: settings.temperature,
-      }),
-      groq: new GroqAIProvider(settings.groqAPIKey, "", {
-        temperature: settings.temperature,
-      }),
-      openRouter: new OpenRouterAIProvider(settings.openRouterAPIKey, "", {
-        temperature: settings.temperature,
-      }),
-      anthropic: new AnthropicAIProvider(settings.anthropicApiKey, "", {
-        temperature: settings.temperature,
-      }),
-      local: new LocalAIProvider("", settings.localEndpoint, {
-        temperature: settings.temperature,
-      }),
+      openai: new OpenAIProvider(
+        settings.openAIApiKey,
+        "https://api.openai.com",
+        { temperature: settings.temperature }
+      ),
+      groq: new GroqAIProvider(
+        settings.groqAPIKey,
+        "", // GroqAIProvider sets its own endpoint
+        { temperature: settings.temperature }
+      ),
+      openRouter: new OpenRouterAIProvider(
+        settings.openRouterAPIKey,
+        "", // OpenRouterAIProvider sets its own endpoint
+        { temperature: settings.temperature }
+      ),
+      local: new LocalAIProvider(
+        "", // LocalAIProvider doesn't use API key
+        settings.localEndpoint,
+        { temperature: settings.temperature }
+      ),
+      anthropic: new AnthropicAIProvider(
+        settings.anthropicApiKey,
+        "", // AnthropicAIProvider sets its own endpoint
+        { temperature: settings.temperature }
+      ),
     };
   }
 
@@ -113,34 +126,39 @@ export class AIService implements AIServiceInterface {
     force: boolean = false
   ): Promise<void> {
     if (force || !this.modelCacheInitialized) {
-      if (provider) {
-        switch (provider) {
-          case "openai":
-            if (this.services.openai) await this.services.openai.getModels();
-            break;
-          case "anthropic":
-            if (this.services.anthropic)
-              await this.services.anthropic.getModels();
-            break;
-          case "groq":
-            if (this.services.groq) await this.services.groq.getModels();
-            break;
-          case "openrouter":
-            if (this.services.openRouter)
-              await this.services.openRouter.getModels();
-            break;
-          case "local":
-            if (this.services.local) await this.services.local.getModels();
-            break;
+      try {
+        if (provider) {
+          switch (provider) {
+            case "openai":
+              if (this.services.openai) await this.services.openai.getModels();
+              break;
+            case "anthropic":
+              if (this.services.anthropic)
+                await this.services.anthropic.getModels();
+              break;
+            case "groq":
+              if (this.services.groq) await this.services.groq.getModels();
+              break;
+            case "openrouter":
+              if (this.services.openRouter)
+                await this.services.openRouter.getModels();
+              break;
+            case "local":
+              if (this.services.local) await this.services.local.getModels();
+              break;
+          }
+        } else {
+          const promises = [
+            this.services.openai?.getModels().catch(() => []),
+            this.services.anthropic?.getModels().catch(() => []),
+            this.services.groq?.getModels().catch(() => []),
+            this.services.openRouter?.getModels().catch(() => []),
+            this.services.local?.getModels().catch(() => []),
+          ];
+          await Promise.all(promises);
         }
-      } else {
-        await Promise.all([
-          this.services.openai?.getModels(),
-          this.services.anthropic?.getModels(),
-          this.services.groq?.getModels(),
-          this.services.openRouter?.getModels(),
-          this.services.local?.getModels(),
-        ]);
+      } catch (error) {
+        console.warn("Error initializing model cache:", error);
       }
       this.modelCacheInitialized = true;
     }
@@ -170,8 +188,8 @@ export class AIService implements AIServiceInterface {
     userMessage: string,
     modelId: string,
     maxOutputTokens: number,
-    callback: (chunk: string) => void,
-    abortSignal?: AbortSignal
+    onData: (chunk: string) => void,
+    abortSignal: AbortSignal
   ): Promise<void> {
     const provider = await this.getProviderForModel(modelId);
     return provider.createStreamingChatCompletionWithCallback(
@@ -179,7 +197,7 @@ export class AIService implements AIServiceInterface {
       userMessage,
       modelId,
       maxOutputTokens,
-      callback,
+      onData,
       abortSignal
     );
   }

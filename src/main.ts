@@ -16,6 +16,7 @@ import { registerMp3ContextMenu } from "./events";
 import { checkForUpdate } from "./modules/brain/functions/checkForUpdate";
 import { BuilderModule } from "./modules/builder/BuilderModule";
 import { AIService } from "./api/AIService";
+import { AnkiModule } from "./modules/anki/AnkiModule";
 
 export default class SystemSculptPlugin extends Plugin {
   settings!: SystemSculptSettings;
@@ -32,6 +33,7 @@ export default class SystemSculptPlugin extends Plugin {
   chatToggleStatusBarItem: HTMLElement | null = null;
   settingsTab!: SystemSculptSettingTab;
   builderModule!: BuilderModule;
+  ankiModule!: AnkiModule;
   public aiService!: AIService;
 
   async onload() {
@@ -42,6 +44,7 @@ export default class SystemSculptPlugin extends Plugin {
       groqAPIKey: this.settings.groqAPIKey,
       openRouterAPIKey: this.settings.openRouterAPIKey,
       localEndpoint: this.settings.localEndpoint,
+      anthropicApiKey: this.settings.anthropicApiKey || "",
       temperature: this.settings.temperature,
     });
 
@@ -56,6 +59,7 @@ export default class SystemSculptPlugin extends Plugin {
     this.aboutModule = new AboutModule(this);
     this.chatModule = new ChatModule(this);
     this.builderModule = new BuilderModule(this);
+    this.ankiModule = new AnkiModule(this);
 
     // Load modules
     const modules = [
@@ -67,6 +71,7 @@ export default class SystemSculptPlugin extends Plugin {
       { name: "About", load: () => this.aboutModule.load() },
       { name: "Chat", load: () => this.chatModule.load() },
       { name: "Builder", load: () => this.builderModule.load() },
+      { name: "Anki", load: () => this.ankiModule.load() },
     ];
 
     for (const module of modules) {

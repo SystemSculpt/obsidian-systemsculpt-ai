@@ -1,14 +1,21 @@
-import { requestUrl } from "obsidian";
+import { ChatGroq } from "@langchain/groq";
 import { BaseAIProvider } from "./BaseAIProvider";
-import { Model, AIProvider } from "../Model";
+import { Model } from "../Model";
+import { requestUrl } from "obsidian";
 
 export class GroqAIProvider extends BaseAIProvider {
+  private llm: ChatGroq;
+
   constructor(
     apiKey: string,
-    _endpoint: string, // Ignored since Groq endpoint is fixed
+    _endpoint: string,
     settings: { temperature: number }
   ) {
     super(apiKey, "https://api.groq.com/openai/v1", "groq", settings);
+    this.llm = new ChatGroq({
+      apiKey: apiKey,
+      temperature: settings.temperature,
+    });
   }
 
   async createChatCompletion(
@@ -17,33 +24,19 @@ export class GroqAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatGroq({
+      apiKey: this.apiKey,
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
       temperature: this.settings.temperature,
-    };
-
-    const response = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(requestData),
     });
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
 
-    const data = await response.json();
-    return data.choices[0].message.content.trim();
+    return response.content.toString();
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -54,65 +47,27 @@ export class GroqAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatGroq({
+      apiKey: this.apiKey,
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
+      streaming: true,
       temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(requestData),
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
+          },
+        },
+      ],
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
-
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let lastContent = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            console.warn("Error parsing SSE message:", error);
-          }
-        }
-      }
-    }
+    await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
   }
 
   async createStreamingConversationWithCallback(
@@ -123,71 +78,38 @@ export class GroqAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const allMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages,
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages: allMessages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatGroq({
+      apiKey: this.apiKey,
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
+      streaming: true,
       temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(requestData),
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
+          },
+        },
+      ],
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
+    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
+  }
 
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let lastContent = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            console.warn("Error parsing SSE message:", error);
-          }
-        }
-      }
+  static async validateApiKey(apiKey: string): Promise<boolean> {
+    try {
+      const llm = new ChatGroq({ apiKey });
+      await llm.invoke([{ role: "user", content: "test" }]);
+      return true;
+    } catch {
+      return false;
     }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
-    if (!this.hasValidApiKey()) {
-      return [];
-    }
+    if (!this.hasValidApiKey()) return [];
 
     const response = await requestUrl({
       url: `${this.endpoint}/models`,
@@ -200,40 +122,18 @@ export class GroqAIProvider extends BaseAIProvider {
     return response.json.data
       .filter(
         (model: any) =>
-          model.id !== "whisper-large-v3" &&
-          !model.id.toLowerCase().includes("tool-use") &&
           !model.id.toLowerCase().includes("whisper") &&
           !model.id.toLowerCase().includes("llava")
       )
       .map((model: any) => ({
         id: model.id,
         name: model.id,
-        provider: "groq" as AIProvider,
-        contextLength: model.context_window || undefined,
-        pricing: model.pricing
-          ? {
-              prompt: parseFloat(model.pricing.prompt),
-              completion: parseFloat(model.pricing.completion),
-            }
-          : { prompt: 0, completion: 0 },
-      }));
-  }
-
-  static async validateApiKey(apiKey: string): Promise<boolean> {
-    if (!apiKey) return false;
-
-    try {
-      const response = await requestUrl({
-        url: "https://api.groq.com/openai/v1/models",
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
+        provider: "groq",
+        contextLength: model.context_window,
+        pricing: {
+          prompt: 0.0001,
+          completion: 0.0002,
         },
-      });
-      return response.status === 200;
-    } catch (error) {
-      console.error("Failed to validate Groq API key:", error);
-      return false;
-    }
+      }));
   }
 }

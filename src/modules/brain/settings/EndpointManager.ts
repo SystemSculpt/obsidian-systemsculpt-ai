@@ -7,7 +7,7 @@ import { OpenRouterAIProvider } from "../../../api/providers/OpenRouterAIProvide
 import { LocalAIProvider } from "../../../api/providers/LocalAIProvider";
 import { AnthropicAIProvider } from "../../../api/providers/AnthropicAIProvider";
 
-type ValidateFunction = (value: string) => Promise<boolean>;
+type ValidateFunction = (value: string, baseUrl?: string) => Promise<boolean>;
 
 interface APIProvider {
   name: string;

@@ -110,26 +110,24 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }
   }
 
-  private async initializeModels(): Promise<void> {
+  private async initializeModels() {
     try {
+      this.updateModelLoadingStatus("all");
       if (this._AIService) {
-        const providers = [
-          "OpenAI",
-          "Anthropic",
-          "Groq",
-          "OpenRouter",
-          "Local",
-        ];
-        for (const provider of providers) {
-          this.updateModelLoadingStatus(provider);
-          await this._AIService.initializeModelCache(provider.toLowerCase());
-        }
-        this.updateModelLoadingStatus(null);
-        await this.updateDefaultModelAndStatusBar();
+        await this._AIService.initializeModelCache();
+        const models = await this._AIService.getModels();
+        this.cachedModels = models;
+
+        // Get the current model name immediately after loading
+        const modelName = await this.getCurrentModelShortName();
+        this.updateModelStatusBarText(modelName);
+        this.updateModelSelectionButton(modelName, false);
       }
     } catch (error) {
-      console.error("Error initializing models:", error);
-      this.updateModelStatusBarText("Error loading models");
+      console.warn("Failed to initialize models:", error);
+      this.updateModelStatusBarText("No Models Available");
+    } finally {
+      this.updateModelLoadingStatus(null);
     }
   }
 
@@ -350,39 +348,27 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     return this.cachedModels.find((model) => model.id === modelId);
   }
 
-  async updateDefaultModelAndStatusBar(): Promise<void> {
-    if (this.isUpdatingDefaultModel) return;
-    this.isUpdatingDefaultModel = true;
-
+  async updateDefaultModelAndStatusBar() {
     try {
-      this.updateModelStatusBarText("Loading Models...");
-
-      await this._AIService?.ensureModelCacheInitialized();
-      this.cachedModels = await this.getEnabledModels();
-
-      if (this.cachedModels.length === 0) {
-        this.updateModelStatusBarText("No Models Detected");
-      } else {
-        const currentModel = this.getCurrentModel();
-        if (
-          !currentModel ||
-          !this.cachedModels.some((model) => model.id === currentModel.id)
-        ) {
-          // If the current model is not in the cached models, select the first available model
-          this.settings.defaultModelId = this.cachedModels[0].id;
-          await this.saveSettings();
-        }
-        this.updateModelStatusBarText(
-          this.settings.showDefaultModelOnStatusBar && currentModel
-            ? `Model: ${currentModel.name}`
-            : ""
-        );
+      const models = (await this._AIService?.getModels()) || [];
+      if (models.length === 0) {
+        this.updateModelStatusBarText("No Models Available");
+        return;
       }
+
+      const currentModel = this.getCurrentModel();
+      if (!currentModel || !models.some((m) => m.id === currentModel.id)) {
+        // Set first available model as default if current is invalid
+        this.settings.defaultModelId = models[0].id;
+        await this.saveSettings();
+      }
+
+      const modelName = this.getCurrentModel()?.name || "Select Model";
+      this.updateModelStatusBarText(modelName);
+      this.updateModelSelectionButton(modelName, false);
     } catch (error) {
-      console.error("Error updating default model:", error);
-      this.updateModelStatusBarText("Error Detecting Models");
-    } finally {
-      this.isUpdatingDefaultModel = false;
+      console.warn("Error updating default model:", error);
+      this.updateModelStatusBarText("Error Loading Models");
     }
   }
 
@@ -461,13 +447,18 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     this.modelLoadTimeout = setTimeout(async () => {
       try {
         if (this._AIService) {
-          this.cachedModels = await this._AIService.getModels();
-          this.emit("models-refreshed");
+          await this._AIService.initializeModelCache(undefined, true);
+          const models = await this._AIService.getModels();
+          this.cachedModels = models;
+          const modelName = await this.getCurrentModelShortName();
+          this.updateModelStatusBarText(modelName);
+          this.updateModelSelectionButton(modelName, false);
         }
       } catch (error) {
-        console.error("Failed to load models:", error);
+        console.warn("Failed to load models:", error);
+        this.updateModelStatusBarText("Error Loading Models");
       }
-    }, 2000);
+    }, 1000);
   }
 
   async refreshModels() {

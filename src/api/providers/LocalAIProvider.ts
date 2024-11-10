@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model, AIProvider } from "../Model";
+import { ChatOpenAI } from "@langchain/openai";
 
 export class LocalAIProvider extends BaseAIProvider {
   constructor(
@@ -17,32 +18,22 @@ export class LocalAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatOpenAI({
+      openAIApiKey: "not-needed",
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
       temperature: this.settings.temperature,
-    };
-
-    const response = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      configuration: {
+        baseURL: this.endpoint,
       },
-      body: JSON.stringify(requestData),
     });
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
 
-    const data = await response.json();
-    return data.choices[0].message.content.trim();
+    return response.content.toString();
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -53,65 +44,30 @@ export class LocalAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatOpenAI({
+      openAIApiKey: "not-needed",
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
+      streaming: true,
       temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      configuration: {
+        baseURL: this.endpoint,
       },
-      body: JSON.stringify(requestData),
-      signal: abortSignal,
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
+          },
+        },
+      ],
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
-
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let lastContent = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            console.warn("Error parsing SSE message:", error);
-          }
-        }
-      }
-    }
+    await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
   }
 
   async createStreamingConversationWithCallback(
@@ -122,65 +78,27 @@ export class LocalAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const allMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages,
-    ];
-
-    const requestData = {
-      model: modelId,
-      messages: allMessages,
-      max_tokens: maxOutputTokens,
+    const llm = new ChatOpenAI({
+      openAIApiKey: "not-needed",
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
+      streaming: true,
       temperature: this.settings.temperature,
-      stream: true,
-    };
-
-    const req = await fetch(`${this.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      configuration: {
+        baseURL: this.endpoint,
       },
-      body: JSON.stringify(requestData),
-      signal: abortSignal,
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
+          },
+        },
+      ],
     });
 
-    if (!req.ok || !req.body) {
-      throw new Error(`API request failed with status ${req.status}`);
-    }
-
-    const reader = req.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let lastContent = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const decodedChunk = decoder.decode(value);
-      buffer += decodedChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.choices && data.choices[0].delta.content) {
-              const newContent = data.choices[0].delta.content;
-              if (newContent !== lastContent) {
-                callback(line);
-                lastContent = newContent;
-              }
-            } else {
-              callback(line);
-            }
-          } catch (error) {
-            console.warn("Error parsing SSE message:", error);
-          }
-        }
-      }
-    }
+    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
   }
 
   protected async getModelsImpl(): Promise<Model[]> {

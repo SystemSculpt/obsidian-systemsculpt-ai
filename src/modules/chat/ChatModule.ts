@@ -6,7 +6,6 @@ import { ChatFileManager } from "./ChatFileManager";
 import { TFile, WorkspaceLeaf } from "obsidian";
 import { DocumentExtractor } from "./DocumentExtractor";
 import { Notice } from "obsidian";
-import { createHash } from "crypto";
 import { ContextFileManager } from "./ContextFileManager";
 import { RecorderModule } from "../recorder/RecorderModule";
 import { logModuleLoadTime } from "../../utils/timing";
@@ -237,13 +236,6 @@ export class ChatModule {
     this.openNewChat();
   }
 
-  async calculateMD5(file: TFile): Promise<string> {
-    const arrayBuffer = await this.plugin.app.vault.readBinary(file);
-    const hash = createHash("md5");
-    hash.update(Buffer.from(arrayBuffer));
-    return hash.digest("hex");
-  }
-
   async extractDocument(file: TFile) {
     const documentExtractor = new DocumentExtractor(this, this.plugin.app);
     const extractedContent = await documentExtractor.extractDocument(file);
@@ -297,4 +289,12 @@ export class ChatModule {
       new Notice("Failed to create a new chat view");
     }
   }
+}
+
+function createHash(data: string): string {
+  const encoder = new TextEncoder();
+  const buffer = encoder.encode(data);
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
