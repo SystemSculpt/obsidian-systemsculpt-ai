@@ -167,14 +167,11 @@ export class EndpointManager {
           .onChange(async (value) => {
             this.plugin.settings[provider.settingKey] = value as never;
             await this.plugin.saveSettings();
-            await this.validateSettingAndUpdateStatus(
+            this.debouncedReinitialize(
               value,
               apiSettingTextComponent,
-              provider
+              provider.settingKey
             );
-            await this.plugin.refreshAIService();
-            await this.plugin.refreshModels(); // Add this line
-            this.onAfterSave();
           });
 
         if (provider.name !== "Local" && provider.name !== "OpenAI Base URL") {
