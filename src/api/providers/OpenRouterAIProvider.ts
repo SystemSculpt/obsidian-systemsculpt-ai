@@ -130,7 +130,7 @@ export class OpenRouterAIProvider extends BaseAIProvider {
   ): Promise<void> {
     try {
       const model = await this.getModelById(modelId);
-      const maxContextLength = model.contextLength || 131072; // Default if not specified
+      const maxContextLength = model.contextLength || 131072;
 
       // Calculate input tokens including system prompt and messages
       let inputContent = [
@@ -164,7 +164,6 @@ export class OpenRouterAIProvider extends BaseAIProvider {
       const llm = new ChatOpenAI({
         openAIApiKey: this.apiKey,
         modelName: modelId,
-        maxTokens: Math.min(maxOutputTokens, availableTokens),
         streaming: true,
         temperature: this.settings.temperature,
         configuration: {

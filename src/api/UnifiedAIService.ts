@@ -41,10 +41,6 @@ export class UnifiedAIService implements AIServiceInterface {
     };
   }
 
-  private isNonStreamingModel(modelId: string): boolean {
-    return modelId === "o1-preview" || modelId === "o1-mini";
-  }
-
   private shouldOmitMaxTokens(modelId: string): boolean {
     return modelId === "o1-preview" || modelId === "o1-mini";
   }
@@ -88,10 +84,6 @@ export class UnifiedAIService implements AIServiceInterface {
         ? 1
         : this.settings.temperature,
     };
-
-    if (!this.shouldOmitMaxTokens(modelId)) {
-      requestData.max_tokens = maxOutputTokens;
-    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

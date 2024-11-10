@@ -170,28 +170,38 @@ export class OpenAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatOpenAI({
-      openAIApiKey: this.apiKey,
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming: true,
-      temperature: this.shouldUseHardcodedTemperature(modelId)
-        ? 1
-        : this.settings.temperature,
-      configuration: {
-        baseURL: this.endpoint,
-      },
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
-          },
+    try {
+      const llm = new ChatOpenAI({
+        openAIApiKey: this.apiKey,
+        modelName: modelId,
+        streaming: true,
+        temperature: this.shouldUseHardcodedTemperature(modelId)
+          ? 1
+          : this.settings.temperature,
+        configuration: {
+          baseURL: this.endpoint,
         },
-      ],
-    });
+        callbacks: [
+          {
+            handleLLMNewToken(token: string) {
+              if (!abortSignal?.aborted) {
+                callback(token);
+              }
+            },
+          },
+        ],
+      });
 
-    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
+      await llm.invoke([
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ]);
+    } catch (error) {
+      console.error(
+        "OpenAIProvider Error in createStreamingConversationWithCallback:",
+        error
+      );
+      throw error;
+    }
   }
 }
