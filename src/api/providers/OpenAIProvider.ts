@@ -1,8 +1,6 @@
-import { OpenAI } from "@langchain/openai";
 import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
-import { ChatMessage } from "@langchain/core/messages";
 
 export class OpenAIProvider extends BaseAIProvider {
   private llm: ChatOpenAI;

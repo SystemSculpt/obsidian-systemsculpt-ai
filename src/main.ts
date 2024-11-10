@@ -1,4 +1,4 @@
-import { Plugin, TFile, Notice, WorkspaceLeaf, Menu } from "obsidian";
+import { Plugin, TFile } from "obsidian";
 import {
   SystemSculptSettings,
   DEFAULT_SETTINGS,

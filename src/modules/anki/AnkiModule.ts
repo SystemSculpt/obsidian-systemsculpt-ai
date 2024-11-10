@@ -1,4 +1,3 @@
-import { Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { AnkiSettings, DEFAULT_ANKI_SETTINGS } from "./settings/AnkiSettings";
 import { AnkiSettingTab } from "./settings/AnkiSettingTab";

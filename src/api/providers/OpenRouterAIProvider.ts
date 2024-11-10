@@ -1,7 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
-import { requestUrl } from "obsidian";
 
 export class OpenRouterAIProvider extends BaseAIProvider {
   private llm: ChatOpenAI;
