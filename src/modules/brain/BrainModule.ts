@@ -200,53 +200,66 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     await this.plugin.saveSettings(this.settings);
   }
 
-  async refreshAIService() {
+  async fullRestartAIService(): Promise<void> {
     try {
-      if (
-        this.settings.localEndpoint &&
-        !this.isValidLocalEndpoint(this.settings.localEndpoint)
-      ) {
-        this.settings.localEndpoint = "";
-        await this.saveSettings();
+      this.isReinitializing = true;
+      this.updateModelStatusBarText("Restarting AI Service...");
+      this.updateModelSelectionButton("Restarting...", true);
+
+      // Force reload settings from disk
+      await this.loadSettings();
+
+      // Destroy existing instance
+      if (this._AIService) {
+        this._AIService.clearModelCache();
+        AIService.destroyInstance();
+        this._AIService = null;
       }
 
-      this.updateModelStatusBarText("Reloading Models...");
-      this.updateModelSelectionButton("Reloading Models...", true);
+      // Create completely new instance with fresh settings
+      this._AIService = await AIService.getInstance(
+        {
+          openAIApiKey: this.settings.openAIApiKey,
+          groqAPIKey: this.settings.groqAPIKey,
+          openRouterAPIKey: this.settings.openRouterAPIKey,
+          localEndpoint: this.settings.localEndpoint,
+          anthropicApiKey: this.settings.anthropicApiKey,
+          temperature: this.settings.temperature,
+          showopenAISetting: this.settings.showopenAISetting,
+          showgroqSetting: this.settings.showgroqSetting,
+          showlocalEndpointSetting: this.settings.showlocalEndpointSetting,
+          showopenRouterSetting: this.settings.showopenRouterSetting,
+          showAnthropicSetting: this.settings.showAnthropicSetting,
+        },
+        true // Force new instance
+      );
 
-      const {
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        localEndpoint,
-        anthropicApiKey,
-        temperature,
-        showopenAISetting,
-        showgroqSetting,
-        showlocalEndpointSetting,
-        showopenRouterSetting,
-        showAnthropicSetting,
-      } = this.settings;
+      // Force new model cache initialization
+      await this._AIService.initializeModelCache(undefined, true);
 
-      this._AIService = await AIService.getInstance({
-        openAIApiKey,
-        groqAPIKey,
-        openRouterAPIKey,
-        localEndpoint,
-        anthropicApiKey,
-        temperature,
-        showopenAISetting,
-        showgroqSetting,
-        showlocalEndpointSetting,
-        showopenRouterSetting,
-        showAnthropicSetting,
-      });
-
-      // Trigger model cache refresh in background
-      this._AIService.initializeModelCache().catch(console.error);
+      const modelName = await this.getCurrentModelShortName();
+      this.updateModelStatusBarText(modelName);
+      this.updateModelSelectionButton(modelName, false);
     } catch (error) {
+      console.error("Error restarting AI service:", error);
       this.updateModelStatusBarText("Error: Check settings");
       this.updateModelSelectionButton("Error: Check settings", false);
+      throw error;
+    } finally {
+      this.isReinitializing = false;
     }
+  }
+
+  async refreshAIService(): Promise<void> {
+    return this.fullRestartAIService();
+  }
+
+  async refreshModels(): Promise<void> {
+    return this.fullRestartAIService();
+  }
+
+  async reinitializeAIService(): Promise<void> {
+    return this.fullRestartAIService();
   }
 
   private updateModelSelectionButton(text: string, disabled: boolean) {
@@ -459,13 +472,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
         this.updateModelStatusBarText("Error Loading Models");
       }
     }, 1000);
-  }
-
-  async refreshModels() {
-    if (this._AIService) {
-      this._AIService.clearModelCache();
-      this.loadModelsWithTimeout();
-    }
   }
 
   private updateModelLoadingStatus(provider: string | null) {

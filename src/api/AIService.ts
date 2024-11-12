@@ -37,14 +37,20 @@ export class AIService implements AIServiceInterface {
   } = {};
   private modelCacheInitialized: boolean = false;
 
-  static async getInstance(settings: AIServiceSettings): Promise<AIService> {
-    if (!this.instance) {
+  static async getInstance(
+    settings: AIServiceSettings,
+    forceNew: boolean = false
+  ): Promise<AIService> {
+    if (forceNew || !this.instance) {
       this.instance = new AIService(settings);
     } else {
-      // Update existing instance settings
       this.instance.updateSettings(settings);
     }
     return this.instance;
+  }
+
+  public static destroyInstance(): void {
+    this.instance = null;
   }
 
   private constructor(settings: AIServiceSettings) {

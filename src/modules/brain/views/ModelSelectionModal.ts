@@ -425,7 +425,7 @@ export class ModelSelectionModal extends Modal {
   private async refreshModels() {
     this.showRefreshingState();
     try {
-      await this.plugin.refreshModels();
+      await this.plugin.reinitializeAIService();
       await this.loadModels();
     } catch (error) {
       console.error("Error refreshing models:", error);

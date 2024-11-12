@@ -263,7 +263,7 @@ export class EndpointManager {
           validateFunction: async (apiKey: string, endpoint?: string) =>
             LocalAIProvider.validateApiKey("", endpoint || ""),
         });
-        await this.plugin.refreshAIService();
+        await this.plugin.reinitializeAIService();
         this.onAfterSave();
       } catch (error) {
         this.updateStatus(textComponent, "Error refreshing", false);
