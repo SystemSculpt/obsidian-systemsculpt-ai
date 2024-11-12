@@ -482,4 +482,40 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     this.updateModelStatusBarText(text);
     this.updateModelSelectionButton(text, true);
   }
+
+  async reinitializeProvider(provider: string): Promise<void> {
+    try {
+      this.isReinitializing = true;
+      this.updateModelStatusBarText(`Restarting ${provider} service...`);
+      this.updateModelSelectionButton("Restarting...", true);
+
+      // Force reload settings from disk
+      await this.loadSettings();
+
+      if (this._AIService) {
+        // Clear only the specific provider's cache
+        const providerInstance = this._AIService.getProvider(provider);
+        if (providerInstance) {
+          providerInstance.clearModelCache();
+        }
+
+        // Reinitialize only this provider's models
+        await this._AIService.initializeModelCache(
+          provider.toLowerCase(),
+          true
+        );
+
+        const modelName = await this.getCurrentModelShortName();
+        this.updateModelStatusBarText(modelName);
+        this.updateModelSelectionButton(modelName, false);
+      }
+    } catch (error) {
+      console.error(`Error reinitializing ${provider} service:`, error);
+      this.updateModelStatusBarText("Error: Check settings");
+      this.updateModelSelectionButton("Error: Check settings", false);
+      throw error;
+    } finally {
+      this.isReinitializing = false;
+    }
+  }
 }

@@ -291,8 +291,9 @@ export class EndpointManager {
     statusTextEl.className =
       "systemsculpt-api-key-status systemsculpt-validating";
 
+    let isValid = false;
+
     try {
-      let isValid: boolean;
       const timeoutPromise = new Promise<boolean>((_, reject) =>
         setTimeout(() => reject(new Error("Validation timeout")), 3000)
       );
@@ -322,6 +323,8 @@ export class EndpointManager {
           "systemsculpt-invalid"
         );
         statusTextEl.classList.add("systemsculpt-valid");
+
+        await this.plugin.reinitializeProvider(provider.name);
       } else {
         statusTextEl.textContent = "Offline";
         statusTextEl.classList.remove(
@@ -341,20 +344,6 @@ export class EndpointManager {
       );
       statusTextEl.classList.add("systemsculpt-invalid");
     }
-
-    AIService.getInstance({
-      openAIApiKey: this.plugin.settings.openAIApiKey,
-      groqAPIKey: this.plugin.settings.groqAPIKey,
-      openRouterAPIKey: this.plugin.settings.openRouterAPIKey,
-      localEndpoint: this.plugin.settings.localEndpoint,
-      anthropicApiKey: this.plugin.settings.anthropicApiKey,
-      temperature: this.plugin.settings.temperature,
-      showopenAISetting: this.plugin.settings.showopenAISetting,
-      showgroqSetting: this.plugin.settings.showgroqSetting,
-      showlocalEndpointSetting: this.plugin.settings.showlocalEndpointSetting,
-      showopenRouterSetting: this.plugin.settings.showopenRouterSetting,
-      showAnthropicSetting: this.plugin.settings.showAnthropicSetting,
-    });
   }
 
   private updateStatus(

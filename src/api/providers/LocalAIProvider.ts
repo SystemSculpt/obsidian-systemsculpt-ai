@@ -25,14 +25,18 @@ export class LocalAIProvider extends BaseAIProvider {
       temperature: this.settings.temperature,
       configuration: {
         baseURL: this.endpoint,
+        defaultHeaders: {
+          "Content-Type": "application/json",
+        },
       },
     });
 
-    const response = await llm.invoke([
+    const messages = [
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
-    ]);
+    ];
 
+    const response = await llm.invoke(messages);
     return response.content.toString();
   }
 
@@ -44,30 +48,42 @@ export class LocalAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatOpenAI({
-      openAIApiKey: "not-needed",
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming: true,
-      temperature: this.settings.temperature,
-      configuration: {
-        baseURL: this.endpoint,
-      },
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
-          },
+    try {
+      const response = await requestUrl({
+        url: `${this.endpoint}/chat/completions`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ],
-    });
+        body: JSON.stringify({
+          model: modelId,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: maxOutputTokens,
+          temperature: this.settings.temperature,
+          stream: true,
+        }),
+      });
 
-    await llm.invoke([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ]);
+      const reader = response.arrayBuffer;
+      const decoder = new TextDecoder();
+      const lines = decoder.decode(reader).split("\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ") && !line.includes("[DONE]")) {
+          const data = JSON.parse(line.slice(6));
+          const content = data.choices[0]?.delta?.content;
+          if (content && !abortSignal?.aborted) {
+            callback(content);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("LocalAIProvider streaming error:", error);
+      throw error;
+    }
   }
 
   async createStreamingConversationWithCallback(
@@ -86,6 +102,9 @@ export class LocalAIProvider extends BaseAIProvider {
       temperature: this.settings.temperature,
       configuration: {
         baseURL: this.endpoint,
+        defaultHeaders: {
+          "Content-Type": "application/json",
+        },
       },
       callbacks: [
         {
@@ -98,45 +117,35 @@ export class LocalAIProvider extends BaseAIProvider {
       ],
     });
 
-    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
+    const formattedMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages.map((msg) => ({
+        role: msg.role === "ai" ? "assistant" : msg.role,
+        content: msg.content,
+      })),
+    ];
+
+    await llm.invoke(formattedMessages);
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
     try {
-      // Try Ollama endpoint first
-      const ollamaResponse = await requestUrl({
-        url: `${this.endpoint}/api/tags`,
+      const response = await requestUrl({
+        url: `${this.endpoint}/models`,
         method: "GET",
       });
 
-      if (ollamaResponse.status === 200) {
-        return ollamaResponse.json.models.map((model: any) => ({
-          id: model.name,
-          name: model.name,
+      if (response.status === 200) {
+        return response.json.data.map((model: any) => ({
+          id: model.id,
+          name: model.id,
           provider: "local" as AIProvider,
+          contextLength: model.context_window || undefined,
           pricing: { prompt: 0, completion: 0 },
         }));
       }
-    } catch {
-      // If Ollama fails, try OpenAI-compatible endpoint
-      try {
-        const openAIResponse = await requestUrl({
-          url: `${this.endpoint}/models`,
-          method: "GET",
-        });
-
-        if (openAIResponse.status === 200) {
-          return openAIResponse.json.data.map((model: any) => ({
-            id: model.id,
-            name: model.id,
-            provider: "local" as AIProvider,
-            contextLength: model.context_window || undefined,
-            pricing: { prompt: 0, completion: 0 },
-          }));
-        }
-      } catch (error) {
-        console.warn("Failed to fetch local models:", error);
-      }
+    } catch (error) {
+      console.warn("Failed to fetch local models:", error);
     }
     return [];
   }
@@ -150,27 +159,14 @@ export class LocalAIProvider extends BaseAIProvider {
     endpoint: string
   ): Promise<boolean> {
     try {
-      // Try Ollama endpoint first
-      const ollamaResponse = await requestUrl({
-        url: `${endpoint}/api/tags`,
+      const response = await requestUrl({
+        url: `${endpoint}/models`,
         method: "GET",
       });
-      if (ollamaResponse.status === 200) {
-        return true;
-      }
-    } catch {
-      // If Ollama fails, try OpenAI-compatible endpoint
-      try {
-        const openAIResponse = await requestUrl({
-          url: `${endpoint}/models`,
-          method: "GET",
-        });
-        return openAIResponse.status === 200;
-      } catch (error) {
-        console.warn("Failed to validate local endpoint:", error);
-        return false;
-      }
+      return response.status === 200;
+    } catch (error) {
+      console.warn("Failed to validate local endpoint:", error);
+      return false;
     }
-    return false;
   }
 }

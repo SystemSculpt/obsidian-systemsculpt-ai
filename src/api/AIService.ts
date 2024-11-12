@@ -83,10 +83,6 @@ export class AIService implements AIServiceInterface {
     };
   }
 
-  getProvider(provider: AIProvider) {
-    return this.services[provider];
-  }
-
   async getModels(): Promise<Model[]> {
     const allModels: Model[] = [];
     for (const provider of Object.values(this.services)) {
@@ -134,24 +130,10 @@ export class AIService implements AIServiceInterface {
     if (force || !this.modelCacheInitialized) {
       try {
         if (provider) {
-          switch (provider) {
-            case "openai":
-              if (this.services.openai) await this.services.openai.getModels();
-              break;
-            case "anthropic":
-              if (this.services.anthropic)
-                await this.services.anthropic.getModels();
-              break;
-            case "groq":
-              if (this.services.groq) await this.services.groq.getModels();
-              break;
-            case "openrouter":
-              if (this.services.openRouter)
-                await this.services.openRouter.getModels();
-              break;
-            case "local":
-              if (this.services.local) await this.services.local.getModels();
-              break;
+          const providerInstance =
+            this.services[provider as keyof typeof this.services];
+          if (providerInstance) {
+            await providerInstance.getModels().catch(() => []);
           }
         } else {
           const promises = [
@@ -242,5 +224,10 @@ export class AIService implements AIServiceInterface {
         provider.clearModelCache();
       }
     });
+  }
+
+  public getProvider(provider: string): BaseAIProvider | undefined {
+    const providerKey = provider.toLowerCase() as keyof typeof this.services;
+    return this.services[providerKey];
   }
 }
