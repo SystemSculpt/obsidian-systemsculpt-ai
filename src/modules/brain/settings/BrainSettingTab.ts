@@ -34,17 +34,13 @@ export class BrainSettingTab extends PluginSettingTab {
 
   private addDescription(): void {
     this.containerEl.createEl("p", {
-      text: "Set the more general settings here, which are used across all modules.",
+      text: "Configure your AI model settings, including API keys, endpoints, model selection, temperature, and generation prompts. This is the core configuration for all AI interactions across SystemSculpt.",
     });
   }
 
   private renderSettings(): void {
     displayVersionInfo(this.containerEl, this.plugin);
-    const endpointManager = new EndpointManager(
-      this.containerEl,
-      this.plugin,
-      () => this.refreshTab()
-    );
+    const endpointManager = new EndpointManager(this.containerEl, this.plugin);
     endpointManager.renderEndpointSettings();
     this.renderModelSettings();
     this.renderTemperatureSettings();
@@ -82,11 +78,5 @@ export class BrainSettingTab extends PluginSettingTab {
   private renderPromptSettings(): void {
     renderGenerateTitlePrompt(this.containerEl, this.plugin);
     renderGeneralGenerationPromptSetting(this.containerEl, this.plugin);
-  }
-
-  refreshTab(): void {
-    this.plugin.refreshModels().then(() => {
-      this.display();
-    });
   }
 }

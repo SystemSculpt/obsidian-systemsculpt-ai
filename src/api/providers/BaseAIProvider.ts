@@ -93,4 +93,12 @@ export abstract class BaseAIProvider {
     // Simple approximation: ~4 chars per token
     return Math.ceil(text.length / 4);
   }
+
+  updateEndpoint(endpoint: string): void {
+    this.endpoint = endpoint.endsWith("/v1") ? endpoint : `${endpoint}/v1`;
+  }
+
+  async initializeModelCache(): Promise<void> {
+    await this.getModels();
+  }
 }

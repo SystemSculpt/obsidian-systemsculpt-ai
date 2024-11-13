@@ -156,8 +156,10 @@ export class LocalAIProvider extends BaseAIProvider {
 
   static async validateApiKey(
     _apiKey: string,
-    endpoint: string
+    endpoint?: string
   ): Promise<boolean> {
+    if (!endpoint) return false;
+
     try {
       const response = await requestUrl({
         url: `${endpoint}/models`,

@@ -1,0 +1,2583 @@
+.systemsculpt-about-description {
+  margin-bottom: 20px;
+}
+
+.systemsculpt-about-doc-container,
+.systemsculpt-about-personal-container {
+  margin-bottom: 30px;
+}
+
+.systemsculpt-about-section-header {
+  font-size: 18px;
+  color: var(--text-normal);
+  margin-bottom: 10px;
+}
+
+.systemsculpt-about-button-container,
+.systemsculpt-supporter-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.systemsculpt-about-button,
+.systemsculpt-supporter-item {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  transition: background-color 0.3s ease;
+}
+
+.systemsculpt-about-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+
+.systemsculpt-supporter-item {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Hall of Fame styles */
+.systemsculpt-about-hall-of-fame {
+  text-align: center;
+}
+
+.systemsculpt-supporters-description {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.systemsculpt-ss-h3 {
+  font-size: 20px;
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  position: relative;
+  display: inline-block;
+}
+
+/* Media query for smaller screens */
+@media (max-width: 768px) {
+  .systemsculpt-about-button-container,
+  .systemsculpt-supporter-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .systemsculpt-supporter-list {
+    gap: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .systemsculpt-supporter-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.systemsculpt-alpha-ribbon {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 14px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-alpha-ribbon a {
+  color: var(--text-accent);
+  text-decoration: underline;
+  font-weight: bold;
+}
+
+.systemsculpt-alpha-ribbon a:hover {
+  text-decoration: none;
+  color: var(--text-accent-hover);
+}
+
+.systemsculpt-api-key-status {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: white;
+  text-align: center;
+}
+
+.systemsculpt-validating {
+  background-color: #f0ad4e; /* Bootstrap's warning color */
+}
+
+.systemsculpt-valid {
+  background-color: #5cb85c; /* Bootstrap's success color */
+}
+
+.systemsculpt-invalid {
+  background-color: #d9534f; /* Bootstrap's danger color */
+}
+
+/* Blank Template Modal */
+
+.systemsculpt-blank-template-modal {
+  max-width: 600px;
+  width: 100%;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+  background-color: var(--background-primary);
+  padding: 20px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-modal-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-modal-content h2 {
+  font-size: 24px;
+  margin-bottom: 20px;
+  color: var(--text-title-h2);
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-info-box {
+  background-color: var(--background-secondary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  padding: 10px;
+  margin-bottom: 20px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-info-box p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-prompt-container {
+  margin-bottom: 20px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-prompt-container label {
+  font-size: 18px;
+  margin-bottom: 10px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-user-prompt-input {
+  width: 100%;
+  min-height: 50px; /* Ensure this is larger than context areas */
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 10px;
+  font-size: 16px;
+  line-height: 1.5;
+  resize: none;
+  margin-top: 2.5px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-button-container {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-button-container button {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 5px;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-button-container button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-context-area {
+  width: 100%;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 5px;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto; /* Allows scrolling if content is longer */
+  display: none; /* Hidden by default */
+  min-height: 100px;
+}
+
+.systemsculpt-pre-context-area {
+  margin-bottom: 10px; /* Space below the pre-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
+}
+
+.systemsculpt-post-context-area {
+  margin-top: 10px; /* Space above the post-context area */
+  font-size: 10px; /* Smaller text size */
+  max-height: 3em; /* Limit to 3 rows of text */
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-system-template-container {
+  margin-bottom: 15px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-system-template-container label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 5px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-system-template-input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-system-template-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-remember-template-container,
+.systemsculpt-blank-template-modal .systemsculpt-copy-to-clipboard-container {
+  margin-bottom: 15px;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-toggle-container {
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-blank-template-modal .systemsculpt-toggle-container input[type="checkbox"] {
+  margin-right: 10px;
+}
+
+.systemsculpt-builder-menu {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background-color: var(--background-secondary);
+  border-radius: 5px;
+  padding: 5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  width: auto;
+  max-width: 200px;
+}
+
+.systemsculpt-builder-ai-button,
+.systemsculpt-builder-info-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 5px 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  width: auto;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.systemsculpt-builder-ai-button:hover,
+.systemsculpt-builder-info-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-builder-ai-button:active,
+.systemsculpt-builder-info-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-options-menu {
+  position: absolute;
+  bottom: -40px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-secondary);
+  border-radius: 5px;
+  padding: 5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+}
+
+.systemsculpt-action-button {
+  margin: 2px 0;
+  width: 100%;
+  text-align: left;
+}
+
+.systemsculpt-node-input {
+  border: 2px solid #4CAF50 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-processing {
+  border: 2px solid #FFC107 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-output {
+  border: 2px solid #FF5722 !important;
+  border-radius: 7px;
+  transition: box-shadow 0.3s ease;
+}
+
+.systemsculpt-node-input.is-focused {
+  box-shadow: 0 0 10px #4CAF50, 0 0 20px #4CAF50;
+}
+
+.systemsculpt-node-processing.is-focused {
+  box-shadow: 0 0 10px #FFC107, 0 0 20px #FFC107;
+}
+
+.systemsculpt-node-output.is-focused {
+  box-shadow: 0 0 10px #FF5722, 0 0 20px #FF5722;
+}
+
+.systemsculpt-builder-info-button {
+  margin-left: 0;
+}
+
+.systemsculpt-node-info {
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-node-info-title {
+  text-align: center;
+  margin-bottom: 20px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-node-info-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-node-info-icon {
+  margin-right: 10px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-node-info h3 {
+  margin: 0;
+  color: var(--text-normal);
+}
+
+.systemsculpt-node-info p {
+  margin-bottom: 15px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-node-info h4 {
+  margin-top: 15px;
+  margin-bottom: 10px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-node-info ul {
+  margin-left: 20px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-node-info li {
+  margin-bottom: 5px;
+}
+
+.systemsculpt-node-toolbar {
+  position: absolute;
+  bottom: -40px;
+  right: -50px;
+  z-index: 1001;
+  display: flex;
+  gap: 5px;
+}
+
+.systemsculpt-toolbar-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  width: auto;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.systemsculpt-toolbar-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-toolbar-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-node-settings {
+  padding: 20px;
+}
+
+.systemsculpt-node-settings h3 {
+  margin-bottom: 10px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-node-settings select {
+  width: 100%;
+  padding: 5px;
+  margin-bottom: 15px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-node-settings select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-node-settings-title-container {
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+.systemsculpt-node-settings-title {
+  margin-bottom: 5px;
+}
+
+.systemsculpt-node-id {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.systemsculpt-builder-separator {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-builder-label {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.systemsculpt-builder-button {
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 5px 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.systemsculpt-builder-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-builder-button:active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-node-color-input {
+  background-color: #b5e8d5;
+}
+
+.systemsculpt-node-color-processing {
+  background-color: #f8d775;
+}
+
+.systemsculpt-node-color-output {
+  background-color: #f3a683;
+}
+
+.systemsculpt-file-picker-container {
+  margin-top: 10px;
+}
+
+.systemsculpt-file-picker-container label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.systemsculpt-file-picker-container input {
+  width: 100%;
+  padding: 5px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.systemsculpt-file-picker-container input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.canvas-node-content[contenteditable="false"] {
+  cursor: default;
+  user-select: none;
+}
+
+.systemsculpt-node-setting select,
+.systemsculpt-node-setting input {
+  width: 100%;
+  padding: 2px 5px;
+  margin-top: 2px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-node-setting select:focus,
+.systemsculpt-node-setting input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-node-setting {
+  margin-bottom: 8px;
+}
+
+.systemsculpt-node-setting-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-file-content {
+  font-size: 0.8em;
+  line-height: 1.3;
+  max-height: 60px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 8px;
+  background-color: var(--background-secondary-alt);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Disabled Button */
+.systemsculpt-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.systemsculpt-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  position: relative;
+  max-width: 100%;
+}
+
+.systemsculpt-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  padding: 15px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-chat-title-container {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  margin-right: 15px;
+}
+
+.systemsculpt-chat-title-text {
+  font-weight: bold;
+  cursor: pointer;
+  transition: color 0.3s ease;
+  text-decoration: underline;
+}
+
+.systemsculpt-chat-title-text:hover {
+  color: var(--text-accent);
+}
+
+.systemsculpt-actions-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.systemsculpt-actions-button:hover {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-title-container.systemsculpt-loading {
+  justify-content: flex-start;
+}
+
+.systemsculpt-chat-title-container.systemsculpt-loading::before {
+  content: 'Generating title...';
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-right: 10px;
+}
+
+.systemsculpt-chat-title-container.systemsculpt-loading .systemsculpt-loading-spinner {
+  display: inline-block;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid var(--interactive-accent);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-edit-title-input {
+  width: 100%;
+  padding: 5px;
+  font-size: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  margin-right: 10px;
+  resize: both;
+  overflow: auto;
+}
+
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
+  font-size: 12px;
+  background-color: var(--background-secondary);
+  padding: 5px 10px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: inline-block;
+  margin-bottom: 5px;
+  margin-left: 10px;
+}
+
+.systemsculpt-token-container {
+  text-align: right;
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .systemsculpt-token-container {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .systemsculpt-token-count,
+  .systemsculpt-cost-estimate {
+    margin-left: 0;
+  }
+}
+
+.systemsculpt-chat-messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 20px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.systemsculpt-chat-input-container {
+  display: flex;
+  flex-direction: column;
+  padding: 15px;
+  background-color: var(--background-primary-alt);
+  border-top: 1px solid var(--background-modifier-border);
+  min-height: 120px; /* Adjust this value to match your desired height */
+}
+
+.systemsculpt-chat-input-wrapper,
+.systemsculpt-chat-input-loading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.systemsculpt-chat-input-wrapper {
+  justify-content: space-between;
+}
+
+.systemsculpt-chat-input-loading {
+  justify-content: center;
+  align-items: center;
+}
+
+.systemsculpt-chat-input {
+  width: 100%;
+  min-height: 30px;
+  max-height: 250px;
+  resize: vertical;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  margin-bottom: 10px;
+  flex: 1;
+}
+
+.systemsculpt-chat-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.systemsculpt-chat-input-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.systemsculpt-token-and-cost-container {
+  flex-grow: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
+  margin-right: 10px;
+}
+
+.systemsculpt-send-button-container {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.systemsculpt-chat-send-button {
+  padding: 5px 10px;
+  background-color: var(--interactive-accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.systemsculpt-chat-send-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-actions-button:hover {
+  cursor: pointer;
+}
+
+.systemsculpt-chat-message.systemsculpt-user {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  align-self: flex-end;
+  text-align: left;
+  box-shadow: 2px 2px 1px var(--interactive-accent);
+  position: relative;
+  user-select: text;
+}
+
+.systemsculpt-chat-message {
+  position: relative;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  user-select: text;
+  max-width: 100%;
+}
+
+.systemsculpt-chat-message pre {
+  background-color: var(--background-secondary-alt);
+  font-size: 75%;
+  padding: 15px;
+  padding-top: 35px;  /* Added extra top padding for the copy button */
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+  word-wrap: normal;
+  position: relative;
+}
+
+/* Modified copy indicator to always show */
+.systemsculpt-chat-message pre::after {
+  content: "Click to copy";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: var(--background-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  opacity: 1;  /* Changed from 0 to 1 to always show */
+  color: var(--text-muted);
+}
+
+/* Enhanced hover state */
+.systemsculpt-chat-message pre:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-message pre:hover::after {
+  opacity: 1;
+}
+
+/* Enhanced copy animation */
+.systemsculpt-chat-message pre.systemsculpt-copied {
+  animation: systemsculpt-copyEffect 1s ease;
+}
+
+.systemsculpt-chat-message pre.systemsculpt-copied::after {
+  content: "Copied! ✓";
+  background-color: #4caf50;
+  color: white;
+  opacity: 1;
+}
+
+@keyframes systemsculpt-copyEffect {
+  0% {
+    background-color: var(--background-secondary-alt);
+    border-color: transparent;
+  }
+  20% {
+    background-color: rgba(76, 175, 80, 0.1);
+    border-color: #4caf50;
+  }
+  60% {
+    background-color: rgba(76, 175, 80, 0.1);
+    border-color: #4caf50;
+  }
+  100% {
+    background-color: var(--background-secondary-alt);
+    border-color: transparent;
+  }
+}
+
+/* Add a subtle active state */
+.systemsculpt-chat-message pre:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-message-actions {
+  position: relative;
+  opacity: 1;
+  text-align: right;
+}
+
+.systemsculpt-copy-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.systemsculpt-delete-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  transition: background-color 0.3s, color 0.3s;
+  margin-left: 5px;
+}
+
+.systemsculpt-copy-button.systemsculpt-copied {
+  background-color: green;
+  color: white;
+}
+
+.systemsculpt-delete-button.systemsculpt-confirm-delete {
+  background-color: red;
+  color: white;
+}
+
+.systemsculpt-delete-button:hover {
+  color: white;
+}
+
+.systemsculpt-chat-message.systemsculpt-ai {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  align-self: flex-start;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  user-select: text;
+}
+
+.systemsculpt-chat-message .systemsculpt-model-name {
+  display: block;
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 5px;
+  text-align: right;
+  font-style: italic;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5), 0 0 5px var(--interactive-accent);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.systemsculpt-chat-message.systemsculpt-ai .systemsculpt-model-name {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-context-files-container {
+  padding: 15px;
+  background-color: var(--background-primary-alt);
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-context-buttons-container {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-context-files-header,
+.systemsculpt-auto-context-button {
+  flex: 1;
+  margin: 0 5px;
+  padding: 5px;
+  background-color: var(--interactive-normal);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.systemsculpt-context-files-header:hover,
+.systemsculpt-auto-context-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-context-files-header h3,
+.systemsculpt-auto-context-button h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-context-files {
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  border-radius: 4px;
+  color: var(--text-normal);
+  display: none;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.systemsculpt-context-files.systemsculpt-has-files {
+  display: block;
+}
+
+.systemsculpt-context-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+  position: relative;
+}
+
+.systemsculpt-context-file-preview {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  margin-right: 10px;
+  border-radius: 4px;
+}
+
+.systemsculpt-audio-icon,
+.systemsculpt-pdf-icon {
+  width: 40px;
+  height: 40px;
+  margin-right: 10px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-context-file-remove {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.systemsculpt-context-file:hover .systemsculpt-context-file-remove {
+  opacity: 1;
+}
+
+.systemsculpt-context-file:last-child {
+  border-bottom: none;
+}
+
+.systemsculpt-context-file-path {
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-bg);
+  direction: rtl;
+  text-align: left;
+}
+
+.systemsculpt-context-file-path::-webkit-scrollbar {
+  height: 6px;
+}
+
+.systemsculpt-context-file-path::-webkit-scrollbar-track {
+  background: var(--scrollbar-bg);
+}
+
+.systemsculpt-context-file-path::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-bg);
+  border-radius: 3px;
+}
+
+.systemsculpt-context-file-path span {
+  direction: ltr;
+  display: inline-block;
+}
+
+.systemsculpt-context-file .systemsculpt-remove-context-file {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.3s;
+  flex-shrink: 0;
+  margin-left: 5px;
+}
+
+.systemsculpt-context-file .systemsculpt-remove-context-file:hover {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+
+.systemsculpt-loading-overlay.systemsculpt-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.systemsculpt-loading-container {
+  background-color: var(--background-primary);
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.systemsculpt-loading-text {
+  font-size: 16px;
+  color: var(--text-normal);
+  margin-bottom: 10px;
+}
+
+@keyframes systemsculpt-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.systemsculpt-title-edit-modal {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+  width: 80%;
+  margin: auto;
+}
+
+.systemsculpt-title-edit-modal h2 {
+  margin-bottom: 15px;
+  color: var(--text-normal);
+  text-align: center;
+}
+
+.systemsculpt-title-edit-input {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  resize: vertical;
+  overflow: auto;
+  box-sizing: border-box;
+  margin-bottom: 15px;
+}
+
+.systemsculpt-save-button {
+  padding: 10px;
+  font-size: 14px;
+  background-color: var(--interactive-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.systemsculpt-save-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-archive-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.systemsculpt-archive-popup h3 {
+  margin-bottom: 15px;
+  color: var(--text-normal);
+  text-align: center;
+}
+
+.systemsculpt-archive-popup-buttons {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.systemsculpt-archive-popup-button {
+  padding: 10px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  flex: 1;
+  margin: 0 5px;
+}
+
+.systemsculpt-archive-popup-button.systemsculpt-archive {
+  background-color: var(--interactive-accent);
+  color: white;
+}
+
+.systemsculpt-archive-popup-button.systemsculpt-delete {
+  background-color: red;
+  color: white;
+}
+
+.systemsculpt-archive-popup-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-archive-popup-button.systemsculpt-delete:hover {
+  background-color: darkred;
+}
+
+.systemsculpt-archive-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
+.systemsculpt-suggestion-content {
+  display: flex;
+  align-items: center;
+  padding: 5px;
+}
+
+.systemsculpt-suggestion-checkbox-container {
+  flex: 0 0 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.systemsculpt-suggestion-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.systemsculpt-suggestion-checkbox:checked {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-suggestion-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 12px;
+}
+
+.systemsculpt-suggestion-checkbox:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background-modifier-border);
+}
+
+.systemsculpt-suggestion-checkbox:indeterminate {
+  background-color: var(--interactive-accent);
+  opacity: 0.5;
+}
+
+.systemsculpt-suggestion-checkbox:indeterminate::after {
+  content: '-';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 12px;
+}
+
+.systemsculpt-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  margin-left: 10px;
+}
+
+.systemsculpt-suggestion-title {
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-suggestion-note {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-fuzzy-match {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.systemsculpt-context-file-path {
+  color: var(--text-normal);
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.systemsculpt-context-file-path:hover {
+  color: var(--text-accent);
+}
+
+.systemsculpt-chat-title-text {
+  cursor: pointer;
+  transition: color 0.3s ease;
+  text-decoration: underline;
+}
+
+.systemsculpt-chat-title-text:hover {
+  color: var(--text-accent);
+}
+
+.systemsculpt-load-more-button {
+  width: 100%;
+  padding: 10px;
+  background-color: var(--background-secondary);
+  border: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  text-align: center;
+}
+
+.systemsculpt-load-more-button:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+@media (max-width: 768px) {
+  .systemsculpt-chat-container {
+    border-radius: 0;
+  }
+
+  .systemsculpt-chat-input-container {
+    padding: 10px;
+  }
+
+  .systemsculpt-chat-input {
+    font-size: 16px;
+  }
+
+  .systemsculpt-chat-send-button {
+    padding: 10px 20px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .systemsculpt-chat-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .systemsculpt-actions-button {
+    margin-top: 10px;
+  }
+
+  .systemsculpt-chat-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .systemsculpt-token-count {
+    margin-top: 5px;
+    margin-left: 0;
+  }
+}
+
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading .systemsculpt-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--text-muted);
+  border-top: 2px solid var(--text-normal);
+  border-radius: 50%;
+  animation: systemsculpt-spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading span {
+  color: var(--text-muted);
+}
+
+@keyframes systemsculpt-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.systemsculpt-file-searcher-filters {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-file-searcher-confirm-button {
+  display: block;
+  width: calc(100% - 24px); /* Subtract padding from width */
+  padding: 6px 12px; /* Increase vertical padding */
+  margin: 12px auto; /* Increase margin */
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  border: none;
+  border-radius: 4px; /* Add rounded corners */
+  font-size: 14px;
+  cursor: not-allowed;
+  text-align: center;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 200px;
+  max-width: 100%; /* Ensure it doesn't overflow its container */
+  position: sticky;
+  bottom: 0;
+  z-index: 1; /* Ensure button is above other content */
+}
+
+.systemsculpt-file-searcher-confirm-button.systemsculpt-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+
+.systemsculpt-file-searcher-confirm-button.systemsculpt-active:hover {
+  background-color: var(--interactive-accent-hover);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-file-searcher-confirm-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.systemsculpt-file-searcher-filter {
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-file-searcher-filter-checkbox {
+  margin-right: 4px;
+}
+
+.systemsculpt-file-searcher-notice {
+  padding: 8px 12px;
+  margin-top: 8px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-file-searcher-filters {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-file-searcher-filter {
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-file-searcher-filter-checkbox {
+  margin-right: 4px;
+}
+
+.systemsculpt-file-searcher-notice {
+  padding: 8px 12px;
+  margin-top: 0px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-suggestion-file-extension {
+  opacity: 0.7;
+  font-size: 0.9em;
+  margin-left: 0.3em;
+}
+
+.systemsculpt-chat-input-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.systemsculpt-chat-input-loading .systemsculpt-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--text-muted);
+  border-top: 2px solid var(--text-normal);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+.systemsculpt-chat-input-loading span {
+  color: var(--text-muted);
+}
+
+.systemsculpt-hidden {
+  display: none !important;
+}
+
+.systemsculpt-chat-message table {
+  display: block;  /* Changes table to block to enable scrolling */
+  overflow-x: auto;  /* Enables horizontal scrolling */
+  max-width: 100%;  /* Ensures table doesn't exceed container width */
+  white-space: nowrap;  /* Prevents text wrapping in cells */
+  border-collapse: collapse;  /* Standard table styling */
+  margin: 10px 0;
+}
+
+.systemsculpt-chat-message td,
+.systemsculpt-chat-message th {
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  min-width: 60px;  /* Ensures columns don't collapse too much */
+}
+
+
+.systemsculpt-cost-estimator-modal {
+  max-width: 500px;
+  padding: 20px;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-icon {
+  margin-right: 10px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-modal-title {
+  margin: 0;
+}
+
+.systemsculpt-cost-estimator-modal h3 {
+  margin-top: 20px;
+  margin-bottom: 10px;
+  color: var(--text-accent);
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100px;
+  text-align: center;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
+  justify-content: space-evenly;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-model-name,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost .systemsculpt-value {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: var(--text-accent);
+  margin: 0 0 10px 0;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-pricing-info {
+  margin-top: 10px;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-pricing-detail {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin: 5px 0;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info-container {
+  display: flex;
+  justify-content: space-between;
+  margin: 10px auto;
+  gap: 20px;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info {
+  flex: 1;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  font-size: 1em;
+  transition: background-color 0.3s, color 0.3s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-token-info .systemsculpt-token-value {
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-top: 5px;
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
+  border: 2px solid var(--text-accent);
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-model-info h3,
+.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost h3 {
+  margin: 0 0 10px 0;
+  color: var(--text-normal);
+}
+
+.systemsculpt-cost-estimator-modal .systemsculpt-cost-notice {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 10px;
+}
+
+/* Custom Notice */
+.systemsculpt-custom-notice {
+  border: 1px solid var(--interactive-accent);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  top: auto;
+  left: auto;
+}
+
+.systemsculpt-custom-notice:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
+}
+
+.systemsculpt-custom-notice-content {
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-notice-message {
+  margin-right: 10px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Info Box */
+.systemsculpt-upcoming-features li,
+.systemsculpt-info-box {
+  background-color: var(--background-secondary);
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-info-box p {
+  margin: 0;
+}
+
+.systemsculpt-upcoming-features {
+  margin-top: 35px;
+}
+
+.systemsculpt-info-box-token-count {
+  font-size: 12px;
+  background-color: var(--background-primary);
+  padding: 5px 10px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: block;
+  text-align: right;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+}
+
+/* Remove all existing styles and replace with these simplified styles */
+
+.systemsculpt-patreon-sub-setting-button {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-patreon-sub-setting-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-info-box {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+/* Links Container */
+.systemsculpt-links-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  padding: 0px;
+  background-color: var(--background-secondary);
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  margin-bottom: 5px;
+}
+
+.systemsculpt-settings-link {
+  flex: 0 1 calc(16.666% - 10px); /* 6 links per row, accounting for gap */
+  min-width: 100px; /* Minimum width for each link */
+  max-width: 250px; /* Maximum width for each link */
+  margin: 5px;
+  padding: 10px 0px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease, background-color 0.3s ease;
+  border-radius: 4px;
+}
+
+.systemsculpt-settings-link:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+/* Modal */
+.systemsculpt-modal-content-centered {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.systemsculpt-modal-header {
+  text-align: center;
+}
+
+/* Revolving dots animation */
+@keyframes systemsculpt-revolving-dots {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+  100% {
+    content: '';
+  }
+}
+
+.systemsculpt-revolving-dots::after {
+  display: inline-block;
+  animation: systemsculpt-revolving-dots 1s infinite steps(4);
+  content: '';
+}
+
+/* Modal list styles */
+.systemsculpt-modal-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-modal-list h3 {
+  margin: 15px 0 0px;
+  padding: 0 5px;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Custom scrollbar styles */
+.systemsculpt-model-selection-modal {
+  padding-right: 12px; /* Increased padding to accommodate wider scrollbar */
+  margin-top: 20px; /* Add top margin to modal content */
+}
+
+.systemsculpt-model-selection-modal::-webkit-scrollbar {
+  width: 12px; /* Increased width */
+}
+
+.systemsculpt-model-selection-modal::-webkit-scrollbar-track {
+  background: var(--background-secondary-alt);
+  border-radius: 6px;
+}
+
+.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb {
+  background: var(--interactive-accent); /* Changed to a more visible color */
+  border-radius: 6px;
+  border: 3px solid var(--background-secondary-alt); /* Added border for contrast */
+}
+
+.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Adjust modal group layout */
+.systemsculpt-modal-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  max-width: 600px;
+  margin-left: 10px; /* Add left margin */
+  margin-right: 10px; /* Add right margin */
+}
+
+.systemsculpt-modal-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  border-radius: 5px;
+  transition: background-color 0.2s ease;
+  padding: 10px;
+  cursor: pointer;
+  background-color: var(--background-secondary-alt);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  position: relative;
+}
+
+.systemsculpt-model-name {
+  font-size: 0.9em;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-model-context-length {
+  font-size: 0.7em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-model-favorite-star {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s ease, transform 0.2s ease;
+  padding: 5px;
+  margin: -5px;
+}
+
+.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite):hover {
+  color: var(--text-accent);
+}
+
+.systemsculpt-model-favorite-star.systemsculpt-is-favorite {
+  color: var(--text-accent);
+  filter: drop-shadow(0 0 3px var(--text-accent))
+    drop-shadow(0 0 1px var(--text-accent));
+}
+
+.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite) {
+  font-variation-settings: 'FILL' 0;
+}
+
+.systemsculpt-model-favorite-star:hover {
+  transform: scale(1.2);
+}
+
+.systemsculpt-model-favorite-star.systemsculpt-is-favorite:hover {
+  color: var(--text-muted);
+}
+
+.systemsculpt-modal-item:hover {
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-modal-item.systemsculpt-disabled {
+  color: var(--text-muted);
+}
+
+.systemsculpt-modal-item .systemsculpt-checkbox-container {
+  margin-left: auto;
+}
+
+/* Additional styles */
+.systemsculpt-modal-list-setting {
+  margin-top: 0;
+}
+
+.systemsculpt-model-search-input {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 5px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-modal-item.systemsculpt-selected {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.systemsculpt-modal-item.systemsculpt-selected .systemsculpt-fuzzy-match {
+  color: inherit;
+  background-color: transparent;
+}
+
+.systemsculpt-no-results-message {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+}
+
+/* API Endpoints specific styles */
+.systemsculpt-api-endpoints-list {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-api-endpoints-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.systemsculpt-api-endpoints-group .systemsculpt-modal-item {
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .systemsculpt-api-endpoints-group {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  }
+}
+
+.systemsculpt-refresh-models-button {
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-refresh-models-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-refreshing-models {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+}
+
+/* Provider checkbox styles */
+.systemsculpt-provider-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.systemsculpt-provider-checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.systemsculpt-provider-checkbox {
+  margin-right: 5px;
+}
+
+/* Recording Notice */
+.systemsculpt-recording-notice {
+  background-color: var(--background-primary);
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
+  border: 2px solid var(--primary-color);
+  transform: scale(1);
+  transform-origin: bottom right;
+  margin-bottom: 15px;
+  margin-right: 5px;
+}
+
+.systemsculpt-recording-notice-position {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+}
+
+.systemsculpt-recording-notice-header {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.systemsculpt-recording-notice-header button {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-recording-notice-header .systemsculpt-close-button {
+  margin-left: auto;
+}
+
+.systemsculpt-recording-notice-header .systemsculpt-hide-button {
+  margin-left: 10px;
+}
+
+.systemsculpt-recording-notice-title {
+  margin: 0;
+  text-align: center;
+  width: 100%;
+}
+
+.systemsculpt-recording-notice-canvas {
+  width: 100%;
+}
+
+.systemsculpt-recording-notice-canvas canvas {
+  width: 100%;
+  height: 100%;
+  stroke: var(--primary-color); /* Updated to use primary color */
+  stroke-width: 2;
+}
+
+/* Variables */
+:root {
+  --primary-color: #1890ff;
+  --secondary-color: #91d5ff;
+  --tertiary-color: #e6f7ff;
+}
+
+/* Section Link */
+.systemsculpt-section-link {
+  display: inline-block;
+  padding: 0px 20px;
+  font-size: 18px;
+  font-weight: bold;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.systemsculpt-section-link:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.systemsculpt-section-link {
+  display: block;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Settings */
+.systemsculpt-tab-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  background-color: var(--background-secondary);
+  border-radius: 0px 0px 0 0;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-tab {
+  flex: 0 1 calc(16.666% - 20px); /* 6 tabs per row, accounting for padding */
+  min-width: 100px; /* Minimum width for each tab */
+  max-width: 200px; /* Maximum width for each tab */
+  margin: 5px;
+  margin-bottom: 0px;
+  padding: 10px 0px;
+  border: none;
+  background-color: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.3s ease, font-weight 0.3s ease;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-tab:hover {
+  color: var(--text-normal);
+}
+
+.systemsculpt-tab::after {
+  content: '';
+  position: absolute;
+  bottom: -10px; /* Match this with the value in .systemsculpt-tab.systemsculpt-active::after */
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--interactive-accent);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.systemsculpt-tab.systemsculpt-active {
+  color: var(--text-normal);
+  font-weight: bold;
+}
+
+.systemsculpt-tab.systemsculpt-active::after {
+  transform: scaleX(1);
+  bottom: 2px; /* Adjust this value to position the underline correctly */
+}
+
+.systemsculpt-settings-container {
+  background-color: var(--background-primary);
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  min-height: 100%;
+}
+
+.systemsculpt-search-container {
+  padding: 10px 0px;
+  border-radius: 0px 0px 10px 10px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.systemsculpt-settings-search-input {
+  width: 80%;
+  max-width: 600px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  text-align: center;
+}
+
+.systemsculpt-settings-search-input::placeholder {
+  text-align: center;
+}
+
+.systemsculpt-settings-search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.systemsculpt-fuzzy-match {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+/* Spinner */
+.systemsculpt-spinner {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  margin: 100px auto;
+}
+
+.systemsculpt-double-bounce1,
+.systemsculpt-double-bounce2 {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background-color: var(--text-normal);
+  opacity: 0.6;
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: systemsculpt-sk-bounce 2s infinite ease-in-out;
+}
+
+.systemsculpt-double-bounce2 {
+  animation-delay: -1s;
+}
+
+@keyframes systemsculpt-sk-bounce {
+  0%,
+  100% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(2);
+  }
+}
+
+/* Common button styles */
+.systemsculpt-status-bar-button {
+  --button-padding: 4px 10px;
+  --button-margin: 0 1px;
+  --button-border-radius: 3px;
+  --button-font-size: 12px;
+  --button-transition: all 0.2s ease;
+  --button-border-color: var(--interactive-accent);
+  --button-border-width: 1px;
+  --button-hover-bg: var(--interactive-hover);
+  --button-active-bg: var(--interactive-accent);
+
+  cursor: pointer;
+  padding: var(--button-padding);
+  margin: var(--button-margin);
+  border: var(--button-border-width) solid var(--button-border-color);
+  border-radius: var(--button-border-radius);
+  background-color: var(--background-secondary-alt);
+  color: var(--text-normal);
+  transition: var(--button-transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--button-font-size);
+  line-height: 1;
+  height: auto;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Button order */
+.systemsculpt-update-button { order: -99; }
+.systemsculpt-recorder-notice-toggle-button { order: -98; }
+.systemsculpt-model-toggle-button { order: -5; }
+.systemsculpt-max-tokens-toggle-button { order: -4; }
+.systemsculpt-chat-toggle-button { order: -3; }
+.systemsculpt-task-toggle-button { order: -2; }
+.systemsculpt-recorder-toggle-button { order: -1; }
+
+/* Specific button styles */
+.systemsculpt-update-button {
+  border-color: var(--text-error);
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-recorder-notice-toggle-button {
+  border-color: var(--text-error);
+}
+
+/* Hover styles */
+.systemsculpt-status-bar-button:hover {
+  background-color: var(--button-hover-bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-update-button:hover {
+  border-color: var(--text-success);
+  background-color: var(--background-modifier-success);
+}
+
+/* Active styles */
+.systemsculpt-status-bar-button:active {
+  background-color: var(--button-active-bg);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
+}
+
+/* Disabled state */
+.systemsculpt-status-bar-button.systemsculpt-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Task Modal */
+.systemsculpt-task-modal-button {
+  margin-top: 20px;
+  text-align: center;
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+.systemsculpt-task-description-textarea textarea {
+  height: 200px;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  resize: none;
+}
+
+.systemsculpt-template-name {
+  margin-top: 5px;
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+
+.systemsculpt-template-description {
+  margin-top: 0px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-template-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.systemsculpt-template-meta-item {
+  margin-right: 2px;
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  margin-bottom: 3px;
+  color: var(--color-green);
+}
+
+.systemsculpt-template-tags {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%; /* This ensures it takes the full width and moves to a new line */
+  margin-top: 0; /* Removes any top margin to keep tags close to the line above */
+  margin-bottom: 0;
+}
+
+.systemsculpt-template-tag {
+  margin-right: 2px;
+  margin-bottom: 2px; /* Ensures tags are close to each other vertically */
+  padding: 2px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.systemsculpt-setting-item textarea {
+  width: 100%;
+  min-height: 250px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.systemsculpt-setting-item textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.systemsculpt-version-info-container {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.systemsculpt-version-info-text {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: white;
+  text-align: center;
+}
+
+.systemsculpt-version-info-text.systemsculpt-up-to-date {
+  background-color: #5cb85c; /* Bootstrap's success color */
+}
+
+.systemsculpt-version-info-text.systemsculpt-outdated {
+  background-color: #d9534f; /* Bootstrap's danger color */
+}
+

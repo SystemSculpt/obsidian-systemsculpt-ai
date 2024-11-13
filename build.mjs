@@ -1,5 +1,6 @@
 import esbuild from "esbuild";
 import fs from "fs/promises";
+import fsSync from "fs";
 import path from "path";
 import builtins from "builtin-modules";
 
@@ -17,6 +18,7 @@ async function combineCssFiles() {
   }
   
   await fs.writeFile('styles.css', combinedCss);
+  await fs.copyFile('styles.css', 'main.css');
 }
 
 const ctx = await esbuild.context({
@@ -56,16 +58,34 @@ await combineCssFiles();
 await fs.rename('dist/main.js', 'main.js');
 
 if (isWatchMode) {
+  console.log('👀 Starting watch mode...');
   await ctx.watch();
-  // Watch CSS directory
-  const cssWatcher = fs.watch(cssDir, async (eventType, filename) => {
-    if (filename?.endsWith('.css')) {
-      await combineCssFiles();
+  
+  const watcher = fsSync.watch('src', { recursive: true }, async (eventType, filename) => {
+    if (!filename) return;
+    
+    console.log(`\n🔄 File changed: ${filename}`);
+    
+    try {
+      if (filename.endsWith('.css')) {
+        console.log('📝 Rebuilding CSS...');
+        await combineCssFiles();
+      }
+      
+      console.log('🛠️  Rebuilding bundle...');
+      await ctx.rebuild();
+      await fs.copyFile('dist/main.js', 'main.js');
+      console.log('✅ Rebuild complete\n');
+    } catch (error) {
+      console.error('❌ Error during rebuild:', error);
     }
   });
   
+  console.log('📦 Watching src directory for changes...\n');
+  
   process.on('SIGINT', () => {
-    cssWatcher.close();
+    console.log('\n👋 Stopping watch mode...');
+    watcher.close();
     ctx.dispose();
     process.exit(0);
   });

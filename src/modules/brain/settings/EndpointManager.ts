@@ -6,6 +6,7 @@ import { GroqAIProvider } from "../../../api/providers/GroqAIProvider";
 import { OpenRouterAIProvider } from "../../../api/providers/OpenRouterAIProvider";
 import { LocalAIProvider } from "../../../api/providers/LocalAIProvider";
 import { AnthropicAIProvider } from "../../../api/providers/AnthropicAIProvider";
+import { AIProviderKey, providerKeyMap } from "../../../api/types";
 
 type ValidateFunction = (value: string, baseUrl?: string) => Promise<boolean>;
 
@@ -20,17 +21,11 @@ interface APIProvider {
 export class EndpointManager {
   private plugin: BrainModule;
   private containerEl: HTMLElement;
-  private onAfterSave: () => void;
   private debounceTimer: NodeJS.Timeout | null = null;
 
-  constructor(
-    containerEl: HTMLElement,
-    plugin: BrainModule,
-    onAfterSave: () => void
-  ) {
+  constructor(containerEl: HTMLElement, plugin: BrainModule) {
     this.containerEl = containerEl;
     this.plugin = plugin;
-    this.onAfterSave = onAfterSave;
   }
 
   renderEndpointSettings(): void {
@@ -76,7 +71,6 @@ export class EndpointManager {
       toggleComponent.onChange(async (value) => {
         (this.plugin.settings[settingKey] as boolean) = value;
         await this.plugin.saveSettings();
-        this.onAfterSave();
         apiEndpointItem.toggleClass("systemsculpt-disabled", !value);
 
         this.renderAPISettings();
@@ -209,7 +203,6 @@ export class EndpointManager {
             provider
           );
           await this.plugin.refreshAIService();
-          this.onAfterSave();
         });
         button.setTooltip(
           `Re-check ${
@@ -257,18 +250,62 @@ export class EndpointManager {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(async () => {
       try {
-        await this.validateSettingAndUpdateStatus(value, textComponent, {
-          name: settingKey,
-          settingKey,
-          validateFunction: async (apiKey: string, endpoint?: string) =>
-            LocalAIProvider.validateApiKey("", endpoint || ""),
-        });
-        await this.plugin.reinitializeAIService();
-        this.onAfterSave();
+        const provider = this.getProviderFromSettingKey(settingKey);
+        if (provider) {
+          await this.validateSettingAndUpdateStatus(value, textComponent, {
+            name: provider,
+            settingKey,
+            validateFunction: this.getValidationFunction(provider),
+          });
+          await this.plugin.AIService.updateSettings({
+            [settingKey]: value,
+          });
+        }
       } catch (error) {
         this.updateStatus(textComponent, "Error refreshing", false);
       }
     }, 3000);
+  }
+
+  private getValidationFunction(
+    provider: AIProviderKey
+  ): (apiKey: string, endpoint?: string) => Promise<boolean> {
+    const validationFunctions: Record<
+      AIProviderKey,
+      (apiKey: string, endpoint?: string) => Promise<boolean>
+    > = {
+      openai: (apiKey: string) =>
+        OpenAIProvider.validateApiKey(apiKey, "https://api.openai.com/v1"),
+      groq: (apiKey: string) => GroqAIProvider.validateApiKey(apiKey),
+      openRouter: (apiKey: string) =>
+        OpenRouterAIProvider.validateApiKey(apiKey),
+      anthropic: (apiKey: string) => AnthropicAIProvider.validateApiKey(apiKey),
+      local: (apiKey: string, endpoint?: string) =>
+        LocalAIProvider.validateApiKey(
+          apiKey,
+          endpoint || "http://localhost:1234"
+        ),
+      all: async () => true, // No validation needed for 'all'
+    };
+
+    return validationFunctions[provider];
+  }
+
+  private getProviderFromSettingKey(
+    settingKey: keyof BrainModule["settings"]
+  ): AIProviderKey {
+    return providerKeyMap[settingKey] || "all";
+  }
+
+  private getProviderKeyFromName(name: string): AIProviderKey {
+    const nameToKey: Record<string, AIProviderKey> = {
+      OpenAI: "openai",
+      Groq: "groq",
+      OpenRouter: "openRouter",
+      Local: "local",
+      Anthropic: "anthropic",
+    };
+    return nameToKey[name] || "all";
   }
 
   private async validateSettingAndUpdateStatus(
@@ -324,7 +361,9 @@ export class EndpointManager {
         );
         statusTextEl.classList.add("systemsculpt-valid");
 
-        await this.plugin.reinitializeProvider(provider.name);
+        await this.plugin.reinitializeProvider(
+          this.getProviderKeyFromName(provider.name)
+        );
       } else {
         statusTextEl.textContent = "Offline";
         statusTextEl.classList.remove(

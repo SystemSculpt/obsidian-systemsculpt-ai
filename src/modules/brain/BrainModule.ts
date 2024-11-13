@@ -19,6 +19,7 @@ import { EventEmitter } from "events";
 import { ButtonComponent } from "obsidian";
 import { CostEstimator } from "../../interfaces/CostEstimatorModal";
 import { logModuleLoadTime } from "../../utils/timing";
+import { AIProviderKey } from "../../api/types";
 
 export class BrainModule extends EventEmitter implements IGenerationModule {
   plugin: SystemSculptPlugin;
@@ -41,7 +42,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
   private cachedModels: Model[] = [];
   private modelInitializationPromise: Promise<void> | null = null;
   private modelLoadTimeout: NodeJS.Timeout | null = null;
-  public currentLoadingProvider: string | null = null;
+  public currentLoadingProvider: AIProviderKey | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     super();
@@ -99,8 +100,13 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
       this.updateModelStatusBarText("Loading models...");
 
+      // Load models only once during initialization
       if (!this.modelInitializationPromise) {
         this.modelInitializationPromise = this.initializeModels();
+        await this.modelInitializationPromise;
+        const modelName = await this.getCurrentModelShortName();
+        this.updateModelStatusBarText(modelName);
+        this.updateModelSelectionButton(modelName, false);
       }
 
       this.isInitialized = true;
@@ -474,7 +480,7 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     }, 1000);
   }
 
-  private updateModelLoadingStatus(provider: string | null) {
+  private updateModelLoadingStatus(provider: AIProviderKey | null) {
     this.currentLoadingProvider = provider;
     const text = provider
       ? `Loading ${provider} models...`
@@ -483,27 +489,18 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     this.updateModelSelectionButton(text, true);
   }
 
-  async reinitializeProvider(provider: string): Promise<void> {
+  async reinitializeProvider(provider: AIProviderKey): Promise<void> {
     try {
       this.isReinitializing = true;
-      this.updateModelStatusBarText(`Restarting ${provider} service...`);
-      this.updateModelSelectionButton("Restarting...", true);
-
-      // Force reload settings from disk
       await this.loadSettings();
 
       if (this._AIService) {
-        // Clear only the specific provider's cache
         const providerInstance = this._AIService.getProvider(provider);
         if (providerInstance) {
           providerInstance.clearModelCache();
         }
 
-        // Reinitialize only this provider's models
-        await this._AIService.initializeModelCache(
-          provider.toLowerCase(),
-          true
-        );
+        await this._AIService.initializeModelCache(provider, true);
 
         const modelName = await this.getCurrentModelShortName();
         this.updateModelStatusBarText(modelName);

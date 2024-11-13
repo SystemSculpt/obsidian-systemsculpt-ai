@@ -8,6 +8,7 @@ import { BaseAIProvider } from "./providers/BaseAIProvider";
 import { OpenAI } from "@langchain/openai";
 import { ChatOpenAI } from "@langchain/openai";
 import { BrainSettings } from "../modules/brain/settings/BrainSettings";
+import { AIProviderKey, AIProviderServices, providerKeyMap } from "./types";
 
 type AIProviderType =
   | OpenAIProvider
@@ -32,9 +33,7 @@ interface AIServiceSettings {
 
 export class AIService implements AIServiceInterface {
   private static instance: AIService | null = null;
-  private services: {
-    [key in AIProvider]?: AIProviderType;
-  } = {};
+  private services: AIProviderServices = {};
   private modelCacheInitialized: boolean = false;
 
   static async getInstance(
@@ -94,56 +93,51 @@ export class AIService implements AIServiceInterface {
     return allModels;
   }
 
-  updateSettings(settings: { temperature: number }) {
-    Object.values(this.services).forEach((provider) => {
-      provider?.updateSettings(settings);
+  async updateSettings(settings: Partial<AIServiceSettings>): Promise<void> {
+    Object.entries(settings).forEach(([key, value]) => {
+      if (typeof value !== "string" || !(key in providerKeyMap)) return;
+
+      const providerKey = providerKeyMap[key as keyof typeof providerKeyMap];
+      const provider = this.services[providerKey];
+
+      if (provider) {
+        if (key === "localEndpoint") {
+          provider.updateEndpoint(value);
+        } else {
+          provider.updateApiKey(value);
+        }
+        provider.clearModelCache();
+        provider.getModels().catch(() => []);
+      }
     });
-  }
 
-  updateApiKey(apiKey: string): void;
-  updateApiKey(providerOrKey: AIProvider | string, apiKey?: string): void {
-    if (typeof providerOrKey === "string" && !apiKey) {
-      // Interface implementation - update all providers
-      Object.values(this.services).forEach((provider) => {
-        provider?.updateApiKey(providerOrKey);
-      });
-    } else if (typeof providerOrKey !== "string" && apiKey) {
-      // Original implementation - update specific provider
-      this.services[providerOrKey as AIProvider]?.updateApiKey(apiKey);
+    // Reinitialize model cache if temperature changed
+    if ("temperature" in settings) {
+      await this.initializeModelCache();
     }
   }
 
-  updateLocalEndpoint(endpoint: string) {
-    if (this.services.local) {
-      this.services.local = new LocalAIProvider(
-        "",
-        endpoint,
-        this.services.local.getSettings()
-      );
-    }
+  getProvider(providerKey: AIProviderKey): AIProviderType | undefined {
+    return this.services[providerKey];
   }
 
   public async initializeModelCache(
-    provider?: string,
+    provider?: AIProviderKey,
     force: boolean = false
   ): Promise<void> {
     if (force || !this.modelCacheInitialized) {
       try {
-        if (provider) {
-          const providerInstance =
-            this.services[provider as keyof typeof this.services];
+        if (provider && provider !== "all") {
+          const providerInstance = this.services[provider];
           if (providerInstance) {
             await providerInstance.getModels().catch(() => []);
           }
         } else {
-          const promises = [
-            this.services.openai?.getModels().catch(() => []),
-            this.services.anthropic?.getModels().catch(() => []),
-            this.services.groq?.getModels().catch(() => []),
-            this.services.openRouter?.getModels().catch(() => []),
-            this.services.local?.getModels().catch(() => []),
-          ];
-          await Promise.all(promises);
+          await Promise.all(
+            Object.values(this.services).map((provider) =>
+              provider?.getModels().catch(() => [])
+            )
+          );
         }
       } catch (error) {
         console.warn("Error initializing model cache:", error);
@@ -226,8 +220,16 @@ export class AIService implements AIServiceInterface {
     });
   }
 
-  public getProvider(provider: string): BaseAIProvider | undefined {
-    const providerKey = provider.toLowerCase() as keyof typeof this.services;
-    return this.services[providerKey];
+  async reinitializeProvider(provider: string, value: string): Promise<void> {
+    if (this.services[provider]) {
+      this.services[provider].updateApiKey(value);
+      this.services[provider].clearModelCache();
+      // Reinitialize model cache for this provider only
+      await this.services[provider].initializeModelCache();
+    }
+  }
+
+  updateApiKey(apiKey: string): void {
+    // This is a no-op since we handle API keys per provider
   }
 }
