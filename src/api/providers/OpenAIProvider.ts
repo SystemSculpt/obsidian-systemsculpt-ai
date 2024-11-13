@@ -18,11 +18,11 @@ export class OpenAIProvider extends BaseAIProvider {
   }
 
   protected shouldConvertSystemToUser(modelId: string): boolean {
-    return modelId.includes("gpt-3.5-turbo-0301");
-  }
-
-  protected shouldUseHardcodedTemperature(modelId: string): boolean {
-    return modelId.includes("instruct");
+    return (
+      modelId.includes("gpt-3.5-turbo-0301") ||
+      modelId.includes("o1-preview") ||
+      modelId.includes("o1-mini")
+    );
   }
 
   async createChatCompletion(
@@ -45,9 +45,7 @@ export class OpenAIProvider extends BaseAIProvider {
       openAIApiKey: this.apiKey,
       modelName: modelId,
       maxTokens: maxOutputTokens,
-      temperature: this.shouldUseHardcodedTemperature(modelId)
-        ? 1
-        : this.settings.temperature,
+      temperature: this.settings.temperature,
       configuration: {
         baseURL: this.endpoint,
       },
@@ -80,9 +78,7 @@ export class OpenAIProvider extends BaseAIProvider {
       modelName: modelId,
       maxTokens: maxOutputTokens,
       streaming: true,
-      temperature: this.shouldUseHardcodedTemperature(modelId)
-        ? 1
-        : this.settings.temperature,
+      temperature: this.settings.temperature,
       configuration: {
         baseURL: this.endpoint,
       },
@@ -173,9 +169,7 @@ export class OpenAIProvider extends BaseAIProvider {
         openAIApiKey: this.apiKey,
         modelName: modelId,
         streaming: true,
-        temperature: this.shouldUseHardcodedTemperature(modelId)
-          ? 1
-          : this.settings.temperature,
+        temperature: this.settings.temperature,
         configuration: {
           baseURL: this.endpoint,
         },
