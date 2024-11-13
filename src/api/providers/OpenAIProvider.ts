@@ -55,6 +55,10 @@ export class OpenAIProvider extends BaseAIProvider {
     return response.content.toString();
   }
 
+  protected shouldDisableStreaming(modelId: string): boolean {
+    return modelId.includes("o1-");
+  }
+
   async createStreamingChatCompletionWithCallback(
     systemPrompt: string,
     userMessage: string,
@@ -63,6 +67,8 @@ export class OpenAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
+    const streaming = !this.shouldDisableStreaming(modelId);
+
     const messages = this.shouldConvertSystemToUser(modelId)
       ? [
           { role: "user", content: systemPrompt },
@@ -77,23 +83,29 @@ export class OpenAIProvider extends BaseAIProvider {
       openAIApiKey: this.apiKey,
       modelName: modelId,
       maxTokens: maxOutputTokens,
-      streaming: true,
+      streaming,
       temperature: this.settings.temperature,
       configuration: {
         baseURL: this.endpoint,
       },
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
-          },
-        },
-      ],
+      callbacks: streaming
+        ? [
+            {
+              handleLLMNewToken(token: string) {
+                if (!abortSignal?.aborted) {
+                  callback(token);
+                }
+              },
+            },
+          ]
+        : undefined,
     });
 
-    await llm.invoke(messages);
+    const response = await llm.invoke(messages);
+
+    if (!streaming) {
+      callback(response.content.toString());
+    }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
@@ -156,6 +168,10 @@ export class OpenAIProvider extends BaseAIProvider {
     }
   }
 
+  protected shouldDisableTemperature(modelId: string): boolean {
+    return modelId.includes("o1-");
+  }
+
   async createStreamingConversationWithCallback(
     systemPrompt: string,
     messages: { role: string; content: string }[],
@@ -165,29 +181,39 @@ export class OpenAIProvider extends BaseAIProvider {
     abortSignal?: AbortSignal
   ): Promise<void> {
     try {
+      const streaming = !this.shouldDisableStreaming(modelId);
+      const formattedMessages = this.shouldConvertSystemToUser(modelId)
+        ? [{ role: "user", content: systemPrompt }, ...messages]
+        : [{ role: "system", content: systemPrompt }, ...messages];
+
       const llm = new ChatOpenAI({
         openAIApiKey: this.apiKey,
         modelName: modelId,
-        streaming: true,
-        temperature: this.settings.temperature,
+        streaming,
+        ...(this.shouldDisableTemperature(modelId)
+          ? {}
+          : { temperature: this.settings.temperature }),
         configuration: {
           baseURL: this.endpoint,
         },
-        callbacks: [
-          {
-            handleLLMNewToken(token: string) {
-              if (!abortSignal?.aborted) {
-                callback(token);
-              }
-            },
-          },
-        ],
+        callbacks: streaming
+          ? [
+              {
+                handleLLMNewToken(token: string) {
+                  if (!abortSignal?.aborted) {
+                    callback(token);
+                  }
+                },
+              },
+            ]
+          : undefined,
       });
 
-      await llm.invoke([
-        { role: "system", content: systemPrompt },
-        ...messages,
-      ]);
+      const response = await llm.invoke(formattedMessages);
+
+      if (!streaming) {
+        callback(response.content.toString());
+      }
     } catch (error) {
       console.error(
         "OpenAIProvider Error in createStreamingConversationWithCallback:",
