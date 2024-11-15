@@ -806,7 +806,16 @@ export class ChatView extends ItemView {
       chatInputWrapper.classList.remove("systemsculpt-hidden");
     }
 
-    this.focusInput();
+    // Check if chat view is active
+    const activeLeaf = this.app.workspace.activeLeaf;
+    if (activeLeaf?.view === this) {
+      const inputEl = this.containerEl.querySelector(
+        ".systemsculpt-chat-input"
+      ) as HTMLTextAreaElement;
+      if (inputEl) {
+        inputEl.focus();
+      }
+    }
   }
 
   appendToLastMessage(content: string) {
