@@ -23,10 +23,14 @@ export class LocalAIProvider extends BaseAIProvider {
         url: `${baseEndpoint}/api/tags`,
         method: "GET",
       });
-      this.isOllama = response.status === 200;
-      if (this.isOllama) {
+
+      // Check if it's a valid Ollama response with data
+      if (response.status === 200 && response.json?.models) {
+        this.isOllama = true;
         this.endpoint = baseEndpoint;
       } else {
+        // If we get 200 but no data, it's likely LM Studio
+        this.isOllama = false;
         this.endpoint = this.endpoint.endsWith("/v1")
           ? this.endpoint
           : `${this.endpoint}/v1`;
