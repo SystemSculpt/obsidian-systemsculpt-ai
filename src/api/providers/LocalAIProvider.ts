@@ -2,14 +2,41 @@ import { requestUrl } from "obsidian";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model, AIProvider } from "../Model";
 import { ChatOpenAI } from "@langchain/openai";
+import { ChatOllama } from "@langchain/ollama";
 
 export class LocalAIProvider extends BaseAIProvider {
+  private isOllama: boolean = false;
+
   constructor(
-    _apiKey: string, // Not used for local
+    _apiKey: string,
     endpoint: string,
     settings: { temperature: number }
   ) {
     super("", endpoint, "local", settings);
+    this.detectEndpointType();
+  }
+
+  private async detectEndpointType(): Promise<void> {
+    try {
+      const baseEndpoint = this.endpoint.replace("/v1", "");
+      const response = await requestUrl({
+        url: `${baseEndpoint}/api/tags`,
+        method: "GET",
+      });
+      this.isOllama = response.status === 200;
+      if (this.isOllama) {
+        this.endpoint = baseEndpoint;
+      } else {
+        this.endpoint = this.endpoint.endsWith("/v1")
+          ? this.endpoint
+          : `${this.endpoint}/v1`;
+      }
+    } catch {
+      this.isOllama = false;
+      this.endpoint = this.endpoint.endsWith("/v1")
+        ? this.endpoint
+        : `${this.endpoint}/v1`;
+    }
   }
 
   async createChatCompletion(
@@ -18,26 +45,37 @@ export class LocalAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const llm = new ChatOpenAI({
-      openAIApiKey: "not-needed",
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-      configuration: {
-        baseURL: this.endpoint,
-        defaultHeaders: {
-          "Content-Type": "application/json",
+    if (this.isOllama) {
+      const llm = new ChatOllama({
+        model: modelId,
+        baseUrl: this.endpoint,
+      });
+      const response = await llm.invoke([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ]);
+      return typeof response.content === "string"
+        ? response.content
+        : JSON.stringify(response.content);
+    } else {
+      const llm = new ChatOpenAI({
+        openAIApiKey: "not-needed",
+        modelName: modelId,
+        maxTokens: maxOutputTokens,
+        temperature: this.settings.temperature,
+        configuration: {
+          baseURL: this.endpoint,
+          defaultHeaders: {
+            "Content-Type": "application/json",
+          },
         },
-      },
-    });
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ];
-
-    const response = await llm.invoke(messages);
-    return response.content.toString();
+      });
+      const response = await llm.invoke([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ]);
+      return response.content.toString();
+    }
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -48,7 +86,26 @@ export class LocalAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    try {
+    if (this.isOllama) {
+      const llm = new ChatOllama({
+        model: modelId,
+        baseUrl: this.endpoint,
+        streaming: true,
+        callbacks: [
+          {
+            handleLLMNewToken(token: string) {
+              if (!abortSignal?.aborted) {
+                callback(token);
+              }
+            },
+          },
+        ],
+      });
+      await llm.invoke([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ]);
+    } else {
       const response = await requestUrl({
         url: `${this.endpoint}/chat/completions`,
         method: "POST",
@@ -80,9 +137,6 @@ export class LocalAIProvider extends BaseAIProvider {
           }
         }
       }
-    } catch (error) {
-      console.error("LocalAIProvider streaming error:", error);
-      throw error;
     }
   }
 
@@ -94,55 +148,91 @@ export class LocalAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatOpenAI({
-      openAIApiKey: "not-needed",
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming: true,
-      temperature: this.settings.temperature,
-      configuration: {
-        baseURL: this.endpoint,
-        defaultHeaders: {
-          "Content-Type": "application/json",
-        },
-      },
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
+    if (this.isOllama) {
+      const llm = new ChatOllama({
+        model: modelId,
+        baseUrl: this.endpoint,
+        streaming: true,
+        callbacks: [
+          {
+            handleLLMNewToken(token: string) {
+              if (!abortSignal?.aborted) {
+                callback(token);
+              }
+            },
+          },
+        ],
+      });
+      await llm.invoke([
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ]);
+    } else {
+      const llm = new ChatOpenAI({
+        openAIApiKey: "not-needed",
+        modelName: modelId,
+        maxTokens: maxOutputTokens,
+        streaming: true,
+        temperature: this.settings.temperature,
+        configuration: {
+          baseURL: this.endpoint,
+          defaultHeaders: {
+            "Content-Type": "application/json",
           },
         },
-      ],
-    });
+        callbacks: [
+          {
+            handleLLMNewToken(token: string) {
+              if (!abortSignal?.aborted) {
+                callback(token);
+              }
+            },
+          },
+        ],
+      });
 
-    const formattedMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((msg) => ({
-        role: msg.role === "ai" ? "assistant" : msg.role,
-        content: msg.content,
-      })),
-    ];
+      const formattedMessages = [
+        { role: "system", content: systemPrompt },
+        ...messages.map((msg) => ({
+          role: msg.role === "ai" ? "assistant" : msg.role,
+          content: msg.content,
+        })),
+      ];
 
-    await llm.invoke(formattedMessages);
+      await llm.invoke(formattedMessages);
+    }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
     try {
-      const response = await requestUrl({
-        url: `${this.endpoint}/models`,
-        method: "GET",
-      });
-
-      if (response.status === 200) {
-        return response.json.data.map((model: any) => ({
-          id: model.id,
-          name: model.id,
-          provider: "local" as AIProvider,
-          contextLength: model.context_window || undefined,
-          pricing: { prompt: 0, completion: 0 },
-        }));
+      if (this.isOllama) {
+        const response = await requestUrl({
+          url: `${this.endpoint}/api/tags`,
+          method: "GET",
+        });
+        if (response.status === 200) {
+          return response.json.models.map((model: any) => ({
+            id: model.name,
+            name: model.name,
+            provider: "local" as AIProvider,
+            contextLength: undefined,
+            pricing: { prompt: 0, completion: 0 },
+          }));
+        }
+      } else {
+        const response = await requestUrl({
+          url: `${this.endpoint}/models`,
+          method: "GET",
+        });
+        if (response.status === 200) {
+          return response.json.data.map((model: any) => ({
+            id: model.id,
+            name: model.id,
+            provider: "local" as AIProvider,
+            contextLength: model.context_window || undefined,
+            pricing: { prompt: 0, completion: 0 },
+          }));
+        }
       }
     } catch (error) {
       console.warn("Failed to fetch local models:", error);
@@ -151,7 +241,7 @@ export class LocalAIProvider extends BaseAIProvider {
   }
 
   hasValidApiKey(): boolean {
-    return true; // Local provider doesn't need an API key
+    return true;
   }
 
   static async validateApiKey(
@@ -161,14 +251,31 @@ export class LocalAIProvider extends BaseAIProvider {
     if (!endpoint) return false;
 
     try {
-      const response = await requestUrl({
-        url: `${endpoint}/models`,
+      const baseEndpoint = endpoint.replace("/v1", "");
+      const ollamaResponse = await requestUrl({
+        url: `${baseEndpoint}/api/tags`,
         method: "GET",
       });
-      return response.status === 200;
-    } catch (error) {
-      console.warn("Failed to validate local endpoint:", error);
-      return false;
+      if (ollamaResponse.status === 200) return true;
+    } catch {
+      try {
+        const openAIEndpoint = endpoint.endsWith("/v1")
+          ? endpoint
+          : `${endpoint}/v1`;
+        const openAIResponse = await requestUrl({
+          url: `${openAIEndpoint}/models`,
+          method: "GET",
+        });
+        return openAIResponse.status === 200;
+      } catch {
+        return false;
+      }
     }
+    return false;
+  }
+
+  updateEndpoint(endpoint: string): void {
+    this.endpoint = endpoint;
+    this.detectEndpointType();
   }
 }
