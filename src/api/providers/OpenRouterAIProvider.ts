@@ -128,62 +128,47 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     abortSignal?: AbortSignal
   ): Promise<void> {
     try {
-      const model = await this.getModelById(modelId);
-      const maxContextLength = model.contextLength || 131072;
+      const formattedMessages = this.shouldConvertSystemToUser(modelId)
+        ? [{ role: "user", content: systemPrompt }, ...messages]
+        : [{ role: "system", content: systemPrompt }, ...messages];
 
-      // Calculate input tokens including system prompt and messages
-      let inputContent = [
-        systemPrompt,
-        ...messages.map((msg) => msg.content),
-      ].join("");
-      let inputTokens = await this.llm.getNumTokens(inputContent);
+      const isO1Model = modelId.includes("o1-");
 
-      const buffer = 100; // Buffer to ensure we're under the limit
-      let availableTokens = maxContextLength - inputTokens - buffer;
-
-      // Apply middle-out compression if needed
-      if (availableTokens <= 0) {
-        inputContent = compressMiddleOut(
-          inputContent,
-          maxContextLength - buffer
-        );
-        inputTokens = await this.llm.getNumTokens(inputContent);
-        availableTokens = maxContextLength - inputTokens - buffer;
-      }
-
-      // Recreate messages with compressed content
-      const compressedMessages = [
-        { role: "system", content: systemPrompt },
-        ...messages.map((msg, index) => ({
-          role: msg.role,
-          content: index === 0 ? inputContent : msg.content,
-        })),
-      ];
-
-      const llm = new ChatOpenAI({
-        openAIApiKey: this.apiKey,
-        modelName: modelId,
-        streaming: true,
-        temperature: this.settings.temperature,
-        configuration: {
-          baseURL: this.endpoint,
-          defaultHeaders: {
-            "HTTP-Referer": "https://SystemSculpt.com",
-            "X-Title": "SystemSculpt AI for Obsidian",
-          },
+      const llm = new ChatOpenAI(
+        {
+          openAIApiKey: this.apiKey,
+          modelName: modelId,
+          streaming: !isO1Model,
+          temperature: isO1Model ? 1 : this.settings.temperature,
+          callbacks: !isO1Model
+            ? [
+                {
+                  handleLLMNewToken(token: string) {
+                    if (!abortSignal?.aborted) {
+                      callback(token);
+                    }
+                  },
+                },
+              ]
+            : undefined,
         },
-        callbacks: [
-          {
-            handleLLMNewToken(token: string) {
-              if (!abortSignal?.aborted) {
-                callback(token);
-              }
+        {
+          basePath: this.endpoint,
+          baseOptions: {
+            headers: {
+              "HTTP-Referer": "https://SystemSculpt.com",
+              "X-Title": "SystemSculpt AI for Obsidian",
             },
           },
-        ],
-      });
+        }
+      );
 
-      await llm.invoke(compressedMessages);
+      const response = await llm.invoke(formattedMessages);
+
+      // For O1 models, send the complete response at once
+      if (isO1Model && response.content) {
+        callback(response.content.toString());
+      }
     } catch (error) {
       console.error(
         "OpenRouterAIProvider Error in createStreamingConversationWithCallback:",
@@ -248,6 +233,18 @@ export class OpenRouterAIProvider extends BaseAIProvider {
       throw new Error(`Model with ID ${modelId} not found.`);
     }
     return model;
+  }
+
+  private shouldConvertSystemToUser(modelId: string): boolean {
+    return modelId.includes("o1-");
+  }
+
+  private shouldDisableStreaming(modelId: string): boolean {
+    return modelId.includes("o1-");
+  }
+
+  private shouldDisableTemperature(modelId: string): boolean {
+    return modelId.includes("o1-");
   }
 }
 
