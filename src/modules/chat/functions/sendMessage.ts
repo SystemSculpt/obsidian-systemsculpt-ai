@@ -88,6 +88,9 @@ export async function sendMessage(
     }
   });
 
+  const modelInfo = await brainModule.getModelById(modelId);
+  const modelName = modelInfo ? modelInfo.name : modelId;
+
   try {
     let accumulatedResponse = "";
     await aiService.createStreamingConversationWithCallback(
@@ -101,13 +104,9 @@ export async function sendMessage(
       }
     );
 
-    const modelInfo = await brainModule.getModelById(modelId);
-    const modelName = modelInfo ? modelInfo.name : "unknown model";
-
     await updateChatFile(
       `\`\`\`\`\`ai-${modelName}\n${accumulatedResponse}\n\`\`\`\`\`\n\n`
     );
-  } catch (error) {
   } finally {
     hideLoading();
   }
