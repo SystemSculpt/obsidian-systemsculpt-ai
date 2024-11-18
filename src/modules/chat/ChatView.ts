@@ -20,8 +20,6 @@ import {
   updateChatTitle,
 } from "./functions/generateTitleForChat";
 import { FileSearcher } from "./FileSearcher";
-import { formatNumber } from "./utils";
-import { CostEstimator } from "../../interfaces/CostEstimatorModal";
 import { SaveChatAsNoteModal } from "./views/SaveChatAsNoteModal";
 
 export const VIEW_TYPE_CHAT = "chat-view";
@@ -64,21 +62,6 @@ export class ChatView extends ItemView {
     this.brainModule.on("model-changed", async () => {
       await this.updateTokenCount();
     });
-
-    this.brainModule.on("cost-estimate-updated", ({ minCost, maxCost }) => {
-      this.updateCostEstimate(minCost, maxCost);
-    });
-  }
-
-  private updateCostEstimate(minCost: number, maxCost: number) {
-    const costEstimateEl = this.containerEl.querySelector(
-      ".systemsculpt-cost-estimate"
-    ) as HTMLElement;
-    if (costEstimateEl) {
-      costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
-        minCost
-      )} - $${formatNumber(maxCost)}`;
-    }
   }
 
   private initializeManagers() {
@@ -550,22 +533,19 @@ export class ChatView extends ItemView {
       titleEl.textContent = moment().format("YYYY-MM-DD HH-mm-ss");
     }
 
-    this.initializeTokenCountAndCost();
+    this.initializeTokenCount();
     this.scrollToBottom();
   }
 
-  private async initializeTokenCountAndCost() {
+  private async initializeTokenCount() {
     const tokenCount = 0;
     const currentModel = this.brainModule.getCurrentModel();
-    const maxOutputTokens = this.brainModule.getMaxOutputTokens();
 
     if (currentModel) {
       this.tokenManager.displayTokenCount(
         tokenCount,
         this.containerEl,
-        this.chatMessages.length,
-        currentModel,
-        maxOutputTokens
+        this.chatMessages.length
       );
     }
   }
@@ -638,30 +618,9 @@ export class ChatView extends ItemView {
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.addEventListener("input", () => {
-        this.updateTokenCountAndCost();
+        this.updateTokenCount();
       });
     }
-  }
-
-  public async updateTokenCountAndCost() {
-    const inputEl = this.containerEl.querySelector(
-      ".systemsculpt-chat-input"
-    ) as HTMLTextAreaElement;
-    const inputValue = inputEl ? inputEl.value : "";
-    const tokenCount = await this.tokenManager.getTokenCount(
-      this.chatMessages,
-      this.contextFiles,
-      inputValue
-    );
-    const currentModel = this.brainModule.getCurrentModel();
-    const maxOutputTokens = this.brainModule.getMaxOutputTokens();
-    this.tokenManager.displayTokenCount(
-      tokenCount,
-      this.containerEl,
-      this.chatMessages.length,
-      currentModel,
-      maxOutputTokens
-    );
   }
 
   async getTokenCount(): Promise<number> {
@@ -687,7 +646,6 @@ export class ChatView extends ItemView {
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = inputValue;
-      this.updateTokenCountAndCost();
     }
   }
 
@@ -931,7 +889,22 @@ export class ChatView extends ItemView {
   }
 
   async updateTokenCount() {
-    await this.updateTokenCountAndCost();
+    const inputEl = this.containerEl.querySelector(
+      ".systemsculpt-chat-input"
+    ) as HTMLTextAreaElement;
+    const inputText = inputEl ? inputEl.value : "";
+
+    const tokenCount = await this.tokenManager.getTokenCount(
+      this.chatMessages,
+      this.contextFiles,
+      inputText
+    );
+
+    this.tokenManager.displayTokenCount(
+      tokenCount,
+      this.containerEl,
+      this.chatMessages.length
+    );
   }
 
   setChatInputValue(value: string) {
@@ -940,27 +913,6 @@ export class ChatView extends ItemView {
     ) as HTMLTextAreaElement;
     if (inputEl) {
       inputEl.value = value;
-    }
-  }
-
-  async openCostEstimator() {
-    const tokenCount = await this.tokenManager.getTokenCount(
-      this.chatMessages,
-      this.contextFiles,
-      ""
-    );
-    const currentModel = this.brainModule.getCurrentModel();
-    if (currentModel) {
-      const costEstimator = new CostEstimator(
-        this.app,
-        currentModel,
-        tokenCount
-      );
-      costEstimator.open();
-    } else {
-      new Notice(
-        "Couldn't find the current model. Please check your settings."
-      );
     }
   }
 
@@ -1055,7 +1007,7 @@ export class ChatView extends ItemView {
       this.hideLoadingContainer();
     }
 
-    await this.updateTokenCountAndCost();
+    await this.updateTokenCount();
     this.scrollToBottom();
   }
 

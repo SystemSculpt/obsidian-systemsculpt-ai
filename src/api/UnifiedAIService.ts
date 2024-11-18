@@ -286,17 +286,6 @@ export class UnifiedAIService implements AIServiceInterface {
         "gpt-4-turbo": 4096,
         "gpt-4": 8192,
       };
-      const specialPricing: {
-        [key: string]: { prompt: number; completion: number };
-      } = {
-        "gpt-4o": { prompt: 0.000005, completion: 0.000015 },
-        "gpt-4o-mini": { prompt: 0.00000015, completion: 0.0000006 },
-        "chatgpt-4o-latest": { prompt: 0.000005, completion: 0.000015 },
-        "o1-preview": { prompt: 0.000015, completion: 0.00006 },
-        "o1-mini": { prompt: 0.000003, completion: 0.000012 },
-        "gpt-4-turbo": { prompt: 0.00001, completion: 0.00003 },
-        "gpt-4": { prompt: 0.00003, completion: 0.00006 },
-      };
 
       const filteredModels = data.data.filter(
         (model: any) =>
@@ -320,14 +309,6 @@ export class UnifiedAIService implements AIServiceInterface {
           priorityContextLengths[model.id] || model.context_window || undefined,
         maxOutputTokens:
           priorityMaxOutputTokens[model.id] || model.context_window || 4096,
-        pricing:
-          specialPricing[model.id] ||
-          (model.pricing
-            ? {
-                prompt: parseFloat(model.pricing.prompt),
-                completion: parseFloat(model.pricing.completion),
-              }
-            : { prompt: 0, completion: 0 }),
       }));
     } else if (this.provider === "groq") {
       return data.data

@@ -72,15 +72,6 @@ export class ActionsModal extends Modal {
           },
         ],
       },
-      {
-        group: "Tokens",
-        items: [
-          {
-            name: "Estimate Cost",
-            callback: () => this.chatView.openCostEstimator(),
-          },
-        ],
-      },
     ];
   }
 

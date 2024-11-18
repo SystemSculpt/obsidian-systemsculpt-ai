@@ -17,7 +17,6 @@ import { ChatView, VIEW_TYPE_CHAT } from "../chat/ChatView";
 import { ModelSelectionModal } from "./views/ModelSelectionModal";
 import { EventEmitter } from "events";
 import { ButtonComponent } from "obsidian";
-import { CostEstimator } from "../../interfaces/CostEstimatorModal";
 import { logModuleLoadTime } from "../../utils/timing";
 import { AIProviderKey } from "../../api/types";
 
@@ -426,18 +425,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
       this.plugin.modelToggleStatusBarItem?.setText(text);
     }
     this.emit("model-changed", this.settings.defaultModelId);
-  }
-
-  public updateCostEstimate(tokenCount: number) {
-    const currentModel = this.getCurrentModel();
-    if (currentModel && currentModel.pricing) {
-      const { minCost, maxCost } = CostEstimator.calculateCost(
-        currentModel,
-        tokenCount,
-        this.getMaxOutputTokens()
-      );
-      this.emit("cost-estimate-updated", { minCost, maxCost });
-    }
   }
 
   public getCurrentModel(): Model | null {

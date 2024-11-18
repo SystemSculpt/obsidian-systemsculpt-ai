@@ -697,13 +697,14 @@
 }
 
 .systemsculpt-chat-title-container.systemsculpt-loading::before {
-  content: 'Generating title...';
+  content: "Generating title...";
   font-size: 14px;
   color: var(--text-muted);
   margin-right: 10px;
 }
 
-.systemsculpt-chat-title-container.systemsculpt-loading .systemsculpt-loading-spinner {
+.systemsculpt-chat-title-container.systemsculpt-loading
+  .systemsculpt-loading-spinner {
   display: inline-block;
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top: 2px solid var(--interactive-accent);
@@ -726,37 +727,10 @@
   overflow: auto;
 }
 
-.systemsculpt-token-count,
-.systemsculpt-cost-estimate {
-  font-size: 12px;
-  background-color: var(--background-secondary);
-  padding: 5px 10px;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: inline-block;
-  margin-bottom: 5px;
-  margin-left: 10px;
-}
-
-.systemsculpt-token-container {
-  text-align: right;
-  margin-bottom: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-}
-
 @media (max-width: 600px) {
   .systemsculpt-token-container {
     flex-direction: column;
     align-items: flex-end;
-  }
-
-  .systemsculpt-token-count,
-  .systemsculpt-cost-estimate {
-    margin-left: 0;
-  }
 }
 
 .systemsculpt-chat-messages {
@@ -834,10 +808,6 @@
   color: var(--text-muted);
 }
 
-.systemsculpt-token-count,
-.systemsculpt-cost-estimate {
-  margin-right: 10px;
-}
 
 .systemsculpt-send-button-container {
   display: flex;
@@ -889,7 +859,7 @@
   background-color: var(--background-secondary-alt);
   font-size: 75%;
   padding: 15px;
-  padding-top: 35px;  /* Added extra top padding for the copy button */
+  padding-top: 35px; /* Added extra top padding for the copy button */
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   transition: all 0.2s ease;
@@ -912,7 +882,7 @@
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
-  opacity: 1;  /* Changed from 0 to 1 to always show */
+  opacity: 1; /* Changed from 0 to 1 to always show */
   color: var(--text-muted);
 }
 
@@ -975,7 +945,9 @@
   border: none;
   cursor: pointer;
   font-size: 10px;
-  transition: background-color 0.3s, color 0.3s;
+  transition:
+    background-color 0.3s,
+    color 0.3s;
 }
 
 .systemsculpt-delete-button {
@@ -983,7 +955,9 @@
   border: none;
   cursor: pointer;
   font-size: 10px;
-  transition: background-color 0.3s, color 0.3s;
+  transition:
+    background-color 0.3s,
+    color 0.3s;
   margin-left: 5px;
 }
 
@@ -1019,7 +993,9 @@
   margin-top: 5px;
   text-align: right;
   font-style: italic;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5), 0 0 5px var(--interactive-accent);
+  text-shadow:
+    1px 1px 2px rgba(0, 0, 0, 0.5),
+    0 0 5px var(--interactive-accent);
   padding: 2px 4px;
   border-radius: 4px;
 }
@@ -1187,7 +1163,9 @@
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.3s, visibility 0.3s;
+  transition:
+    opacity 0.3s,
+    visibility 0.3s;
 }
 
 .systemsculpt-loading-overlay.systemsculpt-visible {
@@ -1210,8 +1188,12 @@
 }
 
 @keyframes systemsculpt-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .systemsculpt-title-edit-modal {
@@ -1349,7 +1331,9 @@
   border-radius: 3px;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.3s, border-color 0.3s;
+  transition:
+    background-color 0.3s,
+    border-color 0.3s;
 }
 
 .systemsculpt-suggestion-checkbox:checked {
@@ -1358,7 +1342,7 @@
 }
 
 .systemsculpt-suggestion-checkbox:checked::after {
-  content: '✓';
+  content: "✓";
   position: absolute;
   top: 50%;
   left: 50%;
@@ -1378,7 +1362,7 @@
 }
 
 .systemsculpt-suggestion-checkbox:indeterminate::after {
-  content: '-';
+  content: "-";
   position: absolute;
   top: 50%;
   left: 50%;
@@ -1493,7 +1477,8 @@
   margin-bottom: 10px;
 }
 
-.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading .systemsculpt-loading-spinner {
+.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading
+  .systemsculpt-loading-spinner {
   width: 20px;
   height: 20px;
   border: 2px solid var(--text-muted);
@@ -1508,8 +1493,12 @@
 }
 
 @keyframes systemsculpt-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .systemsculpt-file-searcher-filters {
@@ -1537,7 +1526,9 @@
   font-size: 14px;
   cursor: not-allowed;
   text-align: center;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1662,11 +1653,11 @@
 }
 
 .systemsculpt-chat-message table {
-  display: block;  /* Changes table to block to enable scrolling */
-  overflow-x: auto;  /* Enables horizontal scrolling */
-  max-width: 100%;  /* Ensures table doesn't exceed container width */
-  white-space: nowrap;  /* Prevents text wrapping in cells */
-  border-collapse: collapse;  /* Standard table styling */
+  display: block; /* Changes table to block to enable scrolling */
+  overflow-x: auto; /* Enables horizontal scrolling */
+  max-width: 100%; /* Ensures table doesn't exceed container width */
+  white-space: nowrap; /* Prevents text wrapping in cells */
+  border-collapse: collapse; /* Standard table styling */
   margin: 10px 0;
 }
 
@@ -1674,114 +1665,7 @@
 .systemsculpt-chat-message th {
   padding: 6px 12px;
   border: 1px solid var(--background-modifier-border);
-  min-width: 60px;  /* Ensures columns don't collapse too much */
-}
-
-
-.systemsculpt-cost-estimator-modal {
-  max-width: 500px;
-  padding: 20px;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-modal-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-modal-icon {
-  margin-right: 10px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-modal-title {
-  margin: 0;
-}
-
-.systemsculpt-cost-estimator-modal h3 {
-  margin-top: 20px;
-  margin-bottom: 10px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
-.systemsculpt-cost-estimator-modal .systemsculpt-token-info,
-.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
-  background-color: var(--background-primary-alt);
-  color: var(--text-normal);
-  padding: 15px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  min-height: 100px;
-  text-align: center;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-model-info,
-.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
-  justify-content: space-evenly;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-model-name,
-.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost .systemsculpt-value {
-  font-size: 1.5em;
-  font-weight: bold;
-  color: var(--text-accent);
-  margin: 0 0 10px 0;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-pricing-info {
-  margin-top: 10px;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-pricing-detail {
-  font-size: 0.9em;
-  color: var(--text-muted);
-  margin: 5px 0;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-token-info-container {
-  display: flex;
-  justify-content: space-between;
-  margin: 10px auto;
-  gap: 20px;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-token-info {
-  flex: 1;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  font-size: 1em;
-  transition: background-color 0.3s, color 0.3s;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-token-info .systemsculpt-token-value {
-  font-size: 1.2em;
-  font-weight: bold;
-  margin-top: 5px;
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost {
-  border: 2px solid var(--text-accent);
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-model-info h3,
-.systemsculpt-cost-estimator-modal .systemsculpt-predicted-cost h3 {
-  margin: 0 0 10px 0;
-  color: var(--text-normal);
-}
-
-.systemsculpt-cost-estimator-modal .systemsculpt-cost-notice {
-  font-size: 0.9em;
-  color: var(--text-muted);
-  text-align: center;
-  margin-top: 10px;
+  min-width: 60px; /* Ensures columns don't collapse too much */
 }
 
 /* Custom Notice */

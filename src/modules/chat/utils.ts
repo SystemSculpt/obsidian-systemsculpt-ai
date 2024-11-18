@@ -59,23 +59,12 @@ export async function getContextFilesContent(
   return contextContent;
 }
 
-import { CostEstimator } from "../../interfaces/CostEstimatorModal";
-
 export function displayTokenCount(
   tokenCount: number,
-  containerEl: HTMLElement,
-  chatMessagesLength: number,
-  model: Model | null | undefined,
-  maxOutputTokens: number
+  containerEl: HTMLElement
 ) {
   const tokenCountEl = containerEl.querySelector(
     ".systemsculpt-token-count"
-  ) as HTMLElement;
-  const costEstimateEl = containerEl.querySelector(
-    ".systemsculpt-cost-estimate"
-  ) as HTMLElement;
-  const dollarButton = containerEl.querySelector(
-    ".systemsculpt-dollar-button"
   ) as HTMLElement;
   const titleContainerEl = containerEl.querySelector(
     ".systemsculpt-chat-title-container"
@@ -86,47 +75,5 @@ export function displayTokenCount(
     tokenCountEl.textContent = `Tokens: ${tokenCount}`;
   }
 
-  if (costEstimateEl) {
-    if (model && model.pricing) {
-      const { minCost, maxCost } = CostEstimator.calculateCost(
-        model,
-        tokenCount,
-        maxOutputTokens
-      );
-      costEstimateEl.style.display = "inline";
-      costEstimateEl.textContent = `Estimated Cost: $${formatNumber(
-        minCost
-      )} - $${formatNumber(maxCost)}`;
-    } else {
-      costEstimateEl.style.display = "none";
-    }
-  }
-
   if (titleContainerEl) titleContainerEl.style.display = "flex";
-  if (dollarButton)
-    dollarButton.style.display = model?.pricing ? "inline" : "none";
-}
-
-export function formatNumber(num: number): string {
-  if (num === 0) return "0.00";
-  if (num >= 1) return num.toFixed(2);
-
-  const fixed = num.toFixed(10);
-  const [integer, decimal] = fixed.split(".");
-
-  if (decimal.startsWith("00")) {
-    const significantIndex = decimal.split("").findIndex((d) => d !== "0");
-    if (significantIndex === -1) {
-      return `${integer}.${"0".repeat(10)}`;
-    }
-    const significantDigits = decimal.slice(
-      significantIndex,
-      significantIndex + 2
-    );
-    return `${integer}.${"0".repeat(
-      Math.max(0, significantIndex)
-    )}${significantDigits}`;
-  }
-
-  return Number(fixed).toFixed(2);
 }

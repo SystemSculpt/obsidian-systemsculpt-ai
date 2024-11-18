@@ -85,7 +85,7 @@ export class ContextFileManager {
       );
     }
 
-    this.chatView.updateTokenCountAndCost();
+    this.chatView.updateTokenCount();
   }
 
   private async processAudioFile(file: TFile) {
@@ -373,7 +373,7 @@ export class ContextFileManager {
     this.chatView.contextFiles.splice(index, 1);
     this.renderContextFiles();
     this.updateChatFileWithContext(file, "remove");
-    this.chatView.updateTokenCountAndCost();
+    this.chatView.updateTokenCount();
   }
 
   private openOrSwitchToFile(file: TFile) {

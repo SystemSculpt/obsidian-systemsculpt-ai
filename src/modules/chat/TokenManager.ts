@@ -1,8 +1,4 @@
-import {
-  getTokenCount,
-  getContextFilesContent,
-  displayTokenCount,
-} from "./utils";
+import { getTokenCount, getContextFilesContent } from "./utils";
 import { ChatMessage } from "./ChatMessage";
 import { TFile } from "obsidian";
 
@@ -12,13 +8,13 @@ export class TokenManager {
   async getTokenCount(
     chatMessages: ChatMessage[],
     contextFiles: TFile[],
-    inputText: string,
+    inputText: string
   ): Promise<number> {
     return getTokenCount(this.app, chatMessages, contextFiles, inputText);
   }
 
   public async getContextFilesContent(
-    contextFiles: TFile[],
+    contextFiles: TFile[]
   ): Promise<{ text: string; images: { path: string; base64: string }[] }> {
     const textContent = await getContextFilesContent(this.app, contextFiles);
     const images = await this.getImageFilesContent(contextFiles);
@@ -26,10 +22,10 @@ export class TokenManager {
   }
 
   private async getImageFilesContent(
-    contextFiles: TFile[],
+    contextFiles: TFile[]
   ): Promise<{ path: string; base64: string }[]> {
     const imageFiles = contextFiles.filter((file) =>
-      ["png", "jpg", "jpeg", "gif"].includes(file.extension.toLowerCase()),
+      ["png", "jpg", "jpeg", "gif"].includes(file.extension.toLowerCase())
     );
 
     const imageContents = await Promise.all(
@@ -38,11 +34,11 @@ export class TokenManager {
         const base64 = btoa(
           new Uint8Array(arrayBuffer).reduce(
             (data, byte) => data + String.fromCharCode(byte),
-            "",
-          ),
+            ""
+          )
         );
         return { path: file.path, base64 };
-      }),
+      })
     );
 
     return imageContents;
@@ -51,16 +47,15 @@ export class TokenManager {
   displayTokenCount(
     tokenCount: number,
     containerEl: HTMLElement,
-    chatMessagesLength: number,
-    model: any,
-    maxOutputTokens: number,
+    chatMessagesLength: number
   ) {
-    displayTokenCount(
-      tokenCount,
-      containerEl,
-      chatMessagesLength,
-      model,
-      maxOutputTokens,
-    );
+    const tokenCountEl = containerEl.querySelector(
+      ".systemsculpt-token-count"
+    ) as HTMLElement;
+
+    if (tokenCountEl) {
+      tokenCountEl.style.display = "inline";
+      tokenCountEl.textContent = `Tokens: ${tokenCount}`;
+    }
   }
 }

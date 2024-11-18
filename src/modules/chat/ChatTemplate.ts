@@ -21,7 +21,6 @@ export const chatTemplate = `
         <div class="systemsculpt-chat-input-footer">
           <div class="systemsculpt-token-and-cost-container">
             <span class="systemsculpt-token-count" style="display: none;">Tokens: 0</span>
-            <span class="systemsculpt-cost-estimate" style="display: none;">Estimated Cost: $0.00 - $0.00</span>
           </div>
           <div class="systemsculpt-send-button-container">
             <button class="systemsculpt-chat-send-button" title="Send Message">Send</button>
