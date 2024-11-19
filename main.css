@@ -727,10 +727,37 @@
   overflow: auto;
 }
 
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
+  font-size: 12px;
+  background-color: var(--background-secondary);
+  padding: 5px 10px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: inline-block;
+  margin-bottom: 5px;
+  margin-left: 10px;
+}
+
+.systemsculpt-token-container {
+  text-align: right;
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+
 @media (max-width: 600px) {
   .systemsculpt-token-container {
     flex-direction: column;
     align-items: flex-end;
+  }
+
+  .systemsculpt-token-count,
+  .systemsculpt-cost-estimate {
+    margin-left: 0;
+  }
 }
 
 .systemsculpt-chat-messages {
@@ -808,6 +835,10 @@
   color: var(--text-muted);
 }
 
+.systemsculpt-token-count,
+.systemsculpt-cost-estimate {
+  margin-right: 10px;
+}
 
 .systemsculpt-send-button-container {
   display: flex;
