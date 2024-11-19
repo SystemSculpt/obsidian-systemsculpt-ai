@@ -1,6 +1,6 @@
 import { TFile } from "obsidian";
 import { ChatMessage } from "../ChatMessage";
-import { handleStreamingResponse } from "./handleStreamingResponse";
+import { Notice } from "obsidian";
 
 export async function sendMessage(
   inputEl: HTMLTextAreaElement,
@@ -26,6 +26,24 @@ export async function sendMessage(
   const messageText = inputEl.value.trim();
   if (messageText === "") return;
 
+  const modelId = brainModule.settings.defaultModelId;
+  const messageHistory = await constructMessageHistory();
+
+  if (
+    modelId.includes("haiku") &&
+    messageHistory.some(
+      (msg) =>
+        Array.isArray(msg.content) &&
+        msg.content.some((c) => c.type === "image_url")
+    )
+  ) {
+    new Notice(
+      "Claude 3.5 Haiku does not support image analysis. Please use Claude 3.5 Sonnet or Claude 3 Opus for image-related tasks.",
+      15000
+    );
+    return;
+  }
+
   const userMessage = new ChatMessage("user", messageText);
   addMessage(userMessage);
   inputEl.value = "";
@@ -37,11 +55,9 @@ export async function sendMessage(
   }
 
   const aiService = brainModule.AIService;
-  const modelId = brainModule.settings.defaultModelId;
   const maxOutputTokens = brainModule.getMaxOutputTokens();
 
   const systemPrompt = chatModule.settings.systemPrompt;
-  const messageHistory = await constructMessageHistory();
 
   const processPDFContent = async (msg: {
     role: string;
