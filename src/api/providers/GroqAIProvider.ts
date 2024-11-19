@@ -111,6 +111,16 @@ export class GroqAIProvider extends BaseAIProvider {
   protected async getModelsImpl(): Promise<Model[]> {
     if (!this.hasValidApiKey()) return [];
 
+    const filteredWords = [
+      "whisper",
+      "llava",
+      "tool-use",
+      "mixtral-8x7b",
+      "llama2-70b",
+      "gemma-7b",
+      "gemma-2b",
+    ];
+
     const response = await requestUrl({
       url: `${this.endpoint}/models`,
       method: "GET",
@@ -122,8 +132,7 @@ export class GroqAIProvider extends BaseAIProvider {
     return response.json.data
       .filter(
         (model: any) =>
-          !model.id.toLowerCase().includes("whisper") &&
-          !model.id.toLowerCase().includes("llava")
+          !filteredWords.some((word) => model.id.toLowerCase().includes(word))
       )
       .map((model: any) => ({
         id: model.id,
