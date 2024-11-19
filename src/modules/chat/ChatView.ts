@@ -691,7 +691,7 @@ export class ChatView extends ItemView {
         userContent.push({
           type: "image_url",
           image_url: {
-            url: `data:image/jpeg;base64,${image.base64}`,
+            url: `data:image/${image.path.split(".")[1]};base64,${image.base64}`,
           },
         });
       });

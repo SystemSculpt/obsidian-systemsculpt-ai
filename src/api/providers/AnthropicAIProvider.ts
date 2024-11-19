@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
+import { Notice } from "obsidian";
 
 export class AnthropicAIProvider extends BaseAIProvider {
   static async validateApiKey(apiKey: string): Promise<boolean> {
@@ -81,32 +82,94 @@ export class AnthropicAIProvider extends BaseAIProvider {
 
   async createStreamingConversationWithCallback(
     systemPrompt: string,
-    messages: { role: string; content: string }[],
+    messages: {
+      role: string;
+      content:
+        | string
+        | { type: string; text?: string; image_url?: { url: string } }[];
+    }[],
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const stream = await this.client.messages.create({
-      model: modelId,
-      messages: messages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      system: systemPrompt,
-      max_tokens: maxOutputTokens,
-      temperature: this.settings.temperature,
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      if (abortSignal?.aborted) break;
+    try {
       if (
-        chunk.type === "content_block_delta" &&
-        chunk.delta.type === "text_delta"
+        modelId.includes("haiku") &&
+        messages.some(
+          (msg) =>
+            Array.isArray(msg.content) &&
+            msg.content.some((c) => c.type === "image_url")
+        )
       ) {
-        callback(chunk.delta.text);
+        new Notice(
+          "Claude 3.5 Haiku does not support image analysis. Please use Claude 3.5 Sonnet or Claude 3 Opus for image-related tasks.",
+          15000
+        );
+        return;
       }
+
+      const formattedMessages: Anthropic.MessageParam[] = messages.map(
+        (msg) => ({
+          role: msg.role as "user" | "assistant",
+          content: Array.isArray(msg.content)
+            ? msg.content.map((c) => {
+                if (c.type === "image_url" && c.image_url) {
+                  const base64Data = c.image_url.url.replace(
+                    /^data:image\/[a-zA-Z]+;base64,/,
+                    ""
+                  );
+                  const mediaTypeMatch = c.image_url.url.match(
+                    /^data:(image\/[a-zA-Z]+);base64,/
+                  );
+                  const mediaType = mediaTypeMatch
+                    ? mediaTypeMatch[1]
+                        .toLowerCase()
+                        .replace("image/jpg", "image/jpeg")
+                    : "image/jpeg";
+
+                  return {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: mediaType as
+                        | "image/jpeg"
+                        | "image/png"
+                        | "image/gif"
+                        | "image/webp",
+                      data: base64Data,
+                    },
+                  } as Anthropic.ImageBlockParam;
+                }
+                return {
+                  type: "text",
+                  text: c.text || "",
+                } as Anthropic.TextBlockParam;
+              })
+            : msg.content,
+        })
+      );
+
+      const stream = await this.client.messages.create({
+        model: modelId,
+        messages: formattedMessages,
+        system: systemPrompt,
+        max_tokens: maxOutputTokens,
+        temperature: this.settings.temperature,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        if (abortSignal?.aborted) break;
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta.type === "text_delta"
+        ) {
+          callback(chunk.delta.text);
+        }
+      }
+    } catch (error) {
+      console.error("Error creating streaming conversation:", error);
     }
   }
 
