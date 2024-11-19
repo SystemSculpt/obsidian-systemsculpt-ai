@@ -1,18 +1,26 @@
-import { ChatAnthropic } from "@langchain/anthropic";
+import Anthropic from "@anthropic-ai/sdk";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
 
 export class AnthropicAIProvider extends BaseAIProvider {
   static async validateApiKey(apiKey: string): Promise<boolean> {
     try {
-      const llm = new ChatAnthropic({ anthropicApiKey: apiKey });
-      await llm.invoke([{ role: "user", content: "test" }]);
+      const anthropic = new Anthropic({
+        apiKey,
+        dangerouslyAllowBrowser: true,
+      });
+      await anthropic.messages.create({
+        model: "claude-3-haiku-20240307",
+        messages: [{ role: "user", content: "test" }],
+        max_tokens: 1,
+      });
       return true;
     } catch {
       return false;
     }
   }
-  private llm: ChatAnthropic;
+
+  private client: Anthropic;
 
   constructor(
     apiKey: string,
@@ -20,9 +28,9 @@ export class AnthropicAIProvider extends BaseAIProvider {
     settings: { temperature: number }
   ) {
     super(apiKey, "https://api.anthropic.com", "anthropic", settings);
-    this.llm = new ChatAnthropic({
-      anthropicApiKey: apiKey,
-      temperature: settings.temperature,
+    this.client = new Anthropic({
+      apiKey,
+      dangerouslyAllowBrowser: true,
     });
   }
 
@@ -32,19 +40,15 @@ export class AnthropicAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const llm = new ChatAnthropic({
-      anthropicApiKey: this.apiKey,
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
+    const response = await this.client.messages.create({
+      model: modelId,
+      messages: [{ role: "user", content: userMessage }],
+      system: systemPrompt,
+      max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
     });
 
-    const response = await llm.invoke([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ]);
-
-    return response.content.toString();
+    return response.content[0].type === "text" ? response.content[0].text : "";
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -55,27 +59,24 @@ export class AnthropicAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatAnthropic({
-      anthropicApiKey: this.apiKey,
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming: true,
+    const stream = await this.client.messages.create({
+      model: modelId,
+      messages: [{ role: "user", content: userMessage }],
+      system: systemPrompt,
+      max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
-          },
-        },
-      ],
+      stream: true,
     });
 
-    await llm.invoke([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ]);
+    for await (const chunk of stream) {
+      if (abortSignal?.aborted) break;
+      if (
+        chunk.type === "content_block_delta" &&
+        chunk.delta.type === "text_delta"
+      ) {
+        callback(chunk.delta.text);
+      }
+    }
   }
 
   async createStreamingConversationWithCallback(
@@ -86,24 +87,27 @@ export class AnthropicAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatAnthropic({
-      anthropicApiKey: this.apiKey,
-      modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming: true,
+    const stream = await this.client.messages.create({
+      model: modelId,
+      messages: messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      system: systemPrompt,
+      max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
-      callbacks: [
-        {
-          handleLLMNewToken(token: string) {
-            if (!abortSignal?.aborted) {
-              callback(token);
-            }
-          },
-        },
-      ],
+      stream: true,
     });
 
-    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
+    for await (const chunk of stream) {
+      if (abortSignal?.aborted) break;
+      if (
+        chunk.type === "content_block_delta" &&
+        chunk.delta.type === "text_delta"
+      ) {
+        callback(chunk.delta.text);
+      }
+    }
   }
 
   async getModelsImpl(): Promise<Model[]> {

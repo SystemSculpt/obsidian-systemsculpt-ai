@@ -22,6 +22,7 @@
     "typescript": "^4.1.5"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/ffmpeg": "^0.11.6",
     "@ffmpeg/util": "^0.12.1",
