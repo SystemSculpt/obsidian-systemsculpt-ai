@@ -69,23 +69,9 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     abortSignal?: AbortSignal
   ): Promise<void> {
     try {
-      const inputTokens = await this.llm.getNumTokens(
-        systemPrompt + userMessage
-      );
-      const maxContextLength = 131072;
-      const buffer = 100; // Buffer to ensure we're under the limit
-      const availableTokens = maxContextLength - inputTokens - buffer;
-
-      if (availableTokens <= 0) {
-        throw new Error(
-          `Input is too long. Reduce the input length to fit within the maximum context length of ${maxContextLength} tokens.`
-        );
-      }
-
       const llm = new ChatOpenAI({
         openAIApiKey: this.apiKey,
         modelName: modelId,
-        maxTokens: Math.min(maxOutputTokens, availableTokens),
         streaming: true,
         temperature: this.settings.temperature,
         configuration: {
@@ -121,52 +107,67 @@ export class OpenRouterAIProvider extends BaseAIProvider {
 
   async createStreamingConversationWithCallback(
     systemPrompt: string,
-    messages: { role: string; content: string }[],
+    messages: {
+      role: string;
+      content:
+        | string
+        | { type: string; text?: string; image_url?: { url: string } }[];
+    }[],
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
     try {
-      const formattedMessages = this.shouldConvertSystemToUser(modelId)
-        ? [{ role: "user", content: systemPrompt }, ...messages]
-        : [{ role: "system", content: systemPrompt }, ...messages];
-
       const isO1Model = modelId.includes("o1-");
+      const streaming = !isO1Model;
 
-      const llm = new ChatOpenAI(
+      // Simplify messages to basic format
+      const formattedMessages = [
         {
-          openAIApiKey: this.apiKey,
-          modelName: modelId,
-          streaming: !isO1Model,
-          temperature: isO1Model ? 1 : this.settings.temperature,
-          callbacks: !isO1Model
-            ? [
-                {
-                  handleLLMNewToken(token: string) {
-                    if (!abortSignal?.aborted) {
-                      callback(token);
-                    }
-                  },
-                },
-              ]
-            : undefined,
+          role: this.shouldConvertSystemToUser(modelId) ? "user" : "system",
+          content: systemPrompt,
         },
-        {
-          basePath: this.endpoint,
-          baseOptions: {
-            headers: {
-              "HTTP-Referer": "https://SystemSculpt.com",
-              "X-Title": "SystemSculpt AI for Obsidian",
-            },
+        ...messages.map((msg) => ({
+          role: msg.role === "ai" ? "assistant" : msg.role,
+          content:
+            typeof msg.content === "string"
+              ? msg.content
+              : msg.content
+                  .map((c) => c.text || "")
+                  .filter(Boolean)
+                  .join(" "),
+        })),
+      ];
+
+      const llm = new ChatOpenAI({
+        openAIApiKey: this.apiKey,
+        modelName: modelId,
+        streaming,
+        temperature: this.settings.temperature,
+        configuration: {
+          baseURL: this.endpoint,
+          defaultHeaders: {
+            "HTTP-Referer": "https://SystemSculpt.com",
+            "X-Title": "SystemSculpt AI for Obsidian",
           },
-        }
-      );
+        },
+        callbacks: streaming
+          ? [
+              {
+                handleLLMNewToken(token: string) {
+                  if (!abortSignal?.aborted) {
+                    callback(token);
+                  }
+                },
+              },
+            ]
+          : undefined,
+      });
 
       const response = await llm.invoke(formattedMessages);
 
-      // For O1 models, send the complete response at once
-      if (isO1Model && response.content) {
+      if (!streaming && response.content) {
         callback(response.content.toString());
       }
     } catch (error) {
@@ -238,18 +239,4 @@ export class OpenRouterAIProvider extends BaseAIProvider {
   private shouldConvertSystemToUser(modelId: string): boolean {
     return modelId.includes("o1-");
   }
-
-  private shouldDisableStreaming(modelId: string): boolean {
-    return modelId.includes("o1-");
-  }
-
-  private shouldDisableTemperature(modelId: string): boolean {
-    return modelId.includes("o1-");
-  }
-}
-
-function compressMiddleOut(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  const halfLength = Math.floor(maxLength / 2);
-  return text.slice(0, halfLength) + "..." + text.slice(-halfLength);
 }
