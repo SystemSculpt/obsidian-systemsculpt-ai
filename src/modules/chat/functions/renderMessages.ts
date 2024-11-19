@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import { ChatMessage } from "../ChatMessage";
 import { handleDeleteMessage } from "./handleDeleteMessage";
+import { handleRetryMessage } from "./handleRetryMessage";
 
 const INITIAL_LOAD_LIMIT = 30000; // Characters
 const CHUNK_SIZE = 10000; // Characters
@@ -153,6 +154,7 @@ function createMessageElement(
     ${marked(message.text)}
     <div class="systemsculpt-message-actions">
       <button class="systemsculpt-copy-button" title="Copy Message">📋</button>
+      ${message.role === "user" ? `<button class="systemsculpt-retry-button" title="Retry Message">🔄</button>` : ""}
       <button class="systemsculpt-delete-button" title="Delete Message">🗑️</button>
     </div>
     ${
@@ -167,6 +169,15 @@ function createMessageElement(
     copyButton.addEventListener("click", () =>
       handleCopyMessage(copyButton as HTMLElement, message.text)
     );
+  }
+
+  if (message.role === "user") {
+    const retryButton = messageEl.querySelector(".systemsculpt-retry-button");
+    if (retryButton) {
+      retryButton.addEventListener("click", () => {
+        handleRetryMessage(retryButton as HTMLElement, message.text, index);
+      });
+    }
   }
 
   const deleteButton = messageEl.querySelector(".systemsculpt-delete-button");

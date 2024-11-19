@@ -51,6 +51,9 @@ export class ChatView extends ItemView {
     this.chatModule = chatModule;
     this.initializeManagers();
     this.listenForModelChanges();
+    document.addEventListener("messageRetry", ((e: CustomEvent) => {
+      this.handleMessageRetry(e.detail.index);
+    }) as EventListener);
   }
 
   public setChatModule(chatModule: ChatModule) {
@@ -1058,5 +1061,27 @@ export class ChatView extends ItemView {
         }
       }
     ).open();
+  }
+
+  private async handleMessageRetry(index: number) {
+    // Get message being retried
+    const messageToRetry = this.chatMessages[index];
+
+    // Delete all messages from index to end, one by one
+    for (let i = this.chatMessages.length - 1; i >= index; i--) {
+      const deletedMessage = this.chatMessages[i];
+      await this.updateChatFileAfterDeletion(deletedMessage, i);
+    }
+
+    // Set input to the retried message's text
+    this.setChatInputValue(messageToRetry.text);
+    const inputEl = this.containerEl.querySelector(
+      ".systemsculpt-chat-input"
+    ) as HTMLTextAreaElement;
+    if (inputEl) {
+      inputEl.focus();
+      inputEl.selectionStart = inputEl.value.length;
+      inputEl.selectionEnd = inputEl.value.length;
+    }
   }
 }

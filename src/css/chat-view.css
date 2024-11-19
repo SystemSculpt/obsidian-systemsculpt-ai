@@ -1058,3 +1058,21 @@
   border: 1px solid var(--background-modifier-border);
   min-width: 60px; /* Ensures columns don't collapse too much */
 }
+
+.systemsculpt-retry-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  transition:
+    background-color 0.3s,
+    color 0.3s;
+  margin-left: 5px;
+}
+
+.systemsculpt-retry-button.confirm-retry {
+  background-color: var(--interactive-accent);
+  color: white;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
