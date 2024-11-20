@@ -209,6 +209,17 @@ export class LocalAIProvider extends BaseAIProvider {
 
   protected async getModelsImpl(): Promise<Model[]> {
     try {
+      // Validate endpoint is reachable first
+      const testResponse = await fetch(this.endpoint, {
+        method: "HEAD",
+        timeout: 5000,
+      }).catch(() => null);
+
+      if (!testResponse?.ok) {
+        console.warn(`Local endpoint ${this.endpoint} not reachable`);
+        return [];
+      }
+
       if (this.isOllama) {
         const response = await requestUrl({
           url: `${this.endpoint}/api/tags`,
@@ -240,6 +251,7 @@ export class LocalAIProvider extends BaseAIProvider {
       }
     } catch (error) {
       console.warn("Failed to fetch local models:", error);
+      return []; // Return empty array instead of throwing
     }
     return [];
   }

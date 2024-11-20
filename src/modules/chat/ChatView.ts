@@ -189,17 +189,24 @@ export class ChatView extends ItemView {
   private async saveDroppedFile(file: File): Promise<TFile> {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const path = `${this.chatModule.settings.attachmentsPath}/${file.name}`;
-      const existingFile = this.app.vault.getAbstractFileByPath(path);
+      const ext = file.name.substring(file.name.lastIndexOf("."));
+      const baseNameWithoutExt = file.name.substring(
+        0,
+        file.name.lastIndexOf(".")
+      );
+      let counter = 1;
+      let fileName = `${baseNameWithoutExt}_${counter}${ext}`;
+      let path = `${this.chatModule.settings.attachmentsPath}/${fileName}`;
 
-      if (existingFile instanceof TFile) {
-        console.log(`Existing file found. Overwriting: ${path}`);
-        await this.app.vault.modifyBinary(existingFile, arrayBuffer);
-        return existingFile;
-      } else {
-        console.log(`Creating new file: ${path}`);
-        return await this.app.vault.createBinary(path, arrayBuffer);
+      // Keep incrementing counter until we find a filename that doesn't exist
+      while (this.app.vault.getAbstractFileByPath(path)) {
+        counter++;
+        fileName = `${baseNameWithoutExt}_${counter}${ext}`;
+        path = `${this.chatModule.settings.attachmentsPath}/${fileName}`;
       }
+
+      console.log(`Creating new file: ${path}`);
+      return await this.app.vault.createBinary(path, arrayBuffer);
     } catch (error) {
       console.error("Error saving dropped file:", error);
       throw error;

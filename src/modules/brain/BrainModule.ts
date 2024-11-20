@@ -99,19 +99,25 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
 
       this.updateModelStatusBarText("Loading models...");
 
-      // Load models only once during initialization
       if (!this.modelInitializationPromise) {
-        this.modelInitializationPromise = this.initializeModels();
+        this.modelInitializationPromise = this.initializeModels().catch(
+          (error) => {
+            console.warn("Model initialization failed:", error);
+            // Set empty models array as fallback
+            this.cachedModels = [];
+            this.updateModelStatusBarText("No Models Available");
+            this.updateModelSelectionButton("No Models", false);
+          }
+        );
         await this.modelInitializationPromise;
-        const modelName = await this.getCurrentModelShortName();
-        this.updateModelStatusBarText(modelName);
-        this.updateModelSelectionButton(modelName, false);
       }
 
       this.isInitialized = true;
     } catch (error) {
       console.error("Error initializing BrainModule:", error);
-      throw error;
+      this.updateModelStatusBarText("Error: Check Settings");
+      // Don't rethrow - allow plugin to continue with limited functionality
+      this.isInitialized = true;
     }
   }
 

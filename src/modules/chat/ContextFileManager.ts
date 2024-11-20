@@ -240,13 +240,21 @@ export class ContextFileManager {
   ) {
     for (const [imageName, imageBase64] of Object.entries(images)) {
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
-      const imagePath = `${folderPath}/${imageName}`;
-      const existingFile = this.app.vault.getAbstractFileByPath(imagePath);
-      if (existingFile instanceof TFile) {
-        await this.app.vault.modifyBinary(existingFile, imageArrayBuffer);
-      } else {
-        await this.app.vault.createBinary(imagePath, imageArrayBuffer);
+      let imagePath = `${folderPath}/${imageName}`;
+      let counter = 1;
+
+      // Keep incrementing counter until we find a filename that doesn't exist
+      while (await this.app.vault.adapter.exists(imagePath)) {
+        const nameWithoutExt = imageName.substring(
+          0,
+          imageName.lastIndexOf(".")
+        );
+        const ext = imageName.substring(imageName.lastIndexOf("."));
+        imagePath = `${folderPath}/${nameWithoutExt}_${counter}${ext}`;
+        counter++;
       }
+
+      await this.app.vault.createBinary(imagePath, imageArrayBuffer);
     }
   }
 

@@ -84,10 +84,15 @@ export class AIService implements AIServiceInterface {
 
   async getModels(): Promise<Model[]> {
     const allModels: Model[] = [];
-    for (const provider of Object.values(this.services)) {
+    for (const [providerKey, provider] of Object.entries(this.services)) {
       if (provider) {
-        const models = await provider.getModels();
-        allModels.push(...models);
+        try {
+          const models = await provider.getModels();
+          allModels.push(...models);
+        } catch (error) {
+          console.warn(`Failed to fetch models from ${providerKey}:`, error);
+          // Continue with other providers instead of failing completely
+        }
       }
     }
     return allModels;
