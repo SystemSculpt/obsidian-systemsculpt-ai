@@ -27,6 +27,11 @@ export async function sendMessage(
   if (messageText === "") return;
 
   const modelId = brainModule.settings.defaultModelId;
+
+  const userMessage = new ChatMessage("user", messageText);
+  addMessage(userMessage);
+  inputEl.value = "";
+
   const messageHistory = await constructMessageHistory();
 
   if (
@@ -43,10 +48,6 @@ export async function sendMessage(
     );
     return;
   }
-
-  const userMessage = new ChatMessage("user", messageText);
-  addMessage(userMessage);
-  inputEl.value = "";
 
   if (!chatFile) {
     chatFile = await createChatFile(messageText);

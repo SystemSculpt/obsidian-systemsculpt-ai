@@ -1,19 +1,22 @@
-import { ChatGroq } from "@langchain/groq";
+import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
 import { requestUrl } from "obsidian";
 
 export class GroqAIProvider extends BaseAIProvider {
-  private llm: ChatGroq;
+  private llm: ChatOpenAI;
 
   constructor(
     apiKey: string,
     _endpoint: string,
     settings: { temperature: number }
   ) {
-    super(apiKey, "https://api.groq.com/openai/v1", "groq", settings);
-    this.llm = new ChatGroq({
-      apiKey: apiKey,
+    super(apiKey, "https://api.groq.com", "groq", settings);
+    this.llm = new ChatOpenAI({
+      openAIApiKey: apiKey,
+      configuration: {
+        baseURL: "https://api.groq.com/openai/v1",
+      },
       temperature: settings.temperature,
     });
   }
@@ -24,11 +27,14 @@ export class GroqAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    const llm = new ChatGroq({
-      apiKey: this.apiKey,
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
       modelName: modelId,
       maxTokens: maxOutputTokens,
       temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://api.groq.com/openai/v1",
+      },
     });
 
     const response = await llm.invoke([
@@ -47,15 +53,25 @@ export class GroqAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatGroq({
-      apiKey: this.apiKey,
+    console.log("Groq API Request Data (Single Message):", {
+      systemPrompt,
+      userMessage,
+      modelId,
+      maxOutputTokens,
+    });
+
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
       streaming: true,
       temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://api.groq.com/openai/v1",
+      },
       callbacks: [
         {
           handleLLMNewToken(token: string) {
+            console.log("Groq Streaming Token:", token);
             if (!abortSignal?.aborted) {
               callback(token);
             }
@@ -64,10 +80,11 @@ export class GroqAIProvider extends BaseAIProvider {
       ],
     });
 
-    await llm.invoke([
+    const response = await llm.invoke([
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
     ]);
+    console.log("Groq Full Response:", response);
   }
 
   async createStreamingConversationWithCallback(
@@ -78,15 +95,25 @@ export class GroqAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const llm = new ChatGroq({
-      apiKey: this.apiKey,
+    console.log("Groq API Request Data (Conversation):", {
+      systemPrompt,
+      messages,
+      modelId,
+      maxOutputTokens,
+    });
+
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
       streaming: true,
       temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://api.groq.com/openai/v1",
+      },
       callbacks: [
         {
           handleLLMNewToken(token: string) {
+            console.log("Groq Streaming Token:", token);
             if (!abortSignal?.aborted) {
               callback(token);
             }
@@ -95,54 +122,55 @@ export class GroqAIProvider extends BaseAIProvider {
       ],
     });
 
-    await llm.invoke([{ role: "system", content: systemPrompt }, ...messages]);
+    const formattedMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages.map((msg) => ({
+        role: msg.role === "ai" ? "assistant" : msg.role,
+        content: msg.content,
+      })),
+    ];
+
+    console.log("Groq Formatted Messages:", formattedMessages);
+
+    const response = await llm.invoke(formattedMessages);
+    console.log("Groq Full Response:", response);
+  }
+
+  protected async getModelsImpl(): Promise<Model[]> {
+    try {
+      const response = await requestUrl({
+        url: "https://api.groq.com/openai/v1/models",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
+      }
+
+      return response.json.data.map((model: any) => ({
+        id: model.id,
+        name: model.id,
+        provider: "groq",
+      }));
+    } catch (error) {
+      console.error("GroqAIProvider Error in getModelsImpl:", error);
+      return [];
+    }
   }
 
   static async validateApiKey(apiKey: string): Promise<boolean> {
     try {
-      const llm = new ChatGroq({ apiKey });
-      await llm.invoke([{ role: "user", content: "test" }]);
-      return true;
+      const response = await requestUrl({
+        url: "https://api.groq.com/openai/v1/models",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+      return response.status === 200;
     } catch {
       return false;
     }
-  }
-
-  protected async getModelsImpl(): Promise<Model[]> {
-    if (!this.hasValidApiKey()) return [];
-
-    const filteredWords = [
-      "whisper",
-      "llava",
-      "tool-use",
-      "mixtral-8x7b",
-      "llama2-70b",
-      "gemma-7b",
-      "gemma-2b",
-    ];
-
-    const response = await requestUrl({
-      url: `${this.endpoint}/models`,
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-    });
-
-    return response.json.data
-      .filter(
-        (model: any) =>
-          !filteredWords.some((word) => model.id.toLowerCase().includes(word))
-      )
-      .map((model: any) => ({
-        id: model.id,
-        name: model.id,
-        provider: "groq",
-        contextLength: model.context_window,
-        pricing: {
-          prompt: 0.0001,
-          completion: 0.0002,
-        },
-      }));
   }
 }

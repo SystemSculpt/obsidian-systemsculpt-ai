@@ -212,7 +212,6 @@ export class LocalAIProvider extends BaseAIProvider {
       // Validate endpoint is reachable first
       const testResponse = await fetch(this.endpoint, {
         method: "HEAD",
-        timeout: 5000,
       }).catch(() => null);
 
       if (!testResponse?.ok) {

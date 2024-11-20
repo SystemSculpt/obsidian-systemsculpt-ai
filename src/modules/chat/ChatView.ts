@@ -674,15 +674,20 @@ export class ChatView extends ItemView {
         | { type: string; text?: string; image_url?: { url: string } }[];
     }[]
   > {
+    // Get existing messages
     const messageHistory = this.chatMessages.map((msg) => ({
-      role: msg.role,
+      role: msg.role === "ai" ? "assistant" : msg.role,
       content: msg.text,
     }));
 
+    // Get context files content
     const contextFilesContent = await this.tokenManager.getContextFilesContent(
       this.contextFiles
     );
 
+    const history = [];
+
+    // Add context files if they exist
     if (contextFilesContent.text || contextFilesContent.images.length > 0) {
       const userContent: {
         type: string;
@@ -706,13 +711,16 @@ export class ChatView extends ItemView {
         });
       });
 
-      messageHistory.unshift({
+      history.push({
         role: "user",
         content: userContent as unknown as string,
       });
     }
 
-    return messageHistory;
+    // Add existing message history
+    history.push(...messageHistory);
+
+    return history;
   }
 
   showLoading() {
