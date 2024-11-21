@@ -95,12 +95,29 @@ export class GroqAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    console.log("Groq API Request Data (Conversation):", {
-      systemPrompt,
-      messages,
-      modelId,
-      maxOutputTokens,
-    });
+    const hasImages = messages.some(
+      (msg) =>
+        Array.isArray(msg.content) &&
+        msg.content.some((c) => c.type === "image_url")
+    );
+
+    const formattedMessages = hasImages
+      ? [
+          { role: "user", content: systemPrompt },
+          ...messages.map((msg) => ({
+            role: msg.role === "ai" ? "assistant" : msg.role,
+            content: msg.content,
+          })),
+        ]
+      : [
+          { role: "system", content: systemPrompt },
+          ...messages.map((msg) => ({
+            role: msg.role === "ai" ? "assistant" : msg.role,
+            content: msg.content,
+          })),
+        ];
+
+    console.log("Groq Formatted Messages:", formattedMessages);
 
     const llm = new ChatOpenAI({
       openAIApiKey: this.apiKey,
@@ -113,7 +130,6 @@ export class GroqAIProvider extends BaseAIProvider {
       callbacks: [
         {
           handleLLMNewToken(token: string) {
-            console.log("Groq Streaming Token:", token);
             if (!abortSignal?.aborted) {
               callback(token);
             }
@@ -121,16 +137,6 @@ export class GroqAIProvider extends BaseAIProvider {
         },
       ],
     });
-
-    const formattedMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((msg) => ({
-        role: msg.role === "ai" ? "assistant" : msg.role,
-        content: msg.content,
-      })),
-    ];
-
-    console.log("Groq Formatted Messages:", formattedMessages);
 
     const response = await llm.invoke(formattedMessages);
     console.log("Groq Full Response:", response);
@@ -149,11 +155,23 @@ export class GroqAIProvider extends BaseAIProvider {
         throw new Error(`Failed to fetch models: ${response.status}`);
       }
 
-      return response.json.data.map((model: any) => ({
-        id: model.id,
-        name: model.id,
-        provider: "groq",
-      }));
+      return response.json.data
+        .filter((model: any) => {
+          const modelId = model.id.toLowerCase();
+          return (
+            !modelId.includes("whisper") &&
+            !modelId.includes("tool-use") &&
+            !modelId.includes("llava") &&
+            !modelId.includes("guard")
+          );
+        })
+        .map((model: any) => ({
+          id: model.id,
+          name: model.id,
+          contextLength: model.context_window,
+          provider: "groq",
+        }))
+        .sort((a: Model, b: Model) => a.id.localeCompare(b.id));
     } catch (error) {
       console.error("GroqAIProvider Error in getModelsImpl:", error);
       return [];
