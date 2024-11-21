@@ -1,6 +1,8 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
+import { requestUrl } from "obsidian";
+import { Notice } from "obsidian";
 
 export class OpenRouterAIProvider extends BaseAIProvider {
   private llm: ChatOpenAI;
@@ -10,14 +12,14 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     _endpoint: string,
     settings: { temperature: number }
   ) {
-    super(apiKey, "https://openrouter.ai/api/v1", "openRouter", settings);
+    super(apiKey, "https://openrouter.ai/api", "openRouter", settings);
     this.llm = new ChatOpenAI({
       openAIApiKey: apiKey,
       configuration: {
         baseURL: "https://openrouter.ai/api/v1",
         defaultHeaders: {
-          "HTTP-Referer": "https://SystemSculpt.com",
-          "X-Title": "SystemSculpt AI for Obsidian",
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
         },
       },
       temperature: settings.temperature,
@@ -30,34 +32,26 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     modelId: string,
     maxOutputTokens: number
   ): Promise<string> {
-    try {
-      const llm = new ChatOpenAI({
-        openAIApiKey: this.apiKey,
-        modelName: modelId,
-        maxTokens: maxOutputTokens,
-        temperature: this.settings.temperature,
-        configuration: {
-          baseURL: this.endpoint,
-          defaultHeaders: {
-            "HTTP-Referer": "https://SystemSculpt.com",
-            "X-Title": "SystemSculpt AI for Obsidian",
-          },
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
+      modelName: modelId,
+      maxTokens: maxOutputTokens,
+      temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
         },
-      });
+      },
+    });
 
-      const response = await llm.invoke([
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ]);
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
 
-      return response.content.toString();
-    } catch (error) {
-      console.error(
-        "OpenRouterAIProvider Error in createChatCompletion:",
-        error
-      );
-      throw error;
-    }
+    return response.content.toString();
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -68,41 +62,33 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    try {
-      const llm = new ChatOpenAI({
-        openAIApiKey: this.apiKey,
-        modelName: modelId,
-        streaming: true,
-        temperature: this.settings.temperature,
-        configuration: {
-          baseURL: this.endpoint,
-          defaultHeaders: {
-            "HTTP-Referer": "https://SystemSculpt.com",
-            "X-Title": "SystemSculpt AI for Obsidian",
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
+      modelName: modelId,
+      streaming: true,
+      temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
+        },
+      },
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
           },
         },
-        callbacks: [
-          {
-            handleLLMNewToken(token: string) {
-              if (!abortSignal?.aborted) {
-                callback(token);
-              }
-            },
-          },
-        ],
-      });
+      ],
+    });
 
-      await llm.invoke([
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ]);
-    } catch (error) {
-      console.error(
-        "OpenRouterAIProvider Error in createStreamingChatCompletionWithCallback:",
-        error
-      );
-      throw error;
-    }
+    await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
   }
 
   async createStreamingConversationWithCallback(
@@ -118,125 +104,131 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    try {
-      const isO1Model = modelId.includes("o1-");
-      const streaming = !isO1Model;
+    const hasImages = messages.some(
+      (msg) =>
+        Array.isArray(msg.content) &&
+        msg.content.some((c) => c.type === "image_url")
+    );
 
-      // Simplify messages to basic format
-      const formattedMessages = [
-        {
-          role: this.shouldConvertSystemToUser(modelId) ? "user" : "system",
-          content: systemPrompt,
+    if (hasImages) {
+      const model = (await this.getModels()).find((m) => m.id === modelId);
+      if (!model?.supportsVision) {
+        new Notice(
+          "This model does not support image analysis. Please use a model with vision capabilities.",
+          15000
+        );
+        return;
+      }
+    }
+
+    const formattedMessages = hasImages
+      ? [
+          { role: "user", content: systemPrompt },
+          ...messages.map((msg) => ({
+            role: msg.role === "ai" ? "assistant" : msg.role,
+            content: msg.content,
+          })),
+        ]
+      : [
+          { role: "system", content: systemPrompt },
+          ...messages.map((msg) => ({
+            role: msg.role === "ai" ? "assistant" : msg.role,
+            content: msg.content,
+          })),
+        ];
+
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.apiKey,
+      modelName: modelId,
+      streaming: true,
+      temperature: this.settings.temperature,
+      configuration: {
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
         },
-        ...messages.map((msg) => ({
-          role: msg.role === "ai" ? "assistant" : msg.role,
-          content:
-            typeof msg.content === "string"
-              ? msg.content
-              : msg.content
-                  .map((c) => c.text || "")
-                  .filter(Boolean)
-                  .join(" "),
-        })),
-      ];
-
-      const llm = new ChatOpenAI({
-        openAIApiKey: this.apiKey,
-        modelName: modelId,
-        streaming,
-        temperature: this.settings.temperature,
-        configuration: {
-          baseURL: this.endpoint,
-          defaultHeaders: {
-            "HTTP-Referer": "https://SystemSculpt.com",
-            "X-Title": "SystemSculpt AI for Obsidian",
+      },
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
           },
         },
-        callbacks: streaming
-          ? [
-              {
-                handleLLMNewToken(token: string) {
-                  if (!abortSignal?.aborted) {
-                    callback(token);
-                  }
-                },
-              },
-            ]
-          : undefined,
-      });
+      ],
+    });
 
-      const response = await llm.invoke(formattedMessages);
-
-      if (!streaming && response.content) {
-        callback(response.content.toString());
-      }
+    try {
+      await llm.invoke(formattedMessages);
     } catch (error) {
-      console.error(
-        "OpenRouterAIProvider Error in createStreamingConversationWithCallback:",
-        error
-      );
+      console.error("Error in OpenRouter streaming conversation:", error);
+      if (
+        error instanceof Error &&
+        error.message?.includes("content must be a string")
+      ) {
+        new Notice(
+          "This model does not support image analysis. Please use a model with vision capabilities.",
+          15000
+        );
+      }
       throw error;
     }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/models", {
+      const response = await requestUrl({
+        url: "https://openrouter.ai/api/v1/models",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
-          "HTTP-Referer": "https://SystemSculpt.com",
-          "X-Title": "SystemSculpt AI for Obsidian",
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
         },
       });
 
-      if (!response.ok) {
+      if (response.status !== 200) {
         throw new Error(`Failed to fetch models: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data.data.map((model: any) => ({
-        id: model.id,
-        name: model.name || model.id,
-        provider: "openRouter",
-        contextLength: model.context_length,
-        maxOutputTokens: model.context_length,
-        pricing: {
-          prompt: model.pricing?.prompt || 0,
-          completion: model.pricing?.completion || 0,
-        },
-      }));
+      return response.json.data
+        .filter((model: any) => model.context_length > 0)
+        .map((model: any) => ({
+          id: model.id,
+          name: model.name || model.id,
+          contextLength: model.context_length,
+          maxOutputTokens: Math.floor(model.context_length / 2),
+          provider: "openRouter",
+          supportsVision: model.architecture?.modality?.includes("image"),
+          pricing: {
+            prompt: model.pricing?.prompt || 0,
+            completion: model.pricing?.completion || 0,
+          },
+        }))
+        .sort(
+          (a: Model, b: Model) =>
+            (b.contextLength || 0) - (a.contextLength || 0)
+        );
     } catch (error) {
       console.error("OpenRouterAIProvider Error in getModelsImpl:", error);
-      throw error;
+      return [];
     }
   }
 
   static async validateApiKey(apiKey: string): Promise<boolean> {
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/models", {
+      const response = await requestUrl({
+        url: "https://openrouter.ai/api/v1/models",
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          "HTTP-Referer": "https://SystemSculpt.com",
-          "X-Title": "SystemSculpt AI for Obsidian",
+          "HTTP-Referer": "https://obsidian.md",
+          "X-Title": "Obsidian",
         },
       });
       return response.status === 200;
-    } catch (error) {
-      console.error("OpenRouterAIProvider Error in validateApiKey:", error);
+    } catch {
       return false;
     }
-  }
-
-  async getModelById(modelId: string): Promise<Model> {
-    const models = await this.getModelsImpl();
-    const model = models.find((m) => m.id === modelId);
-    if (!model) {
-      throw new Error(`Model with ID ${modelId} not found.`);
-    }
-    return model;
-  }
-
-  private shouldConvertSystemToUser(modelId: string): boolean {
-    return modelId.includes("o1-");
   }
 }

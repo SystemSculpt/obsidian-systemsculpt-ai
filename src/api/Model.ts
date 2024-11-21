@@ -13,6 +13,7 @@ export interface Model {
   contextLength?: number;
   favorite?: boolean;
   maxOutputTokens?: number;
+  supportsVision?: boolean;
   pricing: {
     prompt: number;
     completion: number;

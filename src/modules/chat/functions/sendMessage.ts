@@ -33,41 +33,51 @@ export async function sendMessage(
   inputEl.value = "";
 
   const messageHistory = await constructMessageHistory();
-
-  if (
-    modelId.includes("haiku") &&
-    messageHistory.some(
-      (msg) =>
-        Array.isArray(msg.content) &&
-        msg.content.some((c) => c.type === "image_url")
-    )
-  ) {
-    new Notice(
-      "Claude 3.5 Haiku does not support image analysis. Please use Claude 3.5 Sonnet or Claude 3 Opus for image-related tasks.",
-      15000
-    );
-    return;
-  }
-
   const modelInfo = await brainModule.getModelById(modelId);
-  if (
-    modelInfo?.provider === "groq" &&
-    !modelId.toLowerCase().includes("vision") &&
-    messageHistory.some(
-      (msg) =>
-        Array.isArray(msg.content) &&
-        msg.content.some((c) => c.type === "image_url")
-    )
-  ) {
-    new Notice(
-      "This Groq model does not support image analysis. Please use a model with vision capabilities.",
-      15000
-    );
-    inputEl.value = messageText;
-    inputEl.focus();
-    inputEl.selectionStart = inputEl.value.length;
-    inputEl.selectionEnd = inputEl.value.length;
-    return;
+
+  // Check for image content
+  const hasImages = messageHistory.some(
+    (msg) =>
+      Array.isArray(msg.content) &&
+      msg.content.some((c) => c.type === "image_url")
+  );
+
+  // Vision capability checks for different providers
+  if (hasImages) {
+    if (modelInfo?.provider === "openRouter" && !modelInfo?.supportsVision) {
+      new Notice(
+        "This model does not support image analysis. Please use a model with vision capabilities.",
+        15000
+      );
+      inputEl.value = messageText;
+      inputEl.focus();
+      inputEl.selectionStart = inputEl.value.length;
+      inputEl.selectionEnd = inputEl.value.length;
+      return;
+    }
+
+    if (
+      modelInfo?.provider === "groq" &&
+      !modelId.toLowerCase().includes("vision")
+    ) {
+      new Notice(
+        "This Groq model does not support image analysis. Please use a model with vision capabilities.",
+        15000
+      );
+      inputEl.value = messageText;
+      inputEl.focus();
+      inputEl.selectionStart = inputEl.value.length;
+      inputEl.selectionEnd = inputEl.value.length;
+      return;
+    }
+
+    if (modelId.includes("haiku")) {
+      new Notice(
+        "Claude 3.5 Haiku does not support image analysis. Please use Claude 3.5 Sonnet or Claude 3 Opus for image-related tasks.",
+        15000
+      );
+      return;
+    }
   }
 
   if (!chatFile) {
