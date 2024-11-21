@@ -49,6 +49,27 @@ export async function sendMessage(
     return;
   }
 
+  const modelInfo = await brainModule.getModelById(modelId);
+  if (
+    modelInfo?.provider === "groq" &&
+    !modelId.toLowerCase().includes("vision") &&
+    messageHistory.some(
+      (msg) =>
+        Array.isArray(msg.content) &&
+        msg.content.some((c) => c.type === "image_url")
+    )
+  ) {
+    new Notice(
+      "This Groq model does not support image analysis. Please use a model with vision capabilities.",
+      15000
+    );
+    inputEl.value = messageText;
+    inputEl.focus();
+    inputEl.selectionStart = inputEl.value.length;
+    inputEl.selectionEnd = inputEl.value.length;
+    return;
+  }
+
   if (!chatFile) {
     chatFile = await createChatFile(messageText);
   } else {
@@ -105,7 +126,6 @@ export async function sendMessage(
     }
   });
 
-  const modelInfo = await brainModule.getModelById(modelId);
   const modelName = modelInfo ? modelInfo.name : modelId;
 
   try {

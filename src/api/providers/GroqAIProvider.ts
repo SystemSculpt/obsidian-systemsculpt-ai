@@ -2,7 +2,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
 import { requestUrl } from "obsidian";
-
+import { Notice } from "obsidian";
 export class GroqAIProvider extends BaseAIProvider {
   private llm: ChatOpenAI;
 
@@ -89,7 +89,12 @@ export class GroqAIProvider extends BaseAIProvider {
 
   async createStreamingConversationWithCallback(
     systemPrompt: string,
-    messages: { role: string; content: string }[],
+    messages: {
+      role: string;
+      content:
+        | string
+        | { type: string; text?: string; image_url?: { url: string } }[];
+    }[],
     modelId: string,
     maxOutputTokens: number,
     callback: (chunk: string) => void,
@@ -100,6 +105,14 @@ export class GroqAIProvider extends BaseAIProvider {
         Array.isArray(msg.content) &&
         msg.content.some((c) => c.type === "image_url")
     );
+
+    if (hasImages && !modelId.toLowerCase().includes("vision")) {
+      new Notice(
+        "This Groq model does not support image analysis. Please use a model with vision capabilities.",
+        15000
+      );
+      return;
+    }
 
     const formattedMessages = hasImages
       ? [
@@ -138,8 +151,22 @@ export class GroqAIProvider extends BaseAIProvider {
       ],
     });
 
-    const response = await llm.invoke(formattedMessages);
-    console.log("Groq Full Response:", response);
+    try {
+      const response = await llm.invoke(formattedMessages);
+      console.log("Groq Full Response:", response);
+    } catch (error) {
+      console.error("Error in Groq streaming conversation:", error);
+      if (
+        error instanceof Error &&
+        error.message?.includes("content must be a string")
+      ) {
+        new Notice(
+          "This Groq model does not support image analysis. Please use a model with vision capabilities.",
+          15000
+        );
+      }
+      throw error;
+    }
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
