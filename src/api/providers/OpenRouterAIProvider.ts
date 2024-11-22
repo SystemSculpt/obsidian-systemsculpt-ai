@@ -18,8 +18,8 @@ export class OpenRouterAIProvider extends BaseAIProvider {
       configuration: {
         baseURL: "https://openrouter.ai/api/v1",
         defaultHeaders: {
-          "HTTP-Referer": "https://obsidian.md",
-          "X-Title": "Obsidian",
+          "HTTP-Referer": "https://SystemSculpt.com",
+          "X-Title": "SystemSculpt",
         },
       },
       temperature: settings.temperature,
@@ -40,8 +40,8 @@ export class OpenRouterAIProvider extends BaseAIProvider {
       configuration: {
         baseURL: "https://openrouter.ai/api/v1",
         defaultHeaders: {
-          "HTTP-Referer": "https://obsidian.md",
-          "X-Title": "Obsidian",
+          "HTTP-Referer": "https://SystemSculpt.com",
+          "X-Title": "SystemSculpt",
         },
       },
     });
@@ -70,8 +70,8 @@ export class OpenRouterAIProvider extends BaseAIProvider {
       configuration: {
         baseURL: "https://openrouter.ai/api/v1",
         defaultHeaders: {
-          "HTTP-Referer": "https://obsidian.md",
-          "X-Title": "Obsidian",
+          "HTTP-Referer": "https://SystemSculpt.com",
+          "X-Title": "SystemSculpt",
         },
       },
       callbacks: [
