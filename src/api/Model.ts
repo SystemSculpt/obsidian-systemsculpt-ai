@@ -12,7 +12,6 @@ export interface Model {
   provider: AIProvider;
   contextLength?: number;
   favorite?: boolean;
-  maxOutputTokens?: number;
   supportsVision?: boolean;
   pricing: {
     prompt: number;
@@ -24,15 +23,13 @@ export interface AIServiceInterface {
   createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string>;
 
   createStreamingChatCompletionWithCallback(
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void>;
@@ -41,7 +38,6 @@ export interface AIServiceInterface {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void>;

@@ -5,9 +5,6 @@ import { LocalAIProvider } from "./providers/LocalAIProvider";
 import { AnthropicAIProvider } from "./providers/AnthropicAIProvider";
 import { Model, AIProvider, AIServiceInterface } from "./Model";
 import { BaseAIProvider } from "./providers/BaseAIProvider";
-import { OpenAI } from "@langchain/openai";
-import { ChatOpenAI } from "@langchain/openai";
-import { BrainSettings } from "../modules/brain/settings/BrainSettings";
 import { AIProviderKey, AIProviderServices, providerKeyMap } from "./types";
 
 type AIProviderType =
@@ -158,23 +155,16 @@ export class AIService implements AIServiceInterface {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const provider = await this.getProviderForModel(modelId);
-    return provider.createChatCompletion(
-      systemPrompt,
-      userMessage,
-      modelId,
-      maxOutputTokens
-    );
+    return provider.createChatCompletion(systemPrompt, userMessage, modelId);
   }
 
   async createStreamingChatCompletionWithCallback(
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     onData: (chunk: string) => void,
     abortSignal: AbortSignal
   ): Promise<void> {
@@ -183,7 +173,6 @@ export class AIService implements AIServiceInterface {
       systemPrompt,
       userMessage,
       modelId,
-      maxOutputTokens,
       onData,
       abortSignal
     );
@@ -193,7 +182,6 @@ export class AIService implements AIServiceInterface {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -202,7 +190,6 @@ export class AIService implements AIServiceInterface {
       systemPrompt,
       messages,
       modelId,
-      maxOutputTokens,
       callback,
       abortSignal
     );

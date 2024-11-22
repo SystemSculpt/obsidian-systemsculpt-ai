@@ -24,13 +24,11 @@ export class GroqAIProvider extends BaseAIProvider {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const llm = new ChatOpenAI({
       openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
       temperature: this.settings.temperature,
       configuration: {
         baseURL: "https://api.groq.com/openai/v1",
@@ -49,7 +47,6 @@ export class GroqAIProvider extends BaseAIProvider {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -57,7 +54,6 @@ export class GroqAIProvider extends BaseAIProvider {
       systemPrompt,
       userMessage,
       modelId,
-      maxOutputTokens,
     });
 
     const llm = new ChatOpenAI({
@@ -96,7 +92,6 @@ export class GroqAIProvider extends BaseAIProvider {
         | { type: string; text?: string; image_url?: { url: string } }[];
     }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {

@@ -70,11 +70,6 @@ export class BrainModule extends EventEmitter implements IGenerationModule {
     return this.AIService;
   }
 
-  getMaxOutputTokens(): number {
-    const currentModel = this.getCurrentModel();
-    return currentModel?.maxOutputTokens || 4096;
-  }
-
   public async load() {
     const startTime = performance.now();
     if (this.isInitialized) return;

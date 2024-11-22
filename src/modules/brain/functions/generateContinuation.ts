@@ -42,7 +42,6 @@ export async function generateContinuation(
     plugin.settings.generalGenerationPrompt,
     noteContent,
     model.id,
-    model.maxOutputTokens || 4096,
     (chunk: string) => {
       if (abortSignal.aborted) return;
       accumulatedResponse += chunk;

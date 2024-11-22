@@ -64,8 +64,7 @@ export class UnifiedAIService implements AIServiceInterface {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const messages = this.shouldConvertSystemToUser(modelId)
       ? [
@@ -113,7 +112,6 @@ export class UnifiedAIService implements AIServiceInterface {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -124,7 +122,6 @@ export class UnifiedAIService implements AIServiceInterface {
       systemPrompt,
       userMessage,
       modelId,
-      maxOutputTokens,
       callback,
       abortSignal
     );
@@ -139,7 +136,6 @@ export class UnifiedAIService implements AIServiceInterface {
         | { type: string; text?: string; image_url?: { url: string } }[];
     }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -161,7 +157,6 @@ export class UnifiedAIService implements AIServiceInterface {
       systemPrompt,
       simplifiedMessages,
       modelId,
-      maxOutputTokens,
       callback,
       abortSignal
     );
@@ -230,7 +225,6 @@ export class UnifiedAIService implements AIServiceInterface {
         name: model.id,
         provider: "local" as AIProvider,
         contextLength: model.context_window || undefined,
-        maxOutputTokens: model.context_window || 4096,
         pricing: { prompt: 0, completion: 0 },
       }));
     } else if (this.provider === "groq") {

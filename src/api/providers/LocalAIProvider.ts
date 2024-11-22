@@ -46,8 +46,7 @@ export class LocalAIProvider extends BaseAIProvider {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     if (this.isOllama) {
       const llm = new ChatOllama({
@@ -65,7 +64,6 @@ export class LocalAIProvider extends BaseAIProvider {
       const llm = new ChatOpenAI({
         openAIApiKey: "not-needed",
         modelName: modelId,
-        maxTokens: maxOutputTokens,
         temperature: this.settings.temperature,
         configuration: {
           baseURL: this.endpoint,
@@ -86,7 +84,6 @@ export class LocalAIProvider extends BaseAIProvider {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -122,7 +119,6 @@ export class LocalAIProvider extends BaseAIProvider {
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
-          max_tokens: maxOutputTokens,
           temperature: this.settings.temperature,
           stream: true,
         }),
@@ -148,7 +144,6 @@ export class LocalAIProvider extends BaseAIProvider {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -175,7 +170,6 @@ export class LocalAIProvider extends BaseAIProvider {
       const llm = new ChatOpenAI({
         openAIApiKey: "not-needed",
         modelName: modelId,
-        maxTokens: maxOutputTokens,
         streaming: true,
         temperature: this.settings.temperature,
         configuration: {

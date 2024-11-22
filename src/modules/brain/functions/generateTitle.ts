@@ -31,8 +31,7 @@ export async function generateTitle(
     const generatedTitle = await plugin.AIService.createChatCompletion(
       systemPrompt,
       userMessage,
-      model.id,
-      model.maxOutputTokens || 4096
+      model.id
     );
 
     return sanitizeFileName(generatedTitle.trim());

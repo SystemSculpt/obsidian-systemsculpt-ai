@@ -87,7 +87,6 @@ export async function sendMessage(
   }
 
   const aiService = brainModule.AIService;
-  const maxOutputTokens = brainModule.getMaxOutputTokens();
 
   const systemPrompt = chatModule.settings.systemPrompt;
 
@@ -108,10 +107,12 @@ export async function sendMessage(
           if (line.startsWith("### ") && line.endsWith(".pdf")) {
             const pdfFileName = line.slice(4, -4);
             const extractedFolder = `${chatModule.settings.attachmentsPath}/${pdfFileName}`;
+            // @ts-ignore
             const extractedMarkdownFile = app.vault.getAbstractFileByPath(
               `${extractedFolder}/extracted_content.md`
             );
             if (extractedMarkdownFile instanceof TFile) {
+              // @ts-ignore
               const content = await app.vault.read(extractedMarkdownFile);
               return `### ${pdfFileName} (Extracted Content)\n${content}`;
             }
@@ -144,7 +145,6 @@ export async function sendMessage(
       systemPrompt,
       updatedMessageHistory,
       modelId,
-      maxOutputTokens,
       async (chunk: string) => {
         accumulatedResponse += chunk;
         appendToLastMessage(chunk);

@@ -19,7 +19,6 @@ export interface FrontMatter {
   name: string;
   description: string;
   model: string;
-  maxOutputTokens?: number;
   tags: string[];
   prompt: string;
 }
@@ -56,12 +55,6 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
         name: frontMatter.name || "",
         description: frontMatter.description || "",
         model: frontMatter.model || "default",
-        maxOutputTokens:
-          frontMatter["max tokens"] ||
-          frontMatter["max_tokens"] ||
-          frontMatter["max output tokens"] ||
-          frontMatter["max_output_tokens"] ||
-          undefined,
         tags:
           typeof frontMatter.tags === "string"
             ? frontMatter.tags.split(",").map((tag: string) => tag.trim())
@@ -76,7 +69,6 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       name: "",
       description: "",
       model: "",
-      maxOutputTokens: 0,
       tags: [],
       prompt: "",
     };
@@ -310,7 +302,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       new BlankTemplateModal(this.plugin).open();
       this.plugin.isGenerationCompleted = false;
     } else {
-      let { model, maxOutputTokens, prompt } = item.frontMatter;
+      let { model, prompt } = item.frontMatter;
 
       if (model === "default") {
         model = this.plugin.plugin.brainModule.settings.defaultModelId;
@@ -362,7 +354,6 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
             promptWithoutFrontmatter,
             noteContent,
             modelInstance.id,
-            maxOutputTokens || 0,
             (chunk: string) => {
               if (signal.aborted) {
                 return;
@@ -425,7 +416,7 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
     el: HTMLElement
   ): Promise<void> {
     const frontMatter = await this.parseFrontMatter(templateFile);
-    const { name, description, model, maxOutputTokens, tags } = frontMatter;
+    const { name, description, model, tags } = frontMatter;
 
     el.empty();
 
@@ -447,11 +438,6 @@ export class TemplatesSuggest extends EditorSuggest<TemplateItem> {
       cls: "systemsculpt-template-meta-item",
     });
     modelEl.textContent = model === "default" ? "current" : model;
-
-    const maxOutputTokensEl = metaEl.createEl("span", {
-      cls: "systemsculpt-template-meta-item",
-    });
-    maxOutputTokensEl.textContent = `${maxOutputTokens} max`;
 
     const tagsContainer = metaEl.createEl("div", {
       cls: "systemsculpt-template-tags",

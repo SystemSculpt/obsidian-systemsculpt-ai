@@ -497,12 +497,6 @@ export class TemplatesModule implements IGenerationModule {
         name: frontMatter.name || "",
         description: frontMatter.description || "",
         model: frontMatter.model || "default",
-        maxOutputTokens:
-          frontMatter["max tokens"] ||
-          frontMatter["max_tokens"] ||
-          frontMatter["max output tokens"] ||
-          frontMatter["max_output_tokens"] ||
-          undefined,
         tags:
           typeof frontMatter.tags === "string"
             ? frontMatter.tags.split(",").map((tag: string) => tag.trim())
@@ -519,7 +513,6 @@ export class TemplatesModule implements IGenerationModule {
       name: "",
       description: "",
       model: "default",
-      maxOutputTokens: undefined,
       tags: [],
       prompt: content,
     };

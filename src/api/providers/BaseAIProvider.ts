@@ -23,15 +23,13 @@ export abstract class BaseAIProvider {
   abstract createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string>;
 
   abstract createStreamingChatCompletionWithCallback(
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void>;
@@ -40,7 +38,6 @@ export abstract class BaseAIProvider {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void>;

@@ -199,8 +199,7 @@ async function postProcessTranscription(
       await plugin.plugin.brainModule.AIService.createChatCompletion(
         systemPrompt,
         userMessage,
-        model.id,
-        model.maxOutputTokens || 4096
+        model.id
       );
 
     return processedTranscription.trim();

@@ -29,13 +29,11 @@ export class OpenRouterAIProvider extends BaseAIProvider {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const llm = new ChatOpenAI({
       openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
       temperature: this.settings.temperature,
       configuration: {
         baseURL: "https://openrouter.ai/api/v1",
@@ -58,7 +56,6 @@ export class OpenRouterAIProvider extends BaseAIProvider {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -100,7 +97,6 @@ export class OpenRouterAIProvider extends BaseAIProvider {
         | { type: string; text?: string; image_url?: { url: string } }[];
     }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -198,7 +194,6 @@ export class OpenRouterAIProvider extends BaseAIProvider {
           id: model.id,
           name: model.name || model.id,
           contextLength: model.context_length,
-          maxOutputTokens: Math.floor(model.context_length / 2),
           provider: "openRouter",
           supportsVision: model.architecture?.modality?.includes("image"),
           pricing: {

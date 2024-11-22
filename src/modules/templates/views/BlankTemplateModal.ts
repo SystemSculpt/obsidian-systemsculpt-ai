@@ -342,15 +342,11 @@ export class BlankTemplateModal extends Modal {
           return;
         }
 
-        const maxOutputTokens =
-          this.plugin.plugin.brainModule.getMaxOutputTokens();
-
         try {
           await this.plugin.AIService.createStreamingChatCompletionWithCallback(
             this.plugin.settings.blankTemplatePrompt + postSystemPrompt,
             `${userPrompt}\n\n${contextPrompt}`,
             modelInstance.id,
-            maxOutputTokens,
             (chunk: string) => {
               if (signal.aborted) {
                 return;

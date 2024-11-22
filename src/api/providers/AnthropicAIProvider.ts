@@ -35,18 +35,24 @@ export class AnthropicAIProvider extends BaseAIProvider {
     });
   }
 
+  private getMaxTokensForModel(modelId: string): number {
+    if (modelId.includes("sonnet")) {
+      return 8192;
+    }
+    return 4096; // default for haiku and opus
+  }
+
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const response = await this.client.messages.create({
       model: modelId,
       messages: [{ role: "user", content: userMessage }],
       system: systemPrompt,
-      max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
+      max_tokens: this.getMaxTokensForModel(modelId),
     });
 
     return response.content[0].type === "text" ? response.content[0].text : "";
@@ -56,7 +62,6 @@ export class AnthropicAIProvider extends BaseAIProvider {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -64,9 +69,9 @@ export class AnthropicAIProvider extends BaseAIProvider {
       model: modelId,
       messages: [{ role: "user", content: userMessage }],
       system: systemPrompt,
-      max_tokens: maxOutputTokens,
       temperature: this.settings.temperature,
       stream: true,
+      max_tokens: this.getMaxTokensForModel(modelId),
     });
 
     for await (const chunk of stream) {
@@ -89,7 +94,6 @@ export class AnthropicAIProvider extends BaseAIProvider {
         | { type: string; text?: string; image_url?: { url: string } }[];
     }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -154,9 +158,9 @@ export class AnthropicAIProvider extends BaseAIProvider {
         model: modelId,
         messages: formattedMessages,
         system: systemPrompt,
-        max_tokens: maxOutputTokens,
         temperature: this.settings.temperature,
         stream: true,
+        max_tokens: this.getMaxTokensForModel(modelId),
       });
 
       for await (const chunk of stream) {
@@ -180,7 +184,6 @@ export class AnthropicAIProvider extends BaseAIProvider {
         name: "Claude 3.5 Haiku (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        maxOutputTokens: 4096,
         pricing: {
           prompt: 0.003,
           completion: 0.015,
@@ -191,7 +194,6 @@ export class AnthropicAIProvider extends BaseAIProvider {
         name: "Claude 3.5 Sonnet (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        maxOutputTokens: 4096,
         pricing: {
           prompt: 0.003,
           completion: 0.015,
@@ -202,7 +204,6 @@ export class AnthropicAIProvider extends BaseAIProvider {
         name: "Claude 3 Opus (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        maxOutputTokens: 4096,
         pricing: {
           prompt: 0.015,
           completion: 0.075,

@@ -28,8 +28,7 @@ export class OpenAIProvider extends BaseAIProvider {
   async createChatCompletion(
     systemPrompt: string,
     userMessage: string,
-    modelId: string,
-    maxOutputTokens: number
+    modelId: string
   ): Promise<string> {
     const messages = this.shouldConvertSystemToUser(modelId)
       ? [
@@ -47,7 +46,6 @@ export class OpenAIProvider extends BaseAIProvider {
       ...(this.shouldDisableTemperature(modelId)
         ? {}
         : {
-            maxTokens: maxOutputTokens,
             temperature: this.settings.temperature,
           }),
       configuration: {
@@ -63,7 +61,6 @@ export class OpenAIProvider extends BaseAIProvider {
     systemPrompt: string,
     userMessage: string,
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
@@ -84,7 +81,6 @@ export class OpenAIProvider extends BaseAIProvider {
       ...(this.shouldDisableTemperature(modelId)
         ? {}
         : {
-            maxTokens: maxOutputTokens,
             temperature: this.settings.temperature,
           }),
       configuration: {
@@ -166,23 +162,11 @@ export class OpenAIProvider extends BaseAIProvider {
         "gpt-4": 8192,
       };
 
-      const maxOutputTokens: { [key: string]: number } = {
-        "gpt-4o": 16384,
-        "gpt-4o-mini": 16384,
-        "chatgpt-4o-latest": 16384,
-        "o1-preview": 32768,
-        "o1-mini": 65536,
-        "gpt-4-turbo": 4096,
-        "gpt-4": 8192,
-      };
-
       return sortedModels.map((model: any) => ({
         id: model.id,
         name: model.id,
         provider: "openai",
         contextLength: contextLengths[model.id] || model.context_length,
-        maxOutputTokens:
-          maxOutputTokens[model.id] || model.context_length || 4096,
         pricing: {
           prompt: 0.0001,
           completion: 0.0002,
@@ -230,7 +214,6 @@ export class OpenAIProvider extends BaseAIProvider {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     modelId: string,
-    maxOutputTokens: number,
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
