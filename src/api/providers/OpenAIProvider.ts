@@ -44,8 +44,12 @@ export class OpenAIProvider extends BaseAIProvider {
     const llm = new ChatOpenAI({
       openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
-      temperature: this.settings.temperature,
+      ...(this.shouldDisableTemperature(modelId)
+        ? {}
+        : {
+            maxTokens: maxOutputTokens,
+            temperature: this.settings.temperature,
+          }),
       configuration: {
         baseURL: this.endpoint,
       },
@@ -53,10 +57,6 @@ export class OpenAIProvider extends BaseAIProvider {
 
     const response = await llm.invoke(messages);
     return response.content.toString();
-  }
-
-  protected shouldDisableStreaming(modelId: string): boolean {
-    return modelId.includes("o1-");
   }
 
   async createStreamingChatCompletionWithCallback(
@@ -67,8 +67,6 @@ export class OpenAIProvider extends BaseAIProvider {
     callback: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const streaming = !this.shouldDisableStreaming(modelId);
-
     const messages = this.shouldConvertSystemToUser(modelId)
       ? [
           { role: "user", content: systemPrompt },
@@ -82,30 +80,28 @@ export class OpenAIProvider extends BaseAIProvider {
     const llm = new ChatOpenAI({
       openAIApiKey: this.apiKey,
       modelName: modelId,
-      maxTokens: maxOutputTokens,
-      streaming,
-      temperature: this.settings.temperature,
+      streaming: true,
+      ...(this.shouldDisableTemperature(modelId)
+        ? {}
+        : {
+            maxTokens: maxOutputTokens,
+            temperature: this.settings.temperature,
+          }),
       configuration: {
         baseURL: this.endpoint,
       },
-      callbacks: streaming
-        ? [
-            {
-              handleLLMNewToken(token: string) {
-                if (!abortSignal?.aborted) {
-                  callback(token);
-                }
-              },
-            },
-          ]
-        : undefined,
+      callbacks: [
+        {
+          handleLLMNewToken(token: string) {
+            if (!abortSignal?.aborted) {
+              callback(token);
+            }
+          },
+        },
+      ],
     });
 
-    const response = await llm.invoke(messages);
-
-    if (!streaming) {
-      callback(response.content.toString());
-    }
+    await llm.invoke(messages);
   }
 
   protected async getModelsImpl(): Promise<Model[]> {
@@ -239,7 +235,6 @@ export class OpenAIProvider extends BaseAIProvider {
     abortSignal?: AbortSignal
   ): Promise<void> {
     try {
-      const streaming = !this.shouldDisableStreaming(modelId);
       const formattedMessages = this.shouldConvertSystemToUser(modelId)
         ? [{ role: "user", content: systemPrompt }, ...messages]
         : [{ role: "system", content: systemPrompt }, ...messages];
@@ -247,31 +242,25 @@ export class OpenAIProvider extends BaseAIProvider {
       const llm = new ChatOpenAI({
         openAIApiKey: this.apiKey,
         modelName: modelId,
-        streaming,
+        streaming: true,
         ...(this.shouldDisableTemperature(modelId)
           ? {}
           : { temperature: this.settings.temperature }),
         configuration: {
           baseURL: this.endpoint,
         },
-        callbacks: streaming
-          ? [
-              {
-                handleLLMNewToken(token: string) {
-                  if (!abortSignal?.aborted) {
-                    callback(token);
-                  }
-                },
-              },
-            ]
-          : undefined,
+        callbacks: [
+          {
+            handleLLMNewToken(token: string) {
+              if (!abortSignal?.aborted) {
+                callback(token);
+              }
+            },
+          },
+        ],
       });
 
-      const response = await llm.invoke(formattedMessages);
-
-      if (!streaming) {
-        callback(response.content.toString());
-      }
+      await llm.invoke(formattedMessages);
     } catch (error) {
       console.error(
         "OpenAIProvider Error in createStreamingConversationWithCallback:",
