@@ -1,7 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { BaseAIProvider } from "./BaseAIProvider";
 import { Model } from "../Model";
-
+import { Notice } from "obsidian";
 export class OpenAIProvider extends BaseAIProvider {
   private llm: ChatOpenAI;
 
@@ -150,18 +150,18 @@ export class OpenAIProvider extends BaseAIProvider {
         "audio-preview",
       ];
 
-      const priorityOrder = [
-        "gpt-4o",
-        "gpt-4o-mini",
-        "chatgpt-4o-latest",
-        "o1-preview",
-        "o1-mini",
-        "gpt-4-turbo",
-        "gpt-4",
-      ];
+      const filteredModels = models.data.filter(
+        (model: any) =>
+          !filteredWords.some((word) => model.id.toLowerCase().includes(word))
+      );
+
+      const sortedModels = filteredModels.sort((a: any, b: any) =>
+        a.id.localeCompare(b.id)
+      );
 
       const contextLengths: { [key: string]: number } = {
         "gpt-4o": 128000,
+        "gpt-4o-2024-11-20": 128000,
         "gpt-4o-mini": 128000,
         "chatgpt-4o-latest": 128000,
         "o1-preview": 128000,
@@ -179,20 +179,6 @@ export class OpenAIProvider extends BaseAIProvider {
         "gpt-4-turbo": 4096,
         "gpt-4": 8192,
       };
-
-      const filteredModels = models.data.filter(
-        (model: any) =>
-          !filteredWords.some((word) => model.id.toLowerCase().includes(word))
-      );
-
-      const sortedModels = filteredModels.sort((a: any, b: any) => {
-        const aIndex = priorityOrder.findIndex((prefix) => a.id === prefix);
-        const bIndex = priorityOrder.findIndex((prefix) => b.id === prefix);
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-        if (aIndex !== -1) return -1;
-        if (bIndex !== -1) return 1;
-        return a.id.localeCompare(b.id);
-      });
 
       return sortedModels.map((model: any) => ({
         id: model.id,
@@ -291,6 +277,16 @@ export class OpenAIProvider extends BaseAIProvider {
         "OpenAIProvider Error in createStreamingConversationWithCallback:",
         error
       );
+      if (
+        error instanceof Error &&
+        (error.message?.includes("image_url is only supported") ||
+          error.message?.includes("Invalid content type"))
+      ) {
+        new Notice(
+          "This model does not support image analysis. Please use GPT-4o, GPT-4o-mini, or ChatGPT-4o-latest (to name a few) or another vision-capable model.",
+          15000
+        );
+      }
       throw error;
     }
   }
