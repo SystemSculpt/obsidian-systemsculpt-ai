@@ -87,8 +87,7 @@
   overflow: auto;
 }
 
-.systemsculpt-token-count,
-.systemsculpt-cost-estimate {
+.systemsculpt-token-count {
   font-size: 12px;
   background-color: var(--background-secondary);
   padding: 5px 10px;
@@ -114,8 +113,7 @@
     align-items: flex-end;
   }
 
-  .systemsculpt-token-count,
-  .systemsculpt-cost-estimate {
+  .systemsculpt-token-count {
     margin-left: 0;
   }
 }
@@ -195,8 +193,7 @@
   color: var(--text-muted);
 }
 
-.systemsculpt-token-count,
-.systemsculpt-cost-estimate {
+.systemsculpt-token-count {
   margin-right: 10px;
 }
 

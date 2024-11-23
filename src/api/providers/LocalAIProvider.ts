@@ -224,7 +224,6 @@ export class LocalAIProvider extends BaseAIProvider {
             name: model.name,
             provider: "local" as AIProvider,
             contextLength: undefined,
-            pricing: { prompt: 0, completion: 0 },
           }));
         }
       } else {
@@ -238,7 +237,6 @@ export class LocalAIProvider extends BaseAIProvider {
             name: model.id,
             provider: "local" as AIProvider,
             contextLength: model.context_window || undefined,
-            pricing: { prompt: 0, completion: 0 },
           }));
         }
       }

@@ -86,11 +86,6 @@ export abstract class BaseAIProvider {
     this.modelLoadPromise = null;
   }
 
-  protected async getTokenCount(text: string): Promise<number> {
-    // Simple approximation: ~4 chars per token
-    return Math.ceil(text.length / 4);
-  }
-
   updateEndpoint(endpoint: string): void {
     this.endpoint = endpoint.endsWith("/v1") ? endpoint : `${endpoint}/v1`;
   }

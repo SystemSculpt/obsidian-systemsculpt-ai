@@ -184,30 +184,18 @@ export class AnthropicAIProvider extends BaseAIProvider {
         name: "Claude 3.5 Haiku (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        pricing: {
-          prompt: 0.003,
-          completion: 0.015,
-        },
       },
       {
         id: "claude-3-5-sonnet-latest",
         name: "Claude 3.5 Sonnet (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        pricing: {
-          prompt: 0.003,
-          completion: 0.015,
-        },
       },
       {
         id: "claude-3-opus-latest",
         name: "Claude 3 Opus (Latest)",
         provider: "anthropic",
         contextLength: 200000,
-        pricing: {
-          prompt: 0.015,
-          completion: 0.075,
-        },
       },
     ];
   }

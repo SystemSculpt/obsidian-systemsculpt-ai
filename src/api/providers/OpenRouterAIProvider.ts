@@ -196,10 +196,6 @@ export class OpenRouterAIProvider extends BaseAIProvider {
           contextLength: model.context_length,
           provider: "openRouter",
           supportsVision: model.architecture?.modality?.includes("image"),
-          pricing: {
-            prompt: model.pricing?.prompt || 0,
-            completion: model.pricing?.completion || 0,
-          },
         }))
         .sort(
           (a: Model, b: Model) =>

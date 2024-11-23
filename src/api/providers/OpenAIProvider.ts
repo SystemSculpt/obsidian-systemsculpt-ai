@@ -167,10 +167,6 @@ export class OpenAIProvider extends BaseAIProvider {
         name: model.id,
         provider: "openai",
         contextLength: contextLengths[model.id] || model.context_length,
-        pricing: {
-          prompt: 0.0001,
-          completion: 0.0002,
-        },
       }));
     } catch (error) {
       console.warn("Failed to fetch OpenAI models:", error);
@@ -195,14 +191,6 @@ export class OpenAIProvider extends BaseAIProvider {
       return true;
     } catch {
       return false;
-    }
-  }
-
-  protected async getTokenCount(text: string): Promise<number> {
-    try {
-      return await this.llm.getNumTokens(text);
-    } catch (error) {
-      return super.getTokenCount(text);
     }
   }
 

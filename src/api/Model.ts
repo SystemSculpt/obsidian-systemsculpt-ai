@@ -13,10 +13,6 @@ export interface Model {
   contextLength?: number;
   favorite?: boolean;
   supportsVision?: boolean;
-  pricing: {
-    prompt: number;
-    completion: number;
-  };
 }
 
 export interface AIServiceInterface {
