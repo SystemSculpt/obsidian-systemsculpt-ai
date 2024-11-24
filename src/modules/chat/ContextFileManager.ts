@@ -10,6 +10,8 @@ export class ContextFileManager {
 
   private processingQueue: TFile[] = [];
   private isProcessing: boolean = false;
+  private fileStatus: Map<string, "processing" | "processed" | "error"> =
+    new Map();
 
   async addFileToContextFiles(file: TFile) {
     this.processingQueue.push(file);
@@ -177,6 +179,9 @@ export class ContextFileManager {
 
   public async processDocument(file: TFile) {
     console.log(`Starting document processing for file: ${file.path}`);
+    this.fileStatus.set(file.path, "processing");
+    this.renderContextFiles(); // Update UI to show processing status
+
     try {
       const documentExtractor = new DocumentExtractor(
         this.chatView.chatModule,
@@ -187,13 +192,14 @@ export class ContextFileManager {
       console.log(`Document extracted successfully`);
       await this.saveExtractedContent(file, extractedContent);
       console.log(`Extracted content saved`);
+      this.fileStatus.set(file.path, "processed");
+      this.renderContextFiles(); // Update UI to show processed status
       this.chatView.updateTokenCount();
-      console.log(`Token count updated`);
     } catch (error) {
       console.error(`Error processing document:`, error);
-      this.chatView.updateLoadingText(
-        `Error processing document: ${(error as Error).message}`
-      );
+      this.fileStatus.set(file.path, "error");
+      this.renderContextFiles(); // Update UI to show error status
+      throw error;
     }
   }
 
@@ -202,59 +208,37 @@ export class ContextFileManager {
     extractedContent: { markdown: string; images: { [key: string]: string } }
   ) {
     const extractionFolderPath = `${file.parent?.path || ""}/${file.basename}`;
-    await this.app.vault.createFolder(extractionFolderPath).catch(() => {}); // Create folder if it doesn't exist
-    await this.createOrOverwriteMarkdownFile(
-      extractedContent.markdown,
-      extractionFolderPath,
-      file
-    );
-    await this.createOrOverwriteImageFiles(
-      extractedContent.images,
-      extractionFolderPath,
-      file
-    );
-  }
 
-  private async createOrOverwriteMarkdownFile(
-    markdown: string,
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    const fileName = "extracted_content.md";
-    const filePath = `${folderPath}/${fileName}`;
+    // Create folder if it doesn't exist, ignore error if it does
+    await this.app.vault.createFolder(extractionFolderPath).catch(() => {});
 
-    await this.app.vault.createFolder(folderPath).catch(() => {}); // Ensure folder exists
+    // Handle markdown file
+    const markdownPath = `${extractionFolderPath}/extracted_content.md`;
+    const existingMarkdownFile =
+      this.app.vault.getAbstractFileByPath(markdownPath);
 
-    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
-    if (existingFile instanceof TFile) {
-      await this.app.vault.modify(existingFile, markdown);
+    if (existingMarkdownFile instanceof TFile) {
+      await this.app.vault.modify(
+        existingMarkdownFile,
+        extractedContent.markdown
+      );
     } else {
-      await this.app.vault.create(filePath, markdown);
+      await this.app.vault.create(markdownPath, extractedContent.markdown);
     }
-  }
 
-  private async createOrOverwriteImageFiles(
-    images: { [key: string]: string },
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    for (const [imageName, imageBase64] of Object.entries(images)) {
+    // Handle image files
+    for (const [imageName, imageBase64] of Object.entries(
+      extractedContent.images
+    )) {
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
-      let imagePath = `${folderPath}/${imageName}`;
-      let counter = 1;
+      const imagePath = `${extractionFolderPath}/${imageName}`;
+      const existingImageFile = this.app.vault.getAbstractFileByPath(imagePath);
 
-      // Keep incrementing counter until we find a filename that doesn't exist
-      while (await this.app.vault.adapter.exists(imagePath)) {
-        const nameWithoutExt = imageName.substring(
-          0,
-          imageName.lastIndexOf(".")
-        );
-        const ext = imageName.substring(imageName.lastIndexOf("."));
-        imagePath = `${folderPath}/${nameWithoutExt}_${counter}${ext}`;
-        counter++;
+      if (existingImageFile instanceof TFile) {
+        await this.app.vault.modifyBinary(existingImageFile, imageArrayBuffer);
+      } else {
+        await this.app.vault.createBinary(imagePath, imageArrayBuffer);
       }
-
-      await this.app.vault.createBinary(imagePath, imageArrayBuffer);
     }
   }
 
@@ -326,6 +310,59 @@ export class ContextFileManager {
       const isPDF = file.extension.toLowerCase() === "pdf";
       const isDocx = file.extension.toLowerCase() === "docx";
       const isPptx = file.extension.toLowerCase() === "pptx";
+      const isProcessable = isPDF || isDocx || isPptx;
+
+      // Add status icon for processable files
+      if (isProcessable) {
+        const statusIcon = document.createElement("span");
+        statusIcon.className = "systemsculpt-file-status-icon";
+        const status = this.fileStatus.get(file.path);
+
+        switch (status) {
+          case "processing":
+            statusIcon.innerHTML = "⏳";
+            statusIcon.title = "Processing...";
+            statusIcon.classList.add("systemsculpt-status-processing");
+            break;
+          case "processed":
+            statusIcon.innerHTML = "✅";
+            statusIcon.title = "Processed";
+            statusIcon.classList.add("systemsculpt-status-processed");
+            break;
+          case "error":
+            statusIcon.innerHTML = "❌";
+            statusIcon.title = "Error processing file - Click to retry";
+            statusIcon.classList.add(
+              "systemsculpt-status-error",
+              "systemsculpt-status-clickable"
+            );
+            statusIcon.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              try {
+                await this.processDocument(file);
+              } catch (error) {
+                console.error("Error reprocessing document:", error);
+              }
+            });
+            break;
+          default:
+            statusIcon.innerHTML = "⚪";
+            statusIcon.title = "Not processed - Click to process";
+            statusIcon.classList.add(
+              "systemsculpt-status-unprocessed",
+              "systemsculpt-status-clickable"
+            );
+            statusIcon.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              try {
+                await this.processDocument(file);
+              } catch (error) {
+                console.error("Error processing document:", error);
+              }
+            });
+        }
+        fileEl.appendChild(statusIcon);
+      }
 
       if (isImage) {
         const imgPreview = document.createElement("img");

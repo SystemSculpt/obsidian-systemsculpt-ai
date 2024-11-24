@@ -1,23 +1,12 @@
-import {
-  requestUrl,
-  RequestUrlParam,
-  TFile,
-  Notice,
-  TFolder,
-  Modal,
-  App,
-} from "obsidian";
+import { requestUrl, RequestUrlParam, TFile, App } from "obsidian";
 import { ChatModule } from "./ChatModule";
-import { base64ToArrayBuffer, arrayBufferToBase64 } from "obsidian";
+import { arrayBufferToBase64, base64ToArrayBuffer } from "obsidian";
 
 export class DocumentExtractor {
-  private chatModule: ChatModule;
-  private app: App;
-
-  constructor(chatModule: ChatModule, app: App) {
-    this.chatModule = chatModule;
-    this.app = app;
-  }
+  constructor(
+    private chatModule: ChatModule,
+    private app: App
+  ) {}
 
   async extractDocument(
     file: TFile
@@ -25,375 +14,166 @@ export class DocumentExtractor {
     const fileExtension = file.extension.toLowerCase();
 
     if (["pdf", "docx", "pptx"].includes(fileExtension)) {
-      return this.extractComplexDocument(file);
+      const fileContent = await this.app.vault.readBinary(file);
+      const result = await this.sendToMarkerAPI(fileContent, file);
+      await this.writeExtractedContent(result, file);
+      return result;
     } else if (["png", "jpg", "jpeg", "gif"].includes(fileExtension)) {
-      return this.processImage(file);
-    } else if (["mp3", "wav", "m4a", "ogg"].includes(fileExtension)) {
-      return this.processAudio(file);
+      const content = await this.app.vault.readBinary(file);
+      const base64Image = arrayBufferToBase64(content);
+      return {
+        markdown: `![${file.name}](data:image/${file.extension};base64,${base64Image})`,
+        images: { [file.name]: base64Image },
+      };
     } else if (fileExtension === "md") {
-      return this.processMarkdown(file);
+      const content = await this.app.vault.read(file);
+      return {
+        markdown: content,
+        images: {},
+      };
     } else {
       throw new Error(`Unsupported file type: ${fileExtension}`);
     }
   }
 
-  private async extractComplexDocument(
-    file: TFile
-  ): Promise<{ markdown: string; images: { [key: string]: string } }> {
-    const fileContent = await this.app.vault.readBinary(file);
-    return this.convertFileContent(fileContent, file);
-  }
-
-  private async convertFileContent(
-    fileContent: ArrayBuffer,
-    file: TFile
-  ): Promise<any> {
+  private async sendToMarkerAPI(fileContent: ArrayBuffer, file: TFile) {
     const boundary =
       "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
-    const parts = [];
+    const formData = this.createFormData(fileContent, file, boundary);
 
-    parts.push(
-      `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="${file.name}"\r\n` +
-        `Content-Type: ${this.getContentType(file.extension)}\r\n\r\n`
-    );
-    parts.push(new Uint8Array(fileContent));
-    parts.push("\r\n");
-
-    parts.push(
-      `--${boundary}\r\n` +
-        'Content-Disposition: form-data; name="extract_images"\r\n\r\n' +
-        "true\r\n"
-    );
-
-    parts.push(
-      `--${boundary}\r\n` +
-        'Content-Disposition: form-data; name="force_ocr"\r\n\r\n' +
-        "true\r\n"
-    );
-
-    parts.push(
-      `--${boundary}\r\n` +
-        'Content-Disposition: form-data; name="paginate"\r\n\r\n' +
-        "true\r\n"
-    );
-
-    parts.push(
-      `--${boundary}\r\n` +
-        'Content-Disposition: form-data; name="langs"\r\n\r\n' +
-        `${this.chatModule.settings.langs}\r\n`
-    );
-
-    parts.push(`--${boundary}--\r\n`);
-
-    const bodyParts = parts.map((part) =>
-      typeof part === "string" ? new TextEncoder().encode(part) : part
-    );
-    const bodyLength = bodyParts.reduce(
-      (acc, part) => acc + part.byteLength,
-      0
-    );
-    const body = new Uint8Array(bodyLength);
-    let offset = 0;
-    for (const part of bodyParts) {
-      body.set(part, offset);
-      offset += part.byteLength;
-    }
-
-    const requestParams: RequestUrlParam = {
+    const response = await requestUrl({
       url:
         this.chatModule.settings.apiEndpoint === "datalab"
           ? "https://www.datalab.to/api/v1/marker"
           : `http://${this.chatModule.settings.markerEndpoint}/convert`,
       method: "POST",
-      body: body.buffer,
+      body: formData,
       headers: {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
         ...(this.chatModule.settings.apiEndpoint === "datalab" && {
           "X-Api-Key": this.chatModule.settings.markerApiKey,
         }),
       },
-    };
+    });
 
-    try {
-      const response = await requestUrl(requestParams);
-      if (response.status >= 400) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return this.chatModule.settings.apiEndpoint === "datalab"
-        ? await this.pollForConversionResult(response.json.request_check_url)
-        : response.json;
-    } catch (error) {
-      console.error("Error in convertFileContent:", error);
-      throw error;
+    if (response.status >= 400) {
+      throw new Error(`API error: ${response.status}`);
     }
+
+    if (this.chatModule.settings.apiEndpoint === "datalab") {
+      return this.pollForResult(response.json.request_check_url);
+    }
+    return response.json;
   }
 
-  private async pollForConversionResult(requestCheckUrl: string): Promise<any> {
-    let response = await requestUrl({
-      url: requestCheckUrl,
-      method: "GET",
-      headers: {
-        "X-Api-Key": this.chatModule.settings.markerApiKey,
-      },
-    });
-    let data = await response.json;
-    let maxRetries = 300;
-    while (data.status !== "complete" && maxRetries > 0) {
-      maxRetries--;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      response = await requestUrl({
-        url: requestCheckUrl,
+  private async pollForResult(checkUrl: string) {
+    let attempts = 300;
+    while (attempts > 0) {
+      const response = await requestUrl({
+        url: checkUrl,
         method: "GET",
         headers: {
           "X-Api-Key": this.chatModule.settings.markerApiKey,
         },
       });
-      data = await response.json;
-    }
-    return data;
-  }
 
-  private async processConversionResult(
-    data: any,
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    if (Array.isArray(data) && data.length === 1) {
-      data = data[0];
-    } else if (Array.isArray(data) && data.length > 1) {
-      new Notice("Error, multiple files returned");
-      return;
-    }
-
-    await this.createOrOverwriteMarkdownFile(
-      data.markdown,
-      folderPath,
-      originalFile
-    );
-    await this.createOrOverwriteImageFiles(
-      data.images,
-      folderPath,
-      originalFile
-    );
-
-    try {
-      const metadata = data.meta || data.metadata;
-      await this.addMetadataToMarkdownFile(metadata, folderPath, originalFile);
-    } catch (error) {
-      console.error("Error adding metadata to markdown file:", error);
-      new Notice("Failed to add metadata, but conversion process continued.");
-    }
-  }
-
-  private async createOrOverwriteMarkdownFile(
-    markdown: string,
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    const fileName = "extracted_content.md";
-    const filePath = `${folderPath}/${fileName}`;
-
-    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
-    if (existingFile instanceof TFile) {
-      await this.app.vault.modify(existingFile, markdown);
-    } else {
-      await this.app.vault.create(filePath, markdown);
-    }
-    new Notice(`Markdown file created/updated: ${fileName}`);
-    this.app.workspace.openLinkText(filePath, "", true);
-  }
-
-  private async createOrOverwriteImageFiles(
-    images: { [key: string]: string },
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    for (const [imageName, imageBase64] of Object.entries(images)) {
-      const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
-      const imagePath = `${folderPath}/${imageName}`;
-      const existingFile =
-        this.chatModule.plugin.app.vault.getAbstractFileByPath(imagePath);
-      if (existingFile instanceof TFile) {
-        await this.chatModule.plugin.app.vault.modifyBinary(
-          existingFile,
-          imageArrayBuffer
-        );
-      } else {
-        await this.chatModule.plugin.app.vault.createBinary(
-          imagePath,
-          imageArrayBuffer
-        );
+      const data = response.json;
+      if (data.status === "complete") {
+        return data;
       }
+
+      attempts--;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    new Notice(`Image files created/updated successfully`);
+    throw new Error("Processing timeout");
   }
 
-  private async addMetadataToMarkdownFile(
-    metadata: { [key: string]: any } | null | undefined,
-    folderPath: string,
-    originalFile: TFile
-  ) {
-    if (!metadata) {
-      console.warn("No metadata available to add to the markdown file.");
-      return;
-    }
-
-    const fileName = "extracted_content.md";
-    const filePath = `${folderPath}/${fileName}`;
-    const file =
-      this.chatModule.plugin.app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile) {
-      const frontmatter = this.generateFrontmatter(metadata);
-      await this.chatModule.plugin.app.fileManager.processFrontMatter(
-        file,
-        (fm) => {
-          return frontmatter + fm;
-        }
-      );
-    }
-  }
-
-  private generateFrontmatter(
-    metadata: { [key: string]: any } | null | undefined
-  ): string {
-    if (!metadata) {
-      return "";
-    }
-
-    let frontmatter = "---\n";
-    const frontmatterKeys = [
-      "languages",
-      "filetype",
-      "ocr_stats",
-      "block_stats",
+  private createFormData(
+    fileContent: ArrayBuffer,
+    file: TFile,
+    boundary: string
+  ): ArrayBuffer {
+    const parts = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${this.getContentType(file.extension)}\r\n\r\n`,
+      fileContent,
+      "\r\n",
+      `--${boundary}\r\nContent-Disposition: form-data; name="extract_images"\r\n\r\ntrue\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="force_ocr"\r\n\r\ntrue\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="paginate"\r\n\r\ntrue\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="langs"\r\n\r\n${this.chatModule.settings.langs}\r\n`,
+      `--${boundary}--\r\n`,
     ];
-    for (const [key, value] of Object.entries(metadata)) {
-      if (frontmatterKeys.includes(key)) {
-        if (key === "ocr_stats" || key === "block_stats") {
-          if (typeof value === "object" && value !== null) {
-            for (const [k, v] of Object.entries(value)) {
-              frontmatter += `${k}: ${k === "equations" ? JSON.stringify(v).slice(1, -1).replace(/"/g, "") : v}\n`;
-            }
-          }
-        } else {
-          frontmatter += `${key}: ${value}\n`;
-        }
-      }
+
+    const textEncoder = new TextEncoder();
+    const buffers = parts.map((part) =>
+      typeof part === "string" ? textEncoder.encode(part) : new Uint8Array(part)
+    );
+
+    const totalLength = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
+    const result = new Uint8Array(totalLength);
+
+    let offset = 0;
+    for (const buffer of buffers) {
+      result.set(buffer, offset);
+      offset += buffer.byteLength;
     }
-    frontmatter += "---\n";
-    return frontmatter;
+
+    return result.buffer;
   }
 
-  private async deleteOriginalFile(file: TFile) {
+  private async writeExtractedContent(
+    data: { markdown: string; images: { [key: string]: string } },
+    originalFile: TFile
+  ) {
+    const folderPath = `${originalFile.parent?.path || ""}/${originalFile.basename}`;
+
+    // Create extraction folder
     try {
-      await this.chatModule.plugin.app.vault.trash(file, true);
-      new Notice("Original file moved to trash");
+      await this.app.vault.adapter.mkdir(folderPath);
     } catch (error) {
-      console.error("Error deleting original file:", error);
-      new Notice("Failed to move original file to trash");
+      // Ignore if folder exists
+    }
+
+    // Write markdown content
+    const markdownPath = `${folderPath}/extracted_content.md`;
+    try {
+      await this.app.vault.adapter.write(markdownPath, data.markdown);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already exists")) {
+        await this.app.vault.adapter.remove(markdownPath);
+        await this.app.vault.adapter.write(markdownPath, data.markdown);
+      } else {
+        throw error;
+      }
+    }
+
+    // Write images
+    for (const [imageName, imageBase64] of Object.entries(data.images)) {
+      const imagePath = `${folderPath}/${imageName}`;
+      const imageBuffer = base64ToArrayBuffer(imageBase64);
+
+      try {
+        await this.app.vault.adapter.writeBinary(imagePath, imageBuffer);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("already exists")
+        ) {
+          await this.app.vault.adapter.remove(imagePath);
+          await this.app.vault.adapter.writeBinary(imagePath, imageBuffer);
+        } else {
+          throw error;
+        }
+      }
     }
   }
 
   private getContentType(extension: string): string {
-    switch (extension.toLowerCase()) {
-      case "pdf":
-        return "application/pdf";
-      case "docx":
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      case "pptx":
-        return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-      default:
-        return "application/octet-stream";
-    }
-  }
-
-  private async processImage(
-    file: TFile
-  ): Promise<{ markdown: string; images: { [key: string]: string } }> {
-    const content = await this.app.vault.readBinary(file);
-    const base64Image = arrayBufferToBase64(content);
-    return {
-      markdown: `![${file.name}](data:image/${file.extension};base64,${base64Image})`,
-      images: { [file.name]: base64Image },
+    const types: Record<string, string> = {
+      pdf: "application/pdf",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     };
-  }
-
-  private async processAudio(
-    file: TFile
-  ): Promise<{ markdown: string; images: { [key: string]: string } }> {
-    const extractionFolderPath = `${file.parent?.path || ""}/${file.basename}`;
-    const transcriptionFilePath = `${extractionFolderPath}/extracted_content.md`;
-    const transcriptionFile = this.app.vault.getAbstractFileByPath(
-      transcriptionFilePath
-    ) as TFile;
-
-    if (transcriptionFile) {
-      const transcriptionContent = await this.app.vault.read(transcriptionFile);
-      return {
-        markdown: transcriptionContent,
-        images: {},
-      };
-    } else {
-      return {
-        markdown: `[Audio file: ${file.name}] (Transcription not available)`,
-        images: {},
-      };
-    }
-  }
-
-  private async processMarkdown(
-    file: TFile
-  ): Promise<{ markdown: string; images: { [key: string]: string } }> {
-    const content = await this.app.vault.read(file);
-    return {
-      markdown: content,
-      images: {},
-    };
-  }
-}
-
-class ConfirmationModal extends Modal {
-  private result: boolean = false;
-  private onSubmit: (result: boolean) => void;
-
-  constructor(
-    app: App,
-    private title: string,
-    private message: string,
-    onSubmit: (result: boolean) => void
-  ) {
-    super(app);
-    this.onSubmit = onSubmit;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.createEl("h2", { text: this.title });
-    contentEl.createEl("p", { text: this.message });
-
-    const buttonContainer = contentEl.createEl("div", {
-      cls: "systemsculpt-modal-button-container",
-    });
-    const okButton = buttonContainer.createEl("button", {
-      text: "OK",
-      cls: "systemsculpt-mod-cta",
-    });
-    const cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
-
-    okButton.addEventListener("click", () => {
-      this.result = true;
-      this.close();
-    });
-
-    cancelButton.addEventListener("click", () => {
-      this.result = false;
-      this.close();
-    });
-  }
-
-  onClose() {
-    this.onSubmit(this.result);
-    this.contentEl.empty();
+    return types[extension.toLowerCase()] || "application/octet-stream";
   }
 }

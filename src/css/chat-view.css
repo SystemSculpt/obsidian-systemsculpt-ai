@@ -449,8 +449,51 @@
   align-items: center;
   padding: 3px;
   border-bottom: 1px solid var(--background-modifier-border);
-  white-space: nowrap;
   position: relative;
+}
+
+.systemsculpt-file-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 5px;
+  font-size: 14px;
+  cursor: help;
+}
+
+.systemsculpt-status-clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.systemsculpt-status-clickable:hover {
+  transform: scale(1.2);
+}
+
+.systemsculpt-status-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-status-unprocessed {
+  color: var(--text-muted);
+}
+
+.systemsculpt-status-processing {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .systemsculpt-context-file-preview {
