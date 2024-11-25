@@ -289,6 +289,18 @@ export class ChatModule {
       new Notice("Failed to create a new chat view");
     }
   }
+
+  async calculateMD5(file: TFile): Promise<string> {
+    const content = await this.plugin.app.vault.read(file);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(content);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data); // Using SHA-256 as it's more secure than MD5
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return hashHex;
+  }
 }
 
 function createHash(data: string): string {

@@ -49,6 +49,15 @@ export class ContextFileManager {
     const fileExtension = file.extension.toLowerCase();
 
     if (supportedExtensions.includes(fileExtension)) {
+      // Check for duplicate content first
+      const isDuplicate = await this.checkForDuplicateContent(file);
+      if (isDuplicate) {
+        this.chatView.updateLoadingText(
+          `File content already exists in context files.`
+        );
+        return;
+      }
+
       const existingFile = this.chatView.contextFiles.find(
         (contextFile: TFile) => contextFile.path === file.path
       );
@@ -88,6 +97,49 @@ export class ContextFileManager {
     }
 
     this.chatView.updateTokenCount();
+  }
+
+  private async checkForDuplicateContent(newFile: TFile): Promise<boolean> {
+    const newContent = await this.app.vault.read(newFile);
+    const newHash = await this.chatView.chatModule.calculateMD5(newFile);
+
+    for (const existingFile of this.chatView.contextFiles) {
+      // Skip if it's the same file path
+      if (existingFile.path === newFile.path) continue;
+
+      // First check hash for efficiency
+      const existingHash =
+        await this.chatView.chatModule.calculateMD5(existingFile);
+      if (existingHash === newHash) return true;
+
+      // For text-based files, do a content comparison
+      if (
+        existingFile.extension === newFile.extension &&
+        ["md", "txt"].includes(newFile.extension.toLowerCase())
+      ) {
+        const existingContent = await this.app.vault.read(existingFile);
+        if (existingContent === newContent) return true;
+      }
+
+      // For extracted content from PDFs, DOCXs, etc.
+      if (["pdf", "docx", "pptx"].includes(newFile.extension.toLowerCase())) {
+        const extractionFolderPath = `${existingFile.parent?.path || ""}/${existingFile.basename}`;
+        const extractedContentPath = `${extractionFolderPath}/extracted_content.md`;
+
+        if (await this.app.vault.adapter.exists(extractedContentPath)) {
+          const extractedFile = this.app.vault.getAbstractFileByPath(
+            extractedContentPath
+          ) as TFile;
+          if (extractedFile) {
+            const extractedHash =
+              await this.chatView.chatModule.calculateMD5(extractedFile);
+            if (extractedHash === newHash) return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   private async processAudioFile(file: TFile) {
