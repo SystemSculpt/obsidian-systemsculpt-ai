@@ -1,11 +1,11 @@
 {
   "id": "systemsculpt-ai",
   "name": "SystemSculpt AI",
-  "description": "Enhance your data flow with AI-powered tools for note-taking, task management, templates, and so much more.",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "A powerful AI assistant that helps you sculpt your knowledge base with artificial intelligence through intelligent chat, document analysis, and seamless integrations.",
   "author": "SystemSculpt",
   "authorUrl": "systemsculpt.com",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
-  "minAppVersion": "1.5.0",
-  "version": "0.7.0",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

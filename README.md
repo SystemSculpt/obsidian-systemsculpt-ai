@@ -1,124 +1,67 @@
-# SystemSculpt AI for Obsidian
+# 🚀 SystemSculpt AI Obsidian Plugin (v1.0 Beta)
 
-SystemSculpt AI is a comprehensive, all-in-one AI-powered plugin designed to revolutionize your [Obsidian](https://obsidian.md/) experience. Developed by Mike as a solo project, this plugin integrates advanced AI capabilities into various aspects of note-taking, task management, knowledge organization, and content creation.
-
-## Key Features
-
-SystemSculpt AI offers a suite of powerful modules, each designed to enhance specific aspects of your Obsidian workflow:
-
-### [Brain Module](https://www.systemsculpt.com/docs/brain-module-docs/brain-overview)
-
-- Integrates multiple AI services (OpenAI, Groq, OpenRouter, local models)
-- Dynamic model switching with a modal interface (CMD+M)
-- Customizable AI settings (max output tokens, temperature)
-- AI-powered title generation and text continuation
-- API endpoint management for different AI services
-- Model favoriting and filtering options
-- Customizable system prompts for various generation tasks
-- Real-time model status indicators and cost estimation
-- Advanced model selection interface with search and filtering capabilities
-- Support for favoriting models and displaying them in a separate group
-- Ability to show/hide models from different providers (OpenAI, Groq, OpenRouter, Local)
-
-### [Chat Module](https://www.systemsculpt.com/docs/chat-module-docs/chat-overview)
-
-- AI-powered conversations within Obsidian
-- Context-aware responses using your vault's content
-- Local conversation storage and token count tracking
-- Customizable system prompts
-- Chat file management and archiving
-- Support for multiple API endpoints regarding PDF/doc/pptx files (Datalab and Selfhosted)
-- PDF text and image extraction using Marker API
-- Customizable attachments folder location
-- Option to create new folders for each PDF conversion
-- Asset subfolder creation for images
-- Configurable chat button on status bar
-- OCR language support for image processing
-
-### [Recorder Module](https://www.systemsculpt.com/docs/recorder-module-docs/recorder-overview)
-
-- In-app audio recording and automatic transcription
-- Integration with OpenAI's and Groq's Whisper models
-- Customizable storage for recordings and transcriptions
-- Transcription of existing audio files
-- Microphone selection and status bar controls
-- Custom Whisper vocabulary for improved transcription accuracy
-- Post-processing prompt for transcription enhancement
-- Language selection for transcription
-- Options for saving audio clips and managing transcriptions
-- Customizable file paths for recordings and transcriptions
-- Toggle for automatic transcription after recording
-
-### [Templates Module](https://www.systemsculpt.com/docs/templates-module-docs/templates-overview)
-
-- AI-generated and customizable note templates
-- Template syncing for licensed users (Patreon members)
-- Intelligent template suggestions and blank template functionality
-- Integration with multiple AI models
-- Custom template creation with frontmatter support
-- Customizable templates path
-- Option to show/hide SS-Sync templates in suggestions
-- Configurable trigger key for template suggestions
-- Ability to copy AI responses to clipboard
-- Option to remember the last selected template
-- Customizable blank template prompt
-
-### [Tasks Module](https://www.systemsculpt.com/docs/tasks-module-docs/tasks-overview)
-
-- AI-powered task generation and management
-- Customizable task prompts and storage locations
-- Quick task creation interface with batch creation support
-- Integration with Obsidian's native task handling
-- Customizable default task prompt for AI-generated tasks
-- Hotkey support for quick task viewing and addition
-- Automatic task list creation and management
-- Intelligent task breakdown with optional sub-tasks
-
-## Getting Started
-
-1. Install SystemSculpt AI from the Obsidian Community Plugins directory.
-2. Configure API keys for your preferred AI services (OpenAI, Groq, OpenRouter).
-3. Customize settings for each module according to your workflow.
-4. Explore the various features using the plugin's commands, hotkeys, and interface elements.
-
-For detailed installation and setup instructions, please refer to our [Getting Started Guide](https://www.systemsculpt.com/docs/getting-started) and [Installation Guide](https://www.systemsculpt.com/docs/installation).
-
-## Documentation
-
-Comprehensive documentation for all features and modules is available on our website:
-
-- [Features Overview](https://www.systemsculpt.com/docs/features)
-- [Troubleshooting Guide](https://www.systemsculpt.com/docs/troubleshooting)
-
-Visit [https://systemsculpt.com](https://systemsculpt.com) for easily accessible and searchable documentation.
-
-## Support and Community
-
-SystemSculpt AI is Mike's passion project, and your support is crucial for its continued development:
-
-- Support on [BuyMeACoffee](https://www.buymeacoffee.com/SystemSculpt)
-- Join our [Patreon](https://www.patreon.com/SystemSculpt) for exclusive perks
-- Follow us on [YouTube](https://www.youtube.com/systemsculpt) and [Twitter](https://x.com/systemsculpt)
-
-## Feedback and Contributions
-
-Your input shapes the future of SystemSculpt AI:
-
-- Submit issues or feature requests at [https://systemsculpt.com/submit-issue](https://systemsculpt.com/submit-issue)
-- Join our community discussions for tips, use cases, and support
-
-## Privacy and Security
-
-SystemSculpt AI prioritizes your data privacy:
-
-- API keys and sensitive information are stored locally
-- Data is only sent to AI services with user consent
-- Option to use local AI models for enhanced privacy
-
-## License
-
-SystemSculpt AI is released under the [MIT License](LICENSE).
+Welcome to the **SystemSculpt AI Obsidian Plugin**, your ultimate AI-driven productivity booster for Obsidian! Unlock powerful tools previously available only to Patreon subscribers, now publicly accessible in this groundbreaking 1.0 Beta release.
 
 ---
 
-Transform your Obsidian experience with the power of AI using SystemSculpt AI! 🚀🧠
+## 🌐 Quick Links
+
+| Resource | Link |
+|----------|------|
+| 📥 **Install Plugin** | [Obsidian Community Plugins](https://obsidian.md/plugins?id=systemsculpt-ai) |
+| 🌎 **Official Website** | [SystemSculpt.com](https://www.systemsculpt.com/) |
+| ▶️ **YouTube Channel** | [@SystemSculpt](https://www.youtube.com/@SystemSculpt) |
+| ❤️ **Support on Patreon** | [Patreon Membership](https://www.patreon.com/c/systemsculpt/membership) |
+
+---
+
+## ✨ Build Your Own Custom Obsidian Plugin
+
+Ever dreamed of creating your own customized Obsidian plugin without coding? Turn that dream into reality with personalized, one-on-one sessions guided by Mike.
+
+👉 [Schedule Your 1 on 1 Session with Mike Today!](https://www.systemsculpt.com/sessions)
+
+---
+
+## 🌟 Key Features
+
+| Feature | Description |
+|---------|-------------|
+| 🤖 **Advanced AI Assistant** | Interact with powerful language models directly within Obsidian for chat, content editing, and in-depth document analysis. |
+| 🎙️ **Real-Time Audio & Document Transcription** | Effortlessly convert audio and various documents (PDF, DOCX) into organized markdown notes. |
+| 🔊 **Integrated Audio Recorder** | Record, capture, and transcribe your thoughts directly within Obsidian. |
+| 📁 **Contextual File Integration** | Enhance AI interactions by managing contextual files directly in your vault. |
+| 🔗 **Custom AI Provider Integration** | Flexibly connect and utilize your favorite AI service providers. |
+| ✅ **Task & Workflow Optimization** | Efficiently generate, organize, and automate tasks to streamline your productivity. |
+
+---
+
+## 📥 Installation Made Easy
+
+### 🛠️ Requirements
+- Obsidian v0.12.0 or higher
+
+### 🔍 How to Install
+1. Launch Obsidian and navigate to **Settings → Community Plugins**.
+2. Search for **SystemSculpt AI**.
+3. Click **Install**, then **Enable** to activate your powerful AI experience.
+
+### ♻️ Updating & Uninstalling
+- **Update:** Obsidian auto-detects plugin updates; simply select **Update** within the Community Plugins menu.
+- **Uninstall:** Go to **Settings → Community Plugins**, choose **SystemSculpt AI**, and click **Uninstall**.
+
+---
+
+## 🔒 Privacy & Licensing
+
+Your privacy is paramount:
+- 🔑 API keys stored securely and locally.
+- 🔐 Data sent to AI services only upon explicit consent.
+- 📡 Optional local AI models available for maximum privacy.
+
+📄 Licensed under the [MIT License](LICENSE).
+
+---
+
+✨ **Experience productivity like never before. Transform your Obsidian workflow with SystemSculpt AI today!** 🚀
+

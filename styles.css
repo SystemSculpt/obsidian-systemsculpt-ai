@@ -1,2556 +1,5711 @@
-.systemsculpt-about-description {
-  margin-bottom: 20px;
+.systemsculpt-selected-model {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-primary-alt);
 }
 
-.systemsculpt-about-doc-container,
-.systemsculpt-about-personal-container {
-  margin-bottom: 30px;
-}
-
-.systemsculpt-about-section-header {
-  font-size: 18px;
-  color: var(--text-normal);
-  margin-bottom: 10px;
-}
-
-.systemsculpt-about-button-container,
-.systemsculpt-supporter-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  width: 100%;
-  margin-bottom: 20px;
-}
-
-.systemsculpt-about-button,
-.systemsculpt-supporter-item {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border: none;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
-  transition: background-color 0.3s ease;
-}
-
-.systemsculpt-about-button:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-
-.systemsculpt-supporter-item {
-  background-color: var(--background-secondary-alt);
-  color: var(--text-muted);
-  border: none;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
+.systemsculpt-action-container {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  justify-content: center;
+  z-index: 10;
 }
 
-/* Hall of Fame styles */
-.systemsculpt-about-hall-of-fame {
-  text-align: center;
-}
-
-.systemsculpt-supporters-description {
-  font-style: italic;
-  color: var(--text-muted);
-  margin-top: 0;
-  margin-bottom: 10px;
-  font-size: 14px;
-}
-
-.systemsculpt-ss-h3 {
-  font-size: 20px;
-  color: var(--text-accent);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 10px;
-  position: relative;
-  display: inline-block;
-}
-
-/* Media query for smaller screens */
-@media (max-width: 768px) {
-  .systemsculpt-about-button-container,
-  .systemsculpt-supporter-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .systemsculpt-supporter-list {
-    gap: 15px;
-  }
-}
-
-@media (max-width: 480px) {
-  .systemsculpt-supporter-list {
-    grid-template-columns: 1fr;
-  }
-}
-
-.systemsculpt-alpha-ribbon {
-  background-color: var(--background-secondary-alt);
-  color: var(--text-muted);
-  padding: 8px 16px;
-  text-align: center;
-  font-size: 14px;
-  margin-top: 10px;
-  margin-bottom: 10px;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  border: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-alpha-ribbon a {
-  color: var(--text-accent);
-  text-decoration: underline;
-  font-weight: bold;
-}
-
-.systemsculpt-alpha-ribbon a:hover {
-  text-decoration: none;
-  color: var(--text-accent-hover);
-}
-
-.systemsculpt-api-key-status {
-  display: inline-block;
-  margin-left: 10px;
-  padding: 2px 6px;
-  font-size: 12px;
-  border-radius: 4px;
-  color: white;
-  text-align: center;
-}
-
-.systemsculpt-validating {
-  background-color: #f0ad4e; /* Bootstrap's warning color */
-}
-
-.systemsculpt-valid {
-  background-color: #5cb85c; /* Bootstrap's success color */
-}
-
-.systemsculpt-invalid {
-  background-color: #d9534f; /* Bootstrap's danger color */
-}
-
-/* Blank Template Modal */
-
-.systemsculpt-blank-template-modal {
-  max-width: 600px;
-  width: 100%;
-  border-radius: 10px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
-  background-color: var(--background-primary);
-  padding: 20px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-modal-content {
-  display: flex;
-  flex-direction: column;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-modal-content h2 {
-  font-size: 24px;
-  margin-bottom: 20px;
-  color: var(--text-title-h2);
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-info-box {
-  background-color: var(--background-secondary-alt);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 5px;
-  padding: 10px;
-  margin-bottom: 20px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-info-box p {
-  margin: 0;
-  color: var(--text-muted);
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-prompt-container {
-  margin-bottom: 20px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-prompt-container label {
-  font-size: 18px;
-  margin-bottom: 10px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-user-prompt-input {
-  width: 100%;
-  min-height: 50px; /* Ensure this is larger than context areas */
-  border-radius: 5px;
-  border: 1px solid var(--background-modifier-border);
+.systemsculpt-assistant-message {
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   background-color: var(--background-secondary);
-  color: var(--text-normal);
-  padding: 10px;
-  font-size: 16px;
-  line-height: 1.5;
-  resize: none;
-  margin-top: 2.5px;
+  border-radius: 16px 16px 16px 4px;
 }
 
-.systemsculpt-blank-template-modal .systemsculpt-button-container {
+.systemsculpt-assistant-message .systemsculpt-message-button-toolbar {
+  justify-content: flex-start;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-content {
+  color: var(--text-normal);
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-label {
+  color: var(--text-accent);
+}
+
+.systemsculpt-audio-transcription-modal {
+  max-width: 500px;
+  min-width: 400px;
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-modal-content {
+  padding: var(--size-4-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-modal-footer {
   display: flex;
   justify-content: flex-end;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-button-container button {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 5px;
-  padding: 10px 20px;
-  font-size: 16px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-button-container button:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-context-area {
-  width: 100%;
-  border-radius: 5px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  padding: 5px;
-  font-size: 14px;
-  line-height: 1.4;
-  resize: none;
-  overflow-y: auto; /* Allows scrolling if content is longer */
-  display: none; /* Hidden by default */
-  min-height: 100px;
-}
-
-.systemsculpt-pre-context-area {
-  margin-bottom: 10px; /* Space below the pre-context area */
-  font-size: 10px; /* Smaller text size */
-  max-height: 3em; /* Limit to 3 rows of text */
-}
-
-.systemsculpt-post-context-area {
-  margin-top: 10px; /* Space above the post-context area */
-  font-size: 10px; /* Smaller text size */
-  max-height: 3em; /* Limit to 3 rows of text */
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-system-template-container {
-  margin-bottom: 15px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-system-template-container label {
-  display: block;
-  font-size: 14px;
-  margin-bottom: 5px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-system-template-input {
-  width: 100%;
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  font-size: 14px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-system-template-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-remember-template-container,
-.systemsculpt-blank-template-modal .systemsculpt-copy-to-clipboard-container {
-  margin-bottom: 15px;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-toggle-container {
-  display: flex;
-  align-items: center;
-}
-
-.systemsculpt-blank-template-modal .systemsculpt-toggle-container input[type="checkbox"] {
-  margin-right: 10px;
-}
-
-.systemsculpt-builder-menu {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  background-color: var(--background-secondary);
-  border-radius: 5px;
-  padding: 5px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  width: auto;
-  max-width: 200px;
-}
-
-.systemsculpt-builder-ai-button,
-.systemsculpt-builder-info-button {
-  background-color: var(--interactive-normal);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 6px 12px;
-  margin: 5px 0;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-medium);
-  width: auto;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.systemsculpt-builder-ai-button:hover,
-.systemsculpt-builder-info-button:hover {
-  background-color: var(--interactive-hover);
-}
-
-.systemsculpt-builder-ai-button:active,
-.systemsculpt-builder-info-button:active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-options-menu {
-  position: absolute;
-  bottom: -40px;
-  right: 10px;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--background-secondary);
-  border-radius: 5px;
-  padding: 5px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
-}
-
-.systemsculpt-action-button {
-  margin: 2px 0;
-  width: 100%;
-  text-align: left;
-}
-
-.systemsculpt-node-input {
-  border: 2px solid #4CAF50 !important;
-  border-radius: 7px;
-  transition: box-shadow 0.3s ease;
-}
-
-.systemsculpt-node-processing {
-  border: 2px solid #FFC107 !important;
-  border-radius: 7px;
-  transition: box-shadow 0.3s ease;
-}
-
-.systemsculpt-node-output {
-  border: 2px solid #FF5722 !important;
-  border-radius: 7px;
-  transition: box-shadow 0.3s ease;
-}
-
-.systemsculpt-node-input.is-focused {
-  box-shadow: 0 0 10px #4CAF50, 0 0 20px #4CAF50;
-}
-
-.systemsculpt-node-processing.is-focused {
-  box-shadow: 0 0 10px #FFC107, 0 0 20px #FFC107;
-}
-
-.systemsculpt-node-output.is-focused {
-  box-shadow: 0 0 10px #FF5722, 0 0 20px #FF5722;
-}
-
-.systemsculpt-builder-info-button {
-  margin-left: 0;
-}
-
-.systemsculpt-node-info {
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.systemsculpt-node-info-title {
-  text-align: center;
-  margin-bottom: 20px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-node-info-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-node-info-icon {
-  margin-right: 10px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-node-info h3 {
-  margin: 0;
-  color: var(--text-normal);
-}
-
-.systemsculpt-node-info p {
-  margin-bottom: 15px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-node-info h4 {
-  margin-top: 15px;
-  margin-bottom: 10px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-node-info ul {
-  margin-left: 20px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-node-info li {
-  margin-bottom: 5px;
-}
-
-.systemsculpt-node-toolbar {
-  position: absolute;
-  bottom: -40px;
-  right: -50px;
-  z-index: 1001;
-  display: flex;
-  gap: 5px;
-}
-
-.systemsculpt-toolbar-button {
-  background-color: var(--interactive-normal);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-medium);
-  width: auto;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.systemsculpt-toolbar-button:hover {
-  background-color: var(--interactive-hover);
-}
-
-.systemsculpt-toolbar-button:active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-node-settings {
-  padding: 20px;
-}
-
-.systemsculpt-node-settings h3 {
-  margin-bottom: 10px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-node-settings select {
-  width: 100%;
-  padding: 5px;
-  margin-bottom: 15px;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-}
-
-.systemsculpt-node-settings select:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-}
-
-.systemsculpt-node-settings-title-container {
-  text-align: center;
-  margin-bottom: 15px;
-}
-
-.systemsculpt-node-settings-title {
-  margin-bottom: 5px;
-}
-
-.systemsculpt-node-id {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.systemsculpt-builder-separator {
-  margin: 10px 0;
-  border: none;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
   border-top: 1px solid var(--background-modifier-border);
 }
 
-.systemsculpt-builder-label {
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-medium);
-  color: var(--text-muted);
-  margin-bottom: 5px;
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: var(--radius-s);
+  transition: width 0.3s ease;
 }
 
-.systemsculpt-builder-button {
-  background-color: var(--interactive-normal);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 6px 12px;
-  margin: 5px 0;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-medium);
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-bar-container {
   width: 100%;
-  text-align: left;
-  white-space: nowrap;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  margin: var(--size-4-2) 0;
 }
 
-.systemsculpt-builder-button:hover {
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  padding: var(--size-4-1) 0;
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-content {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-text {
+  color: var(--text-muted);
+}
+
+.systemsculpt-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.systemsculpt-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.systemsculpt-button-grid {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  height: fit-content;
+  padding: 0 4px;
+  margin-bottom: 4px;
+}
+
+.systemsculpt-button-group-divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--background-modifier-border);
+  margin: 0 4px;
+  opacity: 0.5;
+}
+
+.systemsculpt-button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-button.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-button:hover {
   background-color: var(--interactive-hover);
 }
 
-.systemsculpt-builder-button:active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
+.systemsculpt-card-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
 }
 
-.systemsculpt-node-color-input {
-  background-color: #b5e8d5;
+.systemsculpt-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 
-.systemsculpt-node-color-processing {
-  background-color: #f8d775;
-}
-
-.systemsculpt-node-color-output {
-  background-color: #f3a683;
-}
-
-.systemsculpt-file-picker-container {
-  margin-top: 10px;
-}
-
-.systemsculpt-file-picker-container label {
-  display: block;
-  margin-bottom: 5px;
-  font-size: var(--font-ui-small);
+.systemsculpt-chat-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  background-color: var(--background-modifier-border);
   color: var(--text-muted);
 }
 
-.systemsculpt-file-picker-container input {
-  width: 100%;
-  padding: 5px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+.systemsculpt-chat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
   background-color: var(--background-primary);
-  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  position: relative;
 }
 
-.systemsculpt-file-picker-container input:focus {
-  outline: none;
+.systemsculpt-chat-card {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.systemsculpt-chat-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.systemsculpt-chat-card.selected {
   border-color: var(--interactive-accent);
 }
 
-.canvas-node-content[contenteditable="false"] {
-  cursor: default;
-  user-select: none;
-}
-
-.systemsculpt-node-setting select,
-.systemsculpt-node-setting input {
-  width: 100%;
-  padding: 2px 5px;
-  margin-top: 2px;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-}
-
-.systemsculpt-node-setting select:focus,
-.systemsculpt-node-setting input:focus {
-  outline: none;
+.systemsculpt-chat-card.selected {
   border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
 }
 
-.systemsculpt-node-setting {
-  margin-bottom: 8px;
+.systemsculpt-chat-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
-.systemsculpt-node-setting-label {
-  display: block;
-  margin-bottom: 2px;
+.systemsculpt-chat-card:hover {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
 }
 
-.systemsculpt-file-content {
-  font-size: 0.8em;
-  line-height: 1.3;
-  max-height: 60px;
-  overflow: auto;
-  margin-top: 8px;
-  padding: 8px;
-  background-color: var(--background-secondary-alt);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  border: 1px solid var(--background-modifier-border);
-}
-
-/* Disabled Button */
-.systemsculpt-button:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+.systemsculpt-chat-card:hover .systemsculpt-favorite-button {
+  opacity: 1;
 }
 
 .systemsculpt-chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
-  flex: 1;
   background-color: var(--background-primary);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
   position: relative;
-  max-width: 100%;
+}
+
+.systemsculpt-chat-container {
+  position: relative;
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active
+  .systemsculpt-drag-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-chat-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  color: var(--text-muted);
+  text-align: center;
+  background-color: var(--background-primary-alt);
+  border-radius: 8px;
+  border: 1px dashed var(--background-modifier-border);
+}
+
+.systemsculpt-chat-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 4px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .systemsculpt-chat-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background-color: var(--background-primary-alt);
-  color: var(--text-normal);
-  padding: 15px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-chat-title-container {
-  display: flex;
-  align-items: center;
-  flex-grow: 1;
-  margin-right: 15px;
-}
-
-.systemsculpt-chat-title-text {
-  font-weight: bold;
-  cursor: pointer;
-  transition: color 0.3s ease;
-  text-decoration: underline;
-}
-
-.systemsculpt-chat-title-text:hover {
-  color: var(--text-accent);
-}
-
-.systemsculpt-actions-button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text-muted);
-  transition: color 0.3s;
-}
-
-.systemsculpt-actions-button:hover {
-  color: var(--interactive-accent);
-}
-
-.systemsculpt-chat-title-container.systemsculpt-loading {
-  justify-content: flex-start;
-}
-
-.systemsculpt-chat-title-container.systemsculpt-loading::before {
-  content: "Generating title...";
-  font-size: 14px;
-  color: var(--text-muted);
-  margin-right: 10px;
-}
-
-.systemsculpt-chat-title-container.systemsculpt-loading
-  .systemsculpt-loading-spinner {
-  display: inline-block;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top: 2px solid var(--interactive-accent);
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  animation: systemsculpt-spin 1s linear infinite;
-}
-
-.systemsculpt-edit-title-input {
-  width: 100%;
-  padding: 5px;
-  font-size: 14px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  margin-right: 10px;
-  resize: both;
-  overflow: auto;
-}
-
-.systemsculpt-token-count {
-  font-size: 12px;
   background-color: var(--background-secondary);
-  padding: 5px 10px;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: inline-block;
-  margin-bottom: 5px;
-  margin-left: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 8px;
 }
 
-.systemsculpt-token-container {
-  text-align: right;
-  margin-bottom: 10px;
+.systemsculpt-chat-header-left {
   display: flex;
+  gap: 6px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+}
+
+.systemsculpt-chat-header-row {
+  display: flex;
+  width: 100%;
+}
+
+.systemsculpt-chat-highlight {
+  color: var(--text-accent);
+  font-weight: 500;
+  background-color: var(--text-accent-hover);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.systemsculpt-chat-info {
+  display: flex;
   align-items: center;
-}
-
-@media (max-width: 600px) {
-  .systemsculpt-token-container {
-    flex-direction: column;
-    align-items: flex-end;
-  }
-
-  .systemsculpt-token-count {
-    margin-left: 0;
-  }
-}
-
-.systemsculpt-chat-messages {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  padding: 20px;
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-.systemsculpt-chat-input-container {
-  display: flex;
-  flex-direction: column;
-  padding: 15px;
-  background-color: var(--background-primary-alt);
-  border-top: 1px solid var(--background-modifier-border);
-  min-height: 120px; /* Adjust this value to match your desired height */
-}
-
-.systemsculpt-chat-input-wrapper,
-.systemsculpt-chat-input-loading {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.systemsculpt-chat-input-wrapper {
-  justify-content: space-between;
-}
-
-.systemsculpt-chat-input-loading {
-  justify-content: center;
-  align-items: center;
+  gap: 4px;
 }
 
 .systemsculpt-chat-input {
-  width: 100%;
-  min-height: 30px;
-  max-height: 250px;
-  resize: vertical;
-  padding: 10px;
-  box-sizing: border-box;
-  border: 1px solid var(--background-modifier-border);
+  flex-grow: 1;
+  resize: none;
+  min-height: 40px;
+  max-height: 150px;
+  padding: 0.5rem;
+  margin-right: 0.25rem;
   border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
   background-color: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.4;
-  margin-bottom: 10px;
-  flex: 1;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-chat-input {
+  flex-grow: 1;
+  resize: none;
+  min-height: 40px;
+  max-height: 150px;
+  padding: 12px 16px;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 15px;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.systemsculpt-chat-input.disabled {
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .systemsculpt-chat-input:focus {
   outline: none;
   border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px var(--interactive-accent);
+  background-color: var(--background-primary);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.systemsculpt-chat-input-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.systemsculpt-chat-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.systemsculpt-token-and-cost-container {
-  flex-grow: 1;
+.systemsculpt-chat-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  font-size: 12px;
+  gap: 16px;
   color: var(--text-muted);
+  font-size: 0.85em;
+  padding-top: 4px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
-.systemsculpt-token-count {
-  margin-right: 10px;
-}
-
-.systemsculpt-send-button-container {
+.systemsculpt-chat-modal {
+  max-width: min(800px, 95vw);
+  max-height: 80vh;
+  width: 100%;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px !important;
+  box-sizing: border-box;
+  margin: 0 auto;
+  align-items: center;
+  background-color: var(--background-primary);
 }
 
-.systemsculpt-chat-send-button {
-  padding: 5px 10px;
+.systemsculpt-chat-preview {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.systemsculpt-chat-search {
+  width: 100%;
+  position: relative;
+}
+
+.systemsculpt-chat-search input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 1em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-chat-search input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-chat-sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.systemsculpt-chat-sentinel {
+  height: 1px;
+  width: 100%;
+  opacity: 0;
+}
+
+.systemsculpt-checkbox-container {
+  --toggle-width: 40px;
+  --toggle-height: 20px;
+  --toggle-thumb-size: 16px;
+
+  position: relative;
+  width: var(--toggle-width);
+  height: var(--toggle-height);
+  cursor: pointer;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-is-enabled .systemsculpt-checkbox-toggle {
   background-color: var(--interactive-accent);
+}
+
+.systemsculpt-checkbox-container.systemsculpt-is-enabled .systemsculpt-checkbox-toggle:before {
+  transform: translateX(20px);
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle {
+  background-color: var(--background-modifier-border);
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle:before {
+  animation: bounce 1s infinite;
+}
+
+.systemsculpt-checkbox-toggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--background-modifier-border);
+  border-radius: 34px;
+  transition: background-color 0.15s ease;
+}
+
+.systemsculpt-checkbox-toggle:before {
+  position: absolute;
+  content: "";
+  height: var(--toggle-thumb-size);
+  width: var(--toggle-thumb-size);
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-code-block-wrapper {
+  position: relative;
+  margin: 1em 0;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+}
+
+.systemsculpt-content-container {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.systemsculpt-content-container.systemsculpt-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.systemsculpt-context-action-button {
+  width: 100%;
+  padding: 8px 16px;
   border: none;
   border-radius: 4px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+  margin-top: 16px;
 }
 
-.systemsculpt-chat-send-button:hover {
+.systemsculpt-context-action-button.systemsculpt-is-active {
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-context-action-button.systemsculpt-is-active:hover {
   background-color: var(--interactive-accent-hover);
 }
 
-.systemsculpt-actions-button:hover {
+.systemsculpt-context-action-button:active {
+  background-color: var(--interactive-accent-hover);
+  transform: translateY(1px);
+}
+
+.systemsculpt-context-action-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-context-action-container {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.systemsculpt-context-add-button {
+  background: none;
+  border: none;
+  padding: 2px;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
   cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
-.systemsculpt-chat-message.systemsculpt-user {
-  background-color: var(--background-primary);
+.systemsculpt-context-add-button:hover {
   color: var(--text-normal);
-  padding: 10px;
-  margin: 10px 0;
-  border-radius: 4px;
-  align-self: flex-end;
-  text-align: left;
-  box-shadow: 2px 2px 1px var(--interactive-accent);
-  position: relative;
-  user-select: text;
+  background: var(--background-modifier-hover);
 }
 
-.systemsculpt-chat-message {
-  position: relative;
-  padding: 10px;
-  margin: 10px 0;
+.systemsculpt-context-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
   border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-  user-select: text;
-  max-width: 100%;
+  font-size: 11px;
+  font-weight: 500;
+  height: 20px;
 }
 
-.systemsculpt-chat-message pre {
-  background-color: var(--background-secondary-alt);
-  font-size: 75%;
-  padding: 15px;
-  padding-top: 35px; /* Added extra top padding for the copy button */
+.systemsculpt-context-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-context-badge.systemsculpt-pro-badge {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-context-card {
+  position: relative;
+  padding: 12px;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: var(--background-primary);
+  border: 1px solid transparent;
   transition: all 0.2s ease;
   cursor: pointer;
-  border: 2px solid transparent;
-  overflow-x: auto;
-  white-space: pre;
-  max-width: 100%;
-  word-wrap: normal;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
-/* Modified copy indicator to always show */
-.systemsculpt-chat-message pre::after {
-  content: "Click to copy";
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background-color: var(--background-secondary);
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  opacity: 1; /* Changed from 0 to 1 to always show */
-  color: var(--text-muted);
-}
-
-/* Enhanced hover state */
-.systemsculpt-chat-message pre:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  transform: translateY(-1px);
+.systemsculpt-context-card.systemsculpt-is-added {
+  background: var(--background-primary-alt);
   border-color: var(--interactive-accent);
 }
 
-.systemsculpt-chat-message pre:hover::after {
+.systemsculpt-context-card.systemsculpt-is-added .systemsculpt-context-check {
   opacity: 1;
+  transform: scale(1);
 }
 
-/* Enhanced copy animation */
-.systemsculpt-chat-message pre.systemsculpt-copied {
-  animation: systemsculpt-copyEffect 1s ease;
+.systemsculpt-context-card.systemsculpt-is-selected {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
 }
 
-.systemsculpt-chat-message pre.systemsculpt-copied::after {
-  content: "Copied! ✓";
-  background-color: #4caf50;
-  color: white;
-  opacity: 1;
-}
-
-@keyframes systemsculpt-copyEffect {
-  0% {
-    background-color: var(--background-secondary-alt);
-    border-color: transparent;
-  }
-  20% {
-    background-color: rgba(76, 175, 80, 0.1);
-    border-color: #4caf50;
-  }
-  60% {
-    background-color: rgba(76, 175, 80, 0.1);
-    border-color: #4caf50;
-  }
-  100% {
-    background-color: var(--background-secondary-alt);
-    border-color: transparent;
-  }
-}
-
-/* Add a subtle active state */
-.systemsculpt-chat-message pre:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.systemsculpt-message-actions {
-  position: relative;
-  opacity: 1;
-  text-align: right;
-}
-
-.systemsculpt-copy-button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 10px;
-  transition:
-    background-color 0.3s,
-    color 0.3s;
-}
-
-.systemsculpt-delete-button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 10px;
-  transition:
-    background-color 0.3s,
-    color 0.3s;
-  margin-left: 5px;
-}
-
-.systemsculpt-copy-button.systemsculpt-copied {
-  background-color: green;
-  color: white;
-}
-
-.systemsculpt-delete-button.systemsculpt-confirm-delete {
-  background-color: red;
-  color: white;
-}
-
-.systemsculpt-delete-button:hover {
-  color: white;
-}
-
-.systemsculpt-chat-message.systemsculpt-ai {
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  padding: 10px;
-  margin: 10px 0;
-  border-radius: 4px;
-  align-self: flex-start;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  user-select: text;
-}
-
-.systemsculpt-chat-message .systemsculpt-model-name {
-  display: block;
-  font-size: 12px;
-  color: var(--text-faint);
-  margin-top: 5px;
-  text-align: right;
-  font-style: italic;
-  text-shadow:
-    1px 1px 2px rgba(0, 0, 0, 0.5),
-    0 0 5px var(--interactive-accent);
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.systemsculpt-chat-message.systemsculpt-ai .systemsculpt-model-name {
-  color: var(--interactive-accent);
-}
-
-.systemsculpt-context-files-container {
-  padding: 15px;
-  background-color: var(--background-primary-alt);
-  border-top: 1px solid var(--background-modifier-border);
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-context-buttons-container {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-context-files-header,
-.systemsculpt-auto-context-button {
-  flex: 1;
-  margin: 0 5px;
-  padding: 5px;
-  background-color: var(--interactive-normal);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.3s;
-}
-
-.systemsculpt-context-files-header:hover,
-.systemsculpt-auto-context-button:hover {
-  background-color: var(--interactive-hover);
-}
-
-.systemsculpt-context-files-header h3,
-.systemsculpt-auto-context-button h3 {
-  margin: 0;
-  font-size: 14px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-context-files {
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
-  border-radius: 4px;
-  color: var(--text-normal);
-  display: none;
-  max-height: 150px;
-  overflow-y: auto;
-}
-
-.systemsculpt-context-files.systemsculpt-has-files {
-  display: block;
-}
-
-.systemsculpt-context-file {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 3px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  position: relative;
-}
-
-.systemsculpt-file-status-icon {
+.systemsculpt-context-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--interactive-accent);
+  border-radius: 50%;
+  color: var(--text-on-accent);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.2s ease;
+  z-index: 1;
+}
+
+.systemsculpt-context-check svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+}
+
+.systemsculpt-context-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-context-empty svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.5;
+}
+
+.systemsculpt-context-grid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  min-height: 0;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-track {
+  background: var(--background-primary);
+  border-radius: 4px;
+}
+
+.systemsculpt-context-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-context-loading svg {
+  width: 24px;
+  height: 24px;
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-context-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.systemsculpt-context-meta {
+  flex-wrap: nowrap;
+}
+
+.systemsculpt-context-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.systemsculpt-context-meta-group {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  height: 24px;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+.systemsculpt-context-meta-group {
+  display: none;
+}
+
+.systemsculpt-context-modal {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.systemsculpt-context-path {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  width: 100%;
+}
+
+.systemsculpt-context-search {
+  flex-shrink: 0;
+  position: relative;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-context-search input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 16px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-context-search input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-context-size {
+  padding: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.systemsculpt-context-size {
+  padding: 0;
+  min-width: 45px;
+  text-align: right;
+}
+
+.systemsculpt-context-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.systemsculpt-context-thumbnail {
+  width: 64px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 4px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.systemsculpt-context-token-count {
+  background: var(--background-modifier-border);
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.systemsculpt-context-token-count {
+  background: var(--background-modifier-border);
+  min-width: 60px;
+  text-align: right;
+}
+
+.systemsculpt-context-type {
+  background: var(--background-modifier-border);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.systemsculpt-context-type {
+  display: none;
+}
+
+.systemsculpt-context-type {
+  background: var(--background-modifier-border);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.systemsculpt-context-type,
+.systemsculpt-context-size,
+.systemsculpt-context-token-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.systemsculpt-context-type,
+.systemsculpt-context-size,
+.systemsculpt-context-token-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.systemsculpt-context-type-group {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-context-type-group,
+  .systemsculpt-context-meta-group {
+  display: flex;
+}
+
+.systemsculpt-creative-indicator {
+  color: var(--color-cyan);
+}
+
+.systemsculpt-credit-balance.systemsculpt-error {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.systemsculpt-credit-balance.systemsculpt-loading {
+  position: relative;
+  color: transparent;
+}
+
+.systemsculpt-credit-balance.systemsculpt-loading::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: token-loading 0.6s linear infinite;
+}
+
+.systemsculpt-custom-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-input-container {
+  position: relative;
+  width: 100%;
+}
+
+.systemsculpt-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-custom-model-card {
+  min-height: unset;
+  height: auto;
+  padding: 6px 32px 6px 12px;
+  gap: 0;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-model-card .systemsculpt-favorite-button {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 4px;
   width: 20px;
   height: 20px;
-  margin-right: 5px;
-  font-size: 14px;
-  cursor: help;
 }
 
-.systemsculpt-status-clickable {
+.systemsculpt-custom-model-name {
+  font-size: 0.95em;
+  color: var(--text-normal);
+  line-height: 1.2;
+  font-weight: 500;
+}
+
+.systemsculpt-custom-model-name-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.systemsculpt-custom-provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-card-action {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transition: all 0.2s ease;
+  background: none;
+  border: none;
 }
 
-.systemsculpt-status-clickable:hover {
-  transform: scale(1.2);
-}
-
-.systemsculpt-status-error {
+.systemsculpt-custom-provider-card-action.systemsculpt-delete:hover {
   color: var(--text-error);
 }
 
-.systemsculpt-status-unprocessed {
+.systemsculpt-custom-provider-card-action:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.systemsculpt-custom-provider-card-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
   color: var(--text-muted);
 }
 
-.systemsculpt-status-processing {
-  animation: pulse 1.5s infinite;
+.systemsculpt-custom-provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-@keyframes pulse {
-  0% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-  100% {
-    opacity: 1;
-  }
+.systemsculpt-custom-provider-card-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: 1em;
+  margin: 0;
 }
 
-.systemsculpt-context-file-preview {
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  margin-right: 10px;
+.systemsculpt-custom-provider-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  padding: 2px 6px;
   border-radius: 4px;
+  background-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
 }
 
-.systemsculpt-audio-icon,
-.systemsculpt-pdf-icon {
-  width: 40px;
-  height: 40px;
-  margin-right: 10px;
+.systemsculpt-custom-provider-card-status {
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-success);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  opacity: 0.5;
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing {
+  opacity: 0.7;
+  cursor: wait;
+  background-color: var(--background-modifier-border);
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-custom-provider-card-status:hover {
+  opacity: 0.8;
+}
+
+.systemsculpt-custom-provider-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-custom-provider-manager-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  height: 100%;
+}
+
+.systemsculpt-custom-provider-manager-empty-icon {
+  font-size: 2em;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.systemsculpt-custom-provider-manager-empty-text {
+  font-size: 0.9em;
+}
+
+.systemsculpt-custom-provider-manager-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px;
+}
+
+.systemsculpt-custom-provider-manager-modal {
+  height: min(75vh, 600px);
+  width: min(95vw, 480px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: visible;
+  margin: 0 auto;
+}
+
+.systemsculpt-custom-provider-manager-modal {
+  height: 100vh;
+    width: 100vw;
+    padding: 16px;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-back:hover {
+  background-color: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
-.systemsculpt-context-file-remove {
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  height: 32px;
+  min-width: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none !important;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-empty {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  padding: 32px 16px;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-empty-icon {
+  font-size: 2em;
+  opacity: 0.5;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-empty-text {
+  font-size: 0.9em;
+  text-align: center;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-header
+  h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-custom-provider-modal {
+  height: fit-content;
+  width: min(95vw, 480px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: visible;
+  margin: 0 auto;
+  max-height: 90vh;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-button-secondary {
+  font-size: 0.85em;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  height: 28px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-button-secondary:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  input,
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select {
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  width: 100%;
+  height: 32px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  input:focus,
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  label {
+  color: var(--text-normal);
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select {
+  padding-right: 24px;
+  appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 16px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-preset-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-presets
+  label {
+  color: var(--text-normal);
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-back:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: visible;
+  padding: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-toggle-label {
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-section {
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-detail-label {
+  color: var(--text-muted);
+}
+
+.systemsculpt-detail-value {
+  color: var(--text-normal);
+}
+
+.systemsculpt-drag-message {
+  background: var(--background-secondary);
+  color: var(--text-accent);
+  padding: 16px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--background-modifier-border);
+  animation: fade-in 0.2s ease;
+  text-align: center;
+  min-width: 200px;
+  white-space: nowrap;
+}
+
+.systemsculpt-drag-overlay {
+  display: none;
   position: absolute;
   top: 0;
   left: 0;
-  background: rgba(0, 0, 0, 0.5);
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
+  right: 0;
+  bottom: 0;
+  background: rgba(var(--background-primary-rgb), 0.9);
+  z-index: 100;
+  pointer-events: none;
+}
+
+.systemsculpt-drawer {
+  width: 100%;
+  position: relative;
+}
+
+.systemsculpt-drawer-category {
   font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 8px 4px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+}
+
+.systemsculpt-drawer-category:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-drawer-content {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background-color: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  max-height: min(calc(100vh - 300px), 600px);
+  overflow-y: auto;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-drawer-content::before {
+  content: "";
+  position: absolute;
+  top: -25px;
+  left: 0;
+  right: 0;
+  height: 25px;
+  pointer-events: none;
+}
+
+.systemsculpt-drawer-content[style*="opacity: 1"] {
+  transform: translateY(0);
+}
+
+.systemsculpt-drawer-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.systemsculpt-drawer-count {
+  font-size: 14px;
+      padding: 2px 8px;
+}
+
+.systemsculpt-drawer-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+  font-style: italic;
+}
+
+.systemsculpt-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-drawer-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  background-color: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+  z-index: 1;
+}
+
+.systemsculpt-drawer-header {
+  padding: 12px 16px;
+      min-height: 48px;
+}
+
+.systemsculpt-drawer-header:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-primary-alt);
+}
+
+.systemsculpt-drawer-header:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-drawer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-normal);
+  transition: all 0.15s ease;
+  font-size: 13px;
+  background: var(--background-primary);
+  margin-bottom: 5px;
+  min-height: 32px;
+  gap: 8px;
+}
+
+.systemsculpt-drawer-item {
+  padding: 12px;
+      min-height: 44px;
+      margin-bottom: 8px;
+}
+
+.systemsculpt-drawer-item-danger {
+  color: var(--text-error);
+}
+
+.systemsculpt-drawer-item-danger:hover {
+  background-color: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-drawer-item-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.systemsculpt-drawer-item-path a {
+  color: var(--text-normal);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.systemsculpt-drawer-item-path a:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.systemsculpt-drawer-item-remove {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.3s ease;
+  padding: 4px;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: all 0.2s ease;
 }
 
-.systemsculpt-context-file:hover .systemsculpt-context-file-remove {
+.systemsculpt-drawer-item-remove {
+  width: 32px;
+      height: 32px;
+      opacity: 1;
+}
+
+.systemsculpt-drawer-item-remove:hover {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.systemsculpt-drawer-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-drawer-item:hover .systemsculpt-drawer-item-remove {
   opacity: 1;
 }
 
-.systemsculpt-context-file:last-child {
-  border-bottom: none;
+.systemsculpt-drawer-separator {
+  height: 1px;
+  background-color: var(--background-modifier-border);
+  margin: 4px 0;
+  opacity: 0.6;
 }
 
-.systemsculpt-context-file-path {
+.systemsculpt-drawer-title {
   flex: 1;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-bg);
-  direction: rtl;
-  text-align: left;
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.systemsculpt-context-file-path::-webkit-scrollbar {
-  height: 6px;
-}
-
-.systemsculpt-context-file-path::-webkit-scrollbar-track {
-  background: var(--scrollbar-bg);
-}
-
-.systemsculpt-context-file-path::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb-bg);
-  border-radius: 3px;
-}
-
-.systemsculpt-context-file-path span {
-  direction: ltr;
-  display: inline-block;
-}
-
-.systemsculpt-context-file .systemsculpt-remove-context-file {
-  background: transparent;
-  border: none;
-  cursor: pointer;
+.systemsculpt-drawer-title {
+  flex: 1;
   font-size: 14px;
-  color: var(--text-muted);
-  transition: color 0.3s;
-  flex-shrink: 0;
-  margin-left: 5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.systemsculpt-context-file .systemsculpt-remove-context-file:hover {
+.systemsculpt-drawer-title {
+  font-size: 16px;
+}
+
+.systemsculpt-drawer-toggle {
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-drawer::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -40px;
+  pointer-events: none;
+}
+
+.systemsculpt-edit-button-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-empty-state {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.systemsculpt-error-message {
+  color: var(--text-error);
+  text-align: center;
+  padding: 1rem;
+  font-size: 14px;
+}
+
+.systemsculpt-error-message {
+  color: var(--text-error);
+  padding: 16px;
+  text-align: center;
+  background-color: var(--background-modifier-error);
+  border-radius: 4px;
+}
+
+.systemsculpt-extension-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.systemsculpt-extension-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+.systemsculpt-extension-badge.systemsculpt-pro-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: inherit;
+}
+
+.systemsculpt-extension-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.systemsculpt-extension-button {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-extension-button.systemsculpt-is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-extension-button.systemsculpt-is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-extension-button.systemsculpt-is-selected
+  .systemsculpt-extension-badge.systemsculpt-pro-badge {
+  background: var(--text-on-accent);
   color: var(--interactive-accent);
 }
 
-.systemsculpt-loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
+.systemsculpt-extension-button.systemsculpt-is-selected:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.systemsculpt-extension-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-extension-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-extension-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.systemsculpt-extension-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-extension-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-extension-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-extension-text {
+  font-weight: 500;
+}
+
+.systemsculpt-favorite-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border-radius: 4px;
+  z-index: 2;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-favorite-button.systemsculpt-is-favorite {
+  color: var(--color-yellow);
+  opacity: 1;
+}
+
+.systemsculpt-favorite-button.systemsculpt-is-favorite {
+  color: var(--color-yellow);
+}
+
+.systemsculpt-favorite-button.systemsculpt-is-favorite:hover {
+  opacity: 0.8;
+}
+
+.systemsculpt-favorite-button.systemsculpt-is-favorite:hover {
+  opacity: 0.8;
+}
+
+.systemsculpt-favorite-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--color-yellow);
+}
+
+.systemsculpt-favorite-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--color-yellow);
+}
+
+.systemsculpt-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-file-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background-color: var(--background-primary-alt);
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.systemsculpt-file-meta {
+  display: none; 
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.systemsculpt-file-meta {
+  display: inline;
+}
+
+.systemsculpt-file-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-file-remove {
+  margin-left: auto;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.systemsculpt-file-remove:hover {
+  opacity: 1;
+}
+
+.systemsculpt-file-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  animation: systemsculpt-slideIn 0.2s ease;
+}
+
+.systemsculpt-file-status .systemsculpt-status-icon svg {
+  color: var(--text-muted);
+}
+
+.systemsculpt-file-status:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-file-status[data-status="error"] .systemsculpt-status-icon svg {
+  color: var(--text-error);
+}
+
+.systemsculpt-file-status[data-status="processing"]
+  .systemsculpt-status-icon
+  svg {
+  color: var(--text-accent);
+}
+
+.systemsculpt-file-status[data-status="success"] .systemsculpt-status-icon svg {
+  color: var(--text-success);
+}
+
+.systemsculpt-file-tree {
+  margin: 8px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.systemsculpt-file-tree .systemsculpt-nav-file {
+  padding-left: 24px;
+  position: relative;
+}
+
+.systemsculpt-file-tree .systemsculpt-nav-file-size {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin-left: auto;
+}
+
+.systemsculpt-file-tree .systemsculpt-nav-file-title {
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.systemsculpt-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.systemsculpt-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.systemsculpt-filters-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.systemsculpt-filters-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-has-tooltip {
+  cursor: help;
+}
+
+.systemsculpt-header-section-left {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.systemsculpt-hide-completed-tasks [data-task="x"],
+.systemsculpt-hide-completed-tasks .systemsculpt-is-checked,
+.systemsculpt-hide-completed-tasks .systemsculpt-task-list-item[data-task="x"],
+.systemsculpt-hide-completed-tasks li[data-task="x"],
+.systemsculpt-hide-completed-tasks .systemsculpt-markdown-source-view .systemsculpt-cm-line:has(.systemsculpt-cm-formatting-task.systemsculpt-cm-property) {
+  display: none !important;
+}
+
+.systemsculpt-highlight {
+  color: var(--text-accent);
+  font-weight: 500;
+}
+
+.systemsculpt-image-preview {
+  object-fit: contain;
+}
+
+.systemsculpt-image-wrapper {
+  margin: 8px 0;
+  max-width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.systemsculpt-info-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-info-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-info-button.systemsculpt-mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-info-button.systemsculpt-mod-cta:hover {
+  opacity: 0.9;
+}
+
+.systemsculpt-info-button:hover {
+  background: var(--background-modifier-active);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-input-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary-alt);
+  color: var(--text-normal);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 36px;
+  height: 36px;
+}
+
+.systemsculpt-input-action-button.active {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.systemsculpt-input-action-button.active:not(.disabled),
+.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-input-action-button.active:not(.disabled),
+.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-input-action-button.disabled {
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.systemsculpt-input-action-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.systemsculpt-input-action-button.disabled:hover {
+  background-color: var(--background-modifier-form-field);
+  transform: none;
+}
+
+.systemsculpt-input-action-button.disabled:hover {
+  background-color: transparent;
+}
+
+.systemsculpt-input-action-button:active {
+  transform: translateY(0);
+}
+
+.systemsculpt-input-action-button:hover {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background-color: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+  position: relative;
+}
+
+.systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
+  opacity: 0.2;
+}
+
+.systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
+  opacity: 0.5;
+}
+
+.systemsculpt-janitor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 8px;
+}
+
+.systemsculpt-janitor-section {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.systemsculpt-janitor-section .systemsculpt-button {
   width: 100%;
+  padding: 8px 16px;
+  background-color: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.systemsculpt-janitor-section .systemsculpt-button.systemsculpt-mod-disabled {
+  background-color: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.7;
+}
+
+.systemsculpt-janitor-section .systemsculpt-button.systemsculpt-mod-warning {
+  background-color: var(--background-modifier-error);
+  border-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-left-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.systemsculpt-license-container .systemsculpt-setting-item-control {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.systemsculpt-license-container .systemsculpt-setting-item-control input {
+  flex: 1;
+}
+
+.systemsculpt-load-chat-modal {
+  max-width: min(800px, 95vw);
+  max-height: 80vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px !important;
+}
+
+.systemsculpt-loading {
+  display: inline;
+  position: relative;
+  margin-left: 0.1rem;
+  margin-right: 0.1rem;
+  margin-top: 0.15rem;
+  animation: pulse 1.5s infinite;
+  color: var(--text-accent);
+  font-size: 0.8em;
+  line-height: inherit;
+  vertical-align: baseline;
+  user-select: none;
+}
+
+.systemsculpt-loading {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 0.3s,
-    visibility 0.3s;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
-.systemsculpt-loading-overlay.systemsculpt-visible {
+.systemsculpt-loading .systemsculpt-lucide-loader-2 {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-loading-animation {
+  font-size: 24px;
+  animation: pulse 1.5s infinite;
+  color: var(--text-accent);
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  gap: 1rem;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.systemsculpt-loading-spinner {
+  color: var(--text-muted);
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 2s linear infinite;
+}
+
+.systemsculpt-loading-spinner svg {
+  width: 32px;
+  height: 32px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-markdown-preview {
+  padding: 12px 16px;
+  min-width: 300px;
+  max-width: 600px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 0.9em;
+  line-height: 1.5;
+  border: 1px solid var(--background-modifier-border);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.systemsculpt-markdown-preview :last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-markdown-preview h1:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-markdown-preview::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-markdown-preview::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border-hover);
+  border-radius: 3px;
+}
+
+.systemsculpt-markdown-preview::-webkit-scrollbar-thumb:hover {
+  background: var(--interactive-accent);
+}
+
+.systemsculpt-markdown-preview::-webkit-scrollbar-track {
+  background: var(--background-primary);
+  border-radius: 3px;
+}
+
+.systemsculpt-markdown-source-view .systemsculpt-cm-editor {
+  padding-top: 0 !important;
+}
+
+.systemsculpt-markdown-source-view .systemsculpt-cm-scroller,
+.systemsculpt-markdown-reading-view .systemsculpt-markdown-preview-view {
+  padding-top: 8px;
+}
+
+.systemsculpt-markdown-wrapper {
+  line-height: 1.5;
+}
+
+.systemsculpt-markdown-wrapper li {
+  margin: 0.5em 0;
+}
+
+.systemsculpt-markdown-wrapper p {
+  margin: 1em 0;
+}
+
+.systemsculpt-markdown-wrapper p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-markdown-wrapper p:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-markdown-wrapper pre {
+  margin: 1em 0;
+}
+
+.systemsculpt-markdown-wrapper ul {
+  margin: 1em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.75rem;
+  margin: 0.5rem;
+  border-radius: 16px;
+}
+
+.systemsculpt-message-button {
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-message-button-toolbar {
+  position: absolute;
+  bottom: 0;
+  left: 8px;
+  width: fit-content;
+  min-width: min-content;
+  display: flex;
+  gap: 0.25rem;
+  padding: 4px;
+  margin-top: 8px;
+  background-color: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  opacity: 0;
+  transform: translateY(calc(100% + 4px));
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  visibility: hidden;
+  z-index: 100;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming {
+  width: auto;
+  min-width: 20px;
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming span {
+  font-size: 0.9em;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-success {
+  color: white;
+  background-color: var(--background-modifier-success);
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming {
+  color: white;
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-message-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-message-container {
+  padding: 8px 0;
+}
+
+.systemsculpt-message-content {
+  color: var(--text-normal);
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content > * {
+  clear: both;
+  display: block;
+}
+
+.systemsculpt-message-content a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.systemsculpt-message-content a:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-message-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--interactive-accent);
+  background-color: var(--background-primary);
+  border-radius: 0 4px 4px 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content h6 {
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content li {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content li > ol {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message-content p {
+  margin: 0.5em 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-message-content pre {
+  margin: 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.systemsculpt-message-content::after {
+  pointer-events: none;
+}
+
+.systemsculpt-message-edit-button {
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  opacity: 0;
+  transition: all 0.5s ease;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-message-edit-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-message-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  max-height: 70vh;
+  object-fit: contain;
+  padding: 16px;
+}
+
+.systemsculpt-message-label {
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.systemsculpt-message-text {
+  font-size: 1.1em;
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+
+.systemsculpt-message::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -40px;
+  pointer-events: none;
+}
+
+.systemsculpt-message:active .systemsculpt-message-button-toolbar,
+.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
+.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
   opacity: 1;
   visibility: visible;
 }
 
-.systemsculpt-loading-container {
-  background-color: var(--background-primary);
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  text-align: center;
+.systemsculpt-message:hover::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -40px;
+  height: 40px;
+  z-index: 99;
 }
 
-.systemsculpt-loading-text {
-  font-size: 16px;
-  color: var(--text-normal);
-  margin-bottom: 10px;
-}
-
-@keyframes systemsculpt-spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-.systemsculpt-title-edit-modal {
+.systemsculpt-messages-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 0.75rem 0.75rem 0.25rem;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  background-color: var(--background-primary);
+  gap: 0.75rem;
+}
+
+.systemsculpt-modal {
+  max-width: 500px;
   border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-modal {
   max-width: 600px;
-  width: 80%;
-  margin: auto;
+  max-height: 80vh;
+  border-radius: var(--radius-l);
+  padding: var(--size-4-4);
+  background-color: var(--background-primary);
+  box-shadow: var(--shadow-l);
 }
 
-.systemsculpt-title-edit-modal h2 {
-  margin-bottom: 15px;
+.systemsculpt-modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.systemsculpt-modal-button-container button {
+  padding: var(--size-4-1) var(--size-4-3);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  transition: all 0.15s ease-in-out;
+}
+
+.systemsculpt-modal-button-container button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-modal-button-container button:not(.systemsculpt-mod-cta) {
+  background-color: var(--background-modifier-hover);
   color: var(--text-normal);
-  text-align: center;
 }
 
-.systemsculpt-title-edit-input {
-  width: 100%;
-  padding: 10px;
+.systemsculpt-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.systemsculpt-modal-buttons button {
+  padding: 8px 16px;
+  border-radius: 4px;
   font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.systemsculpt-modal-buttons button.systemsculpt-mod-warning {
+  background-color: var(--background-modifier-error);
+  border: 1px solid var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-modal-content {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.systemsculpt-modal-content {
+  margin: var(--size-4-2) 0;
+  padding: 0;
+}
+
+.systemsculpt-modal-description {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.systemsculpt-modal-title {
+  padding: 16px 20px;
+  margin: 0;
+  font-size: 1.2em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-modal-title,
+h2.systemsculpt-modal-title {
+  color: var(--interactive-accent);
+  margin: 0;
+  margin-bottom: var(--size-4-2);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-medium);
+  line-height: var(--line-height-tight);
+}
+
+.systemsculpt-model-card {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: clamp(8px, 1.5vw, 12px);
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  height: fit-content;
+  min-height: clamp(120px, 20vh, 160px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-card {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-model-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.systemsculpt-model-card:hover {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-model-description {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 1px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.15;
+}
+
+.systemsculpt-model-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.systemsculpt-model-description.systemsculpt-has-tooltip {
+  cursor: help;
+}
+
+.systemsculpt-model-detail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9em;
+}
+
+.systemsculpt-model-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.systemsculpt-model-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 32px;
+  grid-column: 1 / -1;
+}
+
+.systemsculpt-model-grid {
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  overflow-y: scroll;
+  padding-right: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-highlight {
+  background-color: var(--text-highlight-bg);
+  color: var(--text-normal);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.systemsculpt-model-highlight {
+  background: none;
+  color: var(--text-accent);
+  padding: 0;
+  border-radius: 0;
+  font-weight: 600;
+  text-decoration: underline;
+  margin: 0;
+}
+
+.systemsculpt-model-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  line-height: 1;
+}
+
+.systemsculpt-model-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.systemsculpt-model-icon-container {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--interactive-accent);
+  border-radius: 6px;
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-model-icon-container svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-model-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.systemsculpt-model-indicator {
+  padding: 8px 12px;
+  background-color: var(--background-modifier-form-field);
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  height: 35px;
+  box-sizing: border-box;
+  justify-content: space-between;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-model-indicator {
+  flex: 1;
+  padding: 8px 12px;
+  background-color: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-model-indicator span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-model-indicator-drawer.systemsculpt-no-model {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.systemsculpt-model-indicator-drawer:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-model-indicator:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-indicator:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-info {
+  padding: 12px;
+  margin: 4px 0;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border-left: 4px solid var(--interactive-accent);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.systemsculpt-model-info-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.systemsculpt-model-info-description {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.systemsculpt-model-info-title {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-model-message-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-model-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-model-name {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: 1;
+}
+
+.systemsculpt-model-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-model-name-container {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0px;
+  padding: 1px 0;
+}
+
+.systemsculpt-model-name-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-model-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-section-label {
+  display: block;
+  text-align: center;
+  padding: var(--size-4-1) 0;
+  margin: var(--size-4-2) 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-model-selection-container {
+  padding: 12px;
+}
+
+.systemsculpt-model-selection-modal {
+  height: min(85vh, 900px);
+  width: clamp(300px, 95%, 1200px);
+  padding: clamp(8px, 2vw, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.5vw, 16px);
+  overflow: hidden;
+  margin: 0 auto;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.systemsculpt-model-selection-modal {
+  max-width: min(800px, 95vw);
+  max-height: 80vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px !important;
+  box-sizing: border-box;
+  margin: 0 auto;
+  align-items: center;
+}
+
+.systemsculpt-no-model {
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-no-model:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-active);
+}
+
+.systemsculpt-note-preview {
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  padding: 12px;
   background-color: var(--background-primary);
   color: var(--text-normal);
-  resize: vertical;
-  overflow: auto;
-  box-sizing: border-box;
-  margin-bottom: 15px;
-}
-
-.systemsculpt-save-button {
-  padding: 10px;
-  font-size: 14px;
-  background-color: var(--interactive-accent);
-  color: white;
   border: none;
+  border-radius: 0;
+  height: 150px;
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-notice {
+  padding: 8px 12px;
   border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  opacity: 1;
+  transition: opacity 150ms ease-in-out;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.systemsculpt-notice-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.systemsculpt-notice-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.systemsculpt-notice-message {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-notice.systemsculpt-fade {
+  opacity: 0.9;
+}
+
+.systemsculpt-notice.systemsculpt-notice-error {
+  background-color: var(--background-modifier-error);
+  border-color: var(--background-modifier-error);
+  color: var(--text-error);
+}
+
+.systemsculpt-notice.systemsculpt-notice-info {
+  background-color: var(--background-modifier-info);
+  border-color: var(--background-modifier-info);
+  color: var(--text-info);
+}
+
+.systemsculpt-notice.systemsculpt-notice-success {
+  background-color: var(--background-modifier-success);
+  border-color: var(--background-modifier-success);
+  color: var(--text-success);
+}
+
+.systemsculpt-notice.systemsculpt-notice-warning {
+  background-color: var(--background-modifier-warning);
+  border-color: var(--background-modifier-warning);
+  color: var(--text-warning);
+}
+
+.systemsculpt-popup {
+  background-color: var(--background-primary);
+  padding: 24px;
+  border-radius: 12px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  animation: popup-slide-up 0.2s ease-out;
+}
+
+.systemsculpt-popup-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.systemsculpt-popup-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  padding: 16px;
+  animation: popup-fade-in 0.2s ease-out;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing {
+  animation: popup-fade-out 0.2s ease-out forwards;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
+  animation: popup-slide-down 0.2s ease-out forwards;
+}
+
+.systemsculpt-popup-content {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.systemsculpt-popup-description {
+  color: var(--text-muted);
+  line-height: 1.5;
+  font-size: 0.9em;
+}
+
+.systemsculpt-popup-large {
+  max-width: 600px;
+}
+
+.systemsculpt-popup-message {
+  color: var(--text-normal);
+  line-height: 1.5;
+  font-size: 1em;
+}
+
+.systemsculpt-popup-textarea {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: var(--font-text-size);
+  line-height: 1.5;
+  color: var(--text-normal);
+  resize: vertical;
+  width: 100%;
+  min-height: 180px;
+  transition: all 0.15s ease-in-out;
+  font-family: var(--font-text);
+  margin: 12px 0;
+}
+
+.systemsculpt-popup-textarea::placeholder {
+  color: var(--text-faint);
+  opacity: 0.8;
+}
+
+.systemsculpt-popup-textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-popup-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.systemsculpt-popup-title .systemsculpt-popup-icon {
+  color: var(--interactive-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-popup-title .systemsculpt-popup-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-preset-button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.2s ease;
+  background-color: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
 }
 
-.systemsculpt-save-button:hover {
-  background-color: var(--interactive-accent-hover);
+.systemsculpt-preset-button-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+  justify-content: center;
 }
 
-.systemsculpt-archive-popup {
+.systemsculpt-preset-button.active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-preset-button.active {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+}
+
+.systemsculpt-preset-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-preview {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translate(8px, 8px);
+  transition: opacity 0.2s ease;
+  background-color: var(--background-primary);
+}
+
+.systemsculpt-preview {
+  display: none; /* Hidden by default, shown when .systemsculpt-visible is added */
+}
+
+.systemsculpt-preview-audio {
+  width: 100%;
+  margin: 20px 0;
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.systemsculpt-preview-container {
+  position: fixed;
+  z-index: 1000;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  max-width: min(800px, 80vw);
+  max-height: min(600px, 80vh);
+  overflow: hidden;
+}
+
+.systemsculpt-preview-error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 32px;
+  min-height: 200px;
+}
+
+.systemsculpt-preview-frontmatter {
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.systemsculpt-preview-frontmatter-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.systemsculpt-preview-frontmatter-key {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.systemsculpt-preview-frontmatter-row {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 4px 0;
+}
+
+.systemsculpt-preview-frontmatter-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.systemsculpt-preview-frontmatter-value {
+  font-size: 13px;
+  color: var(--text-normal);
+  word-break: break-word;
+}
+
+.systemsculpt-preview-header {
+  padding: 8px 12px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 4px 4px 0 0;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.systemsculpt-preview-image {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  max-height: 70vh;
+  padding: 16px;
+}
+
+.systemsculpt-preview-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px;
+  min-height: 200px;
+  position: absolute;
+  inset: 0;
+  background: var(--background-primary);
+  z-index: 1;
+}
+
+.systemsculpt-preview-loading svg {
+  width: 32px;
+  height: 32px;
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-preview-loading::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--text-accent);
+  border-radius: 50%;
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+.systemsculpt-preview-markdown {
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-normal);
+  overflow-wrap: break-word;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.systemsculpt-preview-markdown h3:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-preview-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+.systemsculpt-preview-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.systemsculpt-preview-pdf {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.systemsculpt-preview-pdf-container {
+  width: 100%;
+  height: 70vh;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.systemsculpt-preview-separator {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 16px 0;
+}
+
+.systemsculpt-preview-text {
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.systemsculpt-preview-video {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.systemsculpt-preview.systemsculpt-visible {
+  opacity: 1;
+  display: block;
+}
+
+.systemsculpt-pricing-high {
+  color: var(--color-red);
+  transition: opacity 0.2s ease;
+}
+
+.systemsculpt-pricing-low {
+  color: var(--color-green);
+  transition: opacity 0.2s ease;
+}
+
+.systemsculpt-pricing-low:hover,
+.systemsculpt-pricing-medium:hover,
+.systemsculpt-pricing-high:hover {
+  opacity: 0.8;
+}
+
+.systemsculpt-pricing-medium {
+  color: var(--color-orange);
+  transition: opacity 0.2s ease;
+}
+
+.systemsculpt-pro-benefits-list {
+  margin: 8px 0;
+  padding-left: 16px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.systemsculpt-pro-benefits-list li {
+  margin: 2px 0;
+  list-style-type: "→";
+  padding-left: 8px;
+  text-indent: -12px;
+  flex: 1 1 calc(50% - 16px);
+  min-width: 200px;
+}
+
+.systemsculpt-pro-promotion {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-pro-promotion .systemsculpt-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-pro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-pro-header .systemsculpt-pricing {
+  font-weight: 600;
+  color: var(--text-accent);
+}
+
+.systemsculpt-pro-promotion .systemsculpt-pro-header .systemsculpt-pricing-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-pro-header h3 {
+  margin: 0;
+  color: var(--text-accent);
+}
+
+.systemsculpt-pro-promotion .systemsculpt-setting-item {
+  padding: 0;
+  border: none;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-setting-item-control {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.systemsculpt-pro-promotion .systemsculpt-setting-item-heading {
+  margin-bottom: 8px;
+}
+
+.systemsculpt-pro-promotion button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.systemsculpt-processing-status {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 8px;
+  z-index: 100;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.systemsculpt-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  margin: 16px 0;
+  overflow: hidden;
+}
+
+.systemsculpt-progress-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  border: none;
+  transition: background 0.2s ease;
+}
+
+.systemsculpt-progress-button-primary {
+  background-color: #7e57c2; 
+  color: white;
+}
+
+.systemsculpt-progress-button-primary:hover {
+  background-color: #9575cd;
+}
+
+.systemsculpt-progress-button:hover {
+  background: var(--interactive-hover);
+}
+
+.systemsculpt-progress-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.systemsculpt-progress-modal {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background-color: var(--background-primary);
+  background: var(--background-primary);
   border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  padding: 20px;
+  padding: 24px;
+  min-width: 400px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 
-.systemsculpt-archive-popup h3 {
-  margin-bottom: 15px;
+.systemsculpt-progress-modal-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin-bottom: 16px;
   color: var(--text-normal);
-  text-align: center;
 }
 
-.systemsculpt-archive-popup-buttons {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.systemsculpt-archive-popup-button {
-  padding: 10px;
-  font-size: 14px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  flex: 1;
-  margin: 0 5px;
-}
-
-.systemsculpt-archive-popup-button.systemsculpt-archive {
-  background-color: var(--interactive-accent);
-  color: white;
-}
-
-.systemsculpt-archive-popup-button.systemsculpt-delete {
-  background-color: red;
-  color: white;
-}
-
-.systemsculpt-archive-popup-button:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-archive-popup-button.systemsculpt-delete:hover {
-  background-color: darkred;
-}
-
-.systemsculpt-archive-popup-overlay {
+.systemsculpt-progress-overlay {
   position: fixed;
   top: 0;
   left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 999;
+}
+
+.systemsculpt-progress-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.systemsculpt-progress-status {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-progress-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-progress-status-icon {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-prompt-creation-content {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: var(--font-text);
+  resize: vertical;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-prompt-creation-content::placeholder,
+.systemsculpt-prompt-creation-title-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-prompt-creation-content:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-prompt-creation-title-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-prompt-creation-title-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-provider-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px 8px;
+  margin: 8px 0 4px;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-normal);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-provider-header {
+  grid-column: 1 / -1;
+  padding: 12px 16px 8px;
+  margin: 8px 0 4px;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-normal);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-provider-header:first-of-type {
+  margin-top: 0;
+}
+
+.systemsculpt-provider-header:first-of-type {
+  margin-top: 0;
+}
+
+.systemsculpt-provider-header:first-of-type span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-provider-header:first-of-type span::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: var(--color-yellow);
+  mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>');
+  -webkit-mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>');
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+}
+
+.systemsculpt-provider-link {
+  color: var(--interactive-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 500;
+  display: inline-block;
+  margin-top: 8px;
+}
+
+.systemsculpt-provider-link:hover {
+  color: var(--interactive-accent-hover);
+  text-decoration: none;
+}
+
+.systemsculpt-providers-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  min-width: 105px;
+  cursor: pointer;
+  margin: 0;
+  vertical-align: top;
+}
+
+.systemsculpt-providers-button {
+  padding: 0 8px;
+    min-width: 40px;
+    width: 40px;
+}
+
+.systemsculpt-providers-button span:last-child {
+  display: none;
+}
+
+.systemsculpt-providers-button svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.systemsculpt-reasoning-container.systemsculpt-collapsed .systemsculpt-reasoning-content {
+  max-height: 0;
+}
+
+.systemsculpt-reasoning-container.systemsculpt-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.systemsculpt-reasoning-content {
+  font-size: 0.9em;
+  line-height: 1.4;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  max-height: 1000px;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+
+.systemsculpt-reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.systemsculpt-reasoning-header .systemsculpt-lucide {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-reasoning-header:hover {
+  color: var(--text-normal);
+}
+
+.systemsculpt-reasoning-indicator {
+  color: var(--color-purple);
+}
+
+.systemsculpt-recorder-canvas {
+  width: 100%;
+  height: 80px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.systemsculpt-recorder-canvas {
+  height: 60px;
+    margin: 0;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-recorder-content {
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  background: var(--background-primary);
+  border-radius: 6px;
+}
+
+.systemsculpt-recorder-content {
+  min-height: 100px;
+}
+
+.systemsculpt-recorder-live {
+  font-size: 12px;
+  color: #5871ef;
+  margin-bottom: 4px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.systemsculpt-recorder-modal {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 9999;
+  width: 240px;
+  height: fit-content;
+  cursor: move;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  will-change: top, left;
+  touch-action: none;
+}
+
+.systemsculpt-recorder-modal {
+  width: calc(100% - 40px);
+    max-width: 240px;
+    bottom: 80px;
+    right: 20px;
+    padding: 10px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-recorder-modal.systemsculpt-recording {
+  touch-action: none;
+}
+
+.systemsculpt-recorder-modal.systemsculpt-recording .systemsculpt-recorder-live {
+  opacity: 1;
+  animation: pulse 2s infinite;
+}
+
+.systemsculpt-recorder-status.systemsculpt-error {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.systemsculpt-recorder-status:not([style*="display: none"]) {
+  opacity: 1;
+}
+
+.systemsculpt-recorder-visualizer {
+  width: 100%;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 4px;
+  transition: all 0.3s ease;
+}
+
+.systemsculpt-recorder-visualizer .systemsculpt-recorder-canvas {
+  width: 100%;
+  height: 60px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.systemsculpt-recorder-visualizer .systemsculpt-recorder-canvas {
+  height: 50px;
+}
+
+.systemsculpt-recorder-visualizer .systemsculpt-recorder-live {
+  font-size: 12px;
+  color: var(--text-accent);
+  margin-bottom: 4px;
+  font-weight: 500;
+  opacity: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  width: fit-content;
+  animation: pulse 2s infinite;
+}
+
+.systemsculpt-response-container {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.systemsculpt-response-container {
+  max-height: 200px;
+}
+
+.systemsculpt-result-badge {
+  font-size: 0.8em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.systemsculpt-result-context {
+  flex: 1;
+  margin-right: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.systemsculpt-result-description {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.systemsculpt-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.systemsculpt-result-info {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.systemsculpt-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.systemsculpt-result-item.systemsculpt-is-selected {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-result-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-direction: column;
+  gap: 8px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.systemsculpt-result-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-result-size {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-border);
+  font-size: 11px;
+}
+
+.systemsculpt-result-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.systemsculpt-results-container {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  min-width: 300px;
+  overflow: hidden;
+}
+
+.systemsculpt-scroll-bottom-button {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--background-secondary);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+  z-index: 100;
+}
+
+.systemsculpt-scroll-bottom-button:hover {
+  opacity: 1;
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-scroll-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.systemsculpt-search-container {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: min(800px, 95%);
+  margin: 16px auto;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.systemsculpt-search-container {
+  padding: 8px;
+    gap: 8px;
+}
+
+.systemsculpt-search-container {
+  position: relative;
+  top: 0;
+  z-index: 1;
+  background-color: var(--background-primary);
+  padding: 0.5rem 0;
+  width: 100%;
+}
+
+.systemsculpt-search-highlight {
+  color: var(--text-accent);
+  font-weight: 600;
+}
+
+.systemsculpt-search-input {
+  flex: 1;
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+.systemsculpt-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 16px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-search-input,
+.systemsculpt-providers-button {
+  box-sizing: border-box !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 4px;
+  background-color: var(--background-secondary-alt) !important;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 30px !important;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-search-modal {
+  width: 100%;
+  max-width: 100%;
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem !important;
+  border-radius: 0;
+}
+
+.systemsculpt-search-result {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.systemsculpt-search-result .systemsculpt-result-context,
+.systemsculpt-search-result .systemsculpt-result-description,
+.systemsculpt-search-result .systemsculpt-result-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-search-result.selected {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-search-result.selected {
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-search-results-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.systemsculpt-section {
+  margin-bottom: 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-section-description {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.systemsculpt-section-header {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+}
+
+.systemsculpt-section-header {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: var(--size-4-2) 0;
+  margin: 0 var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-section-header {
+  font-size: 0.95em;
+  font-weight: 600;
+  padding: 10px 12px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  margin-bottom: 0;
+}
+
+.systemsculpt-sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-4);
+}
+
+.systemsculpt-send-button {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-send-button.disabled {
+  background-color: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-send-button.disabled {
+  background-color: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-send-button.disabled:hover {
+  background-color: var(--background-modifier-border);
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-send-button.disabled:hover {
+  background-color: var(--background-modifier-border);
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-send-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.systemsculpt-send-button:hover {
+  background-color: var(--interactive-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-sort-select {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.systemsculpt-sort-select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.systemsculpt-sort-select:hover {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-speed-indicator {
+  color: var(--color-yellow);
+}
+
+.systemsculpt-split-container {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.systemsculpt-ss-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  min-width: 80px;
+  text-align: center;
+  line-height: 1.4;
+  background-color: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+}
+
+.systemsculpt-ss-button--danger {
+  background-color: var(--background-modifier-error) !important;
+  color: white !important;
+}
+
+.systemsculpt-ss-button--danger:hover {
+  background-color: var(--text-error) !important;
+}
+
+.systemsculpt-ss-button--large {
+  padding: 10px 20px;
+  font-size: 16px;
+  min-width: 100px;
+}
+
+.systemsculpt-ss-button--patron:hover {
+  opacity: 0.9;
+}
+
+.systemsculpt-ss-button--primary {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none !important;
+}
+
+.systemsculpt-ss-button--primary:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-ss-button--secondary {
+  background-color: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+}
+
+.systemsculpt-ss-button--secondary:hover {
+  background-color: var(--background-modifier-border) !important;
+}
+
+.systemsculpt-ss-button--small {
+  padding: 4px 12px;
+  font-size: 12px;
+  min-width: 60px;
+}
+
+.systemsculpt-ss-button.systemsculpt-is-loading {
+  position: relative;
+  color: transparent;
+}
+
+.systemsculpt-ss-button.systemsculpt-is-loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: systemsculpt-ss-button-loading 0.8s linear infinite;
+  opacity: 1;
+}
+
+.systemsculpt-ss-button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-ss-button.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-ss-button:active {
+  transform: translateY(0);
+}
+
+.systemsculpt-ss-button:disabled,
+.systemsculpt-ss-button.systemsculpt-is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+}
+
+.systemsculpt-ss-button:hover {
+  background-color: var(--background-modifier-border) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-status-bar {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  transition: all 0.2s ease;
+  max-width: 300px;
+}
+
+.systemsculpt-status-bar[data-status="processing"] {
+  border-color: var(--text-accent);
+}
+
+.systemsculpt-status-bar[data-status="success"] {
+  border-color: var(--text-success);
+}
+
+.systemsculpt-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-status-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-status-text {
+  font-size: 14px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-stop-button {
+  background-color: var(--text-error);
+  border-color: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-stop-button.disabled {
+  background-color: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-stop-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: translateY(0);
+}
+
+.systemsculpt-stop-button.disabled:hover {
+  background-color: var(--background-modifier-border);
+  transform: none;
+  box-shadow: none;
+}
+
+.systemsculpt-stop-button.disabled:hover {
+  background-color: transparent;
+}
+
+.systemsculpt-stop-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.systemsculpt-stop-button:hover {
+  background-color: var(--text-error-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-stream-container {
+  display: inline;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.systemsculpt-stream-container > * {
+  display: inline;
+}
+
+.systemsculpt-stream-container p {
+  display: inline;
+  margin: 0;
 }
 
 .systemsculpt-suggestion-content {
   display: flex;
   align-items: center;
-  padding: 5px;
+  gap: 8px;
+  width: 100%;
 }
 
-.systemsculpt-suggestion-checkbox-container {
-  flex: 0 0 30px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.systemsculpt-suggestion-content-inner {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.systemsculpt-suggestion-checkbox {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--text-muted);
-  border-radius: 3px;
-  cursor: pointer;
-  position: relative;
-  transition:
-    background-color 0.3s,
-    border-color 0.3s;
-}
-
-.systemsculpt-suggestion-checkbox:checked {
-  background-color: var(--interactive-accent);
-  border-color: var(--interactive-accent);
-}
-
-.systemsculpt-suggestion-checkbox:checked::after {
-  content: "✓";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 12px;
-}
-
-.systemsculpt-suggestion-checkbox:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--background-modifier-border);
-}
-
-.systemsculpt-suggestion-checkbox:indeterminate {
-  background-color: var(--interactive-accent);
-  opacity: 0.5;
-}
-
-.systemsculpt-suggestion-checkbox:indeterminate::after {
-  content: "-";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 12px;
-}
-
-.systemsculpt-suggestion-text {
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-  margin-left: 10px;
-}
-
-.systemsculpt-suggestion-title {
-  font-weight: bold;
-  margin-bottom: 2px;
+.systemsculpt-suggestion-highlight {
+  color: var(--text-accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .systemsculpt-suggestion-note {
   font-size: 0.8em;
   color: var(--text-muted);
-}
-
-.systemsculpt-fuzzy-match {
-  color: var(--text-accent);
-  text-decoration: underline;
-}
-
-.systemsculpt-context-file-path {
-  color: var(--text-normal);
-  text-decoration: underline;
-  cursor: pointer;
-  transition: color 0.3s ease;
-}
-
-.systemsculpt-context-file-path:hover {
-  color: var(--text-accent);
-}
-
-.systemsculpt-chat-title-text {
-  cursor: pointer;
-  transition: color 0.3s ease;
-  text-decoration: underline;
-}
-
-.systemsculpt-chat-title-text:hover {
-  color: var(--text-accent);
-}
-
-.systemsculpt-load-more-button {
-  width: 100%;
-  padding: 10px;
-  background-color: var(--background-secondary);
-  border: none;
-  border-bottom: 1px solid var(--background-modifier-border);
-  cursor: pointer;
-  text-align: center;
-}
-
-.systemsculpt-load-more-button:hover {
-  background-color: var(--background-modifier-hover);
-}
-
-@media (max-width: 768px) {
-  .systemsculpt-chat-container {
-    border-radius: 0;
-  }
-
-  .systemsculpt-chat-input-container {
-    padding: 10px;
-  }
-
-  .systemsculpt-chat-input {
-    font-size: 16px;
-  }
-
-  .systemsculpt-chat-send-button {
-    padding: 10px 20px;
-    font-size: 16px;
-  }
-}
-
-@media (max-width: 480px) {
-  .systemsculpt-chat-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .systemsculpt-actions-button {
-    margin-top: 10px;
-  }
-
-  .systemsculpt-chat-title {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .systemsculpt-token-count {
-    margin-top: 5px;
-    margin-left: 0;
-  }
-}
-
-.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading {
-  display: flex;
-  align-items: center;
-  padding: 10px;
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading
-  .systemsculpt-loading-spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--text-muted);
-  border-top: 2px solid var(--text-normal);
-  border-radius: 50%;
-  animation: systemsculpt-spin 1s linear infinite;
-  margin-right: 10px;
-}
-
-.systemsculpt-chat-message.systemsculpt-ai.systemsculpt-loading span {
-  color: var(--text-muted);
-}
-
-@keyframes systemsculpt-spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-.systemsculpt-file-searcher-filters {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 8px 12px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  margin-top: 8px;
-  margin-bottom: 8px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.systemsculpt-file-searcher-confirm-button {
-  display: block;
-  width: calc(100% - 24px); /* Subtract padding from width */
-  padding: 6px 12px; /* Increase vertical padding */
-  margin: 12px auto; /* Increase margin */
-  background-color: var(--background-modifier-border);
-  color: var(--text-muted);
-  border: none;
-  border-radius: 4px; /* Add rounded corners */
-  font-size: 14px;
-  cursor: not-allowed;
-  text-align: center;
-  transition:
-    background-color 0.3s ease,
-    color 0.3s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 200px;
-  max-width: 100%; /* Ensure it doesn't overflow its container */
-  position: sticky;
-  bottom: 0;
-  z-index: 1; /* Ensure button is above other content */
 }
 
-.systemsculpt-file-searcher-confirm-button.systemsculpt-active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  cursor: pointer;
-}
-
-.systemsculpt-file-searcher-confirm-button.systemsculpt-active:hover {
-  background-color: var(--interactive-accent-hover);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.systemsculpt-file-searcher-confirm-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.systemsculpt-file-searcher-filter {
-  display: flex;
-  align-items: center;
-  margin: 0 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-file-searcher-filter-checkbox {
-  margin-right: 4px;
-}
-
-.systemsculpt-file-searcher-notice {
-  padding: 8px 12px;
-  margin-top: 8px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.systemsculpt-file-searcher-filters {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 8px 12px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  margin-top: 8px;
-  margin-bottom: 8px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.systemsculpt-file-searcher-filter {
-  display: flex;
-  align-items: center;
-  margin: 0 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-file-searcher-filter-checkbox {
-  margin-right: 4px;
-}
-
-.systemsculpt-file-searcher-notice {
-  padding: 8px 12px;
-  margin-top: 0px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.systemsculpt-suggestion-file-extension {
-  opacity: 0.7;
-  font-size: 0.9em;
-  margin-left: 0.3em;
-}
-
-.systemsculpt-chat-input-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  margin-top: 10px;
-}
-
-.systemsculpt-chat-input-loading .systemsculpt-loading-spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--text-muted);
-  border-top: 2px solid var(--text-normal);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-right: 10px;
-}
-
-.systemsculpt-chat-input-loading span {
-  color: var(--text-muted);
-}
-
-.systemsculpt-hidden {
-  display: none !important;
-}
-
-.systemsculpt-chat-message table {
-  display: block; /* Changes table to block to enable scrolling */
-  overflow-x: auto; /* Enables horizontal scrolling */
-  max-width: 100%; /* Ensures table doesn't exceed container width */
-  white-space: nowrap; /* Prevents text wrapping in cells */
-  border-collapse: collapse; /* Standard table styling */
-  margin: 10px 0;
-}
-
-.systemsculpt-chat-message td,
-.systemsculpt-chat-message th {
-  padding: 6px 12px;
-  border: 1px solid var(--background-modifier-border);
-  min-width: 60px; /* Ensures columns don't collapse too much */
-}
-
-.systemsculpt-retry-button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 10px;
-  transition:
-    background-color 0.3s,
-    color 0.3s;
-  margin-left: 5px;
-}
-
-.systemsculpt-retry-button.confirm-retry {
-  background-color: var(--interactive-accent);
-  color: white;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-/* Custom Notice */
-.systemsculpt-custom-notice {
-  border: 1px solid var(--interactive-accent);
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 1000;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  top: auto;
-  left: auto;
-}
-
-.systemsculpt-custom-notice:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
-}
-
-.systemsculpt-custom-notice-content {
-  display: flex;
-  align-items: center;
-}
-
-.systemsculpt-custom-notice-message {
-  margin-right: 10px;
-  font-size: 16px;
+.systemsculpt-suggestion-title {
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Info Box */
-.systemsculpt-upcoming-features li,
-.systemsculpt-info-box {
-  background-color: var(--background-secondary);
-  padding: 10px;
-  border-radius: 5px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+.systemsculpt-sync-status {
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
 }
 
-.systemsculpt-info-box p {
+.systemsculpt-sync-status svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-sync-status.systemsculpt-synced svg {
+  color: var(--color-green);
+}
+
+.systemsculpt-sync-status.systemsculpt-syncing svg {
+  color: var(--text-muted);
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-tasks-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 0.9em;
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  margin: 0;
+  backdrop-filter: blur(10px);
+}
+
+.systemsculpt-tasks-toggle input[type="checkbox"] {
   margin: 0;
 }
 
-.systemsculpt-upcoming-features {
-  margin-top: 35px;
-}
-
-.systemsculpt-info-box-token-count {
-  font-size: 12px;
-  background-color: var(--background-primary);
-  padding: 5px 10px;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: block;
-  text-align: right;
-  margin-bottom: 5px;
+.systemsculpt-tasks-toggle label {
   color: var(--text-muted);
-}
-
-/* Remove all existing styles and replace with these simplified styles */
-
-.systemsculpt-patreon-sub-setting-button {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  padding: 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.systemsculpt-patreon-sub-setting-button:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-info-box {
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 10px;
-  margin-top: 10px;
-}
-
-/* Links Container */
-.systemsculpt-links-container {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  padding: 0px;
-  background-color: var(--background-secondary);
-  border-radius: 10px 10px 0 0;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  margin-bottom: 5px;
-}
-
-.systemsculpt-settings-link {
-  flex: 0 1 calc(16.666% - 10px); /* 6 links per row, accounting for gap */
-  min-width: 100px; /* Minimum width for each link */
-  max-width: 250px; /* Maximum width for each link */
-  margin: 5px;
-  padding: 10px 0px;
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 10px;
-  font-weight: 500;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color 0.3s ease, background-color 0.3s ease;
-  border-radius: 4px;
-}
-
-.systemsculpt-settings-link:hover {
-  color: var(--text-normal);
-  background-color: var(--background-modifier-hover);
-}
-
-/* Modal */
-.systemsculpt-modal-content-centered {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-}
-
-.systemsculpt-modal-header {
-  text-align: center;
-}
-
-/* Revolving dots animation */
-@keyframes systemsculpt-revolving-dots {
-  0% {
-    content: '';
-  }
-  25% {
-    content: '.';
-  }
-  50% {
-    content: '..';
-  }
-  75% {
-    content: '...';
-  }
-  100% {
-    content: '';
-  }
-}
-
-.systemsculpt-revolving-dots::after {
-  display: inline-block;
-  animation: systemsculpt-revolving-dots 1s infinite steps(4);
-  content: '';
-}
-
-/* Modal list styles */
-.systemsculpt-modal-list {
-  margin-top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-modal-list h3 {
-  margin: 15px 0 0px;
-  padding: 0 5px;
-  font-size: 14px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Custom scrollbar styles */
-.systemsculpt-model-selection-modal {
-  padding-right: 12px; /* Increased padding to accommodate wider scrollbar */
-  margin-top: 20px; /* Add top margin to modal content */
-}
-
-.systemsculpt-model-selection-modal::-webkit-scrollbar {
-  width: 12px; /* Increased width */
-}
-
-.systemsculpt-model-selection-modal::-webkit-scrollbar-track {
-  background: var(--background-secondary-alt);
-  border-radius: 6px;
-}
-
-.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb {
-  background: var(--interactive-accent); /* Changed to a more visible color */
-  border-radius: 6px;
-  border: 3px solid var(--background-secondary-alt); /* Added border for contrast */
-}
-
-.systemsculpt-model-selection-modal::-webkit-scrollbar-thumb:hover {
-  background: var(--interactive-accent-hover);
-}
-
-/* Adjust modal group layout */
-.systemsculpt-modal-group {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  max-width: 600px;
-  margin-left: 10px; /* Add left margin */
-  margin-right: 10px; /* Add right margin */
-}
-
-.systemsculpt-modal-item {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  border-radius: 5px;
-  transition: background-color 0.2s ease;
-  padding: 10px;
-  cursor: pointer;
-  background-color: var(--background-secondary-alt);
-  word-break: break-all;
-  overflow-wrap: break-word;
-  hyphens: auto;
-  position: relative;
-}
-
-.systemsculpt-model-name {
-  font-size: 0.9em;
-  margin-bottom: 2px;
-}
-
-.systemsculpt-model-context-length {
-  font-size: 0.7em;
-  color: var(--text-muted);
-}
-
-.systemsculpt-model-favorite-star {
-  position: absolute;
-  bottom: 5px;
-  right: 5px;
-  cursor: pointer;
-  color: var(--text-muted);
-  transition: color 0.2s ease, transform 0.2s ease;
-  padding: 5px;
-  margin: -5px;
-}
-
-.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite):hover {
-  color: var(--text-accent);
-}
-
-.systemsculpt-model-favorite-star.systemsculpt-is-favorite {
-  color: var(--text-accent);
-  filter: drop-shadow(0 0 3px var(--text-accent))
-    drop-shadow(0 0 1px var(--text-accent));
-}
-
-.systemsculpt-model-favorite-star:not(.systemsculpt-is-favorite) {
-  font-variation-settings: 'FILL' 0;
-}
-
-.systemsculpt-model-favorite-star:hover {
-  transform: scale(1.2);
-}
-
-.systemsculpt-model-favorite-star.systemsculpt-is-favorite:hover {
-  color: var(--text-muted);
-}
-
-.systemsculpt-modal-item:hover {
-  background-color: var(--background-secondary);
-}
-
-.systemsculpt-modal-item.systemsculpt-disabled {
-  color: var(--text-muted);
-}
-
-.systemsculpt-modal-item .systemsculpt-checkbox-container {
-  margin-left: auto;
-}
-
-/* Additional styles */
-.systemsculpt-modal-list-setting {
-  margin-top: 0;
-}
-
-.systemsculpt-model-search-input {
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 5px;
-  border-radius: 5px;
-  border: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-modal-item.systemsculpt-selected {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-fuzzy-match {
-  font-weight: bold;
-  text-decoration: underline;
-}
-
-.systemsculpt-modal-item.systemsculpt-selected .systemsculpt-fuzzy-match {
-  color: inherit;
-  background-color: transparent;
-}
-
-.systemsculpt-no-results-message {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-muted);
-}
-
-/* API Endpoints specific styles */
-.systemsculpt-api-endpoints-list {
-  margin-top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-api-endpoints-group {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.systemsculpt-api-endpoints-group .systemsculpt-modal-item {
-  width: 100%;
-}
-
-@media (max-width: 600px) {
-  .systemsculpt-api-endpoints-group {
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  }
-}
-
-.systemsculpt-refresh-models-button {
-  margin-bottom: 10px;
-  padding: 5px 10px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.systemsculpt-refresh-models-button:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-refreshing-models {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-muted);
-}
-
-/* Provider checkbox styles */
-.systemsculpt-provider-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.systemsculpt-provider-checkbox-label {
-  display: flex;
-  align-items: center;
   cursor: pointer;
   user-select: none;
 }
 
-.systemsculpt-provider-checkbox {
-  margin-right: 5px;
-}
-
-/* Recording Notice */
-.systemsculpt-recording-notice {
-  background-color: var(--background-primary);
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 1000;
-  border: 2px solid var(--primary-color);
-  transform: scale(1);
-  transform-origin: bottom right;
-  margin-bottom: 15px;
-  margin-right: 5px;
-}
-
-.systemsculpt-recording-notice-position {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-}
-
-.systemsculpt-recording-notice-header {
-  display: flex;
-  justify-content: flex-end;
-  width: 100%;
-}
-
-.systemsculpt-recording-notice-header button {
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 1.5em;
-  cursor: pointer;
-  margin-bottom: 10px;
-}
-
-.systemsculpt-recording-notice-header .systemsculpt-close-button {
-  margin-left: auto;
-}
-
-.systemsculpt-recording-notice-header .systemsculpt-hide-button {
-  margin-left: 10px;
-}
-
-.systemsculpt-recording-notice-title {
-  margin: 0;
-  text-align: center;
-  width: 100%;
-}
-
-.systemsculpt-recording-notice-canvas {
-  width: 100%;
-}
-
-.systemsculpt-recording-notice-canvas canvas {
-  width: 100%;
-  height: 100%;
-  stroke: var(--primary-color); /* Updated to use primary color */
-  stroke-width: 2;
-}
-
-/* Variables */
-:root {
-  --primary-color: #1890ff;
-  --secondary-color: #91d5ff;
-  --tertiary-color: #e6f7ff;
-}
-
-/* Section Link */
-.systemsculpt-section-link {
-  display: inline-block;
-  padding: 0px 20px;
-  font-size: 18px;
-  font-weight: bold;
-  text-decoration: none;
-  border-radius: 8px;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.systemsculpt-section-link:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
-}
-
-.systemsculpt-section-link {
-  display: block;
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-/* Settings */
-.systemsculpt-tab-container {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  background-color: var(--background-secondary);
-  border-radius: 0px 0px 0 0;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-.systemsculpt-tab {
-  flex: 0 1 calc(16.666% - 20px); /* 6 tabs per row, accounting for padding */
-  min-width: 100px; /* Minimum width for each tab */
-  max-width: 200px; /* Maximum width for each tab */
-  margin: 5px;
-  margin-bottom: 0px;
-  padding: 10px 0px;
-  border: none;
-  background-color: transparent;
-  color: var(--text-muted);
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  position: relative;
-  transition: color 0.3s ease, font-weight 0.3s ease;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.systemsculpt-tab:hover {
-  color: var(--text-normal);
-}
-
-.systemsculpt-tab::after {
-  content: '';
-  position: absolute;
-  bottom: -10px; /* Match this with the value in .systemsculpt-tab.systemsculpt-active::after */
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background-color: var(--interactive-accent);
-  transform: scaleX(0);
-  transition: transform 0.3s ease;
-}
-
-.systemsculpt-tab.systemsculpt-active {
-  color: var(--text-normal);
-  font-weight: bold;
-}
-
-.systemsculpt-tab.systemsculpt-active::after {
-  transform: scaleX(1);
-  bottom: 2px; /* Adjust this value to position the underline correctly */
-}
-
-.systemsculpt-settings-container {
-  background-color: var(--background-primary);
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  min-height: 100%;
-}
-
-.systemsculpt-search-container {
-  padding: 10px 0px;
-  border-radius: 0px 0px 10px 10px;
-  background-color: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.systemsculpt-settings-search-input {
-  width: 80%;
-  max-width: 600px;
-  padding: 8px 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 14px;
-  text-align: center;
-}
-
-.systemsculpt-settings-search-input::placeholder {
-  text-align: center;
-}
-
-.systemsculpt-settings-search-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
-}
-
-.systemsculpt-fuzzy-match {
-  font-weight: bold;
-  text-decoration: underline;
-}
-
-/* Spinner */
-.systemsculpt-spinner {
-  width: 40px;
-  height: 40px;
-  position: relative;
-  margin: 100px auto;
-}
-
-.systemsculpt-double-bounce1,
-.systemsculpt-double-bounce2 {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background-color: var(--text-normal);
-  opacity: 0.6;
-  position: absolute;
-  top: 0;
-  left: 0;
-  animation: systemsculpt-sk-bounce 2s infinite ease-in-out;
-}
-
-.systemsculpt-double-bounce2 {
-  animation-delay: -1s;
-}
-
-@keyframes systemsculpt-sk-bounce {
-  0%,
-  100% {
-    transform: scale(0);
-  }
-  50% {
-    transform: scale(2);
-  }
-}
-
-/* Common button styles */
-.systemsculpt-status-bar-button {
-  --button-padding: 4px 10px;
-  --button-margin: 0 1px;
-  --button-border-radius: 3px;
-  --button-font-size: 12px;
-  --button-transition: all 0.2s ease;
-  --button-border-color: var(--interactive-accent);
-  --button-border-width: 1px;
-  --button-hover-bg: var(--interactive-hover);
-  --button-active-bg: var(--interactive-accent);
-
-  cursor: pointer;
-  padding: var(--button-padding);
-  margin: var(--button-margin);
-  border: var(--button-border-width) solid var(--button-border-color);
-  border-radius: var(--button-border-radius);
-  background-color: var(--background-secondary-alt);
-  color: var(--text-normal);
-  transition: var(--button-transition);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--button-font-size);
-  line-height: 1;
-  height: auto;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-/* Button order */
-.systemsculpt-update-button { order: -99; }
-.systemsculpt-recorder-notice-toggle-button { order: -98; }
-.systemsculpt-model-toggle-button { order: -5; }
-.systemsculpt-max-tokens-toggle-button { order: -4; }
-.systemsculpt-chat-toggle-button { order: -3; }
-.systemsculpt-task-toggle-button { order: -2; }
-.systemsculpt-recorder-toggle-button { order: -1; }
-
-/* Specific button styles */
-.systemsculpt-update-button {
-  border-color: var(--text-error);
-  background-color: var(--background-secondary);
-}
-
-.systemsculpt-recorder-notice-toggle-button {
-  border-color: var(--text-error);
-}
-
-/* Hover styles */
-.systemsculpt-status-bar-button:hover {
-  background-color: var(--button-hover-bg);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  transform: translateY(-1px);
-}
-
-.systemsculpt-update-button:hover {
-  border-color: var(--text-success);
-  background-color: var(--background-modifier-success);
-}
-
-/* Active styles */
-.systemsculpt-status-bar-button:active {
-  background-color: var(--button-active-bg);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-  transform: translateY(0);
-}
-
-/* Disabled state */
-.systemsculpt-status-bar-button.systemsculpt-disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-/* Task Modal */
-.systemsculpt-task-modal-button {
-  margin-top: 20px;
-  text-align: center;
-  position: relative;
-  display: flex;
-  justify-content: flex-end;
-}
-.systemsculpt-task-description-textarea textarea {
+.systemsculpt-template-content-container {
   height: 200px;
-  width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  resize: none;
-}
-
-.systemsculpt-template-name {
-  margin-top: 5px;
-  font-size: 16px;
-  margin-bottom: 5px;
-}
-
-.systemsculpt-template-description {
-  margin-top: 0px;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-
-.systemsculpt-template-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-bottom: 3px;
-}
-
-.systemsculpt-template-meta-item {
-  margin-right: 2px;
-  padding: 2px 6px;
-  background-color: var(--background-secondary-alt);
-  border-radius: 4px;
-  margin-bottom: 3px;
-  color: var(--color-green);
-}
-
-.systemsculpt-template-tags {
-  display: flex;
-  flex-wrap: wrap;
-  width: 100%; /* This ensures it takes the full width and moves to a new line */
-  margin-top: 0; /* Removes any top margin to keep tags close to the line above */
+  position: relative;
+  border-radius: 0;
+  overflow: hidden;
   margin-bottom: 0;
 }
 
-.systemsculpt-template-tag {
-  margin-right: 2px;
-  margin-bottom: 2px; /* Ensures tags are close to each other vertically */
-  padding: 2px 6px;
-  background-color: var(--background-secondary-alt);
-  border-radius: 4px;
-  white-space: nowrap;
+.systemsculpt-template-content-container,
+  .systemsculpt-note-preview {
+  height: 120px;
 }
 
-.systemsculpt-setting-item textarea {
-  width: 100%;
-  min-height: 250px;
-  border-radius: 5px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  padding: 10px;
-  font-size: 14px;
+.systemsculpt-template-modal {
+  max-width: 800px;
+  width: 90vw;
+}
+
+.systemsculpt-template-preview,
+.systemsculpt-template-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px;
+  background-color: var(--background-primary);
+  border: none;
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
   line-height: 1.5;
-  resize: vertical;
+  color: var(--text-normal);
+  overflow: auto;
 }
 
-.systemsculpt-setting-item textarea:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+.systemsculpt-template-textarea {
+  resize: none;
+  width: 100%;
+  height: 100%;
 }
 
-.systemsculpt-version-info-container {
-  display: flex;
-  margin-bottom: 10px;
+.systemsculpt-text-modification-modal {
+  width: 80vw;
+  height: 80vh;
+  max-width: 1200px;
+  max-height: 800px;
 }
 
-.systemsculpt-version-info-text {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 12px;
+.systemsculpt-text-modification-modal .systemsculpt-button {
+  padding: 8px 16px;
   border-radius: 4px;
-  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  background-color: var(--background-modifier-border);
+  color: var(--text-normal);
+  border: none;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-loading svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button:hover {
+  background-color: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-input-section,
+.systemsculpt-text-modification-modal .systemsculpt-preview-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-modal-content {
+  display: flex;
+  gap: 20px;
+  height: calc(100% - 120px); 
+  padding: 20px;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-preview-content {
+  flex-grow: 1;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-textarea {
+  flex-grow: 1;
+  resize: none;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-text-modification-modal label {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-text-wrapper {
+  position: relative;
+}
+
+.systemsculpt-textarea {
+  width: 100%;
+  flex-grow: 1;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  transition: all 0.2s ease;
+  overflow-y: auto;
+}
+
+.systemsculpt-textarea-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-textarea-modal {
+  max-width: 800px;
+  width: 90vw;
+}
+
+.systemsculpt-textarea:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected:hover {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.systemsculpt-theme-dark .systemsculpt-file-status {
+  background: var(--background-secondary-alt);
+}
+
+.systemsculpt-theme-dark .systemsculpt-processing-status {
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-theme-dark .systemsculpt-status-bar {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.systemsculpt-token-counter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-top-pick-badge {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.systemsculpt-top-pick-badge svg {
+  display: none;
+}
+
+.systemsculpt-user-message {
+  align-self: flex-end;
+  background-color: var(--interactive-accent);
+  border-radius: 16px 16px 16px 16px;
+}
+
+.systemsculpt-user-message .systemsculpt-message-button-toolbar {
+  left: auto;
+  right: 8px;
+}
+
+.systemsculpt-user-message .systemsculpt-message-content {
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-user-message .systemsculpt-message-label {
+  color: var(--text-on-accent);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.systemsculpt-utility-button-grid {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+
+.systemsculpt-validation-time {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-version-indicator {
+  margin: 12px 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.systemsculpt-version-indicator p {
+  margin: 4px 0;
+  opacity: 1;
+  transform: translateY(0);
+  transition: all 0.3s ease;
+}
+
+.systemsculpt-vision-indicator {
+  color: var(--color-blue);
+}
+
+0% {
+  opacity: 0.3;
+  transform: scale(0.8);
+}
+
+0% {
+  opacity: 1;
+}
+
+0% {
+  opacity: 0.3;
+  transform: scale(0.8);
+}
+
+0% {
+  opacity: 1;
+}
+
+0%,
+  100% {
+  transform: translateX(2px);
+}
+
+100% {
+  opacity: 0.3;
+  transform: scale(0.8);
+}
+
+100% {
+  opacity: 1;
+}
+
+100% {
+  opacity: 0.3;
+  transform: scale(0.8);
+}
+
+100% {
+  opacity: 1;
+}
+
+50% {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+50% {
+  transform: translateX(10px);
+}
+
+50% {
+  opacity: 0.5;
+}
+
+50% {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+50% {
+  opacity: 0.5;
+}
+
+button.systemsculpt-ss-button--primary[data-button-text="Choose Model"],
+button.systemsculpt-ss-button--primary[data-button-text="Choose New Model"],
+button.systemsculpt-ss-button--primary.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none !important;
+}
+
+button.systemsculpt-ss-button--primary[data-button-text="Choose Model"]:hover,
+button.systemsculpt-ss-button--primary[data-button-text="Choose New Model"]:hover,
+button.systemsculpt-ss-button--primary.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+from {
+  opacity: 0;
+  transform: rotate(0deg);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  opacity: 0;
+    transform: translateY(10px);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  opacity: 0;
+    transform: translateY(-10px);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  opacity: 0;
+  transform: rotate(0deg);
+}
+
+from {
+  transform: rotate(0deg);
+}
+
+from {
+  opacity: 0;
+}
+
+from {
+  opacity: 1;
+}
+
+from {
+  opacity: 0;
+    transform: translateY(10px);
+}
+
+from {
+  opacity: 1;
+    transform: translateY(0);
+}
+
+to {
+  opacity: 1;
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  opacity: 1;
+    transform: translateY(0);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  opacity: 1;
+    transform: translateY(0);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  opacity: 1;
+  transform: rotate(360deg);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+to {
+  opacity: 1;
+}
+
+to {
+  opacity: 0;
+}
+
+to {
+  opacity: 1;
+    transform: translateY(0);
+}
+
+to {
+  opacity: 0;
+    transform: translateY(10px);
+}
+
+to {
+  transform: rotate(360deg);
+}
+
+}
+
+
+.systemsculpt-favorite-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border-radius: 4px;
+  z-index: 2;
+  transition: all 0.2s ease;
+  opacity: 0.5;
+}
+
+.systemsculpt-model-grid {
+  flex-grow: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: clamp(8px, 1.5vw, 12px);
+  overflow-y: auto;
+  padding: 0 4px 8px 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  max-width: 100%;
+  align-items: start;
+  align-content: start;
+}
+
+
+
+.systemsculpt-model-indicator-drawer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-normal);
+  font-size: 0.9em;
+  width: 100%;
+}
+
+
+
+.systemsculpt-prompt-creation-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+
+
+.systemsculpt-reasoning-container {
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: all 0.2s ease;
+}
+
+
+
+.systemsculpt-ss-button--patron {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: 1px solid var(--interactive-accent) !important;
+}
+
+
+
+.systemsculpt-status-bar[data-status="error"] {
+  border-color: var(--text-error);
+}
+
+
+
+.systemsculpt-status-icon svg.systemsculpt-lucide-loader-2 {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+
+
+.systemsculpt-theme-dark .systemsculpt-popup {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+
+.systemsculpt-button-container {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+
+.systemsculpt-chat-input.disabled {
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+
+.systemsculpt-credit-balance {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin: 4px 0;
+  padding: 4px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  display: inline-block;
+  transition: all 0.3s ease;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-custom-provider-toggle-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+.systemsculpt-drawer {
+  position: relative;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  overflow: visible;
+}
+
+
+.systemsculpt-input-action-button.active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+
+.systemsculpt-janitor-modal {
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px !important;
+  box-sizing: border-box;
+  margin: 0 auto;
+}
+
+
+.systemsculpt-model-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+
+.systemsculpt-progress-spinner {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 2s linear infinite;
+}
+
+
+.systemsculpt-recorder-error {
+  color: var(--text-error);
   text-align: center;
+  padding: 8px;
+  font-size: 14px;
+  background: var(--background-secondary);
+  border-radius: 4px;
 }
 
-.systemsculpt-version-info-text.systemsculpt-up-to-date {
-  background-color: #5cb85c; /* Bootstrap's success color */
+
+.systemsculpt-recorder-modal.systemsculpt-dragging {
+  opacity: 0.9;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
-.systemsculpt-version-info-text.systemsculpt-outdated {
-  background-color: #d9534f; /* Bootstrap's danger color */
+
+.systemsculpt-recorder-status {
+  font-size: 12px;
+  text-align: center;
+  padding: 4px 8px;
+  margin-top: 4px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
+
+
+body.systemsculpt-drawer-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+@keyframes systemsculpt-token-loading  {
+  to {
+    transform: rotate(360deg);
+}
+
+@media (min-width: 600px)  {
+  .systemsculpt-file-meta {
+    display: inline;
+}
+
+@media (hover: none)  {
+  .systemsculpt-preview {
+    display: none;
+}
+
+@media (max-width: 600px)  {
+  .systemsculpt-context-meta {
+    flex-wrap: nowrap;
+}
+
+@media (min-width: 600px)  {
+  .systemsculpt-context-type-group,
+  .systemsculpt-context-meta-group {
+    display: flex;
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-custom-provider-manager-modal {
+    height: 100vh;
+    width: 100vw;
+    padding: 16px;
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@keyframes systemsculpt-bounce  {
+  0%,
+  100% {
+    transform: translateX(2px);
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-drawer.is-mobile {
+    
+    .systemsculpt-drawer-header {
+      padding: 12px 16px;
+      min-height: 48px;
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@keyframes systemsculpt-slideIn  {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-recorder-visualizer .systemsculpt-recorder-canvas {
+    height: 50px;
+}
+
+@keyframes systemsculpt-pulse  {
+  0% {
+    opacity: 1;
+}
+
+@keyframes systemsculpt-fade-in  {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+}
+
+@keyframes systemsculpt-spin  {
+  from { transform: rotate(0deg);
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@media (max-width: 600px)  {
+  .systemsculpt-search-container {
+    padding: 8px;
+    gap: 8px;
+}
+
+@keyframes systemsculpt-spin  {
+  from {
+    transform: rotate(0deg);
+}
+
+@keyframes systemsculpt-popup-fade-in  {
+  from {
+    opacity: 0;
+}
+
+@keyframes systemsculpt-popup-fade-out  {
+  from {
+    opacity: 1;
+}
+
+@keyframes systemsculpt-popup-slide-up  {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+@keyframes systemsculpt-popup-slide-down  {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-recorder-modal {
+    width: calc(100% - 40px);
+    max-width: 240px;
+    bottom: 80px;
+    right: 20px;
+    padding: 10px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-recorder-canvas {
+    height: 60px;
+    margin: 0;
+    border: 1px solid var(--background-modifier-border);
+}
+
+@keyframes systemsculpt-pulse  {
+  0% {
+    opacity: 1;
+}
+
+@keyframes systemsculpt-ss-button-loading  {
+  to {
+    transform: rotate(360deg);
+}
+
+@media (max-width: 768px)  {
+  .systemsculpt-template-content-container,
+  .systemsculpt-note-preview {
+    height: 120px;
+}
