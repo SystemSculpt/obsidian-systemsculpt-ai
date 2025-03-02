@@ -1125,12 +1125,6 @@
   margin: 0 auto;
 }
 
-.systemsculpt-custom-provider-manager-modal {
-  height: 100vh;
-    width: 100vw;
-    padding: 16px;
-}
-
 .systemsculpt-custom-provider-manager-modal
   .systemsculpt-custom-provider-manager-actions {
   display: flex;
@@ -1139,6 +1133,10 @@
   padding-top: 10px;
   border-top: 1px solid var(--background-modifier-border);
   flex-shrink: 0;
+  position: sticky; /* Make it stick to the bottom */
+  bottom: 0;
+  background-color: var(--background-primary); /* Ensure it has a background */
+  z-index: 1; /* Ensure it stays on top of scrolling content */
 }
 
 .systemsculpt-custom-provider-manager-modal
@@ -1197,7 +1195,8 @@
   flex-direction: column;
   gap: 14px;
   flex-grow: 1;
-  overflow: hidden;
+  overflow: auto; /* Changed from 'hidden' to 'auto' to ensure content is scrollable */
+  max-height: calc(100% - 60px); /* Ensure there's room for the header and actions */
 }
 
 .systemsculpt-custom-provider-manager-modal
@@ -5574,8 +5573,9 @@ body.systemsculpt-drawer-open {
 @media (max-width: 768px)  {
   .systemsculpt-custom-provider-manager-modal {
     height: 100vh;
-    width: 100vw;
+    width: 95vw; /* Changed from 100vw to 95vw to prevent horizontal scrolling */
     padding: 16px;
+  }
 }
 
 @keyframes systemsculpt-spin  {
