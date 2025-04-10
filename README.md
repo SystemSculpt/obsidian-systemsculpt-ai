@@ -33,10 +33,42 @@ Ever dreamed of creating your own customized Obsidian plugin without coding? Tur
 | 📁 **Contextual File Integration** | Enhance AI interactions by managing contextual files directly in your vault. |
 | 🔗 **Custom AI Provider Integration** | Flexibly connect and utilize your favorite AI service providers. |
 | ✅ **Task & Workflow Optimization** | Efficiently generate, organize, and automate tasks to streamline your productivity. |
+| 📝 **One-Click AI Response Insertion** | Easily insert AI-generated responses directly into your active note at the cursor position using the "Insert" button in AI response modals. This fixes a previous issue where the button did not insert text, streamlining your workflow without manual copy-paste. |
 
 ---
 
-## 📥 Installation Made Easy
+## 🛠️ Recent Modernization & Improvements
+
+SystemSculpt AI has undergone significant modernization to enhance maintainability, user experience, and extensibility. Recent updates include:
+
+- **API Settings Modernization:**
+  Centralized and refactored API endpoint and header management for both internal and custom providers, improving clarity and extensibility. Enhanced error handling and user feedback for API configuration.
+
+- **Template Management Enhancements:**
+  Overhauled the template management system for reliability and flexibility. Introduced dynamic template suggestions, improved error handling, and a redesigned selection UI with search, preview, and keyboard navigation.
+
+- **Notification System Refactor:**
+  Unified and streamlined notification handling across the codebase. Centralized logic ensures consistent user feedback for errors and success states in services and modals.
+
+- **Title Generation Workflow and UI Overhaul:**
+  Redesigned the title generation process for chats and notes, adding support for multiple prompt types, fallback logic, and real-time feedback. The UI now offers greater control and clarity for both manual and automatic title generation.
+
+- **UI/UX Improvements and Codebase Modernization:**
+  Modernized UI components and styles for accessibility and consistency. Improved state management, responsive layouts, and error handling. Refactored core logic for better separation of concerns and long-term maintainability.
+
+These improvements collectively deliver a more robust, user-friendly, and future-proof experience for all SystemSculpt AI users.
+
+---
+
+## ⚠️ Known Limitations
+
+**Title Generation Prompt Handling:**
+The current implementation of the title generation workflow does not yet support the use of `titleGenerationPromptType` and `titleGenerationPromptPath` settings. At present, only the direct prompt setting is utilized for generating titles. Future updates may expand support to handle these additional prompt configuration options.
+
+---
+---
+
+## � Installation Made Easy
 
 ### 🛠️ Requirements
 - Obsidian v0.12.0 or higher
