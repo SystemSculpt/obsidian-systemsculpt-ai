@@ -2048,8 +2048,8 @@
 
 .ss-modal--large {
   width: 650px;
-  height: auto;
-  max-height: 85vh;
+  height: auto; /* Restore auto height */
+  max-height: 85vh; /* Restore original max-height */
 }
 
 .ss-modal--fullwidth {
@@ -2125,39 +2125,70 @@
   margin-bottom: 16px;
 }
 
+/* --- Filter Container --- */
 .ss-modal__filter-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid; /* Use grid layout */
+  grid-template-columns: repeat(auto-fit, minmax(120px, max-content)); /* Auto-fit columns */
+  gap: 10px; /* Consistent gap between grid items */
+  align-items: center; /* Vertically align items */
+  padding: 12px 20px; /* Consistent padding */
   margin-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border); /* Add border if needed */
 }
 
-/* Filter buttons for file extensions and other filters */
-.ss-filter-button {
+/* --- Base Filter Button Style (Applies to both provider and favorites) --- */
+.ss-filter-button,
+.systemsculpt-favorites-filter {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  background-color: var(--background-modifier-border);
-  color: var(--text-muted);
+  justify-content: center; /* Center content */
+  height: 34px; /* Consistent height */
+  padding: 0 12px; /* Consistent padding */
+  border-radius: 6px; /* Consistent border radius */
+  font-size: 14px; /* Consistent font size */
+  font-weight: 500; /* Consistent font weight */
   cursor: pointer;
   user-select: none;
-  font-weight: 500;
-  gap: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary); /* Default background */
+  color: var(--text-muted); /* Default text color */
   transition: all 0.15s ease;
+  white-space: nowrap;
+  gap: 6px; /* Gap between icon and text */
+  margin-right: 0; /* Remove specific margins, rely on grid gap */
 }
 
-.ss-filter-button:hover {
+/* Hover state for all filter buttons */
+.ss-filter-button:hover,
+.systemsculpt-favorites-filter:hover {
   background-color: var(--background-modifier-hover);
   color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
 }
 
+/* Active state for Provider filter buttons */
 .ss-filter-button.ss-active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.ss-filter-button.ss-active .ss-filter-button__icon svg {
+  color: var(--text-on-accent); /* Ensure icon color matches */
 }
 
+
+/* Active state for Favorites filter button */
+.systemsculpt-favorites-filter.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.systemsculpt-favorites-filter.is-active .svg-icon {
+   color: var(--text-on-accent); /* Ensure icon color matches */
+}
+
+
+/* Specific styles for Provider button icon/text */
 .ss-filter-button__icon {
   display: flex;
   align-items: center;
@@ -2165,27 +2196,48 @@
   width: 16px;
   height: 16px;
 }
-
 .ss-filter-button__text {
-  font-size: 11px;
-  font-weight: 600;
+  /* font-size is handled by base style */
+  /* font-weight is handled by base style */
 }
 
+/* Specific styles for Favorites button icon */
+.systemsculpt-favorites-filter .svg-icon {
+  /* margin-right: 6px; /* Use gap instead */
+  width: 16px; /* Match provider icon size */
+  height: 16px; /* Match provider icon size */
+  color: var(--text-muted); /* Default icon color */
+  transition: all 0.2s ease;
+}
+
+/* Remove old badge styles if not used */
 .ss-filter-button__badge {
-  display: inline-flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
-  padding: 1px 4px;
-  margin-left: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  gap: 2px;
+  /* Remove or adjust if badges are not part of the design */
+  display: none;
 }
 
-.ss-filter-button__badge svg {
-  width: 10px;
-  height: 10px;
+/* Focus state */
+.ss-filter-button:focus-visible,
+.systemsculpt-favorites-filter:focus-visible {
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--background-modifier-border-focus); /* Improved focus ring */
+}
+
+/* Responsive adjustments (Optional, based on previous attempt) */
+@media (max-width: 600px) {
+  .ss-modal__filter-container {
+    /* Grid handles wrapping automatically, but adjust columns if needed */
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); /* Allow more buttons per row on smaller screens */
+    padding: 12px; /* Adjust padding */
+    gap: 8px; /* Slightly smaller gap */
+  }
+  .ss-filter-button,
+  .systemsculpt-favorites-filter {
+    /* width: 100%; /* Let grid handle width */
+    justify-content: center; /* Center content */
+    margin-right: 0; /* Ensure no margin interferes */
+  }
 }
 
 /* Search */
@@ -2256,6 +2308,12 @@
   padding-bottom: 4px;
 }
 
+/* 
+ * NOTE: The ss-modal__item styling has been moved to favorite-toggle.css
+ * to use a grid layout that properly positions the favorite toggle and provider badge
+ * without overlap. The commented styles below are kept for reference only.
+ */
+/*
 .ss-modal__item {
   display: flex;
   align-items: center;
@@ -2266,6 +2324,7 @@
   position: relative;
   gap: 8px;
 }
+*/
 
 .ss-modal__item:hover,
 .ss-modal__item:focus {
@@ -2276,33 +2335,21 @@
   background-color: var(--background-primary-alt);
 }
 
-.ss-modal__item .ss-modal__item-icon {
-  color: var(--text-muted);
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .ss-modal__item.ss-active .ss-modal__item-icon {
   color: var(--interactive-accent);
 }
 
-.ss-modal__item-content {
-  flex-grow: 1;
-  overflow: hidden;
-}
-
+/* 
+ * The following item content styles are now managed through the grid layout
+ * in favorite-toggle.css, but we keep the color and text styles here.
+ */
 .ss-modal__item-title {
-  font-weight: 500;
   font-size: 14px;
+  font-weight: 500;
   color: var(--text-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.3;
 }
 
 .ss-modal__item-description {
@@ -2311,8 +2358,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
-  line-height: 1.3;
 }
 
 .ss-modal__item-badge {
@@ -2741,6 +2786,35 @@
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* --- Specific Modal Overrides --- */
+
+/* Apply fixed height specifically to the Model Selection Modal's inner container */
+/* This assumes .ss-modal--large is a child of the element with .systemsculpt-model-selection-modal */
+/* If the class is on the root .modal, use: .modal.systemsculpt-model-selection-modal.ss-modal--large */
+.systemsculpt-model-selection-modal .ss-modal--large {
+   height: 75vh;
+   max-height: 75vh;
+}
+
+/* Add specific styling for the sort dropdown if needed */
+.ss-modal-sort-container {
+  /* Container for the dropdown, allows alignment */
+  display: flex;
+  align-items: center;
+  margin-left: auto; /* Push to the right within the filter container */
+}
+.ss-modal-sort-container .ss-sort-dropdown {
+  /* Example: Adjust width or appearance */
+  min-width: 150px;
+  height: 34px; /* Match filter button height */
+  font-size: 14px; /* Match filter button font size */
+  border-radius: 6px; /* Match filter button border radius */
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  padding-left: 8px; /* Adjust padding */
+  padding-right: 8px;
 }
 
 
@@ -7135,6 +7209,595 @@
   
   .systemsculpt-recording-visualizer {
     height: 50px;
+  }
+} 
+
+/* favorite-toggle.css */
+/* Favorite Toggle Component Styles */
+
+.systemsculpt-favorite-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  margin: 0 4px;
+  overflow: visible;
+}
+
+.systemsculpt-favorite-toggle:hover {
+  background-color: var(--interactive-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-favorite-toggle.is-active {
+  transform: scale(0.95);
+}
+
+.systemsculpt-favorite-toggle.is-focused {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  outline: none;
+}
+
+/* Icon wrapper allows for better animation control */
+.systemsculpt-favorite-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  z-index: 2;
+}
+
+/* Enhanced star icon appearance */
+.systemsculpt-favorite-toggle .systemsculpt-favorite-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Favorited state styling */
+.systemsculpt-favorite-toggle.is-favorite .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle.is-favorite .systemsculpt-favorite-icon svg,
+.systemsculpt-favorite-toggle.is-favorite svg {
+  color: var(--color-yellow) !important;
+  fill: var(--color-yellow) !important;
+  stroke: var(--color-yellow) !important;
+  filter: drop-shadow(0 0 4px rgba(255, 217, 0, 0.5));
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Unfavorited state styling */
+.systemsculpt-favorite-toggle.not-favorite .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle.not-favorite .systemsculpt-favorite-icon svg,
+.systemsculpt-favorite-toggle.not-favorite svg {
+  color: var(--text-muted);
+  fill: transparent;
+  stroke: var(--text-muted);
+  stroke-width: 1px;
+}
+
+/* Hover effects for unfavorited state */
+.systemsculpt-favorite-toggle.not-favorite:hover .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle.not-favorite.is-focused .systemsculpt-favorite-icon .svg-icon {
+  color: var(--text-normal);
+  stroke: var(--text-normal);
+}
+
+/* Hover effects for favorited state */
+.systemsculpt-favorite-toggle.is-favorite:hover .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle.is-favorite.is-focused .systemsculpt-favorite-icon .svg-icon {
+  filter: drop-shadow(0 0 5px rgba(255, 217, 0, 0.5));
+  transform: scale(1.1);
+}
+
+/* Animation for toggling favorite status */
+.systemsculpt-favorite-toggle .systemsculpt-favorite-icon .svg-icon {
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              color 0.2s ease,
+              fill 0.2s ease,
+              filter 0.2s ease;
+}
+
+.systemsculpt-favorite-toggle.is-active .systemsculpt-favorite-icon .svg-icon {
+  transform: scale(0.9);
+}
+
+/* Animation feedback element for status change */
+.systemsculpt-favorite-feedback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+
+/* Animation for adding to favorites */
+.systemsculpt-favorite-feedback.animate-favorite {
+  animation: favorite-pulse 0.5s ease-out forwards;
+}
+
+/* Animation for removing from favorites */
+.systemsculpt-favorite-feedback.animate-unfavorite {
+  animation: unfavorite-pulse 0.5s ease-out forwards;
+}
+
+@keyframes favorite-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 0;
+    background-color: rgba(255, 217, 0, 0);
+  }
+  30% {
+    opacity: 0.6;
+    background-color: rgba(255, 217, 0, 0.3);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+    background-color: rgba(255, 217, 0, 0);
+  }
+}
+
+@keyframes unfavorite-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+    background-color: rgba(255, 255, 255, 0);
+  }
+  30% {
+    opacity: 0.3;
+    background-color: rgba(200, 200, 200, 0.2);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 0;
+    background-color: rgba(200, 200, 200, 0);
+  }
+}
+
+/* Model list favorite toggle positioning - improved position and size */
+.ss-modal-item .systemsculpt-favorite-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  border-radius: 50%;
+  background-color: transparent;
+}
+
+.ss-modal-item:hover .systemsculpt-favorite-toggle,
+.ss-modal-item:focus-within .systemsculpt-favorite-toggle {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Make favorited items in list more visible */
+.ss-modal-item.ss-selected .systemsculpt-favorite-toggle.is-favorite {
+  background-color: rgba(255, 217, 0, 0.1);
+}
+
+/* Favorites filter toggle styles moved to standardized-modal.css */
+
+/* Empty state for favorites */
+.systemsculpt-favorites-empty-state {
+  text-align: center;
+  padding: 32px 24px;
+  color: var(--text-muted);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  margin: 16px;
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.systemsculpt-favorites-empty-state .svg-icon {
+  font-size: 40px;
+  margin-bottom: 20px;
+  color: var(--text-faint);
+  opacity: 0.8;
+}
+
+.systemsculpt-favorites-empty-state h4 {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: 16px;
+}
+
+.systemsculpt-favorites-empty-state p {
+  max-width: 300px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+/* Model Selection Modal enhancements */
+.systemsculpt-model-selection-modal .systemsculpt-list {
+  --favorite-accent-color: rgba(255, 217, 0, 0.1);
+}
+
+/* Create a subtle highlight for favorited models in the list */
+.systemsculpt-model-selection-modal .ss-modal-item.has-favorite {
+  background-color: var(--favorite-accent-color);
+  border-left: 2px solid var(--color-yellow);
+}
+
+.systemsculpt-model-selection-modal .ss-modal-item.has-favorite:hover {
+  background-color: var(--background-modifier-hover);
+  border-left-color: var(--color-yellow);
+}
+
+.systemsculpt-model-selection-modal .ss-modal-item.has-favorite.ss-selected {
+  background-color: var(--interactive-accent);
+  border-left-color: var(--color-yellow);
+}
+
+/* Make favorites more distinctive */
+.systemsculpt-model-selection-modal .ss-modal-item.has-favorite::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-yellow);
+  box-shadow: 0 0 4px rgba(255, 217, 0, 0.5);
+}
+
+/* Add fade in animation for favorites */
+@keyframes favorite-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.systemsculpt-model-selection-modal .systemsculpt-favorites-filter.is-active + * .ss-modal-item {
+  animation: favorite-fade-in 0.3s ease-out forwards;
+}
+
+/* Optimize the position of the favorite button in the list */
+.systemsculpt-model-selection-modal .ss-modal-item .systemsculpt-favorite-toggle {
+  z-index: 5;
+}
+
+/* Filter container styles moved to standardized-modal.css */
+
+/* Enhanced visibility for favorite toggle buttons in list items */
+.systemsculpt-favorite-button-container {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Use a more visible star */
+.systemsculpt-favorite-toggle {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 20;
+}
+
+.systemsculpt-favorite-toggle:hover {
+  transform: scale(1.2);
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+.theme-dark .systemsculpt-favorite-toggle {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.theme-dark .systemsculpt-favorite-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Make the star icon more visible */
+.systemsculpt-favorite-toggle .systemsculpt-favorite-icon .svg-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Make the favorited star more vibrant */
+.systemsculpt-favorite-toggle.is-favorite .systemsculpt-favorite-icon .svg-icon {
+  color: var(--color-yellow);
+  fill: var(--color-yellow);
+  filter: drop-shadow(0 0 4px rgba(255, 217, 0, 0.5));
+}
+
+/* Optimize spacing for list items in the modal */
+.systemsculpt-model-selection-modal .ss-modal__item {
+  position: relative;
+}
+
+/* Create a clearer hover effect for the list item's favorite toggle */
+.systemsculpt-model-selection-modal .ss-modal__item:hover .systemsculpt-favorite-toggle {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.theme-dark .systemsculpt-model-selection-modal .ss-modal__item:hover .systemsculpt-favorite-toggle {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Ensure the favorite toggle works with the DOM structure in the screenshot */
+.workspace-leaf-content [role="button"] {
+  position: relative;
+}
+
+/* Make favorites more noticeable in the list */
+.systemsculpt-model-selection-modal .has-favorite {
+  background-color: rgba(255, 217, 0, 0.05);
+}
+
+.systemsculpt-model-selection-modal .has-favorite:hover {
+  background-color: rgba(255, 217, 0, 0.1);
+}
+
+/* Completely revised model list item layout */
+.ss-modal__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  grid-template-areas: "icon content badge favorite";
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  position: relative;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+/* Style for the model icon */
+.ss-modal__item-icon {
+  grid-area: icon;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Style for the main content area */
+.ss-modal__item-content {
+  grid-area: content;
+  min-width: 0; /* Allows content to shrink properly */
+  overflow: hidden;
+}
+
+/* Style for the provider badge */
+.ss-modal__item .systemsculpt-provider-badge,
+.ss-modal__item .provider-badge {
+  grid-area: badge;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  background-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
+  margin: 0 4px;
+}
+
+/* Different colors for different providers */
+.ss-modal__item[data-provider="openai"] .provider-badge {
+  background-color: #10a37f; /* OpenAI green */
+}
+
+.ss-modal__item[data-provider="anthropic"] .provider-badge {
+  background-color: #b300ff; /* Anthropic purple */
+}
+
+.ss-modal__item[data-provider="openrouter"] .provider-badge {
+  background-color: #0066cc; /* OpenRouter blue */
+}
+
+/* Style for the favorite toggle container */
+.systemsculpt-favorite-button-container {
+  grid-area: favorite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  position: relative;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+}
+
+/* Style for the favorite toggle button - removing absolute positioning */
+.systemsculpt-favorite-toggle {
+  display: flex;
+  visibility: visible;
+  opacity: 1;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  align-items: center;
+  justify-content: center;
+}
+
+/* Remove absolute positioning from favorite toggle in modal items */
+.ss-modal-item .systemsculpt-favorite-toggle {
+  position: relative;
+  right: auto;
+  top: auto;
+  transform: none;
+}
+
+/* Star color when favorited */
+/* Ensure all SVGs in favorited state are yellow and visible */
+.systemsculpt-favorite-toggle.is-favorite svg {
+  color: var(--color-yellow) !important;
+  fill: var(--color-yellow) !important;
+  stroke: var(--color-yellow) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Hover effect for star */
+.systemsculpt-favorite-toggle:hover {
+  transform: scale(1.2);
+}
+
+/* Hover effect for non-favorited star in light theme */
+body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg {
+  color: rgba(255, 204, 0, 0.7);
+}
+
+/* Hover effect for non-favorited star in dark theme */
+.theme-dark .systemsculpt-favorite-toggle:not(.is-favorite):hover svg {
+  color: rgba(255, 204, 0, 0.7);
+}
+
+/* Make items with favorites stand out with subtle highlighting */
+.ss-modal__item.has-favorite {
+  background-color: rgba(255, 204, 0, 0.05);
+  border-left: 2px solid var(--color-yellow);
+}
+
+.ss-modal__item.has-favorite:hover {
+  background-color: rgba(255, 204, 0, 0.08);
+}
+
+/* Focused state for keyboard navigation */
+.ss-modal__item:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+/* Add subtle transition for hover effects */
+.ss-modal__item {
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.ss-modal__item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Add focus animation for the favorite toggle */
+.systemsculpt-favorite-toggle:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  animation: pulse-focus 1.5s infinite;
+}
+
+@keyframes pulse-focus {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--interactive-accent-rgb), 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(var(--interactive-accent-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--interactive-accent-rgb), 0);
+  }
+}
+
+/* Handle long text in model names and descriptions */
+.ss-modal__item-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.ss-modal__item-description {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Ensure proper touch target sizes for mobile */
+@media (max-width: 768px) {
+  .systemsculpt-favorite-toggle {
+    width: 36px;
+    height: 36px;
+    min-width: 36px; /* Ensure minimum touch target size */
+  }
+  
+  /* Reduce badge text size on small screens */
+  .ss-modal__item .systemsculpt-provider-badge,
+  .ss-modal__item .provider-badge {
+    font-size: 0.75em;
+    padding: 2px 4px;
+  }
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 500px) {
+  .ss-modal__item {
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  /* Adjust font sizes for smaller screens */
+  .ss-modal__item-title {
+    font-size: 14px;
+  }
+  
+  .ss-modal__item-description {
+    font-size: 12px;
+  }
+  
+  /* Further reduce gap for very small screens */
+  @media (max-width: 375px) {
+    .ss-modal__item {
+      gap: 6px;
+/* Filter row improvement styles moved to standardized-modal.css */
+      padding: 6px;
+    }
+    
+    /* For very narrow screens, allow provider badges to wrap text */
+    .ss-modal__item .systemsculpt-provider-badge,
+    .ss-modal__item .provider-badge {
+      white-space: normal;
+      text-align: center;
+      line-height: 1.2;
+      max-width: 70px;
+    }
   }
 } 
 
