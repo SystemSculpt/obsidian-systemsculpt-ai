@@ -7748,6 +7748,14 @@
     gap: 8px;
 }
 
+/* Input wrapper for search input and clear button */
+.systemsculpt-input-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
 .systemsculpt-search-input {
     flex: 1;
     padding: 4px 10px;
@@ -7758,6 +7766,10 @@
     background-color: var(--background-primary);
     color: var(--text-normal);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    /* Text overflow handling */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .systemsculpt-search-input:focus {
@@ -7775,26 +7787,31 @@
     margin-left: 0;
     padding: 0 12px;
     height: 28px;
-    background-color: var(--interactive-accent);
-    color: var(--text-on-accent);
-    border: none;
+    background-color: var(--background-secondary-alt);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     font-size: var(--font-ui-small);
     font-weight: var(--font-medium);
     cursor: pointer;
-    transition: background-color 0.15s ease, transform 0.15s ease;
+    transition: background-color 0.15s ease, transform 0.15s ease, outline-color 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 .systemsculpt-search-button:hover {
-    background-color: var(--interactive-accent-hover);
+    background-color: var(--background-secondary-hover);
     transform: translateY(-1px);
 }
 
 .systemsculpt-search-button:active {
     transform: translateY(0);
+}
+/* Focus outline for accessibility */
+.systemsculpt-search-button:focus {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
 }
 
 .systemsculpt-search-query {
@@ -7816,14 +7833,22 @@
     opacity: 0.7;
 }
 
+/* Style for chat search query */
+.systemsculpt-search-query.systemsculpt-chat-query::before {
+    content: "💬";  /* Chat emoji instead of search emoji */
+    margin-right: 6px;
+    opacity: 0.7;
+}
+
 /* Toggle container styles - repositioned and improved */
 .systemsculpt-toggle-container {
     display: flex;
     align-items: center;
-    padding: 6px 12px;
-    border-top: 1px solid var(--background-modifier-border); 
-    border-bottom: 1px solid var(--background-modifier-border);
-    background-color: var(--background-primary);
+    /* padding handled by context panel */
+    padding: 0;
+    /* borders handled by context panel */
+    border: none;
+    background-color: transparent;
     justify-content: flex-end;
     font-size: var(--font-ui-smaller);
 }
@@ -8050,6 +8075,81 @@
 .systemsculpt-similar-notes-view .systemsculpt-loading::after {
     content: none !important;
     display: none !important;
+}
+
+.systemsculpt-search-help {
+    font-size: var(--font-ui-smallest);
+    color: var(--text-muted);
+    padding: 4px 2px;
+    text-align: center;
+    font-style: italic;
+}
+/* Input clear button */
+.systemsculpt-input-clear-button {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    opacity: 0.7;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.systemsculpt-input-clear-button:hover {
+    opacity: 1;
+}
+/* Highlight similar note items that are already in context */
+.systemsculpt-result-item-in-context {
+    /* Light green outline to indicate already added */
+    outline: 2px solid var(--background-modifier-success);
+    outline-offset: -1px;
+    background-color: transparent;
+}
+
+/* Context panel grouping search badge and toggle */
+.systemsculpt-context-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background-color: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Add multi-vector badge styling */
+.systemsculpt-multi-vector-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    font-size: 0.7em;
+    font-weight: 500;
+    background-color: var(--background-modifier-success-hover);
+    color: var(--text-on-accent);
+    border-radius: 4px;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.systemsculpt-multi-vector {
+    padding-right: 8px;
+}
+
+.systemsculpt-tooltip {
+    background-color: var(--background-secondary);
+    color: var(--text-normal);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.9em;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    max-width: 250px;
+    z-index: 1000;
+    line-height: 1.4;
+    border: 1px solid var(--background-modifier-border);
 }
 
 /* reasoning.css */
@@ -10857,6 +10957,21 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background: var(--background-secondary);
   border-radius: 8px;
   overflow: hidden;
+}
+
+/* Markdown preview specific styles */
+.systemsculpt-preview.systemsculpt-markdown-preview {
+  max-width: min(450px, 80vw);
+  max-height: min(450px, 80vh);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+}
+
+.systemsculpt-preview.systemsculpt-markdown-preview .systemsculpt-preview-markdown {
+  overflow-y: auto;
+  max-height: min(400px, 70vh);
+  padding-right: 8px; /* Space for scrollbar */
 }
 
 
