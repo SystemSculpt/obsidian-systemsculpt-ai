@@ -1185,7 +1185,7 @@
 /* drawer.css */
 /**
  * Drawer Components
- * 
+ *
  * Styles for side drawers, panels, and slide-out menus
  */
 
@@ -1239,7 +1239,7 @@
   left: 0;
   right: 0;
   padding: 8px;
-  background-color: var(--background-modifier-form-field);
+  background-color: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   max-height: min(calc(100vh - 300px), 600px);
@@ -1250,6 +1250,7 @@
   transition: opacity 0.15s ease, transform 0.15s ease;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  backdrop-filter: none;
 }
 
 .systemsculpt-drawer-content::before {
@@ -1515,7 +1516,7 @@
   left: 0;
   right: 0;
   padding: 8px;
-  background-color: var(--background-modifier-form-field);
+  background-color: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   max-height: min(calc(100vh - 300px), 600px);
@@ -1526,6 +1527,7 @@
   transition: opacity 0.15s ease, transform 0.15s ease;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  backdrop-filter: none;
 }
 
 .systemsculpt-drawer-content::before {
@@ -4418,7 +4420,7 @@
 /* modals.css */
 /**
  * Modal Components
- * 
+ *
  * Styles for all modal dialogs, popups, and overlays
  */
 
@@ -4435,54 +4437,13 @@
   box-sizing: border-box;
 }
 
-/* System Search Modal beautification */
-.modal.systemsculpt-search-modal .modal-content {
-  max-width: 500px;
+/* System Search Modal - StandardModal version */
+.systemsculpt-search-modal.ss-modal {
+  max-width: 600px;
   width: 90%;
-  padding: 24px;
-  background-color: var(--background-primary);
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-}
-.modal.systemsculpt-search-modal .modal-content h2 {
-  margin: 0;
-  font-size: 1.6em;
-  text-align: center;
-  color: var(--text-normal);
-}
-.modal.systemsculpt-search-modal .modal-content p {
-  margin: 8px 0 16px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 1em;
-}
-.modal.systemsculpt-search-modal .systemsculpt-search-form {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.modal.systemsculpt-search-modal .systemsculpt-search-input {
-  flex: 1;
-  padding: 12px 16px;
-  font-size: 1em;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
-  outline: none;
-}
-.modal.systemsculpt-search-modal .systemsculpt-search-input:focus {
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
-}
-.modal.systemsculpt-search-modal button.mod-cta {
-  padding: 12px 20px;
-  font-size: 1em;
-  border-radius: 6px;
-  flex-shrink: 0;
 }
 
-/* 
+/*
  * Button styles have been moved to ss-buttons.css
  * Use .ss-button and .ss-button--secondary instead
  */
@@ -4494,7 +4455,7 @@
   gap: 6px;
 }
 
-/* 
+/*
  * Button styles have been moved to ss-buttons.css
  * Use .ss-button and .ss-button--secondary instead
  */
@@ -4541,7 +4502,7 @@
 .systemsculpt-text-modification-modal .systemsculpt-modal-content {
   display: flex;
   gap: 20px;
-  height: calc(100% - 120px); 
+  height: calc(100% - 120px);
   padding: 20px;
 }
 
@@ -5612,53 +5573,25 @@
   pointer-events: none;
 }
 
-/* Enhanced System Search Modal styling overrides */
+/* Enhanced System Search Modal styling */
 .systemsculpt-search-modal {
-  /* backdrop tweaks */
-  background: var(--background-secondary);
-}
-
-/* modal content - full-height container */
-.systemsculpt-search-modal .modal-content {
-  max-width: 600px;
-  width: 92%;
-  padding: 28px 28px 0;
-  margin: auto;
-  border-radius: var(--radius-l);
   background: var(--background-primary);
-  box-shadow: var(--shadow-l);
-  display: flex;
-  flex-direction: column;
 }
 
-/* title */
-.systemsculpt-search-title-container h2 {
-  margin: 0;
-  font-size: 1.7em;
-  font-weight: 600;
-  text-align: center;
-  color: var(--text-normal);
-}
-
-.systemsculpt-search-subtitle {
-  margin: 4px 0 20px;
-  font-size: 0.9em;
-  text-align: center;
-  color: var(--text-muted);
-}
+/* Search form styling */
 
 /* input + button */
 .systemsculpt-search-form {
   display: flex;
   gap: 10px;
-  max-width: 500px;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0 auto 16px;
 }
 
 .systemsculpt-search-input {
   flex: 1;
-  padding: 14px 18px;
-  border: none;
+  padding: 12px 16px;
+  border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-secondary);
   color: var(--text-normal);
@@ -5666,54 +5599,31 @@
 }
 
 .systemsculpt-search-input:focus {
-  outline: 2px solid var(--interactive-accent);
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
 }
 
 .systemsculpt-search-button {
-  padding: 14px 24px;
+  padding: 12px 20px;
   border-radius: var(--radius-s);
+  font-size: 1em;
+  flex-shrink: 0;
 }
 
-/* suggestions */
-.systemsculpt-search-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  margin-top: 14px;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-}
 
-.systemsculpt-search-suggestion {
-  padding: 6px 14px;
-  border-radius: 16px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  font-size: 0.85em;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.systemsculpt-search-suggestion:hover,
-.systemsculpt-search-suggestion.is-active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: var(--interactive-accent);
-}
 
 /* results container - fully integrated */
 .systemsculpt-search-results-container {
-  margin-top: 26px;
+  margin-top: 16px;
   flex-grow: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--background-modifier-border);
-  margin-left: -28px;
-  margin-right: -28px;
-  padding-bottom: 28px;
+  margin-left: -20px;
+  margin-right: -20px;
+  padding-bottom: 20px;
 }
 
 /* loading */
@@ -5746,7 +5656,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 28px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -5779,9 +5689,10 @@
 
 /* individual result item */
 .systemsculpt-result-item {
-  padding: 16px 28px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--background-modifier-border);
   transition: background 0.15s ease;
+  position: relative;
 }
 
 .systemsculpt-result-item:last-child {
@@ -5792,18 +5703,12 @@
   background: var(--background-secondary);
 }
 
-/* result header with title and badges */
+/* result header with title */
 .systemsculpt-result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
   margin-bottom: 8px;
 }
 
-.systemsculpt-result-title-section {
-  flex: 1;
-  padding-right: 16px;
-}
+
 
 /* file name */
 .systemsculpt-result-filename {
@@ -5814,19 +5719,24 @@
   margin-bottom: 4px;
 }
 
-/* score section with badges */
-.systemsculpt-result-score-section {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-}
-
+/* badges */
 .systemsculpt-result-badges {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 5px;
-  align-items: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+/* footer with badges and score */
+.systemsculpt-result-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* badge styling */
@@ -5852,10 +5762,11 @@
 
 /* score/match percentage */
 .systemsculpt-result-score {
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: 10px;
   font-weight: 600;
-  font-size: 0.8em;
+  font-size: 0.85em;
+  display: inline-block;
 }
 
 .systemsculpt-result-score-high {
@@ -5918,6 +5829,10 @@
   font-size: 0.75em;
   color: var(--color-yellow);
   font-weight: 600;
+  background: rgba(var(--background-primary-rgb), 0.8);
+  padding: 4px 8px;
+  border-radius: 12px;
+  backdrop-filter: blur(2px);
 }
 
 .systemsculpt-result-star-icon {
@@ -10433,7 +10348,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* preview.css */
 /**
  * Preview Components
- * 
+ *
  * Styles for content previews and preview panels
  */
 
@@ -10453,8 +10368,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   justify-content: center;
   color: var(--text-muted);
   text-align: center;
-  padding: 32px;
-  min-height: 200px;
+  padding: 16px;
+  min-height: 100px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin: 8px;
 }
 
 .systemsculpt-preview-loading {
@@ -10711,7 +10632,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-preview {
   position: fixed;
   z-index: 1000;
-  pointer-events: none;
+  pointer-events: auto; /* Enable mouse events on the preview */
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   opacity: 0;
@@ -10972,6 +10893,18 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   overflow-y: auto;
   max-height: min(400px, 70vh);
   padding-right: 8px; /* Space for scrollbar */
+}
+
+/* Truncation notice */
+.systemsculpt-preview-truncation-notice {
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  padding: 8px 12px;
+  font-size: 12px;
+  text-align: center;
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 8px;
+  font-style: italic;
 }
 
 
