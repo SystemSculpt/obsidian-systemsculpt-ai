@@ -3411,7 +3411,7 @@
 /* messages.css */
 /**
  * Message Components
- * 
+ *
  * Styles for chat messages, user and assistant messages, and message containers
  */
 
@@ -3833,6 +3833,89 @@
 
 .systemsculpt-message-content p:last-child {
   margin-bottom: 0;
+}
+
+/* Web Search Citations Styles */
+.systemsculpt-citations-container {
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.systemsculpt-citations-divider {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 0.5rem 0;
+}
+
+.systemsculpt-citations-header {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.systemsculpt-citations-header::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: var(--text-accent);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'%3E%3Cpath fill='none' d='M0 0h24v24H0z'/%3E%3Cpath d='M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 2c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 3c1.82 0 3.413.973 4.288 2.428l-1.714 1.029A3 3 0 0 0 12 9a3 3 0 0 0-3 3c0 .88.377 1.673.982 2.224l-1.453 1.358A5 5 0 0 1 7 12c0-2.76 2.24-5 5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z' fill='rgba(128,128,128,1)'/%3E%3C/svg%3E");
+  mask-size: cover;
+  mask-repeat: no-repeat;
+}
+
+.systemsculpt-citations-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.systemsculpt-citation-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title {
+  font-weight: 500;
+  color: var(--text-accent);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-citation-url {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-citation-snippet {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .systemsculpt-message-content pre {
@@ -5844,7 +5927,7 @@
 /* inputs.css */
 /**
  * Input Components
- * 
+ *
  * Styles for form inputs, textareas, and related form elements
  */
 
@@ -6090,6 +6173,28 @@
 .systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
+}
+
+/* Recording button styles */
+.systemsculpt-button-grid button[aria-label="Record audio message"].ss-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  animation: mic-pulse 2s infinite;
+}
+
+@keyframes mic-pulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .systemsculpt-input-action-button.active:not(.disabled),
@@ -6384,7 +6489,7 @@
   background-color: var(--background-modifier-hover);
 }
 
-/* 
+/*
   Input action button styles removed - Now using ss-button component classes
   The systemsculpt-input-action-button class has been replaced with ss-button classes in the code
 */
@@ -9370,6 +9475,256 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     transform: rotate(359deg);
   }
 }
+
+/* progress-modal.css */
+/**
+ * Progress Modal Component
+ *
+ * Styles for the document conversion progress modal
+ */
+
+/* Main modal container */
+.systemsculpt-progress-modal {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 20px;
+  width: 350px;
+  max-width: 90vw;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 9999; /* Ensure it's above other elements */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--background-modifier-border);
+  animation: slide-in-right 0.3s ease forwards;
+}
+
+/* Modal header */
+.systemsculpt-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-progress-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0;
+  flex: 1;
+}
+
+.systemsculpt-progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  font-size: 1.4em;
+}
+
+/* Progress bar */
+.systemsculpt-progress-bar {
+  height: 10px;
+  background: var(--interactive-accent);
+  border-radius: 5px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+/* Progress status */
+.systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-normal);
+  font-size: 0.95em;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.systemsculpt-progress-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+/* Progress steps */
+.systemsculpt-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-progress-step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.systemsculpt-progress-step-text {
+  flex: 1;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+/* Active step */
+.systemsculpt-progress-step.active {
+  background: rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+.systemsculpt-progress-step.active .systemsculpt-progress-step-icon {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-progress-step.active .systemsculpt-progress-step-text {
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+/* Completed step */
+.systemsculpt-progress-step.completed .systemsculpt-progress-step-icon {
+  background: var(--color-green);
+  color: white;
+}
+
+/* Error step */
+.systemsculpt-progress-step.error .systemsculpt-progress-step-icon {
+  background: var(--color-red);
+  color: white;
+}
+
+/* Buttons */
+.systemsculpt-progress-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-progress-button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+  border: none;
+}
+
+.systemsculpt-progress-button:hover {
+  background: var(--background-modifier-border-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-progress-button.primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-progress-button.primary:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Completion dialog */
+.systemsculpt-completion-dialog {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--background-modifier-border);
+  max-width: 350px;
+  animation: slide-in-right 0.3s ease forwards;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.systemsculpt-completion-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.systemsculpt-completion-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-green);
+  font-size: 1.4em;
+}
+
+.systemsculpt-completion-title {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0;
+  flex: 1;
+}
+
+.systemsculpt-completion-message {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.systemsculpt-completion-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Animation for spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.systemsculpt-spinner {
+  animation: spin 1s linear infinite;
+}
+
 
 /* chat.css */
 /**
