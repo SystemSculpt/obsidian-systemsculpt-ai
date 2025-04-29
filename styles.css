@@ -9726,6 +9726,335 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 
+/* expanded-progress-modal.css */
+/**
+ * Expanded Progress Modal Component
+ *
+ * Styles for the expanded audio transcription progress modal
+ */
+
+/* Modal container overrides */
+.systemsculpt-expanded-progress-modal .modal {
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+  border-radius: 8px;
+}
+
+.systemsculpt-expanded-progress-modal .modal-content {
+  padding: 20px;
+}
+
+.systemsculpt-expanded-progress-modal .modal-close-button {
+  color: var(--text-muted);
+}
+
+/* Main container */
+.expanded-modal-main-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 0;
+}
+
+/* Progress Section Styles */
+.expanded-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 0 16px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 16px;
+}
+
+/* File info section */
+.expanded-file-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.expanded-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: var(--text-accent);
+  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+  border-radius: 50%;
+  padding: 12px;
+}
+
+.expanded-file-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.expanded-current-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+  margin-bottom: 16px;
+}
+
+.expanded-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  width: 24px;
+  height: 24px;
+}
+
+.expanded-status-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.expanded-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.expanded-progress-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.expanded-progress-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.expanded-progress-bar-container {
+  flex: 1;
+  height: 10px;
+  background-color: var(--background-modifier-border);
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.expanded-progress-bar {
+  height: 100%;
+  background-color: var(--interactive-accent);
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 5px;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 20px 20px;
+  animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 20px 0;
+  }
+}
+
+.expanded-progress-percentage {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-accent);
+  min-width: 45px;
+  text-align: right;
+}
+
+/* Details Section Styles */
+.expanded-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.expanded-details-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.expanded-details-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+.expanded-details-container {
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.expanded-details-text {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-normal);
+  padding: 0;
+}
+
+.expanded-log-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 16px;
+  text-align: center;
+}
+
+/* Log Entry Styles */
+.expanded-log-entry {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+  transition: background-color 0.2s ease;
+}
+
+.expanded-log-entry:hover {
+  background-color: var(--background-primary);
+}
+
+.expanded-log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.log-entry-timestamp {
+  color: var(--text-muted);
+  font-size: 11px;
+  background-color: var(--background-primary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.log-entry-status {
+  color: var(--text-normal);
+  font-weight: 500;
+  flex: 1;
+}
+
+.log-entry-progress {
+  color: var(--text-accent);
+  font-weight: 600;
+  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 40px;
+  text-align: center;
+}
+
+.log-entry-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 0 0 12px;
+  border-left: 2px solid var(--background-modifier-border);
+  margin-left: 4px;
+}
+
+.log-entry-chunk {
+  color: var(--text-accent);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.log-entry-chunk::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background-color: var(--text-accent);
+  border-radius: 50%;
+}
+
+.log-entry-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.log-entry-filename {
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.log-entry-size {
+  font-style: italic;
+}
+
+.log-entry-time {
+  color: var(--text-accent-hover);
+  font-weight: 500;
+}
+
+.log-entry-raw {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  padding: 6px;
+  background-color: var(--background-primary);
+  border-radius: 4px;
+  margin-top: 4px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+/* Audio icon styling */
+.audio-icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.audio-icon {
+  color: var(--text-accent);
+  width: 32px;
+  height: 32px;
+}
+
+
 /* chat.css */
 /**
  * Chat View
