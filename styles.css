@@ -381,6 +381,89 @@
   }
 }
 
+/* typography.css */
+/**
+ * Typography styles for SystemSculpt
+ * 
+ * This file contains typography-related styles that leverage Obsidian's theming system.
+ * These styles provide consistent text formatting across all components.
+ */
+
+/* Base typography */
+.systemsculpt-container {
+  font-family: var(--font-text);
+  font-size: var(--font-ui-medium);
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+/* Headings */
+.systemsculpt-heading-1 {
+  font-size: var(--font-ui-larger);
+  font-weight: var(--font-bold);
+  margin-bottom: 1rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-heading-2 {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-heading-3 {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.5rem;
+  color: var(--text-normal);
+}
+
+/* Text styles */
+.systemsculpt-text-normal {
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+.systemsculpt-text-muted {
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-small {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-accent {
+  color: var(--text-accent);
+}
+
+.systemsculpt-text-error {
+  color: var(--text-error);
+}
+
+/* Links */
+.systemsculpt-link {
+  color: var(--text-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.systemsculpt-link:hover {
+  text-decoration: underline;
+}
+
+/* Code blocks */
+.systemsculpt-code {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  background-color: var(--background-secondary);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+
 /* containers.css */
 /**
  * Container Components
@@ -8306,6 +8389,138 @@
 
 
 
+/* checkboxes.css */
+/**
+ * Checkbox styles for SystemSculpt
+ * 
+ * This file contains styles for custom checkboxes that match Obsidian's design system.
+ */
+
+/* Custom checkbox container */
+.systemsculpt-checkbox-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding-left: 28px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Hide the browser's default checkbox */
+.systemsculpt-checkbox-container input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+/* Create a custom checkbox */
+.systemsculpt-checkbox {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 18px;
+  width: 18px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+/* On mouse-over, add a background color */
+.systemsculpt-checkbox-container:hover input ~ .systemsculpt-checkbox {
+  background-color: var(--background-secondary);
+}
+
+/* When the checkbox is checked, add accent background */
+.systemsculpt-checkbox-container input:checked ~ .systemsculpt-checkbox {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* Create the checkmark/indicator (hidden when not checked) */
+.systemsculpt-checkbox:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+/* Show the checkmark when checked */
+.systemsculpt-checkbox-container input:checked ~ .systemsculpt-checkbox:after {
+  display: block;
+}
+
+/* Style the checkmark/indicator */
+.systemsculpt-checkbox-container .systemsculpt-checkbox:after {
+  left: 6px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Disabled state */
+.systemsculpt-checkbox-container.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.systemsculpt-checkbox-container.disabled input ~ .systemsculpt-checkbox {
+  background-color: var(--background-secondary);
+  border-color: var(--background-modifier-border);
+}
+
+/* Toggle switch variant */
+.systemsculpt-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.systemsculpt-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.systemsculpt-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--background-modifier-border);
+  transition: .4s;
+  border-radius: 34px;
+}
+
+.systemsculpt-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--background-primary);
+  transition: .4s;
+  border-radius: 50%;
+}
+
+.systemsculpt-toggle input:checked + .systemsculpt-toggle-slider {
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-toggle input:checked + .systemsculpt-toggle-slider:before {
+  transform: translateX(16px);
+}
+
+
 /* setup.css */
 /* Setup Tab Styles */
 
@@ -8667,6 +8882,581 @@
 .api-notice-settings-button:hover {
   background-color: var(--interactive-accent-hover);
 } 
+
+/* welcome.css */
+/**
+ * Welcome screen styles for SystemSculpt
+ * 
+ * This file contains styles for the welcome/onboarding experience.
+ */
+
+.systemsculpt-welcome-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.systemsculpt-welcome-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.systemsculpt-welcome-logo {
+  width: 120px;
+  height: 120px;
+  margin-bottom: 1rem;
+}
+
+.systemsculpt-welcome-title {
+  font-size: var(--font-ui-larger);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.5rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-welcome-subtitle {
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.systemsculpt-welcome-steps {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.systemsculpt-welcome-step {
+  display: flex;
+  align-items: flex-start;
+  padding: 1rem;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+
+.systemsculpt-welcome-step:hover {
+  transform: translateY(-2px);
+}
+
+.systemsculpt-welcome-step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 50%;
+  font-weight: var(--font-bold);
+  margin-right: 1rem;
+  flex-shrink: 0;
+}
+
+.systemsculpt-welcome-step-content {
+  flex: 1;
+}
+
+.systemsculpt-welcome-step-title {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.5rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-welcome-step-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.systemsculpt-welcome-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.systemsculpt-welcome-skip {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  text-decoration: underline;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.systemsculpt-welcome-skip:hover {
+  color: var(--text-normal);
+}
+
+/* Welcome tour tooltip styles */
+.systemsculpt-welcome-tooltip {
+  position: absolute;
+  z-index: 1000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-width: 300px;
+}
+
+.systemsculpt-welcome-tooltip-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background-color: var(--background-primary);
+  transform: rotate(45deg);
+  border: 1px solid var(--background-modifier-border);
+  z-index: -1;
+}
+
+
+/* buttons.css */
+/**
+ * Button styles for SystemSculpt
+ * 
+ * This file contains styles for buttons that match Obsidian's design system.
+ * These styles complement the ss-buttons.css file with additional button variants.
+ */
+
+/* Base button styles */
+.systemsculpt-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  gap: 6px;
+}
+
+/* Button variants */
+.systemsculpt-button-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-button-primary:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-button-secondary {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.systemsculpt-button-secondary:hover {
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-button-danger {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-button-danger:hover {
+  background-color: var(--text-error);
+}
+
+.systemsculpt-button-ghost {
+  background-color: transparent;
+  color: var(--text-muted);
+}
+
+.systemsculpt-button-ghost:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-button-link {
+  background-color: transparent;
+  color: var(--text-accent);
+  padding: 0;
+  border: none;
+  text-decoration: underline;
+}
+
+.systemsculpt-button-link:hover {
+  color: var(--text-accent-hover);
+  text-decoration: none;
+}
+
+/* Button sizes */
+.systemsculpt-button-small {
+  padding: 4px 8px;
+  font-size: var(--font-ui-smaller);
+}
+
+.systemsculpt-button-large {
+  padding: 8px 16px;
+  font-size: var(--font-ui-medium);
+}
+
+/* Button states */
+.systemsculpt-button:disabled,
+.systemsculpt-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.systemsculpt-button.loading {
+  position: relative;
+  color: transparent;
+}
+
+.systemsculpt-button.loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Icon button */
+.systemsculpt-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.systemsculpt-icon-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Button group */
+.systemsculpt-button-group {
+  display: inline-flex;
+}
+
+.systemsculpt-button-group .systemsculpt-button {
+  border-radius: 0;
+}
+
+.systemsculpt-button-group .systemsculpt-button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.systemsculpt-button-group .systemsculpt-button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* icons.css */
+/**
+ * Icon styles for SystemSculpt
+ * 
+ * This file contains styles for icons used throughout the plugin.
+ */
+
+/* Base icon styles */
+.systemsculpt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+  flex-shrink: 0;
+}
+
+/* Icon sizes */
+.systemsculpt-icon-xs {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-icon-md {
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-icon-lg {
+  width: 24px;
+  height: 24px;
+}
+
+.systemsculpt-icon-xl {
+  width: 32px;
+  height: 32px;
+}
+
+/* Icon colors */
+.systemsculpt-icon-muted {
+  color: var(--text-muted);
+}
+
+.systemsculpt-icon-normal {
+  color: var(--text-normal);
+}
+
+.systemsculpt-icon-accent {
+  color: var(--text-accent);
+}
+
+.systemsculpt-icon-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-icon-success {
+  color: var(--background-modifier-success);
+}
+
+.systemsculpt-icon-warning {
+  color: var(--color-yellow);
+}
+
+/* Icon with background */
+.systemsculpt-icon-with-bg {
+  padding: 6px;
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+}
+
+/* Icon button */
+.systemsculpt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.systemsculpt-icon-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Animated icons */
+.systemsculpt-icon-spin {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-icon-pulse {
+  animation: systemsculpt-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes systemsculpt-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes systemsculpt-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Icon with text */
+.systemsculpt-icon-with-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-icon-with-text .systemsculpt-icon {
+  flex-shrink: 0;
+}
+
+/* Icon list */
+.systemsculpt-icon-list {
+  display: flex;
+  gap: 4px;
+}
+
+/* Icon grid */
+.systemsculpt-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 8px;
+}
+
+
+/* tables.css */
+/**
+ * Table styles for SystemSculpt
+ * 
+ * This file contains styles for tables used throughout the plugin.
+ */
+
+/* Base table styles */
+.systemsculpt-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: var(--font-ui-small);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.systemsculpt-table th,
+.systemsculpt-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-table th {
+  background-color: var(--background-secondary-alt);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  white-space: nowrap;
+}
+
+.systemsculpt-table tr:last-child td {
+  border-bottom: none;
+}
+
+.systemsculpt-table tr:nth-child(even) {
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-table tr:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Compact table */
+.systemsculpt-table-compact th,
+.systemsculpt-table-compact td {
+  padding: 4px 8px;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Bordered table */
+.systemsculpt-table-bordered th,
+.systemsculpt-table-bordered td {
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Striped table */
+.systemsculpt-table-striped tr:nth-child(odd) {
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-table-striped tr:nth-child(even) {
+  background-color: var(--background-primary);
+}
+
+/* Table with fixed layout */
+.systemsculpt-table-fixed {
+  table-layout: fixed;
+}
+
+.systemsculpt-table-fixed td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Table with hover effect */
+.systemsculpt-table-hover tr:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Table with sticky header */
+.systemsculpt-table-sticky-header {
+  position: relative;
+}
+
+.systemsculpt-table-sticky-header thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--background-secondary-alt);
+}
+
+/* Table container with scrolling */
+.systemsculpt-table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin: 1rem 0;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Table with actions column */
+.systemsculpt-table .actions-column {
+  width: 100px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Table cell alignments */
+.systemsculpt-table .align-left {
+  text-align: left;
+}
+
+.systemsculpt-table .align-center {
+  text-align: center;
+}
+
+.systemsculpt-table .align-right {
+  text-align: right;
+}
+
+/* Table with row selection */
+.systemsculpt-table tr.selected {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Table footer */
+.systemsculpt-table tfoot td {
+  background-color: var(--background-secondary-alt);
+  font-weight: var(--font-medium);
+}
+
 
 /* recorder.css */
 /* SystemSculpt Recorder Component Styling */
@@ -9726,332 +10516,164 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 
-/* expanded-progress-modal.css */
+/* processing-status.css */
 /**
- * Expanded Progress Modal Component
+ * Processing Status Component
  *
- * Styles for the expanded audio transcription progress modal
+ * Styles for the file processing status indicators
  */
 
-/* Modal container overrides */
-.systemsculpt-expanded-progress-modal .modal {
-  width: 600px;
-  max-width: 90vw;
-  max-height: 80vh;
-  border-radius: 8px;
-}
-
-.systemsculpt-expanded-progress-modal .modal-content {
-  padding: 20px;
-}
-
-.systemsculpt-expanded-progress-modal .modal-close-button {
-  color: var(--text-muted);
-}
-
-/* Main container */
-.expanded-modal-main-container {
+/* Base status styles */
+.systemsculpt-file-status {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 0;
-}
-
-/* Progress Section Styles */
-.expanded-progress-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 0 0 16px 0;
-  border-bottom: 1px solid var(--background-modifier-border);
-  margin-bottom: 16px;
-}
-
-/* File info section */
-.expanded-file-info {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-}
-
-.expanded-file-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  color: var(--text-accent);
-  background-color: rgba(var(--interactive-accent-rgb), 0.1);
-  border-radius: 50%;
-  padding: 12px;
-}
-
-.expanded-file-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-.expanded-current-status {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 8px;
-  background-color: var(--background-secondary);
-  margin-bottom: 16px;
-}
-
-.expanded-status-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-accent);
-  width: 24px;
-  height: 24px;
-}
-
-.expanded-status-text {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-normal);
-}
-
-.expanded-progress-container {
-  display: flex;
-  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+  animation: fade-in 0.3s ease;
 }
 
-.expanded-progress-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-normal);
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.expanded-progress-bar-wrapper {
+/* Status icon styling */
+.systemsculpt-status-icon {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  color: var(--text-accent);
+  margin-top: 2px;
 }
 
-.expanded-progress-bar-container {
+/* Status content container */
+.systemsculpt-status-content {
   flex: 1;
-  height: 10px;
-  background-color: var(--background-modifier-border);
-  border-radius: 5px;
-  overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-.expanded-progress-bar {
-  height: 100%;
-  background-color: var(--interactive-accent);
-  width: 0%;
-  transition: width 0.3s ease;
-  border-radius: 5px;
-  background-image: linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.15) 25%,
-    transparent 25%,
-    transparent 50%,
-    rgba(255, 255, 255, 0.15) 50%,
-    rgba(255, 255, 255, 0.15) 75%,
-    transparent 75%,
-    transparent
-  );
-  background-size: 20px 20px;
-  animation: progress-bar-stripes 1s linear infinite;
-}
-
-@keyframes progress-bar-stripes {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 20px 0;
-  }
-}
-
-.expanded-progress-percentage {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-accent);
-  min-width: 45px;
-  text-align: right;
-}
-
-/* Details Section Styles */
-.expanded-details-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
 }
 
-.expanded-details-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Status text styling */
+.systemsculpt-status-text {
   font-size: 14px;
-  font-weight: 600;
   color: var(--text-normal);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.expanded-details-header-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-accent);
-}
-
-.expanded-details-container {
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  padding: 0;
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid var(--background-modifier-border);
-}
-
-.expanded-details-text {
-  font-family: var(--font-monospace);
+/* Status details styling */
+.systemsculpt-status-details {
   font-size: 12px;
-  color: var(--text-normal);
-  padding: 0;
-}
-
-.expanded-log-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100px;
   color: var(--text-muted);
-  font-style: italic;
-  padding: 16px;
-  text-align: center;
+  white-space: pre-line;
+  padding: 4px 0 0 0;
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 2px;
+  animation: fade-in 0.3s ease;
 }
 
-/* Log Entry Styles */
-.expanded-log-entry {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--background-modifier-border-hover);
-  transition: background-color 0.2s ease;
-}
-
-.expanded-log-entry:hover {
-  background-color: var(--background-primary);
-}
-
-.expanded-log-entry:last-child {
-  border-bottom: none;
-}
-
-.log-entry-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.log-entry-timestamp {
-  color: var(--text-muted);
-  font-size: 11px;
-  background-color: var(--background-primary);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.log-entry-status {
-  color: var(--text-normal);
-  font-weight: 500;
-  flex: 1;
-}
-
-.log-entry-progress {
-  color: var(--text-accent);
-  font-weight: 600;
+/* Chunking status */
+.status-chunking {
   background-color: rgba(var(--interactive-accent-rgb), 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  min-width: 40px;
-  text-align: center;
+  border-left: 3px solid var(--text-accent);
 }
 
-.log-entry-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 6px 0 0 12px;
-  border-left: 2px solid var(--background-modifier-border);
-  margin-left: 4px;
-}
-
-.log-entry-chunk {
+.status-chunking .systemsculpt-status-icon {
   color: var(--text-accent);
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  animation: pulse 2s infinite;
 }
 
-.log-entry-chunk::before {
+/* Processing status */
+.status-processing {
+  background-color: rgba(var(--interactive-accent-rgb), 0.15);
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.status-processing .systemsculpt-status-icon {
+  color: var(--interactive-accent);
+  animation: spin 1.5s linear infinite;
+}
+
+/* Uploading status */
+.status-uploading {
+  background-color: rgba(var(--color-blue-rgb), 0.1);
+  border-left: 3px solid var(--color-blue);
+}
+
+.status-uploading .systemsculpt-status-icon {
+  color: var(--color-blue);
+  animation: bounce 1s infinite;
+}
+
+/* Success status */
+.status-success {
+  background-color: rgba(var(--color-green-rgb), 0.1);
+  border-left: 3px solid var(--color-green);
+}
+
+.status-success .systemsculpt-status-icon {
+  color: var(--color-green);
+}
+
+/* Error status */
+.status-error {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  border-left: 3px solid var(--color-red);
+}
+
+.status-error .systemsculpt-status-icon {
+  color: var(--color-red);
+}
+
+/* Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+/* Add shimmer effect to status text during processing */
+.status-processing .systemsculpt-status-text,
+.status-chunking .systemsculpt-status-text,
+.status-uploading .systemsculpt-status-text {
+  position: relative;
+  overflow: hidden;
+}
+
+.status-processing .systemsculpt-status-text::after,
+.status-chunking .systemsculpt-status-text::after,
+.status-uploading .systemsculpt-status-text::after {
   content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background-color: var(--text-accent);
-  border-radius: 50%;
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: shimmer 2s infinite;
 }
 
-.log-entry-file {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.log-entry-filename {
-  font-weight: 500;
-  color: var(--text-normal);
-}
-
-.log-entry-size {
-  font-style: italic;
-}
-
-.log-entry-time {
-  color: var(--text-accent-hover);
-  font-weight: 500;
-}
-
-.log-entry-raw {
-  font-family: var(--font-monospace);
-  font-size: 11px;
-  white-space: pre-wrap;
-  color: var(--text-muted);
-  padding: 6px;
-  background-color: var(--background-primary);
-  border-radius: 4px;
-  margin-top: 4px;
-  max-height: 100px;
-  overflow-y: auto;
-}
-
-/* Audio icon styling */
-.audio-icon-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.audio-icon {
-  color: var(--text-accent);
-  width: 32px;
-  height: 32px;
+@keyframes shimmer {
+  0% { left: -100%; }
+  100% { left: 200%; }
 }
 
 
