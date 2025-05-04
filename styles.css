@@ -9613,6 +9613,36 @@
   }
 }
 
+/* Microphone selection in settings */
+.systemsculpt-microphone-container {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.systemsculpt-microphone-select {
+  flex: 1;
+  min-width: 200px;
+  height: 32px;
+  border-radius: 4px;
+  padding: 0 8px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.systemsculpt-microphone-select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.systemsculpt-microphone-select option {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 8px;
+}
+
 /* Media query for smaller screens */
 @media (max-width: 768px) {
   .systemsculpt-recording-modal {
@@ -9620,11 +9650,75 @@
     right: 10px;
     top: 40px;
   }
-  
+
   .systemsculpt-recording-visualizer {
     height: 50px;
   }
-} 
+}
+
+/* custom-endpoint.css */
+/**
+ * Custom Endpoint Settings Styles
+ *
+ * Styles for the custom transcription endpoint settings in the recorder tab
+ */
+
+.custom-endpoint-settings {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+.custom-endpoint-info {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.custom-endpoint-settings .setting-item {
+  border-top: none;
+  padding-top: 12px;
+}
+
+.custom-endpoint-settings .setting-item:first-child {
+  padding-top: 0;
+}
+
+/* Preset buttons container */
+.custom-endpoint-settings .setting-item-control {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Preset buttons */
+.custom-endpoint-settings button {
+  min-width: 80px;
+}
+
+/* Model selection container */
+.model-selection-container {
+  display: flex;
+  width: 100%;
+}
+
+/* Model dropdown */
+.model-selection-container select {
+  width: 100%;
+  margin-right: 0;
+}
+
+/* Model text input */
+.model-selection-container input {
+  width: 100%;
+}
+
 
 /* favorite-toggle.css */
 /* Favorite Toggle Component Styles */
