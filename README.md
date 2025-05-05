@@ -1,6 +1,6 @@
 # 🚀 SystemSculpt AI Obsidian Plugin (v1.0 Beta)
 
-Welcome to the **SystemSculpt AI Obsidian Plugin**, your ultimate AI-driven productivity booster for Obsidian! Unlock powerful tools previously available only to Patreon subscribers, now publicly accessible in this groundbreaking 1.0 Beta release.
+Welcome to the **SystemSculpt AI Obsidian Plugin**, your ultimate AI-driven productivity booster for Obsidian! Unlock powerful tools with a SystemSculpt license and transform your Obsidian experience with this groundbreaking plugin.
 
 ---
 
@@ -11,7 +11,7 @@ Welcome to the **SystemSculpt AI Obsidian Plugin**, your ultimate AI-driven prod
 | 📥 **Install Plugin** | [Obsidian Community Plugins](https://obsidian.md/plugins?id=systemsculpt-ai) |
 | 🌎 **Official Website** | [SystemSculpt.com](https://www.systemsculpt.com/) |
 | ▶️ **YouTube Channel** | [@SystemSculpt](https://www.youtube.com/@SystemSculpt) |
-| ❤️ **Support on Patreon** | [Patreon Membership](https://www.patreon.com/c/systemsculpt/membership) |
+| ❤️ **Get a License** | [SystemSculpt Licenses](https://systemsculpt.com/resources?tab=license) |
 
 ---
 
