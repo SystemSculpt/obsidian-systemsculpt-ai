@@ -70,7 +70,7 @@ When you're ready to take your productivity to the next level, upgrade to System
 - **Convert Office documents** (Word, PowerPoint, Excel) into Obsidian notes
 - **Maintain document structure** including headings, lists, and tables
 - **Extract text from images** within documents
-- **Process documents up to 200MB** in size
+- **Process documents up to 500MB** in size
 
 ### 🖼️ Vision & Image Analysis
 - **Analyze images and screenshots** with AI vision capabilities

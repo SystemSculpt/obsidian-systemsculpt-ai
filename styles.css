@@ -531,6 +531,7 @@
   border-radius: var(--radius-s);
   overflow: hidden;
   margin: var(--size-4-2) 0;
+  position: relative;
 }
 
 .systemsculpt-progress-bar-container {
@@ -540,6 +541,7 @@
   border-radius: 4px;
   margin: 16px 0;
   overflow: hidden;
+  position: relative;
 }
 
 .systemsculpt-chat-container.systemsculpt-drag-active
@@ -591,6 +593,7 @@
   border-radius: var(--radius-s);
   overflow: hidden;
   margin: var(--size-4-2) 0;
+  position: relative;
 }
 
 .systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle {
@@ -5376,223 +5379,7 @@
   border: 1px solid var(--background-modifier-border);
 }
 
-/* Embedding Control Modal Styles */
-.systemsculpt-embedding-modal-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.systemsculpt-embedding-modal-content h2 {
-  margin: 0 0 4px;
-  padding: 0 12px;
-  font-size: 18px;
-}
-
-.embedding-modal-card {
-  background-color: var(--background-primary);
-  border-radius: 4px;
-  padding: 10px 12px;
-  margin: 0 12px;
-  border: 1px solid var(--background-modifier-border);
-}
-
-.embedding-modal-card-title {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-normal);
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding-bottom: 4px;
-}
-
-.embedding-modal-status-description {
-  font-size: 13px;
-  margin: 0 0 8px;
-  color: var(--text-normal);
-}
-
-/* Status-specific styling */
-.status-running { color: var(--text-accent); }
-.status-error { color: var(--text-error); }
-.status-paused { color: var(--text-warning); }
-.status-complete { color: var(--text-success); }
-
-/* Progress bar styling */
-.embedding-progress-container {
-  margin: 6px 0;
-}
-
-.embedding-progress-bar {
-  width: 100%;
-  height: 8px;
-  border-radius: 4px;
-  background-color: var(--background-modifier-border);
-  overflow: hidden;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.embedding-progress-bar::-webkit-progress-bar {
-  background-color: var(--background-modifier-border);
-  border-radius: 4px;
-}
-
-.embedding-progress-bar::-webkit-progress-value {
-  background-color: var(--interactive-accent);
-  border-radius: 4px;
-}
-
-.embedding-progress-bar::-moz-progress-bar {
-  background-color: var(--interactive-accent);
-  border-radius: 4px;
-}
-
-.embedding-progress-label {
-  display: block;
-  text-align: center;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-/* Statistics styling */
-.embedding-stats-list {
-  margin: 0;
-  padding: 0 0 0 18px;
-  list-style-type: disc;
-}
-
-.embedding-stats-list li {
-  margin-bottom: 4px;
-  font-size: 13px;
-}
-
-/* Error card styling */
-.embedding-error-card {
-  background-color: rgba(var(--background-modifier-error-rgb), 0.1);
-  border-color: var(--background-modifier-error);
-}
-
-.embedding-error-card .error-title {
-  color: var(--text-error);
-}
-
-.embedding-error-details {
-  font-family: var(--font-monospace);
-  white-space: pre-wrap;
-  font-size: 11px;
-  padding: 6px;
-  background-color: var(--background-primary);
-  border-radius: 3px;
-  border: 1px solid var(--background-modifier-border);
-  overflow-x: auto;
-}
-
-/* Cost info styling */
-.systemsculpt-cost-info {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-style: italic;
-  margin: 0;
-}
-
-/* Actions styling */
-.embedding-actions-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-start;
-}
-
-.embedding-action-button {
-  flex: 0 0 auto;
-  min-width: 90px;
-}
-
-/* Current file display styling */
-.embedding-current-file {
-  margin: 6px 0;
-  padding: 6px 8px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  border-left: 3px solid var(--interactive-accent);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.embedding-current-file-label {
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.embedding-current-file-path {
-  font-family: var(--font-monospace);
-  word-break: break-all;
-  color: var(--text-normal);
-}
-
-/* StatusBar Indicator Styling */
-.systemsculpt-statusbar-indicator {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.systemsculpt-statusbar-indicator:hover {
-  color: var(--text-normal);
-}
-
-.systemsculpt-statusbar-indicator .systemsculpt-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-statusbar-indicator.status-running .systemsculpt-icon,
-.systemsculpt-statusbar-indicator.status-scanning .systemsculpt-icon,
-.systemsculpt-statusbar-indicator.status-updating .systemsculpt-icon {
-  color: var(--text-accent);
-}
-
-.systemsculpt-statusbar-indicator.status-error .systemsculpt-icon {
-  color: var(--text-error);
-}
-
-.systemsculpt-statusbar-indicator.status-complete .systemsculpt-icon {
-  color: var(--text-success);
-}
-
-.systemsculpt-statusbar-indicator .systemsculpt-text {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.systemsculpt-statusbar-indicator:hover .systemsculpt-text {
-  color: var(--text-normal);
-}
-
-.systemsculpt-icon-spin {
-  animation: embedding-spinner-rotate 1.5s linear infinite;
-}
-
-@keyframes embedding-spinner-rotate {
-  100% {
-    transform: rotate(360deg);
-  }
-}
+/* Embedding-related styles have been moved to components/embeddings.css */
 
 /* Search Results Modal Styling */
 .systemsculpt-search-results-modal {
@@ -5674,6 +5461,8 @@
   background-color: rgba(var(--interactive-accent-rgb), 0.2);
   border-radius: 3px;
   padding: 0 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .systemsculpt-match-strength {
@@ -5982,6 +5771,8 @@
   background: rgba(var(--interactive-accent-rgb), 0.25);
   border-radius: 3px;
   padding: 1px 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* best match indicator */
@@ -7341,6 +7132,8 @@
     border-radius: 2px;
     padding: 0 2px;
     margin: 0 -2px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 /* Responsive Adjustments */
@@ -7351,467 +7144,1832 @@
     }
 } 
 
-/* embedding-modal.css */
-/* Embedding Control Modal - Redesigned for better Obsidian integration */
+/* omni-search.css */
+/**
+ * OmniSearch Modal Styles
+ * A clean, streamlined search interface inspired by Omnisearch
+ */
 
-/* Modal container with fixed viewport-relative height */
-.systemsculpt-embedding-modal {
-  width: 600px;
-  height: 60vh !important;
-  max-height: 800px;
+/* Main modal container */
+.systemsculpt-omni-search-modal {
+    /* Original viewport constraints - these act as ultimate limits */
+    max-width: 90vw;
+    max-height: 85vh;
+
+    /* New responsive sizing for desktop */
+    width: 60vw;
+    min-width: 700px; /* Ensures it doesn't get smaller than current default */
+    max-width: 900px; /* Caps the width at a larger size */
+
+    height: 70vh;
+    min-height: 500px; /* Ensures it doesn't get shorter than current default */
+    max-height: 750px; /* Caps the height at a taller size */
+
+    border-radius: 8px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative; /* Ensure proper positioning context */
 }
 
-/* Fix height of all modal elements */
-.systemsculpt-embedding-modal .modal,
-.systemsculpt-embedding-modal .modal-container,
-.systemsculpt-embedding-modal .modal-content {
-  height: 60vh !important;
-  max-height: 800px;
-  overflow: hidden !important; /* Prevent overall modal scrolling */
-  display: flex;
-  flex-direction: column;
+/* Main container inside the modal */
+.systemsculpt-omni-search-main-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    width: 100%;
 }
 
-/* Content container - maintain fixed height */
-.embedding-control-content {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  height: 60vh !important;
-  max-height: 800px;
+/* Fix for modal content positioning */
+.systemsculpt-omni-search-modal .modal-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    justify-content: flex-start !important;
+    align-items: stretch !important;
 }
 
-/* Tabs styling */
-.embedding-tabs-container {
-  display: flex;
-  border-bottom: 1px solid var(--background-modifier-border);
-  margin-bottom: 0;
+/* Header with search input */
+.systemsculpt-omni-search-header {
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-shrink: 0;
+    border-radius: 6px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.embedding-tab {
-  padding: 12px 16px;
-  cursor: pointer;
-  color: var(--text-muted);
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
-  font-size: var(--font-ui-medium);
+/* Apply focus styles to the header when input is focused */
+.systemsculpt-omni-search-header:focus-within {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
 }
 
-.embedding-tab:hover {
-  color: var(--text-normal);
-  background-color: var(--background-modifier-hover);
+/* Search input container */
+.systemsculpt-omni-search-input-container {
+    display: flex;
+    align-items: center;
 }
 
-.embedding-tab.is-active {
-  color: var(--text-accent);
-  border-bottom: 2px solid var(--text-accent);
-  font-weight: var(--font-medium);
+/* Search icon */
+.systemsculpt-omni-search-icon {
+    color: var(--text-muted);
+    margin-right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/* Tab content */
-.embedding-tab-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
+/* Search input */
+.systemsculpt-omni-search-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 16px;
+    color: var(--text-normal);
+    padding: 6px 0;
+    height: auto;
 }
 
-.embedding-control-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary-alt);
+.systemsculpt-omni-search-input:focus {
+    outline: none;
+    box-shadow: none;
 }
 
-.embedding-control-header h2 {
-  margin: 0;
-  font-size: var(--font-ui-large);
-  color: var(--text-normal);
+/* Clear button */
+.systemsculpt-omni-search-clear {
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 50%;
 }
 
-.embedding-control-body {
-  padding: 0;
-  overflow-y: auto;
+.systemsculpt-omni-search-clear:hover {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-hover);
 }
 
-/* Status section */
-.embedding-status-section {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
+/* Semantic search indicator */
+.systemsculpt-omni-search-semantic-indicator {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
+    padding: 0;
+    margin-top: 2px;
+    margin-bottom: 2px;
 }
 
-.embedding-section-item {
-  margin-bottom: 12px;
+.systemsculpt-omni-search-semantic-indicator.is-active {
+    color: var(--interactive-accent);
+    font-weight: 600;
 }
 
-.embedding-section-item:last-child {
-  margin-bottom: 0;
+/* Results container */
+.systemsculpt-omni-search-results-container {
+     flex: 1;
+     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+     background-color: var(--background-primary);
+     border-top: 1px solid var(--background-modifier-border);
+     display: flex;
+    flex-direction: column;
 }
 
-.embedding-status-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* Results list */
+.systemsculpt-omni-search-result-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
 }
 
-.embedding-status-title {
-  font-weight: var(--font-medium);
-  font-size: var(--font-ui-medium);
-  color: var(--text-normal);
+/* Result item */
+.systemsculpt-omni-search-result-item {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    cursor: pointer;
+    transition: background-color 0.1s ease;
 }
 
-.embedding-status-badge {
-  padding: 4px 10px;
-  border-radius: 16px;
-  font-size: var(--font-ui-smaller);
-  font-weight: var(--font-medium);
+.systemsculpt-omni-search-result-item:hover {
+    background-color: var(--background-modifier-hover);
 }
 
-.embedding-status-badge.status-idle {
-  background-color: var(--background-modifier-border);
-  color: var(--text-muted);
+.systemsculpt-omni-search-result-item.is-selected {
+    background-color: var(--background-modifier-active-hover);
 }
 
-.embedding-status-badge.status-scanning,
-.embedding-status-badge.status-updating {
-  background-color: var(--color-yellow);
-  color: var(--text-on-accent);
+/* Result header */
+.systemsculpt-omni-search-result-header {
+    margin-bottom: 4px;
 }
 
-.embedding-status-badge.status-running {
-  background-color: var(--color-blue);
-  color: var(--text-on-accent);
+.systemsculpt-omni-search-result-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-normal);
 }
 
-.embedding-status-badge.status-paused {
-  background-color: var(--color-orange);
-  color: var(--text-on-accent);
+/* Result path */
+.systemsculpt-omni-search-result-path {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
 }
 
-.embedding-status-badge.status-complete {
-  background-color: var(--color-green);
-  color: var(--text-on-accent);
+.systemsculpt-omni-search-result-folder-icon {
+    color: var(--text-faint);
+    display: flex;
+    align-items: center;
 }
 
-.embedding-status-badge.status-error {
-  background-color: var(--color-red);
-  color: var(--text-on-accent);
+/* Result preview */
+.systemsculpt-omni-search-result-preview {
+    font-size: 13px;
+    color: var(--text-normal);
+    margin-bottom: 8px;
+    line-height: 1.5;
+    max-height: 80px;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--background-secondary);
+    border-radius: 4px;
+    padding: 8px;
 }
 
-.embedding-status-description {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
+/* Result footer */
+.systemsculpt-omni-search-result-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
-.embedding-current-file {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  border-left: 3px solid var(--color-blue);
+/* Base class for badges and scores - applied using shared selectors */
+.systemsculpt-omni-search-result-badge,
+.systemsculpt-omni-search-result-score {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
 }
 
-.embedding-current-file-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+/* Result badge */
+.systemsculpt-omni-search-result-badge {
+    font-size: 10px;
+    text-transform: uppercase;
 }
 
-.embedding-current-file-path {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  color: var(--text-normal);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.systemsculpt-omni-search-result-badge-lexical {
+    background-color: rgba(var(--color-blue-rgb), 0.1);
+    color: var(--color-blue);
+    cursor: help;
 }
 
-/* Progress bar */
-.embedding-progress {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.systemsculpt-omni-search-result-badge-semantic {
+    background-color: rgba(var(--color-purple-rgb), 0.1);
+    color: var(--color-purple);
+    cursor: help;
 }
 
-.embedding-progress-bar {
-  height: 8px;
-  background-color: var(--background-secondary);
-  border-radius: 4px;
-  overflow: hidden;
+.systemsculpt-omni-search-result-badge-recent {
+    background-color: rgba(var(--color-cyan-rgb), 0.1);
+    color: var(--color-cyan);
 }
 
-.embedding-progress-value {
-  height: 100%;
-  background-color: var(--color-blue);
-  border-radius: 4px;
-  transition: width 0.3s ease;
+/* Result score */
+.systemsculpt-omni-search-result-score {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-red);
 }
 
-.embedding-progress-text {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  text-align: right;
+/* Tooltip icon for score explanation */
+.systemsculpt-omni-search-score-tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    cursor: help;
+    position: relative;
 }
 
-/* Stats section */
-.embedding-stats-section {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary-alt);
+.systemsculpt-omni-search-score-tooltip-icon svg {
+    width: 13px;
+    height: 13px;
 }
 
-.embedding-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+.systemsculpt-omni-search-score-tooltip-icon:hover {
+    color: var(--text-normal);
 }
 
-.embedding-stat-item {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 8px 12px;
-  background-color: var(--background-primary);
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  position: relative;
+/* Custom tooltip style - REMOVED */
+/*
+.systemsculpt-omni-search-custom-tooltip {
+    display: none;
+    position: absolute;
+    bottom: 130%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--background-secondary-alt);
+    color: var(--text-normal);
+    padding: 5px 8px;
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow-m);
+    font-size: var(--font-ui-smaller);
+    z-index: 1000;
+    max-width: 250px;
+    text-align: center;
+    pointer-events: none;
+    white-space: normal;
+}
+*/
+
+.systemsculpt-omni-search-result-score-high {
+    background-color: rgba(var(--color-green-rgb), 0.1);
+    color: var(--color-green);
 }
 
-.embedding-stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  width: 24px;
-  height: 24px;
+.systemsculpt-omni-search-result-score-medium {
+    background-color: rgba(var(--color-orange-rgb), 0.1);
+    color: var(--color-orange);
 }
 
-.embedding-stat-text {
-  flex: 1;
-  min-width: 0; /* Allow text to wrap/truncate */
+.systemsculpt-omni-search-result-score-low {
+    background-color: rgba(var(--color-red-rgb), 0.1);
+    color: var(--color-red);
 }
 
-.embedding-stat-label {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  margin-bottom: 2px;
+/* Modified time for recent files */
+.systemsculpt-omni-search-result-modified-time {
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
-.embedding-stat-value {
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  font-weight: var(--font-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Loading indicator */
+.systemsculpt-omni-search-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-muted);
+    gap: 12px;
 }
 
-.embedding-stat-pending .embedding-stat-icon,
-.embedding-stat-pending .embedding-stat-value {
-  color: var(--color-yellow);
-}
-
-.embedding-view-skipped {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  background-color: var(--background-secondary);
-  border: none;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.embedding-view-skipped:hover {
-  background-color: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-/* API Notice */
-.embedding-api-notice {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.embedding-api-notice-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-blue);
-  width: 24px;
-  height: 24px;
-}
-
-.embedding-api-notice-text {
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-}
-
-/* Action buttons section */
-.embedding-actions-section {
-  padding: 16px 20px;
-  border-top: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary-alt);
-  /* Fixed at the bottom */
-  position: sticky;
-  bottom: 0;
-}
-
-/* Button container */
-.embedding-buttons-container {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-/* Primary actions (left side) */
-.embedding-primary-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* Secondary/danger actions (right side) */
-.embedding-secondary-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* Individual action button styling */
-.embedding-action-button {
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: var(--font-ui-small);
-}
-
-/* Danger button styling */
-.danger-button {
-  background-color: var(--background-modifier-error) !important;
-  color: var(--text-on-accent) !important;
-}
-
-.danger-button:hover {
-  background-color: var(--color-red) !important;
-}
-
-/* Loading state */
-.embedding-loading-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 0;
-  gap: 16px;
-  color: var(--text-muted);
-}
-
-.embedding-loading-spinner {
-  animation: spin 1s linear infinite;
-  font-size: 24px;
+.systemsculpt-omni-search-loading-icon {
+    animation: spin 1.5s linear infinite;
+    font-size: 22px;
+    color: var(--interactive-accent);
 }
 
 @keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
-/* Settings Tab Styles */
-.embedding-settings-tab {
-  background-color: var(--background-primary);
+.systemsculpt-omni-search-loading-text {
+    font-size: 13px;
 }
 
-.embedding-settings-container {
-  padding: 16px 20px;
+/* Empty state */
+.systemsculpt-omni-search-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-muted);
+    gap: 12px;
+    height: 100%;
+    margin-top: 20px;
 }
 
-.embedding-settings-description {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  margin: 8px 0 16px;
+.systemsculpt-omni-search-empty-icon {
+    font-size: 28px;
+    opacity: 0.5;
 }
 
-.embedding-cost-info-section {
-  margin-top: 24px;
-  padding: 16px;
-  background-color: var(--background-secondary);
-  border-radius: 6px;
-  border: 1px solid var(--background-modifier-border);
+.systemsculpt-omni-search-empty-text {
+    font-size: 13px;
 }
 
-.embedding-cost-info-section h4 {
-  margin: 0 0 8px;
-  color: var(--text-normal);
-  font-size: var(--font-ui-medium);
+/* Highlight */
+.systemsculpt-omni-search-highlight {
+    /* Solid fallback for browsers that don't support mix-blend-mode or rgba */
+    background-color: var(--interactive-accent);
+    color: var(--interactive-accent); /* Changed to use accent color for text */
+    border-radius: 2px;
+    padding: 0 2px;
+    font-weight: 600;
+    /* Ensure text readability through borders when background contrast is insufficient */
+    /* Moved border into @supports as it uses rgba */
+    box-shadow: 0 0 0 1px var(--background-primary);
+    /* text-shadow: 0 0 2px var(--background-primary); /* Removed text-shadow */
+    /* Add underline for better visibility */
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
-.embedding-cost-info-list {
-  margin: 0;
-  padding-left: 20px;
+@supports (mix-blend-mode: darken) {
+    .systemsculpt-omni-search-highlight {
+        /* Primary highlight style with better contrast using transparency and blend modes */
+        background-color: rgba(var(--interactive-accent-rgb), 0.4);
+        /* color: var(--text-normal); /* Removed: text color is now always --interactive-accent */
+        border: 1px solid rgba(var(--interactive-accent-rgb), 0.5);
+        /* Enhanced contrast using mix-blend-mode */
+        -webkit-mix-blend-mode: darken; /* Vendor prefix */
+        mix-blend-mode: darken;
+    }
 }
 
-.embedding-cost-info-list li {
-  margin-bottom: 6px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
+@supports (mix-blend-mode: lighten) {
+    .theme-dark .systemsculpt-omni-search-highlight {
+        /* color: var(--text-on-accent); /* Removed: text color is now always --interactive-accent */
+        -webkit-mix-blend-mode: lighten; /* Vendor prefix */
+        mix-blend-mode: lighten;
+        /* Ensure the background and border also adapt if they were part of the blended style */
+        background-color: rgba(var(--interactive-accent-rgb), 0.4); /* Assuming same transparency for dark theme blend */
+        border: 1px solid rgba(var(--interactive-accent-rgb), 0.5); /* Assuming same border for dark theme blend */
+    }
 }
 
-.embedding-pricing-link {
-  display: inline-block;
-  margin-top: 12px;
-  color: var(--text-accent);
-  font-size: var(--font-ui-smaller);
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .systemsculpt-omni-search-modal {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+
+    .systemsculpt-omni-search-input {
+        font-size: 14px;
+    }
+
+    .systemsculpt-omni-search-input-container {
+        height: 36px;
+    }
+
+    .systemsculpt-omni-search-result-item {
+        padding: 10px 12px;
+    }
 }
 
-/* Confirmation dialog styling */
+
+/* embeddings.css */
+/**
+ * SystemSculpt Embeddings CSS
+ *
+ * A consolidated file for ALL embedding-related styling in the SystemSculpt plugin.
+ * This includes styles previously in:
+ * - embeddings.css
+ * - embeddings-tab.css
+ * - embeddings-exclusions.css
+ * - embedding-related styles from modals.css
+ */
+
+/* ========== EMBEDDING STATUS PANEL STYLES ========== */
+
+.systemsculpt-embedding-status-panel {
+    padding: 12px 16px;
+    border-radius: 6px;
+    background-color: var(--background-secondary);
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/* Status row with indicator and buttons */
+.systemsculpt-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+/* Status indicator */
+.systemsculpt-status-indicator {
+    display: flex;
+    align-items: center;
+    min-width: 150px; /* Ensure enough space for status indicator */
+    overflow: visible;
+}
+
+.systemsculpt-status-icon {
+    margin-right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.systemsculpt-status-text {
+    font-size: 0.9em;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: visible;
+    min-width: 150px; /* Further increased width to ensure text fits */
+    max-width: none; /* Remove any max-width constraints */
+    width: auto; /* Allow the width to adjust to content */
+    display: inline-block;
+    text-align: center;
+    text-overflow: clip; /* Don't use ellipsis */
+}
+
+/* Status colors */
+.systemsculpt-status-text.status-idle {
+    background-color: var(--background-modifier-form-field);
+    color: var(--text-normal);
+}
+
+.systemsculpt-status-text.status-running,
+.systemsculpt-status-text.status-scanning,
+.systemsculpt-status-text.status-updating {
+    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+    color: var(--text-accent);
+    min-width: 160px; /* Further increased width to ensure percentage fits */
+    padding: 4px 12px; /* Add more horizontal padding */
+    white-space: nowrap !important; /* Force no wrapping */
+    overflow: visible !important; /* Ensure text doesn't get cut off */
+    text-overflow: clip !important; /* Don't allow ellipsis truncation */
+}
+
+.systemsculpt-status-text.status-complete {
+    background-color: rgba(0, 128, 0, 0.1);
+    color: var(--color-green);
+    min-width: 100px; /* Increase minimum width for "Complete" text */
+    padding: 2px 12px; /* Add more horizontal padding */
+    white-space: nowrap; /* Prevent text wrapping */
+    overflow: visible; /* Ensure text doesn't get cut off */
+}
+
+.systemsculpt-status-text.status-error {
+    background-color: rgba(255, 0, 0, 0.1);
+    color: var(--text-error);
+}
+
+.systemsculpt-status-text.status-paused {
+    background-color: rgba(255, 165, 0, 0.1);
+    color: var(--text-warning);
+}
+
+/* Action buttons */
+.systemsculpt-action-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+/* Progress bar */
+.systemsculpt-progress-bar {
+    height: 6px;
+    background-color: var(--background-modifier-form-field);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.systemsculpt-progress-bar-inner {
+    height: 100%;
+    background-color: var(--interactive-accent);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+/* Current file */
+.systemsculpt-current-file {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    background-color: var(--background-primary);
+    border-radius: 3px;
+    margin-bottom: 10px;
+    border-left: 2px solid var(--interactive-accent);
+    display: flex;
+    align-items: center;
+}
+
+.systemsculpt-current-file-label {
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.systemsculpt-current-file-path {
+    font-family: var(--font-monospace);
+    word-break: break-all;
+    color: var(--text-normal);
+    font-size: 0.9em;
+}
+
+/* Stats table */
+.systemsculpt-stats-table {
+    margin-bottom: 10px;
+}
+
+.systemsculpt-stats-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.systemsculpt-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85em;
+    padding: 2px 0;
+}
+
+.systemsculpt-stat-label {
+    color: var(--text-muted);
+}
+
+.systemsculpt-stat-value {
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+/* Exclusion toggle */
+.systemsculpt-exclusion-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    margin-top: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: var(--text-accent);
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-toggle-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Exclusion stats */
+.systemsculpt-exclusion-stats {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed var(--background-modifier-border);
+}
+
+/* Obsidian exclusions toggle */
+.systemsculpt-obsidian-exclusions-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    margin-top: 6px;
+    cursor: pointer;
+    font-size: 0.8em;
+    color: var(--text-accent);
+    margin-left: 16px;
+}
+
+/* Obsidian exclusions container */
+.systemsculpt-obsidian-exclusions {
+    margin-left: 16px;
+    padding: 8px;
+    background-color: var(--background-primary);
+    border-radius: 4px;
+    font-size: 0.8em;
+    margin-bottom: 8px;
+}
+
+/* Obsidian exclusions list */
+.systemsculpt-obsidian-exclusions-list {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.systemsculpt-obsidian-exclusions-list li {
+    margin-bottom: 4px;
+    font-family: var(--font-monospace);
+    word-break: break-all;
+}
+
+/* No exclusions message */
+.systemsculpt-no-exclusions {
+    color: var(--text-muted);
+    font-style: italic;
+    margin: 4px 0;
+}
+
+/* Last update */
+.systemsculpt-last-update {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    text-align: right;
+    margin-top: 6px;
+}
+
+/* Animation for the spinner icon */
+.systemsculpt-icon-spin {
+    animation: systemsculpt-spin 1.5s linear infinite;
+}
+
+/* Stop animation when the status is complete - comprehensive fix */
+.status-complete .systemsculpt-icon-spin,
+.systemsculpt-status-icon.status-complete.systemsculpt-icon-spin,
+.is-complete .systemsculpt-status-icon.is-spinning,
+.is-complete .is-spinning,
+.status-complete.systemsculpt-icon-spin,
+.status-complete .is-spinning,
+[class*='complete'] .systemsculpt-icon-spin,
+[class*='complete'] .is-spinning,
+.systemsculpt-status-icon.status-complete,
+div.status-complete svg,
+.systemsculpt-status-text.status-complete + .systemsculpt-status-icon svg {
+    animation: none !important;
+    -webkit-animation: none !important;
+    transform: none !important;
+}
+
+@keyframes systemsculpt-spin {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Main container for vertical layout */
+.systemsculpt-main-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+}
+
+/* Common section styles */
+.systemsculpt-section {
+    background-color: var(--background-primary);
+    border-radius: 6px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 20px;
+}
+
+/* Middle row with stats and actions */
+.systemsculpt-middle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    width: 100%;
+}
+
+/* Make sections in middle row responsive */
+.systemsculpt-middle-row .systemsculpt-section {
+    flex: 1;
+    min-width: 300px; /* Minimum width before wrapping */
+}
+
+/* ========== STATUS INDICATORS & HEADERS ========== */
+
+.systemsculpt-status-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 8px;
+}
+
+.systemsculpt-status-title {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    color: var(--text-normal);
+}
+
+/* Inline status styling */
+.systemsculpt-status-row,
+.systemsculpt-current-file-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.systemsculpt-inline-label {
+    margin: 0;
+    display: inline;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.systemsculpt-status-value {
+    font-weight: var(--font-medium);
+    margin-left: 8px;
+    padding: 2px 12px;
+    border-radius: 4px;
+    display: inline-block;
+    min-width: 160px; /* Increased minimum width for percentages */
+    max-width: none;
+    width: auto;
+    white-space: nowrap !important; /* Prevent text wrapping */
+    overflow: visible !important; /* Allow text to overflow if needed */
+    text-align: center; /* Center the text */
+    text-overflow: clip !important; /* Don't truncate with ellipsis */
+}
+
+/* Status indicator dots */
+.systemsculpt-status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.systemsculpt-status-success {
+    background-color: var(--interactive-success);
+}
+
+.systemsculpt-status-error {
+    background-color: var(--interactive-error);
+}
+
+.systemsculpt-status-warning {
+    background-color: var(--interactive-warning);
+}
+
+.systemsculpt-status-idle {
+    background-color: var(--interactive-normal);
+}
+
+/* Status colors for text & backgrounds */
+.status-idle {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-form-field);
+}
+
+.status-running,
+.status-scanning,
+.status-updating {
+    color: var(--text-accent);
+    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+.status-paused {
+    color: var(--text-muted);
+}
+
+.status-complete {
+    color: var(--text-success);
+    background-color: rgba(var(--color-green-rgb), 0.1);
+}
+
+.status-error {
+    color: var(--text-error);
+    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+}
+
+/* ========== NEW EMBEDDING PROGRESS BAR ========== */
+
+/* Brand new progress bar implementation with embedding-specific class names */
+.embed-progress-container {
+    width: 100%;
+    height: 10px;
+    background-color: var(--background-modifier-border);
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 10px 0;
+    position: relative;
+}
+
+.embed-progress-track {
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    position: relative;
+}
+
+.embed-progress-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 0%; /* Will be set by JavaScript */
+    background-color: var(--interactive-accent);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+    z-index: 5;
+}
+
+/* Loading animation for the progress bar */
+.embed-progress-loading .embed-progress-fill {
+    background: linear-gradient(
+        90deg,
+        var(--interactive-accent) 0%,
+        var(--interactive-accent-hover) 50%,
+        var(--interactive-accent) 100%
+    );
+    background-size: 200% 100%;
+    animation: embed-progress-animate 1.5s infinite ease-in-out;
+}
+
+@keyframes embed-progress-animate {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
+}
+
+/* Progress section containing the progress bar */
+.embed-progress-section {
+    margin-bottom: 16px;
+}
+
+.embed-progress-section h5 {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.embed-progress-text {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.embed-progress-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--font-ui-small);
+}
+
+/* ========== PROGRESS BAR ========== */
+
+/* Progress bar container and styling */
+.systemsculpt-progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: var(--background-modifier-border);
+    border-radius: 4px;
+    margin: 8px 0;
+    overflow: hidden;
+    position: relative;
+}
+
+.systemsculpt-progress-bar {
+    width: 100%;
+    height: 100%;
+    background-color: var(--background-secondary);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+.systemsculpt-progress-bar-inner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background-color: var(--interactive-accent);
+    border-radius: 4px;
+    transition: width 0.3s ease-in-out;
+    z-index: 1;
+}
+
+/* Progress section */
+.systemsculpt-progress-section {
+    margin-bottom: 16px;
+}
+
+.systemsculpt-progress-section h5 {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.systemsculpt-progress-text {
+    margin-top: 6px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.systemsculpt-progress-container {
+    margin: 16px 0;
+}
+
+.systemsculpt-progress-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--font-ui-small);
+}
+
+/* Progress loading animation */
+.systemsculpt-progress-loading {
+    background: linear-gradient(
+        90deg,
+        var(--interactive-accent) 0%,
+        var(--interactive-accent-hover) 50%,
+        var(--interactive-accent) 100%
+    );
+    animation: progress-loading 1.5s infinite ease-in-out;
+    background-size: 200% 100%;
+}
+
+.systemsculpt-progress-bar.systemsculpt-progress-loading .systemsculpt-progress-bar-inner {
+    display: block !important;
+    opacity: 1 !important;
+    background: transparent; /* Make the inner transparent when loading animation is active */
+}
+
+@keyframes progress-loading {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
+}
+
+/* Initialization progress bar */
+.systemsculpt-init-progress-container {
+    margin: 10px 0;
+    height: 4px;
+    background-color: var(--background-modifier-border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.systemsculpt-init-progress-bar {
+    height: 100%;
+    width: 100%;
+    background-color: transparent;
+    position: relative;
+}
+
+.systemsculpt-init-progress-inner {
+    height: 100%;
+    background-color: var(--interactive-accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* ========== FILES & PROCESSING INFO ========== */
+
+/* Files checked counter styling */
+.systemsculpt-files-checked {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.files-checked-label {
+    font-weight: 500;
+}
+
+.files-checked-count {
+    color: var(--text-normal);
+    background: rgba(89, 74, 147, 0.1);
+    border-radius: 4px;
+    padding: 2px 6px;
+    animation: highlight-pulse 2s infinite;
+}
+
+/* Add animation for files being checked */
+@keyframes highlight-pulse {
+    0% { background-color: rgba(89, 74, 147, 0.1); }
+    50% { background-color: rgba(89, 74, 147, 0.3); }
+    100% { background-color: rgba(89, 74, 147, 0.1); }
+}
+
+/* Time remaining info */
+.systemsculpt-time-remaining {
+    color: var(--text-accent);
+    font-weight: var(--font-medium);
+}
+
+/* Current file styles */
+.systemsculpt-current-file {
+    margin-top: 10px;
+    font-size: 0.85rem;
+}
+
+.systemsculpt-current-file-info {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.current-file-label {
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.current-file-path {
+    font-family: var(--font-monospace);
+    word-break: break-all;
+}
+
+.systemsculpt-current-file-value {
+    margin-left: 8px;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--background-modifier-form-field);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* Last update info styling */
+.systemsculpt-last-update {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.last-update-label {
+    font-weight: 500;
+}
+
+.last-update-value {
+    color: var(--text-normal);
+    background: rgba(89, 74, 147, 0.05);
+    border-radius: 4px;
+    padding: 2px 6px;
+}
+
+/* Status bar update info styling */
+.update-info {
+    margin-left: 6px;
+    opacity: 0.8;
+    font-size: 0.85em;
+}
+
+/* ========== STATS SECTION ========== */
+
+/* Stats section */
+.systemsculpt-stats h5,
+.systemsculpt-stats-section h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 8px;
+}
+
+.systemsculpt-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.systemsculpt-stats-table td,
+.systemsculpt-stats-table tr {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+
+.systemsculpt-stats-table tr:last-child {
+    border-bottom: none;
+}
+
+.systemsculpt-stats-table .stat-label,
+.systemsculpt-stat-label {
+    font-weight: var(--font-medium);
+    color: var(--text-muted);
+    padding: 8px 0;
+    width: 40%;
+}
+
+.systemsculpt-stats-table .stat-value,
+.systemsculpt-stat-value {
+    text-align: right;
+    color: var(--text-muted);
+    padding: 8px 0;
+}
+
+.systemsculpt-stats-loading {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+/* ========== ACTIONS SECTION ========== */
+
+/* Actions section */
+.systemsculpt-actions h5,
+.systemsculpt-actions-title {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 8px;
+}
+
+.systemsculpt-primary-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.systemsculpt-secondary-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.systemsculpt-primary-actions button,
+.systemsculpt-secondary-actions button {
+    flex: 1;
+    min-width: 150px;
+}
+
+.systemsculpt-maintenance-actions {
+    margin-top: 12px;
+}
+
+/* ========== LOADING & ANIMATIONS ========== */
+
+/* Loading message styles */
+.systemsculpt-loading-message {
+    margin: 10px 0;
+    padding: 8px 12px;
+    background-color: var(--background-modifier-border);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    border-left: 4px solid var(--interactive-accent);
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+/* Pulsing animation for loading indicator */
+.systemsculpt-pulsing {
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.7;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.7;
+    }
+}
+
+/* ========== ERROR & WARNING MESSAGES ========== */
+
+/* Error state */
+.systemsculpt-error {
+    color: var(--text-error);
+}
+
+.embedding-error-button-container {
+    margin-bottom: 16px;
+    padding: 12px;
+    border-radius: 6px;
+    background-color: var(--background-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.embedding-error-info {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+    border-left: 3px solid var(--text-error);
+}
+
+.embedding-error-message {
+    margin: 0;
+    color: var(--text-error);
+    font-weight: var(--font-medium);
+}
+
+.embedding-warning-message {
+    margin: 0;
+    color: var(--text-warning);
+    font-weight: var(--font-medium);
+}
+
+.systemsculpt-fix-errors-button {
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+}
+
+.systemsculpt-view-details-button {
+    background-color: var(--interactive-normal);
+    margin-top: 8px;
+}
+
+/* ========== EMBEDDING SETTINGS PANEL ========== */
+
+.systemsculpt-embeddings-settings {
+    padding: 12px;
+}
+
+.systemsculpt-embeddings-settings .setting-item {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+}
+
+.systemsculpt-embeddings-settings .setting-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Section styles */
+.systemsculpt-settings-section {
+    margin-bottom: 24px;
+    padding: 16px;
+    border-radius: 6px;
+    background-color: var(--background-secondary);
+}
+
+.systemsculpt-section-heading {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 1.2rem;
+    color: var(--text-normal);
+    font-weight: 600;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 8px;
+}
+
+/* API Key Settings Section */
+.systemsculpt-embedding-api-settings {
+    margin-bottom: 24px;
+}
+
+.systemsculpt-embedding-api-settings h3 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 1.2rem;
+}
+
+/* Preferences Section */
+.systemsculpt-embedding-preferences {
+    margin-bottom: 24px;
+}
+
+.systemsculpt-api-key-info {
+    margin-top: 12px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.systemsculpt-api-key-help {
+    margin: 0;
+}
+
+.settings-separator {
+    margin: 24px 0;
+    border-color: var(--background-modifier-border);
+}
+
+/* ========== CONFIRMATION MODAL ========== */
+
 .systemsculpt-confirmation-modal {
-  max-width: 450px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.confirmation-message-container {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 20px;
-  padding: 16px;
-  background-color: var(--background-modifier-error-rgb, rgba(255, 0, 0, 0.05));
-  border-radius: 6px;
-  border-left: 3px solid var(--color-red);
+.systemsculpt-confirmation-content {
+    background-color: var(--background-primary);
+    border-radius: 8px;
+    padding: 20px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.confirmation-icon {
-  color: var(--color-red);
-  display: flex;
-  font-size: 18px;
+.systemsculpt-confirmation-content h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: var(--font-ui-large);
+    color: var(--text-normal);
 }
 
-.confirmation-message {
-  color: var(--text-normal);
-  font-size: var(--font-ui-small);
-  flex: 1;
+.systemsculpt-confirmation-content p {
+    margin-bottom: 20px;
+    color: var(--text-muted);
 }
 
-.confirmation-button-container {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.systemsculpt-confirmation-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.systemsculpt-confirmation-buttons button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+    background-color: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+}
+
+.systemsculpt-confirmation-buttons button:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-confirmation-buttons button.mod-warning {
+    background-color: var(--background-modifier-error);
+    color: var(--text-on-accent);
+    border-color: var(--background-modifier-error-hover);
+}
+
+.systemsculpt-confirmation-buttons button.mod-warning:hover {
+    background-color: var(--background-modifier-error-hover);
+}
+
+/* ========== SETTINGS TAB STYLES ========== */
+
+/* Settings tab specific styles */
+.embeddings-status-panel-container {
+    margin-top: 24px;
+    margin-bottom: 24px;
+}
+
+.embeddings-status-panel-container h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+
+/* ========== EMBEDDING STATUS CLASSES ========== */
+
+.systemsculpt-progress-text.has-skipped-files {
+    color: var(--text-warning);
+    font-weight: 600;
+}
+
+.systemsculpt-skipped-files-count {
+    color: var(--text-warning);
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: rgba(var(--color-yellow-rgb), 0.1);
+}
+
+/* ========== EMBEDDING TAB STYLES ========== */
+
+/* Basic status value styling */
+.embeddings-status-value {
+    font-weight: var(--font-medium);
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+/* Status colors for embeddings tab */
+.embeddings-status-value.status-idle {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-form-field);
+}
+
+.embeddings-status-value.status-running,
+.embeddings-status-value.status-scanning,
+.embeddings-status-value.status-updating {
+    color: var(--text-accent);
+    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+.embeddings-status-value.status-paused {
+    color: var(--text-muted);
+    background-color: var(--background-modifier-form-field);
+}
+
+.embeddings-status-value.status-complete {
+    color: var(--text-success);
+    background-color: rgba(var(--color-green-rgb), 0.1);
+}
+
+.embeddings-status-value.status-error {
+    color: var(--text-error);
+    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+}
+
+/* Progress bar styling for embeddings tab */
+.embeddings-progress-container {
+    width: 100%;
+    height: 10px;
+    background-color: var(--background-modifier-border);
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 10px 0;
+    position: relative;
+}
+
+.embeddings-progress-track {
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    position: relative;
+}
+
+.embeddings-progress-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 0%; /* Will be set by JavaScript */
+    background-color: var(--interactive-accent);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+    z-index: 5;
+}
+
+/* Loading animation for the progress bar */
+.embeddings-progress-loading .embeddings-progress-fill {
+    background: linear-gradient(
+        90deg,
+        var(--interactive-accent) 0%,
+        var(--interactive-accent-hover) 50%,
+        var(--interactive-accent) 100%
+    );
+    background-size: 200% 100%;
+    animation: progress-loading 1.5s infinite;
+    width: 100% !important;
+}
+
+/* Container for all progress information elements */
+.embeddings-info-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 4px; /* Reduced spacing between elements */
+    margin-top: 8px;
+}
+
+.embeddings-progress-text {
+    font-size: 0.9rem;
+    color: var(--text-normal);
+    margin: 0; /* Remove margin since the wrapper handles spacing */
+}
+
+.embeddings-progress-text.has-skipped-files {
+    color: var(--text-warning);
+    font-weight: 600;
+}
+
+.embeddings-progress-text.has-tooltip {
+    cursor: help;
+    border-bottom: 1px dotted var(--text-muted);
+    display: inline-block;
+}
+
+.embeddings-files-checked,
+.embeddings-current-file,
+.embeddings-last-update {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 0; /* Remove margin since the wrapper handles spacing */
+}
+
+.embeddings-current-file-info {
+    padding: 4px 0;
+}
+
+/* Loading indicator */
+.embeddings-loading-message {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    padding: 8px 0;
+    text-align: center;
+}
+
+/* Error state */
+.embeddings-error {
+    color: var(--text-error);
+    font-weight: 600;
+}
+
+/* ========== EMBEDDING EXCLUSIONS STYLES ========== */
+
+/* Container for excluded items lists */
+.excluded-folders-list,
+.excluded-files-list {
+    margin-top: 8px;
+    margin-bottom: 16px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 8px;
+    background-color: var(--background-primary);
+}
+
+/* Empty state */
+.excluded-item-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 4px;
+    text-align: center;
+}
+
+/* Individual excluded item */
+.excluded-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    background-color: var(--background-secondary);
+}
+
+.excluded-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Path text */
+.excluded-item-path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+}
+
+/* Remove button */
+.excluded-item-remove {
+    cursor: pointer;
+    color: var(--text-muted);
+    margin-left: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+.excluded-item-remove:hover {
+    color: var(--text-error);
+    background-color: var(--background-modifier-hover);
+}
+
+/* Add button styling */
+.excluded-folders-control button,
+.excluded-files-control button {
+    margin-right: 8px;
+}
+
+/* ========== EMBEDDING MODAL STYLES ========== */
+
+/* Embedding Control Modal Styles */
+.systemsculpt-embedding-modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.systemsculpt-embedding-modal-content h2 {
+    margin: 0 0 4px;
+    padding: 0 12px;
+    font-size: 18px;
+}
+
+.embedding-modal-card {
+    background-color: var(--background-primary);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.embedding-modal-card-title {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 4px;
+}
+
+.embedding-modal-status-description {
+    font-size: 13px;
+    margin: 0 0 8px;
+    color: var(--text-normal);
+}
+
+/* Modal Progress bar styling */
+.embedding-progress-container {
+    margin: 6px 0;
+}
+
+.embedding-progress-bar {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background-color: var(--background-modifier-border);
+    overflow: hidden;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.embedding-progress-bar::-webkit-progress-bar {
+    background-color: var(--background-modifier-border);
+    border-radius: 4px;
+}
+
+.embedding-progress-bar::-webkit-progress-value {
+    background-color: var(--interactive-accent);
+    border-radius: 4px;
+}
+
+.embedding-progress-bar::-moz-progress-bar {
+    background-color: var(--interactive-accent);
+    border-radius: 4px;
+}
+
+.embedding-progress-label {
+    display: block;
+    text-align: center;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Statistics styling */
+.embedding-stats-list {
+    margin: 0;
+    padding: 0 0 0 18px;
+    list-style-type: disc;
+}
+
+.embedding-stats-list li {
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+/* Error card styling */
+.embedding-error-card {
+    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+    border-color: var(--background-modifier-error);
+}
+
+.embedding-error-card .error-title {
+    color: var(--text-error);
+}
+
+.embedding-error-details {
+    font-family: var(--font-monospace);
+    white-space: pre-wrap;
+    font-size: 11px;
+    padding: 6px;
+    background-color: var(--background-primary);
+    border-radius: 3px;
+    border: 1px solid var(--background-modifier-border);
+    overflow-x: auto;
+}
+
+/* Actions styling */
+.embedding-actions-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+}
+
+.embedding-action-button {
+    flex: 0 0 auto;
+    min-width: 90px;
+}
+
+/* Current file display styling for modal */
+.embedding-current-file {
+    margin: 6px 0;
+    padding: 6px 8px;
+    background-color: var(--background-secondary);
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    border-left: 3px solid var(--interactive-accent);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.embedding-current-file-label {
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.embedding-current-file-path {
+    font-family: var(--font-monospace);
+    word-break: break-all;
+    color: var(--text-normal);
+}
+
+/* Animation for the spinner icon */
+.systemsculpt-icon-spin {
+    animation: embedding-spinner-rotate 1.5s linear infinite;
+}
+
+/* Stop spinner when complete */
+.status-complete .systemsculpt-icon-spin,
+.is-complete .systemsculpt-icon-spin {
+    animation: none !important;
+}
+
+@keyframes embedding-spinner-rotate {
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* similar-notes-view.css */
@@ -8019,11 +9177,20 @@
 }
 
 .systemsculpt-result-item {
-    padding: 8px 12px;
+    padding: 12px 12px;
     border-bottom: 1px solid var(--background-modifier-border);
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, outline 0.15s ease;
     position: relative;
+    min-height: 90px; /* Increased height to fit both magnifying glass and content preview */
+}
+
+/* Highlight style for the currently previewed item */
+.systemsculpt-result-item.systemsculpt-previewing {
+    background-color: var(--background-modifier-active-hover);
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: -2px;
+    z-index: 1;
 }
 
 .systemsculpt-result-item:hover {
@@ -8034,11 +9201,43 @@
     background-color: var(--background-modifier-active);
 }
 
+/* Preview button styling */
+.systemsculpt-preview-button {
+    position: absolute;
+    right: 12px;
+    bottom: 12px; /* Position at the bottom instead of a fixed top value */
+    width: 28px; /* Slightly larger */
+    height: 28px; /* Slightly larger */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--interactive-normal);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    opacity: 0.8;
+    z-index: 2; /* Ensure it's above other elements */
+}
+
+.systemsculpt-preview-button:hover {
+    background-color: var(--interactive-hover);
+    transform: translateY(-1px);
+    opacity: 1;
+    color: var(--text-normal);
+}
+
+.systemsculpt-preview-button:active {
+    transform: translateY(0);
+}
+
 .systemsculpt-result-container {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding-right: 65px; /* Increased from 45px to create more space between text and score */
+    padding-right: 25px; /* Reduced padding to allow content to use more horizontal space */
+    width: 100%; /* Ensure container takes full width */
 }
 
 .systemsculpt-result-title {
@@ -8051,42 +9250,91 @@
     text-overflow: ellipsis;
 }
 
-/* Score category styling - Updated with black background and colored text */
+/* Score category styling - Theme-compatible with proper contrast */
 .systemsculpt-result-score {
     font-size: var(--font-ui-smaller);
     font-weight: var(--font-medium);
     position: absolute;
     right: 12px;
     top: 10px;
-    background-color: rgba(0, 0, 0, 0.7); /* Black background with slight transparency */
-    color: var(--text-on-accent); /* Default color */
     padding: 3px 8px;
     border-radius: 12px;
     line-height: 1.2;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     transition: transform 0.15s ease;
+    background-color: var(--background-secondary-alt);
+    color: var(--text-normal);
 }
 
-/* Score category specific styling */
+/* Score category specific styling with theme variables */
+/* Common styles for all similarity pills */
+.systemsculpt-result-score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+    margin-left: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    transition: all 0.15s ease-in-out;
+    min-width: 45px;
+    text-align: center;
+}
+
+/* High similarity (75%+) - Success/positive color */
+.systemsculpt-result-score.systemsculpt-score-high,
 .systemsculpt-score-high {
-    color: rgb(72, 255, 72); /* Bright green */
-    text-shadow: 0 0 4px rgba(72, 255, 72, 0.4); /* Subtle glow */
-    font-weight: 600;
+    background-color: var(--interactive-success-hover, #3e8f3e) !important;
+    color: var(--text-on-accent, white) !important;
+    border: 1px solid var(--interactive-success, #5cb85c) !important;
+    font-weight: 500;
 }
 
-.systemsculpt-score-good {
-    color: rgb(72, 200, 255); /* Bright cyan/blue */
-    text-shadow: 0 0 4px rgba(72, 200, 255, 0.4);
-    font-weight: 600;
+body.theme-light .systemsculpt-result-score.systemsculpt-score-high,
+body.theme-light .systemsculpt-score-high {
+    background-color: var(--color-green-300, #81c784) !important;
+    color: var(--color-green-900, #005a13) !important;
+    border-color: var(--color-green-500, #4CAF50) !important;
 }
 
+/* Medium similarity (50-74%) - Warning/neutral color */
+.systemsculpt-result-score.systemsculpt-score-medium,
 .systemsculpt-score-medium {
-    color: rgb(255, 213, 72); /* Bright yellow/gold */
-    text-shadow: 0 0 4px rgba(255, 213, 72, 0.4);
+    background-color: var(--interactive-warning-hover, #d58512) !important;
+    color: var(--text-on-accent, white) !important;
+    border: 1px solid var(--interactive-warning, #f0ad4e) !important;
+    font-weight: 500;
 }
 
+body.theme-light .systemsculpt-result-score.systemsculpt-score-medium,
+body.theme-light .systemsculpt-score-medium {
+    background-color: var(--color-orange-300, #ffb74d) !important;
+    color: var(--color-orange-900, #663c00) !important;
+    border-color: var(--color-orange-500, #FF9800) !important;
+}
+
+/* Low similarity (below 50%) - Error/negative color */
+.systemsculpt-result-score.systemsculpt-score-low,
 .systemsculpt-score-low {
-    color: rgb(180, 180, 180); /* Light gray */
+    background-color: var(--interactive-error-hover, #ac2925) !important;
+    color: var(--text-on-accent, white) !important;
+    border: 1px solid var(--interactive-error, #d9534f) !important;
+    font-weight: 500;
+}
+
+body.theme-light .systemsculpt-result-score.systemsculpt-score-low,
+body.theme-light .systemsculpt-score-low {
+    background-color: var(--color-red-300, #e57373) !important;
+    color: var(--color-red-900, #7a0000) !important;
+    border-color: var(--color-red-500, #F44336) !important;
+}
+
+/* Hover effect for all similarity indicators */
+.systemsculpt-result-score:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .systemsculpt-result-path {
@@ -8106,6 +9354,34 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Content preview container and styling */
+.systemsculpt-result-content-preview-container {
+    margin: 8px 0 0 0; /* Increased spacing from path text */
+    padding: 8px 10px; /* Internal padding to prevent text from touching borders */
+    background-color: var(--background-modifier-form-field); /* Light background that works in both themes */
+    border: 1px solid var(--background-modifier-border); /* Subtle border */
+    border-radius: 6px; /* Slightly rounded corners */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); /* Subtle shadow for depth */
+    position: relative; /* For proper positioning of child elements */
+    max-width: calc(100% - 10px); /* Extend almost to the edge, making better use of space */
+}
+
+/* Content preview text styling */
+.systemsculpt-result-content-preview {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-family: var(--font-text); /* Use text font instead of UI font */
+    max-height: 2.8em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-height: 1.5; /* Improved line height for readability */
+    font-weight: 450; /* Slightly different weight for distinction */
+    font-style: normal; /* Ensure it's not italic by default */
 }
 
 /* Loading state styles */
@@ -8253,6 +9529,203 @@
     z-index: 1000;
     line-height: 1.4;
     border: 1px solid var(--background-modifier-border);
+}
+
+/* File metadata styling */
+.systemsculpt-result-metadata {
+    display: flex;
+    gap: 12px;
+    margin-top: 2px;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smallest);
+    flex-wrap: wrap;
+}
+
+.systemsculpt-result-date {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.systemsculpt-result-date svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+}
+
+/* Content preview styling */
+.systemsculpt-result-preview {
+    margin-top: 4px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+    max-width: 100%;
+}
+
+/* Load More button styles */
+.systemsculpt-load-more-button {
+    display: block;
+    width: 100%;
+    padding: 10px 16px;
+    margin: 12px 0;
+    background-color: var(--interactive-normal);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+}
+
+.systemsculpt-load-more-button:hover {
+    background-color: var(--interactive-hover);
+    transform: translateY(-1px);
+}
+
+.systemsculpt-load-more-button:active {
+    transform: translateY(0);
+}
+
+.systemsculpt-load-more-button.is-loading {
+    position: relative;
+    color: transparent;
+    pointer-events: none;
+}
+
+.systemsculpt-load-more-button.is-loading::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 20px;
+    height: 20px;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 2px solid var(--background-modifier-border);
+    border-top-color: var(--interactive-accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.systemsculpt-load-more-button.systemsculpt-no-more-results {
+    background-color: var(--background-secondary);
+    color: var(--text-muted);
+    cursor: default;
+}
+
+.systemsculpt-load-more-button.systemsculpt-load-error {
+    background-color: var(--background-modifier-error);
+    color: var(--text-on-accent);
+}
+
+/* Note Preview Modal Styles */
+.systemsculpt-note-preview-modal {
+    max-width: 800px;
+    width: 90vw;
+    max-height: 80vh;
+    border-radius: var(--radius-m);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-note-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-note-preview-title {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    color: var(--text-normal);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.systemsculpt-note-preview-close {
+    cursor: pointer;
+    color: var(--text-muted);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.15s ease;
+}
+
+.systemsculpt-note-preview-close:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.systemsculpt-note-preview-content {
+    padding: 16px;
+    overflow-y: auto;
+    max-height: calc(80vh - 120px);
+    background-color: var(--background-primary);
+}
+
+.systemsculpt-note-preview-text {
+    font-size: var(--font-text-size);
+    color: var(--text-normal);
+    line-height: 1.5;
+}
+
+.systemsculpt-note-preview-footer {
+    padding: 8px 16px;
+    border-top: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary-alt);
+    display: flex;
+    justify-content: center;
+}
+
+.systemsculpt-note-preview-hint {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Navigation container */
+.systemsculpt-note-preview-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 500px;
+}
+
+/* Navigation buttons */
+.systemsculpt-note-preview-nav-button {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: var(--interactive-normal);
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-note-preview-nav-button:hover {
+    background-color: var(--interactive-hover);
+    transform: translateY(-1px);
+}
+
+.systemsculpt-note-preview-nav-button:active {
+    transform: translateY(0);
 }
 
 /* reasoning.css */
@@ -10344,6 +11817,11 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   opacity: 0.9;
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  max-width: none;
+  width: auto;
 }
 
 /* Improve spacing between icon and text */
@@ -10357,6 +11835,116 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
   to {
     transform: rotate(359deg);
+  }
+}
+
+/* Status Bar Indicator Styles */
+.systemsculpt-status-indicator {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  cursor: pointer;
+  height: 100%;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-status-indicator:hover {
+  background-color: var(--interactive-hover);
+}
+
+.systemsculpt-status-icon {
+  margin-right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Spinning animation for active states */
+.systemsculpt-status-icon.is-spinning svg {
+  animation: systemsculpt-spin 2s linear infinite;
+}
+
+@keyframes systemsculpt-spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Enhanced status container */
+.status-container {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  max-width: none; /* Remove max-width restriction to allow content to display fully */
+}
+
+/* Progress text */
+.status-progress-text {
+  font-weight: 600;
+  color: var(--interactive-accent);
+}
+
+/* Sub info elements */
+.status-sub-info {
+  font-size: 0.85em;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-sub-info.count-info {
+  color: var(--text-muted);
+}
+
+.status-sub-info.file-info {
+  color: var(--text-accent);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-sub-info.update-info {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.8em;
+}
+
+/* Status colors */
+.systemsculpt-status-value.status-idle {
+  color: var(--text-normal);
+}
+
+.systemsculpt-status-value.status-running,
+.systemsculpt-status-value.status-updating {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-status-value.status-scanning {
+  color: var(--text-accent);
+}
+
+.systemsculpt-status-value.status-complete {
+  color: var(--text-success);
+}
+
+.systemsculpt-status-value.status-paused {
+  color: var(--text-warning);
+}
+
+.systemsculpt-status-value.status-error {
+  color: var(--text-error);
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .status-container {
+    max-width: none; /* Allow full width display even on mobile */
+  }
+  
+  .status-sub-info.file-info {
+    max-width: 100px; /* Increased space for file info on mobile */
   }
 }
 
@@ -10968,6 +12556,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background-color: var(--text-accent-hover);
   padding: 0 2px;
   border-radius: 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .systemsculpt-chat-header-row {
@@ -11044,7 +12634,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
@@ -14176,6 +15765,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background: var(--interactive-accent);
   border-radius: 4px;
   transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .systemsculpt-progress-overlay {
@@ -14542,6 +16133,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-search-highlight {
   color: var(--text-accent);
   font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .systemsculpt-search-result {
