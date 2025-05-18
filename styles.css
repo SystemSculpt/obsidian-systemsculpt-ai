@@ -6757,8 +6757,49 @@
 /* load-chat.css */
 /* Load Chat Modal Styles */
 
+/* Updated Search Container to mimic OmniSearch header */
 .systemsculpt-load-chat-modal .systemsculpt-search-container {
-  margin-bottom: 16px;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  /* position: sticky; remove if not needed for LoadChatModal top: 0; z-index: 10; */
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  margin-bottom: 12px; /* Adjusted from 16px */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Apply focus styles to the container when input is focused */
+.systemsculpt-load-chat-modal .systemsculpt-search-container:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+/* Style the SearchComponent's input to mimic OmniSearch */
+.systemsculpt-load-chat-modal .search-input-container input.search-input {
+  flex: 1;
+  border: none !important; /* Override default Obsidian styles */
+  background: transparent !important; /* Override default Obsidian styles */
+  font-size: 15px; /* Slightly smaller than OmniSearch for balance */
+  color: var(--text-normal);
+  padding: 6px 0 !important; /* Override default Obsidian styles */
+  height: auto !important; /* Override default Obsidian styles */
+  box-shadow: none !important; /* Override default Obsidian styles */
+  outline: none !important; /* Override default Obsidian styles */
+}
+
+/* Hide the default magnifying glass icon from Obsidian's SearchComponent */
+.systemsculpt-load-chat-modal .search-input-container .search-icon {
+  display: none !important;
+}
+
+/* Adjust flex grow for the input container if SearchComponent wraps it */
+.systemsculpt-load-chat-modal .search-input-container {
+  flex-grow: 1;
+  display: flex; /* Ensure input inside also behaves with flex */
 }
 
 .systemsculpt-chat-list {
@@ -6768,6 +6809,7 @@
   max-height: 70vh;
   overflow-y: auto;
   padding: 0 4px;
+  margin-bottom: 16px;
 }
 
 .systemsculpt-section-header {
@@ -6777,6 +6819,9 @@
   margin-bottom: 8px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 14px;
+  color: var(--text-accent);
+  font-weight: 600;
 }
 
 .systemsculpt-section-icon {
@@ -6927,15 +6972,155 @@
   opacity: 0.5;
 }
 
-/* Responsive adjustments for smaller screens */
+/* --- Modal List Item Styles --- */
+
+.systemsculpt-modal-list-item {
+  padding: var(--size-4-2) var(--size-4-3);
+  margin-bottom: var(--size-4-2);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  background-color: var(--background-secondary);
+  display: flex;
+}
+
+.systemsculpt-modal-list-item:hover {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.systemsculpt-modal-list-item.is-selected {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--text-accent);
+}
+
+/* When an item is favorited, add visual distinction */
+.systemsculpt-modal-list-item[data-favorite="true"] {
+  border-left: 3px solid var(--color-yellow);
+}
+
+.systemsculpt-modal-list-item-content {
+  flex: 1;
+  margin-left: 4px;
+  overflow: hidden;
+}
+
+.systemsculpt-modal-list-item-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  line-height: 1.4;
+  padding-right: 8px;
+}
+
+.systemsculpt-modal-list-item-preview {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  max-height: 3.5em;
+  overflow: hidden;
+  position: relative;
+}
+
+.systemsculpt-modal-list-item-preview::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 30%;
+  height: 1.4em;
+  background: linear-gradient(to right, transparent, var(--background-secondary));
+  pointer-events: none;
+}
+
+.systemsculpt-modal-list-item:hover .systemsculpt-modal-list-item-preview::after {
+  background: linear-gradient(to right, transparent, var(--background-modifier-hover));
+}
+
+.systemsculpt-modal-list-item.is-selected .systemsculpt-modal-list-item-preview::after {
+  background: linear-gradient(to right, transparent, var(--background-modifier-hover));
+}
+
+.systemsculpt-modal-message {
+  margin-bottom: 4px;
+  line-height: 1.4;
+  font-size: 13px;
+}
+
+.systemsculpt-modal-list-item-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+.systemsculpt-modal-list-item-date,
+.systemsculpt-modal-list-item-count {
+  white-space: nowrap;
+}
+
+.systemsculpt-modal-empty-state {
+  text-align: center;
+  padding: 32px 24px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-search-highlight {
+  background-color: rgba(var(--interactive-accent-rgb), 0.2);
+  border-radius: 2px;
+  padding: 0 2px;
+  margin: 0 -2px;
+  font-weight: 600;
+}
+
+/* Favorites UI Enhancements */
+.systemsculpt-chat-favorite {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  margin-right: 8px;
+  margin-top: 4px;
+}
+
+.systemsculpt-modal-list-item[data-favorite="true"] {
+  background-color: rgba(255, 217, 0, 0.03);
+}
+
+.systemsculpt-modal-list-item[data-favorite="true"]:hover {
+  background-color: rgba(255, 217, 0, 0.07);
+}
+
+.systemsculpt-modal-list-item[data-favorite="true"].is-selected {
+  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-modal-list-item[data-favorite="true"] {
+  background-color: rgba(255, 217, 0, 0.03);
+}
+
+.theme-dark .systemsculpt-modal-list-item[data-favorite="true"]:hover {
+  background-color: rgba(255, 217, 0, 0.07);
+}
+
+/* Responsive styles */
 @media (max-width: 768px) {
-  .systemsculpt-badge-container {
+  .systemsculpt-modal-list-item-meta {
     flex-direction: column;
     gap: 4px;
   }
   
-  .systemsculpt-chat-actions {
-    justify-content: space-between;
+  .systemsculpt-chat-favorite {
+    margin-top: 2px;
   }
 }
 
@@ -7030,25 +7215,6 @@
     max-height: 100px;
     overflow: hidden;
     position: relative;
-}
-
-.systemsculpt-modal-list-item-preview::after {
-    content: "";
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 20px;
-    background: linear-gradient(transparent, var(--background-secondary));
-    pointer-events: none;
-}
-
-.systemsculpt-modal-list-item:hover .systemsculpt-modal-list-item-preview::after {
-    background: linear-gradient(transparent, var(--background-modifier-hover));
-}
-
-.systemsculpt-modal-list-item.is-selected .systemsculpt-modal-list-item-preview::after {
-    background: linear-gradient(transparent, var(--background-modifier-active));
 }
 
 /* Message (inside preview) */
@@ -7956,108 +8122,7 @@ div.status-complete svg,
     background-color: var(--interactive-normal);
 }
 
-/* Status colors for text & backgrounds */
-.status-idle {
-    color: var(--text-normal);
-    background-color: var(--background-modifier-form-field);
-}
 
-.status-running,
-.status-scanning,
-.status-updating {
-    color: var(--text-accent);
-    background-color: rgba(var(--interactive-accent-rgb), 0.1);
-}
-
-.status-paused {
-    color: var(--text-muted);
-}
-
-.status-complete {
-    color: var(--text-success);
-    background-color: rgba(var(--color-green-rgb), 0.1);
-}
-
-.status-error {
-    color: var(--text-error);
-    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
-}
-
-/* ========== NEW EMBEDDING PROGRESS BAR ========== */
-
-/* Brand new progress bar implementation with embedding-specific class names */
-.embed-progress-container {
-    width: 100%;
-    height: 10px;
-    background-color: var(--background-modifier-border);
-    border-radius: 5px;
-    overflow: hidden;
-    margin: 10px 0;
-    position: relative;
-}
-
-.embed-progress-track {
-    width: 100%;
-    height: 100%;
-    background-color: transparent;
-    position: relative;
-}
-
-.embed-progress-fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    width: 0%; /* Will be set by JavaScript */
-    background-color: var(--interactive-accent);
-    border-radius: 5px;
-    transition: width 0.3s ease;
-    z-index: 5;
-}
-
-/* Loading animation for the progress bar */
-.embed-progress-loading .embed-progress-fill {
-    background: linear-gradient(
-        90deg,
-        var(--interactive-accent) 0%,
-        var(--interactive-accent-hover) 50%,
-        var(--interactive-accent) 100%
-    );
-    background-size: 200% 100%;
-    animation: embed-progress-animate 1.5s infinite ease-in-out;
-}
-
-@keyframes embed-progress-animate {
-    0% {
-        background-position: 100% 0;
-    }
-    100% {
-        background-position: -100% 0;
-    }
-}
-
-/* Progress section containing the progress bar */
-.embed-progress-section {
-    margin-bottom: 16px;
-}
-
-.embed-progress-section h5 {
-    margin-top: 0;
-    margin-bottom: 8px;
-}
-
-.embed-progress-text {
-    margin-top: 8px;
-    font-size: 0.9rem;
-    color: var(--text-muted);
-}
-
-.embed-progress-info-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: var(--font-ui-small);
-}
 
 /* ========== PROGRESS BAR ========== */
 
@@ -8182,11 +8247,11 @@ div.status-complete svg,
     gap: 6px;
 }
 
-.files-checked-label {
+.systemsculpt-files-checked-label {
     font-weight: 500;
 }
 
-.files-checked-count {
+.systemsculpt-files-checked-count {
     color: var(--text-normal);
     background: rgba(89, 74, 147, 0.1);
     border-radius: 4px;
@@ -8220,15 +8285,6 @@ div.status-complete svg,
     gap: 6px;
 }
 
-.current-file-label {
-    font-weight: 600;
-    color: var(--text-muted);
-}
-
-.current-file-path {
-    font-family: var(--font-monospace);
-    word-break: break-all;
-}
 
 .systemsculpt-current-file-value {
     margin-left: 8px;
@@ -8736,73 +8792,64 @@ div.status-complete svg,
 /* ========== EMBEDDING EXCLUSIONS STYLES ========== */
 
 /* Container for excluded items lists */
-.excluded-folders-list,
-.excluded-files-list {
-    margin-top: 8px;
-    margin-bottom: 16px;
-    max-height: 200px;
-    overflow-y: auto;
+.systemsculpt-excluded-folders,
+.systemsculpt-excluded-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+    padding: 6px;
+    background-color: var(--background-modifier-hover);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
-    padding: 8px;
-    background-color: var(--background-primary);
+    border-radius: var(--radius-sm);
 }
 
 /* Empty state */
-.excluded-item-empty {
+.systemsculpt-no-exclusions {
     color: var(--text-muted);
     font-style: italic;
+    margin: 0 auto;
     padding: 4px;
-    text-align: center;
 }
 
-/* Individual excluded item */
-.excluded-item {
+/* Individual excluded item chips */
+.systemsculpt-excluded-folders .setting-item,
+.systemsculpt-excluded-files .setting-item {
+    margin: 0;
+    padding: 2px 8px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 4px 8px;
-    border-radius: 4px;
-    margin-bottom: 4px;
-    background-color: var(--background-secondary);
-}
-
-.excluded-item:last-child {
-    margin-bottom: 0;
+    background-color: var(--interactive-accent-subtle);
+    border: 1px solid var(--interactive-accent);
+    border-radius: var(--radius-pill);
 }
 
 /* Path text */
-.excluded-item-path {
-    flex: 1;
+.systemsculpt-excluded-folders .setting-item-name,
+.systemsculpt-excluded-files .setting-item-name {
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-monospace);
     font-size: 0.85em;
+    margin-right: 4px;
 }
 
 /* Remove button */
-.excluded-item-remove {
-    cursor: pointer;
+.systemsculpt-excluded-folders .setting-item-control .mod-icon-button,
+.systemsculpt-excluded-files .setting-item-control .mod-icon-button {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 2px;
     color: var(--text-muted);
-    margin-left: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
 }
 
-.excluded-item-remove:hover {
+.systemsculpt-excluded-folders .setting-item-control .mod-icon-button:hover,
+.systemsculpt-excluded-files .setting-item-control .mod-icon-button:hover {
     color: var(--text-error);
     background-color: var(--background-modifier-hover);
-}
-
-/* Add button styling */
-.excluded-folders-control button,
-.excluded-files-control button {
-    margin-right: 8px;
 }
 
 /* ========== EMBEDDING MODAL STYLES ========== */
@@ -8944,12 +8991,14 @@ div.status-complete svg,
     overflow: hidden;
 }
 
-.embedding-current-file-label {
+/* Current file display label */
+.systemsculpt-current-file-label {
     font-weight: 600;
     color: var(--text-muted);
 }
 
-.embedding-current-file-path {
+/* Current file display path */
+.systemsculpt-current-file-path {
     font-family: var(--font-monospace);
     word-break: break-all;
     color: var(--text-normal);
@@ -11256,9 +11305,9 @@ body.theme-light .systemsculpt-score-low {
 }
 
 /* Unfavorited state styling */
-.systemsculpt-favorite-toggle.not-favorite .systemsculpt-favorite-icon .svg-icon,
-.systemsculpt-favorite-toggle.not-favorite .systemsculpt-favorite-icon svg,
-.systemsculpt-favorite-toggle.not-favorite svg {
+.systemsculpt-favorite-toggle:not(.is-favorite) .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle:not(.is-favorite) .systemsculpt-favorite-icon svg,
+.systemsculpt-favorite-toggle:not(.is-favorite) svg {
   color: var(--text-muted);
   fill: transparent;
   stroke: var(--text-muted);
@@ -11266,8 +11315,8 @@ body.theme-light .systemsculpt-score-low {
 }
 
 /* Hover effects for unfavorited state */
-.systemsculpt-favorite-toggle.not-favorite:hover .systemsculpt-favorite-icon .svg-icon,
-.systemsculpt-favorite-toggle.not-favorite.is-focused .systemsculpt-favorite-icon .svg-icon {
+.systemsculpt-favorite-toggle:not(.is-favorite):hover .systemsculpt-favorite-icon .svg-icon,
+.systemsculpt-favorite-toggle:not(.is-favorite).is-focused .systemsculpt-favorite-icon .svg-icon {
   color: var(--text-normal);
   stroke: var(--text-normal);
 }
@@ -11347,6 +11396,125 @@ body.theme-light .systemsculpt-score-low {
     opacity: 0;
     background-color: rgba(200, 200, 200, 0);
   }
+}
+
+/* Load Chat Modal Integrations */
+.systemsculpt-chat-favorite {
+  margin-right: 8px;
+}
+
+.systemsculpt-modal-list-item {
+  display: flex;
+  align-items: flex-start;
+}
+
+.systemsculpt-modal-list-item .systemsculpt-favorite-toggle {
+  height: 28px;
+  width: 28px;
+  margin: 0;
+  transform: translateY(2px);
+}
+
+.systemsculpt-modal-list-item .systemsculpt-favorite-toggle:hover {
+  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+  transform: translateY(1px);
+}
+
+/* Highlight for favorited items in the list */
+.systemsculpt-modal-list-item.has-favorite {
+  border-left: 3px solid var(--color-yellow);
+  background-color: rgba(255, 217, 0, 0.03);
+}
+
+.systemsculpt-modal-list-item.has-favorite:hover {
+  background-color: rgba(255, 217, 0, 0.07);
+}
+
+.systemsculpt-modal-list-item.has-favorite.is-selected {
+  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+  border-left-color: var(--color-yellow);
+}
+
+/* Favorites filter toggle in search bar */
+.systemsculpt-favorites-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.systemsculpt-favorites-filter:hover {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-favorites-filter.is-active {
+  background-color: rgba(255, 217, 0, 0.1);
+  border-color: rgba(255, 217, 0, 0.3);
+}
+
+.systemsculpt-favorites-filter.is-active svg {
+  color: var(--color-yellow);
+  fill: var(--color-yellow);
+}
+
+/* Favorites filter toggle states */
+.systemsculpt-favorites-filter.is-focused {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  outline: none;
+}
+
+.systemsculpt-favorites-filter.is-clicking {
+  transform: scale(0.95);
+}
+
+/* Animation for favorites filter */
+.systemsculpt-favorites-filter {
+  transition: transform 0.15s ease, background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/* Improve icon in favorites filter */
+.systemsculpt-favorites-filter .systemsculpt-favorites-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-favorites-filter.is-active .systemsculpt-favorites-icon svg {
+  color: var(--color-yellow);
+  fill: var(--color-yellow);
+  filter: drop-shadow(0 0 2px rgba(255, 217, 0, 0.4));
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .systemsculpt-favorites-filter span:not(.svg-icon) {
+    display: none;
+  }
+  
+  .systemsculpt-favorites-filter {
+    padding: 8px;
+  }
+}
+
+/* Make sure dark theme has good contrast */
+.theme-dark .systemsculpt-favorites-filter.is-active {
+  background-color: rgba(255, 217, 0, 0.15);
+}
+
+.theme-dark .systemsculpt-modal-list-item.has-favorite {
+  background-color: rgba(255, 217, 0, 0.05);
+}
+
+.theme-dark .systemsculpt-modal-list-item.has-favorite:hover {
+  background-color: rgba(255, 217, 0, 0.1);
 }
 
 /* Model list favorite toggle positioning - improved position and size */
