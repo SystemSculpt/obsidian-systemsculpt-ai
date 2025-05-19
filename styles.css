@@ -13500,6 +13500,647 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-bottom: 8px;
 }
 
+/* Change Log Tab Styles - Enhanced Timeline Design */
+.systemsculpt-changelog-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 30px; /* Increased gap for more breathing room */
+  padding-left: 35px; /* Space for timeline elements */
+  margin-top: 20px;
+}
+
+.systemsculpt-changelog-list::before { /* The vertical timeline bar */
+  content: "";
+  position: absolute;
+  left: 10px; /* Position of the bar within the padding-left */
+  top: 15px;  /* Start a bit down, to align with first dot */
+  bottom: 15px; /* End a bit up, to align with last dot */
+  width: 3px;
+  background-color: var(--background-modifier-border);
+  border-radius: 2px;
+  z-index: 0;
+}
+
+.systemsculpt-changelog-entry {
+  position: relative;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.07);
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.systemsculpt-changelog-entry:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 15px rgba(0,0,0,0.1);
+}
+
+.systemsculpt-changelog-entry::before { /* The timeline dot */
+  content: "";
+  position: absolute;
+  left: -30.5px; /* Calculation: -(list_padding_left) + bar_center_in_list_padding - dot_radius */
+  top: 29px; /* Aligns with the vertical center of the version badge */
+  width: 14px;
+  height: 14px;
+  background-color: var(--interactive-accent);
+  border-radius: 50%;
+  border: 3px solid var(--background-secondary); /* Creates a "pop" effect */
+  z-index: 1; /* Ensure dot is above the timeline bar */
+}
+
+.systemsculpt-changelog-entry-header {
+  display: flex;
+  align-items: center; /* Vertically align badge and date */
+  margin-bottom: 15px;
+  gap: 15px; /* Gap between version badge and date */
+}
+
+.systemsculpt-changelog-entry-header h4 { /* Version Badge */
+  margin: 0;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background-color: var(--interactive-accent);
+  padding: 5px 12px;
+  border-radius: 15px; /* Pill shape */
+  line-height: 1.4;
+  flex-shrink: 0; /* Prevent shrinking */
+}
+
+.systemsculpt-changelog-entry-date {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.systemsculpt-changelog-entry-notes-markdown {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border-hover);
+  padding: 12px 15px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin-top: 10px;
+  margin-bottom: 15px;
+}
+
+.systemsculpt-changelog-entry-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+  padding: 7px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.85em;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.systemsculpt-changelog-entry-link:hover {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: none;
+}
+
+.systemsculpt-all-releases-link-container {
+  margin-top: 30px;
+  text-align: center;
+}
+
+.systemsculpt-all-releases-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: none;
+  font-weight: 600;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-all-releases-link:hover {
+  background-color: var(--interactive-accent-hover);
+}
+/* End of Enhanced Change Log Tab Styles */
+
+/* Styles for Load More Button in Changelog */
+.systemsculpt-load-more-container {
+  text-align: center;
+  margin-top: 20px; /* Space above the button */
+  margin-bottom: 15px; /* Space below the button, before the 'View All Releases' link container */
+}
+
+.systemsculpt-load-more-button.mod-cta {
+  padding: 10px 20px; /* Make it a bit more prominent */
+  font-weight: 500;
+  /* display: inline-block; is already handled by Obsidian's .mod-cta or button default */
+  cursor: pointer;
+}
+
+/* Ensure the 'View All Releases' link container has enough space if 'Load More' is present */
+.systemsculpt-all-releases-link-container {
+  /* margin-top is already 30px, which should be sufficient */
+  /* If the load more button is hidden, this margin will still apply */
+}
+
+/* Additional styles for settings sections and items */
+.systemsculpt-settings-section-divider {
+  margin-top: var(--size-4-6);      /* More prominent top margin */
+  margin-bottom: var(--size-4-5);   /* More prominent bottom margin */
+  border-top: 1px solid var(--background-modifier-border-hover); /* Slightly more visible */
+}
+
+.systemsculpt-setup-section-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: var(--size-4-4); /* Spacing below descriptions */
+  max-width: 70ch; /* Improve readability */
+}
+
+.systemsculpt-license-description {
+  margin-bottom: var(--size-4-5) !important; /* Ensure consistent spacing for license description */
+}
+
+/* Styling for individual setting items to ensure consistent look */
+.systemsculpt-setting-item {
+  padding: var(--size-4-3) 0; /* Consistent vertical padding */
+}
+
+.systemsculpt-setting-item-info {
+  flex-grow: 1;
+}
+
+.systemsculpt-setting-item-name {
+  font-weight: var(--font-semibold); /* Make setting names slightly bolder */
+  font-size: var(--font-ui-normal); 
+}
+
+.systemsculpt-setting-item-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-faint);
+  padding-top: var(--size-4-1);
+}
+
+.systemsculpt-setting-item-description.systemsculpt-guidance {
+  padding-left: 0; /* Reset padding if icon is not directly part of this desc */
+}
+
+/* Ensuring Obsidian native components are respected but can be subtly enhanced */
+.systemsculpt-setting-item-control .slider {
+  width: 150px; /* Consistent slider width */
+}
+
+/* Badges */
+.systemsculpt-pro-badge {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 3px 8px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-bold);
+  margin-left: var(--size-4-2); /* Spacing from the setting name */
+  vertical-align: middle;
+}
+
+.systemsculpt-token-balance-value {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-left: var(--size-4-2);
+}
+
+/* Pro Promotion Section */
+.systemsculpt-pro-promotion {
+  background-color: var(--background-secondary-alt); /* Slightly different background */
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-4);
+  margin-top: var(--size-4-5);
+  box-shadow: var(--shadow-s);
+}
+
+.systemsculpt-pro-promotion-header .systemsculpt-setting-item-name {
+  font-size: var(--font-ui-large); /* Larger heading for promotion */
+}
+
+.systemsculpt-pro-promotion-features li {
+  margin-bottom: var(--size-4-2);
+  padding-left: var(--size-4-2); /* Indent feature list items */
+  position: relative;
+}
+
+.systemsculpt-pro-promotion-features li::before {
+  content: "✓"; /* Checkmark icon */
+  color: var(--color-green);
+  position: absolute;
+  left: -var(--size-4-1);
+  font-weight: var(--font-bold);
+}
+
+.systemsculpt-pro-promotion-buttons .button {
+  margin-right: var(--size-4-2); /* Space between buttons */
+}
+
+.systemsculpt-pro-promotion-buttons .button.mod-cta {
+  background-color: var(--interactive-accent-hover); /* Make CTA stand out */
+}
+
+/* API Key Input Field Styling */
+.systemsculpt-api-key-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-api-key-input-container input[type="password"],
+.systemsculpt-api-key-input-container input[type="text"] {
+  flex-grow: 1;
+  padding-right: 30px; /* Space for the toggle icon */
+}
+
+.systemsculpt-api-key-toggle-visibility {
+  position: absolute;
+  right: 5px; /* Position inside the input field */
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 5px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-api-key-toggle-visibility .obsidian-icon svg {
+  width: 16px; /* Adjust icon size as needed */
+  height: 16px;
+}
+
+.systemsculpt-setting-item-description a {
+  text-decoration: underline !important; 
+}
+
+/* SystemSculpt Native Provider Card Styles */
+.systemsculpt-native-provider-card {
+  border-left: 3px solid var(--interactive-accent);
+  padding-left: var(--size-4-3); /* Add some padding to visually offset due to border */
+  margin-bottom: var(--size-4-4); /* Space before custom providers section */
+}
+
+.systemsculpt-provider-status-indicator {
+  margin-right: var(--size-4-2); 
+}
+
+.systemsculpt-provider-status-indicator .obsidian-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.systemsculpt-provider-status-indicator.is-active svg {
+  color: var(--color-green);
+}
+
+.systemsculpt-provider-status-indicator.is-inactive svg {
+  color: var(--color-orange); 
+}
+
+.systemsculpt-guidance {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-top: var(--size-4-1);
+}
+
+.systemsculpt-custom-providers-header {
+  margin-top: var(--size-4-4); 
+  margin-bottom: var(--size-4-3); 
+  font-size: var(--font-ui-large); /* Make it a bit more prominent */
+  font-weight: var(--font-semibold);
+}
+
+.systemsculpt-provider-group-divider {
+  margin-top: var(--size-4-6);
+  margin-bottom: var(--size-4-4);
+}
+
+/* --- NEW STYLES FOR PROVIDER CARDS --- */
+.systemsculpt-active-providers-heading {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-3);
+}
+
+.systemsculpt-provider-card {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3) var(--size-4-4);
+  margin-bottom: var(--size-4-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-provider-card.systemsculpt-native-provider-card {
+  padding-left: var(--size-4-4); /* Ensure padding consistency if border-left removed or changed */
+}
+
+.systemsculpt-provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--size-4-3);
+}
+
+.systemsculpt-provider-header h5 {
+  margin: 0;
+  font-size: var(--font-ui-normal);
+  font-weight: var(--font-semibold);
+  flex-grow: 1;
+}
+
+.systemsculpt-provider-status-container {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-provider-status {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  padding: 2px var(--size-4-2);
+  border-radius: var(--radius-s);
+  text-transform: uppercase;
+}
+
+.systemsculpt-provider-status.enabled {
+  color: var(--color-green);
+  background-color: var(--color-green-faint);
+}
+
+.systemsculpt-provider-status.disabled {
+  color: var(--color-orange);
+  background-color: var(--color-orange-faint);
+}
+
+/* Styling for the toggle within the provider card status */
+.systemsculpt-provider-status-container .checkbox-container {
+  transform: scale(0.9); /* Slightly smaller toggle */
+}
+
+.systemsculpt-provider-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  padding-left: var(--size-4-1); /* Small indent for details */
+  border-left: 2px solid var(--background-modifier-border-hover);
+  padding-left: var(--size-4-3);
+  margin-left: var(--size-4-1); /* Give a bit of space from the header content */
+}
+
+.systemsculpt-provider-endpoint,
+.systemsculpt-provider-api-key,
+.systemsculpt-provider-last-tested {
+  word-break: break-all;
+}
+
+.systemsculpt-masked-api-key {
+  font-family: var(--font-monospace);
+  background-color: var(--background-modifier-hover);
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+}
+
+.systemsculpt-provider-actions {
+  display: flex;
+  justify-content: flex-end; /* Align buttons to the right */
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
+
+.systemsculpt-provider-actions .button {
+  font-size: var(--font-ui-small);
+  padding: var(--size-2-1) var(--size-4-2); /* Smaller padding for action buttons */
+}
+
+.systemsculpt-add-provider-container {
+  margin-top: var(--size-4-4);
+  text-align: center; /* Center the add button if it's alone */
+}
+
+.systemsculpt-no-providers-message {
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--size-4-4);
+  background-color: var(--background-secondary);
+  border-radius: var(--radius-m);
+  border: 1px dashed var(--background-modifier-border);
+}
+
+/* Ensuring the ToggleComponent within Setting items is vertically aligned */
+.setting-item-control .checkbox-container {
+  display: flex; /* Helps with alignment if other elements are in control */
+  align-items: center;
+}
+
+/* SystemSculpt Native Provider specific override for desc if needed */
+.systemsculpt-native-provider-card .setting-item-description {
+    max-width: none; /* Allow full width for this specific description */
+}
+
+/* --- CUSTOM PROVIDER MODAL STYLES --- */
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group {
+  margin-bottom: var(--size-4-3); /* Consistent spacing */
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group label:not(.systemsculpt-toggle-switch) {
+  display: block;
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-1);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-optional-field-text {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+}
+
+.systemsculpt-custom-provider-presets {
+  margin-bottom: var(--size-4-4);
+}
+
+.systemsculpt-custom-provider-presets > label {
+  display: block;
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-2);
+}
+
+.systemsculpt-custom-provider-preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-preset-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  background-color: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  padding: var(--size-2-2) var(--size-4-2);
+}
+.systemsculpt-preset-button:hover {
+  background-color: var(--background-modifier-border-hover);
+  border-color: var(--background-modifier-border-focus);
+}
+
+
+.systemsculpt-preset-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+  color: var(--text-muted);
+}
+
+/* Validation error styling in Modal */
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group.error input,
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group.error .systemsculpt-api-key-input-container input {
+  border-color: var(--color-red) !important; 
+}
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group.error .systemsculpt-api-key-input-container {
+  border: 1px solid var(--color-red) !important; /* Add border to container as well */
+  border-radius: var(--radius-s);
+}
+
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-validation {
+  font-size: var(--font-ui-small);
+  color: var(--color-red);
+  margin-top: var(--size-4-1);
+}
+
+/* Ensure API Key toggle visibility button in modal is styled correctly */
+.systemsculpt-custom-provider-modal .systemsculpt-api-key-toggle-visibility {
+    right: 8px; /* Adjust if padding of input is different */
+}
+.systemsculpt-custom-provider-modal .systemsculpt-api-key-input-container input[type="password"],
+.systemsculpt-custom-provider-modal .systemsculpt-api-key-input-container input[type="text"] {
+  padding-right: 35px; /* Ensure space for the button */
+}
+
+/* --- QUICK SETUP BUTONS IN SETTINGS TAB --- */
+.systemsculpt-one-click-container {
+  margin-top: var(--size-4-4);
+  margin-bottom: var(--size-4-5); /* Space before the active providers list */
+}
+
+.systemsculpt-one-click-heading {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-3);
+}
+
+.systemsculpt-one-click-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-one-click-buttons .button {
+  /* Standard button styling from Obsidian will apply */
+  /* Add specific overrides if needed */
+  display: inline-flex; /* Ensures icon and text align well */
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.systemsculpt-one-click-buttons .button .obsidian-icon {
+  /* Specific styling for icons within these buttons if needed */
+}
+
+/* SystemSculptModelsModal Styling */
+.systemsculpt-models-modal-content .modal-content {
+  padding: 15px;
+}
+
+.systemsculpt-models-list-container {
+  max-height: 450px;
+  overflow-y: auto;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-model-entry {
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.systemsculpt-model-entry:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-model-name {
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-normal);
+  color: var(--text-normal);
+  margin-bottom: 5px;
+}
+
+.systemsculpt-model-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 5px;
+  /* white-space: pre-wrap; */ /* Allow wrapping, remove if causing issues with truncation */
+  transition: max-height 0.3s ease-in-out; /* Smooth transition for expansion */
+}
+
+.systemsculpt-model-description.truncated {
+  max-height: 4.2em; /* Approx 3 lines (1.4em line-height * 3) */
+  overflow: hidden;
+  /* text-overflow: ellipsis; */ /* Ellipsis might not work well with dynamic show/less and multi-line */
+  position: relative; /* For potential future absolute positioned gradient fade-out */
+}
+
+.systemsculpt-description-toggle {
+  display: inline-block; /* Or block if it should be on its own line */
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  cursor: pointer;
+  margin-top: 4px;
+  text-decoration: underline;
+}
+
+.systemsculpt-description-toggle:hover {
+  color: var(--text-accent-hover);
+}
+
+.systemsculpt-model-context {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  margin-top: 8px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--background-modifier-border);
+}
+
+.systemsculpt-models-modal-content .systemsculpt-empty-message {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 20px;
+  font-style: italic;
+}
 
 
 /* preview.css */
