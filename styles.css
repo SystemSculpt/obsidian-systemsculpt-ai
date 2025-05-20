@@ -9443,6 +9443,8 @@ body.theme-light .systemsculpt-score-low {
     align-items: center;
     justify-content: center;
     gap: 16px;
+    width: 100%; /* Ensure it fills parent for proper centering */
+    height: 100%; /* Ensure it fills parent for proper centering */
 }
 
 .systemsculpt-similar-notes-view .systemsculpt-loading::before {
@@ -9471,6 +9473,7 @@ body.theme-light .systemsculpt-score-low {
     text-align: center;
     color: var(--text-muted);
     background-color: var(--background-primary);
+    width: 100%; /* Ensure it fills parent for proper centering */
 }
 
 .systemsculpt-empty-icon {
@@ -9512,6 +9515,31 @@ body.theme-light .systemsculpt-score-low {
     text-align: center;
     font-style: italic;
 }
+
+/* Indeterminate Progress Bar for Empty State */
+.systemsculpt-empty-state-progress-bar {
+    width: 80%;
+    max-width: 300px;
+    height: 8px;
+    background-color: var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    margin-top: 12px; /* Space between text and progress bar */
+}
+
+.systemsculpt-empty-state-progress-bar-inner {
+    width: 40%;
+    height: 100%;
+    background-color: var(--interactive-accent);
+    border-radius: var(--radius-s);
+    animation: indeterminate-progress 1.5s infinite linear;
+}
+
+@keyframes indeterminate-progress {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); } /* (100 / 40 * 100) = 250% to move fully across */
+}
+
 /* Input clear button */
 .systemsculpt-input-clear-button {
     position: absolute;
@@ -9775,6 +9803,350 @@ body.theme-light .systemsculpt-score-low {
 
 .systemsculpt-note-preview-nav-button:active {
     transform: translateY(0);
+}
+
+/* Main View Header (Above Tabs) */
+.systemsculpt-view-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-view-title { /* Renamed from similar-notes-title */
+    margin: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    color: var(--text-normal);
+}
+
+/* Tab Navigation Bar */
+.systemsculpt-tab-nav {
+    display: flex;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary);
+}
+
+.systemsculpt-tab-button {
+    padding: 10px 15px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    border-bottom: 2px solid transparent; /* For active state indicator */
+    transition: color 0.15s ease, border-color 0.15s ease;
+    flex-grow: 1; /* Make tabs share space equally */
+    text-align: center;
+}
+
+.systemsculpt-tab-button:hover {
+    color: var(--text-normal);
+}
+
+.systemsculpt-tab-button.active {
+    color: var(--interactive-accent-hover);
+    border-bottom-color: var(--interactive-accent-hover);
+    font-weight: var(--font-bold);
+}
+
+/* View Content Area (Below Tabs - holds the panes) */
+.systemsculpt-view-content {
+    flex: 1;
+    overflow-y: auto; /* Important for scrolling content within panes */
+    display: flex; /* Allows panes to fill height if needed */
+    flex-direction: column; /* Ensures panes stack correctly if ever needed, though only one active */
+}
+
+/* Tab Panes */
+.systemsculpt-tab-pane {
+    display: none; /* Hidden by default */
+    flex-direction: column; /* Children stack vertically */
+    height: 100%; /* Take full height of parent */
+    overflow-y: auto; /* Allow individual pane scrolling if content exceeds pane height */
+    padding: 0; /* Reset padding, specific content inside will have its own */
+}
+
+.systemsculpt-tab-pane.active {
+    display: flex; /* Show active pane, use flex to allow children to fill space */
+}
+
+/* Styles for the Global Search Tab (Inspired by OmniSearchModal) */
+
+/* Global Search Header (Input Area) */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-main-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    width: 100%;
+}
+
+/* Header with search input */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-header {
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-shrink: 0;
+    border-radius: 6px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Apply focus styles to the header when input is focused */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-header:focus-within {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+/* Search input container */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-input-container {
+    display: flex;
+    align-items: center;
+}
+
+/* Search icon */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-icon {
+    color: var(--text-muted);
+    margin-right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Search input */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 16px;
+    color: var(--text-normal);
+    padding: 6px 0;
+    height: auto;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Clear button */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-clear {
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 50%;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-clear:hover {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-hover);
+}
+
+/* Semantic search indicator */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-semantic-indicator {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
+    padding: 0;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-semantic-indicator.is-active {
+    color: var(--interactive-accent);
+    font-weight: 600;
+}
+
+/* Results container */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-results-container {
+     flex: 1;
+     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+     background-color: var(--background-primary);
+     border-top: 1px solid var(--background-modifier-border);
+     display: flex;
+    flex-direction: column;
+}
+
+/* Results list */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* Result item */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-item {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-item.is-selected {
+    background-color: var(--background-modifier-active-hover);
+}
+
+/* Result header */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-header {
+    margin-bottom: 4px;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-normal);
+}
+
+/* Result path */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-path {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-folder-icon {
+    color: var(--text-faint);
+    display: flex;
+    align-items: center;
+}
+
+/* Result preview */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-preview {
+    font-size: 13px;
+    color: var(--text-normal);
+    margin-bottom: 8px;
+    line-height: 1.5;
+    max-height: 80px;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--background-secondary);
+    border-radius: 4px;
+    padding: 8px;
+}
+
+/* Result footer */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Base class for badges and scores */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-badge,
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-score {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* Result badge */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-badge-lexical {
+    background-color: rgba(var(--color-blue-rgb), 0.1);
+    color: var(--color-blue);
+    cursor: help;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-badge-semantic {
+    background-color: rgba(var(--color-purple-rgb), 0.1);
+    color: var(--color-purple);
+    cursor: help;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-result-badge-recent {
+    background-color: rgba(var(--color-cyan-rgb), 0.1);
+    color: var(--color-cyan);
+}
+
+/* Loading indicator */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-muted);
+    gap: 12px;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-loading-icon {
+    animation: spin 1.5s linear infinite;
+    font-size: 22px;
+    color: var(--interactive-accent);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-loading-text {
+    font-size: 13px;
+}
+
+/* Empty state */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-muted);
+    gap: 12px;
+    height: 100%;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-empty-icon {
+    font-size: 28px;
+    opacity: 0.5;
+}
+
+.systemsculpt-global-search-pane .systemsculpt-omni-search-empty-text {
+    font-size: 13px;
+}
+
+/* Highlight */
+.systemsculpt-global-search-pane .systemsculpt-omni-search-highlight {
+    background-color: var(--interactive-accent);
+    color: var(--interactive-accent);
+    border-radius: 2px;
+    padding: 0 2px;
+    font-weight: 600;
+    box-shadow: 0 0 0 1px var(--background-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .systemsculpt-global-search-pane .systemsculpt-omni-search-input {
+        font-size: 14px;
+    }
+
+    .systemsculpt-global-search-pane .systemsculpt-omni-search-input-container {
+        height: 36px;
+    }
+
+    .systemsculpt-global-search-pane .systemsculpt-omni-search-result-item {
+        padding: 10px 12px;
+    }
 }
 
 /* reasoning.css */
