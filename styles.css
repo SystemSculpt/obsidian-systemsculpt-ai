@@ -15416,6 +15416,27 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-top: 16px;
 }
 
+/* New style for primary action button */
+.systemsculpt-primary-action {
+  font-size: 15px !important;
+  padding: 10px 18px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+  transform: translateY(0);
+}
+
+.systemsculpt-primary-action:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-primary-action:active {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  transform: translateY(1px);
+}
+/* End of new styles */
+
 .systemsculpt-context-action-button.ss-active {
   background-color: var(--interactive-accent);
 }
@@ -15792,7 +15813,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   opacity: 1;
   transform: scale(1);
 }
-
 
 /* custom-provider.css */
 /* 
