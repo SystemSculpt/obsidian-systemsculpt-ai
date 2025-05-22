@@ -16371,8 +16371,104 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   right: 0;
   bottom: 0;
   background: rgba(var(--background-primary-rgb), 0.9);
+  backdrop-filter: blur(8px);
   z-index: 100;
   pointer-events: none;
+  flex-direction: column;
+  border: 2px dashed var(--interactive-accent);
+  border-radius: 12px;
+  margin: 8px;
+}
+
+.systemsculpt-drag-message {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--interactive-accent);
+  text-align: center;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.systemsculpt-drag-message::before {
+  content: "📁";
+  font-size: 1.5em;
+}
+
+.systemsculpt-drag-detail {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 0 16px;
+  line-height: 1.4;
+}
+
+/* Different icons for different content types */
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="search-results"] 
+  .systemsculpt-drag-message::before {
+  content: "🔍";
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="folder"] 
+  .systemsculpt-drag-message::before {
+  content: "📂";
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="folders"] 
+  .systemsculpt-drag-message::before {
+  content: "📁📁";
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="files"] 
+  .systemsculpt-drag-message::before {
+  content: "📄";
+}
+
+/* Draggable elements styling */
+.systemsculpt-draggable {
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.systemsculpt-draggable:hover {
+  background-color: var(--background-modifier-hover);
+  border-radius: 4px;
+}
+
+.systemsculpt-draggable.systemsculpt-dragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+}
+
+/* Search results modal enhancements */
+.systemsculpt-search-results-modal .systemsculpt-modal-header {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-search-results-modal .systemsculpt-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-search-results-modal .systemsculpt-result-list.systemsculpt-draggable {
+  border: 2px dashed transparent;
+  border-radius: 8px;
+  padding: 8px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-search-results-modal .systemsculpt-result-list.systemsculpt-draggable:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
 }
 
 .systemsculpt-empty-state {
