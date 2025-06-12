@@ -73,9 +73,9 @@
   --ss-transition-slow: 0.3s ease;
   
   /* Shadows */
-  --ss-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --ss-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.15);
-  --ss-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --ss-shadow-sm: 0 2px 4px rgb(0, 0, 0);
+  --ss-shadow-md: 0 2px 8px rgb(0, 0, 0);
+  --ss-shadow-lg: 0 4px 12px rgb(0, 0, 0);
 }
 
 /* reset.css */
@@ -133,7 +133,7 @@
     opacity: 1;
   }
   50% {
-    opacity: 0.5;
+    opacity: 1;
   }
   100% {
     opacity: 1;
@@ -215,7 +215,7 @@
     opacity: 1;
   }
   50% {
-    opacity: 0.5;
+    opacity: 1;
   }
   100% {
     opacity: 1;
@@ -484,10 +484,7 @@
   z-index: 10;
 }
 
-.systemsculpt-reasoning-container.systemsculpt-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+/* Reasoning container styles removed - using unified collapsible drawer */
 
 .systemsculpt-response-container {
   font-family: var(--font-monospace);
@@ -708,9 +705,7 @@
   width: 100%;
 }
 
-.systemsculpt-reasoning-container.systemsculpt-collapsed .systemsculpt-reasoning-content {
-  max-height: 0;
-}
+/* Removed - using unified collapsible drawer */
 
 .systemsculpt-stream-container p {
   display: inline;
@@ -763,22 +758,11 @@
   overflow: hidden;
 }
 
-.systemsculpt-reasoning-container.systemsculpt-collapsed .systemsculpt-reasoning-content {
-  max-height: 0;
-}
+/* Removed - using unified collapsible drawer */
 
-.systemsculpt-reasoning-container.systemsculpt-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+/* Reasoning container styles removed - using unified collapsible drawer */
 
-.systemsculpt-reasoning-container {
-  margin-bottom: 8px;
-  padding: 8px;
-  border-radius: 4px;
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  opacity: 0;
+/* Reasoning container styles removed - using unified collapsible drawer */
   transform: translateY(-4px);
   transition: all 0.2s ease;
 }
@@ -1287,20 +1271,41 @@
   min-height: 35px;
 }
 
-/* Highlight drawer when it has files */
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: var(--interactive-accent);
+/* Temporary highlight animation when files are added/removed */
+@keyframes systemsculpt-file-change-flash {
+  0% {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+  }
+  100% {
+    background-color: var(--background-modifier-form-field);
+    color: var(--text-normal);
+    border-color: var(--background-modifier-border);
+  }
 }
 
-/* Ensure child elements inherit the correct color when highlighted */
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files .systemsculpt-model-indicator-icon,
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files .systemsculpt-drawer-title,
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files .systemsculpt-model-indicator-arrow,
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files .systemsculpt-drawer-count,
-.systemsculpt-drawer-header.systemsculpt-model-indicator.has-files .systemsculpt-sync-status {
-  color: var(--text-on-accent);
+/* Class for temporary flash animation */
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed {
+  animation: systemsculpt-file-change-flash 2s ease-out forwards;
+}
+
+/* Ensure child elements inherit correct colors during animation */
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed .systemsculpt-model-indicator-icon,
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed .systemsculpt-drawer-title,
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed .systemsculpt-model-indicator-arrow,
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed .systemsculpt-drawer-count,
+.systemsculpt-drawer-header.systemsculpt-model-indicator.files-changed .systemsculpt-sync-status {
+  animation: systemsculpt-file-change-text-flash 2s ease-out forwards;
+}
+
+@keyframes systemsculpt-file-change-text-flash {
+  0% {
+    color: var(--text-on-accent);
+  }
+  100% {
+    color: var(--text-normal);
+  }
 }
 
 /* Override arrow styles for drawer */
@@ -1521,23 +1526,1424 @@
   gap: 8px;
   min-width: 0;
   color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.systemsculpt-drawer::after {
-  content: "";
-  position: absolute;
-  top: -8px;
-  left: -8px;
-  right: -8px;
-  bottom: -40px;
-  pointer-events: none;
-}
+/* REMOVED - This pseudo-element was causing hover issues by extending 40px below drawers */
 
 .systemsculpt-drawer-open {
   overflow: hidden;
   position: fixed;
   width: 100%;
 }
+
+/**
+ * Shared Drawer Mechanics
+ * 
+ * Common collapse/expand behavior for drawers - styling stays in component files
+ */
+
+/* REMOVED - Duplicate header styles moved to main collapsible drawer section */
+
+/* REMOVED - Duplicate rule with problematic max-height that breaks grid animation 
+   The correct rule is at line 570 with proper grid support */
+
+/* REMOVED - Duplicate rule moved to line 582 */
+
+.systemsculpt-drawer-footer {
+  /* Styles for the drawer footer if needed */
+}
+
+/* The following .systemsculpt-collapsible-drawer related styles have been removed 
+   as they are consolidated in obsidian-plugin-client/src/css/components/collapsible-drawer.css */
+
+/*
+.systemsculpt-collapsible-header {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 8px;
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-collapsible-header:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-collapsible-header::after {
+  content: '▼';
+  margin-left: auto;
+  transition: transform 0.2s ease-out;
+}
+
+.systemsculpt-collapsed .systemsculpt-collapsible-header::after {
+  transform: rotate(-90deg);
+}
+
+.systemsculpt-collapsible-header:hover::after {
+  color: var(--text-accent);
+}
+
+/* REMOVED - Old max-height based animation, replaced with grid at line 557 */
+
+/* REMOVED - Duplicate rule with problematic max-height: 0 */
+*/
+
+
+/* ========================================================================== */
+/* == Collapsible Drawer Component Styles                                  == */
+/* == (Originally from components/collapsible-drawer.css)                == */
+/* ========================================================================== */
+
+/**
+ * Collapsible Drawer Component Styles
+ * 
+ * Base styles for all collapsible drawers (reasoning, tool calls, etc.)
+ * Provides consistent collapse/expand behavior and visual styling
+ */
+
+/* Base container styles - SINGLE DEFINITION FOR ALL DRAWER CONTAINERS */
+.systemsculpt-collapsible-drawer {
+  /* Layout and positioning */
+  margin: 4px 0;
+  padding: 4px;
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  overflow: visible; /* Keep visible for grid animation */
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: auto;
+  position: relative;
+  /* Ensure proper stacking context and hover detection */
+  z-index: 1;
+  pointer-events: auto !important;
+  will-change: transform, border-color;
+  /* contain: layout removed - might interfere with grid */
+  
+  /* Animation entrance state */
+  opacity: 1;
+  transform: translateY(0);
+  
+  /* Grid-based collapse/expand animation - CRITICAL FOR ANIMATION */
+  display: grid !important;
+  grid-template-rows: auto 0fr !important;
+  
+  /* Unified transitions with consistent timing */
+  transition: all 0.2s ease-in-out !important;
+}
+
+/* ========================================================================== */
+/* == Message Group Drawer Styling (Clean border-only design)             == */
+/* ========================================================================== */
+
+/* Subtle but clear drawer styling within message groups */
+.systemsculpt-assistant-message-group .systemsculpt-collapsible-drawer {
+  margin: 8px 0 !important; /* Consistent spacing with unified parts */
+  background: transparent !important;
+  border: 1px dashed var(--background-modifier-border) !important;
+  border-radius: 4px !important;
+  /* Inherit transition from parent to avoid conflicts */
+  position: relative !important;
+  /* Ensure each drawer creates its own stacking context */
+  isolation: isolate !important;
+}
+
+/* Reasoning drawers - subtle left accent */
+.systemsculpt-assistant-message-group .systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer {
+  border-left: 2px solid var(--text-accent) !important;
+  background: rgba(139, 69, 19, 0.03) !important;
+}
+
+/* Tool call drawers - subtle left accent */
+.systemsculpt-assistant-message-group .systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer {
+  border-left: 2px solid var(--interactive-accent) !important;
+  background: rgba(139, 69, 19, 0.03) !important;
+}
+
+/* Hover glow effects to indicate interactivity - border glow removed */
+.systemsculpt-assistant-message-group .systemsculpt-collapsible-drawer:hover {
+  /* border-color: rgba(var(--background-modifier-border-rgb), 0.9); */
+  /* box-shadow: 0 0 0 1px rgba(var(--background-modifier-border-rgb), 0.3); */
+}
+
+.systemsculpt-assistant-message-group .systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer:hover {
+  /* border-color: rgba(var(--text-accent-rgb), 0.8); */
+  /* box-shadow: 0 0 0 1px rgba(var(--text-accent-rgb), 0.2); */
+}
+
+.systemsculpt-assistant-message-group .systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer:hover {
+  /* border-color: rgba(var(--interactive-accent-rgb), 0.8); */
+  /* box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb), 0.2); */
+}
+
+/* Collapsed state for container - FORCE COLLAPSE STATE */
+.systemsculpt-collapsible-drawer.systemsculpt-collapsed {
+  /* Grid collapses the second row to 0fr - FORCE WITH !important */
+  grid-template-rows: auto 0fr !important;
+  /* Container should only show header when collapsed */
+  padding-bottom: 4px; /* Maintain consistent padding */
+}
+
+/* Header styles - clickable area */
+.systemsculpt-collapsible-header {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: color 0.2s ease, background-color 0.2s ease;
+  position: relative;
+  /* Enhanced clickable area with proper event handling */
+  width: 100%;
+  padding: 8px; /* Normal padding without negative margins */
+  margin: 0; /* No negative margins that might overlap */
+  border-radius: 6px;
+  background-color: transparent;
+  pointer-events: auto !important;
+  z-index: 10; /* Ensure header is above content */
+  /* Force header to capture all events in its area */
+  isolation: isolate;
+}
+
+.systemsculpt-collapsible-header:hover {
+  color: var(--text-normal);
+  /* Subtle background on hover for visual feedback */
+  background-color: rgba(var(--background-modifier-hover-rgb), 0.3);
+}
+
+/* Icon styles */
+.systemsculpt-collapsible-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.systemsculpt-collapsible-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Title styles */
+.systemsculpt-collapsible-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-normal);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Arrow indicator - shared for all collapsible drawers */
+.systemsculpt-collapsible-header::after {
+  content: "▼";
+  font-size: 10px;
+  margin-left: auto;
+  transition: transform 0.3s ease-in-out;
+  color: var(--text-muted);
+}
+
+.systemsculpt-collapsed .systemsculpt-collapsible-header::after {
+  transform: rotate(-90deg);
+}
+
+.systemsculpt-collapsible-header:hover::after {
+  color: var(--text-accent);
+}
+
+/* ========================================================================== */
+/* == Hover and Expanded State Effects                                     == */
+/* ========================================================================== */
+
+/* Hover state for drawer - border glow removed */
+.systemsculpt-collapsible-drawer:hover {
+  /* border-color: var(--text-muted); */
+  background-color: var(--background-secondary-alt);
+  /* Bring to front on hover with isolation */
+  z-index: 10 !important; /* Higher z-index to ensure it's on top */
+  isolation: isolate;
+  position: relative !important; /* Ensure z-index works */
+}
+
+/* Expanded state visual indicator - FORCE EXPAND STATE - border glow removed */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) {
+  grid-template-rows: auto 1fr !important;
+  border-color: var(--interactive-accent);
+  /* box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb), 0.1); */
+}
+
+/* Header hover state when drawer is collapsed */
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover {
+  color: var(--interactive-accent);
+}
+
+/* Icon animation on hover when collapsed */
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover .systemsculpt-collapsible-icon {
+  transform: scale(1.1);
+}
+
+/* Icon color when expanded */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) .systemsculpt-collapsible-icon {
+  color: var(--interactive-accent);
+}
+
+/* Arrow color when expanded */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) .systemsculpt-collapsible-header::after {
+  color: var(--interactive-accent);
+}
+
+/* Content wrapper styles - SINGLE DEFINITION FOR ALL DRAWER CONTENT */
+.systemsculpt-collapsible-content {
+  /* Grid positioning - makes this the second row of the grid container */
+  grid-row: 2;
+  
+  /* Critical properties for grid animation */
+  overflow: hidden;
+  min-height: 0;
+  
+  /* Spacing and visibility when expanded */
+  padding-top: 4px;
+  margin-top: 8px;
+  opacity: 1;
+  visibility: visible;
+  
+  /* Smooth fade transition */
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Collapsed content - fade out during collapse and REMOVE ALL SPACING */
+.systemsculpt-collapsed .systemsculpt-collapsible-content {
+  opacity: 0;
+  visibility: hidden;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s 0.25s;
+}
+
+/* Utility classes for specific drawer types to customize */
+.systemsculpt-collapsible-drawer.with-status-indicator .systemsculpt-collapsible-header {
+  /* Allow space for status indicators */
+}
+
+.systemsculpt-collapsible-drawer.error-state {
+  border-color: var(--text-error);
+  background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+}
+
+.systemsculpt-collapsible-drawer.success-state {
+  border-color: var(--text-success);
+  background-color: rgba(var(--background-modifier-success-rgb), 0.1);
+}
+
+/* REMOVED - Merged into main definition at line 373 */
+
+/* Unified part styling for message chronological display */
+.systemsculpt-unified-part.systemsculpt-collapsible-drawer {
+  /* Specific styles for unified message parts */
+}
+
+/* Wrapper elements for proper DOM insertion */
+.systemsculpt-reasoning-wrapper,
+.systemsculpt-tool-call-wrapper {
+  /* Critical fix: Use grid to contain children without blocking events */
+  display: block;
+  position: static;
+  /* Ensure wrapper takes no space and doesn't interfere */
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  width: 100% !important;
+  /* Keep pointer events active for interactions */
+  pointer-events: auto !important;
+  /* Prevent any overflow that might block adjacent elements */
+  overflow: visible !important;
+}
+
+/* Ensure drawer children have proper positioning and stacking context */
+.systemsculpt-reasoning-wrapper > .systemsculpt-collapsible-drawer,
+.systemsculpt-tool-call-wrapper > .systemsculpt-collapsible-drawer {
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+/* Content part containerization - more differentiated for LLM response text */
+.systemsculpt-content-part {
+  margin: 4px 0;
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  line-height: 1.6;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Content parts within message groups - distinct but harmonious */
+.systemsculpt-assistant-message-group .systemsculpt-content-part {
+  background: var(--background-secondary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  margin: 8px 0 !important;
+  padding: 12px 16px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ========================================================================== */
+/* == Unified Content Styles (shared by reasoning, tool calls, etc.)       == */
+/* ========================================================================== */
+
+/* Base content container - shared by all drawer content types */
+.systemsculpt-drawer-content-container {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Base text content - shared text styling */
+.systemsculpt-drawer-content-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Monospace variant for code-like content */
+.systemsculpt-drawer-content-text.monospace {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+/* ========================================================================== */
+/* == Specific Content Type Styling (minimal overrides)                    == */
+/* ========================================================================== */
+
+/* Reasoning content – keep typography identical to normal Markdown */
+.systemsculpt-reasoning-text {
+  font-family: var(--font-text);
+  font-size: var(--font-ui-medium);
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: normal;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Guard against legacy "monospace" class still lingering */
+.systemsculpt-reasoning-text.monospace {
+  font-family: var(--font-text);
+  color: var(--text-normal);
+}
+
+/* Tool response content - uses base styles */
+.systemsculpt-tool-response-body {
+  /* Inherits from .systemsculpt-drawer-content-container and .systemsculpt-drawer-content-text */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.systemsculpt-tool-response-body pre {
+  background: var(--background-secondary);
+  padding: 6px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+
+.systemsculpt-tool-response-body code {
+  background: var(--background-secondary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+/* ========================================================================== */
+/* == Tool Call Content Styles (content inside drawers)                    == */
+/* ========================================================================== */
+
+/* Tool Call Status Indicators */
+.systemsculpt-tool-call-status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-call-status-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-tool-call-status-indicator.completed {
+  color: var(--text-success);
+}
+
+.systemsculpt-tool-call-status-indicator.denied {
+  color: var(--text-error);
+}
+
+.systemsculpt-tool-call-status-indicator.executing {
+  color: var(--text-warning);
+}
+
+.systemsculpt-tool-call-status-indicator.pending {
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-call-status-indicator.error {
+  color: var(--text-error);
+}
+
+@keyframes systemsculpt-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.systemsculpt-tool-call-status-indicator svg.systemsculpt-spinning {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+/* Open File Button */
+.systemsculpt-tool-call-open-file-btn {
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  height: 24px !important;
+  line-height: 1 !important;
+  border-radius: 3px !important;
+  background: var(--background-modifier-form-field) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  margin-left: 8px !important;
+  flex-shrink: 0 !important;
+  transition: all 0.15s ease !important;
+}
+
+.systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.systemsculpt-tool-call-open-file-btn:active {
+  transform: translateY(1px) !important;
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-tool-call-open-file-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.theme-dark .systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+/* Light theme adjustments */
+.theme-light .systemsculpt-tool-call-open-file-btn {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+.theme-light .systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+/* Tool Call Content Styles */
+.systemsculpt-tool-call-content {
+  /* Inherits from .systemsculpt-drawer-content-container */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Tool Call Summary */
+.systemsculpt-tool-call-summary {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Collapsible Details Toggle */
+.systemsculpt-tool-call-details-toggle {
+  font-size: 11px;
+  color: var(--text-accent);
+  cursor: pointer;
+  padding: 2px 0;
+  margin: 4px 0 2px 0;
+  user-select: none;
+  transition: color 0.2s ease;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.systemsculpt-tool-call-details-toggle:hover {
+  color: var(--text-accent-hover);
+  text-decoration-style: solid;
+}
+
+/* Collapsible Details Container */
+.systemsculpt-tool-call-details-container {
+  max-height: 200px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  opacity: 1;
+}
+
+.systemsculpt-tool-call-details-container.systemsculpt-collapsed {
+  /* Use transform instead of max-height for smoother animation */
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.systemsculpt-tool-call-details {
+  padding: 4px 0;
+}
+
+.systemsculpt-tool-call-args {
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-call-args-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.systemsculpt-tool-call-args-content {
+  /* Container for arguments */
+}
+
+.systemsculpt-tool-call-arg {
+  font-size: 11px;
+  margin-bottom: 3px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.systemsculpt-tool-call-arg:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-tool-call-arg-key {
+  color: var(--text-muted);
+  font-weight: 500;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-call-arg-key::after {
+  content: ":";
+}
+
+.systemsculpt-tool-call-arg-value {
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  background: transparent;
+  padding: 1px 0;
+  border-radius: 3px;
+  word-break: break-word;
+  flex: 1;
+}
+
+/* Tool Response Section (matching arguments styling) */
+.systemsculpt-tool-call-response {
+  margin: 8px 0 !important;
+  padding: 8px !important;
+  background: var(--background-primary) !important;
+  border-radius: 4px !important;
+  border: 1px solid var(--background-modifier-border) !important;
+}
+
+.systemsculpt-tool-call-response-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.systemsculpt-tool-call-response-content {
+  /* Uniform height for all tool call results */
+  height: 150px !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  color: var(--text-normal) !important;
+  padding: 0 !important; /* Override base container padding */
+}
+
+.systemsculpt-tool-response-json {
+  background: var(--background-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-response-text {
+  /* Uses base .systemsculpt-drawer-content-text styles */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.systemsculpt-tool-response-error {
+  border-color: var(--text-error);
+  background: rgba(var(--background-modifier-error-rgb), 0.1);
+}
+
+.systemsculpt-tool-response-error-json {
+  background: rgba(var(--background-modifier-error-rgb), 0.2);
+  color: var(--text-error);
+  padding: 4px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* Loading state for tool responses */
+.systemsculpt-tool-response-executing {
+  opacity: 0.8;
+}
+
+.systemsculpt-tool-response-loading {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* State-specific styling (opacity only, no border colors) */
+.systemsculpt-tool-call-denied {
+  opacity: 1;
+}
+
+.systemsculpt-tool-call-executing {
+  opacity: 1;
+}
+
+/* Tool Call Actions (Approval/Denial buttons) */
+.systemsculpt-tool-call-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.systemsculpt-tool-call-approve,
+.systemsculpt-tool-call-deny {
+  flex: 1;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-tool-call-approve:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-tool-call-deny:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-color: var(--background-modifier-error);
+}
+
+.systemsculpt-tool-call-view-file {
+  flex: 1;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-call-view-file:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-tool-call-view-file:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.theme-dark .systemsculpt-tool-call-view-file {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.theme-dark .systemsculpt-tool-call-view-file:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.theme-light .systemsculpt-tool-call-view-file {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.theme-light .systemsculpt-tool-call-view-file:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.systemsculpt-tool-call-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.systemsculpt-tool-call-status.completed {
+  color: var(--text-success);
+}
+
+.systemsculpt-tool-call-status.denied {
+  color: var(--text-error);
+}
+
+.tool-call-auto-executed {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  margin: 4px 0;
+}
+
+/* Simple Tool Call Approval Interface */
+.systemsculpt-tool-call-approval-card {
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 12px;
+  margin: 8px 0;
+  font-family: var(--font-interface);
+}
+
+.systemsculpt-tool-call-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-tool-call-approval-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-call-approval-summary-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-family: var(--font-monospace);
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-call-approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.systemsculpt-tool-call-approval-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-call-approval-button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-tool-call-approval-button-approve {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-tool-call-approval-button-approve:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.systemsculpt-tool-call-approval-button-deny:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-color: var(--background-modifier-error);
+}
+
+.systemsculpt-tool-call-approval-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.systemsculpt-tool-call-approval-result.completed {
+  background: var(--background-modifier-success);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-tool-call-approval-result.denied {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-tool-call-approval-result.error {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+/* Tool Call Approval Container for Follow-up Calls */
+.systemsculpt-tool-call-approval-container {
+  margin: 8px 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  /* Ensure it's visible and on top */
+  position: relative;
+  z-index: 100;
+  /* Ensure it doesn't interfere with other content */
+  clear: both;
+}
+
+/* Arguments display within approval card */
+.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-args {
+  margin: 12px 0;
+}
+
+.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-args-content {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border-hover);
+}
+
+.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-details-toggle {
+  margin-bottom: 12px;
+}
+
+/* ========================================================================== */
+/* == Tool Call Result Display (legacy support)                            == */
+/* ========================================================================== */
+
+.systemsculpt-tool-call-result {
+  margin: 8px 0 !important;
+  padding: 8px !important;
+  background: var(--background-primary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 4px !important;
+}
+
+.systemsculpt-tool-call-result-header {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.systemsculpt-tool-call-result-content {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  color: var(--text-normal) !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  height: 150px !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+
+.systemsculpt-tool-call-result-content pre {
+  margin: 0 !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  color: inherit !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+
+.systemsculpt-tool-call-result-content code {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  color: inherit !important;
+}
+
+/* Enhanced tool result display */
+.systemsculpt-tool-result-container {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.systemsculpt-tool-result-header {
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-result-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-result-content {
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.systemsculpt-tool-result-summary {
+  background: var(--background-modifier-form-field);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+.systemsculpt-tool-result-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-tool-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  transition: background 0.15s ease;
+}
+
+.systemsculpt-tool-result-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-tool-result-item.directory {
+  font-weight: 500;
+}
+
+.systemsculpt-tool-result-item .item-icon {
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.systemsculpt-tool-result-item .item-name {
+  flex: 1;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-result-item .item-number {
+  flex-shrink: 0;
+  width: 20px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-tool-result-item .item-content {
+  flex: 1;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-tool-result-text,
+.systemsculpt-tool-result-raw {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.systemsculpt-tool-result-json {
+  margin-top: 8px;
+}
+
+.systemsculpt-tool-result-truncated {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--background-modifier-hover);
+  border-radius: 4px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-result-expand-btn {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.systemsculpt-tool-result-expand-btn:hover {
+  opacity: 0.8;
+}
+
+/* Legacy support - complete markdown rendering isolation for tool results */
+.systemsculpt-tool-result-raw-container {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  color: var(--text-normal) !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  /* Add height constraint for tool call results */
+  max-height: 150px !important;
+  overflow-y: auto !important;
+}
+
+
+
+/* Rolling window visual feedback and smooth animations */
+.systemsculpt-collapsible-drawer.auto-collapsed .systemsculpt-collapsible-header {
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.systemsculpt-collapsible-drawer.auto-collapsed:hover .systemsculpt-collapsible-header {
+  opacity: 1;
+}
+
+/* Smooth collapse animation for FIFO */
+.systemsculpt-collapsible-drawer.auto-collapsing {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1), opacity 0.25s cubic-bezier(0.4, 0, 1, 1) !important;
+  transform: scale(0.95);
+  opacity: 0;
+}
+
+/* REMOVED - Merged into main definition at line 373 */
+
+/* REMOVED - Empty rule, content styles consolidated at line 557 */
+
+/* Override ALL possible markdown/syntax highlighting within raw container */
+.systemsculpt-tool-result-raw-container *,
+.systemsculpt-tool-result-raw-container pre,
+.systemsculpt-tool-result-raw-container code,
+.systemsculpt-tool-result-raw-container .token,
+.systemsculpt-tool-result-raw-container .language-json,
+.systemsculpt-tool-result-raw-container .hljs,
+.systemsculpt-tool-result-raw-container .cm-editor,
+.systemsculpt-tool-result-raw-container .cm-line {
+  color: var(--text-normal) !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  font-weight: normal !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* Override heading styles for Result */
+.systemsculpt-tool-call-result h4 {
+  font-weight: 500 !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  margin: 0 0 3px 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  border: none !important;
+}
+
+/* Collapsible result styling */
+.systemsculpt-tool-call-result-collapsible {
+  cursor: pointer;
+  position: relative;
+}
+
+.systemsculpt-tool-call-result-collapsible.collapsed .systemsculpt-tool-call-result-full {
+  display: none;
+}
+
+.systemsculpt-tool-call-result-collapsible:not(.collapsed) .systemsculpt-tool-call-result-preview {
+  display: none;
+}
+
+.systemsculpt-tool-call-result-preview::after {
+  content: " (click to expand)";
+  color: var(--interactive-accent);
+  font-size: 12px;
+}
+
+/* Ensure compatibility with new drawer design */
+.systemsculpt-tool-call-result.systemsculpt-collapsed .systemsculpt-tool-call-result-content {
+  /* Use grid-based animation instead of max-height */
+  opacity: 0;
+  padding: 0 8px;
+}
+
+/* Scrollbar styling for legacy result content */
+.systemsculpt-tool-call-result-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-tool-call-result-content::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-bg);
+  border-radius: 3px;
+}
+
+.systemsculpt-tool-call-result-content::-webkit-scrollbar-track {
+  background-color: var(--scrollbar-bg);
+  border-radius: 3px;
+}
+
+/* ========================================================================== */
+/* == Tool Call Drawer State Styling                                       == */
+/* ========================================================================== */
+
+/* State-based drawer styling */
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="pending"] {
+  background-color: var(--background-modifier-form-field);
+}
+
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="executing"] {
+}
+
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="completed"] {
+}
+
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="denied"] {
+  opacity: 0.7;
+}
+
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="error"],
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="failed"] {
+  border-color: var(--text-error);
+  background-color: rgba(var(--background-modifier-error-rgb), 0.05);
+}
+
+/* Loading state styling */
+.systemsculpt-tool-response-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 12px;
+  background: var(--background-modifier-form-field);
+  border-radius: 4px;
+  justify-content: center;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .systemsculpt-tool-call-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .systemsculpt-tool-call-approve,
+  .systemsculpt-tool-call-deny {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ========================================================================== */
+/* == Streaming UI Logic                                                   == */
+/* ========================================================================== */
+
+.systemsculpt-collapsible-drawer.is-streaming-reasoning.systemsculpt-collapsed {
+  animation: pulsating-glow-reasoning 2s ease-in-out infinite;
+  border-color: var(--text-accent-translucent);
+}
+
+.systemsculpt-collapsible-drawer.is-streaming-reasoning.systemsculpt-collapsed .systemsculpt-collapsible-header .systemsculpt-collapsible-title::after {
+  content: '...';
+  display: inline-block;
+  animation: ellipsis-animation 1.5s infinite steps(3, end);
+  width: 1.2em;
+  text-align: left;
+  vertical-align: bottom;
+  position: absolute;
+}
+
+@keyframes pulsating-glow-reasoning {
+  0% {
+    box-shadow: 0 0 2px 0px transparent, inset 0 0 2px 0px transparent;
+  }
+  50% {
+    box-shadow: 0 0 5px 1px var(--text-accent-translucent), inset 0 0 4px 0px var(--text-accent-translucent);
+  }
+  100% {
+    box-shadow: 0 0 2px 0px transparent, inset 0 0 2px 0px transparent;
+  }
+}
+
+@keyframes ellipsis-animation {
+  0% { content: '.'; }
+  50% { content: '..'; }
+  100% { content: '...'; }
+}
+
+/* ========================================================================== */
+/* == Compact Drawer Grouping - Override Margins for Messages with Drawers == */
+/* ========================================================================== */
+
+/* 
+ * CORRECTED: Target drawers within consecutive messages in the group,
+ * not consecutive wrappers within the same message
+ */
+
+/* Drawers within grouped messages should have tighter spacing */
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-collapsible-drawer {
+  margin: 2px 0 !important; /* Override the base 8px margin for much tighter spacing */
+}
+
+/* Visual indicators for consecutive messages with drawers */
+.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message .systemsculpt-collapsible-drawer {
+  border-top-left-radius: 2px !important;
+  border-top-right-radius: 2px !important;
+  border-top-style: dotted !important; /* Subtle visual connection to previous message's drawer */
+  opacity: 0.95; /* Slightly fade follow-up message drawers for visual hierarchy */
+}
+
+/* Extra tight spacing and visual connection for 3rd+ consecutive messages */
+.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message + .systemsculpt-message .systemsculpt-collapsible-drawer {
+  margin: 1px 0 !important; /* Extra tight for deeply nested message sequences */
+  border-top-style: solid !important;
+  opacity: 0.9; /* More fading for deeper nesting */
+}
+
+/* ========================================================================== */
+/* == End Compact Drawer Grouping Overrides                               == */
+/* ========================================================================== */
+
+
 
 /* ss-buttons.css */
 /**
@@ -2535,17 +3941,17 @@
 .systemsculpt-context-card.systemsculpt-is-selected {
   border-color: var(--interactive-accent);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;
 }
 
 .systemsculpt-context-card.systemsculpt-is-selected {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-context-card.systemsculpt-is-selected:hover {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
 }
 
 .systemsculpt-chat-card {
@@ -2601,7 +4007,7 @@
 }
 
 .systemsculpt-custom-provider-card-status.systemsculpt-testing {
-  opacity: 0.7;
+  opacity: 1;
   cursor: wait;
   background-color: var(--background-modifier-border);
 }
@@ -2618,7 +4024,7 @@
 
 .systemsculpt-custom-provider-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
 }
 
 .systemsculpt-custom-provider-card-status {
@@ -2654,11 +4060,11 @@
 }
 
 .systemsculpt-custom-provider-card-status.disabled {
-  opacity: 0.5;
+  opacity: 1;
 }
 
 .systemsculpt-custom-provider-card-status.systemsculpt-testing {
-  opacity: 0.7;
+  opacity: 1;
   cursor: wait;
   background-color: var(--background-modifier-border);
 }
@@ -2668,7 +4074,7 @@
 }
 
 .systemsculpt-custom-provider-card-status:hover {
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .systemsculpt-custom-provider-card-status.disabled {
@@ -2685,11 +4091,11 @@
 }
 
 .systemsculpt-custom-provider-card-status.disabled {
-  opacity: 0.5;
+  opacity: 1;
 }
 
 .systemsculpt-custom-provider-card-status:hover {
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .systemsculpt-custom-model-card .systemsculpt-favorite-button {
@@ -2752,11 +4158,7 @@
 
 .systemsculpt-model-card:hover {
   border-color: var(--interactive-accent);
-}
-
-.systemsculpt-model-card:hover {
-  border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-custom-provider-card {
@@ -2854,11 +4256,11 @@
 }
 
 .systemsculpt-custom-provider-card-status.disabled {
-  opacity: 0.5;
+  opacity: 1;
 }
 
 .systemsculpt-custom-provider-card-status.systemsculpt-testing {
-  opacity: 0.7;
+  opacity: 1;
   cursor: wait;
   background-color: var(--background-modifier-border);
 }
@@ -2868,21 +4270,22 @@
 }
 
 .systemsculpt-custom-provider-card-status:hover {
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .systemsculpt-custom-provider-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
 }
 
 .systemsculpt-model-card:hover {
   border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-model-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-custom-provider-card-action.systemsculpt-delete:hover {
@@ -2975,17 +4378,17 @@
 .systemsculpt-context-card.systemsculpt-is-selected {
   border-color: var(--interactive-accent);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;
 }
 
 .systemsculpt-context-card.systemsculpt-is-selected {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-context-card.systemsculpt-is-selected:hover {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
 }
 
 .systemsculpt-model-card.selected {
@@ -3037,11 +4440,11 @@
 }
 
 .systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected:hover {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
 }
 
 .systemsculpt-custom-provider-card-details {
@@ -3081,7 +4484,7 @@
 }
 
 .systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected:hover {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
 }
 
 .systemsculpt-chat-card:hover {
@@ -3133,167 +4536,194 @@
   padding: 8px 0;
 }
 
-.systemsculpt-user-message .systemsculpt-message-button-toolbar {
-  left: auto;
-  right: 8px;
+/* ========================================================================== */
+/* == Assistant Message Grouping                                          == */
+/* ========================================================================== */
+
+/**
+ * Visual grouping for consecutive assistant messages
+ * Makes multiple assistant messages appear as one seamless conversation
+ */
+.systemsculpt-assistant-message-group {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid var(--background-modifier-border);
+  gap: 4px;
+  position: relative;
+  transition: all 0.2s ease-out;
+}
+
+/* Individual messages within a group should have minimal styling */
+.systemsculpt-assistant-message-group .systemsculpt-message {
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  transition: none; /* Disable individual message transitions */
+}
+
+/* Remove gaps between messages in a group and add subtle separators */
+.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  opacity: 0.95; /* Slightly fade follow-up messages for visual hierarchy */
+}
+
+/* First message in group should be fully opaque */
+.systemsculpt-assistant-message-group .systemsculpt-message:first-child {
+  opacity: 1;
+}
+
+/* Style message content within groups */
+.systemsculpt-assistant-message-group .systemsculpt-message-content {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Ensure unified parts within grouped messages have consistent spacing */
+.systemsculpt-assistant-message-group .systemsculpt-unified-part {
+  margin: 8px 0;
+}
+
+/* Hide individual message toolbars within groups */
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar {
+  display: none !important;
+}
+
+/* Hide both collapsed and expanded individual toolbars within groups */
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar-collapsed {
+  display: none !important;
+}
+
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar-expanded {
+  display: none !important;
+}
+
+/* Group toolbar now uses unified .systemsculpt-message-button-toolbar class */
+/* Group toolbar hover rules updated for container-based approach */
+.systemsculpt-assistant-message-group:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Show expanded group toolbar when active */
+.systemsculpt-assistant-message-group .systemsculpt-message-button-toolbar-expanded.active {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Group hover effects - border glow removed */
+.systemsculpt-assistant-message-group:hover {
+  /* border-color: var(--text-muted); */
+  /* box-shadow: 0 0 0 1px rgba(var(--text-muted-rgb), 0.3); */
+}
+
+/* Content part styling within groups - remove redundant borders */
+.systemsculpt-assistant-message-group .systemsculpt-content-part {
+  border: none;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.systemsculpt-assistant-message-group .systemsculpt-content-part:hover {
+  background: none;
+  border: none;
+}
+
+
+
+/* Special styling for thinking indicator in grouped messages */
+.systemsculpt-assistant-message-group .systemsculpt-thinking-indicator {
+  opacity: 0.8;
+  font-style: italic;
+}
+
+/* Responsive adjustments for message groups */
+@media (max-width: 768px) {
+  .systemsculpt-assistant-message-group {
+    padding: 8px;
+    margin: 6px 0;
+  }
+  
+  .systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+}
+
+/* ========================================================================== */
+/* == End Assistant Message Grouping                                      == */
+/* ========================================================================== */
+
+/* Unified Message Parts - ensure they fit within container */
+.systemsculpt-unified-part {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Content parts should be visible and styled like regular message content */
+.systemsculpt-content-part {
+  color: var(--text-normal);
+  margin: 8px 0;
+  padding: 8px 12px;
+  display: block;
+  width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+  /* Visual container styling */
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  /* Smooth transitions for hover effects */
+  transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
+}
+
+/* Hover effect for content parts - border glow removed */
+.systemsculpt-content-part:hover {
+  /* border-color: var(--text-muted); */
+  background-color: var(--background-primary-alt);
+}
+
+/* Ensure proper spacing between multiple content parts */
+.systemsculpt-content-part + .systemsculpt-content-part {
+  margin-top: 8px;
+}
+
+/* Consistent spacing with other unified parts (reasoning, tool calls) */
+.systemsculpt-unified-part + .systemsculpt-content-part,
+.systemsculpt-content-part + .systemsculpt-unified-part {
+  margin-top: 8px;
+}
+
+/* Ensure content parts in assistant messages have correct text color */
+.systemsculpt-assistant-message .systemsculpt-content-part {
+  color: var(--text-normal);
+}
+
+/* Remove top margin from first paragraph in content part */
+.systemsculpt-content-part p:first-child {
+  margin-top: 0;
+}
+
+/* Remove bottom margin from last paragraph in content part */
+.systemsculpt-content-part p:last-child {
+  margin-bottom: 0;
 }
 
 .systemsculpt-user-message .systemsculpt-message-content {
   color: var(--text-on-accent);
-}
-
-.systemsculpt-message-edit-button {
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  opacity: 0;
-  transition: all 0.5s ease;
-  cursor: pointer;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.systemsculpt-message-edit-button:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
-}
-
-.systemsculpt-message-button.systemsculpt-success {
-  color: white;
-  background-color: var(--background-modifier-success);
-}
-
-.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming {
-  color: white;
-  background-color: var(--interactive-accent);
-}
-
-.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-message-content a {
-  color: var(--text-accent);
-  text-decoration: none;
-}
-
-.systemsculpt-message-content a:hover {
-  text-decoration: underline;
-}
-
-.systemsculpt-message-button-toolbar {
-  justify-content: flex-start;
-}
-
-.systemsculpt-message-button {
-  background: none;
-  border: none;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-}
-
-.systemsculpt-message-button-toolbar {
-  position: absolute;
-  bottom: 0;
-  left: 8px;
-  width: fit-content;
-  min-width: min-content;
-  display: flex;
-  gap: 0.25rem;
-  padding: 4px;
-  margin-top: 8px;
-  background-color: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  opacity: 0;
-  transform: translateY(calc(100% + 4px));
-  transition: all 0.15s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  visibility: hidden;
-  z-index: 100;
-}
-
-.systemsculpt-message-button.systemsculpt-confirming {
-  width: auto;
-  min-width: 20px;
-  padding: 4px 8px;
-  transition: all 0.15s ease;
-}
-
-.systemsculpt-message-button.systemsculpt-confirming span {
-  font-size: 0.9em;
-  display: inline-block;
-  vertical-align: middle;
-}
-
-.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
-  color: white;
-  background-color: var(--background-modifier-error);
-}
-
-.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
-  color: white;
-  background-color: var(--background-modifier-error);
-}
-
-.systemsculpt-message-button.systemsculpt-danger:hover {
-  color: white;
-  background-color: var(--background-modifier-error);
-}
-
-.systemsculpt-message-button.systemsculpt-success {
-  color: white;
-  background-color: var(--background-modifier-success);
-}
-
-.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming {
-  color: white;
-  background-color: var(--interactive-accent);
-}
-
-.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-message-button:hover {
-  background-color: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-.systemsculpt-message-button-toolbar,
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
-
-.systemsculpt-message-button-toolbar {
-  left: auto;
-  right: 8px;
-}
-
-.systemsculpt-error-message {
-  color: var(--text-error);
-  text-align: center;
-  padding: 1rem;
-  font-size: 14px;
 }
 
 .systemsculpt-error-message {
@@ -3330,15 +4760,12 @@
 
 .systemsculpt-assistant-message {
   align-self: flex-start;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   background-color: var(--background-secondary);
   border-radius: 16px 16px 16px 4px;
 }
 
-.systemsculpt-assistant-message .systemsculpt-message-button-toolbar {
-  justify-content: flex-start;
-}
+/* Assistant message toolbar positioning handled by modern floating design */
 
 .systemsculpt-assistant-message .systemsculpt-message-content {
   color: var(--text-normal);
@@ -3399,46 +4826,7 @@
   color: var(--text-normal);
 }
 
-.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
-  background-color: var(--interactive-accent-hover);
-}
-
-.systemsculpt-message-button-toolbar {
-  justify-content: flex-start;
-}
-
-.systemsculpt-message-button-toolbar {
-  position: absolute;
-  bottom: 0;
-  left: 8px;
-  width: fit-content;
-  min-width: min-content;
-  display: flex;
-  gap: 0.25rem;
-  padding: 4px;
-  margin-top: 8px;
-  background-color: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  opacity: 0;
-  transform: translateY(calc(100% + 4px));
-  transition: all 0.15s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  visibility: hidden;
-  z-index: 100;
-}
-
-.systemsculpt-message-button-toolbar,
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
-
-.systemsculpt-message-button-toolbar {
-  left: auto;
-  right: 8px;
-}
+/* Legacy button and toolbar styles removed - using modern floating design */
 
 .systemsculpt-popup-message {
   color: var(--text-normal);
@@ -3659,11 +5047,7 @@
   white-space: pre-wrap;
 }
 
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
+/* Legacy hover behavior removed - handled by modern floating toolbar */
 
 .systemsculpt-model-message-container {
   flex: 1;
@@ -3684,7 +5068,7 @@
   padding: 16px 24px;
   border-radius: 8px;
   font-size: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
   border: 1px solid var(--background-modifier-border);
   animation: fade-in 0.2s ease;
   text-align: center;
@@ -3706,48 +5090,16 @@
 
 .systemsculpt-message {
   position: relative;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   padding: 0.75rem;
   margin: 0.5rem;
   border-radius: 16px;
 }
 
-.systemsculpt-message-button {
-  background: none;
-  border: none;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-}
+/* Removed duplicate - using unified ultra-compact button styling */
 
-.systemsculpt-message-button-toolbar {
-  position: absolute;
-  bottom: 0;
-  left: 8px;
-  width: fit-content;
-  min-width: min-content;
-  display: flex;
-  gap: 0.25rem;
-  padding: 4px;
-  margin-top: 8px;
-  background-color: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  opacity: 0;
-  transform: translateY(calc(100% + 4px));
-  transition: all 0.15s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  visibility: hidden;
-  z-index: 100;
-}
+
 
 .systemsculpt-message-button.systemsculpt-confirming {
   width: auto;
@@ -3873,6 +5225,89 @@
   margin-bottom: 0;
 }
 
+/* Web Search Citations Styles */
+.systemsculpt-citations-container {
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.systemsculpt-citations-divider {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 0.5rem 0;
+}
+
+.systemsculpt-citations-header {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.systemsculpt-citations-header::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: var(--text-accent);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'%3E%3Cpath fill='none' d='M0 0h24v24H0z'/%3E%3Cpath d='M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 2c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 3c1.82 0 3.413.973 4.288 2.428l-1.714 1.029A3 3 0 0 0 12 9a3 3 0 0 0-3 3c0 .88.377 1.673.982 2.224l-1.453 1.358A5 5 0 0 1 7 12c0-2.76 2.24-5 5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z' fill='rgba(128,128,128,1)'/%3E%3C/svg%3E");
+  mask-size: cover;
+  mask-repeat: no-repeat;
+}
+
+.systemsculpt-citations-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.systemsculpt-citation-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title {
+  font-weight: 500;
+  color: var(--text-accent);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-citation-url {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-citation-snippet {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
 .systemsculpt-message-content pre {
   margin: 0;
   padding: 2em 1em 1em;
@@ -3901,45 +5336,13 @@
   pointer-events: none;
 }
 
-.systemsculpt-message-edit-button {
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  opacity: 0;
-  transition: all 0.5s ease;
-  cursor: pointer;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.systemsculpt-message-content {
+  color: var(--text-on-accent);
 }
 
-.systemsculpt-message-edit-button:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
-}
-
-.systemsculpt-message-image {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  border-radius: 8px;
-  max-height: 70vh;
-  object-fit: contain;
-  padding: 16px;
-}
-
-.systemsculpt-message-label {
-  font-size: 0.8rem;
-  margin-bottom: 0.25rem;
-  display: block;
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
 }
 
 .systemsculpt-message-text {
@@ -3949,32 +5352,7 @@
   white-space: pre-wrap;
 }
 
-.systemsculpt-message::after {
-  content: "";
-  position: absolute;
-  top: -8px;
-  left: -8px;
-  right: -8px;
-  bottom: -40px;
-  pointer-events: none;
-}
-
-.systemsculpt-message:active .systemsculpt-message-button-toolbar,
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
-
-.systemsculpt-message:hover::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -40px;
-  height: 40px;
-  z-index: 99;
-}
+/* Legacy hover behavior removed - modern toolbar uses pure CSS */
 
 .systemsculpt-messages-container {
   flex-grow: 1;
@@ -3985,10 +5363,7 @@
   gap: 0.75rem;
 }
 
-.systemsculpt-message-button-toolbar {
-  left: auto;
-  right: 8px;
-}
+/* Removed - using unified positioning */
 
 .systemsculpt-message-content {
   color: var(--text-on-accent);
@@ -4005,12 +5380,7 @@
   background-color: var(--background-modifier-error);
 }
 
-.systemsculpt-message:active .systemsculpt-message-button-toolbar,
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar,
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
+/* Removed duplicate hover rule */
 
 .systemsculpt-notice-message {
   flex: 1;
@@ -4025,10 +5395,7 @@
   border-radius: 16px 16px 16px 16px;
 }
 
-.systemsculpt-user-message .systemsculpt-message-button-toolbar {
-  left: auto;
-  right: 8px;
-}
+/* Removed - using unified toolbar positioning */
 
 .systemsculpt-user-message .systemsculpt-message-content {
   color: var(--text-on-accent);
@@ -4052,10 +5419,7 @@
   width: 100%;
 }
 
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-}
+/* Removed duplicate hover rule */
 
 .systemsculpt-message-content pre[class*="language-"]::before {
   content: attr(class);
@@ -4186,14 +5550,413 @@
   pointer-events: none;
 }
 
-.systemsculpt-assistant-message .systemsculpt-message-button-toolbar {
-  justify-content: flex-start;
-}
+/* Removed - using unified toolbar positioning */
 
 .systemsculpt-message-edit-button:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
+
+/* Assistant message specific styling */
+.systemsculpt-assistant-message .systemsculpt-message-content {
+  /* Styles for the general content area of an assistant message if needed */
+}
+
+/* Styling for the new wrapper around the assistant's textual response */
+.systemsculpt-assistant-text-content-wrapper {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m); /* Medium radius, adjust as needed */
+  padding: var(--size-4-3); /* Equivalent to 10px if base is 8px for var(--size-4-1) being 4px */
+  margin-top: var(--size-4-2); /* Add some space above this container if it's not the first element */
+  background-color: var(--background-secondary-alt); /* Slightly different background to distinguish if needed */
+}
+
+/* Ensure markdown within the new wrapper is styled correctly */
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered ul,
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered ol {
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+  padding-left: var(--size-4-5); /* Default list padding */
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered pre {
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+/* ========================================================================== */
+/* == Message Button Toolbar (Hover Actions) - Modern Floating Design     == */
+/* ========================================================================== */
+
+/* Collapsible slider toolbar container */
+.systemsculpt-message-button-toolbar {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 1px 1px rgba(0, 0, 0, 0.04);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(1px) scale(0.95);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 150;
+  height: 20px;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Toolbar visible state */
+.systemsculpt-message:hover .systemsculpt-message-button-toolbar,
+.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Container-based collapsible toolbar - industry standard approach */
+
+/* Collapsed toolbar - only chevron toggle button with transparent background */
+.systemsculpt-message-button-toolbar-collapsed {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  padding: 2px;
+  background: transparent; /* Transparent when collapsed */
+  border: none; /* No border when collapsed */
+  border-radius: 12px;
+  box-shadow: none; /* No shadow when collapsed */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(1px) scale(0.95);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 150;
+  backdrop-filter: none; /* No backdrop filter when collapsed */
+  -webkit-backdrop-filter: none;
+}
+
+/* Expanded toolbar - all action buttons */
+.systemsculpt-message-button-toolbar-expanded {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 1px 1px rgba(0, 0, 0, 0.04);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(1px) scale(0.95);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 150;
+  height: 20px;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  width: auto;
+  min-width: 80px;
+}
+
+/* Show collapsed toolbar on hover (when expanded is hidden) */
+.systemsculpt-message:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden),
+.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Show expanded toolbar when active */
+.systemsculpt-message-button-toolbar-expanded.active {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Hide collapsed when expanded is active */
+.systemsculpt-message-button-toolbar-collapsed.hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none;
+}
+
+/* Individual button styling - industry standard */
+.systemsculpt-message-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease-out;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Button hover effects */
+.systemsculpt-message-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  transform: scale(1.05);
+}
+
+/* Button active state */
+.systemsculpt-message-button:active {
+  transform: scale(0.95);
+}
+
+/* Icon sizing within buttons - compact slider */
+.systemsculpt-message-button .lucide {
+  width: 12px;
+  height: 12px;
+}
+
+/* Chevron icon specific styling for collapsed toolbar */
+.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button .lucide {
+  transition: transform 0.2s ease;
+}
+
+/* Keep button transparent in collapsed toolbar - override general hover styles */
+.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button:hover {
+  background: transparent !important;
+  transform: scale(1.05); /* Keep the scale transform but remove background */
+}
+
+/* Chevron icon specific styling for expanded toolbar */
+.systemsculpt-message-button-toolbar-expanded .systemsculpt-message-button.chevron .lucide {
+  transform: rotate(180deg); /* Flip chevron when expanded */
+  transition: transform 0.2s ease;
+}
+
+/* Success state (e.g., after copy) */
+.systemsculpt-message-button.systemsculpt-success {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-message-button.systemsculpt-success:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Danger state (delete button) */
+.systemsculpt-message-button.systemsculpt-danger:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+/* Confirming state for delete/resubmit actions - ultra-compact */
+.systemsculpt-message-button.systemsculpt-confirming {
+  width: auto;
+  min-width: 14px;
+  padding: 0 4px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming span {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
+  background: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
+  background: var(--background-modifier-error);
+  opacity: 0.9;
+}
+
+/* Unified positioning for all message types - always bottom right */
+
+/* Removed - now using unified .systemsculpt-message-button-toolbar */
+
+/* Dark mode adjustments */
+.theme-dark .systemsculpt-message-button-toolbar {
+  background: rgba(var(--background-primary-rgb), 0.9);
+  border-color: var(--background-modifier-border);
+}
+
+/* High contrast support */
+@media (prefers-contrast: high) {
+  .systemsculpt-message-button-toolbar {
+    border-width: 2px;
+    box-shadow: 
+      0 3px 12px rgba(0, 0, 0, 0.2),
+      0 1px 4px rgba(0, 0, 0, 0.15);
+  }
+  
+  .systemsculpt-message-button {
+    border: 1px solid transparent;
+  }
+  
+  .systemsculpt-message-button:hover {
+    border-color: var(--background-modifier-border);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-message-button-toolbar {
+    transition: opacity 0.1s ease, visibility 0.1s ease;
+    transform: none;
+  }
+  
+  .systemsculpt-message:hover .systemsculpt-message-button-toolbar,
+  .systemsculpt-message:focus-within .systemsculpt-message-button-toolbar {
+    transform: none;
+  }
+  
+  .systemsculpt-message-button {
+    transition: background-color 0.1s ease, color 0.1s ease;
+  }
+  
+  .systemsculpt-message-button:hover,
+  .systemsculpt-message-button:active {
+    transform: none;
+  }
+}
+
+/* Mobile responsive adjustments - ultra-compact design */
+@media (max-width: 768px) {
+  .systemsculpt-message-button-toolbar {
+    bottom: 3px;
+    right: 4px;
+    padding: 2px 3px;
+    gap: 1px;
+    min-height: 18px;
+  }
+  
+  .systemsculpt-message-button {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .systemsculpt-message-button .lucide {
+    width: 12px;
+    height: 12px;
+  }
+  
+  /* Slightly larger touch targets on mobile */
+  .systemsculpt-message-button.systemsculpt-confirming {
+    padding: 0 6px;
+    font-size: 10px;
+  }
+}
+
+/* Remove old/redundant toolbar styles */
+.systemsculpt-message::after {
+  display: none;
+}
+
+.systemsculpt-message:hover::before {
+  display: none;
+}
+
+/* ========================================================================== */
+/* == End Modern Floating Toolbar                                         == */
+/* ========================================================================== */
+
+.systemsculpt-message-content pre.systemsculpt-code-block {
+  margin: 1em 0;
+  background-color: var(--background-primary-alt);
+  border-radius: 8px;
+  position: relative;
+}
+
+.systemsculpt-code-copy-button {
+  display: none !important;
+}
+
+.systemsculpt-content-part pre,
+.systemsculpt-content-part .markdown-rendered pre {
+  margin: 1em 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary-alt, var(--background-primary));
+  border-radius: 8px;
+  overflow-x: auto;
+  position: relative;
+}
+
+.systemsculpt-content-part pre code {
+  user-select: text;
+}
+
+/* ========================================================================== */
+/* == Compact Drawer Grouping for Consecutive Messages with Tool Calls    == */
+/* ========================================================================== */
+
+/* 
+ * CRITICAL FIX: The real DOM structure has consecutive .systemsculpt-message elements
+ * within the group, each containing drawers. We need to target consecutive messages
+ * that contain tool calls, not consecutive drawers within the same message.
+ */
+
+/* Tighter spacing between consecutive messages that have tool calls */
+.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
+  margin-top: 4px !important; /* Much tighter spacing between consecutive assistant messages */
+  padding-top: 4px !important; /* Reduce the padding too */
+}
+
+/* Even tighter for 3rd+ consecutive messages */
+.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message + .systemsculpt-message {
+  margin-top: 2px !important;
+  padding-top: 2px !important;
+}
+
+/* Also target the drawer spacing within each message for extra compactness */
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-tool-call-wrapper,
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-reasoning-wrapper {
+  margin: 2px 0 !important; /* Tight spacing for drawers within grouped messages */
+}
+
+/* Content parts within grouped messages should also be more compact */
+.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-content-part {
+  margin: 2px 0 !important; /* Tight spacing for content within grouped messages */
+}
+
+/* ========================================================================== */
+/* == End Compact Drawer Grouping                                          == */
+/* ========================================================================== */
 
 
 
@@ -6162,7 +7925,7 @@
   position: absolute;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid rgb(255, 255, 255);
   border-radius: 50%;
   border-top-color: currentColor;
   animation: ss-loading-spin 0.8s linear infinite;
@@ -6188,7 +7951,7 @@
 }
 
 .systemsculpt-content-container.systemsculpt-loading {
-  opacity: 0.5;
+  opacity: 1;
   pointer-events: none;
 }
 
@@ -6253,7 +8016,7 @@
 }
 
 .systemsculpt-loading {
-  opacity: 0.5;
+  opacity: 1;
   pointer-events: none;
 }
 
@@ -6362,6 +8125,235 @@
   transform-origin: center center;
 }
 
+/* Persistent streaming status indicator for chat messages */
+.systemsculpt-streaming-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  margin: 12px 0;
+  background: var(--background-primary);
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 24px;
+  color: var(--text-normal);
+  font-size: 0.95em;
+  font-weight: 500;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  position: relative;
+  transform: translateY(20px) scale(0.9);
+  backdrop-filter: blur(12px);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  min-width: 200px;
+  justify-content: center;
+  will-change: transform, opacity;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Show animation - slide up and scale in */
+.systemsculpt-streaming-status[style*="flex"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  animation: ss-status-breathe 3s ease-in-out infinite;
+}
+
+/* Hide animation */
+.systemsculpt-streaming-status[style*="none"] {
+  opacity: 0;
+  transform: translateY(20px) scale(0.9);
+  pointer-events: none;
+}
+
+/* Breathing animation for liveliness */
+@keyframes ss-status-breathe {
+  0%, 100% { 
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.12),
+      0 2px 8px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  50% { 
+    box-shadow: 
+      0 12px 48px rgba(0, 0, 0, 0.16),
+      0 4px 16px rgba(0, 0, 0, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px) scale(1.02);
+  }
+}
+
+/* Enhanced shimmer effect with multiple layers */
+.systemsculpt-streaming-status::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    110deg,
+    transparent 25%,
+    rgba(var(--interactive-accent-rgb), 0.15) 50%,
+    transparent 75%
+  );
+  animation: ss-shimmer-enhanced 2.5s ease-in-out infinite;
+  border-radius: inherit;
+}
+
+@keyframes ss-shimmer-enhanced {
+  0% { left: -100%; opacity: 0; }
+  50% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* Status icon - simple and clean */
+.systemsculpt-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Status text - simple and clean */
+.systemsculpt-status-text {
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+
+/* ===== STATE-SPECIFIC STYLING ===== */
+
+/* Thinking state - simple blue indicator */
+.systemsculpt-streaming-status[data-status="thinking"] .systemsculpt-status-icon,
+.systemsculpt-streaming-status[data-status="reasoning"] .systemsculpt-status-icon {
+  background: #3b82f6;
+  color: white;
+}
+
+/* Content generation state - simple green indicator */
+.systemsculpt-streaming-status[data-status="content"] .systemsculpt-status-icon {
+  background: #22c55e;
+  color: white;
+}
+
+/* Tool calls state - simple orange indicator */
+.systemsculpt-streaming-status[data-status="tool_calls"] .systemsculpt-status-icon {
+  background: #f97316;
+  color: white;
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+
+/* Tablet adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-streaming-status {
+    bottom: 20px;
+    padding: 14px 20px;
+    font-size: 0.9em;
+    min-width: 180px;
+  }
+  
+  .systemsculpt-status-icon {
+    width: 18px;
+    height: 18px;
+  }
+  
+  .systemsculpt-status-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+  }
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+  .systemsculpt-streaming-status {
+    padding: 12px 16px;
+    font-size: 0.85em;
+    min-width: unset;
+    max-width: 280px;
+    margin: 12px auto;
+  }
+  
+  .systemsculpt-streaming-status[style*="flex"] {
+    transform: translateY(0) scale(1);
+  }
+  
+  .systemsculpt-streaming-status[style*="none"] {
+    transform: translateY(20px) scale(0.9);
+  }
+  
+  .systemsculpt-status-icon {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .systemsculpt-status-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 10px;
+  }
+  
+  /* Adjust breathing animation for mobile */
+  @keyframes ss-status-breathe {
+    0%, 100% { 
+      box-shadow: 
+        0 6px 24px rgba(0, 0, 0, 0.1),
+        0 2px 6px rgba(0, 0, 0, 0.06);
+    }
+    50% { 
+      box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.14),
+        0 3px 12px rgba(0, 0, 0, 0.1);
+             transform: translateY(-1px) scale(1.01);
+    }
+  }
+}
+
+/* ===== ACCESSIBILITY & PERFORMANCE ===== */
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-streaming-status,
+  .systemsculpt-streaming-status::before,
+  .systemsculpt-streaming-status::after,
+  .systemsculpt-status-icon::before,
+  .systemsculpt-status-text::after {
+    animation: none !important;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  
+  .systemsculpt-streaming-status[style*="flex"] {
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .systemsculpt-streaming-status {
+    border-width: 3px;
+    background: var(--background-primary);
+    backdrop-filter: none;
+  }
+  
+  .systemsculpt-status-icon::before {
+    border-width: 4px;
+  }
+}
+
 
 
 
@@ -6386,7 +8378,7 @@
 /* Apply focus styles to the container when input is focused */
 .systemsculpt-load-chat-modal .systemsculpt-search-container:focus-within {
   border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+  box-shadow: 0 0 0 2px rgb(var(--interactive-accent-rgb));
 }
 
 /* Style the SearchComponent's input to mimic OmniSearch */
@@ -6460,7 +8452,7 @@
 .systemsculpt-chat-card:hover {
   background-color: var(--background-secondary-alt);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-chat-card.is-selected {
@@ -6527,16 +8519,16 @@
   left: 0;
   right: 0;
   height: 20px;
-  background: linear-gradient(transparent, var(--background-secondary));
+  background: linear-gradient(var(--background-secondary), var(--background-secondary));
   pointer-events: none;
 }
 
 .systemsculpt-chat-card:hover .systemsculpt-chat-preview::after {
-  background: linear-gradient(transparent, var(--background-secondary-alt));
+  background: linear-gradient(var(--background-secondary-alt), var(--background-secondary-alt));
 }
 
 .systemsculpt-chat-card.is-selected .systemsculpt-chat-preview::after {
-  background: linear-gradient(transparent, var(--background-modifier-hover));
+  background: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover));
 }
 
 .systemsculpt-preview-message {
@@ -6580,7 +8572,7 @@
 .systemsculpt-empty-state .svg-icon {
   width: 48px;
   height: 48px;
-  opacity: 0.5;
+  opacity: 1;
 }
 
 /* --- Modal List Item Styles --- */
@@ -6599,7 +8591,7 @@
 .systemsculpt-modal-list-item:hover {
   background-color: var(--background-modifier-hover);
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
 }
 
 .systemsculpt-modal-list-item.is-selected {
@@ -6609,7 +8601,8 @@
 
 /* When an item is favorited, add visual distinction */
 .systemsculpt-modal-list-item[data-favorite="true"] {
-  border-left: 3px solid var(--color-yellow);
+  /* border-left: 3px solid var(--color-yellow); */ /* Existing border for favorite */
+  background-color: rgb(255, 217, 0);
 }
 
 .systemsculpt-modal-list-item-content {
@@ -6703,24 +8696,29 @@
 }
 
 .systemsculpt-modal-list-item[data-favorite="true"] {
-  background-color: rgba(255, 217, 0, 0.03);
+  /* border-left: 3px solid var(--color-yellow); */ /* Existing border for favorite */
+  background-color: rgb(255, 217, 0);
 }
 
 .systemsculpt-modal-list-item[data-favorite="true"]:hover {
-  background-color: rgba(255, 217, 0, 0.07);
+  background-color: rgb(255, 217, 0);
+  /* border-color: var(--color-yellow-hover); */
 }
 
 .systemsculpt-modal-list-item[data-favorite="true"].is-selected {
+  /* border-color: var(--color-yellow); */
   background-color: rgba(var(--interactive-accent-rgb), 0.1);
 }
 
 /* Dark theme adjustments */
 .theme-dark .systemsculpt-modal-list-item[data-favorite="true"] {
-  background-color: rgba(255, 217, 0, 0.03);
+  /* border-left-color: var(--color-yellow); */
+  background-color: rgb(255, 217, 0);
 }
 
 .theme-dark .systemsculpt-modal-list-item[data-favorite="true"]:hover {
-  background-color: rgba(255, 217, 0, 0.07);
+  background-color: rgb(255, 217, 0);
+  /* border-left-color: var(--color-yellow-hover); */
 }
 
 /* Responsive styles */
@@ -6886,8 +8884,10 @@
 }
 
 .systemsculpt-modal-button:disabled {
-    opacity: 0.5;
+    background-color: var(--background-modifier-form-field);
+    color: var(--text-faint);
     cursor: not-allowed;
+    opacity: 1;
 }
 
 .systemsculpt-modal-button.mod-cta {
@@ -6919,6 +8919,12 @@
         flex-direction: column;
         gap: var(--size-4-1);
     }
+}
+
+.systemsculpt-modal-list-item-date,
+.systemsculpt-modal-list-item-tokens {
+  color: var(--text-muted);
+  opacity: 1;
 } 
 
 /* omni-search.css */
@@ -7149,19 +9155,19 @@
 }
 
 .systemsculpt-omni-search-result-badge-lexical {
-    background-color: rgba(var(--color-blue-rgb), 0.1);
+    background-color: rgb(var(--color-blue-rgb));
     color: var(--color-blue);
     cursor: help;
 }
 
 .systemsculpt-omni-search-result-badge-semantic {
-    background-color: rgba(var(--color-purple-rgb), 0.1);
+    background-color: rgb(var(--color-purple-rgb));
     color: var(--color-purple);
     cursor: help;
 }
 
 .systemsculpt-omni-search-result-badge-recent {
-    background-color: rgba(var(--color-cyan-rgb), 0.1);
+    background-color: rgb(var(--color-cyan-rgb));
     color: var(--color-cyan);
 }
 
@@ -7216,17 +9222,17 @@
 */
 
 .systemsculpt-omni-search-result-score-high {
-    background-color: rgba(var(--color-green-rgb), 0.1);
+    background-color: rgb(var(--color-green-rgb));
     color: var(--color-green);
 }
 
 .systemsculpt-omni-search-result-score-medium {
-    background-color: rgba(var(--color-orange-rgb), 0.1);
+    background-color: rgb(var(--color-orange-rgb));
     color: var(--color-orange);
 }
 
 .systemsculpt-omni-search-result-score-low {
-    background-color: rgba(var(--color-red-rgb), 0.1);
+    background-color: rgb(var(--color-red-rgb));
     color: var(--color-red);
 }
 
@@ -7278,7 +9284,7 @@
 
 .systemsculpt-omni-search-empty-icon {
     font-size: 28px;
-    opacity: 0.5;
+    opacity: 1;
 }
 
 .systemsculpt-omni-search-empty-text {
@@ -7305,9 +9311,9 @@
 @supports (mix-blend-mode: darken) {
     .systemsculpt-omni-search-highlight {
         /* Primary highlight style with better contrast using transparency and blend modes */
-        background-color: rgba(var(--interactive-accent-rgb), 0.4);
+        background-color: rgb(var(--interactive-accent-rgb));
         /* color: var(--text-normal); /* Removed: text color is now always --interactive-accent */
-        border: 1px solid rgba(var(--interactive-accent-rgb), 0.5);
+        border: 1px solid rgb(var(--interactive-accent-rgb));
         /* Enhanced contrast using mix-blend-mode */
         -webkit-mix-blend-mode: darken; /* Vendor prefix */
         mix-blend-mode: darken;
@@ -7320,8 +9326,8 @@
         -webkit-mix-blend-mode: lighten; /* Vendor prefix */
         mix-blend-mode: lighten;
         /* Ensure the background and border also adapt if they were part of the blended style */
-        background-color: rgba(var(--interactive-accent-rgb), 0.4); /* Assuming same transparency for dark theme blend */
-        border: 1px solid rgba(var(--interactive-accent-rgb), 0.5); /* Assuming same border for dark theme blend */
+        background-color: rgb(var(--interactive-accent-rgb)); /* Assuming same transparency for dark theme blend */
+        border: 1px solid rgb(var(--interactive-accent-rgb)); /* Assuming same border for dark theme blend */
     }
 }
 
@@ -7368,7 +9374,7 @@
     border-radius: 6px;
     background-color: var(--background-secondary);
     margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgb(0, 0, 0);
     transition: all 0.3s ease;
     width: 100%;
     box-sizing: border-box;
@@ -7422,7 +9428,7 @@
 .systemsculpt-status-text.status-running,
 .systemsculpt-status-text.status-scanning,
 .systemsculpt-status-text.status-updating {
-    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+    background-color: rgb(var(--interactive-accent-rgb));
     color: var(--text-accent);
     min-width: 160px; /* Further increased width to ensure percentage fits */
     padding: 4px 12px; /* Add more horizontal padding */
@@ -7432,7 +9438,7 @@
 }
 
 .systemsculpt-status-text.status-complete {
-    background-color: rgba(0, 128, 0, 0.1);
+    background-color: rgb(0, 128, 0);
     color: var(--color-green);
     min-width: 100px; /* Increase minimum width for "Complete" text */
     padding: 2px 12px; /* Add more horizontal padding */
@@ -7441,12 +9447,12 @@
 }
 
 .systemsculpt-status-text.status-error {
-    background-color: rgba(255, 0, 0, 0.1);
+    background-color: rgb(255, 0, 0);
     color: var(--text-error);
 }
 
 .systemsculpt-status-text.status-paused {
-    background-color: rgba(255, 165, 0, 0.1);
+    background-color: rgb(255, 165, 0);
     color: var(--text-warning);
 }
 
@@ -7641,7 +9647,7 @@ div.status-complete svg,
     background-color: var(--background-primary);
     border-radius: 6px;
     padding: 16px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgb(0, 0, 0);
     width: 100%;
     box-sizing: border-box;
     margin-bottom: 20px;
@@ -7864,7 +9870,7 @@ div.status-complete svg,
 
 .systemsculpt-files-checked-count {
     color: var(--text-normal);
-    background: rgba(89, 74, 147, 0.1);
+    background: rgb(89, 74, 147);
     border-radius: 4px;
     padding: 2px 6px;
     animation: highlight-pulse 2s infinite;
@@ -7872,9 +9878,9 @@ div.status-complete svg,
 
 /* Add animation for files being checked */
 @keyframes highlight-pulse {
-    0% { background-color: rgba(89, 74, 147, 0.1); }
-    50% { background-color: rgba(89, 74, 147, 0.3); }
-    100% { background-color: rgba(89, 74, 147, 0.1); }
+    0% { background-color: rgb(89, 74, 147); }
+    50% { background-color: rgb(89, 74, 147); }
+    100% { background-color: rgb(89, 74, 147); }
 }
 
 /* Time remaining info */
@@ -7929,7 +9935,7 @@ div.status-complete svg,
 
 .last-update-value {
     color: var(--text-normal);
-    background: rgba(89, 74, 147, 0.05);
+    background: rgb(89, 74, 147);
     border-radius: 4px;
     padding: 2px 6px;
 }
@@ -7937,7 +9943,7 @@ div.status-complete svg,
 /* Status bar update info styling */
 .update-info {
     margin-left: 6px;
-    opacity: 0.8;
+    opacity: 1;
     font-size: 0.85em;
 }
 
@@ -8052,13 +10058,13 @@ div.status-complete svg,
 
 @keyframes pulse {
     0% {
-        opacity: 0.7;
+        opacity: 1;
     }
     50% {
         opacity: 1;
     }
     100% {
-        opacity: 0.7;
+        opacity: 1;
     }
 }
 
@@ -8074,14 +10080,14 @@ div.status-complete svg,
     padding: 12px;
     border-radius: 6px;
     background-color: var(--background-primary);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgb(0, 0, 0);
 }
 
 .embedding-error-info {
     margin-top: 12px;
     padding: 8px 12px;
     border-radius: 4px;
-    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+    background-color: rgb(var(--background-modifier-error-rgb));
     border-left: 3px solid var(--text-error);
 }
 
@@ -8181,7 +10187,7 @@ div.status-complete svg,
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: rgb(0, 0, 0);
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -8194,7 +10200,7 @@ div.status-complete svg,
     padding: 20px;
     width: 400px;
     max-width: 90%;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgb(0, 0, 0);
 }
 
 .systemsculpt-confirmation-content h2 {
@@ -8264,7 +10270,7 @@ div.status-complete svg,
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
-    background-color: rgba(var(--color-yellow-rgb), 0.1);
+    background-color: rgb(var(--color-yellow-rgb));
 }
 
 /* ========== EMBEDDING TAB STYLES ========== */
@@ -8288,7 +10294,7 @@ div.status-complete svg,
 .embeddings-status-value.status-scanning,
 .embeddings-status-value.status-updating {
     color: var(--text-accent);
-    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+    background-color: rgb(var(--interactive-accent-rgb));
 }
 
 .embeddings-status-value.status-paused {
@@ -8298,12 +10304,12 @@ div.status-complete svg,
 
 .embeddings-status-value.status-complete {
     color: var(--text-success);
-    background-color: rgba(var(--color-green-rgb), 0.1);
+    background-color: rgb(var(--color-green-rgb));
 }
 
 .embeddings-status-value.status-error {
     color: var(--text-error);
-    background-color: rgba(var(--background-modifier-error-rgb), 0.1);
+    background-color: rgb(var(--background-modifier-error-rgb));
 }
 
 /* Progress bar styling for embeddings tab */
@@ -9760,119 +11766,6 @@ body.theme-light .systemsculpt-score-low {
     }
 }
 
-/* reasoning.css */
-/**
- * Reasoning Component Styles
- * 
- * Styles for the reasoning/thinking containers that display AI thinking process
- */
-
-/* Main reasoning container */
-.systemsculpt-reasoning-container {
-  margin-bottom: 10px;
-  padding: 12px;
-  border-radius: 6px;
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: all 0.3s ease;
-  overflow: hidden;
-  max-height: 500px; /* Default max height */
-}
-
-/* Visible state */
-.systemsculpt-reasoning-container.systemsculpt-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* Collapsed state */
-.systemsculpt-reasoning-container.systemsculpt-collapsed {
-  max-height: 40px; /* Just enough to show the header */
-  overflow: hidden;
-}
-
-.systemsculpt-reasoning-container.systemsculpt-collapsed .systemsculpt-reasoning-content {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-/* Header styling */
-.systemsculpt-reasoning-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  color: var(--text-muted);
-  padding-bottom: 4px;
-  transition: color 0.2s ease;
-  user-select: none;
-  /* Ensure header is always visible and clickable */
-  position: relative;
-  z-index: 2;
-}
-
-.systemsculpt-reasoning-header svg {
-  width: 16px;
-  height: 16px;
-  color: var(--text-accent);
-}
-
-.systemsculpt-reasoning-header:hover {
-  color: var(--text-normal);
-}
-
-/* Content styling */
-.systemsculpt-reasoning-content {
-  font-family: var(--font-monospace);
-  font-size: 0.9em;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  color: var(--text-muted);
-  overflow-x: auto;
-  padding: 8px 0 0;
-  transition: all 0.3s ease;
-  max-height: 400px;
-  opacity: 1;
-}
-
-/* Add a collapse/expand indicator */
-.systemsculpt-reasoning-header::after {
-  content: "▼";
-  font-size: 10px;
-  margin-left: auto;
-  transition: transform 0.3s ease;
-}
-
-.systemsculpt-reasoning-container.systemsculpt-collapsed .systemsculpt-reasoning-header::after {
-  transform: rotate(-90deg);
-}
-
-/* Add hover effect to improve UX */
-.systemsculpt-reasoning-header:hover::after {
-  color: var(--text-accent);
-}
-
-/* Scrollbar styling for reasoning content */
-.systemsculpt-reasoning-content::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.systemsculpt-reasoning-content::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb-bg);
-  border-radius: 3px;
-}
-
-.systemsculpt-reasoning-content::-webkit-scrollbar-track {
-  background-color: var(--scrollbar-bg);
-  border-radius: 3px;
-} 
-
 /* tooltips.css */
 /**
  * Tooltip Components
@@ -9970,7 +11863,7 @@ body.theme-light .systemsculpt-score-low {
 
 /* Disabled state */
 .systemsculpt-checkbox-container.disabled {
-  opacity: 0.6;
+  opacity: 1;
   cursor: not-allowed;
 }
 
@@ -10100,36 +11993,36 @@ body.theme-light .systemsculpt-score-low {
 .one-click-button:hover {
   transform: translateY(-2px);
   border-color: var(--interactive-accent);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
 }
 
 .one-click-button.openai {
-  background-color: rgba(16, 163, 127, 0.1);
-  border-color: rgba(16, 163, 127, 0.3);
+  background-color: rgb(16, 163, 127);
+  border-color: rgb(16, 163, 127);
   color: #10a37f;
 }
 
 .one-click-button.openrouter {
-  background-color: rgba(66, 133, 244, 0.1);
-  border-color: rgba(66, 133, 244, 0.3);
+  background-color: rgb(66, 133, 244);
+  border-color: rgb(66, 133, 244);
   color: #4285f4;
 }
 
 .one-click-button.ollama {
-  background-color: rgba(105, 72, 115, 0.1);
-  border-color: rgba(105, 72, 115, 0.3);
+  background-color: rgb(105, 72, 115);
+  border-color: rgb(105, 72, 115);
   color: #694873;
 }
 
 .one-click-button.lmstudio {
-  background-color: rgba(249, 115, 22, 0.1);
-  border-color: rgba(249, 115, 22, 0.3);
+  background-color: rgb(249, 115, 22);
+  border-color: rgb(249, 115, 22);
   color: #f97316;
 }
 
 .one-click-button.custom {
-  background-color: rgba(128, 128, 128, 0.1);
-  border-color: rgba(128, 128, 128, 0.3);
+  background-color: rgb(128, 128, 128);
+  border-color: rgb(128, 128, 128);
   width: 110px;
   font-size: 0.8em;
 }
@@ -10180,7 +12073,7 @@ body.theme-light .systemsculpt-score-low {
 
 .provider-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgb(0, 0, 0);
 }
 
 .provider-header {
@@ -10208,12 +12101,12 @@ body.theme-light .systemsculpt-score-low {
 }
 
 .provider-status.enabled {
-  background-color: rgba(50, 205, 50, 0.2);
+  background-color: rgb(50, 205, 50);
   color: rgb(50, 205, 50);
 }
 
 .provider-status.disabled {
-  background-color: rgba(255, 99, 71, 0.2);
+  background-color: rgb(255, 99, 71);
   color: rgb(255, 99, 71);
 }
 
@@ -10288,28 +12181,27 @@ body.theme-light .systemsculpt-score-low {
 }
 
 .provider-action-button:hover {
-  background-color: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
 .provider-action-button.test:hover {
-  background-color: rgba(66, 133, 244, 0.2);
-  color: #4285f4;
+  background-color: rgb(66, 133, 244);
+  border-color: var(--color-blue-hover);
 }
 
 .provider-action-button.edit:hover {
-  background-color: rgba(50, 205, 50, 0.2);
-  color: rgb(50, 205, 50);
+  background-color: rgb(50, 205, 50);
+  border-color: var(--color-green-hover);
 }
 
 .provider-action-button.delete:hover {
-  background-color: rgba(255, 99, 71, 0.2);
-  color: rgb(255, 99, 71);
+  background-color: rgb(255, 99, 71);
+  border-color: var(--color-red-hover);
 }
 
 .provider-action-button.testing {
-  opacity: 0.6;
-  cursor: wait;
+  opacity: 1;
+  pointer-events: none;
 }
 
 /* Add Provider Button */
@@ -10507,7 +12399,7 @@ body.theme-light .systemsculpt-score-low {
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   padding: 1rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgb(0, 0, 0);
   max-width: 300px;
 }
 
@@ -10611,7 +12503,7 @@ body.theme-light .systemsculpt-score-low {
 /* Button states */
 .systemsculpt-button:disabled,
 .systemsculpt-button.disabled {
-  opacity: 0.6;
+  opacity: 1;
   cursor: not-allowed;
   pointer-events: none;
 }
@@ -10626,7 +12518,7 @@ body.theme-light .systemsculpt-score-low {
   position: absolute;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid rgb(255, 255, 255);
   border-radius: 50%;
   border-top-color: currentColor;
   animation: spin 0.8s linear infinite;
@@ -10800,7 +12692,7 @@ body.theme-light .systemsculpt-score-low {
     opacity: 1;
   }
   50% {
-    opacity: 0.5;
+    opacity: 1;
   }
 }
 
@@ -10975,14 +12867,13 @@ body.theme-light .systemsculpt-score-low {
   color: var(--text-normal);
   padding: 15px;
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgb(0, 0, 0);
   width: 300px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   border: 1px solid var(--background-modifier-border);
   transition: all 0.3s ease;
-  opacity: 0.95;
   transform: translateY(-10px);
   opacity: 0;
   transition: transform 0.3s ease, opacity 0.3s ease;
@@ -10990,7 +12881,7 @@ body.theme-light .systemsculpt-score-low {
 
 .systemsculpt-recording-modal.visible {
   transform: translateY(0);
-  opacity: 0.95;
+  opacity: 1;
 }
 
 .systemsculpt-recording-modal.recording .systemsculpt-recording-title {
@@ -11111,7 +13002,7 @@ body.theme-light .systemsculpt-score-low {
     opacity: 1;
   }
   50% {
-    opacity: 0.5;
+    opacity: 1;
   }
   100% {
     opacity: 1;
@@ -11138,7 +13029,7 @@ body.theme-light .systemsculpt-score-low {
 }
 
 .systemsculpt-microphone-select:disabled {
-  opacity: 0.7;
+  opacity: 1;
   cursor: not-allowed;
 }
 
@@ -11965,7 +13856,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Progress text styling */
 .status-progress-text {
   font-size: var(--font-smallest);
-  opacity: 0.9;
+  opacity: 1;
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -12039,7 +13930,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Sub info elements */
 .status-sub-info {
   font-size: 0.85em;
-  opacity: 0.8;
+  opacity: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -12111,12 +14002,12 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   position: fixed;
   bottom: 30px;
   right: 30px;
-  background: var(--background-primary);
+  background: var(--ss-color-bg-primary);
   border-radius: 12px;
   padding: 20px;
   width: 350px;
   max-width: 90vw;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px rgb(0, 0, 0);
   z-index: 9999; /* Ensure it's above other elements */
   display: flex;
   flex-direction: column;
@@ -12152,7 +14043,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Progress bar */
 .systemsculpt-progress-bar {
   height: 10px;
-  background: var(--interactive-accent);
+  background: var(--ss-color-primary);
   border-radius: 5px;
   transition: width 0.3s ease;
   width: 0%;
@@ -12215,7 +14106,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Active step */
 .systemsculpt-progress-step.active {
-  background: rgba(var(--interactive-accent-rgb), 0.1);
+  background: rgb(var(--interactive-accent-rgb));
 }
 
 .systemsculpt-progress-step.active .systemsculpt-progress-step-icon {
@@ -12279,10 +14170,10 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   position: fixed;
   bottom: 30px;
   right: 30px;
-  background: var(--background-primary);
+  background: var(--ss-color-bg-primary);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px rgb(0, 0, 0);
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -12410,7 +14301,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Chunking status */
 .status-chunking {
-  background-color: rgba(var(--interactive-accent-rgb), 0.1);
+  background-color: rgb(var(--interactive-accent-rgb));
   border-left: 3px solid var(--text-accent);
 }
 
@@ -12421,7 +14312,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Processing status */
 .status-processing {
-  background-color: rgba(var(--interactive-accent-rgb), 0.15);
+  background-color: rgb(var(--interactive-accent-rgb));
   border-left: 3px solid var(--interactive-accent);
 }
 
@@ -12432,7 +14323,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Uploading status */
 .status-uploading {
-  background-color: rgba(var(--color-blue-rgb), 0.1);
+  background-color: rgb(var(--color-blue-rgb));
   border-left: 3px solid var(--color-blue);
 }
 
@@ -12443,7 +14334,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Success status */
 .status-success {
-  background-color: rgba(var(--color-green-rgb), 0.1);
+  background-color: rgb(var(--color-green-rgb));
   border-left: 3px solid var(--color-green);
 }
 
@@ -12453,7 +14344,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Error status */
 .status-error {
-  background-color: rgba(var(--color-red-rgb), 0.1);
+  background-color: rgb(var(--color-red-rgb));
   border-left: 3px solid var(--color-red);
 }
 
@@ -12497,9 +14388,9 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   height: 100%;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.2) 50%,
-    rgba(255, 255, 255, 0) 100%
+    rgb(255, 255, 255) 0%,
+    rgb(255, 255, 255) 50%,
+    rgb(255, 255, 255) 100%
   );
   animation: shimmer 2s infinite;
 }
@@ -12547,6 +14438,44 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   height: 14px;
 }
 
+/* Locked system prompt state when agent mode is active */
+.systemsculpt-system-prompt-locked {
+  opacity: 0.7;
+  cursor: default !important;
+  pointer-events: none; /* Prevent all interactions */
+}
+
+.systemsculpt-system-prompt-locked:hover {
+  background-color: transparent !important; /* Remove hover effect */
+}
+
+.systemsculpt-system-prompt-locked .systemsculpt-model-indicator-arrow {
+  color: var(--text-accent);
+}
+
+.systemsculpt-system-prompt-locked .systemsculpt-model-indicator-arrow svg {
+  color: var(--text-accent);
+}
+
+/* Locked model state when agent mode is active */
+.systemsculpt-model-locked {
+  opacity: 0.7;
+  cursor: default !important;
+  pointer-events: none; /* Prevent all interactions */
+}
+
+.systemsculpt-model-locked:hover {
+  background-color: transparent !important; /* Remove hover effect */
+}
+
+.systemsculpt-model-locked .systemsculpt-model-indicator-arrow {
+  color: var(--text-accent);
+}
+
+.systemsculpt-model-locked .systemsculpt-model-indicator-arrow svg {
+  color: var(--text-accent);
+}
+
 /* resume-chat.css */
 /* Resume Chat Button Container */
 .systemsculpt-resume-chat-button {
@@ -12575,7 +14504,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -12584,12 +14513,12 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-resume-chat-btn:hover {
   background: var(--interactive-accent-hover) !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-resume-chat-btn:active {
   transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 2px rgb(0, 0, 0);
 }
 
 /* Add icon to button */
@@ -12647,6 +14576,2133 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   padding-right: 50px !important; /* Maintain 50px from right edge */
 }
 
+/* mcp.css */
+/* MCP (Model Context Protocol) Component Styles */
+
+/* MCP Server Modal */
+.systemsculpt-mcp-server-modal .modal-content {
+  padding: 20px;
+}
+
+.systemsculpt-mcp-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.systemsculpt-mcp-server-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-mcp-server-form-group label {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-server-form-group input,
+.systemsculpt-mcp-server-form-group select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.systemsculpt-mcp-server-form-group input:focus,
+.systemsculpt-mcp-server-form-group select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.systemsculpt-mcp-server-form-group.error input,
+.systemsculpt-mcp-server-form-group.error select {
+  border-color: var(--text-error);
+}
+
+.systemsculpt-mcp-server-form-validation {
+  color: var(--text-error);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.systemsculpt-mcp-info-notice {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-mcp-info-notice p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.systemsculpt-mcp-stdio-note {
+  background: var(--background-modifier-error-rgb);
+  border: 1px solid var(--text-error);
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-mcp-stdio-note p {
+  margin: 0;
+  color: var(--text-error);
+  font-size: 13px;
+}
+
+/* Legacy MCP Tools Modal (keeping for compatibility) */
+.systemsculpt-mcp-tools-modal .modal-content {
+  padding: 20px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.systemsculpt-mcp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.systemsculpt-mcp-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-mcp-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+@keyframes systemsculpt-spin {
+  to { transform: rotate(360deg); }
+}
+
+.systemsculpt-mcp-error {
+  padding: 20px;
+  text-align: center;
+}
+
+.systemsculpt-mcp-error p {
+  margin-bottom: 16px;
+}
+
+.systemsculpt-mcp-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.systemsculpt-mcp-bulk-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-mcp-tools-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-mcp-tool-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-mcp-tool-item:hover {
+  border-color: var(--background-modifier-border-hover);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.systemsculpt-mcp-tool-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-mcp-tool-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-tool-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.systemsculpt-mcp-tool-toggle {
+  margin-left: 16px;
+}
+
+/* MCP Settings Section */
+.systemsculpt-mcp-servers-management {
+  margin-top: 16px;
+}
+
+.systemsculpt-mcp-status {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.systemsculpt-mcp-status-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-mcp-status-icon.mod-success {
+  color: var(--text-success);
+}
+
+.systemsculpt-mcp-status-icon.mod-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-mcp-status .mod-success {
+  color: var(--text-success);
+}
+
+.systemsculpt-mcp-status .mod-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-mcp-info {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-mcp-info p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Spinning animation for buttons */
+.systemsculpt-spinning svg {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+/* API Key Container (reused from custom provider) */
+.systemsculpt-api-key-input-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-api-key-input-container input {
+  flex: 1;
+}
+
+.systemsculpt-api-key-toggle-visibility {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+}
+
+.systemsculpt-api-key-toggle-visibility:hover {
+  color: var(--text-normal);
+}
+
+.systemsculpt-optional-field-text {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-weight: normal;
+}
+
+/* MCP Filesystem Consent Modal */
+.systemsculpt-filesystem-consent-modal .modal-content {
+  padding: 20px;
+}
+
+.systemsculpt-filesystem-consent-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.systemsculpt-consent-section {
+  padding: 16px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.systemsculpt-consent-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-consent-section p {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+.systemsculpt-consent-section ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.systemsculpt-consent-section li {
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-consent-note {
+  background: var(--background-modifier-error-rgb);
+  border: 1px solid var(--text-error);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.systemsculpt-consent-note p {
+  margin: 0;
+  color: var(--text-error);
+  font-size: 13px;
+}
+
+/* Legacy Grid Layout (keeping for compatibility) */
+.systemsculpt-mcp-tools-subheader {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.systemsculpt-mcp-tools-description {
+  margin-bottom: 16px;
+}
+
+.systemsculpt-mcp-tools-grid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-item {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-item:hover {
+  border-color: var(--interactive-accent-hover);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-toggle {
+  flex-shrink: 0;
+}
+
+/* ====== NEW COMPACT MCP MANAGER MODAL ====== */
+
+/* Modal sizing - more compact, mobile-friendly */
+.systemsculpt-mcp-manager-modal {
+  min-width: 480px;
+  max-width: min(640px, 95vw);
+}
+
+.systemsculpt-mcp-manager-modal .modal-content {
+  padding: var(--size-4-4);
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-tools-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: var(--size-4-3);
+  padding-right: var(--size-4-1); /* Add space for scrollbar */
+}
+
+/* Let Obsidian handle all setting-item styling natively */
+
+/* Agent status indicator */
+.systemsculpt-agent-status {
+  margin-top: var(--size-4-1);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Server section headers */
+.systemsculpt-server-section {
+  margin: var(--size-4-4) 0 var(--size-4-2) 0;
+}
+
+.systemsculpt-server-title {
+  margin: 0 0 var(--size-4-2) 0;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  padding-bottom: var(--size-4-1);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Let Obsidian handle setting-item-control styling natively */
+
+/* Let native Obsidian handle checkbox container styling */
+
+/* Custom styling for specific components only - not modifying base Obsidian */
+.systemsculpt-no-active-chat .setting-item-name {
+  color: var(--text-muted);
+}
+
+/* Modal actions removed - immediate saving implemented */
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+  .systemsculpt-mcp-manager-modal {
+    min-width: 320px;
+    max-width: 100vw;
+  }
+  
+  .systemsculpt-mcp-manager-modal .modal-content {
+    padding: var(--size-4-3);
+  }
+  
+  /* Let Obsidian handle mobile responsiveness for setting items */
+}
+
+@media (max-width: 400px) {
+  .systemsculpt-mcp-manager-modal {
+    min-width: 280px;
+  }
+  
+  /* No modal actions to style */
+}
+
+/* Disabled tool settings when agent mode is off */
+.systemsculpt-tool-setting.mod-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Let Obsidian's native disabled states handle the styling */
+
+/* Bulk actions styling */
+.systemsculpt-bulk-actions .setting-item-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  align-items: stretch;
+}
+
+.systemsculpt-bulk-actions .setting-item-control > button {
+  width: 100%;
+  margin: 0;
+}
+
+/* Disabled bulk actions when agent mode is off */
+.systemsculpt-bulk-actions.mod-disabled {
+  opacity: 0.5;
+}
+
+/* Let Obsidian handle bulk action styling natively too */
+
+/* ====== TOOL CATEGORIZATION STYLES ====== */
+
+/* Tool category sections */
+.systemsculpt-tool-category {
+  margin-bottom: var(--size-4-6);
+}
+
+.systemsculpt-category-header {
+  margin-bottom: var(--size-4-2);
+  padding-bottom: var(--size-4-2);
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.systemsculpt-category-title {
+  margin: 0 0 var(--size-4-2) 0;
+  font-size: var(--font-ui-larger);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-category-title.systemsculpt-write-category {
+  color: var(--text-warning);
+}
+
+.systemsculpt-warning-icon {
+  color: var(--text-warning);
+  display: inline-flex;
+  align-items: center;
+}
+
+.systemsculpt-category-description {
+  margin: 0;
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+}
+
+.systemsculpt-category-description.systemsculpt-write-warning {
+  color: var(--text-warning);
+  font-weight: var(--font-medium);
+  background: var(--background-modifier-error-rgb);
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--text-warning);
+}
+
+/* Write tool styling */
+.systemsculpt-tool-setting.systemsculpt-write-tool {
+  background: var(--background-modifier-error-rgb);
+}
+
+.systemsculpt-tool-setting.systemsculpt-write-tool .setting-item-name {
+  color: var(--text-warning);
+  font-weight: var(--font-medium);
+}
+
+/* Enhanced server section styling within categories */
+.systemsculpt-tool-category .systemsculpt-server-section {
+  margin: var(--size-4-3) 0 var(--size-4-2) 0;
+}
+
+.systemsculpt-tool-category .systemsculpt-server-title {
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+}
+
+/* mcp-result.css */
+/* Tool call result styles have been moved to drawer.css */
+
+/* batch-tool-call-approver.css */
+/* MCP (Model Context Protocol) Component Styles */
+
+/* MCP Server Modal */
+.systemsculpt-mcp-server-modal .modal-content {
+  padding: 20px;
+}
+
+.systemsculpt-mcp-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.systemsculpt-mcp-server-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-mcp-server-form-group label {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-server-form-group input,
+.systemsculpt-mcp-server-form-group select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.systemsculpt-mcp-server-form-group input:focus,
+.systemsculpt-mcp-server-form-group select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.systemsculpt-mcp-server-form-group.error input,
+.systemsculpt-mcp-server-form-group.error select {
+  border-color: var(--text-error);
+}
+
+.systemsculpt-mcp-server-form-validation {
+  color: var(--text-error);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.systemsculpt-mcp-info-notice {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-mcp-info-notice p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.systemsculpt-mcp-stdio-note {
+  background: var(--background-modifier-error-rgb);
+  border: 1px solid var(--text-error);
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-mcp-stdio-note p {
+  margin: 0;
+  color: var(--text-error);
+  font-size: 13px;
+}
+
+/* MCP Tools Modal */
+.systemsculpt-mcp-tools-modal .modal-content {
+  padding: 20px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.systemsculpt-mcp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.systemsculpt-mcp-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-mcp-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+@keyframes systemsculpt-spin {
+  to { transform: rotate(360deg); }
+}
+
+.systemsculpt-mcp-error {
+  padding: 20px;
+  text-align: center;
+}
+
+.systemsculpt-mcp-error p {
+  margin-bottom: 16px;
+}
+
+.systemsculpt-mcp-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.systemsculpt-mcp-bulk-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-mcp-tools-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-mcp-tool-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-mcp-tool-item:hover {
+  border-color: var(--background-modifier-border-hover);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
+}
+
+.systemsculpt-mcp-tool-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-mcp-tool-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-tool-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.systemsculpt-mcp-tool-toggle {
+  margin-left: 16px;
+}
+
+/* MCP Settings Section */
+.systemsculpt-mcp-servers-management {
+  margin-top: 16px;
+}
+
+.systemsculpt-mcp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.systemsculpt-mcp-status-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.systemsculpt-mcp-status .mod-success {
+  color: var(--text-success);
+}
+
+.systemsculpt-mcp-status .mod-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-mcp-info {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.systemsculpt-mcp-info p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Spinning animation for buttons */
+.systemsculpt-spinning svg {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+/* API Key Container (reused from custom provider) */
+.systemsculpt-api-key-input-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-api-key-input-container input {
+  flex: 1;
+}
+
+.systemsculpt-api-key-toggle-visibility {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-api-key-toggle-visibility:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-optional-field-text {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  opacity: 1;
+  margin-left: 8px;
+}
+
+/* Filesystem Consent Modal */
+.systemsculpt-filesystem-consent-modal .modal-content {
+  padding: 20px;
+}
+
+.systemsculpt-filesystem-consent-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.systemsculpt-consent-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-consent-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-normal);
+}
+
+.systemsculpt-consent-section p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-consent-section ul {
+  margin: 0;
+  padding-left: 24px;
+  list-style: disc;
+}
+
+.systemsculpt-consent-section li {
+  font-size: 14px;
+  color: var(--text-normal);
+  margin-bottom: 4px;
+}
+
+.systemsculpt-consent-note {
+  background: var(--background-modifier-error-rgb);
+  border: 1px solid var(--text-error);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.systemsculpt-consent-note p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Default MCP Tools Grid */
+.systemsculpt-mcp-tools-subheader {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 24px 0 8px 0;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-tools-description {
+  margin: 0 0 16px 0;
+  color: var(--text-muted);
+}
+
+.systemsculpt-mcp-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-item:hover {
+  border-color: var(--interactive-accent-hover);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.systemsculpt-mcp-tools-grid .systemsculpt-mcp-tool-toggle {
+  flex-shrink: 0;
+}
+
+/* Tool call content styles have been moved to drawer.css */
+
+/* 
+ * Batch Tool Call Approver Component Styles
+ */
+
+.systemsculpt-batch-tool-call-approver {
+  background: var(--background-secondary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bta-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.bta-body h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+.bta-args {
+  background: var(--background-primary);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.bta-args pre {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.bta-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bta-actions .btn {
+  flex: 1;
+}
+
+.bta-timer-wrapper {
+  height: 4px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.bta-timer-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+}
+
+/* Hide individual pending tool call drawers when batch approver is active */
+.systemsculpt-message.has-batch-approval .systemsculpt-tool-call-wrapper[data-state="pending"] {
+    display: none !important;
+} 
+
+/* diff-viewer.css */
+/**
+ * Diff Viewer Styles - Optimized for tool call UI
+ */
+
+.systemsculpt-diff-viewer {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: hidden;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Compact Header */
+.systemsculpt-diff-header {
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-diff-file-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.systemsculpt-diff-filename {
+  font-family: var(--font-monospace);
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-diff-stats {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smallest);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--background-modifier-form-field);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: fit-content;
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-no-changes {
+  color: var(--text-faint);
+  background: var(--background-modifier-hover);
+}
+
+/* Individual spans for additions and deletions */
+.systemsculpt-diff-additions {
+  color: var(--color-green);
+}
+
+.systemsculpt-diff-deletions {
+  color: var(--color-red);
+}
+
+/* Background colors based on what types of changes exist */
+.systemsculpt-diff-stats.systemsculpt-diff-has-additions {
+  background: rgba(var(--color-green-rgb), 0.1);
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-has-deletions {
+  background: rgba(var(--color-red-rgb), 0.1);
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-has-additions.systemsculpt-diff-has-deletions {
+  background: rgba(var(--color-orange-rgb), 0.1);
+}
+
+/* Content */
+.systemsculpt-diff-content {
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-diff-no-changes-notice {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Hunks */
+.systemsculpt-diff-hunk {
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+}
+
+.systemsculpt-diff-hunk:last-child {
+  border-bottom: none;
+}
+
+.systemsculpt-diff-hunk-separated {
+  margin-top: 8px;
+  border-top: 2px solid var(--background-modifier-border);
+  position: relative;
+}
+
+.systemsculpt-diff-hunk-separated::before {
+  content: '⋯';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--background-primary);
+  color: var(--text-faint);
+  padding: 0 8px;
+  font-size: var(--font-ui-smallest);
+}
+
+.systemsculpt-diff-lines {
+  /* Container for lines in a hunk */
+}
+
+/* Lines */
+.systemsculpt-diff-line {
+  display: flex;
+  align-items: stretch;
+  min-height: 18px;
+  line-height: 18px;
+  font-size: var(--font-ui-smaller);
+  border-left: 2px solid transparent;
+}
+
+.systemsculpt-diff-line-added {
+  background: rgba(var(--color-green-rgb), 0.08);
+  border-left-color: var(--color-green);
+}
+
+.systemsculpt-diff-line-removed {
+  background: rgba(var(--color-red-rgb), 0.08);
+  border-left-color: var(--color-red);
+}
+
+.systemsculpt-diff-line-unchanged {
+  background: var(--background-primary);
+  opacity: 0.7;
+}
+
+.systemsculpt-diff-line:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-diff-line-added:hover {
+  background: rgba(var(--color-green-rgb), 0.12);
+}
+
+.systemsculpt-diff-line-removed:hover {
+  background: rgba(var(--color-red-rgb), 0.12);
+}
+
+/* Line numbers (optional, compact) */
+.systemsculpt-diff-line-numbers {
+  min-width: 30px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  text-align: right;
+  padding: 0 4px;
+  background: var(--background-modifier-hover);
+  border-right: 1px solid var(--background-modifier-border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Prefix symbols */
+.systemsculpt-diff-prefix {
+  width: 16px;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-diff-line-added .systemsculpt-diff-prefix {
+  color: var(--color-green);
+}
+
+.systemsculpt-diff-line-removed .systemsculpt-diff-prefix {
+  color: var(--color-red);
+}
+
+.systemsculpt-diff-line-unchanged .systemsculpt-diff-prefix {
+  color: transparent;
+}
+
+/* Line content */
+.systemsculpt-diff-line-content {
+  flex: 1;
+  padding: 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-family: var(--font-monospace);
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-diff-line-added {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.theme-dark .systemsculpt-diff-line-removed {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.theme-dark .systemsculpt-diff-line-added:hover {
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.theme-dark .systemsculpt-diff-line-removed:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* Light theme adjustments */
+.theme-light .systemsculpt-diff-line-added {
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.theme-light .systemsculpt-diff-line-removed {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.theme-light .systemsculpt-diff-line-added:hover {
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.theme-light .systemsculpt-diff-line-removed:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  .systemsculpt-diff-line-numbers {
+    min-width: 24px;
+  }
+  
+  .systemsculpt-diff-prefix {
+    width: 14px;
+  }
+  
+  .systemsculpt-diff-line-content {
+    padding: 0 4px;
+  }
+} 
+
+/* tool-call-ui.css */
+/**
+ * Tool Call UI Enhancements - Compact display for file operations
+ */
+
+/* Write File Preview */
+.systemsculpt-tool-call-content-preview {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.systemsculpt-tool-call-content-header {
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-call-content-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.systemsculpt-tool-call-content-filename {
+  font-family: var(--font-monospace);
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-tool-call-content-stats {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smallest);
+  color: var(--text-muted);
+  background: var(--background-modifier-form-field);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-call-content-body {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.systemsculpt-tool-call-content-code {
+  margin: 0;
+  padding: 10px;
+  background: var(--background-primary);
+  border: none;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-x: auto;
+}
+
+.systemsculpt-tool-call-content-code code {
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.systemsculpt-tool-call-content-truncated {
+  padding: 6px 10px;
+  background: var(--background-modifier-hover);
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smallest);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Edit File Preview */
+.systemsculpt-tool-call-edits-preview {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.systemsculpt-tool-call-edits-header {
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-family: var(--font-monospace);
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+}
+
+.systemsculpt-tool-call-edits-list {
+  padding: 8px;
+}
+
+.systemsculpt-tool-call-edit-item {
+  margin-bottom: 8px;
+}
+
+.systemsculpt-tool-call-edit-item:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-tool-call-edit-remove,
+.systemsculpt-tool-call-edit-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+}
+
+.systemsculpt-tool-call-edit-remove {
+  background: rgba(var(--color-red-rgb), 0.08);
+  border-left: 2px solid var(--color-red);
+  margin-bottom: 2px;
+}
+
+.systemsculpt-tool-call-edit-add {
+  background: rgba(var(--color-green-rgb), 0.08);
+  border-left: 2px solid var(--color-green);
+}
+
+.systemsculpt-tool-call-edit-prefix {
+  font-weight: 600;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-call-edit-remove .systemsculpt-tool-call-edit-prefix {
+  color: var(--color-red);
+}
+
+.systemsculpt-tool-call-edit-add .systemsculpt-tool-call-edit-prefix {
+  color: var(--color-green);
+}
+
+.systemsculpt-tool-call-edit-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-tool-call-edits-more {
+  padding: 6px 10px;
+  background: var(--background-modifier-hover);
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smallest);
+  font-style: italic;
+  text-align: center;
+  font-family: var(--font-monospace);
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-tool-call-edit-remove {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.theme-dark .systemsculpt-tool-call-edit-add {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+/* Light theme adjustments */
+.theme-light .systemsculpt-tool-call-edit-remove {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.theme-light .systemsculpt-tool-call-edit-add {
+  background: rgba(34, 197, 94, 0.06);
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  .systemsculpt-tool-call-content-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .systemsculpt-tool-call-content-stats {
+    align-self: flex-end;
+  }
+  
+  .systemsculpt-tool-call-edit-remove,
+  .systemsculpt-tool-call-edit-add {
+    padding: 3px 5px;
+    gap: 4px;
+  }
+} 
+
+/* codemirror-diff.css */
+/* CodeMirror Diff Overlay Styles */
+
+/* Notification banner */
+.cm-diff-notification {
+    position: relative;
+    z-index: 1000;
+    background-color: var(--background-primary);
+    border: 2px solid #ff8c00;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    animation: cm-diff-notification-fade-in 0.3s ease-out;
+    width: 80%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.cm-diff-notification-content {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 10px;
+}
+
+.cm-diff-notification-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.cm-diff-notification-text {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.cm-diff-notification-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+}
+
+.cm-diff-notification-close:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+@keyframes cm-diff-notification-fade-in {
+    from { 
+        opacity: 0; 
+        transform: translateY(-10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+}
+
+/* Legacy line highlighting (kept for compatibility) */
+.cm-diff-line-added {
+    background-color: rgba(0, 170, 0, 0.1) !important;
+    border-left: 3px solid #00aa00 !important;
+    position: relative;
+    border-radius: 2px;
+    margin: 1px 0;
+}
+
+.cm-diff-line-removed {
+    background-color: rgba(204, 0, 0, 0.1) !important;
+    border-left: 3px solid #cc0000 !important;
+    position: relative;
+    border-radius: 2px;
+    margin: 1px 0;
+}
+
+
+
+/* Dark theme adjustments for legacy line highlighting */
+.theme-dark .cm-diff-line-added {
+    background-color: rgba(0, 170, 0, 0.15) !important;
+    border-left-color: #22aa22 !important;
+}
+
+.theme-dark .cm-diff-line-removed {
+    background-color: rgba(204, 0, 0, 0.15) !important;
+    border-left-color: #dd2222 !important;
+}
+
+.theme-dark .cm-diff-notification {
+    border-color: #ff9c20;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Light theme adjustments */
+.theme-light .cm-diff-line-added {
+    background-color: rgba(0, 170, 0, 0.08) !important;
+}
+
+.theme-light .cm-diff-line-removed {
+    background-color: rgba(204, 0, 0, 0.08) !important;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .cm-diff-line-added {
+        background-color: rgba(0, 255, 0, 0.2) !important;
+        border-left-width: 4px !important;
+    }
+    
+    .cm-diff-line-removed {
+        background-color: rgba(255, 0, 0, 0.2) !important;
+        border-left-width: 4px !important;
+    }
+}
+
+
+
+/* Improve visibility when lines are focused */
+.cm-diff-line-added.cm-active,
+.cm-diff-line-removed.cm-active {
+    background-color: var(--background-modifier-active-hover) !important;
+}
+
+/* Smooth transitions for better UX */
+.cm-diff-line-added,
+.cm-diff-line-removed {
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Make sure diff lines are visible during selection */
+.cm-diff-line-added::selection,
+.cm-diff-line-removed::selection {
+    background-color: var(--text-selection) !important;
+}
+
+/* Accessibility improvements */
+.cm-diff-notification[role="alert"] {
+    /* Announce changes to screen readers */
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .cm-diff-notification-content {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+    
+    .cm-diff-notification-text {
+        font-size: 13px;
+    }
+    
+
+}
+
+/* Enhanced diff widget styles */
+.cm-diff-widget-added,
+.cm-diff-widget-removed {
+    display: block;
+    font-family: var(--font-monospace);
+    font-size: var(--editor-font-size);
+    line-height: var(--line-height-normal);
+    margin: 1px 0;
+    border-radius: var(--radius-xs);
+    position: relative;
+    min-height: var(--line-height-normal);
+    padding: 2px 8px;
+}
+
+.cm-diff-widget-added {
+    background-color: rgba(var(--color-green-rgb), 0.1);
+    border: 1px solid rgba(var(--color-green-rgb), 0.2);
+}
+
+.cm-diff-widget-removed {
+    background-color: rgba(var(--color-red-rgb), 0.1);
+    border: 1px solid rgba(var(--color-red-rgb), 0.2);
+}
+
+
+
+.cm-diff-widget-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    color: var(--text-normal);
+    line-height: var(--line-height-normal);
+    display: block;
+    width: 100%;
+}
+
+/* Improved line highlighting for original removed lines */
+.cm-diff-line-original-removed {
+    background-color: rgba(var(--color-red-rgb), 0.05) !important;
+    border-left: 2px solid rgba(var(--color-red-rgb), 0.3) !important;
+    opacity: 0.7;
+    position: relative;
+}
+
+/* Theme-specific adjustments */
+.theme-dark .cm-diff-widget-added {
+    background-color: rgba(34, 170, 34, 0.12);
+    border-color: rgba(34, 170, 34, 0.25);
+}
+
+.theme-dark .cm-diff-widget-removed {
+    background-color: rgba(221, 34, 34, 0.12);
+    border-color: rgba(221, 34, 34, 0.25);
+}
+
+
+
+.theme-dark .cm-diff-line-original-removed {
+    background-color: rgba(221, 34, 34, 0.08) !important;
+    border-left-color: rgba(221, 34, 34, 0.35) !important;
+}
+
+.theme-light .cm-diff-line-original-removed {
+    background-color: rgba(204, 0, 0, 0.05) !important;
+    border-left-color: rgba(204, 0, 0, 0.25) !important;
+}
+
+/* High contrast support */
+@media (prefers-contrast: high) {
+    .cm-diff-widget-added,
+    .cm-diff-widget-removed {
+        border-width: 2px;
+    }
+    
+    .cm-diff-line-original-removed {
+        border-left-width: 3px !important;
+    }
+}
+
+/* Hover effects for better interactivity */
+.cm-diff-widget-added:hover,
+.cm-diff-widget-removed:hover {
+    filter: brightness(1.05);
+    transition: filter 0.1s ease;
+}
+
+/* Ensure proper spacing and alignment */
+.cm-diff-widget-added + .cm-line,
+.cm-diff-widget-removed + .cm-line {
+    margin-top: 1px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .cm-diff-widget-added,
+    .cm-diff-widget-removed {
+        padding: 2px 6px;
+    }
+} 
+
+/* notices.css */
+/* 
+  Custom styles for SystemSculpt Notices
+*/
+
+.systemsculpt-notice-title {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.systemsculpt-notice-path {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  color: var(--text-accent);
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  word-break: break-all; /* Ensure long paths wrap */
+}
+
+.systemsculpt-notice-message {
+  font-size: 0.9em;
+  /* Removed opacity to look more like a vanilla notice */
+}
+
+.system-sculpt-notice {
+  padding: 10px 15px;
+  border-radius: var(--radius-m);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+} 
+
+/* slash-commands.css */
+/**
+ * Slash Command Menu Styles
+ * 
+ * A sleek dropdown menu that appears when users type "/" in the chat input.
+ * Follows Obsidian's native UI patterns and is responsive for mobile devices.
+ */
+
+/* Main menu container */
+.systemsculpt-slash-command-menu {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 400px;
+  max-width: 500px;
+  max-height: 300px;
+  overflow: hidden;
+  font-family: var(--font-interface);
+  z-index: 1000;
+  display: none;
+}
+
+/* Search container (now at bottom) */
+.systemsculpt-slash-search-container {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  gap: 8px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+/* Search icon */
+.systemsculpt-slash-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-slash-search-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Search input */
+.systemsculpt-slash-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-normal);
+  font-size: 14px;
+  font-family: var(--font-interface);
+  padding: 4px 0;
+}
+
+.systemsculpt-slash-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Results container (now at top) */
+.systemsculpt-slash-results-container {
+  max-height: 240px;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+/* Result item */
+.systemsculpt-slash-result-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background-color 0.1s ease;
+  gap: 12px;
+}
+
+.systemsculpt-slash-result-item:last-child {
+  border-bottom: none;
+}
+
+.systemsculpt-slash-result-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-slash-result-item.is-selected {
+  background-color: var(--background-modifier-active-hover);
+}
+
+/* Result icon */
+.systemsculpt-slash-result-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-slash-result-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-slash-result-item.is-selected .systemsculpt-slash-result-icon {
+  color: var(--interactive-accent);
+}
+
+/* Result content */
+.systemsculpt-slash-result-content {
+  flex: 1;
+  min-width: 0; /* Allow text to truncate */
+}
+
+/* Result title */
+.systemsculpt-slash-result-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-slash-result-item.is-selected .systemsculpt-slash-result-title {
+  color: var(--interactive-accent);
+}
+
+/* Result description */
+.systemsculpt-slash-result-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Scrollbar styling for results container */
+.systemsculpt-slash-results-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-track {
+  background: var(--background-modifier-border);
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 2px;
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-thumb:hover {
+  background: var(--text-normal);
+}
+
+/* Empty state (when no commands match search) */
+.systemsculpt-slash-empty-state {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Mobile responsive design */
+@media (max-width: 600px) {
+  .systemsculpt-slash-command-menu {
+    min-width: 320px;
+    max-width: calc(100vw - 20px);
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+  }
+  
+  .systemsculpt-slash-search-container {
+    padding: 10px 14px;
+  }
+  
+  .systemsculpt-slash-search-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  .systemsculpt-slash-result-item {
+    padding: 12px 14px;
+    gap: 14px;
+  }
+  
+  .systemsculpt-slash-result-title {
+    font-size: 15px;
+  }
+  
+  .systemsculpt-slash-result-description {
+    font-size: 13px;
+  }
+}
+
+/* Small mobile screens */
+@media (max-width: 400px) {
+  .systemsculpt-slash-command-menu {
+    min-width: 280px;
+  }
+  
+  .systemsculpt-slash-result-item {
+    padding: 10px 12px;
+  }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .systemsculpt-slash-command-menu {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-slash-command-menu {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Animation for menu appearance */
+.systemsculpt-slash-command-menu {
+  transform-origin: top left;
+  animation: systemsculpt-slash-menu-appear 0.1s ease-out;
+}
+
+@keyframes systemsculpt-slash-menu-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Focus states for accessibility */
+.systemsculpt-slash-search-input:focus {
+  /* No visible focus ring since the container handles focus styling */
+}
+
+.systemsculpt-slash-search-container:focus-within {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Selection highlighting for keyboard navigation */
+.systemsculpt-slash-result-item.is-selected {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .systemsculpt-slash-command-menu {
+    border-width: 2px;
+  }
+  
+  .systemsculpt-slash-result-item.is-selected {
+    outline-width: 3px;
+  }
+} 
+
+/* mermaid.css */
+/* Mermaid diagram enhancements – SystemSculpt */
+
+/* Ensure diagram containers can host absolutely-positioned buttons */
+.mermaid {
+  position: relative;
+}
+
+/* Expand button overlay */
+.systemsculpt-mermaid-expand-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.12s ease-in-out;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* Always show for now – can fade on hover later */
+.systemsculpt-mermaid-expand-btn {
+  opacity: 0.8;
+}
+
+/* Ensure hover emphasises */
+.mermaid:hover .systemsculpt-mermaid-expand-btn {
+  opacity: 1;
+}
+
+/* Expanded preview modal layout */
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-diagram {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.systemsculpt-mermaid-preview-modal button.ss-mermaid-copy-btn {
+  margin-top: 8px;
+}
+
+/* Mermaid theme – map to Obsidian CSS variables for seamless theming */
+.mermaid .node rect,
+.mermaid .node circle,
+.mermaid .node polygon {
+  fill: var(--background-secondary) !important;
+  stroke: var(--interactive-accent) !important;
+}
+
+.mermaid .node text {
+  fill: var(--text-normal) !important;
+}
+
+.mermaid .edgePath path {
+  stroke: var(--interactive-accent) !important;
+}
+
+.mermaid .edgeLabel text {
+  fill: var(--text-muted) !important;
+}
+
+.mermaid .cluster rect {
+  fill: var(--background-primary) !important;
+  stroke: var(--interactive-accent) !important;
+} 
+
 /* chat.css */
 /**
  * Chat View
@@ -12663,80 +16719,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   position: relative;
   overscroll-behavior: contain; /* Prevent scroll chaining */
   -webkit-overflow-scrolling: touch; /* Better touch scrolling on iOS */
-}
-
-/* Disable browser's default scroll anchoring for all content */
-* {
-  overflow-anchor: none;
-}
-
-/* Create a dedicated scroll anchor element at the bottom */
-.systemsculpt-scroll-anchor {
-  overflow-anchor: auto !important; /* Force enable scroll anchoring only for this element */
-  height: 1px;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  visibility: hidden;
-  pointer-events: none;
-  position: relative;
-  z-index: -1;
-  min-height: 1px;
-  display: block;
-}
-
-/* Auto-scroll indicator styling */
-.systemsculpt-auto-scroll-indicator {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 500;
-  z-index: 1000;
-  border-radius: 25px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  opacity: 0;
-  transform: translateY(10px);
-  transition: all 0.3s ease;
-  display: none;
-  cursor: pointer;
-  max-width: 90%;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(var(--interactive-accent-rgb), 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(var(--interactive-accent-rgb), 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(var(--interactive-accent-rgb), 0);
-  }
-}
-
-.systemsculpt-auto-scroll-indicator:hover {
-  background-color: var(--interactive-accent-hover);
-  transform: translateY(0);
-}
-
-.systemsculpt-auto-scroll-indicator:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.systemsculpt-auto-scroll-indicator.visible {
-  opacity: 1;
-  transform: translateY(0);
-  display: flex;
 }
 
 /* Thumb appearance for scrollbar */
@@ -12761,6 +16743,48 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Fade out scrollbar when inactive */
 .systemsculpt-messages-container:not(:hover)::-webkit-scrollbar-thumb {
   opacity: 0.5;
+}
+
+/* Scroll to bottom button */
+.systemsculpt-scroll-to-bottom {
+  position: absolute;
+  bottom: 140px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.systemsculpt-scroll-to-bottom:hover {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-normal);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.systemsculpt-scroll-to-bottom:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-scroll-to-bottom {
+    width: 32px;
+    height: 32px;
+    bottom: 120px;
+    right: 16px;
+  }
 }
 
 .systemsculpt-chat-input {
@@ -13225,7 +17249,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-model-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-model-search input {
@@ -13244,7 +17268,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-model-card:hover {
   border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
 }
 
 .systemsculpt-model-info-buttons {
@@ -14067,11 +18091,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border: 1px dashed var(--background-modifier-border);
 }
 
-/* Ensuring the ToggleComponent within Setting items is vertically aligned */
-.setting-item-control .checkbox-container {
-  display: flex; /* Helps with alignment if other elements are in control */
-  align-items: center;
-}
+/* Removed global checkbox-container styling - let Obsidian handle native components */
 
 /* SystemSculpt Native Provider specific override for desc if needed */
 .systemsculpt-native-provider-card .setting-item-description {
@@ -16962,39 +20982,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   text-decoration: none;
 }
 
-.systemsculpt-reasoning-content {
-  font-size: 0.9em;
-  line-height: 1.4;
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  max-height: 1000px;
-  overflow: hidden;
-  transition: max-height 0.2s ease;
-}
-
-.systemsculpt-reasoning-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.9em;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.systemsculpt-reasoning-header .systemsculpt-lucide {
-  width: 14px;
-  height: 14px;
-}
-
-.systemsculpt-reasoning-header:hover {
-  color: var(--text-normal);
-}
-
-.systemsculpt-reasoning-indicator {
-  color: var(--color-purple);
-}
+/* Reasoning-specific styles removed - using unified collapsible drawer styles */
 
 .systemsculpt-recorder-canvas {
   width: 100%;

@@ -17,6 +17,7 @@ SystemSculpt AI comes packed with powerful features that are completely **free t
 - **Generate content, summaries, and insights** based on your knowledge base
 - **Save and organize conversations** for future reference
 - **Use your own API keys** with providers like OpenAI, Anthropic, and Groq
+- **File diff preview** - See git-like diffs when AI proposes changes to open files
 
 ### 🧠 Context-Aware Intelligence
 - **Drag and drop files** into your chat for instant context
@@ -127,6 +128,7 @@ When you're ready to take your productivity to the next level, upgrade to System
 SystemSculpt AI is constantly evolving with new features and improvements:
 
 - **Enhanced UI/UX**: Modern, intuitive interface with improved accessibility and responsiveness
+- **File Diff Preview**: See git-like diffs when AI proposes changes to files you have open, with color-coded additions/deletions
 - **Customizable Title Generation**: Create attention-grabbing titles for chats and notes with customizable prompts
 - **Similar Notes Discovery**: Automatically find connections between your notes as you work
 - **Flexible AI Provider Integration**: Seamlessly connect to your preferred AI services
