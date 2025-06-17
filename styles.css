@@ -4806,6 +4806,30 @@
   margin-bottom: 0;
 }
 
+/* Wiki-links styling in messages */
+.systemsculpt-message-content a.internal-link {
+  color: var(--link-color);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.1s ease;
+}
+
+.systemsculpt-message-content a.internal-link:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}
+
+/* Style for user messages with accent background */
+.systemsculpt-user-message .systemsculpt-message-content a.internal-link {
+  color: var(--text-on-accent);
+  opacity: 0.9;
+}
+
+.systemsculpt-user-message .systemsculpt-message-content a.internal-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .systemsculpt-message-label {
   color: var(--text-accent);
 }
@@ -7172,6 +7196,231 @@
 }
 
 
+/* token-details-modal.css */
+/**
+ * Token Details Modal Styles
+ * 
+ * Styles for the detailed token usage modal
+ */
+
+.systemsculpt-token-details-modal {
+  max-width: 600px;
+  min-height: 400px;
+}
+
+.systemsculpt-token-details-modal h2 {
+  margin-bottom: 20px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-token-details-modal h3 {
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Sections */
+.systemsculpt-token-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Model info grid */
+.systemsculpt-token-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-token-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.systemsculpt-token-info-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.systemsculpt-token-info-value {
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+
+/* Progress bar in modal */
+.systemsculpt-token-modal-progress {
+  margin-top: 12px;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.systemsculpt-token-modal-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.systemsculpt-token-modal-progress-bar.is-warning {
+  background: var(--text-warning);
+}
+
+.systemsculpt-token-modal-progress-bar.is-danger {
+  background: var(--text-error);
+}
+
+/* Breakdown grid */
+.systemsculpt-token-breakdown-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.systemsculpt-token-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+
+.systemsculpt-token-breakdown-row.is-total {
+  font-weight: 600;
+  font-size: 14px;
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.systemsculpt-token-breakdown-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+}
+
+.systemsculpt-token-icon {
+  font-size: 16px;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.systemsculpt-token-label-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.systemsculpt-token-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.systemsculpt-token-breakdown-value {
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  color: var(--text-normal);
+  text-align: right;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.systemsculpt-token-percent {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-token-modal-separator {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 8px 0;
+}
+
+/* Tips section */
+.systemsculpt-token-tips {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+
+.systemsculpt-token-tips li {
+  margin-bottom: 8px;
+}
+
+/* Files list */
+.systemsculpt-token-files-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.systemsculpt-token-files-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-token-file-icon {
+  font-size: 14px;
+}
+
+/* Footer */
+.systemsculpt-token-modal-footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+  text-align: center;
+}
+
+.systemsculpt-token-footer-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-token-section {
+  background: var(--background-secondary-alt);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-token-details-modal {
+    min-height: auto;
+  }
+  
+  .systemsculpt-token-section {
+    padding: 12px;
+  }
+  
+  .systemsculpt-token-breakdown-row {
+    font-size: 12px;
+  }
+}
+
 /* inputs.css */
 /**
  * Input Components
@@ -7796,37 +8045,28 @@
   pointer-events: none;
 }
 
-/* Thinking and generating indicators in messages */
-.systemsculpt-thinking-indicator,
-.systemsculpt-generating-indicator {
-  display: inline-flex;
-  align-items: center;
-  position: relative;
-  color: var(--text-accent);
-  padding-left: 1.5em;
-  font-size: 0.95em;
-  line-height: 1.4;
-  margin-top: 0.25em;
-  /* Ensure minimum width to prevent layout shift during transitions */
-  min-width: 80px;
+/* Terminal-style block loading indicator */
+.systemsculpt-streaming-status {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 1em;
+  color: var(--text-muted);
+  margin-left: 0.5em;
+  min-width: 1ch;
+  line-height: 1;
 }
 
-.systemsculpt-thinking-indicator::before,
-.systemsculpt-generating-indicator::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  width: 0.8em;
-  height: 0.8em;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-  border-right-color: transparent;
-  animation: ss-spin 0.8s linear infinite;
-  /* Prevent animation restart by using animation-play-state */
-  will-change: transform;
-  /* Hardware acceleration for smoother animation */
-  backface-visibility: hidden;
-  transform-style: preserve-3d;
+@keyframes block-cycle {
+  0%   { content: "█"; }
+  25%  { content: "▓"; }
+  50%  { content: "▒"; }
+  75%  { content: "░"; }
+  100% { content: "█"; }
+}
+
+.systemsculpt-streaming-status::after {
+  content: "█";
+  animation: block-cycle 0.8s steps(4) infinite;
 }
 
 /* Preview loading styles */
@@ -8113,8 +8353,6 @@
 }
 
 /* Spinner animation optimization - Apply transform-origin to center */
-.systemsculpt-thinking-indicator::before,
-.systemsculpt-generating-indicator::before,
 .systemsculpt-loader svg,
 .systemsculpt-loading-spinner svg,
 .systemsculpt-preview-loading svg,
@@ -8124,236 +8362,6 @@
 .systemsculpt-loading .systemsculpt-lucide-loader-2 {
   transform-origin: center center;
 }
-
-/* Persistent streaming status indicator for chat messages */
-.systemsculpt-streaming-status {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 24px;
-  margin: 12px 0;
-  background: var(--background-primary);
-  border: 2px solid var(--background-modifier-border);
-  border-radius: 24px;
-  color: var(--text-normal);
-  font-size: 0.95em;
-  font-weight: 500;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  opacity: 0;
-  position: relative;
-  transform: translateY(20px) scale(0.9);
-  backdrop-filter: blur(12px);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.12),
-    0 2px 8px rgba(0, 0, 0, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  pointer-events: none;
-  min-width: 200px;
-  justify-content: center;
-  will-change: transform, opacity;
-  max-width: 400px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* Show animation - slide up and scale in */
-.systemsculpt-streaming-status[style*="flex"] {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  animation: ss-status-breathe 3s ease-in-out infinite;
-}
-
-/* Hide animation */
-.systemsculpt-streaming-status[style*="none"] {
-  opacity: 0;
-  transform: translateY(20px) scale(0.9);
-  pointer-events: none;
-}
-
-/* Breathing animation for liveliness */
-@keyframes ss-status-breathe {
-  0%, 100% { 
-    box-shadow: 
-      0 8px 32px rgba(0, 0, 0, 0.12),
-      0 2px 8px rgba(0, 0, 0, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  }
-  50% { 
-    box-shadow: 
-      0 12px 48px rgba(0, 0, 0, 0.16),
-      0 4px 16px rgba(0, 0, 0, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    transform: translateY(-2px) scale(1.02);
-  }
-}
-
-/* Enhanced shimmer effect with multiple layers */
-.systemsculpt-streaming-status::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    110deg,
-    transparent 25%,
-    rgba(var(--interactive-accent-rgb), 0.15) 50%,
-    transparent 75%
-  );
-  animation: ss-shimmer-enhanced 2.5s ease-in-out infinite;
-  border-radius: inherit;
-}
-
-@keyframes ss-shimmer-enhanced {
-  0% { left: -100%; opacity: 0; }
-  50% { opacity: 1; }
-  100% { left: 100%; opacity: 0; }
-}
-
-/* Status icon - simple and clean */
-.systemsculpt-status-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  position: relative;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* Status text - simple and clean */
-.systemsculpt-status-text {
-  font-weight: 600;
-  letter-spacing: 0.025em;
-  white-space: nowrap;
-}
-
-/* ===== STATE-SPECIFIC STYLING ===== */
-
-/* Thinking state - simple blue indicator */
-.systemsculpt-streaming-status[data-status="thinking"] .systemsculpt-status-icon,
-.systemsculpt-streaming-status[data-status="reasoning"] .systemsculpt-status-icon {
-  background: #3b82f6;
-  color: white;
-}
-
-/* Content generation state - simple green indicator */
-.systemsculpt-streaming-status[data-status="content"] .systemsculpt-status-icon {
-  background: #22c55e;
-  color: white;
-}
-
-/* Tool calls state - simple orange indicator */
-.systemsculpt-streaming-status[data-status="tool_calls"] .systemsculpt-status-icon {
-  background: #f97316;
-  color: white;
-}
-
-/* ===== RESPONSIVE DESIGN ===== */
-
-/* Tablet adjustments */
-@media (max-width: 768px) {
-  .systemsculpt-streaming-status {
-    bottom: 20px;
-    padding: 14px 20px;
-    font-size: 0.9em;
-    min-width: 180px;
-  }
-  
-  .systemsculpt-status-icon {
-    width: 18px;
-    height: 18px;
-  }
-  
-  .systemsculpt-status-icon {
-    width: 18px;
-    height: 18px;
-    font-size: 11px;
-  }
-}
-
-/* Mobile adjustments */
-@media (max-width: 600px) {
-  .systemsculpt-streaming-status {
-    padding: 12px 16px;
-    font-size: 0.85em;
-    min-width: unset;
-    max-width: 280px;
-    margin: 12px auto;
-  }
-  
-  .systemsculpt-streaming-status[style*="flex"] {
-    transform: translateY(0) scale(1);
-  }
-  
-  .systemsculpt-streaming-status[style*="none"] {
-    transform: translateY(20px) scale(0.9);
-  }
-  
-  .systemsculpt-status-icon {
-    width: 16px;
-    height: 16px;
-  }
-  
-  .systemsculpt-status-icon {
-    width: 16px;
-    height: 16px;
-    font-size: 10px;
-  }
-  
-  /* Adjust breathing animation for mobile */
-  @keyframes ss-status-breathe {
-    0%, 100% { 
-      box-shadow: 
-        0 6px 24px rgba(0, 0, 0, 0.1),
-        0 2px 6px rgba(0, 0, 0, 0.06);
-    }
-    50% { 
-      box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.14),
-        0 3px 12px rgba(0, 0, 0, 0.1);
-             transform: translateY(-1px) scale(1.01);
-    }
-  }
-}
-
-/* ===== ACCESSIBILITY & PERFORMANCE ===== */
-
-/* Respect reduced motion preferences */
-@media (prefers-reduced-motion: reduce) {
-  .systemsculpt-streaming-status,
-  .systemsculpt-streaming-status::before,
-  .systemsculpt-streaming-status::after,
-  .systemsculpt-status-icon::before,
-  .systemsculpt-status-text::after {
-    animation: none !important;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-  }
-  
-  .systemsculpt-streaming-status[style*="flex"] {
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* High contrast mode support */
-@media (prefers-contrast: high) {
-  .systemsculpt-streaming-status {
-    border-width: 3px;
-    background: var(--background-primary);
-    backdrop-filter: none;
-  }
-  
-  .systemsculpt-status-icon::before {
-    border-width: 4px;
-  }
-}
-
 
 
 
@@ -11786,6 +11794,230 @@ body.theme-light .systemsculpt-score-low {
 }
 
 
+
+/* token-tooltip.css */
+/**
+ * Token Breakdown Tooltip Component
+ * 
+ * A beautiful hover tooltip that shows token count breakdown
+ * Designed to match Obsidian's native UI aesthetics
+ */
+
+.systemsculpt-token-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: var(--layer-tooltip);
+  
+  /* Visual styling */
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  
+  /* Spacing */
+  padding: 12px;
+  min-width: 220px;
+  
+  /* Animation */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: all 0.2s ease;
+  
+  /* Prevent interaction blocking */
+  pointer-events: none;
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-token-tooltip {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Show state */
+.systemsculpt-token-counter-container:hover .systemsculpt-token-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0.3s; /* Slight delay before showing */
+}
+
+/* Tooltip arrow */
+.systemsculpt-token-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 12px;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+  border-top-color: var(--background-secondary);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
+}
+
+/* Tooltip content layout */
+.systemsculpt-token-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Individual token category row */
+.systemsculpt-token-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Category label with icon */
+.systemsculpt-token-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+/* Category icon */
+.systemsculpt-token-icon {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.8;
+}
+
+/* Token count value */
+.systemsculpt-token-value {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-normal);
+  font-weight: 500;
+  text-align: right;
+  min-width: 48px;
+}
+
+/* Separator line */
+.systemsculpt-token-separator {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 4px 0;
+  opacity: 0.5;
+}
+
+/* Total row styling */
+.systemsculpt-token-category.is-total {
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.systemsculpt-token-category.is-total .systemsculpt-token-label {
+  color: var(--text-normal);
+}
+
+.systemsculpt-token-category.is-total .systemsculpt-token-value {
+  color: var(--text-accent);
+  font-size: 12px;
+}
+
+/* Progress bar for visual representation */
+.systemsculpt-token-progress {
+  position: relative;
+  height: 3px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.systemsculpt-token-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Warning state for high token usage */
+.systemsculpt-token-progress-bar.is-warning {
+  background: var(--text-warning);
+}
+
+.systemsculpt-token-progress-bar.is-danger {
+  background: var(--text-error);
+}
+
+/* Hover effect on the main counter */
+.systemsculpt-token-counter {
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-token-counter:hover {
+  background: var(--background-modifier-hover);
+  transform: translateY(-1px);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-token-tooltip {
+    min-width: 200px;
+    font-size: 11px;
+  }
+  
+  .systemsculpt-token-value {
+    font-size: 10px;
+  }
+}
+
+/* Position adjustment when near edges */
+.systemsculpt-token-tooltip.position-left {
+  right: auto;
+  left: 0;
+}
+
+.systemsculpt-token-tooltip.position-left::after {
+  right: auto;
+  left: 12px;
+}
+
+/* Loading state */
+.systemsculpt-token-counter.is-loading .systemsculpt-token-tooltip {
+  opacity: 0.6;
+}
+
+/* Smooth number transitions */
+.systemsculpt-token-value {
+  transition: color 0.2s ease;
+}
+
+/* Click to learn more text */
+.systemsculpt-token-learn-more {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Update cursor to indicate clickability */
+.systemsculpt-token-counter {
+  cursor: pointer;
+}
+
+/* Active state for token counter */
+.systemsculpt-token-counter:active {
+  transform: translateY(0);
+  background: var(--background-modifier-active);
+}
 
 /* checkboxes.css */
 /**
@@ -16631,6 +16863,404 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
 } 
 
+/* at-mention.css */
+/**
+ * At Mention Menu Styles
+ * 
+ * A dropdown menu that appears when users type "@" in the chat input.
+ * Similar to slash commands but optimized for file selection.
+ */
+
+/* Main menu container */
+.at-mention-menu {
+  position: fixed;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 350px;
+  max-width: 450px;
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.at-mention-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+.at-mention-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Items container */
+.at-mention-items {
+  max-height: 250px;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+}
+
+/* File item */
+.at-mention-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background-color 0.1s ease;
+  gap: 10px;
+}
+
+.at-mention-item:last-child {
+  border-bottom: none;
+}
+
+.at-mention-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.at-mention-item.selected {
+  background-color: var(--background-modifier-active-hover);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+/* File icon */
+.at-mention-item-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  opacity: 0.8;
+}
+
+.at-mention-item.selected .at-mention-item-icon {
+  opacity: 1;
+  color: var(--interactive-accent);
+}
+
+/* File content */
+.at-mention-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* File name */
+.at-mention-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.at-mention-item.selected .at-mention-item-name {
+  color: var(--interactive-accent);
+}
+
+/* File path */
+.at-mention-item-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Search container */
+.at-mention-search {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  gap: 8px;
+}
+
+/* Search input */
+.at-mention-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-family: var(--font-interface);
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-form-field);
+}
+
+.at-mention-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.at-mention-search-input:focus {
+  background-color: var(--background-modifier-form-field-highlighted);
+}
+
+/* Empty state */
+.at-mention-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Scrollbar styling */
+.at-mention-items::-webkit-scrollbar {
+  width: 4px;
+}
+
+.at-mention-items::-webkit-scrollbar-track {
+  background: var(--background-modifier-border);
+}
+
+.at-mention-items::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 2px;
+}
+
+.at-mention-items::-webkit-scrollbar-thumb:hover {
+  background: var(--text-normal);
+}
+
+/* Mobile responsive design */
+@media (max-width: 600px) {
+  .at-mention-menu {
+    min-width: 300px;
+    max-width: calc(100vw - 20px);
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+  }
+  
+  .at-mention-item {
+    padding: 10px 12px;
+  }
+  
+  .at-mention-search-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Animation for menu appearance */
+.at-mention-menu {
+  transform-origin: bottom left;
+  animation: at-mention-appear 0.1s ease-out;
+}
+
+@keyframes at-mention-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Dark theme adjustments */
+.theme-dark .at-mention-menu {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .at-mention-menu {
+    border-width: 2px;
+  }
+  
+  .at-mention-item.selected {
+    outline-width: 3px;
+  }
+}
+
+/* vault-structure.css */
+/**
+ * Vault Structure Styles
+ * 
+ * Styles for vault structure toggle and display in context panel
+ */
+
+/* Toggle in context panel */
+.systemsculpt-vault-structure-toggle {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+}
+
+.systemsculpt-toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.systemsculpt-toggle-checkbox {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.systemsculpt-toggle-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-toggle-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-toggle-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-vault-token-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+/* Vault structure item in context panel */
+.systemsculpt-vault-structure-item {
+  padding: 10px 12px;
+  background-color: var(--background-modifier-hover);
+  border-radius: 6px;
+  margin: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-vault-structure-item:hover {
+  background-color: var(--background-modifier-active-hover);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-vault-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-vault-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-accent);
+}
+
+.systemsculpt-vault-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.systemsculpt-vault-title {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+/* Vault option in @ mention menu */
+.at-mention-item.at-mention-vault {
+  background-color: var(--background-modifier-hover);
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.at-mention-item.at-mention-vault:hover {
+  background-color: var(--background-modifier-active-hover);
+}
+
+.at-mention-item.at-mention-vault.selected {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.at-mention-item.at-mention-vault .at-mention-item-name {
+  font-weight: 600;
+  color: var(--text-accent);
+}
+
+.at-mention-item.at-mention-vault.selected .at-mention-item-name {
+  color: var(--text-on-accent);
+}
+
+.at-mention-item.at-mention-vault .at-mention-item-path {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.at-mention-item.at-mention-vault.selected .at-mention-item-path {
+  color: var(--text-on-accent);
+  opacity: 0.8;
+}
+
+/* Vault structure preview modal */
+.systemsculpt-vault-structure-preview {
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--background-secondary);
+  padding: 16px;
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 60vh;
+  white-space: pre;
+  color: var(--text-normal);
+}
+
+/* Scrollbar for preview */
+.systemsculpt-vault-structure-preview::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.systemsculpt-vault-structure-preview::-webkit-scrollbar-track {
+  background: var(--background-modifier-border);
+}
+
+.systemsculpt-vault-structure-preview::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 4px;
+}
+
+.systemsculpt-vault-structure-preview::-webkit-scrollbar-thumb:hover {
+  background: var(--text-normal);
+}
+
+/* Mobile responsive */
+@media (max-width: 600px) {
+  .systemsculpt-vault-structure-toggle {
+    padding: 12px;
+  }
+  
+  .systemsculpt-toggle-text {
+    font-size: 15px;
+  }
+  
+  .systemsculpt-vault-structure-item {
+    margin: 8px;
+    padding: 12px;
+  }
+}
+
 /* mermaid.css */
 /* Mermaid diagram enhancements – SystemSculpt */
 
@@ -17728,11 +18358,103 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border: 1px solid var(--background-modifier-border-hover);
   padding: 12px 15px;
   border-radius: 6px;
-  font-size: 0.9em;
+  font-size: 0.875em;
   line-height: 1.6;
-  white-space: pre-wrap;
   margin-top: 10px;
   margin-bottom: 15px;
+  color: var(--text-normal);
+}
+
+/* Calm markdown styles for changelog */
+.systemsculpt-changelog-entry-notes-markdown h1,
+.systemsculpt-changelog-entry-notes-markdown h2,
+.systemsculpt-changelog-entry-notes-markdown h3,
+.systemsculpt-changelog-entry-notes-markdown h4,
+.systemsculpt-changelog-entry-notes-markdown h5,
+.systemsculpt-changelog-entry-notes-markdown h6 {
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.systemsculpt-changelog-entry-notes-markdown h1 { font-size: 1.3em; }
+.systemsculpt-changelog-entry-notes-markdown h2 { font-size: 1.2em; }
+.systemsculpt-changelog-entry-notes-markdown h3 { font-size: 1.1em; }
+.systemsculpt-changelog-entry-notes-markdown h4 { font-size: 1.05em; }
+.systemsculpt-changelog-entry-notes-markdown h5 { font-size: 1em; }
+.systemsculpt-changelog-entry-notes-markdown h6 { font-size: 0.95em; }
+
+.systemsculpt-changelog-entry-notes-markdown p {
+  margin-bottom: 0.75em;
+}
+
+.systemsculpt-changelog-entry-notes-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-changelog-entry-notes-markdown ul,
+.systemsculpt-changelog-entry-notes-markdown ol {
+  margin-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.systemsculpt-changelog-entry-notes-markdown li {
+  margin-bottom: 0.25em;
+}
+
+.systemsculpt-changelog-entry-notes-markdown code {
+  background-color: var(--background-modifier-code-block);
+  padding: 0.15em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-changelog-entry-notes-markdown pre {
+  background-color: var(--background-modifier-code-block);
+  padding: 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin-bottom: 0.75em;
+}
+
+.systemsculpt-changelog-entry-notes-markdown pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.systemsculpt-changelog-entry-notes-markdown blockquote {
+  border-left: 3px solid var(--blockquote-border);
+  padding-left: 1em;
+  margin-left: 0;
+  margin-bottom: 0.75em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-changelog-entry-notes-markdown a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.systemsculpt-changelog-entry-notes-markdown a:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-changelog-entry-notes-markdown strong,
+.systemsculpt-changelog-entry-notes-markdown b {
+  font-weight: 600;
+}
+
+.systemsculpt-changelog-entry-notes-markdown em,
+.systemsculpt-changelog-entry-notes-markdown i {
+  font-style: italic;
+}
+
+.systemsculpt-changelog-entry-notes-markdown hr {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 1em 0;
 }
 
 .systemsculpt-changelog-entry-link {
@@ -21419,14 +22141,22 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.systemsculpt-token-counter {
+.systemsculpt-token-counter-container {
+  margin-left: auto;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  padding: 0.25rem 0.5rem;
-  font-size: 12px;
+}
+
+.systemsculpt-token-counter {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 0.25rem;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .systemsculpt-top-pick-badge {
