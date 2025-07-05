@@ -16256,6 +16256,11 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background: var(--background-modifier-active-hover);
 }
 
+.context-file-item.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .context-file-icon {
   width: var(--icon-m);
   height: var(--icon-m);
