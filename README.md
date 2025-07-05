@@ -4,8 +4,8 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/systemsculpt/obsidian-systemsculpt-plugin)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
 
@@ -121,13 +121,12 @@ See through your AI's eyes:
 - **📝 OCR Capabilities**: Extract text from images
 - **🎯 Context Integration**: Include images in conversations
 
-### ⚡ **SystemSculpt Cloud**
-Premium AI access without managing API keys:
-- **🌐 Optimized Models**: Curated selection of best-performing models
-- **💳 Credit System**: Pay-as-you-go, no subscriptions
-- **🚀 Priority Access**: First to try new models
-- **📊 Usage Analytics**: Track your AI usage
-- **🔒 Privacy-First**: Your data never trains models
+### ⚡ **SystemSculpt Premium**
+Enhanced AI capabilities for power users:
+- **🌐 Premium Models**: Access to advanced AI models
+- **🚀 Priority Features**: First access to new capabilities
+- **📊 Enhanced Processing**: Document and audio processing
+- **🔒 Privacy-Focused**: Your data stays in your vault
 
 ---
 
@@ -143,7 +142,7 @@ Premium AI access without managing API keys:
 ```bash
 # Clone into your vault's plugins folder
 cd /path/to/vault/.obsidian/plugins/
-git clone https://github.com/systemsculpt/obsidian-systemsculpt-plugin systemsculpt-ai
+git clone https://github.com/SystemSculpt/obsidian-systemsculpt-plugin systemsculpt-ai
 
 # Install dependencies and build
 cd systemsculpt-ai
@@ -226,8 +225,10 @@ AI: *Reads code, generates documentation with examples*
 
 | Plan | Price | Best For | Includes |
 |------|-------|----------|----------|
-| **Monthly** | $19/mo | Active users | All premium features + 10,000 API credits |
-| **Lifetime** | $249 | Power users | Everything + 1-on-1 setup session with creator |
+| **[Monthly](https://systemsculpt.com/monthly)** | $19/mo | Active users | All premium features |
+| **[Lifetime](https://systemsculpt.com/lifetime)** | $249 | Power users | Everything + 1-on-1 setup session with creator |
+
+[**🛒 Get Premium Access →**](https://systemsculpt.com/pricing)
 
 ---
 
@@ -237,9 +238,9 @@ Your data is YOUR data. Period.
 
 - 🏠 **Local First**: All data stays in your vault
 - 🔑 **Your API Keys**: Direct connection to AI providers
-- 🚫 **No Training**: Your data never trains AI models
+- 🚫 **No Data Collection**: Your conversations stay private
 - 🔒 **Encrypted Storage**: API keys secured by Obsidian
-- ✅ **Explicit Consent**: Cloud features require opt-in
+- ✅ **Secure Processing**: Premium features use secure endpoints
 - 🌐 **Offline Mode**: Works with local models
 
 ---
@@ -272,14 +273,8 @@ Built with modern web technologies for performance and reliability:
 ```
 
 ### Contributing
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [GitHub Issues](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin/issues) to get started.
 
-### Building from Source
-```bash
-npm install        # Install dependencies
-npm run dev       # Start development mode
-npm run build     # Build for production
-```
 
 ---
 
@@ -291,7 +286,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Built with ❤️ by [Mike Birdgeneau](https://github.com/birdflu) for the Obsidian community**
+**Built with ❤️ by [Mike Stolarz](https://github.com/SystemSculpt) for the Obsidian community**
 
 [⬆ Back to Top](#-systemsculpt-ai-for-obsidian)
 

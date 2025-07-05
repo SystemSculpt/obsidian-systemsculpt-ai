@@ -9283,6 +9283,94 @@
 
 .api-notice-settings-button:hover {
   background-color: var(--interactive-accent-hover);
+}
+
+/* SystemSculpt Primary Provider Styling */
+.systemsculpt-primary-provider-active {
+  border: 2px solid var(--interactive-accent) !important;
+  background: linear-gradient(135deg, 
+    rgba(var(--interactive-accent-rgb), 0.05) 0%, 
+    rgba(var(--interactive-accent-rgb), 0.02) 100%) !important;
+  box-shadow: 0 4px 16px rgba(var(--interactive-accent-rgb), 0.15) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.systemsculpt-primary-provider-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, 
+    var(--interactive-accent) 0%, 
+    var(--interactive-accent-hover) 50%, 
+    var(--interactive-accent) 100%);
+  z-index: 1;
+}
+
+.systemsculpt-primary-provider-header {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(var(--interactive-accent-rgb), 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(var(--interactive-accent-rgb), 0.2);
+  position: relative;
+  z-index: 2;
+}
+
+.systemsculpt-primary-provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.3);
+}
+
+.systemsculpt-primary-provider-description {
+  margin: 0;
+  font-size: 0.9em;
+  color: var(--text-normal);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.systemsculpt-primary-toggle {
+  background: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.systemsculpt-primary-provider-active:hover {
+  box-shadow: 0 6px 20px rgba(var(--interactive-accent-rgb), 0.25) !important;
+  border-color: var(--interactive-accent-hover) !important;
+}
+
+/* Enhanced native provider card styling */
+.systemsculpt-native-provider-card {
+  margin-bottom: 20px;
+  transition: all 0.3s ease;
+}
+
+.systemsculpt-native-provider-card .setting-item {
+  border: none;
+  background: transparent;
+}
+
+.systemsculpt-native-provider-card .setting-item:first-child {
+  border-top: none;
+}
+
+.systemsculpt-native-provider-card .setting-item:last-child {
+  border-bottom: none;
 } 
 
 /* welcome.css */
