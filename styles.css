@@ -11113,34 +11113,34 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* status-bar.css */
 /* Status Bar Indicator - Native Obsidian Integration */
 
-/* Base status bar styling to merge with Obsidian's look */
-.status-bar-item.is-active {
+/* Base status bar styling to merge with Obsidian's look - scoped to SystemSculpt elements */
+.systemsculpt-status-bar-item.is-active {
   color: var(--interactive-accent);
 }
 
-.status-bar-item.is-complete {
+.systemsculpt-status-bar-item.is-complete {
   color: var(--text-success);
 }
 
-.status-bar-item.has-error {
+.systemsculpt-status-bar-item.has-error {
   color: var(--text-error);
 }
 
-.status-bar-item.is-paused {
+.systemsculpt-status-bar-item.is-paused {
   color: var(--text-warning);
 }
 
-.status-bar-item.is-scanning {
+.systemsculpt-status-bar-item.is-scanning {
   color: var(--text-accent);
 }
 
-/* Spinning animation using Obsidian's native animation */
-.status-bar-item-icon.is-spinning {
+/* Spinning animation using Obsidian's native animation - scoped to SystemSculpt elements */
+.systemsculpt-status-bar-item-icon.is-spinning {
   animation: rotation 2s infinite linear;
 }
 
-/* Progress text styling */
-.status-progress-text {
+/* Progress text styling - scoped to SystemSculpt elements */
+.systemsculpt-status-progress-text {
   font-size: var(--font-smallest);
   opacity: 1;
   margin-left: 4px;
@@ -11152,8 +11152,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   width: auto;
 }
 
-/* Improve spacing between icon and text */
-.status-bar-item-icon + span {
+/* Improve spacing between icon and text - scoped to SystemSculpt elements */
+.systemsculpt-status-bar-item-icon + span {
   margin-left: 4px;
 }
 
@@ -11198,8 +11198,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
 }
 
-/* Enhanced status container */
-.status-container {
+/* Enhanced status container - scoped to SystemSculpt elements */
+.systemsculpt-status-container {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -11207,14 +11207,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   max-width: none; /* Remove max-width restriction to allow content to display fully */
 }
 
-/* Progress text */
-.status-progress-text {
+/* Progress text - scoped to SystemSculpt elements */
+.systemsculpt-status-progress-text {
   font-weight: 600;
   color: var(--interactive-accent);
 }
 
-/* Sub info elements */
-.status-sub-info {
+/* Sub info elements - scoped to SystemSculpt elements */
+.systemsculpt-status-sub-info {
   font-size: 0.85em;
   opacity: 1;
   white-space: nowrap;
@@ -11222,18 +11222,18 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   text-overflow: ellipsis;
 }
 
-.status-sub-info.count-info {
+.systemsculpt-status-sub-info.count-info {
   color: var(--text-muted);
 }
 
-.status-sub-info.file-info {
+.systemsculpt-status-sub-info.file-info {
   color: var(--text-accent);
   max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.status-sub-info.update-info {
+.systemsculpt-status-sub-info.update-info {
   color: var(--text-muted);
   font-style: italic;
   font-size: 0.8em;
@@ -11267,25 +11267,25 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Mobile optimizations */
 @media (max-width: 768px) {
-  .status-container {
+  .systemsculpt-status-container {
     max-width: none; /* Allow full width display even on mobile */
   }
   
-  .status-sub-info.file-info {
+  .systemsculpt-status-sub-info.file-info {
     max-width: 100px; /* Increased space for file info on mobile */
   }
 }
 
-/* Performance meter colours */
-.status-bar-item-icon.perf-low {
+/* Performance meter colours - scoped to SystemSculpt elements */
+.systemsculpt-status-bar-item-icon.perf-low {
   color: var(--text-success);
 }
 
-.status-bar-item-icon.perf-med {
+.systemsculpt-status-bar-item-icon.perf-med {
   color: var(--text-warning);
 }
 
-.status-bar-item-icon.perf-high {
+.systemsculpt-status-bar-item-icon.perf-high {
   color: var(--text-error);
 }
 
@@ -11324,6 +11324,13 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   white-space: pre-line;
   font-variant-numeric: tabular-nums;
   font-size: var(--font-smallest);
+}
+
+/* embeddings-status-bar.css */
+/* Embeddings Status Bar Component - Minimal styling to match native status bar */
+
+.systemsculpt-embeddings-status-bar {
+  cursor: pointer;
 }
 
 /* progress-modal.css */
@@ -11636,55 +11643,55 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 /* Chunking status */
-.status-chunking {
+.systemsculpt-status-chunking {
   background-color: rgb(var(--interactive-accent-rgb));
   border-left: 3px solid var(--text-accent);
 }
 
-.status-chunking .systemsculpt-status-icon {
+.systemsculpt-status-chunking .systemsculpt-status-icon {
   color: var(--text-accent);
   animation: pulse 2s infinite;
 }
 
 /* Processing status */
-.status-processing {
+.systemsculpt-status-processing {
   background-color: rgb(var(--interactive-accent-rgb));
   border-left: 3px solid var(--interactive-accent);
 }
 
-.status-processing .systemsculpt-status-icon {
+.systemsculpt-status-processing .systemsculpt-status-icon {
   color: var(--interactive-accent);
   animation: spin 1.5s linear infinite;
 }
 
 /* Uploading status */
-.status-uploading {
+.systemsculpt-status-uploading {
   background-color: rgb(var(--color-blue-rgb));
   border-left: 3px solid var(--color-blue);
 }
 
-.status-uploading .systemsculpt-status-icon {
+.systemsculpt-status-uploading .systemsculpt-status-icon {
   color: var(--color-blue);
   animation: bounce 1s infinite;
 }
 
 /* Success status */
-.status-success {
+.systemsculpt-status-success {
   background-color: rgb(var(--color-green-rgb));
   border-left: 3px solid var(--color-green);
 }
 
-.status-success .systemsculpt-status-icon {
+.systemsculpt-status-success .systemsculpt-status-icon {
   color: var(--color-green);
 }
 
 /* Error status */
-.status-error {
+.systemsculpt-status-error {
   background-color: rgb(var(--color-red-rgb));
   border-left: 3px solid var(--color-red);
 }
 
-.status-error .systemsculpt-status-icon {
+.systemsculpt-status-error .systemsculpt-status-icon {
   color: var(--color-red);
 }
 
@@ -11706,16 +11713,16 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 /* Add shimmer effect to status text during processing */
-.status-processing .systemsculpt-status-text,
-.status-chunking .systemsculpt-status-text,
-.status-uploading .systemsculpt-status-text {
+.systemsculpt-status-processing .systemsculpt-status-text,
+.systemsculpt-status-chunking .systemsculpt-status-text,
+.systemsculpt-status-uploading .systemsculpt-status-text {
   position: relative;
   overflow: hidden;
 }
 
-.status-processing .systemsculpt-status-text::after,
-.status-chunking .systemsculpt-status-text::after,
-.status-uploading .systemsculpt-status-text::after {
+.systemsculpt-status-processing .systemsculpt-status-text::after,
+.systemsculpt-status-chunking .systemsculpt-status-text::after,
+.systemsculpt-status-uploading .systemsculpt-status-text::after {
   content: "";
   position: absolute;
   top: 0;
@@ -15578,7 +15585,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   font-size: var(--font-ui-medium);
 }
 
-.embeddings-progress-bar {
+.systemsculpt-embeddings-progress-bar {
   width: 100%;
   height: 20px;
   background-color: var(--background-modifier-border);
@@ -15592,27 +15599,26 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background: linear-gradient(90deg, var(--interactive-accent), var(--interactive-accent-hover));
   transition: width 0.3s ease;
   position: relative;
+  overflow: hidden;
 }
 
-.embeddings-progress-fill::after {
+/* Animated stripes overlay for processing state - shows activity while maintaining actual progress width */
+.embeddings-progress-fill.processing::after {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   bottom: 0;
   right: 0;
-  background: linear-gradient(
+  background: repeating-linear-gradient(
     45deg,
-    transparent 25%,
-    rgba(255, 255, 255, 0.1) 25%,
-    rgba(255, 255, 255, 0.1) 50%,
-    transparent 50%,
-    transparent 75%,
-    rgba(255, 255, 255, 0.1) 75%,
-    rgba(255, 255, 255, 0.1)
+    transparent 0px,
+    transparent 10px,
+    rgba(255, 255, 255, 0.3) 10px,
+    rgba(255, 255, 255, 0.3) 20px
   );
-  background-size: 20px 20px;
-  animation: embeddings-progress-stripes 1s linear infinite;
+  background-size: 28.28px 28.28px;
+  animation: embeddings-progress-stripes 0.8s linear infinite;
 }
 
 @keyframes embeddings-progress-stripes {
@@ -15620,7 +15626,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     background-position: 0 0;
   }
   100% {
-    background-position: 20px 20px;
+    background-position: 28.28px 0;
   }
 }
 
@@ -15903,7 +15909,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   display: none;
 }
 
-.status-text {
+.systemsculpt-status-text {
   color: var(--text-muted);
 }
 
@@ -16058,23 +16064,23 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   text-align: center;
 }
 
-.loading-spinner {
+.systemsculpt-loading-spinner {
   width: var(--size-4-8);
   height: var(--size-4-8);
   border: 2px solid var(--background-modifier-border);
   border-top-color: var(--interactive-accent);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: systemsculpt-spin 1s linear infinite;
   margin-bottom: var(--size-4-4);
 }
 
-@keyframes spin {
+@keyframes systemsculpt-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.loading-text {
+.systemsculpt-loading-text {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
@@ -19639,6 +19645,51 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-top: var(--size-4-1);
 }
 
+.systemsculpt-license-guidance {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-3);
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.systemsculpt-guidance-header {
+  font-weight: var(--font-semibold);
+  color: var(--text-accent);
+  margin-bottom: var(--size-4-2);
+  text-align: center;
+}
+
+.systemsculpt-guidance-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  margin-bottom: var(--size-4-2);
+  line-height: 1.4;
+}
+
+.systemsculpt-guidance-option:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-option-label {
+  font-weight: var(--font-semibold);
+  color: var(--interactive-accent);
+  margin-right: var(--size-4-1);
+  flex-shrink: 0;
+}
+
+.systemsculpt-option-divider {
+  text-align: center;
+  margin: var(--size-4-2) 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+}
+
 .systemsculpt-custom-providers-header {
   margin-top: var(--size-4-4); 
   margin-bottom: var(--size-4-3); 
@@ -20422,6 +20473,162 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   .ss-modal-refresh-button {
     justify-content: center;
   }
+}
+
+/* --- MODEL SETTINGS TAB STYLES --- */
+.systemsculpt-models-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--size-4-3);
+  margin-bottom: var(--size-4-4);
+}
+
+.systemsculpt-model-card {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 12px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.systemsculpt-model-card-clickable {
+  cursor: pointer;
+}
+
+.systemsculpt-model-card-clickable:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-model-card-title {
+  margin: 0;
+  font-size: var(--font-ui-normal);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.systemsculpt-model-card-description {
+  margin: 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.systemsculpt-model-card-value {
+  margin: 0;
+  margin-top: auto;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  word-break: break-word;
+  line-height: 1.1;
+  padding: 6px 10px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-model-card-value-empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.systemsculpt-model-card-value-default {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.systemsculpt-model-card-value-unavailable {
+  color: var(--color-red);
+  font-style: italic;
+}
+
+/* First-time user guidance for models */
+.systemsculpt-models-guidance {
+  margin-top: var(--size-4-3);
+  padding: var(--size-4-3);
+  background-color: var(--background-modifier-info);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.systemsculpt-models-guidance-text {
+  margin: 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  line-height: 1.4;
+}
+
+
+/* Transcription model display */
+.systemsculpt-transcription-model-display {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  background-color: var(--background-modifier-hover);
+  padding: var(--size-2-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-transcription-note {
+  margin-top: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  background-color: var(--background-modifier-info);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--interactive-accent);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/* Responsive layout for model cards */
+@media (max-width: 768px) {
+  .systemsculpt-models-container {
+    grid-template-columns: 1fr;
+    gap: var(--size-4-2);
+  }
+  
+  .systemsculpt-model-card {
+    padding: 10px;
+    gap: 4px;
+  }
+  
+  .systemsculpt-model-card-value {
+    padding: 4px 8px;
+  }
+}
+
+/* Medium screens - 2 columns */
+@media (min-width: 769px) and (max-width: 1200px) {
+  .systemsculpt-models-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Large screens - 3 columns */
+@media (min-width: 1201px) {
+  .systemsculpt-models-container {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Model settings reference note */
+.systemsculpt-model-settings-note {
+  margin-bottom: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  background-color: var(--background-modifier-info);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--interactive-accent);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
 }
 
 
@@ -22559,7 +22766,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Consolidated empty states - more compact */
 .embeddings-view-empty,
 .embeddings-view-no-results,
-.embeddings-view-error {
+.embeddings-view-error,
+.embeddings-view-disabled {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -22571,7 +22779,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .empty-icon,
 .no-results-icon,
-.error-icon {
+.error-icon,
+.disabled-icon {
   width: 40px;
   height: 40px;
   opacity: 0.4;
@@ -22580,7 +22789,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .empty-title,
 .no-results-title,
-.error-title {
+.error-title,
+.disabled-title {
   font-size: 15px;
   font-weight: 500;
   color: var(--text-normal);
@@ -22589,7 +22799,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .empty-description,
 .no-results-description,
-.error-message {
+.error-message,
+.disabled-description {
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1.3;
@@ -22622,36 +22833,36 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   min-height: 120px;
 }
 
-.loading-spinner {
+.systemsculpt-loading-spinner {
   width: 24px;
   height: 24px;
   border: 2px solid var(--background-modifier-border);
   border-top: 2px solid var(--text-accent);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: embeddings-view-spin 1s linear infinite;
   margin-bottom: 16px;
 }
 
 /* Small spinner for quick loading */
-.loading-spinner.small {
+.systemsculpt-loading-spinner.small {
   width: 18px;
   height: 18px;
   border-width: 1.5px;
   margin-bottom: 12px;
 }
 
-.loading-text {
+.systemsculpt-loading-text {
   font-size: 14px;
   color: var(--text-muted);
 }
 
 /* Small text for quick loading */
-.loading-text.small {
+.systemsculpt-loading-text.small {
   font-size: 12px;
   opacity: 0.8;
 }
 
-@keyframes spin {
+@keyframes embeddings-view-spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
@@ -22792,14 +23003,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-top: 16px;
 }
 
-.progress-text {
+.systemsculpt-progress-text {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 8px;
   text-align: center;
 }
 
-.progress-bar {
+.systemsculpt-progress-bar {
   width: 100%;
   height: 4px;
   background-color: var(--background-modifier-border);
@@ -22807,12 +23018,45 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   overflow: hidden;
 }
 
-.progress-fill {
+.systemsculpt-progress-fill {
   height: 100%;
   background-color: var(--interactive-accent);
   width: 0%;
   transition: width 0.3s ease;
   border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated stripes for processing state */
+.systemsculpt-progress-fill.processing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    45deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.15) 25%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 50%,
+    transparent 75%,
+    rgba(255, 255, 255, 0.15) 75%,
+    rgba(255, 255, 255, 0.15)
+  );
+  background-size: 16px 16px;
+  animation: embeddings-view-progress-stripes 1.2s linear infinite;
+}
+
+@keyframes embeddings-view-progress-stripes {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 16px 16px;
+  }
 }
 
 /* Drag and Drop Styles for Similar Notes */
