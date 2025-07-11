@@ -459,6 +459,33 @@
 }
 
 
+/* responsive-breakpoints.css */
+/* ========================================================================== */
+/* == Responsive Breakpoints                                              == */
+/* ========================================================================== */
+
+:root {
+  /* Mobile breakpoints */
+  --mobile-max-width: 480px;
+  --tablet-min-width: 600px;
+  --desktop-min-width: 1024px;
+  
+  /* Toolbar opacity values */
+  --toolbar-opacity-hidden: 0;
+  --toolbar-opacity-partial: 0.6;
+  --toolbar-opacity-visible: 0.8;
+  --toolbar-opacity-full: 1;
+  
+  /* Backdrop blur intensity */
+  --toolbar-backdrop-blur: 4px;
+  
+  /* Toolbar scaling on interaction */
+  --toolbar-scale-active: 1.05;
+  
+  /* Border radius for toolbars */
+  --toolbar-border-radius: 12px;
+}
+
 /* containers.css */
 /**
  * Container Components
@@ -6108,12 +6135,75 @@
     overscroll-behavior-y: contain;
   }
   
-  /* Reduce complexity on mobile during scrolling */
+  /* Only hide toolbars on very small screens (phones in portrait) */
+  /* This preserves functionality on iPad split-view and larger screens */
+}
+
+/* Improved responsive toolbar handling for touch devices */
+@media (max-width: var(--mobile-max-width)) {
+  /* Only hide on very small screens like phones */
   .systemsculpt-message-button-toolbar,
   .systemsculpt-message-button-toolbar-collapsed,
   .systemsculpt-message-button-toolbar-expanded {
-    /* Hide toolbars on mobile during scroll for better performance */
+    /* Reduce complexity on very small screens only */
     display: none !important;
+  }
+}
+
+/* Touch-friendly action buttons for devices without hover */
+@media (hover: none) {
+  /* Make collapsed toolbar visible by default on touch devices */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-partial) !important;
+    visibility: visible !important;
+    background: rgba(var(--background-primary-rgb), 0.8) !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    border-radius: var(--toolbar-border-radius) !important;
+    backdrop-filter: blur(var(--toolbar-backdrop-blur)) !important;
+    -webkit-backdrop-filter: blur(var(--toolbar-backdrop-blur)) !important;
+  }
+  
+  /* Full visibility when touched/active */
+  .systemsculpt-message:active .systemsculpt-message-button-toolbar-collapsed,
+  .systemsculpt-message-button-toolbar-collapsed:active {
+    opacity: var(--toolbar-opacity-full) !important;
+    transform: translateY(0) scale(var(--toolbar-scale-active)) !important;
+  }
+  
+  /* Ensure buttons within collapsed toolbar are visible */
+  .systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button {
+    opacity: var(--toolbar-opacity-full) !important;
+    visibility: visible !important;
+  }
+}
+
+/* Tablet-friendly: Allow toolbars on larger touch devices */
+@media (hover: none) and (min-width: var(--tablet-min-width)) {
+  /* iPad and larger tablets should show toolbars */
+  .systemsculpt-message-button-toolbar,
+  .systemsculpt-message-button-toolbar-collapsed,
+  .systemsculpt-message-button-toolbar-expanded {
+    display: flex !important; /* Override any hiding rules */
+  }
+  
+  /* Make collapsed toolbar more visible on tablets */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-visible) !important;
+    visibility: visible !important;
+  }
+}
+
+/* Desktop with fine pointer: Original hover behavior */
+@media (hover: hover) and (pointer: fine) {
+  /* Desktop users get original hover-based interaction */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-hidden);
+    visibility: hidden;
+  }
+  
+  .systemsculpt-message:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
+    opacity: var(--toolbar-opacity-full);
+    visibility: visible;
   }
 }
 
@@ -9371,6 +9461,44 @@
 
 .systemsculpt-native-provider-card .setting-item:last-child {
   border-bottom: none;
+}
+
+/* Credit Display and "Need More Credits?" Styling */
+.systemsculpt-credit-display-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.systemsculpt-credit-breakdown-text {
+  font-size: 0.9em;
+  color: var(--text-normal);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.systemsculpt-need-more-credits-link {
+  font-size: 0.8em;
+  color: var(--interactive-accent);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid transparent;
+  margin-top: 2px;
+  padding: 2px 0;
+  font-weight: 500;
+}
+
+.systemsculpt-need-more-credits-link:hover {
+  color: var(--interactive-accent-hover);
+  border-bottom-color: var(--interactive-accent-hover);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-need-more-credits-link:active {
+  transform: translateY(0);
 } 
 
 /* welcome.css */
@@ -20765,6 +20893,45 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border-left: 3px solid var(--interactive-accent);
   font-size: var(--font-ui-small);
   color: var(--text-normal);
+}
+
+/* Credit breakdown display styles */
+.systemsculpt-credit-total {
+  margin-bottom: var(--size-4-1);
+}
+
+.systemsculpt-credit-total-text {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-credit-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin-left: var(--size-4-2);
+}
+
+.systemsculpt-credit-item {
+  display: flex;
+  align-items: center;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.systemsculpt-credit-bullet {
+  color: var(--text-accent);
+  margin-right: var(--size-2-1);
+  font-weight: var(--font-bold);
+}
+
+.systemsculpt-credit-monthly {
+  color: var(--text-accent);
+}
+
+.systemsculpt-credit-additional {
+  color: var(--color-yellow);
 }
 
 

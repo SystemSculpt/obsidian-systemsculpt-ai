@@ -286,7 +286,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Built with ❤️ by [Mike Stolarz](https://github.com/SystemSculpt) for the Obsidian community**
+**Built with ❤️ by [Mike](https://github.com/SystemSculpt) for the Obsidian community**
 
 [⬆ Back to Top](#-systemsculpt-ai-for-obsidian)
 
