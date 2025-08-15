@@ -1,11 +1,11 @@
 {
   "id": "systemsculpt-ai",
   "name": "SystemSculpt AI",
-  "version": "1.5.2",
+  "version": "2.0.0",
   "minAppVersion": "0.15.0",
   "description": "A powerful AI that helps you sculpt your knowledge base with artificial intelligence through intelligent chat, document analysis, and seamless integrations.",
   "author": "SystemSculpt",
-  "authorUrl": "systemsculpt.com",
+  "authorUrl": "https://systemsculpt.com",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
   "isDesktopOnly": false
 }

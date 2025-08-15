@@ -283,6 +283,324 @@
 }
 
 
+/* chat-animations.css */
+/**
+ * Chat Animations - Smooth UI Transitions
+ *
+ * Entrance animations, state transitions, and micro-interactions
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Message Entrance Animations                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Typing Indicator Animation                               ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(var(--background-secondary-rgb), 0.6);
+  border-radius: 16px;
+  margin: 8px 0;
+}
+
+.systemsculpt-typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingPulse 1.4s ease-in-out infinite;
+}
+
+.systemsculpt-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.systemsculpt-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingPulse {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Loading States                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.systemsculpt-loading::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(var(--interactive-accent-rgb), 0.1),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  to {
+    left: 100%;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Pulse Effects                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(var(--interactive-accent-rgb), 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px 10px rgba(var(--interactive-accent-rgb), 0);
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Smooth State Transitions                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-transition-opacity {
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-transition-transform {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-transition-all {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Button Press Effects                                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-button-press {
+  transition: transform 0.1s ease;
+}
+
+.systemsculpt-button-press:active {
+  transform: scale(0.95);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Shake                                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes errorShake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+.systemsculpt-error-shake {
+  animation: errorShake 0.5s ease-out;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Success Check                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes successCheck {
+  0% {
+    transform: scale(0) rotate(45deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(45deg);
+  }
+  100% {
+    transform: scale(1) rotate(45deg);
+    opacity: 1;
+  }
+}
+
+.systemsculpt-success-check {
+  animation: successCheck 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Drawer Expand/Collapse                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes drawerExpand {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+
+@keyframes drawerCollapse {
+  from {
+    opacity: 1;
+    max-height: 500px;
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Floating Action Button                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes fabEntrance {
+  from {
+    opacity: 0;
+    transform: scale(0) rotate(-180deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+.systemsculpt-fab-entrance {
+  animation: fabEntrance 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Reduced Motion Support                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  
+  .systemsculpt-typing-indicator,
+  .systemsculpt-loading::after {
+    display: none;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Glow Effects                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow: 
+      0 0 5px rgba(var(--interactive-accent-rgb), 0.5),
+      0 0 10px rgba(var(--interactive-accent-rgb), 0.3),
+      0 0 15px rgba(var(--interactive-accent-rgb), 0.1);
+  }
+  50% {
+    box-shadow: 
+      0 0 10px rgba(var(--interactive-accent-rgb), 0.6),
+      0 0 20px rgba(var(--interactive-accent-rgb), 0.4),
+      0 0 30px rgba(var(--interactive-accent-rgb), 0.2);
+  }
+}
+
+.systemsculpt-glow-pulse {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
 /* media-queries.css */
 /**
  * Media Queries for Responsive Design
@@ -375,6 +693,8 @@
     display: none;
   }
 }
+
+/* REMOVED - All mobile button CSS deleted */
 
 /* typography.css */
 /**
@@ -1236,14 +1556,17 @@
 
 /* drawer.css */
 /**
- * Drawer Components
+ * Drawer Components - Modern Glass Design
  *
- * Styles for side drawers, panels, and slide-out menus
+ * Elegant collapsible drawers with smooth animations
  */
 
 .systemsculpt-drawer {
   width: 100%;
   position: relative;
+  z-index: 999;
+  isolation: isolate;
+  overflow: visible !important;
 }
 
 /* Use model indicator styles for drawer header */
@@ -1251,6 +1574,8 @@
   width: 100%;
   height: auto;
   min-height: 35px;
+  position: relative;
+  z-index: 999;
 }
 
 /* Temporary highlight animation when files are added/removed */
@@ -1379,9 +1704,13 @@
   transform: translateY(-8px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  backdrop-filter: none;
+  z-index: 1000;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  isolation: isolate;
 }
 
 .systemsculpt-drawer-content::before {
@@ -1391,11 +1720,13 @@
   left: 0;
   right: 0;
   height: 25px;
-  pointer-events: none;
+  pointer-events: auto;
+  z-index: 999;
 }
 
 .systemsculpt-drawer-content[style*="opacity: 1"] {
   transform: translateY(0);
+  pointer-events: auto !important;
 }
 
 .systemsculpt-drawer-count {
@@ -1586,63 +1917,86 @@
  * Provides consistent collapse/expand behavior and visual styling
  */
 
-/* Base container styles - SINGLE DEFINITION FOR ALL DRAWER CONTAINERS */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Collapsible Drawer - Base Container                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-collapsible-drawer {
-  /* Layout and positioning */
-  margin: 4px 0;
-  padding: 4px;
-  border-radius: 6px;
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  overflow: visible; /* Keep visible for grid animation */
+  /* Layout */
+  margin: 8px 0;
+  padding: 8px;
+  position: relative;
   max-width: 100%;
   box-sizing: border-box;
-  min-height: auto;
-  position: relative;
-  /* Ensure proper stacking context and hover detection */
-  z-index: 1;
-  pointer-events: auto !important;
-  will-change: transform, border-color;
-  /* contain: layout removed - might interfere with grid */
   
-  /* Animation entrance state */
-  opacity: 1;
-  transform: translateY(0);
+  /* Glass morphism design */
+  background: rgba(var(--background-secondary-rgb), 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.25);
+  border-radius: 12px;
   
-  /* Grid-based collapse/expand animation - CRITICAL FOR ANIMATION */
+  /* Shadow for depth */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  
+  /* Grid animation system */
   display: grid !important;
   grid-template-rows: auto 0fr !important;
+  overflow: visible;
   
-  /* Unified transitions with consistent timing */
-  transition: all 0.2s ease-in-out !important;
+  /* Smooth transitions */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  
+  /* Interaction states */
+  z-index: 1;
+  pointer-events: auto !important;
+  will-change: transform, grid-template-rows;
 }
 
 /* ========================================================================== */
 /* == Message Group Drawer Styling (Clean border-only design)             == */
 /* ========================================================================== */
 
-/* Subtle but clear drawer styling within message groups */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Message Group Drawers - Refined Styles                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-assistant-message-group .systemsculpt-collapsible-drawer {
-  margin: 8px 0 !important; /* Consistent spacing with unified parts */
-  background: transparent !important;
-  border: 1px dashed var(--background-modifier-border) !important;
-  border-radius: 4px !important;
-  /* Inherit transition from parent to avoid conflicts */
+  margin: 10px 0 !important;
+  background: rgba(var(--background-primary-rgb), 0.4) !important;
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2) !important;
+  border-radius: 10px !important;
   position: relative !important;
-  /* Ensure each drawer creates its own stacking context */
   isolation: isolate !important;
 }
 
-/* Reasoning drawers - subtle left accent */
+/* Reasoning drawers - Thinking indicator */
 .systemsculpt-assistant-message-group .systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer {
-  border-left: 2px solid var(--text-accent) !important;
-  background: rgba(139, 69, 19, 0.03) !important;
+  border-left: 3px solid rgba(var(--text-accent-rgb), 0.6) !important;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--text-accent-rgb), 0.05) 0%,
+    rgba(var(--background-primary-rgb), 0.4) 10%
+  ) !important;
+  box-shadow: 
+    0 2px 6px rgba(var(--text-accent-rgb), 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
 }
 
-/* Tool call drawers - subtle left accent */
+/* Tool call drawers - Simplified */
 .systemsculpt-assistant-message-group .systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer {
-  border-left: 2px solid var(--interactive-accent) !important;
-  background: rgba(139, 69, 19, 0.03) !important;
+  border-left: 2px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  margin: 2px 0;
+}
+
+/* Compact header for tool-call drawers */
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-header {
+  padding: 4px 8px;
+  gap: 6px;
+  font-size: 12px;
 }
 
 /* Hover glow effects to indicate interactivity - border glow removed */
@@ -1669,34 +2023,43 @@
   padding-bottom: 4px; /* Maintain consistent padding */
 }
 
-/* Header styles - clickable area */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Drawer Header - Interactive Controls                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-collapsible-header {
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  width: 100%;
+  
+  /* Interactive styling */
   cursor: pointer;
   user-select: none;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
-  transition: color 0.2s ease, background-color 0.2s ease;
+  
+  /* Hover area */
+  border-radius: 8px;
+  background: transparent;
+  
+  /* Transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Stacking */
   position: relative;
-  /* Enhanced clickable area with proper event handling */
-  width: 100%;
-  padding: 8px; /* Normal padding without negative margins */
-  margin: 0; /* No negative margins that might overlap */
-  border-radius: 6px;
-  background-color: transparent;
+  z-index: 10;
   pointer-events: auto !important;
-  z-index: 10; /* Ensure header is above content */
-  /* Force header to capture all events in its area */
   isolation: isolate;
 }
 
 .systemsculpt-collapsible-header:hover {
   color: var(--text-normal);
-  /* Subtle background on hover for visual feedback */
-  background-color: rgba(var(--background-modifier-hover-rgb), 0.3);
+  background: rgba(var(--interactive-accent-rgb), 0.05);
+  transform: translateX(2px);
 }
 
 /* Icon styles */
@@ -1728,13 +2091,17 @@
   min-width: 0;
 }
 
-/* Arrow indicator - shared for all collapsible drawers */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Expand/Collapse Arrow - Smooth Animation                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-collapsible-header::after {
   content: "▼";
-  font-size: 10px;
+  font-size: 11px;
   margin-left: auto;
-  transition: transform 0.3s ease-in-out;
   color: var(--text-muted);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.2s ease;
 }
 
 .systemsculpt-collapsed .systemsculpt-collapsible-header::after {
@@ -1742,28 +2109,43 @@
 }
 
 .systemsculpt-collapsible-header:hover::after {
-  color: var(--text-accent);
+  color: var(--interactive-accent);
+  transform: scale(1.2);
+}
+
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover::after {
+  transform: rotate(-90deg) scale(1.2);
 }
 
 /* ========================================================================== */
 /* == Hover and Expanded State Effects                                     == */
 /* ========================================================================== */
 
-/* Hover state for drawer - border glow removed */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Hover & Expanded States                                  ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-collapsible-drawer:hover {
-  /* border-color: var(--text-muted); */
-  background-color: var(--background-secondary-alt);
-  /* Bring to front on hover with isolation */
-  z-index: 10 !important; /* Higher z-index to ensure it's on top */
+  background: rgba(var(--background-secondary-rgb), 0.4);
+  border-color: rgba(var(--interactive-accent-rgb), 0.3);
+  transform: translateY(-1px);
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    0 2px 4px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  z-index: 10 !important;
   isolation: isolate;
-  position: relative !important; /* Ensure z-index works */
 }
 
-/* Expanded state visual indicator - FORCE EXPAND STATE - border glow removed */
+/* Expanded state */
 .systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) {
   grid-template-rows: auto 1fr !important;
-  border-color: var(--interactive-accent);
-  /* box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb), 0.1); */
+  border-color: rgba(var(--interactive-accent-rgb), 0.4);
+  background: rgba(var(--background-secondary-rgb), 0.35);
+  box-shadow: 
+    0 4px 16px rgba(var(--interactive-accent-rgb), 0.1),
+    0 2px 6px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 /* Header hover state when drawer is collapsed */
@@ -1875,14 +2257,8 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-/* Content parts within message groups - distinct but harmonious */
-.systemsculpt-assistant-message-group .systemsculpt-content-part {
-  background: var(--background-secondary) !important;
-  border: 1px solid var(--background-modifier-border) !important;
-  margin: 8px 0 !important;
-  padding: 12px 16px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
-}
+/* Content parts within message groups - removed conflicting styles */
+/* Styles moved to messages.css for proper cascade */
 
 /* ========================================================================== */
 /* == Unified Content Styles (shared by reasoning, tool calls, etc.)       == */
@@ -1962,40 +2338,138 @@
 /* == Tool Call Content Styles (content inside drawers)                    == */
 /* ========================================================================== */
 
-/* Tool Call Status Indicators */
+/* Tool Call Status Indicators - Enhanced with animations */
 .systemsculpt-tool-call-status-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   flex-shrink: 0;
+  position: relative;
+  margin-left: 8px;
 }
 
 .systemsculpt-tool-call-status-indicator svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+
+.systemsculpt-tool-call-status-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
 .systemsculpt-tool-call-status-indicator.completed {
   color: var(--text-success);
+  animation: successPulse 0.5s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.completed svg {
+  animation: checkmarkAnim 0.3s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.completed::after {
+  background: radial-gradient(
+    circle,
+    rgba(var(--color-green-rgb), 0.3),
+    transparent
+  );
+  opacity: 1;
+  animation: rippleEffect 0.6s ease-out;
+}
+
+@keyframes successPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes checkmarkAnim {
+  0% { transform: scale(0) rotate(-45deg); }
+  50% { transform: scale(1.2) rotate(10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes rippleEffect {
+  from {
+    width: 0;
+    height: 0;
+    opacity: 1;
+  }
+  to {
+    width: 40px;
+    height: 40px;
+    opacity: 0;
+  }
 }
 
 .systemsculpt-tool-call-status-indicator.denied {
   color: var(--text-error);
+  animation: shakeAnim 0.3s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.denied svg {
+  animation: xmarkAnim 0.3s ease-out;
+}
+
+@keyframes shakeAnim {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@keyframes xmarkAnim {
+  0% { transform: scale(0) rotate(45deg); }
+  50% { transform: scale(1.2) rotate(-10deg); }
+  100% { transform: scale(1) rotate(0); }
 }
 
 .systemsculpt-tool-call-status-indicator.executing {
   color: var(--text-warning);
 }
 
+.systemsculpt-tool-call-status-indicator.executing svg {
+  animation: spinAnim 1s linear infinite;
+}
+
+@keyframes spinAnim {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .systemsculpt-tool-call-status-indicator.pending {
   color: var(--text-muted);
 }
 
+.systemsculpt-tool-call-status-indicator.pending svg {
+  animation: breatheAnim 2s ease-in-out infinite;
+}
+
+@keyframes breatheAnim {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .systemsculpt-tool-call-status-indicator.error {
   color: var(--text-error);
+  animation: errorFlashAnim 0.5s ease-out;
+}
+
+@keyframes errorFlashAnim {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 @keyframes systemsculpt-spin {
@@ -2117,8 +2591,8 @@
 }
 
 .systemsculpt-tool-call-args {
-  margin: 8px 0;
-  padding: 8px;
+  margin: 6px 0;
+  padding: 6px;
   background: var(--background-primary);
   border-radius: 4px;
   border: 1px solid var(--background-modifier-border);
@@ -2170,8 +2644,8 @@
 
 /* Tool Response Section (matching arguments styling) */
 .systemsculpt-tool-call-response {
-  margin: 8px 0 !important;
-  padding: 8px !important;
+  margin: 6px 0 !important;
+  padding: 6px !important;
   background: var(--background-primary) !important;
   border-radius: 4px !important;
   border: 1px solid var(--background-modifier-border) !important;
@@ -2254,40 +2728,89 @@
   opacity: 1;
 }
 
-/* Tool Call Actions (Approval/Denial buttons) */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Tool Call Actions - Modern Buttons                       ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-tool-call-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--background-secondary-rgb), 0.8),
+    rgba(var(--background-modifier-form-field-rgb), 0.6)
+  );
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  animation: fadeInUpActions 0.3s ease-out;
+}
+
+@keyframes fadeInUpActions {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .systemsculpt-tool-call-approve,
 .systemsculpt-tool-call-deny {
   flex: 1;
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
+  padding: 10px 20px;
+  border-radius: 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
-  font-weight: 500;
-  transition: all 0.15s ease;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-tool-call-approve {
+  background: rgba(var(--interactive-accent-rgb), 0.1);
+  border: 1.5px solid rgba(var(--interactive-accent-rgb), 0.3);
+  color: var(--interactive-accent);
 }
 
 .systemsculpt-tool-call-approve:hover {
   background: var(--interactive-accent);
-  color: var(--text-on-accent);
   border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 16px rgba(var(--interactive-accent-rgb), 0.3),
+    0 2px 6px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.systemsculpt-tool-call-deny {
+  background: rgba(var(--text-error-rgb), 0.1);
+  border: 1.5px solid rgba(var(--text-error-rgb), 0.3);
+  color: var(--text-error);
 }
 
 .systemsculpt-tool-call-deny:hover {
-  background: var(--background-modifier-error);
+  background: var(--text-error);
+  border-color: var(--text-error);
   color: var(--text-on-accent);
-  border-color: var(--background-modifier-error);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 16px rgba(var(--text-error-rgb), 0.3),
+    0 2px 6px rgba(var(--text-error-rgb), 0.2);
+}
+
+.systemsculpt-tool-call-approve:active,
+.systemsculpt-tool-call-deny:active {
+  transform: translateY(0);
 }
 
 .systemsculpt-tool-call-view-file {
@@ -2336,162 +2859,6 @@
   background: rgba(0, 0, 0, 0.05);
 }
 
-.systemsculpt-tool-call-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.systemsculpt-tool-call-status.completed {
-  color: var(--text-success);
-}
-
-.systemsculpt-tool-call-status.denied {
-  color: var(--text-error);
-}
-
-.tool-call-auto-executed {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  color: var(--text-normal);
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 0.9em;
-  margin: 4px 0;
-}
-
-/* Simple Tool Call Approval Interface */
-.systemsculpt-tool-call-approval-card {
-  background: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 12px;
-  margin: 8px 0;
-  font-family: var(--font-interface);
-}
-
-.systemsculpt-tool-call-approval-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.systemsculpt-tool-call-approval-title {
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-tool-call-approval-summary-text {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-  white-space: pre-wrap;
-  line-height: 1.5;
-  font-family: var(--font-monospace);
-  background: var(--background-secondary);
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-tool-call-approval-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.systemsculpt-tool-call-approval-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  background: var(--background-primary);
-  color: var(--text-normal);
-}
-
-.systemsculpt-tool-call-approval-button:hover {
-  background: var(--background-modifier-hover);
-}
-
-.systemsculpt-tool-call-approval-button-approve {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: var(--interactive-accent);
-}
-
-.systemsculpt-tool-call-approval-button-approve:hover {
-  background: var(--interactive-accent-hover);
-}
-
-.systemsculpt-tool-call-approval-button-deny:hover {
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
-  border-color: var(--background-modifier-error);
-}
-
-.systemsculpt-tool-call-approval-result {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: center;
-}
-
-.systemsculpt-tool-call-approval-result.completed {
-  background: var(--background-modifier-success);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-tool-call-approval-result.denied {
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-tool-call-approval-result.error {
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
-}
-
-/* Tool Call Approval Container for Follow-up Calls */
-.systemsculpt-tool-call-approval-container {
-  margin: 8px 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  /* Ensure it's visible and on top */
-  position: relative;
-  z-index: 100;
-  /* Ensure it doesn't interfere with other content */
-  clear: both;
-}
-
-/* Arguments display within approval card */
-.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-args {
-  margin: 12px 0;
-}
-
-.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-args-content {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border-hover);
-}
-
-.systemsculpt-tool-call-approval-card .systemsculpt-tool-call-details-toggle {
-  margin-bottom: 12px;
-}
 
 /* ========================================================================== */
 /* == Tool Call Result Display (legacy support)                            == */
@@ -2574,8 +2941,8 @@
 }
 
 .systemsculpt-tool-result-content {
-  padding: 12px;
-  max-height: 300px;
+  padding: 10px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
@@ -2645,7 +3012,7 @@
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  padding: 8px;
+  padding: 6px;
   font-family: var(--font-monospace);
   font-size: 11px;
   line-height: 1.4;
@@ -2687,25 +3054,6 @@
   opacity: 0.8;
 }
 
-/* Legacy support - complete markdown rendering isolation for tool results */
-.systemsculpt-tool-result-raw-container {
-  font-size: 11px !important;
-  line-height: 1.4 !important;
-  font-family: var(--font-monospace) !important;
-  color: var(--text-normal) !important;
-  background: none !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  white-space: pre-wrap !important;
-  word-break: break-word !important;
-  /* Add height constraint for tool call results */
-  max-height: 150px !important;
-  overflow-y: auto !important;
-}
-
-
-
 /* Rolling window visual feedback and smooth animations */
 .systemsculpt-collapsible-drawer.auto-collapsed .systemsculpt-collapsible-header {
   opacity: 0.7;
@@ -2723,67 +3071,127 @@
   opacity: 0;
 }
 
-/* REMOVED - Merged into main definition at line 373 */
-
-/* REMOVED - Empty rule, content styles consolidated at line 557 */
-
-/* Override ALL possible markdown/syntax highlighting within raw container */
-.systemsculpt-tool-result-raw-container *,
-.systemsculpt-tool-result-raw-container pre,
-.systemsculpt-tool-result-raw-container code,
-.systemsculpt-tool-result-raw-container .token,
-.systemsculpt-tool-result-raw-container .language-json,
-.systemsculpt-tool-result-raw-container .hljs,
-.systemsculpt-tool-result-raw-container .cm-editor,
-.systemsculpt-tool-result-raw-container .cm-line {
-  color: var(--text-normal) !important;
-  background: none !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  font-size: 11px !important;
-  line-height: 1.4 !important;
-  font-family: var(--font-monospace) !important;
-  font-weight: normal !important;
-  text-decoration: none !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-}
+/* REMOVED legacy raw container (now unused) */
 
 /* Override heading styles for Result */
 .systemsculpt-tool-call-result h4 {
   font-weight: 500 !important;
   color: var(--text-muted) !important;
   font-size: 12px !important;
-  margin: 0 0 3px 0 !important;
+  margin: 0 0 2px 0 !important;
   padding: 0 !important;
   background: none !important;
   border: none !important;
 }
 
-/* Collapsible result styling */
-.systemsculpt-tool-call-result-collapsible {
+/* Enhanced: Compact inline header actions for pending tool-calls */
+.systemsculpt-tool-call-compact-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  animation: slideInActions 0.3s ease-out;
+}
+
+@keyframes slideInActions {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.ss-tool-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: linear-gradient(
+    135deg,
+    var(--background-modifier-form-field),
+    var(--background-secondary)
+  );
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  overflow: hidden;
 }
 
-.systemsculpt-tool-call-result-collapsible.collapsed .systemsculpt-tool-call-result-full {
-  display: none;
+.ss-tool-compact-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.3s, height 0.3s;
 }
 
-.systemsculpt-tool-call-result-collapsible:not(.collapsed) .systemsculpt-tool-call-result-preview {
-  display: none;
+.ss-tool-compact-btn:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.systemsculpt-tool-call-result-preview::after {
-  content: " (click to expand)";
-  color: var(--interactive-accent);
-  font-size: 12px;
+.ss-tool-compact-btn:hover::before {
+  width: 40px;
+  height: 40px;
+}
+
+.ss-tool-compact-btn:active {
+  transform: scale(0.95);
+}
+
+.ss-tool-compact-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.ss-tool-compact-approve {
+  color: var(--text-success);
+}
+
+.ss-tool-compact-approve:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-green-rgb), 0.1),
+    rgba(var(--color-green-rgb), 0.05)
+  );
+  border-color: var(--text-success);
+}
+
+.ss-tool-compact-approve:hover svg {
+  transform: rotate(15deg) scale(1.1);
+}
+
+.ss-tool-compact-deny {
+  color: var(--text-error);
+}
+
+.ss-tool-compact-deny:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-red-rgb), 0.1),
+    rgba(var(--color-red-rgb), 0.05)
+  );
+  border-color: var(--text-error);
+}
+
+.ss-tool-compact-deny:hover svg {
+  transform: rotate(-15deg) scale(1.1);
 }
 
 /* Ensure compatibility with new drawer design */
 .systemsculpt-tool-call-result.systemsculpt-collapsed .systemsculpt-tool-call-result-content {
-  /* Use grid-based animation instead of max-height */
   opacity: 0;
   padding: 0 8px;
 }
@@ -2829,17 +3237,7 @@
 }
 
 /* Loading state styling */
-.systemsculpt-tool-response-loading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-style: italic;
-  padding: 12px;
-  background: var(--background-modifier-form-field);
-  border-radius: 4px;
-  justify-content: center;
-}
+/* Duplicate loading style removed; using the compact version above */
 
 /* Mobile responsiveness */
 @media (max-width: 768px) {
@@ -2924,7 +3322,6 @@
 /* ========================================================================== */
 /* == End Compact Drawer Grouping Overrides                               == */
 /* ========================================================================== */
-
 
 
 /* ss-buttons.css */
@@ -3928,6 +4325,14 @@
   padding-right: 8px;
 }
 
+/* Search result highlighting */
+.ss-hl {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: underline;
+  border-radius: 2px;
+}
+
 
 /* cards.css */
 /**
@@ -4516,22 +4921,26 @@
 
 /* messages.css */
 /**
- * Message Components
+ * Message Components - Modern Design System
  *
- * Styles for chat messages, user and assistant messages, and message containers
+ * Clean, elegant message styling with visual hierarchy
  */
 
-.systemsculpt-message-content p:first-child {
-  margin-top: 0;
-}
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Base Message Container                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
 
 .systemsculpt-messages-container {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 0.75rem 0.75rem 0.25rem;
+  padding: 1.5rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
+}
+
+.systemsculpt-message-content p:first-child {
+  margin-top: 0;
 }
 
 .systemsculpt-message-content li > ol {
@@ -4542,35 +4951,51 @@
   padding: 8px 0;
 }
 
-/* ========================================================================== */
-/* == Assistant Message Grouping                                          == */
-/* ========================================================================== */
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Assistant Message Grouping                               ║
+   ╚══════════════════════════════════════════════════════════╝ */
 
-/**
- * Visual grouping for consecutive assistant messages
- * Makes multiple assistant messages appear as one seamless conversation
- */
 .systemsculpt-assistant-message-group {
   display: flex;
   flex-direction: column;
-  background-color: var(--background-secondary);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 8px 0;
-  border: 1px solid var(--background-modifier-border);
-  gap: 4px;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 16px;
   position: relative;
-  transition: all 0.2s ease-out;
+  
+  /* Fully opaque background for maximum visibility */
+  background: var(--background-secondary);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.35);
+  border-radius: 16px;
+  
+  /* Subtle shadow */
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.05),
+    0 1px 3px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  
+  /* Smooth transitions */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Individual messages within a group should have minimal styling */
 .systemsculpt-assistant-message-group .systemsculpt-message {
-  background: none;
+  background: transparent; /* Transparent to show group background */
   border: none;
   margin: 0;
   padding: 0;
   border-radius: 0;
   transition: none; /* Disable individual message transitions */
+}
+
+/* Override the individual assistant message background when inside a group */
+.systemsculpt-assistant-message-group .systemsculpt-assistant-message {
+  background: transparent !important; /* Force transparency to show group background */
+  backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* Remove gaps between messages in a group and add subtle separators */
@@ -4628,23 +5053,25 @@
   transform: translateY(0) scale(1);
 }
 
-/* Group hover effects - border glow removed */
+/* Hover effect - subtle shadow only, no movement or color change */
 .systemsculpt-assistant-message-group:hover {
-  /* border-color: var(--text-muted); */
-  /* box-shadow: 0 0 0 1px rgba(var(--text-muted-rgb), 0.3); */
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* Content part styling within groups - remove redundant borders */
 .systemsculpt-assistant-message-group .systemsculpt-content-part {
-  border: none;
-  background: none;
-  padding: 0;
+  background: transparent !important;
+  border: none !important;
+  padding: 8px 0;
   border-radius: 0;
 }
 
 .systemsculpt-assistant-message-group .systemsculpt-content-part:hover {
-  background: none;
-  border: none;
+  background: transparent !important;
+  border: none !important;
 }
 
 
@@ -4679,7 +5106,7 @@
   overflow: hidden;
 }
 
-/* Content parts should be visible and styled like regular message content */
+/* Content parts should be transparent inside groups, visible outside */
 .systemsculpt-content-part {
   color: var(--text-normal);
   margin: 8px 0;
@@ -4688,12 +5115,18 @@
   width: 100%;
   user-select: text;
   -webkit-user-select: text;
-  /* Visual container styling */
-  border: 1px solid var(--background-modifier-border);
+  /* Default: transparent background */
+  background: transparent;
+  border: none;
   border-radius: 6px;
-  background-color: var(--background-primary);
   /* Smooth transitions for hover effects */
   transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
+}
+
+/* Only add background when NOT in a message group */
+.systemsculpt-message:not(.systemsculpt-assistant-message-group .systemsculpt-message) .systemsculpt-content-part {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
 }
 
 /* Hover effect for content parts - border glow removed */
@@ -4728,16 +5161,72 @@
   margin-bottom: 0;
 }
 
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  System Messages                                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-system-message {
+  align-self: center;
+  max-width: 90%;
+  margin: 12px auto;
+  padding: 12px 16px;
+  text-align: center;
+  
+  /* Distinct tint for system messages */
+  background: linear-gradient(
+    135deg,
+    rgba(var(--text-muted-rgb), 0.08),
+    rgba(var(--text-muted-rgb), 0.05)
+  );
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.25);
+  border-radius: 12px;
+  
+  /* Subtle shadow */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.systemsculpt-system-message .systemsculpt-message-content {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.95em;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Messages                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-user-message .systemsculpt-message-content {
   color: var(--text-on-accent);
 }
 
 .systemsculpt-error-message {
-  color: var(--text-error);
-  padding: 16px;
+  padding: 16px 20px;
+  margin: 12px 0;
   text-align: center;
-  background-color: var(--background-modifier-error);
-  border-radius: 4px;
+  
+  /* Error styling */
+  background: linear-gradient(
+    135deg,
+    rgba(var(--text-error-rgb), 0.1),
+    rgba(var(--text-error-rgb), 0.05)
+  );
+  border: 1px solid rgba(var(--text-error-rgb), 0.3);
+  border-radius: 12px;
+  color: var(--text-error);
+  
+  /* Icon and animation */
+  position: relative;
+  animation: shakeIn 0.4s ease-out;
+}
+
+@keyframes shakeIn {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
 }
 
 .systemsculpt-message-content pre {
@@ -4764,21 +5253,62 @@
   pointer-events: none;
 }
 
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Assistant Messages                                       ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-assistant-message {
   align-self: flex-start;
-  width: 100%;
-  background-color: var(--background-secondary);
-  border-radius: 16px 16px 16px 4px;
+  max-width: 90%;
+  margin: 8px 0;
+  padding: 12px 16px;
+  
+  /* Fully opaque background for visibility */
+  background: var(--background-secondary);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+  border-radius: 18px 18px 18px 4px;
+  
+  /* Shadow depth */
+  box-shadow: 
+    0 3px 10px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  
+  /* Entrance animation */
+  animation: slideInLeft 0.3s ease-out;
+  transition: all 0.2s ease;
 }
 
-/* Assistant message toolbar positioning handled by modern floating design */
+.systemsculpt-assistant-message:hover {
+  box-shadow: 
+    0 5px 15px rgba(0, 0, 0, 0.08),
+    0 2px 5px rgba(0, 0, 0, 0.03);
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 
 .systemsculpt-assistant-message .systemsculpt-message-content {
   color: var(--text-normal);
+  line-height: 1.6;
 }
 
 .systemsculpt-assistant-message .systemsculpt-message-label {
   color: var(--text-accent);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  opacity: 0.8;
 }
 
 .systemsculpt-message-content > * {
@@ -5116,13 +5646,19 @@
   color: var(--text-accent);
 }
 
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Base Message Styles                                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-message {
   position: relative;
-  width: 100%;
-  max-width: 100%;
-  padding: 0.75rem;
-  margin: 0.5rem;
+  width: auto;
+  padding: 12px 16px;
+  margin: 8px 4px;
   border-radius: 16px;
+  
+  /* Smooth transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Removed duplicate - using unified ultra-compact button styling */
@@ -5416,22 +5952,57 @@
   text-overflow: ellipsis;
 }
 
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  User Messages                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-user-message {
   align-self: flex-end;
-  background-color: var(--interactive-accent);
-  border-radius: 16px 16px 16px 16px;
+  max-width: 85%;
+  
+  /* Fully opaque accent color for maximum visibility */
+  background: var(--interactive-accent);
+  
+  border-radius: 18px 18px 4px 18px;
+  
+  /* Elegant shadow */
+  box-shadow: 
+    0 4px 12px rgba(var(--interactive-accent-rgb), 0.2),
+    0 2px 4px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  
+  /* Entrance animation */
+  animation: slideInRight 0.3s ease-out;
 }
 
-/* Removed - using unified toolbar positioning */
+.systemsculpt-user-message:hover {
+  box-shadow: 
+    0 6px 16px rgba(var(--interactive-accent-rgb), 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.08);
+}
 
 .systemsculpt-user-message .systemsculpt-message-content {
   color: var(--text-on-accent);
+  font-weight: 500;
+  line-height: 1.6;
 }
 
 .systemsculpt-user-message .systemsculpt-message-label {
   color: var(--text-on-accent);
-  opacity: 1;
-  font-weight: 500;
+  opacity: 0.9;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .systemsculpt-message-content code {
@@ -7080,9 +7651,9 @@
 
 /* inputs.css */
 /**
- * Input Components
+ * Input Components - Modern UI System
  *
- * Styles for form inputs, textareas, and related form elements
+ * Elegant form controls with glassmorphism and smooth interactions
  */
 
 
@@ -7108,13 +7679,6 @@
   cursor: not-allowed;
 }
 
-.systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
-
 .systemsculpt-textarea:focus {
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
@@ -7127,19 +7691,9 @@
   box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.systemsculpt-chat-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
 .systemsculpt-input-action-button.disabled:hover {
   background-color: var(--background-modifier-form-field);
   transform: none;
-}
-
-.systemsculpt-input-action-button.disabled:hover {
-  background-color: transparent;
 }
 
 
@@ -7197,26 +7751,221 @@
   transform: none;
 }
 
-.systemsculpt-input-action-button.disabled:hover {
-  background-color: transparent;
-}
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Input Container - Floating Card Design                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
 
 .systemsculpt-input-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  background-color: var(--background-primary);
-  border-top: 1px solid var(--background-modifier-border);
+  gap: 12px;
+  padding: 16px;
   position: relative;
+  
+  /* Elevated card effect */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--background-primary-rgb), 0.98),
+    rgba(var(--background-primary-rgb), 0.95)
+  );
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  
+  /* Subtle top border */
+  border-top: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+  
+  /* Elegant shadow for depth */
+  box-shadow: 
+    0 -4px 12px rgba(0, 0, 0, 0.05),
+    0 -2px 4px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Button Grid - Modern Toolbar Design                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-button-grid {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Button groups for logical organization */
+.systemsculpt-button-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Primary action buttons - most prominent */
+.systemsculpt-button-group-primary {
+  order: 1;
+}
+
+/* Configuration buttons - secondary prominence */
+.systemsculpt-button-group-config {
+  order: 2;
+  opacity: 0.95;
+}
+
+/* Action buttons (send/stop) */
+.systemsculpt-button-group-actions {
+  order: 4;
+  margin-left: auto; /* Push to the right */
+}
+
+/* Visual divider between button groups */
+.systemsculpt-button-group-divider {
+  order: 3; /* Can be reordered as needed */
+  width: 1px;
+  height: 24px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(var(--background-modifier-border-rgb), 0.3) 30%,
+    rgba(var(--background-modifier-border-rgb), 0.3) 70%,
+    transparent 100%
+  );
+  margin: 0 4px;
+  align-self: center;
+}
+
+.systemsculpt-button-grid .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger) {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  /* Glass button effect */
+  background: rgba(var(--background-secondary-rgb), 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.3);
+  border-radius: 10px;
+  
+  color: var(--text-muted);
+  
+  /* Subtle shadow */
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  
+  /* Smooth transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+/* Primary group buttons - slightly more prominent */
+.systemsculpt-button-group-primary .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger) {
+  background: rgba(var(--interactive-accent-rgb), 0.08);
+  border-color: rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.systemsculpt-button-group-primary .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger):hover {
+  background: rgba(var(--interactive-accent-rgb), 0.2);
+  border-color: rgba(var(--interactive-accent-rgb), 0.4);
+}
+
+/* Config group styling - integrated with model/prompt indicators */
+.systemsculpt-button-group-config {
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-button-group-config .systemsculpt-model-indicator-section {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.systemsculpt-button-grid .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger):hover {
+  background: rgba(var(--interactive-accent-rgb), 0.15);
+  border-color: rgba(var(--interactive-accent-rgb), 0.3);
+  color: var(--interactive-accent);
+  /* Remove transform to prevent position shifts */
+  box-shadow: 
+    0 4px 10px rgba(var(--interactive-accent-rgb), 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.systemsculpt-button-grid .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger):active {
+  /* Remove transform to prevent position shifts */
+}
+
+.systemsculpt-button-grid .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger) svg {
+  width: 18px;
+  height: 18px;
+  /* Remove transform transition to prevent size changes */
+}
+
+.systemsculpt-button-grid .mod-small:not(.mod-cta):not(.mod-warning):not(.mod-danger):hover svg {
+  /* Remove scale transform to prevent icon size changes */
+}
+
+/* Active state - glowing primary color, brightest state */
+.systemsculpt-button-grid .mod-small.ss-active:not([aria-label="Record audio message"]) {
+  background: rgba(var(--interactive-accent-rgb), 0.35);  /* Brightest state */
+  border-color: rgba(var(--interactive-accent-rgb), 0.6);  /* More pronounced border */
+  color: var(--interactive-accent);  /* Use accent color, not white */
+  box-shadow: 
+    0 8px 24px rgba(var(--interactive-accent-rgb), 0.4),  /* Strong glow */
+    0 3px 10px rgba(var(--interactive-accent-rgb), 0.3),   /* Layered shadows for depth */
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.15);
+}
+
+/* Hover on active - slightly less bright for visual feedback */
+.systemsculpt-button-grid .mod-small.ss-active:not([aria-label="Record audio message"]):hover {
+  background: rgba(var(--interactive-accent-rgb), 0.25);  /* Less bright than active */
+  border-color: rgba(var(--interactive-accent-rgb), 0.5);
+  color: var(--interactive-accent);
+  box-shadow: 
+    0 6px 20px rgba(var(--interactive-accent-rgb), 0.3),
+    0 2px 8px rgba(var(--interactive-accent-rgb), 0.2),
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+/* Icon color in active state - match text color */
+.systemsculpt-button-grid .mod-small.ss-active svg {
+  color: var(--interactive-accent);  /* Match text color, not white */
 }
 
 .systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
-  opacity: 0.2;
+  opacity: 0.3;
 }
 
-.systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
-  opacity: 0.5;
+/* Responsive adjustments for button groups */
+@media (max-width: 768px) {
+  .systemsculpt-button-grid {
+    gap: 4px;
+  }
+  
+  .systemsculpt-button-group {
+    gap: 3px;
+  }
+  
+  .systemsculpt-button-group-divider {
+    height: 20px;
+    margin: 0 2px;
+  }
+  
+  /* Stack configuration group on small screens */
+  .systemsculpt-button-group-config {
+    flex-wrap: wrap;
+    width: 100%;
+    order: 5; /* Move to bottom on mobile */
+  }
+  
+  /* Actions group spans full width on mobile */
+  .systemsculpt-button-group-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .systemsculpt-model-search input {
@@ -7288,95 +8037,131 @@
   transform: translateY(0);
 }
 
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Input Action Buttons - Unified Design                    ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-input-action-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary-alt);
-  color: var(--text-normal);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  width: 36px;
-  height: 36px;
-}
-
-.systemsculpt-input-action-button.active {
-  background-color: var(--background-modifier-hover);
-  color: var(--text-accent);
-}
-
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-/* Recording button styles */
-.systemsculpt-button-grid button[aria-label="Record audio message"].ss-active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  animation: mic-pulse 2s infinite;
-}
-
-@keyframes mic-pulse {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  color: var(--text-accent);
-  background-color: var(--background-modifier-hover);
-}
-
-.systemsculpt-input-action-button.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  
+  /* Modern glass effect */
+  background: rgba(var(--background-secondary-rgb), 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.3);
+  border-radius: 12px;
+  
   color: var(--text-muted);
-  cursor: not-allowed;
-  transform: none;
+  cursor: pointer;
+  
+  /* Shadow and transitions */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+.systemsculpt-input-action-button:hover:not(.disabled) {
+  background: rgba(var(--interactive-accent-rgb), 0.15);
+  border-color: rgba(var(--interactive-accent-rgb), 0.4);
+  color: var(--interactive-accent);
+  transform: translateY(-2px); /* Remove scale to prevent size change */
+  box-shadow: 
+    0 6px 16px rgba(var(--interactive-accent-rgb), 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.systemsculpt-input-action-button:active:not(.disabled) {
+  transform: translateY(0); /* Remove scale to prevent size change */
+}
+
+/* Active/Enabled state - glowing primary color, no size/transform changes */
+.systemsculpt-input-action-button.active:not(.disabled),
+.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
+  background: rgba(var(--interactive-accent-rgb), 0.35);  /* Brightest state */
+  border-color: rgba(var(--interactive-accent-rgb), 0.6);
+  color: var(--interactive-accent);  /* Use accent color, not white */
+  box-shadow: 
+    0 8px 24px rgba(var(--interactive-accent-rgb), 0.4),
+    0 3px 10px rgba(var(--interactive-accent-rgb), 0.3),
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.15);
+}
+
+.systemsculpt-input-action-button.active:not(.disabled):hover {
+  /* Keep the same transform as regular hover - no additional scaling */
+  transform: translateY(-2px);
+  background: rgba(var(--interactive-accent-rgb), 0.25);  /* Less bright for visual feedback */
+  border-color: rgba(var(--interactive-accent-rgb), 0.5);
+  box-shadow: 
+    0 6px 20px rgba(var(--interactive-accent-rgb), 0.3),
+    0 2px 8px rgba(var(--interactive-accent-rgb), 0.2),
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Recording Button - Active State                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-button-grid button[aria-label="Record audio message"].ss-active {
+  background: rgba(var(--interactive-accent-rgb), 0.35);  /* Same as other active buttons */
+  border-color: rgba(var(--interactive-accent-rgb), 0.6);
+  color: var(--interactive-accent);  /* Use accent color */
+  box-shadow: 
+    0 8px 24px rgba(var(--interactive-accent-rgb), 0.4),
+    0 3px 10px rgba(var(--interactive-accent-rgb), 0.3),
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.15);
+  /* Recording indicator - subtle dot animation */
+  position: relative;
+}
+
+/* Small recording indicator dot - doesn't affect button size */
+.systemsculpt-button-grid button[aria-label="Record audio message"].ss-active::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  background: var(--interactive-accent);  /* Use accent color */
+  border-radius: 50%;
+  animation: recording-dot 1.5s ease-in-out infinite;
+}
+
+/* Hover state for active recording button - less bright for visual feedback */
+.systemsculpt-button-grid button[aria-label="Record audio message"].ss-active:hover {
+  background: rgba(var(--interactive-accent-rgb), 0.25);  /* Less bright than active */
+  border-color: rgba(var(--interactive-accent-rgb), 0.5);
+  color: var(--interactive-accent);
+  box-shadow: 
+    0 6px 20px rgba(var(--interactive-accent-rgb), 0.3),
+    0 2px 8px rgba(var(--interactive-accent-rgb), 0.2),
+    inset 0 1px 0 rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+@keyframes recording-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 
 .systemsculpt-input-action-button.disabled {
   opacity: 0.5;
   cursor: not-allowed;
   filter: grayscale(100%);
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  transform: none;
 }
 
 .systemsculpt-input-action-button.disabled:hover {
   background-color: var(--background-modifier-form-field);
   transform: none;
-}
-
-.systemsculpt-input-action-button.disabled:hover {
-  background-color: transparent;
-}
-
-.systemsculpt-input-action-button:active {
-  transform: translateY(0);
-}
-
-.systemsculpt-input-action-button:hover {
-  background-color: var(--background-modifier-hover);
-  transform: translateY(-1px);
-}
-
-.systemsculpt-input-action-button.active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
 }
 
 .systemsculpt-context-search input:focus {
@@ -7385,37 +8170,6 @@
   box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.systemsculpt-input-action-button.active {
-  background-color: var(--background-modifier-hover);
-  color: var(--text-accent);
-}
-
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  color: var(--text-accent);
-  background-color: var(--background-modifier-hover);
-}
-
-.systemsculpt-input-action-button.active {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  color: var(--text-accent);
-  background-color: var(--background-modifier-hover);
-}
 
 .systemsculpt-license-container .systemsculpt-setting-item-control input {
   flex: 1;
@@ -7466,63 +8220,7 @@
   box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.systemsculpt-chat-input {
-  flex-grow: 1;
-  resize: none;
-  min-height: 40px;
-  max-height: 150px;
-  padding: 0.5rem;
-  margin-right: 0.25rem;
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
-  font-size: 16px;
-  line-height: 1.4;
-  transition: all 0.2s ease;
-}
-
-.systemsculpt-chat-input {
-  flex-grow: 1;
-  resize: none;
-  min-height: 40px;
-  max-height: 150px;
-  padding: 12px 16px;
-  margin: 0;
-  border-radius: 8px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
-  font-size: 15px;
-  line-height: 1.5;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
-
-.systemsculpt-chat-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  background-color: var(--background-primary);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
-}
-
-.systemsculpt-chat-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
+/* Clean up - duplicate chat input styles removed (defined in chat.css) */
 
 .systemsculpt-chat-search input:focus {
   border-color: var(--interactive-accent);
@@ -7585,34 +8283,45 @@
 }
 
 .systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
-  opacity: 0.2;
+  opacity: 0.3;
 }
 
-.systemsculpt-input-container.disabled .systemsculpt-button-group-divider {
-  opacity: 0.5;
+/* Responsive adjustments for button groups */
+@media (max-width: 768px) {
+  .systemsculpt-button-grid {
+    gap: 4px;
+  }
+  
+  .systemsculpt-button-group {
+    gap: 3px;
+  }
+  
+  .systemsculpt-button-group-divider {
+    height: 20px;
+    margin: 0 2px;
+  }
+  
+  /* Stack configuration group on small screens */
+  .systemsculpt-button-group-config {
+    flex-wrap: wrap;
+    width: 100%;
+    order: 5; /* Move to bottom on mobile */
+  }
+  
+  /* Actions group spans full width on mobile */
+  .systemsculpt-button-group-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
 
-.systemsculpt-input-action-button.active:not(.disabled),
-.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
-  color: var(--text-accent);
-  background-color: var(--background-modifier-hover);
-}
 
 /*
   Input action button styles removed - Now using ss-button component classes
   The systemsculpt-input-action-button class has been replaced with ss-button classes in the code
 */
-/* Make input handler buttons show pointer cursor on hover */
-.systemsculpt-button-grid button:hover {
-  cursor: pointer;
-}
-
 
 
 /* loaders.css */
@@ -7674,17 +8383,64 @@
   line-height: 1;
 }
 
-@keyframes block-cycle {
-  0%   { content: "█"; }
-  25%  { content: "▓"; }
-  50%  { content: "▒"; }
-  75%  { content: "░"; }
-  100% { content: "█"; }
+/* Braille Spinner - smooth, technical, perfect */
+@keyframes braille-spin {
+  0%   { content: "⠋"; }
+  10%  { content: "⠙"; }
+  20%  { content: "⠹"; }
+  30%  { content: "⠸"; }
+  40%  { content: "⠼"; }
+  50%  { content: "⠴"; }
+  60%  { content: "⠦"; }
+  70%  { content: "⠧"; }
+  80%  { content: "⠇"; }
+  90%  { content: "⠏"; }
+  100% { content: "⠋"; }
+}
+
+/* Subtle opacity pulse for depth */
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Gentle glow effect */
+@keyframes glow-pulse {
+  0%, 100% { 
+    text-shadow: 0 0 2px currentColor, 
+                 0 0 4px currentColor; 
+  }
+  50% { 
+    text-shadow: 0 0 4px currentColor, 
+                 0 0 8px currentColor,
+                 0 0 12px currentColor; 
+  }
+}
+
+/* Enhanced Braille spinner with styling */
+.systemsculpt-streaming-status {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 1.2em;
+  color: var(--text-accent);
+  margin-left: 0.5em;
+  position: relative;
+  /* Add some spacing for the glow effect */
+  padding: 0 4px;
 }
 
 .systemsculpt-streaming-status::after {
-  content: "█";
-  animation: block-cycle 0.8s steps(4) infinite;
+  content: "⠋";
+  display: inline-block;
+  animation: 
+    braille-spin 0.8s linear infinite,
+    pulse-opacity 2s ease-in-out infinite,
+    glow-pulse 3s ease-in-out infinite;
+  /* Ensure the character is well-spaced */
+  letter-spacing: 0.1em;
+  /* Smooth rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Preview loading styles */
@@ -8515,95 +9271,6 @@
   opacity: 1;
 } 
 
-/* system-search.css */
-/**
- * System Search Modal Styles
- * 
- * Minimal styling that extends the StandardModal system.
- * Uses ss-modal classes and components for consistency.
- */
-
-/* Notice styles for embeddings info */
-.ss-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.ss-notice--info {
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  color: var(--text-muted);
-}
-
-.ss-notice__content {
-  flex: 1;
-}
-
-.ss-link {
-  color: var(--interactive-accent);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.ss-link:hover {
-  text-decoration: underline;
-}
-
-/* List header styles */
-.ss-modal__list-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  margin-bottom: 8px;
-}
-
-.ss-modal__list-header h4 {
-  margin: 0 0 4px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-normal);
-}
-
-.ss-modal__list-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* Clickable item modifier */
-.ss-modal__item--clickable {
-  cursor: pointer;
-}
-
-.ss-modal__item--clickable:hover {
-  background-color: var(--background-modifier-hover);
-}
-
-/* Search highlighting */
-.ss-highlight {
-  background-color: var(--text-highlight-bg);
-  color: var(--text-normal);
-  border-radius: 2px;
-  padding: 0 2px;
-  font-weight: 600;
-}
-
-/* Mobile optimizations */
-@media (max-width: 768px) {
-  .ss-modal__list-header {
-    padding: 8px 12px;
-  }
-  
-  .ss-notice {
-    font-size: 12px;
-    padding: 8px 12px;
-  }
-}
-
 /* tooltips.css */
 /**
  * Tooltip Components
@@ -8758,12 +9425,17 @@
 
 
 /* setup.css */
-/* Setup Tab Styles */
+/* Setup Tab Styles - Streamlined */
 
 .systemsculpt-setup-settings {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--ss-space-lg);
+}
+
+/* Welcome Banner - Uses unified banner system */
+.systemsculpt-welcome-banner {
+  /* Now uses .ss-banner classes */
 }
 
 .systemsculpt-api-connection-section,
@@ -8784,6 +9456,141 @@
   margin: 0;
 }
 
+/* Compact License Section Styles */
+.systemsculpt-license-section.systemsculpt-license-compact {
+  padding: 12px 0;
+  gap: 8px;
+}
+
+.systemsculpt-license-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.systemsculpt-license-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-license-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-license-inline-title {
+  margin: 0 !important;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+.systemsculpt-pro-badge-inline {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.systemsculpt-credit-inline {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.systemsculpt-license-subtitle {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin-left: 4px;
+}
+
+.systemsculpt-license-controls {
+  flex-shrink: 0;
+}
+
+.systemsculpt-license-field-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-license-input-compact {
+  width: 200px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+  font-family: monospace;
+}
+
+.systemsculpt-license-input-compact:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+  font-family: inherit;
+}
+
+.systemsculpt-license-button-compact {
+  padding: 4px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.systemsculpt-license-button-compact:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-license-button-compact.active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-license-button-compact:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.systemsculpt-copy-button-compact {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-copy-button-compact:hover {
+  color: var(--text-normal);
+}
+
+.systemsculpt-mini-promo {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-mini-promo-link {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  text-decoration: none;
+}
+
+.systemsculpt-mini-promo-link:hover {
+  color: var(--interactive-accent);
+}
+
 .systemsculpt-api-connection-section .systemsculpt-setup-section-description {
   margin-bottom: var(--size-4-3);
 }
@@ -8797,74 +9604,44 @@
 
 
 
+/* Quick setup buttons - Now uses unified button system */
 .systemsculpt-one-click-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  /* Uses .ss-quick-setup-buttons */
 }
 
 .one-click-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100px;
-  height: 90px;
-  border-radius: 8px;
-  background-color: var(--background-primary);
-  border: 2px solid var(--background-modifier-border);
-  color: var(--text-normal);
-  font-size: 0.85em;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  padding: 12px 8px;
-  position: relative;
-  overflow: hidden;
-  text-align: center;
+  /* Uses .ss-quick-setup-button */
 }
 
-.one-click-button:hover {
-  transform: translateY(-2px);
-  border-color: var(--interactive-accent);
-  box-shadow: 0 3px 10px rgb(0, 0, 0);
-}
-
+/* Provider-specific brand colors - Keep these for visual recognition */
 .one-click-button.openai {
   background-color: rgb(16, 163, 127);
   border-color: rgb(16, 163, 127);
-  color: #10a37f;
+  color: white;
+}
+
+.one-click-button.anthropic {
+  background-color: rgb(204, 109, 61);
+  border-color: rgb(204, 109, 61);
+  color: white;
 }
 
 .one-click-button.openrouter {
   background-color: rgb(66, 133, 244);
   border-color: rgb(66, 133, 244);
-  color: #4285f4;
+  color: white;
 }
 
 .one-click-button.ollama {
   background-color: rgb(105, 72, 115);
   border-color: rgb(105, 72, 115);
-  color: #694873;
+  color: white;
 }
 
 .one-click-button.lmstudio {
   background-color: rgb(249, 115, 22);
   border-color: rgb(249, 115, 22);
-  color: #f97316;
-}
-
-.one-click-button.custom {
-  background-color: rgb(128, 128, 128);
-  border-color: rgb(128, 128, 128);
-  width: 110px;
-  font-size: 0.8em;
-}
-
-.one-click-icon {
-  font-size: 1.5em;
-  margin-bottom: 2px;
+  color: white;
 }
 
 
@@ -9499,6 +10276,311 @@
 
 .systemsculpt-need-more-credits-link:active {
   transform: translateY(0);
+}
+
+/* Subscription Type Display */
+.systemsculpt-subscription-type {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* License Input with Copy Button */
+.systemsculpt-license-input {
+  font-family: monospace;
+  letter-spacing: 0.5px;
+}
+
+/* Compact settings in provider style */
+.systemsculpt-license-section .systemsculpt-active-providers-list {
+  margin-top: 8px;
+}
+
+.systemsculpt-license-section .systemsculpt-provider-line-item {
+  padding: 6px 0;
+  min-height: 32px;
+  margin-bottom: 5px;
+}
+
+.systemsculpt-license-section .systemsculpt-provider-line-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.systemsculpt-license-section .systemsculpt-provider-name-section {
+  gap: 8px;
+}
+
+.systemsculpt-license-section .systemsculpt-provider-endpoint-section {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  margin-left: 8px;
+}
+
+.systemsculpt-license-section .systemsculpt-provider-endpoint-inline {
+  text-align: right;
+}
+
+/* Connection Status Section */
+.systemsculpt-connection-status-section {
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.systemsculpt-section-title {
+  margin: 0;
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.systemsculpt-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+}
+
+.systemsculpt-status-indicator.connected .status-text {
+  color: var(--text-success, #4caf50);
+}
+
+.systemsculpt-status-indicator.disconnected .status-text {
+  color: var(--text-error, #f44336);
+}
+
+/* Providers Header with Add Button */
+.systemsculpt-providers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-quick-add {
+  position: relative;
+}
+
+.systemsculpt-add-provider-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.systemsculpt-add-provider-btn:hover {
+  background: var(--interactive-accent-hover);
+  box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+/* Provider Dropdown Menu */
+.systemsculpt-provider-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.systemsculpt-provider-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.9em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-provider-menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-provider-menu-item svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+/* Improved Provider Line Items */
+.systemsculpt-provider-line-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.systemsculpt-provider-line-item:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.systemsculpt-provider-line-item.systemsculpt-primary {
+  background: linear-gradient(135deg, 
+    rgba(var(--interactive-accent-rgb), 0.05) 0%, 
+    var(--background-secondary) 100%);
+  border-color: rgba(var(--interactive-accent-rgb), 0.3);
+}
+
+.systemsculpt-provider-name-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.systemsculpt-provider-name {
+  font-weight: 500;
+  font-size: 0.9em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-pro-badge-mini {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.65em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.systemsculpt-provider-endpoint-section {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-provider-endpoint-inline {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-provider-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.systemsculpt-compact-button {
+  padding: 4px 8px !important;
+  font-size: 0.8em !important;
+  height: 26px !important;
+  border-radius: 4px !important;
+  background: var(--background-primary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  color: var(--text-muted) !important;
+  cursor: pointer !important;
+  transition: all 0.15s !important;
+}
+
+.systemsculpt-compact-button:hover {
+  background: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.systemsculpt-delete-button {
+  font-weight: bold !important;
+  width: 26px !important;
+  padding: 0 !important;
+  color: var(--text-error, #f44336) !important;
+}
+
+.systemsculpt-delete-button:hover {
+  background: var(--text-error, #f44336) !important;
+  color: white !important;
+  border-color: var(--text-error, #f44336) !important;
+}
+
+/* Fallback Toggle */
+.systemsculpt-fallback-label {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+/* Empty State */
+.systemsculpt-no-providers-message {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  padding: 24px;
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 12px 0;
+}
+
+/* Help Section */
+.systemsculpt-help-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+  text-align: center;
+}
+
+.systemsculpt-help-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.85em;
+}
+
+.systemsculpt-help-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.systemsculpt-help-link:hover {
+  color: var(--interactive-accent);
+  text-decoration: underline;
+}
+
+.systemsculpt-help-link.pro-upgrade {
+  color: var(--interactive-accent);
+  font-weight: 500;
+}
+
+.systemsculpt-help-links .separator {
+  color: var(--text-faint);
 } 
 
 /* welcome.css */
@@ -10075,6 +11157,497 @@
   font-weight: var(--font-medium);
 }
 
+
+/* documentation.css */
+/**
+ * Documentation Renderer Styles
+ * 
+ * Enhanced styles for beautiful documentation rendering
+ * Makes markdown documentation look professional and polished
+ */
+
+/* Documentation Container */
+.systemsculpt-docs {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.7;
+  color: var(--ss-color-text-normal);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--ss-space-xl);
+}
+
+/* Enhanced Typography */
+.systemsculpt-docs h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: var(--ss-space-lg);
+  padding-bottom: var(--ss-space-md);
+  border-bottom: 3px solid var(--ss-color-primary);
+  color: var(--ss-color-text-normal);
+}
+
+.systemsculpt-docs h2 {
+  font-size: 2rem;
+  font-weight: 600;
+  margin-top: var(--ss-space-xxl);
+  margin-bottom: var(--ss-space-lg);
+  color: var(--ss-color-text-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-sm);
+}
+
+.systemsculpt-docs h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-top: var(--ss-space-xl);
+  margin-bottom: var(--ss-space-md);
+  color: var(--ss-color-text-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-sm);
+}
+
+.systemsculpt-docs h4 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: var(--ss-space-lg);
+  margin-bottom: var(--ss-space-md);
+  color: var(--ss-color-text-normal);
+}
+
+/* Paragraph Spacing */
+.systemsculpt-docs p {
+  margin-bottom: var(--ss-space-md);
+  color: var(--ss-color-text-normal);
+  font-size: 1rem;
+}
+
+/* Horizontal Rules - Visual Separators */
+.systemsculpt-docs hr {
+  border: none;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--ss-color-border), transparent);
+  margin: var(--ss-space-xxl) 0;
+}
+
+/* Enhanced Blockquotes - Callout Boxes */
+.systemsculpt-docs blockquote {
+  margin: var(--ss-space-lg) 0;
+  padding: var(--ss-space-md) var(--ss-space-lg);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-color-bg-secondary);
+  border-left: 4px solid var(--ss-color-primary);
+  box-shadow: var(--ss-shadow-sm);
+}
+
+/* Special callout styles based on emoji */
+.systemsculpt-docs blockquote:has(p:first-child:contains("💡")) {
+  background: rgba(255, 193, 7, 0.1);
+  border-left-color: #ffc107;
+}
+
+.systemsculpt-docs blockquote:has(p:first-child:contains("⚠️")) {
+  background: rgba(255, 87, 34, 0.1);
+  border-left-color: #ff5722;
+}
+
+.systemsculpt-docs blockquote:has(p:first-child:contains("✅")) {
+  background: rgba(76, 175, 80, 0.1);
+  border-left-color: #4caf50;
+}
+
+.systemsculpt-docs blockquote:has(p:first-child:contains("🎉")) {
+  background: rgba(156, 39, 176, 0.1);
+  border-left-color: #9c27b0;
+}
+
+.systemsculpt-docs blockquote:has(p:first-child:contains("📝")) {
+  background: rgba(33, 150, 243, 0.1);
+  border-left-color: #2196f3;
+}
+
+/* Lists */
+.systemsculpt-docs ul,
+.systemsculpt-docs ol {
+  margin-bottom: var(--ss-space-md);
+  padding-left: var(--ss-space-xl);
+}
+
+.systemsculpt-docs li {
+  margin-bottom: var(--ss-space-xs);
+  line-height: 1.8;
+}
+
+.systemsculpt-docs ul li::marker {
+  color: var(--ss-color-primary);
+}
+
+/* Enhanced Tables */
+.systemsculpt-docs table {
+  width: 100%;
+  margin: var(--ss-space-lg) 0;
+  border-collapse: collapse;
+  background: var(--ss-color-bg-secondary);
+  border-radius: var(--ss-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--ss-shadow-sm);
+}
+
+.systemsculpt-docs table thead {
+  background: var(--ss-color-primary);
+  color: var(--ss-color-text-on-primary);
+}
+
+.systemsculpt-docs table th {
+  padding: var(--ss-space-md);
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.systemsculpt-docs table td {
+  padding: var(--ss-space-md);
+  border-bottom: 1px solid var(--ss-color-border);
+}
+
+.systemsculpt-docs table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.systemsculpt-docs table tbody tr:hover {
+  background: var(--ss-color-bg-hover);
+  transition: background var(--ss-transition-fast);
+}
+
+/* Code Blocks */
+.systemsculpt-docs pre {
+  margin: var(--ss-space-lg) 0;
+  padding: var(--ss-space-lg);
+  background: var(--ss-color-bg-secondary);
+  border-radius: var(--ss-radius-lg);
+  overflow-x: auto;
+  box-shadow: var(--ss-shadow-sm);
+  border: 1px solid var(--ss-color-border);
+}
+
+.systemsculpt-docs code {
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace;
+  font-size: 0.9rem;
+}
+
+.systemsculpt-docs :not(pre) > code {
+  padding: 2px 6px;
+  background: var(--ss-color-bg-secondary);
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-color-text-accent);
+}
+
+/* Links */
+.systemsculpt-docs a {
+  color: var(--ss-color-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all var(--ss-transition-fast);
+}
+
+.systemsculpt-docs a:hover {
+  border-bottom-color: var(--ss-color-primary);
+}
+
+/* Numbered Steps */
+.systemsculpt-docs ol {
+  counter-reset: step-counter;
+  list-style: none;
+}
+
+.systemsculpt-docs ol li {
+  counter-increment: step-counter;
+  position: relative;
+  padding-left: var(--ss-space-xl);
+}
+
+.systemsculpt-docs ol li::before {
+  content: counter(step-counter);
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--ss-color-primary);
+  color: var(--ss-color-text-on-primary);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ss-radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+/* Nested Lists */
+.systemsculpt-docs ul ul,
+.systemsculpt-docs ol ul {
+  margin-top: var(--ss-space-xs);
+  margin-bottom: var(--ss-space-xs);
+}
+
+/* Strong/Bold Text */
+.systemsculpt-docs strong {
+  font-weight: 600;
+  color: var(--ss-color-text-normal);
+}
+
+/* Keyboard Shortcuts */
+.systemsculpt-docs kbd {
+  display: inline-block;
+  padding: 3px 6px;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: var(--ss-color-text-normal);
+  background: var(--ss-color-bg-secondary);
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: inset 0 -1px 0 var(--ss-color-border);
+  font-family: monospace;
+}
+
+/* Feature Cards */
+.systemsculpt-docs .feature-card {
+  background: var(--ss-color-bg-secondary);
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-lg);
+  padding: var(--ss-space-lg);
+  margin: var(--ss-space-md) 0;
+  transition: all var(--ss-transition-normal);
+}
+
+.systemsculpt-docs .feature-card:hover {
+  box-shadow: var(--ss-shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .systemsculpt-docs {
+    padding: var(--ss-space-lg);
+  }
+  
+  .systemsculpt-docs h1 {
+    font-size: 2rem;
+  }
+  
+  .systemsculpt-docs h2 {
+    font-size: 1.5rem;
+  }
+  
+  .systemsculpt-docs h3 {
+    font-size: 1.25rem;
+  }
+  
+  .systemsculpt-docs table {
+    font-size: 0.875rem;
+  }
+}
+
+/* Dark Mode Adjustments */
+.theme-dark .systemsculpt-docs {
+  --ss-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --ss-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --ss-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Smooth Scrolling */
+.systemsculpt-docs {
+  scroll-behavior: smooth;
+}
+
+/* Section Anchors */
+.systemsculpt-docs h2[id],
+.systemsculpt-docs h3[id] {
+  scroll-margin-top: var(--ss-space-xl);
+}
+
+/* Emoji in Headers */
+.systemsculpt-docs h2 .emoji,
+.systemsculpt-docs h3 .emoji {
+  font-size: 1.2em;
+  margin-right: var(--ss-space-xs);
+}
+
+/* Documentation Navigation */
+.systemsculpt-docs-nav {
+  background: var(--ss-color-bg-secondary);
+  border-bottom: 2px solid var(--ss-color-border);
+  padding: var(--ss-space-md) var(--ss-space-xl);
+  margin: calc(-1 * var(--ss-space-xl)) calc(-1 * var(--ss-space-xl)) var(--ss-space-xl);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+}
+
+.systemsculpt-docs-nav-list {
+  display: flex;
+  gap: var(--ss-space-lg);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+}
+
+.systemsculpt-docs-nav-link {
+  display: inline-block;
+  padding: var(--ss-space-sm) var(--ss-space-md);
+  color: var(--ss-color-text-muted);
+  font-weight: 500;
+  border-radius: var(--ss-radius-md);
+  transition: all var(--ss-transition-fast);
+  white-space: nowrap;
+}
+
+.systemsculpt-docs-nav-link:hover {
+  background: var(--ss-color-bg-hover);
+  color: var(--ss-color-text-normal);
+  text-decoration: none;
+  border-bottom: none;
+}
+
+.systemsculpt-docs-nav-link.active {
+  background: var(--ss-color-primary);
+  color: var(--ss-color-text-on-primary);
+}
+
+/* Documentation Content */
+.systemsculpt-docs-content {
+  animation: fadeIn var(--ss-transition-normal);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Error State */
+.systemsculpt-docs-error {
+  text-align: center;
+  color: var(--ss-color-text-muted);
+  padding: var(--ss-space-xxl);
+  font-style: italic;
+}
+
+/* Callout Box Variants */
+.systemsculpt-docs blockquote.tip {
+  background: rgba(255, 193, 7, 0.1);
+  border-left-color: #ffc107;
+}
+
+.systemsculpt-docs blockquote.warning {
+  background: rgba(255, 87, 34, 0.1);
+  border-left-color: #ff5722;
+}
+
+.systemsculpt-docs blockquote.success {
+  background: rgba(76, 175, 80, 0.1);
+  border-left-color: #4caf50;
+}
+
+.systemsculpt-docs blockquote.celebration {
+  background: rgba(156, 39, 176, 0.1);
+  border-left-color: #9c27b0;
+}
+
+.systemsculpt-docs blockquote.note {
+  background: rgba(33, 150, 243, 0.1);
+  border-left-color: #2196f3;
+}
+
+/* Copy Code Button */
+.systemsculpt-docs pre {
+  position: relative;
+}
+
+.systemsculpt-docs pre:hover .copy-code-button {
+  opacity: 1;
+}
+
+.copy-code-button {
+  position: absolute;
+  top: var(--ss-space-sm);
+  right: var(--ss-space-sm);
+  padding: var(--ss-space-xs) var(--ss-space-sm);
+  background: var(--ss-color-primary);
+  color: var(--ss-color-text-on-primary);
+  border: none;
+  border-radius: var(--ss-radius-sm);
+  font-size: 0.875rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ss-transition-fast);
+}
+
+.copy-code-button:hover {
+  background: var(--ss-color-primary-hover);
+}
+
+/* TOC Sidebar (future enhancement) */
+.systemsculpt-docs-toc {
+  position: fixed;
+  right: var(--ss-space-xl);
+  top: 100px;
+  width: 200px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.systemsculpt-docs-toc-title {
+  font-weight: 600;
+  margin-bottom: var(--ss-space-md);
+  color: var(--ss-color-text-muted);
+  text-transform: uppercase;
+  font-size: 0.875rem;
+  letter-spacing: 0.5px;
+}
+
+.systemsculpt-docs-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.systemsculpt-docs-toc-item {
+  margin-bottom: var(--ss-space-xs);
+}
+
+.systemsculpt-docs-toc-link {
+  display: block;
+  padding: var(--ss-space-xs);
+  color: var(--ss-color-text-muted);
+  font-size: 0.875rem;
+  border-left: 2px solid transparent;
+  transition: all var(--ss-transition-fast);
+}
+
+.systemsculpt-docs-toc-link:hover {
+  color: var(--ss-color-text-normal);
+  border-left-color: var(--ss-color-primary);
+  padding-left: var(--ss-space-sm);
+}
+
+.systemsculpt-docs-toc-link.active {
+  color: var(--ss-color-primary);
+  border-left-color: var(--ss-color-primary);
+  font-weight: 500;
+}
 
 /* recorder.css */
 /* SystemSculpt Recorder Component Styling */
@@ -11879,6 +13452,72 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
  * Styles for the model indicator in chat view
  */
 
+/* Base chip style for compact, tabbable pills */
+.systemsculpt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ensure inner text truncates cleanly inside pills */
+.systemsculpt-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Keep legacy classes working while using the shared chip look */
+.systemsculpt-model-indicator,
+.systemsculpt-manage-agent-tooling-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+
+.systemsculpt-chip:hover,
+.systemsculpt-model-indicator:hover,
+.systemsculpt-manage-agent-tooling-btn:hover {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-chip:focus-visible,
+.systemsculpt-model-indicator:focus-visible,
+.systemsculpt-manage-agent-tooling-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.systemsculpt-model-indicator.systemsculpt-no-model {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 .systemsculpt-model-indicator-icon {
   display: inline-flex;
   align-items: center;
@@ -11892,6 +13531,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   height: 14px;
 }
 
+.systemsculpt-chip:hover .systemsculpt-model-indicator-icon,
 .systemsculpt-model-indicator:hover .systemsculpt-model-indicator-icon {
   color: var(--text-normal);
 }
@@ -11946,6 +13586,13 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-model-locked .systemsculpt-model-indicator-arrow svg {
   color: var(--text-accent);
 }
+
+/* Manage Agent Tooling pill */
+/* Inline pill sizing for compact row placement */
+.systemsculpt-model-indicator-section.inline .systemsculpt-chip {
+  max-width: 280px;
+}
+
 
 /* resume-chat.css */
 /* Resume Chat Button Container */
@@ -12990,58 +14637,100 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* Tool call content styles have been moved to drawer.css */
 
 /* 
- * Batch Tool Call Approver Component Styles
+ * Batch Tool Call Approver Component Styles - Simplified
  */
 
 .systemsculpt-batch-tool-call-approver {
   background: var(--background-secondary);
-  border: 1px solid var(--interactive-accent);
+  border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  padding: 12px;
-  margin: 8px 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  padding: 16px;
+  margin: 12px 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .bta-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-weight: 600;
+  color: var(--text-normal);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.bta-header svg {
+  width: 18px;
+  height: 18px;
+  color: var(--interactive-accent);
+}
+
+.bta-header span {
   color: var(--text-normal);
 }
 
 .bta-body h4 {
-  margin: 0 0 8px 0;
-  font-size: 14px;
+  margin: 0 0 12px 0;
+  font-size: 15px;
   font-family: var(--font-monospace);
-  color: var(--text-muted);
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .bta-args {
   background: var(--background-primary);
-  border-radius: 4px;
-  padding: 8px;
-  max-height: 200px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 250px;
   overflow-y: auto;
+}
+
+.bta-args::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bta-args::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 3px;
+}
+
+.bta-args::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .bta-args pre {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
+  font-family: var(--font-monospace);
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+  color: var(--text-normal);
+  line-height: 1.5;
 }
 
 .bta-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  padding-top: 12px;
 }
 
-.bta-actions .btn {
-  flex: 1;
+.bta-actions button {
+  /* Use standard ss-button classes in the HTML instead */
 }
 
 .bta-timer-wrapper {
@@ -13049,7 +14738,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   background: var(--background-modifier-border);
   border-radius: 2px;
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .bta-timer-bar {
@@ -13057,11 +14746,73 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   width: 0%;
   background: var(--interactive-accent);
   border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Quick actions for batch approval */
+.bta-quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: var(--background-modifier-form-field);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+
+.bta-quick-actions button {
+  /* Use standard ss-button classes in the HTML instead */
+}
+
+/* Tool info display */
+.bta-tool-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--background-modifier-form-field);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.bta-tool-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+
+.bta-tool-name {
+  font-weight: 500;
+  color: var(--text-normal);
 }
 
 /* Hide individual pending tool call drawers when batch approver is active */
 .systemsculpt-message.has-batch-approval .systemsculpt-tool-call-wrapper[data-state="pending"] {
     display: none !important;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+  .systemsculpt-batch-tool-call-approver {
+    padding: 12px;
+    margin: 8px 0;
+  }
+  
+  .bta-quick-actions {
+    flex-direction: column;
+  }
+  
+  .bta-quick-actions button {
+    width: 100%;
+  }
+  
+  .bta-actions {
+    flex-direction: column;
+  }
+  
+  .bta-actions button {
+    width: 100%;
+  }
 } 
 
 /* diff-viewer.css */
@@ -13529,6 +15280,412 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     gap: 4px;
   }
 } 
+
+/* tool-results.css */
+/**
+ * Tool Call Results - Modal-specific styling
+ *
+ * Simplified styles for tool call result display in modals
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Modal Sections                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__section {
+  margin-bottom: 24px;
+}
+
+.ss-modal__section-header {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-modal__section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-modal__section-title--success {
+  color: var(--text-success);
+}
+
+.ss-modal__section-title--error {
+  color: var(--text-error);
+}
+
+.ss-modal__section-content {
+  padding: 0;
+}
+
+.ss-modal__subsection {
+  margin-bottom: 16px;
+}
+
+.ss-modal__subsection-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Table Display                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ss-modal__table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+}
+
+.ss-modal__table-key {
+  width: 30%;
+  color: var(--text-muted);
+}
+
+.ss-modal__table-value {
+  color: var(--text-normal);
+  word-break: break-word;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Code Display                                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__code {
+  margin: 0;
+  padding: 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-modal__code--scrollable {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.ss-modal__code::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ss-modal__code::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.ss-modal__inline-code {
+  padding: 2px 4px;
+  background: var(--background-modifier-form-field);
+  border-radius: 3px;
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Text Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__text--muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Summary Display                                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__summary {
+  padding: 10px 14px;
+  background: var(--background-modifier-form-field);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Grid Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ss-modal__grid-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  transition: background-color 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.ss-modal__grid-item:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border);
+}
+
+.ss-modal__grid-item--directory {
+  background: var(--background-secondary);
+}
+
+.ss-modal__grid-item--file {
+  background: var(--background-secondary);
+}
+
+.ss-modal__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  List Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__list {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.ss-modal__list li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Display                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__error {
+  padding: 0;
+  background: rgba(var(--color-red-rgb), 0.03);
+  border: 1px solid rgba(var(--color-red-rgb), 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ss-modal__error-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(var(--color-red-rgb), 0.05);
+  border-bottom: 1px solid rgba(var(--color-red-rgb), 0.15);
+}
+
+.ss-modal__error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-error);
+}
+
+.ss-modal__error-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ss-modal__error-content {
+  padding: 14px 16px;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Mobile Responsiveness                                    ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (max-width: 600px) {
+  .ss-modal__grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .ss-modal__code--scrollable {
+    max-height: 300px;
+  }
+  
+  .ss-modal__grid-item {
+    padding: 6px 10px;
+  }
+}
+
+/* tool-states.css */
+/**
+ * Tool Call States - Simplified inline display styling
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Inline Tool Call Display                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 14px;
+  min-height: 36px;
+}
+
+.systemsculpt-tool-inline:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Tool name */
+.systemsculpt-tool-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  flex: 0 0 auto;
+}
+
+/* Status text */
+.systemsculpt-tool-status {
+  color: var(--text-muted);
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+/* Actions container */
+.systemsculpt-tool-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Status Icons                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-status-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-tool-status-icon--success {
+  color: var(--text-success);
+  animation: checkmark 0.3s ease-out;
+}
+
+.systemsculpt-tool-status-icon--error {
+  color: var(--text-error);
+}
+
+.systemsculpt-tool-status-icon--denied {
+  color: var(--text-warning);
+}
+
+.systemsculpt-tool-status-icon--pending {
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-status-icon--executing {
+  color: var(--interactive-accent);
+}
+
+@keyframes checkmark {
+  from {
+    transform: scale(0) rotate(-45deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Simple Loading Spinner                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Tool Call Wrapper States                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-call-wrapper {
+  margin: 4px 0;
+}
+
+.systemsculpt-tool-call-wrapper[data-state="executing"] .systemsculpt-tool-inline {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-tool-call-wrapper[data-state="denied"] .systemsculpt-tool-inline {
+  opacity: 0.7;
+}
+
+.systemsculpt-tool-call-wrapper[data-state="failed"] .systemsculpt-tool-inline {
+  border-color: rgba(var(--color-red-rgb), 0.3);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Mobile Optimizations                                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (max-width: 600px) {
+  .systemsculpt-tool-inline {
+    padding: 6px 10px;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  
+  .systemsculpt-tool-actions {
+    width: 100%;
+    margin-top: 8px;
+    justify-content: flex-end;
+  }
+  
+  .systemsculpt-tool-status-icon {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .systemsculpt-tool-status-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+}
 
 /* codemirror-diff.css */
 /* CodeMirror Diff Overlay Styles */
@@ -15359,9 +17516,11 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* embeddings-settings.css */
 /**
  * Embeddings Settings - SystemSculpt Component
- * 
+ *
  * Styles for embeddings settings tab with proper Obsidian UI integration
  */
+
+
 
 /* Statistics Section */
 .systemsculpt-embeddings-statistics-section {
@@ -16543,6 +18702,18 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     font-size: 12px;
   }
 }
+
+/* systemsculpt-search.css */
+/* SystemSculpt Search Modal - Minimal custom styles */
+/* Most styles now handled by standardized-modal.css */
+
+/* Draggable cursor for results list */
+.ss-modal__list.scs-draggable { 
+  cursor: grab; 
+}
+
+
+
 
 /* context-selection.css */
 /**
@@ -17795,8 +19966,9 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     display: none; /* Hide text on mobile */
   }
   
+  /* Keep favorites text visible on mobile */
   .ss-favorites-button .systemsculpt-favorites-label {
-    display: none; /* Hide favorites text on mobile */
+    display: inline; /* Show favorites text on mobile */
   }
   
   /* Make favorites button consistent with other buttons on mobile */
@@ -18446,154 +20618,813 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
 }
 
-/* chat.css */
-/**
- * Chat View
- * 
- * Styles specific to the chat interface
- */
-
-.systemsculpt-messages-container {
-  overflow-y: auto;
-  overflow-x: hidden;
-  height: calc(100% - 130px);
-  padding: 16px;
-  /* Remove smooth scroll behavior to prevent conflicts during generation */
-  /* scroll-behavior: smooth; */
-  position: relative;
-  overscroll-behavior: contain; /* Prevent scroll chaining */
-  -webkit-overflow-scrolling: touch; /* Better touch scrolling on iOS */
-  
-  /* Performance optimizations for smooth scrolling */
-  will-change: scroll-position;
-  transform: translateZ(0); /* Force hardware acceleration */
-  backface-visibility: hidden; /* Reduce repaints */
-  /* Remove containment - it was breaking child height calculation */
-  /* contain: layout style paint; */
+/* welcome-modal.css */
+/* Welcome Modal - Fresh design with better spacing */
+.systemsculpt-welcome-modal {
+    /* Responsive modal sizing */
+    .modal {
+        max-width: min(520px, 90vw);
+        min-width: 320px;
+    }
+    
+    /* Hero section with centered icon and tagline */
+    .welcome-hero {
+        text-align: center;
+        margin-bottom: var(--size-4-8);
+    }
+    
+    .welcome-icon-wrapper {
+        display: flex;
+        justify-content: center;
+        margin-bottom: var(--size-4-3);
+    }
+    
+    .welcome-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 60px;
+        height: 60px;
+        background: var(--interactive-accent);
+        border-radius: var(--radius-l);
+        
+        svg {
+            width: 32px;
+            height: 32px;
+            color: var(--text-on-accent);
+        }
+    }
+    
+    .welcome-tagline {
+        font-size: var(--font-ui-large);
+        color: var(--text-normal);
+        margin: 0;
+        font-weight: var(--font-medium);
+    }
+    
+    /* Feature grid */
+    .welcome-features-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--size-4-3);
+        margin-bottom: var(--size-4-8);
+    }
+    
+    .welcome-feature-card {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--size-4-2);
+        padding: var(--size-4-3);
+        background: var(--background-secondary);
+        border-radius: var(--radius-s);
+        border: 1px solid var(--background-modifier-border);
+    }
+    
+    .welcome-feature-icon {
+        flex-shrink: 0;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        svg {
+            width: 16px;
+            height: 16px;
+            color: var(--interactive-accent);
+        }
+    }
+    
+    .welcome-feature-content {
+        flex: 1;
+    }
+    
+    .welcome-feature-title {
+        font-size: var(--font-ui-small);
+        font-weight: var(--font-semibold);
+        color: var(--text-normal);
+        margin-bottom: 2px;
+    }
+    
+    .welcome-feature-desc {
+        font-size: var(--font-ui-smaller);
+        color: var(--text-muted);
+        line-height: 1.3;
+    }
+    
+    /* CTA section */
+    .welcome-cta-section {
+        text-align: center;
+        margin-bottom: var(--size-4-6);
+    }
+    
+    .welcome-cta-text {
+        font-size: var(--font-ui-medium);
+        color: var(--text-muted);
+        margin: 0 0 var(--size-4-4) 0;
+    }
+    
+    /* Action buttons */
+    .welcome-buttons {
+        display: flex;
+        gap: var(--size-4-2);
+        justify-content: center;
+        
+        button {
+            padding: var(--size-2-3) var(--size-4-6);
+            font-size: var(--font-ui-medium);
+            border-radius: var(--button-radius);
+            
+            &.mod-cta {
+                font-weight: var(--font-semibold);
+            }
+        }
+    }
+    
+    /* Footer */
+    .welcome-footer {
+        text-align: center;
+        padding-top: var(--size-4-3);
+        border-top: 1px solid var(--background-modifier-border);
+        
+        .welcome-skip-link {
+            font-size: var(--font-ui-smaller);
+            color: var(--text-faint);
+            text-decoration: none;
+            cursor: pointer;
+            transition: color 0.2s ease;
+            
+            &:hover {
+                color: var(--text-muted);
+                text-decoration: underline;
+            }
+        }
+    }
+    
+    /* Mobile responsive adjustments */
+    @media (max-width: 600px) {
+        .modal {
+            margin: var(--size-4-4);
+            max-height: calc(100vh - var(--size-4-8));
+        }
+        
+        .welcome-hero {
+            margin-bottom: var(--size-4-6);
+        }
+        
+        .welcome-icon {
+            width: 50px;
+            height: 50px;
+            
+            svg {
+                width: 28px;
+                height: 28px;
+            }
+        }
+        
+        .welcome-tagline {
+            font-size: var(--font-ui-medium);
+        }
+        
+        .welcome-features-grid {
+            grid-template-columns: 1fr;
+            gap: var(--size-4-2);
+            margin-bottom: var(--size-4-6);
+        }
+        
+        .welcome-feature-card {
+            padding: var(--size-4-2);
+        }
+        
+        .welcome-cta-section {
+            margin-bottom: var(--size-4-4);
+        }
+        
+        .welcome-cta-text {
+            font-size: var(--font-ui-small);
+            margin-bottom: var(--size-4-3);
+        }
+        
+        .welcome-buttons {
+            flex-direction: column;
+            gap: var(--size-2-2);
+            
+            button {
+                width: 100%;
+                padding: var(--size-2-3) var(--size-4-3);
+                font-size: var(--font-ui-small);
+            }
+        }
+    }
+    
+    /* Smaller mobile devices */
+    @media (max-width: 400px) {
+        .welcome-features-grid {
+            margin-bottom: var(--size-4-4);
+        }
+        
+        .welcome-feature-title {
+            font-size: 13px;
+        }
+        
+        .welcome-feature-desc {
+            font-size: 11px;
+        }
+    }
+    
+    /* Dark/Light theme compatibility */
+    &.theme-light .welcome-icon {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    &.theme-dark .welcome-icon {
+        background: var(--interactive-accent);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    /* Hover effects for feature cards */
+    .welcome-feature-card {
+        transition: all 0.2s ease;
+        
+        &:hover {
+            background: var(--background-secondary-alt);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-s);
+        }
+    }
 }
 
-/* Thumb appearance for scrollbar */
+/* guided-tour.css */
+/* Guided Tour Styles */
+.systemsculpt-tour-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 9998;
+    animation: fadeIn 0.3s ease-out;
+    pointer-events: auto;
+}
+
+/* Spotlight cutout for highlighted elements */
+.systemsculpt-tour-overlay.has-highlight {
+    /* We'll use a radial gradient to create the cutout effect */
+    /* This will be dynamically updated via JavaScript */
+    mask-image: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%), 
+                transparent var(--spotlight-inner-radius, 0px),
+                transparent var(--spotlight-outer-radius, 0px),
+                black var(--spotlight-fade-radius, 0px));
+    -webkit-mask-image: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%), 
+                transparent var(--spotlight-inner-radius, 0px),
+                transparent var(--spotlight-outer-radius, 0px),
+                black var(--spotlight-fade-radius, 0px));
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.systemsculpt-tour-highlight {
+    position: fixed;
+    border: 3px solid var(--interactive-accent);
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px rgba(var(--interactive-accent-rgb), 0.3),
+                0 0 30px rgba(var(--interactive-accent-rgb), 0.6),
+                inset 0 0 20px rgba(var(--interactive-accent-rgb), 0.1);
+    pointer-events: none;
+    z-index: 9999;
+    animation: pulse 2s ease-in-out infinite;
+    /* Ensure the highlight is above the overlay but allows interaction */
+    isolation: isolate;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 4px rgba(var(--interactive-accent-rgb), 0.3),
+                    0 0 30px rgba(var(--interactive-accent-rgb), 0.6),
+                    inset 0 0 20px rgba(var(--interactive-accent-rgb), 0.1);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(var(--interactive-accent-rgb), 0.2),
+                    0 0 40px rgba(var(--interactive-accent-rgb), 0.8),
+                    inset 0 0 25px rgba(var(--interactive-accent-rgb), 0.2);
+    }
+}
+
+.systemsculpt-tour-tooltip {
+    position: fixed;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    max-width: 400px;
+    z-index: 10000;
+    animation: slideInScale 0.3s ease-out;
+    
+    &.centered {
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%);
+        animation: slideInScaleCentered 0.3s ease-out;
+    }
+}
+
+@keyframes slideInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes slideInScaleCentered {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+.tour-tooltip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    
+    h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-normal);
+    }
+}
+
+.tour-close-btn {
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+    
+    &:hover {
+        background: var(--background-modifier-hover);
+        color: var(--text-normal);
+    }
+    
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+}
+
+.tour-tooltip-content {
+    padding: 20px;
+    
+    p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text-normal);
+        white-space: pre-line; /* Preserve line breaks */
+    }
+}
+
+.tour-tooltip-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    border-radius: 0 0 12px 12px;
+}
+
+.tour-step-indicator {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.tour-nav-buttons {
+    display: flex;
+    gap: 8px;
+    
+    button {
+        padding: 6px 16px;
+        font-size: 13px;
+        border: 1px solid var(--background-modifier-border);
+        background: var(--background-primary);
+        color: var(--text-normal);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        
+        &:hover {
+            background: var(--background-modifier-hover);
+        }
+        
+        &.mod-cta {
+            background: var(--interactive-accent);
+            color: white;
+            border: none;
+            
+            &:hover {
+                background: var(--interactive-accent-hover);
+            }
+        }
+    }
+}
+
+/* Arrow indicators for tooltip positioning */
+.systemsculpt-tour-tooltip::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 8px solid transparent;
+}
+
+/* Positioning-specific arrows */
+.systemsculpt-tour-tooltip[data-position="top"]::before {
+    bottom: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: var(--background-modifier-border);
+}
+
+.systemsculpt-tour-tooltip[data-position="bottom"]::before {
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: var(--background-modifier-border);
+}
+
+.systemsculpt-tour-tooltip[data-position="left"]::before {
+    right: -16px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: var(--background-modifier-border);
+}
+
+.systemsculpt-tour-tooltip[data-position="right"]::before {
+    left: -16px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: var(--background-modifier-border);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+    .systemsculpt-tour-tooltip {
+        max-width: calc(100vw - 40px);
+        
+        &.centered {
+            width: calc(100vw - 40px);
+        }
+    }
+    
+    .tour-tooltip-content {
+        padding: 16px;
+        
+        p {
+            font-size: 13px;
+        }
+    }
+}
+
+/* chat.css */
+/**
+ * Chat View - Modern UI/UX Design System
+ * 
+ * Clean, elegant chat interface with glassmorphism and smooth animations
+ */
+
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Messages Container - Main chat scrollable area          ║
+   ╚═══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-messages-container {
+  /* Layout */
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 24px 20px;
+  position: relative;
+  
+  /* Visual Design */
+  background: linear-gradient(
+    180deg,
+    var(--background-primary) 0%,
+    var(--background-primary-alt) 100%
+  );
+  
+  /* Smooth Scrolling */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto; /* Controlled programmatically */
+  
+  /* Performance */
+  will-change: scroll-position;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Modern Scrollbar Design */
 .systemsculpt-messages-container::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .systemsculpt-messages-container::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(var(--background-modifier-border-rgb), 0.1);
+  border-radius: 4px;
+  margin: 8px 0;
 }
 
 .systemsculpt-messages-container::-webkit-scrollbar-thumb {
-  background-color: var(--text-muted);
-  border-radius: 3px;
-  border: 2px solid transparent;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--interactive-accent-rgb), 0.4),
+    rgba(var(--interactive-accent-rgb), 0.2)
+  );
+  border-radius: 4px;
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+  transition: all 0.2s ease;
 }
 
 .systemsculpt-messages-container::-webkit-scrollbar-thumb:hover {
-  background-color: var(--text-normal);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--interactive-accent-rgb), 0.6),
+    rgba(var(--interactive-accent-rgb), 0.4)
+  );
+  box-shadow: 0 0 8px rgba(var(--interactive-accent-rgb), 0.3);
 }
 
-/* Fade out scrollbar when inactive */
-.systemsculpt-messages-container:not(:hover)::-webkit-scrollbar-thumb {
-  opacity: 0.5;
-}
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Scroll to Bottom - Floating Action Button               ║
+   ╚═══════════════════════════════════════════════════════════╝ */
 
-/* Scroll to bottom button */
 .systemsculpt-scroll-to-bottom {
   position: absolute;
   bottom: 140px;
-  right: 20px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  color: var(--text-muted);
+  right: 24px;
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  
+  /* Glassmorphism effect */
+  background: rgba(var(--background-secondary-rgb), 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.3);
+  
+  color: var(--text-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 10;
+  
+  /* Elegant shadow */
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  
+  /* Smooth animations */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+  
+  /* Entrance animation */
+  animation: fadeInScale 0.3s ease-out;
 }
 
-.systemsculpt-scroll-to-bottom:hover {
-  background-color: var(--background-secondary-alt);
-  color: var(--text-normal);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.systemsculpt-scroll-to-bottom:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-/* Mobile adjustments */
-@media (max-width: 768px) {
-  .systemsculpt-scroll-to-bottom {
-    width: 32px;
-    height: 32px;
-    bottom: 120px;
-    right: 16px;
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
-.systemsculpt-chat-input {
-  flex-grow: 1;
-  resize: none;
-  min-height: 40px;
-  max-height: 150px;
-  padding: 0.5rem;
-  margin-right: 0.25rem;
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
-  font-size: 16px;
-  line-height: 1.4;
-  transition: all 0.2s ease;
+.systemsculpt-scroll-to-bottom:hover {
+  background: rgba(var(--interactive-accent-rgb), 0.9);
+  color: var(--text-on-accent);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 
+    0 8px 24px rgba(var(--interactive-accent-rgb), 0.25),
+    0 4px 8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
+
+.systemsculpt-scroll-to-bottom:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+/* Accessibility utility */
+.systemsculpt-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Responsive Design - Mobile & Tablet                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (max-width: 768px) {
+  /* Messages container - reduced padding */
+  .systemsculpt-messages-container {
+    padding: 16px 12px;
+  }
+  
+  /* Scroll button - smaller and repositioned */
+  .systemsculpt-scroll-to-bottom {
+    width: 40px;
+    height: 40px;
+    bottom: 120px;
+    right: 16px;
+  }
+  
+  /* Chat input - mobile optimized */
+  .systemsculpt-chat-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+    padding: 10px 14px;
+    min-height: 42px;
+  }
+  
+  /* Input container - compact */
+  .systemsculpt-input-container {
+    padding: 12px;
+    gap: 10px;
+  }
+  
+  /* Button grid - horizontal scroll */
+  .systemsculpt-button-grid {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding-bottom: 4px;
+  }
+  
+  .systemsculpt-button-grid .mod-small {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+  }
+  
+  /* Load more button - full width */
+  .systemsculpt-load-more {
+    max-width: 100%;
+    margin: 12px 8px 20px;
+    padding: 8px 16px;
+    font-size: 12px;
+  }
+  
+  /* Chat header - compact */
+  .systemsculpt-chat-header {
+    padding: 10px;
+  }
+}
+
+/* Small devices and portrait tablets */
+@media (max-width: 600px) {
+  /* User messages - wider on small screens */
+  .systemsculpt-user-message {
+    max-width: 90%;
+  }
+  
+  /* Assistant messages - full width */
+  .systemsculpt-assistant-message {
+    max-width: 95%;
+  }
+  
+  /* Message group - reduced padding */
+  .systemsculpt-assistant-message-group {
+    padding: 12px;
+    margin: 8px 0;
+  }
+}
+
+/* Landscape phones */
+@media (max-height: 500px) and (orientation: landscape) {
+  /* Reduce vertical spacing */
+  .systemsculpt-messages-container {
+    padding: 12px 16px;
+    gap: 0.75rem;
+  }
+  
+  /* Smaller input */
+  .systemsculpt-chat-input {
+    min-height: 36px;
+    max-height: 80px;
+  }
+  
+  /* Compact header */
+  .systemsculpt-chat-header {
+    padding: 8px;
+  }
+}
+
+/* Large tablets and small desktops */
+@media (min-width: 769px) and (max-width: 1200px) {
+  /* Intermediate sizing */
+  .systemsculpt-messages-container {
+    padding: 20px 16px;
+  }
+  
+  .systemsculpt-user-message {
+    max-width: 80%;
+  }
+  
+  .systemsculpt-assistant-message {
+    max-width: 85%;
+  }
+}
+
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Chat Input - Modern Text Area                           ║
+   ╚═══════════════════════════════════════════════════════════╝ */
 
 .systemsculpt-chat-input {
   flex-grow: 1;
   resize: none;
-  min-height: 40px;
-  max-height: 150px;
+  min-height: 44px;
+  max-height: 160px;
   padding: 12px 16px;
   margin: 0;
-  border-radius: 8px;
-  border: 1px solid var(--background-modifier-border);
-  background-color: var(--background-primary);
+  
+  /* Modern rounded design with clearly visible border */
+  border-radius: 12px;
+  border: 2px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  
+  /* Typography */
   font-size: 15px;
-  line-height: 1.5;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  line-height: 1.6;
+  color: var(--text-normal);
+  
+  /* Subtle shadow */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 2px rgba(0, 0, 0, 0.02);
+  
+  /* Smooth transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
+.systemsculpt-chat-input::placeholder {
   color: var(--text-muted);
-  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.systemsculpt-chat-input:hover:not(:focus):not(.disabled) {
+  border-color: rgba(var(--interactive-accent-rgb), 0.3);
+  background: var(--background-primary);
 }
 
 .systemsculpt-chat-input:focus {
   outline: none;
   border-color: var(--interactive-accent);
-  background-color: var(--background-primary);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
-}
-
-.systemsculpt-chat-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: var(--background-primary);
+  box-shadow: 
+    0 0 0 3px rgba(var(--interactive-accent-rgb), 0.15),
+    0 4px 12px rgba(var(--interactive-accent-rgb), 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
-  color: var(--text-muted);
+  background: rgba(var(--background-modifier-form-field-rgb), 0.5);
+  border-color: rgba(var(--background-modifier-border-rgb), 0.2);
+  color: var(--text-faint);
   cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .systemsculpt-chat-empty {
@@ -18643,10 +21474,24 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   outline: none;
 }
 
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Chat Header - Clean top section                         ║
+   ╚═══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-chat-header {
-  background-color: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding: 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--background-secondary-rgb), 0.95),
+    rgba(var(--background-secondary-rgb), 0.85)
+  );
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(var(--background-modifier-border-rgb), 0.3);
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  position: relative;
+  z-index: 900;
+  overflow: visible !important;
 }
 
 .systemsculpt-chat-header-left {
@@ -18676,12 +21521,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border-top: 1px solid var(--background-modifier-border);
 }
 
-.systemsculpt-chat-input.disabled {
-  background-color: var(--background-modifier-form-field);
-  border-color: var(--background-modifier-border);
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
+/* Deduped disabled style retained once */
 
 .systemsculpt-chat-input.disabled {
   background-color: var(--background-modifier-form-field);
@@ -18713,11 +21553,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.systemsculpt-chat-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
+/* Focus style defined once above */
 
 .systemsculpt-chat-badge {
   display: flex;
@@ -18777,10 +21613,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     flex-wrap: nowrap;
     overflow-x: auto;
   }
-  .systemsculpt-button-grid button {
-    width: 32px;
-    height: 32px;
-  }
 
   /* Reduce spacing and size of input area */
   .systemsculpt-input-container {
@@ -18806,59 +21638,85 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
 }
 
-/*──────────────────────────────────────────────────────────
-  Load More (Earlier Messages) Button
-──────────────────────────────────────────────────────────*/
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Load More Button - Elegant history loader               ║
+   ╚═══════════════════════════════════════════════════════════╝ */
+
 .systemsculpt-load-more {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   width: 100%;
-  padding: 8px 12px;
-  margin: 4px 0 12px 0;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background-color: var(--background-secondary);
+  max-width: 300px;
+  margin: 16px auto 24px;
+  padding: 10px 20px;
+  
+  /* Glass card effect */
+  background: rgba(var(--background-secondary-rgb), 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--interactive-accent-rgb), 0.2);
+  border-radius: 20px;
+  
+  /* Typography */
   color: var(--interactive-accent);
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  
+  /* Interaction */
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
   user-select: none;
-  text-align: center;
-  line-height: 1.2;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Shadow */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .systemsculpt-load-more:hover {
-  background-color: var(--background-secondary-alt);
+  background: rgba(var(--interactive-accent-rgb), 0.15);
+  border-color: rgba(var(--interactive-accent-rgb), 0.4);
+  transform: translateY(-1px);
+  box-shadow: 
+    0 4px 16px rgba(var(--interactive-accent-rgb), 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.systemsculpt-load-more:active {
+  transform: translateY(0);
 }
 
 .systemsculpt-load-more:focus-visible {
   outline: 2px solid var(--interactive-accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 .systemsculpt-load-more[aria-disabled="true"],
 .systemsculpt-load-more[data-loading="true"] {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.7;
+  transform: none;
 }
 
+/* Loading spinner */
 .systemsculpt-load-more[data-loading="true"]::after {
   content: "";
   width: 14px;
   height: 14px;
-  border: 2px solid currentColor;
-  border-bottom-color: transparent;
+  border: 2px solid var(--interactive-accent);
+  border-top-color: transparent;
+  border-left-color: transparent;
   border-radius: 50%;
-  margin-left: 8px;
-  animation: systemsculpt-spin 0.8s linear infinite;
+  animation: systemsculpt-spin 0.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 @keyframes systemsculpt-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
-
 
 
 /* model-select.css */
@@ -18886,25 +21744,41 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   flex-wrap: wrap;
 }
 
+/* Compact inline variant when placed in the input toolbar */
+.systemsculpt-model-indicator-section.inline {
+  padding: 0;
+  border-top: none;
+  background: transparent;
+  gap: 6px;
+}
+
 .systemsculpt-model-indicator {
   padding: 8px 12px;
   background-color: var(--background-modifier-form-field);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--text-normal);
   font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   text-align: left;
   width: calc(50% - 4px);
   display: flex;
   align-items: center;
-  height: 35px;
+  height: 36px;
   box-sizing: border-box;
   justify-content: space-between;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Inline pill sizing */
+.systemsculpt-model-indicator-section.inline .systemsculpt-model-indicator {
+  width: auto;
+  max-width: 280px;
+  height: 32px;
+  padding: 6px 10px;
 }
 
 
@@ -19442,7 +22316,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     width: 100%;
   }
 }
-
 
 
 /* settings.css */
@@ -19989,109 +22862,109 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   padding-left: var(--size-4-4); /* Ensure padding consistency if border-left removed or changed */
 }
 
-.systemsculpt-provider-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--size-4-3);
-}
-
-.systemsculpt-provider-header h5 {
-  margin: 0;
-  font-size: var(--font-ui-normal);
-  font-weight: var(--font-semibold);
-  flex-grow: 1;
-}
-
-.systemsculpt-provider-status-container {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-}
-
-.systemsculpt-provider-status {
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-medium);
-  padding: 2px var(--size-4-2);
-  border-radius: var(--radius-s);
-  text-transform: uppercase;
-}
-
-.systemsculpt-provider-status.enabled {
-  color: var(--color-green);
-  background-color: var(--color-green-faint);
-}
-
-.systemsculpt-provider-status.disabled {
-  color: var(--color-orange);
-  background-color: var(--color-orange-faint);
-}
-
-.systemsculpt-provider-status.auto-disabled {
-  color: var(--color-red);
-  background-color: var(--color-red-faint);
-  border: 1px solid var(--color-red);
-}
-
-.systemsculpt-provider-failure-info {
-  background-color: var(--background-modifier-form-field);
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-top: 8px;
-  border-left: 3px solid var(--color-red);
-}
-
-.systemsculpt-failure-text {
-  font-weight: 500;
-  color: var(--text-normal);
-}
-
-.systemsculpt-failure-timestamp {
-  font-size: 0.9em;
-  color: var(--text-muted);
-}
-
-/* Styling for the toggle within the provider card status */
-.systemsculpt-provider-status-container .checkbox-container {
-  transform: scale(0.9); /* Slightly smaller toggle */
-}
-
-.systemsculpt-provider-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--size-4-1);
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-  padding-left: var(--size-4-1); /* Small indent for details */
-  border-left: 2px solid var(--background-modifier-border-hover);
-  padding-left: var(--size-4-3);
-  margin-left: var(--size-4-1); /* Give a bit of space from the header content */
-}
-
-.systemsculpt-provider-endpoint,
-.systemsculpt-provider-api-key,
-.systemsculpt-provider-last-tested {
-  word-break: break-all;
-}
-
-.systemsculpt-masked-api-key {
-  font-family: var(--font-monospace);
-  background-color: var(--background-modifier-hover);
-  padding: 1px 4px;
-  border-radius: var(--radius-xs);
-}
-
-.systemsculpt-provider-actions {
-  display: flex;
-  justify-content: flex-end; /* Align buttons to the right */
-  gap: var(--size-4-2);
-  margin-top: var(--size-4-2);
-}
-
-.systemsculpt-provider-actions .button {
-  font-size: var(--font-ui-small);
-  padding: var(--size-2-1) var(--size-4-2); /* Smaller padding for action buttons */
-}
+/* DEPRECATED: .systemsculpt-provider-header { */
+/* DEPRECATED:   display: flex; */
+/* DEPRECATED:   justify-content: space-between; */
+/* DEPRECATED:   align-items: center; */
+/* DEPRECATED:   gap: var(--size-4-3); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-header h5 { */
+/* DEPRECATED:   margin: 0; */
+/* DEPRECATED:   font-size: var(--font-ui-normal); */
+/* DEPRECATED:   font-weight: var(--font-semibold); */
+/* DEPRECATED:   flex-grow: 1; */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-status-container { */
+/* DEPRECATED:   display: flex; */
+/* DEPRECATED:   align-items: center; */
+/* DEPRECATED:   gap: var(--size-4-2); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-status { */
+/* DEPRECATED:   font-size: var(--font-ui-small); */
+/* DEPRECATED:   font-weight: var(--font-medium); */
+/* DEPRECATED:   padding: 2px var(--size-4-2); */
+/* DEPRECATED:   border-radius: var(--radius-s); */
+/* DEPRECATED:   text-transform: uppercase; */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-status.enabled { */
+/* DEPRECATED:   color: var(--color-green); */
+/* DEPRECATED:   background-color: var(--color-green-faint); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-status.disabled { */
+/* DEPRECATED:   color: var(--color-orange); */
+/* DEPRECATED:   background-color: var(--color-orange-faint); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-status.auto-disabled { */
+/* DEPRECATED:   color: var(--color-red); */
+/* DEPRECATED:   background-color: var(--color-red-faint); */
+/* DEPRECATED:   border: 1px solid var(--color-red); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-failure-info { */
+/* DEPRECATED:   background-color: var(--background-modifier-form-field); */
+/* DEPRECATED:   padding: 8px 12px; */
+/* DEPRECATED:   border-radius: 6px; */
+/* DEPRECATED:   margin-top: 8px; */
+/* DEPRECATED:   border-left: 3px solid var(--color-red); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-failure-text { */
+/* DEPRECATED:   font-weight: 500; */
+/* DEPRECATED:   color: var(--text-normal); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-failure-timestamp { */
+/* DEPRECATED:   font-size: 0.9em; */
+/* DEPRECATED:   color: var(--text-muted); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: /* Styling for the toggle within the provider card status */ */
+/* DEPRECATED: .systemsculpt-provider-status-container .checkbox-container { */
+/* DEPRECATED:   transform: scale(0.9); /* Slightly smaller toggle */ */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-details { */
+/* DEPRECATED:   display: flex; */
+/* DEPRECATED:   flex-direction: column; */
+/* DEPRECATED:   gap: var(--size-4-1); */
+/* DEPRECATED:   font-size: var(--font-ui-small); */
+/* DEPRECATED:   color: var(--text-muted); */
+/* DEPRECATED:   padding-left: var(--size-4-1); /* Small indent for details */ */
+/* DEPRECATED:   border-left: 2px solid var(--background-modifier-border-hover); */
+/* DEPRECATED:   padding-left: var(--size-4-3); */
+/* DEPRECATED:   margin-left: var(--size-4-1); /* Give a bit of space from the header content */ */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-endpoint, */
+/* DEPRECATED: .systemsculpt-provider-api-key, */
+/* DEPRECATED: .systemsculpt-provider-last-tested { */
+/* DEPRECATED:   word-break: break-all; */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-masked-api-key { */
+/* DEPRECATED:   font-family: var(--font-monospace); */
+/* DEPRECATED:   background-color: var(--background-modifier-hover); */
+/* DEPRECATED:   padding: 1px 4px; */
+/* DEPRECATED:   border-radius: var(--radius-xs); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-actions { */
+/* DEPRECATED:   display: flex; */
+/* DEPRECATED:   justify-content: flex-end; /* Align buttons to the right */ */
+/* DEPRECATED:   gap: var(--size-4-2); */
+/* DEPRECATED:   margin-top: var(--size-4-2); */
+/* DEPRECATED: } */
+/* DEPRECATED:  */
+/* DEPRECATED: .systemsculpt-provider-actions .button { */
+/* DEPRECATED:   font-size: var(--font-ui-small); */
+/* DEPRECATED:   padding: var(--size-2-1) var(--size-4-2); /* Smaller padding for action buttons */ */
+/* DEPRECATED: } */
 
 .systemsculpt-add-provider-container {
   margin-top: var(--size-4-4);
@@ -20202,6 +23075,164 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   font-size: var(--font-ui-large);
   font-weight: var(--font-semibold);
   margin-bottom: var(--size-4-3);
+}
+
+/* --- SETUP & CONNECT REDESIGN: COMPACT, SLEEK LAYOUT --- */
+.systemsculpt-license-section.systemsculpt-license-compact {
+  margin-bottom: var(--size-4-3);
+}
+
+.systemsculpt-license-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-3);
+}
+
+.systemsculpt-license-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.systemsculpt-license-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-license-inline-title {
+  margin: 0;
+}
+
+.systemsculpt-pro-badge-inline {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: var(--font-bold);
+  font-size: var(--font-ui-smaller);
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+}
+
+.systemsculpt-credit-inline {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.systemsculpt-license-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.systemsculpt-license-field-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.systemsculpt-license-input-compact {
+  width: 240px;
+}
+
+.systemsculpt-license-button-compact {
+  height: 28px;
+}
+
+.systemsculpt-license-button-compact.active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-copy-button-compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.systemsculpt-connection-status-section {
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  margin-bottom: var(--size-4-3);
+}
+
+.systemsculpt-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.systemsculpt-status-indicator .status-text {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.systemsculpt-status-indicator.connected .status-text { color: var(--text-success); }
+.systemsculpt-status-indicator.disconnected .status-text { color: var(--text-error); }
+
+.systemsculpt-providers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--size-4-2);
+}
+
+.systemsculpt-section-title {
+  margin: 0;
+}
+
+.systemsculpt-quick-add { position: relative; }
+.systemsculpt-add-provider-btn.button { height: 28px; }
+
+.systemsculpt-provider-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-l);
+  padding: 4px;
+  z-index: 1000;
+}
+
+.systemsculpt-provider-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.systemsculpt-provider-menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-help-section {
+  margin-top: var(--size-4-3);
+}
+
+.systemsculpt-help-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-help-link {
+  color: var(--text-accent);
+}
+
+.systemsculpt-help-links .separator {
+  color: var(--text-faint);
 }
 
 .systemsculpt-one-click-buttons {
@@ -20932,6 +23963,121 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-credit-additional {
   color: var(--color-yellow);
+}
+
+/* Compact line-item styles for custom providers */
+.systemsculpt-provider-line-item {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  margin-bottom: var(--size-4-2);
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-provider-line-item:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.systemsculpt-provider-name-section {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex: 0 0 auto;
+  min-width: 180px;
+}
+
+.systemsculpt-provider-name {
+  font-weight: 500;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.systemsculpt-provider-status-inline {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 500;
+}
+
+.systemsculpt-provider-status-inline.auto-disabled {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  color: var(--text-error);
+}
+
+.systemsculpt-provider-endpoint-section {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-provider-endpoint-inline {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-provider-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+}
+
+.systemsculpt-compact-button {
+  padding: 4px 8px !important;
+  font-size: var(--font-ui-smaller) !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  line-height: 1 !important;
+}
+
+.systemsculpt-delete-button {
+  background-color: transparent !important;
+  color: var(--text-muted) !important;
+  font-weight: bold !important;
+  padding: 4px 6px !important;
+  min-width: 24px !important;
+  width: 24px !important;
+}
+
+.systemsculpt-delete-button:hover {
+  background-color: rgba(var(--color-red-rgb), 0.1) !important;
+  color: var(--text-error) !important;
+}
+
+/* Make toggle component more compact in line items */
+.systemsculpt-provider-line-item .checkbox-container {
+  margin: 0;
+  padding: 0;
+  scale: 0.9;
+}
+
+/* Responsive adjustments for provider line items */
+@media (max-width: 768px) {
+  .systemsculpt-provider-line-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--size-4-1);
+  }
+  
+  .systemsculpt-provider-name-section,
+  .systemsculpt-provider-endpoint-section,
+  .systemsculpt-provider-actions-inline {
+    width: 100%;
+  }
+  
+  .systemsculpt-provider-actions-inline {
+    justify-content: flex-end;
+  }
 }
 
 
@@ -24779,4 +27925,210 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 
+
+/* mobile-ui-fixes.css */
+/**
+ * Mobile UI Fixes
+ * 
+ * Consolidated fixes for all mobile UI issues in SystemSculpt
+ * Handles toolbar buttons, favorites button across all contexts
+ */
+
+/* ========================================
+   CHAT TOOLBAR BUTTONS
+   ======================================== */
+
+/* Make toolbar buttons visible in mobile */
+.is-mobile .systemsculpt-button-grid button {
+  /* Basic visibility */
+  opacity: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  /* Standard button appearance */
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  
+  /* Subtle shadow for depth */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Ensure icons are visible */
+.is-mobile .systemsculpt-button-grid button svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+/* Hover state */
+.is-mobile .systemsculpt-button-grid button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.is-mobile .systemsculpt-button-grid button:hover svg {
+  color: var(--text-normal);
+}
+
+/* Active/pressed state */
+.is-mobile .systemsculpt-button-grid button:active {
+  background-color: var(--background-modifier-active);
+}
+
+/* Recording button when active */
+.is-mobile .systemsculpt-button-grid button.ss-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.is-mobile .systemsculpt-button-grid button.ss-active svg {
+  color: var(--text-on-accent);
+}
+
+/* ========================================
+   FAVORITES BUTTON (ALL CONTEXTS)
+   ======================================== */
+
+/* Base favorites button visibility */
+.is-mobile .systemsculpt-favorites-filter,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px !important;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+/* Ensure icon is visible */
+.is-mobile .systemsculpt-favorites-icon,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-icon {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.is-mobile .systemsculpt-favorites-icon svg,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-icon svg {
+  width: 14px !important;
+  height: 14px !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Ensure label is visible - override any hiding rules */
+.is-mobile .systemsculpt-favorites-label,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-label,
+.is-mobile .systemsculpt-favorites-filter span:not(.svg-icon),
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter span:not(.svg-icon) {
+  display: inline !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Hover states */
+.is-mobile .systemsculpt-favorites-filter:hover,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Active state */
+.is-mobile .systemsculpt-favorites-filter.is-active,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.is-mobile .systemsculpt-favorites-filter.is-active svg,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter.is-active svg {
+  color: var(--text-on-accent) !important;
+}
+
+/* Favorites count badge */
+.is-mobile .ss-favorites-count,
+.is-mobile .ss-favorites-button .ss-favorites-count {
+  font-size: 9px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-on-accent);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 12px;
+  text-align: center;
+  margin-left: 2px;
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.is-mobile .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-muted);
+}
+
+.is-mobile .theme-dark .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count,
+.is-mobile .theme-dark .ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ========================================
+   MODAL-SPECIFIC ADJUSTMENTS
+   ======================================== */
+
+/* Modal favorites button specific styles */
+.is-mobile .ss-favorites-button {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+   ======================================== */
+
+@media (max-width: 768px) {
+  /* Specific override for model selection modal */
+  .is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+    padding: 3px 6px !important;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Even smaller screens */
+  .is-mobile .systemsculpt-favorites-filter,
+  .is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+    padding: 2px 4px !important;
+    font-size: 10px;
+  }
+}
 
