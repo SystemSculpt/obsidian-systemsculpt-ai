@@ -1197,12 +1197,12 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: 100%;
   background-color: var(--background-primary);
   position: relative;
-}
-
-.systemsculpt-chat-container {
-  position: relative;
+  padding: 0;
+  margin: 0;
+  max-width: none;
 }
 
 .systemsculpt-chat-container.systemsculpt-drag-active
@@ -1930,6 +1930,7 @@
   box-sizing: border-box;
   
   /* Glass morphism design */
+  width: 100%; /* Use full available width from start */
   background: rgba(var(--background-secondary-rgb), 0.3);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1941,18 +1942,17 @@
     0 2px 8px rgba(0, 0, 0, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
   
-  /* Grid animation system */
+  /* Grid layout - no animation */
   display: grid !important;
   grid-template-rows: auto 0fr !important;
   overflow: visible;
   
-  /* Smooth transitions */
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  /* No transitions - instant display */
+  transition: none !important;
   
   /* Interaction states */
   z-index: 1;
   pointer-events: auto !important;
-  will-change: transform, grid-template-rows;
 }
 
 /* ========================================================================== */
@@ -1963,33 +1963,38 @@
    ║  Message Group Drawers - Refined Styles                   ║
    ╚══════════════════════════════════════════════════════════╝ */
 
-.systemsculpt-assistant-message-group .systemsculpt-collapsible-drawer {
+.systemsculpt-collapsible-drawer {
+  width: 100% !important; /* Use full container width */
   margin: 10px 0 !important;
   background: rgba(var(--background-primary-rgb), 0.4) !important;
   border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2) !important;
   border-radius: 10px !important;
   position: relative !important;
   isolation: isolate !important;
+  box-sizing: border-box !important; /* Include padding and border in width */
 }
 
 /* Reasoning drawers - Thinking indicator */
-.systemsculpt-assistant-message-group .systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer {
-  border-left: 3px solid rgba(var(--text-accent-rgb), 0.6) !important;
-  background: linear-gradient(
-    90deg,
-    rgba(var(--text-accent-rgb), 0.05) 0%,
-    rgba(var(--background-primary-rgb), 0.4) 10%
-  ) !important;
-  box-shadow: 
-    0 2px 6px rgba(var(--text-accent-rgb), 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+.systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer {
+  /* New, simpler reasoning visual */
+  width: 100% !important; /* Full width within container */
+  background: var(--background-primary) !important;
+  border-left: 3px solid var(--interactive-accent) !important;
+  border-top: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
+  border-right: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
+  border-bottom: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04) !important;
+  padding: 6px 8px !important;
+  box-sizing: border-box !important;
 }
 
 /* Tool call drawers - Simplified */
-.systemsculpt-assistant-message-group .systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer {
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer {
+  width: 100% !important; /* Full width within container */
   border-left: 2px solid var(--background-modifier-border);
   background: var(--background-secondary);
   margin: 2px 0;
+  box-sizing: border-box !important;
 }
 
 /* Compact header for tool-call drawers */
@@ -2000,17 +2005,17 @@
 }
 
 /* Hover glow effects to indicate interactivity - border glow removed */
-.systemsculpt-assistant-message-group .systemsculpt-collapsible-drawer:hover {
+.systemsculpt-collapsible-drawer:hover {
   /* border-color: rgba(var(--background-modifier-border-rgb), 0.9); */
   /* box-shadow: 0 0 0 1px rgba(var(--background-modifier-border-rgb), 0.3); */
 }
 
-.systemsculpt-assistant-message-group .systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer:hover {
+.systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer:hover {
   /* border-color: rgba(var(--text-accent-rgb), 0.8); */
   /* box-shadow: 0 0 0 1px rgba(var(--text-accent-rgb), 0.2); */
 }
 
-.systemsculpt-assistant-message-group .systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer:hover {
+.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer:hover {
   /* border-color: rgba(var(--interactive-accent-rgb), 0.8); */
   /* box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb), 0.2); */
 }
@@ -2056,6 +2061,54 @@
   isolation: isolate;
 }
 
+/* Reasoning variant tightens header spacing */
+.is-reasoning-drawer .systemsculpt-collapsible-header {
+  padding: 6px 8px;
+  font-weight: 600;
+}
+
+.is-reasoning-drawer .systemsculpt-collapsible-icon {
+  color: var(--interactive-accent);
+}
+
+/* Streaming state: subtle animated left glow */
+.is-reasoning-drawer.is-streaming-reasoning {
+  position: relative;
+}
+
+.is-reasoning-drawer.is-streaming-reasoning::before {
+  content: '';
+  position: absolute;
+  left: -3px; /* align with left border */
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--interactive-accent-rgb), 0.0) 0%,
+    rgba(var(--interactive-accent-rgb), 0.7) 50%,
+    rgba(var(--interactive-accent-rgb), 0.0) 100%
+  );
+  animation: ss-reasoning-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ss-reasoning-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Streamed reasoning preview block */
+.ss-reasoning-stream {
+  font-family: var(--font-monospace);
+  font-size: 0.92em;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
 .systemsculpt-collapsible-header:hover {
   color: var(--text-normal);
   background: rgba(var(--interactive-accent-rgb), 0.05);
@@ -2071,7 +2124,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s ease, color 0.2s ease;
+  /* No transitions */
 }
 
 .systemsculpt-collapsible-icon svg {
@@ -2100,8 +2153,7 @@
   font-size: 11px;
   margin-left: auto;
   color: var(--text-muted);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              color 0.2s ease;
+  transition: none;
 }
 
 .systemsculpt-collapsed .systemsculpt-collapsible-header::after {
@@ -2110,11 +2162,10 @@
 
 .systemsculpt-collapsible-header:hover::after {
   color: var(--interactive-accent);
-  transform: scale(1.2);
 }
 
 .systemsculpt-collapsed .systemsculpt-collapsible-header:hover::after {
-  transform: rotate(-90deg) scale(1.2);
+  transform: rotate(-90deg);
 }
 
 /* ========================================================================== */
@@ -2128,7 +2179,6 @@
 .systemsculpt-collapsible-drawer:hover {
   background: rgba(var(--background-secondary-rgb), 0.4);
   border-color: rgba(var(--interactive-accent-rgb), 0.3);
-  transform: translateY(-1px);
   box-shadow: 
     0 4px 12px rgba(0, 0, 0, 0.06),
     0 2px 4px rgba(0, 0, 0, 0.02),
@@ -2137,9 +2187,10 @@
   isolation: isolate;
 }
 
-/* Expanded state */
+/* Expanded state - use full width from the start */
 .systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) {
   grid-template-rows: auto 1fr !important;
+  width: 100%; /* Use full available width */
   border-color: rgba(var(--interactive-accent-rgb), 0.4);
   background: rgba(var(--background-secondary-rgb), 0.35);
   box-shadow: 
@@ -2153,9 +2204,9 @@
   color: var(--interactive-accent);
 }
 
-/* Icon animation on hover when collapsed */
+/* Icon hover state when collapsed */
 .systemsculpt-collapsed .systemsculpt-collapsible-header:hover .systemsculpt-collapsible-icon {
-  transform: scale(1.1);
+  /* No scaling animation */
 }
 
 /* Icon color when expanded */
@@ -2183,8 +2234,8 @@
   opacity: 1;
   visibility: visible;
   
-  /* Smooth fade transition */
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* No transition - instant display */
+  transition: none;
 }
 
 /* Collapsed content - fade out during collapse and REMOVE ALL SPACING */
@@ -2224,18 +2275,17 @@
 /* Wrapper elements for proper DOM insertion */
 .systemsculpt-reasoning-wrapper,
 .systemsculpt-tool-call-wrapper {
-  /* Critical fix: Use grid to contain children without blocking events */
-  display: block;
+  /* Use full width of parent container */
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
   position: static;
-  /* Ensure wrapper takes no space and doesn't interfere */
   margin: 0 !important;
   padding: 0 !important;
   border: none !important;
   background: transparent !important;
-  width: 100% !important;
-  /* Keep pointer events active for interactions */
+  box-sizing: border-box !important;
   pointer-events: auto !important;
-  /* Prevent any overflow that might block adjacent elements */
   overflow: visible !important;
 }
 
@@ -3133,7 +3183,7 @@
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.3);
   transform: translate(-50%, -50%);
-  transition: width 0.3s, height 0.3s;
+  /* No transition for width/height changes */
 }
 
 .ss-tool-compact-btn:hover {
@@ -3299,25 +3349,7 @@
  * not consecutive wrappers within the same message
  */
 
-/* Drawers within grouped messages should have tighter spacing */
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-collapsible-drawer {
-  margin: 2px 0 !important; /* Override the base 8px margin for much tighter spacing */
-}
-
-/* Visual indicators for consecutive messages with drawers */
-.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message .systemsculpt-collapsible-drawer {
-  border-top-left-radius: 2px !important;
-  border-top-right-radius: 2px !important;
-  border-top-style: dotted !important; /* Subtle visual connection to previous message's drawer */
-  opacity: 0.95; /* Slightly fade follow-up message drawers for visual hierarchy */
-}
-
-/* Extra tight spacing and visual connection for 3rd+ consecutive messages */
-.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message + .systemsculpt-message .systemsculpt-collapsible-drawer {
-  margin: 1px 0 !important; /* Extra tight for deeply nested message sequences */
-  border-top-style: solid !important;
-  opacity: 0.9; /* More fading for deeper nesting */
-}
+/* Group spacing rules removed; flat list layout uses standard margins */
 
 /* ========================================================================== */
 /* == End Compact Drawer Grouping Overrides                               == */
@@ -4949,155 +4981,10 @@
 
 .systemsculpt-message-container {
   padding: 8px 0;
+  width: 100%;
 }
 
-/* ╔══════════════════════════════════════════════════════════╗
-   ║  Assistant Message Grouping                               ║
-   ╚══════════════════════════════════════════════════════════╝ */
-
-.systemsculpt-assistant-message-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 16px;
-  position: relative;
-  
-  /* Fully opaque background for maximum visibility */
-  background: var(--background-secondary);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.35);
-  border-radius: 16px;
-  
-  /* Subtle shadow */
-  box-shadow: 
-    0 4px 16px rgba(0, 0, 0, 0.05),
-    0 1px 3px rgba(0, 0, 0, 0.02),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  
-  /* Smooth transitions */
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Individual messages within a group should have minimal styling */
-.systemsculpt-assistant-message-group .systemsculpt-message {
-  background: transparent; /* Transparent to show group background */
-  border: none;
-  margin: 0;
-  padding: 0;
-  border-radius: 0;
-  transition: none; /* Disable individual message transitions */
-}
-
-/* Override the individual assistant message background when inside a group */
-.systemsculpt-assistant-message-group .systemsculpt-assistant-message {
-  background: transparent !important; /* Force transparency to show group background */
-  backdrop-filter: none !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-/* Remove gaps between messages in a group and add subtle separators */
-.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--background-modifier-border);
-  opacity: 0.95; /* Slightly fade follow-up messages for visual hierarchy */
-}
-
-/* First message in group should be fully opaque */
-.systemsculpt-assistant-message-group .systemsculpt-message:first-child {
-  opacity: 1;
-}
-
-/* Style message content within groups */
-.systemsculpt-assistant-message-group .systemsculpt-message-content {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-
-/* Ensure unified parts within grouped messages have consistent spacing */
-.systemsculpt-assistant-message-group .systemsculpt-unified-part {
-  margin: 8px 0;
-}
-
-/* Hide individual message toolbars within groups */
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar {
-  display: none !important;
-}
-
-/* Hide both collapsed and expanded individual toolbars within groups */
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar-collapsed {
-  display: none !important;
-}
-
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-message-button-toolbar-expanded {
-  display: none !important;
-}
-
-/* Group toolbar now uses unified .systemsculpt-message-button-toolbar class */
-/* Group toolbar hover rules updated for container-based approach */
-.systemsculpt-assistant-message-group:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-}
-
-/* Show expanded group toolbar when active */
-.systemsculpt-assistant-message-group .systemsculpt-message-button-toolbar-expanded.active {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-}
-
-/* Hover effect - subtle shadow only, no movement or color change */
-.systemsculpt-assistant-message-group:hover {
-  box-shadow: 
-    0 8px 24px rgba(0, 0, 0, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-/* Content part styling within groups - remove redundant borders */
-.systemsculpt-assistant-message-group .systemsculpt-content-part {
-  background: transparent !important;
-  border: none !important;
-  padding: 8px 0;
-  border-radius: 0;
-}
-
-.systemsculpt-assistant-message-group .systemsculpt-content-part:hover {
-  background: transparent !important;
-  border: none !important;
-}
-
-
-
-/* Special styling for thinking indicator in grouped messages */
-.systemsculpt-assistant-message-group .systemsculpt-thinking-indicator {
-  opacity: 0.8;
-  font-style: italic;
-}
-
-/* Responsive adjustments for message groups */
-@media (max-width: 768px) {
-  .systemsculpt-assistant-message-group {
-    padding: 8px;
-    margin: 6px 0;
-  }
-  
-  .systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
-    margin-top: 8px;
-    padding-top: 8px;
-  }
-}
-
-/* ========================================================================== */
-/* == End Assistant Message Grouping                                      == */
-/* ========================================================================== */
+/* Grouping removed: messages are a flat list; each message is a single container */
 
 /* Unified Message Parts - ensure they fit within container */
 .systemsculpt-unified-part {
@@ -5123,8 +5010,8 @@
   transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
 }
 
-/* Only add background when NOT in a message group */
-.systemsculpt-message:not(.systemsculpt-assistant-message-group .systemsculpt-message) .systemsculpt-content-part {
+/* Content parts get a subtle card background */
+.systemsculpt-message .systemsculpt-content-part {
   background-color: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
 }
@@ -5259,24 +5146,14 @@
 
 .systemsculpt-assistant-message {
   align-self: flex-start;
-  max-width: 90%;
+  max-width: 85%;
   margin: 8px 0;
   padding: 12px 16px;
-  
-  /* Fully opaque background for visibility */
+  box-sizing: border-box;
   background: var(--background-secondary);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
-  border-radius: 18px 18px 18px 4px;
-  
-  /* Shadow depth */
-  box-shadow: 
-    0 3px 10px rgba(0, 0, 0, 0.06),
-    0 1px 3px rgba(0, 0, 0, 0.02),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  
-  /* Entrance animation */
+  border-radius: 12px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02);
   animation: slideInLeft 0.3s ease-out;
   transition: all 0.2s ease;
 }
@@ -5429,6 +5306,14 @@
 .systemsculpt-message-content a:hover {
   text-decoration: underline;
 }
+
+/* ────────────────────────────────────────────────────────────
+   Floating message toolbar (overlay on hover)
+   Appears below the message without shifting layout
+   Works for both legacy content and unified content parts
+   ──────────────────────────────────────────────────────────── */
+
+/* toolbar styles moved to components/chat-view-messages-toolbar.css */
 
 .systemsculpt-message-content blockquote {
   margin: 0.75em 0;
@@ -5634,9 +5519,6 @@
   white-space: nowrap;
 }
 
-.systemsculpt-message-button-toolbar {
-  justify-content: flex-start;
-}
 
 .systemsculpt-message-content {
   color: var(--text-normal);
@@ -5714,6 +5596,7 @@
 
 .systemsculpt-message-container {
   padding: 8px 0;
+  width: 100%;
 }
 
 .systemsculpt-message-content {
@@ -5917,14 +5800,6 @@
 
 /* Legacy hover behavior removed - modern toolbar uses pure CSS */
 
-.systemsculpt-messages-container {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 0.75rem 0.75rem 0.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
 
 /* Removed - using unified positioning */
 
@@ -5959,19 +5834,13 @@
 .systemsculpt-user-message {
   align-self: flex-end;
   max-width: 85%;
-  
-  /* Fully opaque accent color for maximum visibility */
-  background: var(--interactive-accent);
-  
-  border-radius: 18px 18px 4px 18px;
-  
-  /* Elegant shadow */
-  box-shadow: 
-    0 4px 12px rgba(var(--interactive-accent-rgb), 0.2),
-    0 2px 4px rgba(0, 0, 0, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  
-  /* Entrance animation */
+  margin: 8px 0;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  background: var(--background-secondary);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+  border-radius: 12px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02);
   animation: slideInRight 0.3s ease-out;
 }
 
@@ -5982,14 +5851,13 @@
 }
 
 .systemsculpt-user-message .systemsculpt-message-content {
-  color: var(--text-on-accent);
-  font-weight: 500;
+  color: var(--text-normal);
   line-height: 1.6;
 }
 
 .systemsculpt-user-message .systemsculpt-message-label {
-  color: var(--text-on-accent);
-  opacity: 0.9;
+  color: var(--text-accent);
+  opacity: 0.8;
   font-weight: 600;
   font-size: 12px;
 }
@@ -6047,6 +5915,7 @@
   bottom: -40px;
   height: 40px;
   z-index: 99;
+  pointer-events: none;
 }
 
 .systemsculpt-message-button.systemsculpt-danger:hover {
@@ -6190,313 +6059,6 @@
   margin-bottom: var(--size-4-2);
 }
 
-/* ========================================================================== */
-/* == Message Button Toolbar (Hover Actions) - Modern Floating Design     == */
-/* ========================================================================== */
-
-/* Collapsible slider toolbar container */
-.systemsculpt-message-button-toolbar {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  /* Simplified shadows for better scroll performance */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(1px) scale(0.95);
-  /* Optimized transition for scroll performance */
-  transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
-  z-index: 150;
-  height: 20px;
-  /* Remove heavy backdrop filters during scrolling for performance */
-  /* backdrop-filter: blur(2px); */
-  /* -webkit-backdrop-filter: blur(2px); */
-  will-change: opacity, transform; /* Hint browser for optimization */
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-/* Toolbar visible state */
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar,
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-}
-
-/* Container-based collapsible toolbar - industry standard approach */
-
-/* Collapsed toolbar - only chevron toggle button with transparent background */
-.systemsculpt-message-button-toolbar-collapsed {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 20px;
-  padding: 2px;
-  background: transparent; /* Transparent when collapsed */
-  border: none; /* No border when collapsed */
-  border-radius: 12px;
-  box-shadow: none; /* No shadow when collapsed */
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(1px) scale(0.95);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  z-index: 150;
-  backdrop-filter: none; /* No backdrop filter when collapsed */
-  -webkit-backdrop-filter: none;
-}
-
-/* Expanded toolbar - all action buttons */
-.systemsculpt-message-button-toolbar-expanded {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  /* Simplified shadows for better scroll performance */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(1px) scale(0.95);
-  /* Optimized transition for scroll performance */
-  transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
-  z-index: 150;
-  height: 20px;
-  /* Remove heavy backdrop filters during scrolling for performance */
-  /* backdrop-filter: blur(2px); */
-  /* -webkit-backdrop-filter: blur(2px); */
-  will-change: opacity, transform; /* Hint browser for optimization */
-  width: auto;
-  min-width: 80px;
-}
-
-/* Show collapsed toolbar on hover (when expanded is hidden) */
-.systemsculpt-message:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden),
-.systemsculpt-message:focus-within .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-}
-
-/* Show expanded toolbar when active */
-.systemsculpt-message-button-toolbar-expanded.active {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-}
-
-/* Hide collapsed when expanded is active */
-.systemsculpt-message-button-toolbar-collapsed.hidden {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none;
-}
-
-/* Individual button styling - industry standard */
-.systemsculpt-message-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 3px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.12s ease-out;
-  position: relative;
-  flex-shrink: 0;
-}
-
-/* Button hover effects */
-.systemsculpt-message-button:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-  transform: scale(1.05);
-}
-
-/* Button active state */
-.systemsculpt-message-button:active {
-  transform: scale(0.95);
-}
-
-/* Icon sizing within buttons - compact slider */
-.systemsculpt-message-button .lucide {
-  width: 12px;
-  height: 12px;
-}
-
-/* Chevron icon specific styling for collapsed toolbar */
-.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button .lucide {
-  transition: transform 0.2s ease;
-}
-
-/* Keep button transparent in collapsed toolbar - override general hover styles */
-.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button {
-  background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-}
-
-.systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button:hover {
-  background: transparent !important;
-  transform: scale(1.05); /* Keep the scale transform but remove background */
-}
-
-/* Chevron icon specific styling for expanded toolbar */
-.systemsculpt-message-button-toolbar-expanded .systemsculpt-message-button.chevron .lucide {
-  transform: rotate(180deg); /* Flip chevron when expanded */
-  transition: transform 0.2s ease;
-}
-
-/* Success state (e.g., after copy) */
-.systemsculpt-message-button.systemsculpt-success {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.systemsculpt-message-button.systemsculpt-success:hover {
-  background: var(--interactive-accent-hover);
-}
-
-/* Danger state (delete button) */
-.systemsculpt-message-button.systemsculpt-danger:hover {
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
-}
-
-/* Confirming state for delete/resubmit actions - ultra-compact */
-.systemsculpt-message-button.systemsculpt-confirming {
-  width: auto;
-  min-width: 14px;
-  padding: 0 4px;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  font-size: var(--chat-compact-button-font-size);
-  font-weight: 500;
-}
-
-.systemsculpt-message-button.systemsculpt-confirming span {
-  font-size: var(--chat-compact-button-font-size);
-  white-space: nowrap;
-}
-
-.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
-  background: var(--background-modifier-error);
-}
-
-.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
-  background: var(--background-modifier-error);
-  opacity: 0.9;
-}
-
-/* Unified positioning for all message types - always bottom right */
-
-/* Removed - now using unified .systemsculpt-message-button-toolbar */
-
-/* Dark mode adjustments */
-.theme-dark .systemsculpt-message-button-toolbar {
-  background: rgba(var(--background-primary-rgb), 0.9);
-  border-color: var(--background-modifier-border);
-}
-
-/* High contrast support */
-@media (prefers-contrast: high) {
-  .systemsculpt-message-button-toolbar {
-    border-width: 2px;
-    box-shadow: 
-      0 3px 12px rgba(0, 0, 0, 0.2),
-      0 1px 4px rgba(0, 0, 0, 0.15);
-  }
-  
-  .systemsculpt-message-button {
-    border: 1px solid transparent;
-  }
-  
-  .systemsculpt-message-button:hover {
-    border-color: var(--background-modifier-border);
-  }
-}
-
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-  .systemsculpt-message-button-toolbar {
-    transition: opacity 0.1s ease, visibility 0.1s ease;
-    transform: none;
-  }
-  
-  .systemsculpt-message:hover .systemsculpt-message-button-toolbar,
-  .systemsculpt-message:focus-within .systemsculpt-message-button-toolbar {
-    transform: none;
-  }
-  
-  .systemsculpt-message-button {
-    transition: background-color 0.1s ease, color 0.1s ease;
-  }
-  
-  .systemsculpt-message-button:hover,
-  .systemsculpt-message-button:active {
-    transform: none;
-  }
-}
-
-/* Mobile responsive adjustments - ultra-compact design */
-@media (max-width: 768px) {
-  .systemsculpt-message-button-toolbar {
-    bottom: 3px;
-    right: 4px;
-    padding: 2px 3px;
-    gap: 1px;
-    min-height: 18px;
-  }
-  
-  .systemsculpt-message-button {
-    width: 16px;
-    height: 16px;
-  }
-  
-  .systemsculpt-message-button .lucide {
-    width: 12px;
-    height: 12px;
-  }
-  
-  /* Slightly larger touch targets on mobile */
-  .systemsculpt-message-button.systemsculpt-confirming {
-    padding: 0 6px;
-    font-size: calc(var(--chat-compact-button-font-size) + 1px);
-  }
-}
-
-/* Remove old/redundant toolbar styles */
-.systemsculpt-message::after {
-  display: none;
-}
-
-.systemsculpt-message:hover::before {
-  display: none;
-}
-
-/* ========================================================================== */
-/* == End Modern Floating Toolbar                                         == */
-/* ========================================================================== */
 
 .systemsculpt-message-content pre.systemsculpt-code-block {
   margin: 1em 0;
@@ -6523,38 +6085,6 @@
   user-select: text;
 }
 
-/* ========================================================================== */
-/* == Compact Drawer Grouping for Consecutive Messages with Tool Calls    == */
-/* ========================================================================== */
-
-/* 
- * CRITICAL FIX: The real DOM structure has consecutive .systemsculpt-message elements
- * within the group, each containing drawers. We need to target consecutive messages
- * that contain tool calls, not consecutive drawers within the same message.
- */
-
-/* Tighter spacing between consecutive messages that have tool calls */
-.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message {
-  margin-top: 4px !important; /* Much tighter spacing between consecutive assistant messages */
-  padding-top: 4px !important; /* Reduce the padding too */
-}
-
-/* Even tighter for 3rd+ consecutive messages */
-.systemsculpt-assistant-message-group .systemsculpt-message + .systemsculpt-message + .systemsculpt-message {
-  margin-top: 2px !important;
-  padding-top: 2px !important;
-}
-
-/* Also target the drawer spacing within each message for extra compactness */
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-tool-call-wrapper,
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-reasoning-wrapper {
-  margin: 2px 0 !important; /* Tight spacing for drawers within grouped messages */
-}
-
-/* Content parts within grouped messages should also be more compact */
-.systemsculpt-assistant-message-group .systemsculpt-message .systemsculpt-content-part {
-  margin: 2px 0 !important; /* Tight spacing for content within grouped messages */
-}
 
 /* ========================================================================== */
 /* == End Compact Drawer Grouping                                          == */
@@ -6617,6 +6147,162 @@
 
 
 
+/* chat-view-messages-toolbar.css */
+.systemsculpt-message-content,
+.systemsculpt-content-part {
+  position: relative;
+  overflow: visible;
+}
+
+.systemsculpt-message {
+  position: relative;
+  z-index: 0;
+}
+
+.systemsculpt-message:hover {
+  z-index: 12000;
+}
+
+.systemsculpt-message:hover .systemsculpt-message-content,
+.systemsculpt-message-content:hover,
+.systemsculpt-content-part:hover {
+  z-index: 12000;
+}
+
+.systemsculpt-message-toolbar {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px;
+  background: var(--background-secondary);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06);
+  transform: translateY(6px) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 12001;
+  transition: opacity 120ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-toolbar {
+  left: 0 !important;
+  right: auto !important;
+  top: 100% !important;
+  bottom: auto !important;
+  flex-direction: row !important;
+}
+
+.systemsculpt-user-message .systemsculpt-message-toolbar {
+  left: auto !important;
+  right: 0 !important;
+  top: 100% !important;
+  bottom: auto !important;
+  flex-direction: row-reverse !important;
+}
+
+.systemsculpt-message-toolbar.ss-flip-up {
+  top: auto;
+  bottom: 100%;
+  transform: translateY(-6px) scale(0.98);
+}
+
+.systemsculpt-message:hover .systemsculpt-message-toolbar,
+.systemsculpt-message-content:hover > .systemsculpt-message-toolbar,
+.systemsculpt-content-part:hover > .systemsculpt-message-toolbar {
+  opacity: 1;
+  transform: translateY(2px) scale(1);
+  pointer-events: auto;
+  z-index: 12001;
+}
+
+.systemsculpt-message:hover .systemsculpt-message-toolbar.ss-flip-up,
+.systemsculpt-message-content:hover > .systemsculpt-message-toolbar.ss-flip-up,
+.systemsculpt-content-part:hover > .systemsculpt-message-toolbar.ss-flip-up {
+  transform: translateY(-2px) scale(1);
+}
+
+.systemsculpt-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.25);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.systemsculpt-toolbar-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: rgba(var(--background-modifier-border-rgb), 0.35);
+}
+
+.systemsculpt-toolbar-btn.ss-success {
+  background: var(--background-modifier-success);
+  border-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-toolbar-btn.ss-confirm {
+  background: var(--background-modifier-warning);
+  border-color: var(--background-modifier-warning);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 700px) {
+  .systemsculpt-message-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(2px) scale(1);
+    gap: 0;
+    padding: 2px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-more {
+    margin-right: 4px;
+  }
+
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-btn {
+    display: none;
+  }
+
+  .systemsculpt-message-toolbar.ss-open .systemsculpt-toolbar-btn,
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-more {
+    display: inline-flex;
+  }
+
+  .systemsculpt-message-toolbar.ss-open {
+    background: var(--background-secondary);
+    border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06);
+    gap: 6px;
+    padding: 4px;
+    border-radius: 999px;
+  }
+}
+
+
+
+
 /* scroll-performance.css */
 /**
  * Scroll Performance Optimizations
@@ -6630,8 +6316,7 @@
 /* ========================================================================== */
 
 /* Optimize message containers for smooth scrolling - SAFE VERSION */
-.systemsculpt-message,
-.systemsculpt-assistant-message-group {
+.systemsculpt-message {
   /* Enable hardware acceleration for smooth scrolling */
   transform: translateZ(0);
   /* Remove containment - it was breaking height calculation */
@@ -6640,13 +6325,7 @@
   backface-visibility: hidden;
 }
 
-/* Further optimize grouped assistant messages during generation */
-.systemsculpt-assistant-message-group.generating {
-  /* Prioritize scroll performance during generation */
-  will-change: transform;
-  /* Remove all containment that breaks sizing */
-  /* contain: layout style paint; */
-}
+/* Group container removed */
 
 /* ========================================================================== */
 /* == Toolbar Performance During Scrolling                               == */
@@ -6790,7 +6469,7 @@
   }
   
   .systemsculpt-message,
-  .systemsculpt-assistant-message-group,
+  /* group class removed */
   .systemsculpt-content-part {
     /* Remove hardware acceleration hints for reduced motion */
     transform: none;
@@ -6799,12 +6478,7 @@
   }
 }
 
-/* High performance mode for modern browsers - DISABLED to prevent height issues */
-/* @supports (contain: strict) {
-  .systemsculpt-assistant-message-group {
-    contain: strict;
-  }
-} */
+/* High performance mode for modern browsers - group class removed */
 
 /* ========================================================================== */
 /* == Scroll Snap Optimizations (Experimental)                           == */
@@ -15549,6 +15223,9 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border-radius: 6px;
   font-size: 14px;
   min-height: 36px;
+  /* Ensure inline tool call fills the assistant container width */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .systemsculpt-tool-inline:hover {
@@ -15645,6 +15322,10 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-tool-call-wrapper {
   margin: 4px 0;
+  /* Ensure wrapper takes full width within message content */
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .systemsculpt-tool-call-wrapper[data-state="executing"] .systemsculpt-tool-inline {
@@ -16106,6 +15787,89 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     opacity: 0;
   }
 }
+
+/* title-generation-modal.css */
+/* Title Generation Modal - Fresh, standardized styling */
+
+/* Identifier to scope any specific overrides */
+.ss-title-modal {
+  /* rely on standardized modal for base layout */
+}
+
+/* Smaller context textarea */
+.ss-title-modal__context-textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 100px;
+  height: 60px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  resize: vertical; /* allow manual expansion if needed */
+}
+
+/* Progress area */
+.ss-title-modal__progress {
+  display: none;
+  margin-top: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  padding: 10px 12px;
+}
+
+.ss-title-modal__progress--visible {
+  display: block;
+}
+
+.ss-title-modal__progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.ss-title-modal__progress-bar-container {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ss-title-modal__progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--interactive-accent), var(--interactive-accent-hover));
+  background-size: 200% 100%;
+  animation: ss-title-progress 2s linear infinite;
+}
+
+.ss-title-modal__progress-bar--error {
+  background: var(--text-error);
+  animation: none;
+}
+
+@keyframes ss-title-progress {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Footer hint inside button */
+.ss-title-modal__shortcut {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+
+
 
 /* update-drawer.css */
 /* 
@@ -21113,6 +20877,17 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
  * Clean, elegant chat interface with glassmorphism and smooth animations
  */
 
+/* Ensure Obsidian's view container uses full width */
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] {
+  padding: 0;
+}
+
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] > .view-content {
+  padding: 0;
+  max-width: none;
+  width: 100%;
+}
+
 /* ╔═══════════════════════════════════════════════════════════╗
    ║  Messages Container - Main chat scrollable area          ║
    ╚═══════════════════════════════════════════════════════════╝ */
@@ -21252,6 +21027,44 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border: 0 !important;
 }
 
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  New Messages Pill - Subtle counter + jump               ║
+   ╚═══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-new-messages-pill {
+  position: absolute;
+  bottom: 190px; /* slightly above the scroll FAB */
+  right: 24px;
+  max-width: 70%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  z-index: 101;
+  
+  background: rgba(var(--background-secondary-rgb), 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.35);
+  color: var(--text-accent);
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.12);
+  transition: all 0.25s ease;
+  animation: fadeInScale 0.2s ease-out;
+}
+
+.systemsculpt-new-messages-pill:hover {
+  transform: translateY(-2px);
+  background: rgba(var(--background-secondary-rgb), 0.95);
+}
+
 /* ╔══════════════════════════════════════════════════════════╗
    ║  Responsive Design - Mobile & Tablet                      ║
    ╚══════════════════════════════════════════════════════════╝ */
@@ -21315,18 +21128,12 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 @media (max-width: 600px) {
   /* User messages - wider on small screens */
   .systemsculpt-user-message {
-    max-width: 90%;
-  }
-  
-  /* Assistant messages - full width */
-  .systemsculpt-assistant-message {
     max-width: 95%;
   }
   
-  /* Message group - reduced padding */
-  .systemsculpt-assistant-message-group {
-    padding: 12px;
-    margin: 8px 0;
+  /* Assistant messages - full width on small screens */
+  .systemsculpt-assistant-message {
+    width: 100%;
   }
 }
 
@@ -21358,12 +21165,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
   
   .systemsculpt-user-message {
-    max-width: 80%;
+    max-width: 85%;
   }
   
   .systemsculpt-assistant-message {
-    max-width: 85%;
+    width: 100%;
   }
+  
+  /* group class removed */
 }
 
 /* ╔═══════════════════════════════════════════════════════════╗
@@ -21490,7 +21299,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   padding: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   position: relative;
-  z-index: 900;
+  z-index: 900; /* keep header below toolbars but above content */
   overflow: visible !important;
 }
 
