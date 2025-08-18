@@ -5016,10 +5016,9 @@
   border: 1px solid var(--background-modifier-border);
 }
 
-/* Hover effect for content parts - border glow removed */
+/* Remove hover background/glow for content parts */
 .systemsculpt-content-part:hover {
-  /* border-color: var(--text-muted); */
-  background-color: var(--background-primary-alt);
+  background-color: var(--background-primary);
 }
 
 /* Ensure proper spacing between multiple content parts */
@@ -5031,6 +5030,12 @@
 .systemsculpt-unified-part + .systemsculpt-content-part,
 .systemsculpt-content-part + .systemsculpt-unified-part {
   margin-top: 8px;
+}
+
+/* Show copy button when hovering code blocks inside chat messages */
+.systemsculpt-message-content pre:hover .copy-code-button,
+.systemsculpt-content-part pre:hover .copy-code-button {
+  opacity: 1;
 }
 
 /* Ensure content parts in assistant messages have correct text color */
@@ -5156,6 +5161,12 @@
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02);
   animation: slideInLeft 0.3s ease-out;
   transition: all 0.2s ease;
+}
+
+/* If an assistant message contains reasoning, ensure it initializes at full width
+   immediately so the reasoning drawer does not "grow" during streaming */
+.systemsculpt-assistant-message.has-reasoning {
+  width: 100%;
 }
 
 .systemsculpt-assistant-message:hover {
