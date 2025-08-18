@@ -10112,6 +10112,13 @@
   color: var(--text-muted);
 }
 
+/* Divider inside provider menu */
+.systemsculpt-provider-menu-divider {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 4px 0;
+}
+
 /* Improved Provider Line Items */
 .systemsculpt-provider-line-item {
   display: flex;
