@@ -1,293 +1,237 @@
-# 🧠 SystemSculpt AI for Obsidian
+## 🧠 SystemSculpt AI for Obsidian
 
-> Transform your Obsidian vault into an AI-powered thinking partner that grows smarter with every note you write.
+Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast, reliable chat, agent tools for your vault, semantic “Similar Notes,” rich context handling, and a refined Obsidian‑native experience on desktop and mobile.
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
 
-[**✨ Get Started Free**](#-installation) • [**📚 Documentation**](https://systemsculpt.com) • [**🎥 Video Tutorials**](https://youtube.com/@SystemSculpt)
+[**Get Started**](#-installation) • [**Documentation**](https://systemsculpt.com) • [**Video Tutorials**](https://youtube.com/@SystemSculpt)
 
 </div>
 
 ---
 
-## 🚀 What is SystemSculpt AI?
+## 🚀 Core capabilities
 
-SystemSculpt AI is the most comprehensive AI integration for Obsidian, designed for knowledge workers who refuse to settle for basic productivity tools. Whether you're a researcher synthesizing complex information, a content creator building your second brain, or a developer automating workflows—this plugin transforms Obsidian into your AI-powered thinking partner.
+- **Chat, your way**
+  - Use OpenAI‑compatible providers (OpenAI, OpenRouter, Groq, local servers), Anthropic via adapter, or local models (LM Studio, Ollama)
+  - Streaming, reasoning blocks, mobile‑friendly UI
+  - Per‑chat model selection; saved chats to Markdown; chat history and resume
 
-### 🎯 Perfect For:
-- **📚 Researchers & Academics**: Find hidden connections across thousands of notes
-- **✍️ Content Creators**: Generate ideas and outlines based on your knowledge base
-- **💻 Developers**: Automate documentation and code-related workflows
-- **🧪 Product Managers**: Analyze user feedback and synthesize insights
-- **🎨 Creative Professionals**: Break through creative blocks with AI assistance
+- **Context‑rich conversations**
+  - Drag & drop notes; @‑mention files; paste large text smartly
+  - Paste or attach images; use any vision‑capable model your provider supports
+  - Clean rendering for code, tables, citations, and attachments
 
----
+- **Agent Mode (MCP) with explicit approvals**
+  - Built‑in vault tools exposed to the model with a one‑click safety approval flow
+  - Filesystem tools include: `read`, `write`, `edit`, `create_folders`, `list_items`, `move`, `trash`
+  - Search and context tools: `find`, `search` (grep), `open` (tabs/panes), `context` (manage chat context), `properties_search`, `similar_notes`, `vault_overview`
 
-## ✨ Core Features (Free Forever)
+- **Semantic “Similar Notes”**
+  - Embeddings‑powered vector search across your vault
+  - “Similar Notes” panel that updates for the active file or chat
+  - Exclusions (folders/files), progress UI, and an embeddings status bar
+  - Bring your own embeddings endpoint/model (OpenAI‑compatible), or pick a provider in settings
 
-### 🤖 **Multi-Provider AI Chat**
-Connect to any AI provider with your own API keys—no middleman fees, no vendor lock-in.
+- **Models, prompts, templates, titles**
+  - Unified model selection across providers; favorites and quick picks
+  - System prompt presets or custom prompts from your vault
+  - Template inserter for fast drafting
+  - One‑shot or automatic title generation for chats and notes
 
-<table>
-<tr>
-<td width="50%">
+- **Web search integration**
+  - Optional web search button in the chat toolbar when supported by the current provider
+  - Designed for OpenRouter and native provider endpoints that offer search plugins
 
-**Supported Providers:**
-- 🟢 **OpenAI** (o4-mini, GPT-4o, GPT-4o Mini)
-- 🔵 **Anthropic** (Claude Opus 4, Claude Sonnet 4)
-- 🌐 **OpenRouter** (200+ models including Gemini, DeepSeek, Perplexity)
-- ⚡ **Groq** (Lightning-fast Llama 3.1, Mixtral)
-- 🏠 **Local Models** (Ollama, LM Studio, any local server)
-- 🔧 **Custom Endpoints** (Any OpenAI-compatible API)
-
-</td>
-<td width="50%">
-
-**Chat Features:**
-- 📁 Drag & drop files for instant context
-- 🔄 Multi-file conversations
-- 💾 Save chats as markdown
-- 🎨 Beautiful, customizable UI
-- ⚙️ Per-chat settings
-- 📱 Mobile-friendly design
-
-</td>
-</tr>
-</table>
-
-### 🛠️ **Model Context Protocol (MCP)**
-The future of AI tool usage, available today. Give your AI assistant the ability to:
-- 📂 **Browse** your entire vault structure
-- 📝 **Read & Write** files autonomously
-- 🔍 **Search** for content across notes
-- 🧩 **Connect** to external MCP servers
-- 🎯 **Execute** complex multi-step tasks
-- 🔐 **Safe Mode** with approval workflows
-
-### 🔗 **Semantic Search & Connections**
-Discover relationships between ideas you didn't know existed:
-- 🧲 Find similar notes using AI embeddings
-- 🕸️ Explore knowledge graph connections
-- 🎯 Add relevant context with one click
-- 📊 Visualize idea relationships
-
-### 📋 **AI-Powered Task Management**
-Turn conversations into actionable tasks:
-- ✅ Generate task lists from chat
-- 📌 Track tasks in dedicated file
-- 🔄 Sync with Obsidian's task system
-- 📈 Progress tracking
-
-### 🎨 **Customization & Templates**
-Make the AI work exactly how you think:
-- 💬 Custom system prompts
-- 📄 Template library with hotkeys
-- 🎭 Multiple AI personalities
-- ⚡ Slash commands (`/clear`, `/model`, `/new`)
-- 🔤 @ mentions for file references
+- **Thoughtful details**
+  - Polished Obsidian UI, optimized scrolling and rendering for long chats
+  - Touch‑friendly controls and responsive layout on mobile
+  - Clear errors with structured notices; handy debugging commands
 
 ---
 
-## 💎 Premium Features
+## 🧭 Getting started
 
-> **Note**: Core features are free forever. Premium features enhance your workflow with advanced capabilities.
+1) Open Settings → SystemSculpt AI → Models & Prompts
+- Choose a provider (OpenAI, OpenRouter, Anthropic, LM Studio, Ollama, or any OpenAI‑compatible endpoint)
+- Enter your endpoint and API key if required
 
-### 🎙️ **Voice & Audio Intelligence**
-Transform spoken words into structured knowledge:
-- **🔴 One-Click Recording**: Record thoughts directly in Obsidian
-- **📝 Smart Transcription**: Convert audio to markdown with AI cleanup
-- **🎵 Multi-Format Support**: MP3, WAV, M4A, OGG, WebM
-- **🧩 Large File Handling**: Process hours of audio seamlessly
-- **✨ Post-Processing**: AI improves transcript readability
+2) Start a chat
+- Command palette → “Open SystemSculpt Chat”, or click the ribbon icon
+- Pick a model in the header; type and send
 
-### 📄 **Document Intelligence**
-Extract knowledge from any document:
-- **📑 PDF → Markdown**: Preserve formatting, tables, and structure
-- **💼 Office Files**: Process Word, PowerPoint, Excel documents
-- **🖼️ Image Extraction**: Save embedded images automatically
-- **📊 Table Preservation**: Maintain complex data structures
-- **🗂️ Bulk Processing**: Handle multiple documents at once
+3) Add context
+- Drag notes in, @‑mention files, or click the paperclip to attach
+- Use the “Chat with File” command from any note to open chat preloaded with that file
 
-### 👁️ **Vision & Image Analysis**
-See through your AI's eyes:
-- **🖼️ Image Understanding**: Analyze screenshots, diagrams, photos
-- **📸 Instant Analysis**: Paste images from clipboard
-- **💬 Visual Q&A**: Ask questions about images
-- **📝 OCR Capabilities**: Extract text from images
-- **🎯 Context Integration**: Include images in conversations
+4) Try Agent Mode (optional)
+- Click the vault icon in the chat toolbar to toggle Agent Mode
+- Approve or deny tool calls; everything is explicit and reversible
 
-### ⚡ **SystemSculpt Premium**
-Enhanced AI capabilities for power users:
-- **🌐 Premium Models**: Access to advanced AI models
-- **🚀 Priority Features**: First access to new capabilities
-- **📊 Enhanced Processing**: Document and audio processing
-- **🔒 Privacy-Focused**: Your data stays in your vault
+5) Enable Similar Notes (optional)
+- Settings → Embeddings & Search → Enable, then pick a provider
+- If using a custom endpoint, set API endpoint + key + model (for example: `text-embedding-3-small`)
+- Click “Start Now” to process your vault; open the “Similar Notes” panel from the command palette
+
+6) Power‑ups
+- Templates: Command palette → “Open Template Selection”
+- Titles: “Change/Generate Title” from a chat or any Markdown file
+- Web search: Globe button in chat toolbar (when supported by the provider)
 
 ---
 
-## 🚀 Installation
+## 🧩 Chat experience
+
+- **Toolbar**: Agent Mode toggle, per‑chat settings, attach/context, web search, microphone, send
+- **Context manager**: add/remove files and include your vault’s structure when helpful
+- **Rendering**: unified assistant message layout, code highlighting, citations, images
+- **History**: save chats to Markdown, open chat history, resume from a history file
+- **Shortcuts**: configurable hotkeys; streamlined keyboard navigation
+
+---
+
+## 🔎 Similar Notes & semantic search
+
+- Open “Similar Notes Panel” from the command palette or ribbon
+- Results update as you switch files or as the chat evolves
+- Drag similar results into chat for instant context
+- Exclude chat history or specific folders/files; respect Obsidian’s own exclusions
+- Status UI shows progress, counts, and completion while building embeddings
+
+Settings → Embeddings & Search lets you:
+- Enable/disable embeddings
+- Choose provider: SystemSculpt or Custom (OpenAI‑compatible)
+- Configure endpoint, API key, and model when using a custom provider
+- Scan for local services (Ollama, LM Studio) and apply in one click
+
+---
+
+## 🧱 Agent Mode (MCP) tools
+
+When Agent Mode is on, the model can request tools that work inside your vault. You explicitly approve each call before it runs.
+
+- Files: `read`, `write`, `edit`, `create_folders`, `move`, `trash`
+- Listing and navigation: `list_items`, `open`
+- Search: `find` (by name), `search` (grep), `properties_search`
+- Context & analysis: `context` (manage included files), `similar_notes`, `vault_overview`
+
+All tools are scoped to your vault with built‑in content limits to keep the UI responsive.
+
+---
+
+## ⚙️ Settings overview
+
+- **Overview & Setup**: connect providers and API keys; activate license if you have one
+- **Models & Prompts**: pick chat/title/post‑processing models; choose prompts; manage favorites
+- **Chat & Templates**: chat defaults, agent mode defaults, template hotkeys
+- **Embeddings & Search**: enable embeddings, provider and model selection, exclusions, processing controls
+- **Audio & Transcription**: microphone selection, transcription options, post‑processing
+- **Files & Backup**: directories for attachments, recordings, chats, extractions; automatic backups and restore
+- **Advanced**: additional controls for power users
+
+---
+
+## ⌨️ Commands & shortcuts (highlights)
+
+- Open SystemSculpt Chat
+- Open SystemSculpt Chat History
+- Chat with File (from the current note)
+- Change Chat Model (current chat) / Set Default Chat Model
+- Change/Generate Title
+- Open Template Selection
+- Open Similar Notes Panel
+- Open SystemSculpt Search
+- Open SystemSculpt AI Settings
+
+Ribbon icons include Chat, Chat History, Janitor, Similar Notes, and Search.
+
+---
+
+## 📱 Mobile, privacy, and reliability
+
+- Designed for mobile and desktop with responsive UI and touch‑friendly controls
+- Local‑first: your vault stays on your device
+- Your API keys talk directly to your chosen providers
+- Works offline when using local models
+- Clear, actionable errors and optional debug tools
+
+---
+
+## 🛠 Installation
 
 ### From Obsidian Community Plugins
 1. Open Obsidian Settings → Community Plugins
-2. Browse and search for "SystemSculpt AI"
+2. Browse and search for “SystemSculpt AI”
 3. Click Install, then Enable
-4. Start using immediately with free features!
 
-### Manual Installation
+### Manual installation
 ```bash
-# Clone into your vault's plugins folder
 cd /path/to/vault/.obsidian/plugins/
 git clone https://github.com/SystemSculpt/obsidian-systemsculpt-plugin systemsculpt-ai
-
-# Install dependencies and build
 cd systemsculpt-ai
 npm install
 npm run build
-
-# Restart Obsidian and enable the plugin
 ```
 
 ---
 
-## 🎯 Quick Start Guide
-
-### 1️⃣ **Basic Chat Setup**
-```markdown
-1. Click the brain icon (🧠) in the left sidebar
-2. Choose your AI provider (or use SystemSculpt free tier)
-3. Start chatting—it's that simple!
-```
-
-### 2️⃣ **Add Context to Conversations**
-```markdown
-- Drag any note into the chat
-- Type @ to mention specific files
-- Click "Similar Notes" to find related content
-```
-
-### 3️⃣ **Enable Agent Mode** (Advanced)
-```markdown
-1. Toggle "Agent Mode" in chat settings
-2. AI can now read/write files autonomously
-3. You'll approve each action before execution
-```
-
-### 🎬 **Example Workflows**
+## 🧪 Example workflows
 
 <details>
-<summary><b>📚 Research Assistant</b></summary>
+<summary><b>📚 Research</b></summary>
 
-```markdown
-You: "Find all my notes about machine learning and create a comprehensive overview"
+Ask: “Summarize my notes on retrieval‑augmented generation and link the most similar notes.”
 
-AI: *Searches vault, reads relevant notes, creates structured summary*
-```
+Use: drag notes + Similar Notes panel + agent tools for search and citations.
 </details>
 
 <details>
-<summary><b>✍️ Content Creation</b></summary>
+<summary><b>✍️ Writing</b></summary>
 
-```markdown
-You: "Based on my notes about productivity, write a blog post outline"
+Ask: “Draft an outline for a blog post based on my productivity notes. Include citations.”
 
-AI: *Analyzes your productivity notes, generates SEO-friendly outline*
-```
+Use: attach context files + template inserter + title generator.
 </details>
 
 <details>
-<summary><b>💻 Code Documentation</b></summary>
+<summary><b>🖼️ Vision</b></summary>
 
-```markdown
-You: "Document this code file and create examples"
-
-AI: *Reads code, generates documentation with examples*
-```
+Paste a diagram screenshot and ask questions using a vision‑capable model from your provider.
 </details>
 
 ---
 
-## 💰 Pricing
+## 🙌 Premium benefits (optional)
 
-### 🆓 **Free Forever**
-- ✅ All core AI chat features
-- ✅ MCP tool usage
-- ✅ Semantic search
-- ✅ Task management
-- ✅ Multiple AI providers
-- ✅ No limits, no trials
+If you choose to add a license, you get:
+- Document intelligence: PDF/Office → clean Markdown, with table and structure preservation
+- Voice & audio intelligence: in‑app recording and robust transcription pipeline
+- Unified SystemSculpt provider catalog for chat and embeddings
 
-### 💎 **Premium Options**
-
-| Plan | Price | Best For | Includes |
-|------|-------|----------|----------|
-| **[Monthly](https://systemsculpt.com/monthly)** | $19/mo | Active users | All premium features |
-| **[Lifetime](https://systemsculpt.com/lifetime)** | $249 | Power users | Everything + 1-on-1 setup session with creator |
-
-[**🛒 Get Premium Access →**](https://systemsculpt.com/pricing)
-
----
-
-## 🔐 Privacy & Security
-
-Your data is YOUR data. Period.
-
-- 🏠 **Local First**: All data stays in your vault
-- 🔑 **Your API Keys**: Direct connection to AI providers
-- 🚫 **No Data Collection**: Your conversations stay private
-- 🔒 **Encrypted Storage**: API keys secured by Obsidian
-- ✅ **Secure Processing**: Premium features use secure endpoints
-- 🌐 **Offline Mode**: Works with local models
-
----
-
-## 🛡️ Support & Community
-
-### 📚 **Resources**
-- [Documentation](https://systemsculpt.com/docs)
-- [Video Tutorials](https://youtube.com/@SystemSculpt)
-- [Discord Community](https://discord.gg/3gNUZJWxnJ)
-- [GitHub Issues](https://github.com/systemsculpt/obsidian-systemsculpt-plugin/issues)
-
-### 🤝 **Get Help**
-- 💬 **Discord**: Fast community support
-- 📧 **Email**: mike@systemsculpt.com
-- 🎥 **1-on-1**: Available with lifetime license
-
----
-
-## 🚧 Development
-
-Built with modern web technologies for performance and reliability:
-
-```typescript
-// Tech Stack
-- TypeScript       // Type-safe development
-- Obsidian API    // Deep vault integration  
-- WebSockets      // Real-time streaming
-- Service Workers // Offline capabilities
-```
-
-### Contributing
-We welcome contributions! Please see our [GitHub Issues](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin/issues) to get started.
-
+Learn more at `https://systemsculpt.com/pricing`.
 
 ---
 
 ## 📜 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License – see `LICENSE`.
 
 ---
 
+## 🤝 Community & support
+
+- Docs: `https://systemsculpt.com`
+- Videos: `https://youtube.com/@SystemSculpt`
+- Discord: `https://discord.gg/3gNUZJWxnJ`
+- Email: `mike@systemsculpt.com`
+
 <div align="center">
 
-**Built with ❤️ by [Mike](https://github.com/SystemSculpt) for the Obsidian community**
-
-[⬆ Back to Top](#-systemsculpt-ai-for-obsidian)
+Built with ❤️ by [Mike](https://github.com/SystemSculpt) for the Obsidian community.
 
 </div>
