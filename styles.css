@@ -5044,12 +5044,12 @@
 }
 
 /* Remove top margin from first paragraph in content part */
-.systemsculpt-content-part p:first-child {
+.systemsculpt-content-part p:first-of-type {
   margin-top: 0;
 }
 
 /* Remove bottom margin from last paragraph in content part */
-.systemsculpt-content-part p:last-child {
+.systemsculpt-content-part p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -5226,7 +5226,7 @@
   margin: 0.25em 0;
 }
 
-.systemsculpt-message-content p:last-child {
+.systemsculpt-message-content p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -5367,11 +5367,11 @@
   width: 100%;
 }
 
-.systemsculpt-message-content p:first-child {
+.systemsculpt-message-content p:first-of-type {
   margin-top: 0;
 }
 
-.systemsculpt-message-content p:last-child {
+.systemsculpt-message-content p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -5679,7 +5679,7 @@
   margin-top: 0;
 }
 
-.systemsculpt-message-content p:last-child {
+.systemsculpt-message-content p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -5973,11 +5973,11 @@
   width: 100%;
 }
 
-.systemsculpt-message-content p:first-child {
+.systemsculpt-message-content p:first-of-type {
   margin-top: 0;
 }
 
-.systemsculpt-message-content p:last-child {
+.systemsculpt-message-content p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -6054,7 +6054,7 @@
   margin-top: 0;
 }
 
-.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:last-child {
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:last-of-type {
   margin-bottom: 0;
 }
 
@@ -6199,6 +6199,12 @@
   z-index: 12001;
   transition: opacity 120ms ease, transform 160ms ease;
   white-space: nowrap;
+}
+
+/* Do not reserve extra space after content just because toolbar is positioned after it */
+.systemsculpt-message-content > .systemsculpt-message-toolbar,
+.systemsculpt-content-part > .systemsculpt-message-toolbar {
+  margin-top: 0;
 }
 
 .systemsculpt-assistant-message .systemsculpt-message-toolbar {
@@ -20632,258 +20638,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
             background: var(--background-secondary-alt);
             transform: translateY(-1px);
             box-shadow: var(--shadow-s);
-        }
-    }
-}
-
-/* guided-tour.css */
-/* Guided Tour Styles */
-.systemsculpt-tour-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(2px);
-    z-index: 9998;
-    animation: fadeIn 0.3s ease-out;
-    pointer-events: auto;
-}
-
-/* Spotlight cutout for highlighted elements */
-.systemsculpt-tour-overlay.has-highlight {
-    /* We'll use a radial gradient to create the cutout effect */
-    /* This will be dynamically updated via JavaScript */
-    mask-image: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%), 
-                transparent var(--spotlight-inner-radius, 0px),
-                transparent var(--spotlight-outer-radius, 0px),
-                black var(--spotlight-fade-radius, 0px));
-    -webkit-mask-image: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%), 
-                transparent var(--spotlight-inner-radius, 0px),
-                transparent var(--spotlight-outer-radius, 0px),
-                black var(--spotlight-fade-radius, 0px));
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-.systemsculpt-tour-highlight {
-    position: fixed;
-    border: 3px solid var(--interactive-accent);
-    border-radius: 8px;
-    box-shadow: 0 0 0 4px rgba(var(--interactive-accent-rgb), 0.3),
-                0 0 30px rgba(var(--interactive-accent-rgb), 0.6),
-                inset 0 0 20px rgba(var(--interactive-accent-rgb), 0.1);
-    pointer-events: none;
-    z-index: 9999;
-    animation: pulse 2s ease-in-out infinite;
-    /* Ensure the highlight is above the overlay but allows interaction */
-    isolation: isolate;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        box-shadow: 0 0 0 4px rgba(var(--interactive-accent-rgb), 0.3),
-                    0 0 30px rgba(var(--interactive-accent-rgb), 0.6),
-                    inset 0 0 20px rgba(var(--interactive-accent-rgb), 0.1);
-    }
-    50% {
-        box-shadow: 0 0 0 8px rgba(var(--interactive-accent-rgb), 0.2),
-                    0 0 40px rgba(var(--interactive-accent-rgb), 0.8),
-                    inset 0 0 25px rgba(var(--interactive-accent-rgb), 0.2);
-    }
-}
-
-.systemsculpt-tour-tooltip {
-    position: fixed;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-    max-width: 400px;
-    z-index: 10000;
-    animation: slideInScale 0.3s ease-out;
-    
-    &.centered {
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%);
-        animation: slideInScaleCentered 0.3s ease-out;
-    }
-}
-
-@keyframes slideInScale {
-    from {
-        opacity: 0;
-        transform: scale(0.9) translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
-
-@keyframes slideInScaleCentered {
-    from {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(0.9);
-    }
-    to {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
-    }
-}
-
-.tour-tooltip-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    
-    h3 {
-        margin: 0;
-        font-size: 18px;
-        font-weight: 600;
-        color: var(--text-normal);
-    }
-}
-
-.tour-close-btn {
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    color: var(--text-muted);
-    transition: all 0.2s ease;
-    
-    &:hover {
-        background: var(--background-modifier-hover);
-        color: var(--text-normal);
-    }
-    
-    svg {
-        width: 16px;
-        height: 16px;
-    }
-}
-
-.tour-tooltip-content {
-    padding: 20px;
-    
-    p {
-        margin: 0;
-        font-size: 14px;
-        line-height: 1.6;
-        color: var(--text-normal);
-        white-space: pre-line; /* Preserve line breaks */
-    }
-}
-
-.tour-tooltip-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-top: 1px solid var(--background-modifier-border);
-    background: var(--background-secondary);
-    border-radius: 0 0 12px 12px;
-}
-
-.tour-step-indicator {
-    font-size: 13px;
-    color: var(--text-muted);
-}
-
-.tour-nav-buttons {
-    display: flex;
-    gap: 8px;
-    
-    button {
-        padding: 6px 16px;
-        font-size: 13px;
-        border: 1px solid var(--background-modifier-border);
-        background: var(--background-primary);
-        color: var(--text-normal);
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        
-        &:hover {
-            background: var(--background-modifier-hover);
-        }
-        
-        &.mod-cta {
-            background: var(--interactive-accent);
-            color: white;
-            border: none;
-            
-            &:hover {
-                background: var(--interactive-accent-hover);
-            }
-        }
-    }
-}
-
-/* Arrow indicators for tooltip positioning */
-.systemsculpt-tour-tooltip::before {
-    content: '';
-    position: absolute;
-    width: 0;
-    height: 0;
-    border: 8px solid transparent;
-}
-
-/* Positioning-specific arrows */
-.systemsculpt-tour-tooltip[data-position="top"]::before {
-    bottom: -16px;
-    left: 50%;
-    transform: translateX(-50%);
-    border-top-color: var(--background-modifier-border);
-}
-
-.systemsculpt-tour-tooltip[data-position="bottom"]::before {
-    top: -16px;
-    left: 50%;
-    transform: translateX(-50%);
-    border-bottom-color: var(--background-modifier-border);
-}
-
-.systemsculpt-tour-tooltip[data-position="left"]::before {
-    right: -16px;
-    top: 50%;
-    transform: translateY(-50%);
-    border-left-color: var(--background-modifier-border);
-}
-
-.systemsculpt-tour-tooltip[data-position="right"]::before {
-    left: -16px;
-    top: 50%;
-    transform: translateY(-50%);
-    border-right-color: var(--background-modifier-border);
-}
-
-/* Mobile responsiveness */
-@media (max-width: 600px) {
-    .systemsculpt-tour-tooltip {
-        max-width: calc(100vw - 40px);
-        
-        &.centered {
-            width: calc(100vw - 40px);
-        }
-    }
-    
-    .tour-tooltip-content {
-        padding: 16px;
-        
-        p {
-            font-size: 13px;
         }
     }
 }
