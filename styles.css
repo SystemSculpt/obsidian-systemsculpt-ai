@@ -2286,7 +2286,8 @@
   background: transparent !important;
   box-sizing: border-box !important;
   pointer-events: auto !important;
-  overflow: visible !important;
+  /* Keep visuals contained; inline row itself handles ellipsis */
+  overflow: hidden !important;
 }
 
 /* Ensure drawer children have proper positioning and stacking context */
@@ -2709,15 +2710,14 @@
 }
 
 .systemsculpt-tool-call-response-content {
-  /* Uniform height for all tool call results */
-  height: 150px !important;
+  max-height: clamp(90px, 22vh, 120px) !important;
   overflow-y: auto !important;
   overflow-x: auto !important;
   font-size: 11px !important;
   line-height: 1.4 !important;
   font-family: var(--font-monospace) !important;
   color: var(--text-normal) !important;
-  padding: 0 !important; /* Override base container padding */
+  padding: 0 !important;
 }
 
 .systemsculpt-tool-response-json {
@@ -2942,7 +2942,7 @@
   background: transparent !important;
   border-radius: 0 !important;
   padding: 0 !important;
-  height: 150px !important;
+  max-height: clamp(90px, 22vh, 120px) !important;
   overflow-y: auto !important;
   overflow-x: auto !important;
   white-space: pre-wrap !important;
@@ -3382,6 +3382,8 @@
   text-align: center;
   box-sizing: border-box;
   line-height: 1.3;
+  /* Buttons should not shrink in tight flex rows (prevents leak/overlap) */
+  flex-shrink: 0;
 }
 
 .ss-button:hover {
@@ -4990,7 +4992,8 @@
 .systemsculpt-unified-part {
   max-width: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  /* Let internal components manage their overflow, but avoid horizontal spill */
+  overflow-x: hidden;
 }
 
 /* Content parts should be transparent inside groups, visible outside */
@@ -5008,6 +5011,10 @@
   border-radius: 6px;
   /* Smooth transitions for hover effects */
   transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
+  /* Guard against overflow from very long strings */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Content parts get a subtle card background */
@@ -5302,6 +5309,10 @@
   grid-template-columns: minmax(0, 1fr);
   user-select: text;
   -webkit-user-select: text;
+  /* Prevent long tokens from leaking outside the message card */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .systemsculpt-message-content > * {
@@ -6199,6 +6210,9 @@
   z-index: 12001;
   transition: opacity 120ms ease, transform 160ms ease;
   white-space: nowrap;
+  /* Contain the toolbar within its anchor; if space is tight, allow horizontal scroll rather than overflow */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Do not reserve extra space after content just because toolbar is positioned after it */
@@ -7361,6 +7375,95 @@
 .systemsculpt-chat-search input:focus {
   border-color: var(--interactive-accent);
   outline: none;
+}
+
+.systemsculpt-chat-input-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-chat-input-wrap.has-token-counter .systemsculpt-chat-input {
+  padding-right: 72px; /* ensure input text never overlaps counter (slimmer badge) */
+}
+
+.systemsculpt-token-counter {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 1px 6px; /* slimmer height */
+  border-radius: 6px;
+  background-color: rgba(var(--background-primary-rgb), 0.85);
+  border: 1px solid var(--background-modifier-border);
+  transition: all 0.2s ease;
+  font-variant-numeric: tabular-nums;
+  min-width: 56px; /* slimmer width */
+  text-align: center;
+  user-select: none;
+  cursor: pointer;
+  z-index: 2; /* ensure it overlays the textarea */
+}
+
+.systemsculpt-token-counter:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-token-counter.over-limit {
+  color: var(--text-error);
+  font-weight: 600;
+  border: 1px solid var(--text-error);
+  background-color: rgba(var(--background-primary-rgb), 0.95);
+  animation: pulse-warning 2s infinite;
+}
+
+.systemsculpt-token-counter.over-limit:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+@keyframes pulse-warning {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Different states for token counter */
+.systemsculpt-token-counter.updating {
+  color: var(--text-accent);
+  font-style: italic;
+}
+
+.systemsculpt-token-counter.error {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}
+
+/* Mobile refinements for in-input token counter */
+@media (max-width: 768px) {
+  .systemsculpt-chat-input-wrap.has-token-counter .systemsculpt-chat-input {
+    padding-right: 64px;
+  }
+  .systemsculpt-token-counter {
+    top: 4px;
+    right: 6px;
+    min-width: 56px;
+    font-size: 10px;
+    padding: 1px 4px;
+  }
+}
+@media (max-width: 480px) {
+  .systemsculpt-chat-input-wrap.has-token-counter .systemsculpt-chat-input {
+    padding-right: 56px;
+  }
+  .systemsculpt-token-counter {
+    min-width: 52px;
+  }
 }
 
 .systemsculpt-chat-input.disabled {
@@ -12822,6 +12925,38 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   cursor: pointer;
 }
 
+/* Enhanced indicator container */
+.systemsculpt-status-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.systemsculpt-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-status-icon.is-spinning {
+  animation: systemsculpt-rotate 1.1s linear infinite;
+}
+
+@keyframes systemsculpt-rotate {
+  100% { transform: rotate(360deg); }
+}
+
+.systemsculpt-status-value {
+  font-weight: 600;
+}
+
+.systemsculpt-status-value.status-running { color: var(--interactive-accent); }
+.systemsculpt-status-value.status-complete { color: var(--text-success); }
+.systemsculpt-status-value.status-idle { color: var(--text-muted); }
+
+.systemsculpt-status-sub-info { font-variant-numeric: tabular-nums; opacity: 0.9; }
+.systemsculpt-status-sub-info.count-info { color: var(--text-muted); }
+
 /* progress-modal.css */
 /**
  * Progress Modal Component
@@ -14480,8 +14615,9 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   padding: 12px;
-  max-height: 250px;
-  overflow-y: auto;
+  /* Avoid nested scrollbars; let the parent container handle scrolling */
+  max-height: none;
+  overflow: visible;
 }
 
 .bta-args::-webkit-scrollbar {
@@ -14503,6 +14639,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   font-family: var(--font-monospace);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   color: var(--text-normal);
   line-height: 1.5;
 }
@@ -14511,6 +14648,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   display: flex;
   gap: 10px;
   padding-top: 12px;
+  flex-wrap: wrap;
 }
 
 .bta-actions button {
@@ -14679,7 +14817,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 /* Content */
 .systemsculpt-diff-content {
-  max-height: 400px;
+  max-height: clamp(120px, 30vh, 200px);
   overflow-y: auto;
   font-family: var(--font-monospace);
 }
@@ -14856,6 +14994,12 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 } 
 
 /* tool-call-ui.css */
+/* Token badge for inline tool call display */
+.systemsculpt-tool-inline .systemsculpt-tool-tokens {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
 /**
  * Tool Call UI Enhancements - Compact display for file operations
  */
@@ -14905,7 +15049,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 .systemsculpt-tool-call-content-body {
-  max-height: 250px;
+  max-height: clamp(100px, 25vh, 160px);
   overflow-y: auto;
 }
 
@@ -15160,7 +15304,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 .ss-modal__code--scrollable {
-  max-height: 400px;
+  max-height: clamp(140px, 35vh, 200px);
   overflow-y: auto;
 }
 
@@ -15336,6 +15480,10 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   /* Ensure inline tool call fills the assistant container width */
   width: 100%;
   box-sizing: border-box;
+  /* Allow children to shrink correctly so actions never overflow */
+  min-width: 0;
+  /* Ensure the inline row never visually overflows its parent */
+  overflow: hidden;
 }
 
 .systemsculpt-tool-inline:hover {
@@ -15346,7 +15494,12 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-tool-name {
   font-weight: 500;
   color: var(--text-normal);
-  flex: 0 0 auto;
+  /* Take remaining space, allow shrinking, and ellipsize */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Status text */
@@ -15354,6 +15507,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   color: var(--text-muted);
   font-size: 13px;
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Actions container */
@@ -15362,6 +15516,9 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   display: flex;
   gap: 6px;
   align-items: center;
+  /* Keep buttons visible; they should not shrink below intrinsic width */
+  flex-shrink: 0;
+  min-width: max-content;
 }
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -15375,6 +15532,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+  /* Keep icon visible even when text truncates */
+  min-width: 18px;
 }
 
 .systemsculpt-tool-status-icon svg {
@@ -15448,6 +15607,21 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-tool-call-wrapper[data-state="failed"] .systemsculpt-tool-inline {
   border-color: rgba(var(--color-red-rgb), 0.3);
+}
+
+/* Inline diff preview attached under a tool call */
+.systemsculpt-inline-diff {
+  margin-top: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+
+/* Header/actions removed for a cleaner inline diff */
+
+.systemsculpt-inline-diff__body {
+  max-height: none;
+  overflow: visible;
 }
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -20728,6 +20902,151 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     }
 }
 
+/* changelog-modal.css */
+/* Changelog Modal - scoped styles */
+
+.ss-changelog-modal .ss-modal__header {
+  gap: 8px;
+}
+
+.ss-changelog-modal .ss-modal__subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ss-changelog-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ss-changelog-version-select {
+  flex: 0 0 auto;
+  max-width: 280px;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+/* Make content scroll within the content area while header/footer remain fixed */
+.ss-changelog-modal .ss-modal__content {
+  overflow: hidden;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0; /* critical for flex child scrolling */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px; /* space for scrollbar */
+}
+
+.ss-changelog-modal .systemsculpt-changelog-notes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-notes-inner {
+  padding-right: 6px;
+}
+
+/* Enhance markdown readability inside modal */
+.ss-changelog-modal .markdown-preview-view {
+  --md-heading-color: var(--text-normal);
+}
+
+.ss-changelog-modal .markdown-preview-view h1,
+.ss-changelog-modal .markdown-preview-view h2,
+.ss-changelog-modal .markdown-preview-view h3 {
+  color: var(--text-normal);
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.ss-changelog-modal .markdown-preview-view p,
+.ss-changelog-modal .markdown-preview-view ul,
+.ss-changelog-modal .markdown-preview-view ol {
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+.ss-changelog-modal .markdown-preview-view blockquote {
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.ss-changelog-modal .markdown-preview-view code {
+  background: var(--background-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .markdown-preview-view pre code {
+  display: block;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+/* Footer layout: space between left and right groups */
+.ss-changelog-modal .ss-modal__footer {
+  justify-content: space-between;
+}
+
+.ss-changelog-modal .ss-modal__footer-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Custom scrollbar */
+.ss-changelog-modal .systemsculpt-changelog-modal {
+  scrollbar-width: thin;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+/* Responsive adjustments */
+@media (max-width: 680px) {
+  .ss-changelog-header-controls {
+    flex-wrap: wrap;
+  }
+  .ss-changelog-version-select {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  .ss-changelog-modal .ss-modal__content {
+    padding: 12px;
+  }
+}
+
+
+
+
 /* chat.css */
 /**
  * Chat View - Modern UI/UX Design System
@@ -20776,6 +21095,8 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   will-change: scroll-position;
   transform: translateZ(0);
   backface-visibility: hidden;
+  /* Prevent descendants from creating horizontal overflow */
+  contain: layout paint;
 }
 
 /* Modern Scrollbar Design */
@@ -21383,6 +21704,109 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 @keyframes systemsculpt-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+/* ╔═══════════════════════════════════════════════════════════╗
+   ║  Chat Status Display - Settings overview for empty chats  ║
+   ╚═══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-chat-status {
+  max-width: 600px;
+  margin: 24px auto;
+  padding: 16px;
+  background: var(--background-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--background-modifier-border);
+  animation: systemsculpt-fadeIn 0.3s ease-out;
+}
+
+/* Disable animation when the container is being refreshed in-place */
+.systemsculpt-chat-status.no-animate {
+  animation: none !important;
+}
+
+.systemsculpt-status-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 10px;
+}
+
+.systemsculpt-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.systemsculpt-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.systemsculpt-status-pill:hover {
+  background: var(--background-secondary);
+}
+
+.systemsculpt-status-pill.is-on {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.systemsculpt-status-pill.is-off {
+  opacity: 0.85;
+}
+
+.systemsculpt-status-pill.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.systemsculpt-status-pill .ss-pill-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-status-pill .ss-pill-label {
+  color: var(--text-muted);
+}
+
+.systemsculpt-status-pill .ss-pill-sep {
+  color: var(--text-faint);
+}
+
+.systemsculpt-status-pill .ss-pill-value {
+  font-weight: 600;
+}
+
+.systemsculpt-status-tip {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: left;
+  margin: 8px 0 0 0;
+}
+
+@keyframes systemsculpt-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 
