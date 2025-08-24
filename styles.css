@@ -3454,6 +3454,13 @@
   height: 14px;
 }
 
+/* Subtle inline buttons (e.g., token counter) */
+.ss-button--ghost {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
 /* Button states */
 .ss-button.mod-cta {
   background-color: var(--interactive-accent);
@@ -4365,6 +4372,52 @@
   color: var(--text-on-accent);
   text-decoration: underline;
   border-radius: 2px;
+}
+
+/* --- Token Details Modal Specific Styles --- */
+
+/* Memory usage color coding */
+.ss-token-low {
+  color: var(--text-success);
+  font-weight: 600;
+}
+
+.ss-token-medium {
+  color: var(--text-warning);
+  font-weight: 600;
+}
+
+.ss-token-high {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+/* Memory bar visualization */
+.ss-memory-bar {
+  width: 100px;
+  height: 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.ss-memory-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    var(--text-success) 0%,
+    var(--text-success) 60%,
+    var(--text-warning) 80%,
+    var(--text-error) 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+/* Detail text styling */
+.ss-modal__detail {
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.3;
 }
 
 
@@ -7610,6 +7663,45 @@
   margin-left: auto; /* Push to the right */
 }
 
+/* Send button container with token counter */
+.systemsculpt-button-group-actions > div:has(.systemsculpt-token-counter) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+/* Token counter when placed next to send button */
+.systemsculpt-button-group-actions .systemsculpt-token-counter {
+  position: static;
+  top: auto;
+  right: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+  min-width: 42px;
+  height: 24px;
+  border-radius: 6px;
+  background-color: rgba(var(--background-secondary-rgb), 0.6);
+  border: 1px solid rgba(var(--background-modifier-border-rgb), 0.4);
+  color: var(--text-muted);
+  font-weight: 500;
+  z-index: 1;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-button-group-actions .systemsculpt-token-counter:hover {
+  background-color: rgba(var(--background-secondary-rgb), 0.8);
+  border-color: rgba(var(--background-modifier-border-rgb), 0.6);
+}
+
+.systemsculpt-button-group-actions .systemsculpt-token-counter.over-limit {
+  color: var(--text-error);
+  font-weight: 600;
+  border-color: var(--text-error);
+  background-color: rgba(var(--background-primary-rgb), 0.9);
+  animation: pulse-warning 2s infinite;
+}
+
 /* Visual divider between button groups */
 .systemsculpt-button-group-divider {
   order: 3; /* Can be reordered as needed */
@@ -7759,6 +7851,14 @@
     margin-left: 0;
     width: 100%;
     justify-content: flex-end;
+  }
+
+  /* Token counter adjustments for mobile */
+  .systemsculpt-button-group-actions .systemsculpt-token-counter {
+    font-size: 9px;
+    padding: 1px 4px;
+    min-width: 36px;
+    height: 20px;
   }
 }
 
@@ -17564,34 +17664,77 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 /* embeddings-settings.css */
 /**
  * Embeddings Settings - SystemSculpt Component
- *
- * Styles for embeddings settings tab with proper Obsidian UI integration
+ * Simplified styles for streamlined embeddings settings UI
  */
 
-
-
-/* Statistics Section */
-.systemsculpt-embeddings-statistics-section {
+/* Status Section */
+.embeddings-status-section {
   margin: var(--size-4-4) 0;
-}
-
-/* Stats Container */
-.systemsculpt-embeddings-stats {
-  margin: var(--size-4-3) 0;
   padding: var(--size-4-3);
   background-color: var(--background-secondary);
   border-radius: var(--radius-m);
   border: 1px solid var(--background-modifier-border);
 }
 
-/* Progress Overview */
-.systemsculpt-embeddings-progress-overview {
-  margin-bottom: var(--size-4-4);
+/* Enhanced Live Status Display */
+.embeddings-simple-status {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  font-weight: var(--font-medium);
+  margin-bottom: var(--size-4-2);
 }
 
-.systemsculpt-progress-bar-container {
-  width: 100%;
-  margin: var(--size-4-3) 0 var(--size-4-4) 0;
+.embeddings-simple-status.processing {
+  color: var(--interactive-accent);
+}
+
+.embeddings-simple-status.complete {
+  color: var(--text-success);
+}
+
+.embeddings-simple-status.idle {
+  color: var(--text-muted);
+}
+
+.embeddings-status-icon {
+  font-size: 1.1em;
+  margin-right: var(--size-4-1);
+}
+
+/* Progress Container */
+.embeddings-progress-container {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.embeddings-progress-percent {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+  min-width: 45px;
+  text-align: right;
+}
+
+/* Provider Info */
+.embeddings-provider-info {
+  display: flex;
+  gap: var(--size-4-1);
+  margin-top: var(--size-4-2);
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Enhanced Progress Bar */
+.embeddings-simple-progress {
+  flex: 1;
+  height: 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
 }
 
 .systemsculpt-progress-bar {
@@ -17892,6 +18035,15 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   gap: var(--size-4-2);
 }
 
+/* Inline active namespace row shown with progress */
+.embeddings-namespace-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  flex-wrap: wrap;
+  font-size: var(--font-ui-small);
+}
+
 .embeddings-status-line {
   display: flex;
   align-items: center;
@@ -18030,6 +18182,161 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     font-size: 1.4em;
   }
 }
+
+/* Namespaces section */
+.embeddings-namespaces-section {
+  margin: var(--size-4-4) 0;
+  padding: var(--size-4-3);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.embeddings-namespaces-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+
+.embeddings-namespace-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: var(--size-2-3);
+}
+
+.embeddings-namespace-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-2-3);
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.embeddings-namespace-label.current {
+  position: relative;
+}
+
+.embeddings-namespace-label.current::after {
+  content: 'current';
+  margin-left: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+.embeddings-badge {
+  display: inline-block;
+  margin-right: var(--size-2-2);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.embeddings-badge.badge-provider {
+  color: var(--text-normal);
+  background: var(--background-primary);
+}
+
+.embeddings-badge.badge-model {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embeddings-badge.badge-schema {
+  color: var(--text-muted);
+}
+
+.embeddings-badge.badge-dim {
+  color: var(--text-muted);
+}
+
+.embeddings-namespace-counts {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.embeddings-namespace-actions button {
+  margin-left: var(--size-2-2);
+}
+
+/* Simplified UI Styles */
+.embeddings-progress-fill.processing {
+  animation: processing-pulse 2s ease-in-out infinite;
+}
+
+@keyframes processing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Custom Provider Settings */
+.embeddings-exclusion-input {
+  display: flex;
+  gap: var(--size-4-2);
+  align-items: center;
+}
+
+.embeddings-exclusion-field {
+  flex: 1;
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-primary);
+}
+
+/* Exclusions Display */
+.embeddings-exclusions-display {
+  margin-top: var(--size-4-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.embeddings-exclusion-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+  background-color: var(--background-modifier-hover);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+}
+
+.embeddings-exclusion-name {
+  color: var(--text-normal);
+}
+
+.embeddings-exclusion-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.embeddings-exclusion-remove:hover {
+  color: var(--text-error);
+}
+
+.embeddings-empty-state {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: var(--size-4-2) 0;
+}
+
 
 /* embeddings-exclusions.css */
 /* Embeddings Exclusions UI Components */
@@ -22498,8 +22805,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 .systemsculpt-changelog-entry:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 6px 15px rgba(0,0,0,0.1);
+  /* Lift effect removed */
 }
 
 .systemsculpt-changelog-entry::before { /* The timeline dot */
