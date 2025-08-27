@@ -8268,13 +8268,19 @@
 
 /* Terminal-style block loading indicator */
 .systemsculpt-streaming-status {
-  display: inline-block;
-  font-family: monospace;
-  font-size: 1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
-  margin-left: 0.5em;
-  min-width: 1ch;
-  line-height: 1;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-top: 6px;
+  align-self: flex-start;
 }
 
 /* Braille Spinner - smooth, technical, perfect */
@@ -8313,28 +8319,33 @@
 
 /* Enhanced Braille spinner with styling */
 .systemsculpt-streaming-status {
-  display: inline-block;
-  font-family: monospace;
-  font-size: 1.2em;
-  color: var(--text-accent);
-  margin-left: 0.5em;
   position: relative;
-  /* Add some spacing for the glow effect */
-  padding: 0 4px;
 }
 
-.systemsculpt-streaming-status::after {
-  content: "⠋";
+.systemsculpt-streaming-status::before {
+  content: "";
   display: inline-block;
-  animation: 
-    braille-spin 0.8s linear infinite,
-    pulse-opacity 2s ease-in-out infinite,
-    glow-pulse 3s ease-in-out infinite;
-  /* Ensure the character is well-spaced */
-  letter-spacing: 0.1em;
-  /* Smooth rendering */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-radius: 50%;
+  animation: ss-spin 0.9s linear infinite;
+}
+
+/* Per-status accenting */
+.systemsculpt-streaming-status[data-status="reasoning"] {
+  color: var(--text-accent);
+  background: var(--background-secondary);
+}
+.systemsculpt-streaming-status[data-status="tool_calls"] {
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+.systemsculpt-streaming-status[data-status="content"],
+.systemsculpt-streaming-status[data-status="working"] {
+  color: var(--text-muted);
 }
 
 /* Inline footnote under the generating indicator */
@@ -8684,7 +8695,6 @@
 .systemsculpt-loading .systemsculpt-lucide-loader-2 {
   transform-origin: center center;
 }
-
 
 
 /* load-chat.css */
