@@ -6257,15 +6257,15 @@
   border: 1px solid rgba(var(--background-modifier-border-rgb), 0.2);
   border-radius: 999px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06);
-  transform: translateY(6px) scale(0.98);
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), 6px, 0) scale(0.98);
   opacity: 0;
   pointer-events: none;
   z-index: 12001;
   transition: opacity 120ms ease, transform 160ms ease;
   white-space: nowrap;
-  /* Contain the toolbar within its anchor; if space is tight, allow horizontal scroll rather than overflow */
-  max-width: 100%;
-  overflow-x: auto;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  overflow: visible;
 }
 
 /* Do not reserve extra space after content just because toolbar is positioned after it */
@@ -6293,14 +6293,14 @@
 .systemsculpt-message-toolbar.ss-flip-up {
   top: auto;
   bottom: 100%;
-  transform: translateY(-6px) scale(0.98);
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), -6px, 0) scale(0.98);
 }
 
 .systemsculpt-message:hover .systemsculpt-message-toolbar,
 .systemsculpt-message-content:hover > .systemsculpt-message-toolbar,
 .systemsculpt-content-part:hover > .systemsculpt-message-toolbar {
   opacity: 1;
-  transform: translateY(2px) scale(1);
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), 2px, 0) scale(1);
   pointer-events: auto;
   z-index: 12001;
 }
@@ -6308,7 +6308,7 @@
 .systemsculpt-message:hover .systemsculpt-message-toolbar.ss-flip-up,
 .systemsculpt-message-content:hover > .systemsculpt-message-toolbar.ss-flip-up,
 .systemsculpt-content-part:hover > .systemsculpt-message-toolbar.ss-flip-up {
-  transform: translateY(-2px) scale(1);
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), -2px, 0) scale(1);
 }
 
 .systemsculpt-toolbar-btn {
@@ -6353,7 +6353,7 @@
   .systemsculpt-message-toolbar {
     opacity: 1;
     pointer-events: auto;
-    transform: translateY(2px) scale(1);
+    transform: translate3d(var(--ss-toolbar-shift-x, 0px), 2px, 0) scale(1);
     gap: 0;
     padding: 2px;
     background: transparent;
@@ -6383,7 +6383,6 @@
     border-radius: 999px;
   }
 }
-
 
 
 
@@ -13516,11 +13515,19 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 /* Progress bar */
-.systemsculpt-progress-bar {
+.systemsculpt-progress-bar-track {
+  width: 100%;
   height: 10px;
-  background: var(--ss-color-primary);
+  background: var(--background-modifier-border);
   border-radius: 5px;
-  transition: width 0.3s ease;
+  overflow: hidden;
+}
+
+.systemsculpt-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 5px;
+  transition: width 0.25s ease;
   width: 0%;
 }
 
@@ -13542,6 +13549,16 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   align-items: center;
   justify-content: center;
   color: var(--text-accent);
+}
+
+.systemsculpt-progress-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-progress-percent {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Progress steps */
@@ -13594,15 +13611,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   font-weight: 500;
 }
 
+.systemsculpt-progress-step.error {
+  background: rgba(var(--color-red-rgb), 0.1);
+  border: 1px solid rgba(var(--color-red-rgb), 0.3);
+}
+
 /* Completed step */
 .systemsculpt-progress-step.completed .systemsculpt-progress-step-icon {
   background: var(--color-green);
-  color: white;
-}
-
-/* Error step */
-.systemsculpt-progress-step.error .systemsculpt-progress-step-icon {
-  background: var(--color-red);
   color: white;
 }
 
@@ -13638,6 +13654,24 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-progress-button.primary:hover {
   background: var(--interactive-accent-hover);
+}
+
+.systemsculpt-progress-detail {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.systemsculpt-progress-detail.is-hidden {
+  display: none;
+}
+
+.systemsculpt-progress-modal.is-complete .systemsculpt-progress-bar {
+  background: var(--text-success);
+}
+
+.systemsculpt-progress-modal.is-error .systemsculpt-progress-bar {
+  background: var(--color-red);
 }
 
 /* Completion dialog */
@@ -13715,164 +13749,235 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 }
 
 
-/* processing-status.css */
-/**
- * Processing Status Component
- *
- * Styles for the file processing status indicators
- */
-
-/* Base status styles */
-.systemsculpt-file-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background-color: var(--background-secondary);
-  margin-bottom: 8px;
-  transition: all 0.3s ease;
-  animation: fade-in 0.3s ease;
+/* document-processing-panel.css */
+.systemsculpt-processing-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  display: none;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+.systemsculpt-processing-panel.is-visible {
+  display: block;
 }
 
-/* Status icon styling */
-.systemsculpt-status-icon {
+.systemsculpt-processing-panel__header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--text-accent);
-  margin-top: 2px;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-/* Status content container */
-.systemsculpt-status-content {
-  flex: 1;
+.systemsculpt-processing-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.systemsculpt-processing-panel__title-icon svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-processing-panel__count {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.systemsculpt-processing-panel__list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
 }
 
-/* Status text styling */
-.systemsculpt-status-text {
-  font-size: 14px;
+.systemsculpt-processing-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--background-secondary);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.systemsculpt-processing-card.is-exiting {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.systemsculpt-processing-card.is-stalled {
+  border-color: var(--color-orange);
+}
+
+.systemsculpt-processing-card[data-stage="error"] {
+  border-color: var(--color-red);
+  background: rgba(var(--color-red-rgb), 0.1);
+}
+
+.systemsculpt-processing-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.systemsculpt-processing-card__file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.systemsculpt-processing-card__name {
+  font-weight: 600;
   color: var(--text-normal);
 }
 
-/* Status details styling */
-.systemsculpt-status-details {
+.systemsculpt-processing-card__meta {
   font-size: 12px;
   color: var(--text-muted);
-  white-space: pre-line;
-  padding: 4px 0 0 0;
-  border-top: 1px solid var(--background-modifier-border);
-  margin-top: 2px;
-  animation: fade-in 0.3s ease;
 }
 
-/* Chunking status */
-.systemsculpt-status-chunking {
-  background-color: rgb(var(--interactive-accent-rgb));
-  border-left: 3px solid var(--text-accent);
+.systemsculpt-processing-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
 }
 
-.systemsculpt-status-chunking .systemsculpt-status-icon {
-  color: var(--text-accent);
-  animation: pulse 2s infinite;
+.systemsculpt-processing-card__badge-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
-/* Processing status */
-.systemsculpt-status-processing {
-  background-color: rgb(var(--interactive-accent-rgb));
-  border-left: 3px solid var(--interactive-accent);
+.systemsculpt-processing-card__timeline {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
 }
 
-.systemsculpt-status-processing .systemsculpt-status-icon {
-  color: var(--interactive-accent);
-  animation: spin 1.5s linear infinite;
+.systemsculpt-processing-card__timeline.is-hidden {
+  display: none;
 }
 
-/* Uploading status */
-.systemsculpt-status-uploading {
-  background-color: rgb(var(--color-blue-rgb));
-  border-left: 3px solid var(--color-blue);
-}
-
-.systemsculpt-status-uploading .systemsculpt-status-icon {
-  color: var(--color-blue);
-  animation: bounce 1s infinite;
-}
-
-/* Success status */
-.systemsculpt-status-success {
-  background-color: rgb(var(--color-green-rgb));
-  border-left: 3px solid var(--color-green);
-}
-
-.systemsculpt-status-success .systemsculpt-status-icon {
-  color: var(--color-green);
-}
-
-/* Error status */
-.systemsculpt-status-error {
-  background-color: rgb(var(--color-red-rgb));
-  border-left: 3px solid var(--color-red);
-}
-
-.systemsculpt-status-error .systemsculpt-status-icon {
-  color: var(--color-red);
-}
-
-/* Animations */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); }
-}
-
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-
-/* Add shimmer effect to status text during processing */
-.systemsculpt-status-processing .systemsculpt-status-text,
-.systemsculpt-status-chunking .systemsculpt-status-text,
-.systemsculpt-status-uploading .systemsculpt-status-text {
+.systemsculpt-processing-card__step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
   position: relative;
+}
+
+.systemsculpt-processing-card__step::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 6px;
+  background: var(--background-modifier-border);
+}
+
+.systemsculpt-processing-card__step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  background: var(--background-primary);
+}
+
+.systemsculpt-processing-card__step-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-processing-card__step.is-active {
+  color: var(--text-normal);
+}
+
+.systemsculpt-processing-card__step.is-active .systemsculpt-processing-card__step-icon {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-processing-card__step.is-complete .systemsculpt-processing-card__step-icon {
+  background: rgba(var(--interactive-accent-rgb), 0.2);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-processing-card__status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.systemsculpt-processing-card__label {
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-processing-card__percent {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-processing-card__meter {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
   overflow: hidden;
 }
 
-.systemsculpt-status-processing .systemsculpt-status-text::after,
-.systemsculpt-status-chunking .systemsculpt-status-text::after,
-.systemsculpt-status-uploading .systemsculpt-status-text::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 50%;
+.systemsculpt-processing-card__meter-fill {
   height: 100%;
-  background: linear-gradient(
-    90deg,
-    rgb(255, 255, 255) 0%,
-    rgb(255, 255, 255) 50%,
-    rgb(255, 255, 255) 100%
-  );
-  animation: shimmer 2s infinite;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  transition: width 0.3s ease;
 }
 
-@keyframes shimmer {
-  0% { left: -100%; }
-  100% { left: 200%; }
+.systemsculpt-processing-card__details {
+  margin-top: 10px;
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  background: rgba(var(--background-modifier-border-rgb), 0.35);
+  padding: 8px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.systemsculpt-processing-card__details.is-hidden {
+  display: none;
+}
+
+.systemsculpt-processing-panel .systemsculpt-processing-card[data-stage="ready"] {
+  border-color: var(--color-green);
+  background: rgba(var(--color-green-rgb), 0.1);
+}
+
+.systemsculpt-processing-panel .systemsculpt-processing-card[data-stage="ready"] .systemsculpt-processing-card__badge {
+  background: rgba(var(--color-green-rgb), 0.15);
+  color: var(--color-green);
+}
+
+.systemsculpt-processing-panel .systemsculpt-processing-card[data-stage="error"] .systemsculpt-processing-card__badge {
+  background: rgba(var(--color-red-rgb), 0.15);
+  color: var(--color-red);
 }
 
 
@@ -18341,11 +18446,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   font-size: var(--font-ui-small);
   color: var(--text-muted);
   margin-top: var(--size-4-2);
-}
-
-/* Processing Status Animation */
-.systemsculpt-processing-status {
-  color: var(--interactive-accent);
 }
 
 /* Currently processing file display */
@@ -27625,39 +27725,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   opacity: 1;
 }
 
-.systemsculpt-file-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  margin-bottom: 4px;
-  border-radius: 4px;
-  background: var(--background-secondary);
-  animation: systemsculpt-slideIn 0.2s ease;
-}
-
-.systemsculpt-file-status .systemsculpt-status-icon svg {
-  color: var(--text-muted);
-}
-
-.systemsculpt-file-status:last-child {
-  margin-bottom: 0;
-}
-
-.systemsculpt-file-status[data-status="error"] .systemsculpt-status-icon svg {
-  color: var(--text-error);
-}
-
-.systemsculpt-file-status[data-status="processing"]
-  .systemsculpt-status-icon
-  svg {
-  color: var(--text-accent);
-}
-
-.systemsculpt-file-status[data-status="success"] .systemsculpt-status-icon svg {
-  color: var(--text-success);
-}
-
 .systemsculpt-file-tree {
   margin: 8px 0;
   max-height: 300px;
@@ -28096,74 +28163,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-bottom: 8px;
 }
 
-.systemsculpt-processing-status {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--background-primary);
-  border-top: 1px solid var(--background-modifier-border);
-  padding: 8px;
-  z-index: 100;
-  transition: all 0.2s ease;
-}
-
-.systemsculpt-progress-bar {
-  height: 100%;
-  background: var(--interactive-accent);
-  border-radius: 4px;
-  transition: width 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.systemsculpt-progress-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 999;
-}
-
-.systemsculpt-progress-overlay {
-  position: absolute;
-  inset: 0;
-  background-color: var(--background-primary);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-
-.systemsculpt-progress-status {
-  font-size: 0.9em;
-  color: var(--text-muted);
-  margin: 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.systemsculpt-progress-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-progress-status-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.systemsculpt-progress-status-icon {
-  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
-  color: var(--interactive-accent);
-}
 
 .systemsculpt-prompt-creation-content {
   width: 100%;
@@ -28550,14 +28549,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   position: relative;
 }
 
-.systemsculpt-theme-dark .systemsculpt-file-status {
-  background: var(--background-secondary-alt);
-}
-
-.systemsculpt-theme-dark .systemsculpt-processing-status {
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-}
-
 .systemsculpt-theme-dark .systemsculpt-status-bar {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
@@ -28728,7 +28719,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   opacity: 1 !important;
   visibility: visible !important;
 }
-
 
 
 /* mobile-ui-fixes.css */
