@@ -4,7 +4,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.0.4-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-4.1.1-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
@@ -30,7 +30,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 - **Agent Mode (MCP) with explicit approvals**
   - Built‑in vault tools exposed to the model with a one‑click safety approval flow
   - Filesystem tools include: `read`, `write`, `edit`, `create_folders`, `list_items`, `move`, `trash`
-  - Search and context tools: `find`, `search` (grep), `open` (tabs/panes), `context` (manage chat context), `properties_search`, `similar_notes`, `vault_overview`
+  - Search and context tools: `find`, `search` (grep), `open` (tabs/panes), `context` (manage chat context)
 
 - **Semantic “Similar Notes”**
   - Embeddings‑powered vector search across your vault
@@ -117,8 +117,8 @@ When Agent Mode is on, the model can request tools that work inside your vault. 
 
 - Files: `read`, `write`, `edit`, `create_folders`, `move`, `trash`
 - Listing and navigation: `list_items`, `open`
-- Search: `find` (by name), `search` (grep), `properties_search`
-- Context & analysis: `context` (manage included files), `similar_notes`, `vault_overview`
+- Search: `find` (by name), `search` (grep)
+- Context & analysis: `context` (manage included files)
 
 All tools are scoped to your vault with built‑in content limits to keep the UI responsive.
 

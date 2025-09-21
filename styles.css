@@ -1974,51 +1974,12 @@
   box-sizing: border-box !important; /* Include padding and border in width */
 }
 
-/* Reasoning drawers - Thinking indicator */
-.systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer {
-  /* New, simpler reasoning visual */
-  width: 100% !important; /* Full width within container */
-  background: var(--background-primary) !important;
-  border-left: 3px solid var(--interactive-accent) !important;
-  border-top: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
-  border-right: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
-  border-bottom: 1px solid rgba(var(--background-modifier-border-rgb), 0.35) !important;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04) !important;
-  padding: 6px 8px !important;
-  box-sizing: border-box !important;
-}
-
-/* Tool call drawers - Simplified */
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer {
-  width: 100% !important; /* Full width within container */
-  border-left: 2px solid var(--background-modifier-border);
-  background: var(--background-secondary);
-  margin: 2px 0;
-  box-sizing: border-box !important;
-}
-
-/* Compact header for tool-call drawers */
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-header {
-  padding: 4px 8px;
-  gap: 6px;
-  font-size: 12px;
-}
-
 /* Hover glow effects to indicate interactivity - border glow removed */
 .systemsculpt-collapsible-drawer:hover {
   /* border-color: rgba(var(--background-modifier-border-rgb), 0.9); */
   /* box-shadow: 0 0 0 1px rgba(var(--background-modifier-border-rgb), 0.3); */
 }
 
-.systemsculpt-reasoning-wrapper .systemsculpt-collapsible-drawer:hover {
-  /* border-color: rgba(var(--text-accent-rgb), 0.8); */
-  /* box-shadow: 0 0 0 1px rgba(var(--text-accent-rgb), 0.2); */
-}
-
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer:hover {
-  /* border-color: rgba(var(--interactive-accent-rgb), 0.8); */
-  /* box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb), 0.2); */
-}
 
 /* Collapsed state for container - FORCE COLLAPSE STATE */
 .systemsculpt-collapsible-drawer.systemsculpt-collapsed {
@@ -2043,7 +2004,8 @@
   
   /* Interactive styling */
   cursor: pointer;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
   font-weight: 600;
   color: var(--text-muted);
   
@@ -2059,54 +2021,6 @@
   z-index: 10;
   pointer-events: auto !important;
   isolation: isolate;
-}
-
-/* Reasoning variant tightens header spacing */
-.is-reasoning-drawer .systemsculpt-collapsible-header {
-  padding: 6px 8px;
-  font-weight: 600;
-}
-
-.is-reasoning-drawer .systemsculpt-collapsible-icon {
-  color: var(--interactive-accent);
-}
-
-/* Streaming state: subtle animated left glow */
-.is-reasoning-drawer.is-streaming-reasoning {
-  position: relative;
-}
-
-.is-reasoning-drawer.is-streaming-reasoning::before {
-  content: '';
-  position: absolute;
-  left: -3px; /* align with left border */
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: linear-gradient(
-    180deg,
-    rgba(var(--interactive-accent-rgb), 0.0) 0%,
-    rgba(var(--interactive-accent-rgb), 0.7) 50%,
-    rgba(var(--interactive-accent-rgb), 0.0) 100%
-  );
-  animation: ss-reasoning-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes ss-reasoning-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
-/* Streamed reasoning preview block */
-.ss-reasoning-stream {
-  font-family: var(--font-monospace);
-  font-size: 0.92em;
-  color: var(--text-muted);
-  background: var(--background-secondary);
-  border: 1px dashed var(--background-modifier-border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin: 4px 0;
 }
 
 .systemsculpt-collapsible-header:hover {
@@ -2272,31 +2186,6 @@
   /* Specific styles for unified message parts */
 }
 
-/* Wrapper elements for proper DOM insertion */
-.systemsculpt-reasoning-wrapper,
-.systemsculpt-tool-call-wrapper {
-  /* Use full width of parent container */
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  position: static;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: none !important;
-  background: transparent !important;
-  box-sizing: border-box !important;
-  pointer-events: auto !important;
-  /* Keep visuals contained; inline row itself handles ellipsis */
-  overflow: hidden !important;
-}
-
-/* Ensure drawer children have proper positioning and stacking context */
-.systemsculpt-reasoning-wrapper > .systemsculpt-collapsible-drawer,
-.systemsculpt-tool-call-wrapper > .systemsculpt-collapsible-drawer {
-  position: relative !important;
-  isolation: isolate !important;
-}
-
 /* Content part containerization - more differentiated for LLM response text */
 .systemsculpt-content-part {
   margin: 4px 0;
@@ -2349,12 +2238,20 @@
 /* Reasoning content – keep typography identical to normal Markdown */
 .systemsculpt-reasoning-text {
   font-family: var(--font-text);
-  font-size: var(--font-ui-medium);
+  font-size: inherit;
   line-height: 1.5;
   color: var(--text-normal);
   white-space: normal;
   user-select: text !important;
   -webkit-user-select: text !important;
+}
+
+.systemsculpt-reasoning-text > *:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-reasoning-text > *:last-child {
+  margin-bottom: 0;
 }
 
 /* Guard against legacy "monospace" class still lingering */
@@ -2611,7 +2508,8 @@
   cursor: pointer;
   padding: 2px 0;
   margin: 4px 0 2px 0;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
   transition: color 0.2s ease;
   text-decoration: underline;
   text-decoration-style: dotted;
@@ -2931,7 +2829,8 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .systemsculpt-tool-call-result-content {
@@ -3261,34 +3160,6 @@
   border-radius: 3px;
 }
 
-/* ========================================================================== */
-/* == Tool Call Drawer State Styling                                       == */
-/* ========================================================================== */
-
-/* State-based drawer styling */
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="pending"] {
-  background-color: var(--background-modifier-form-field);
-}
-
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="executing"] {
-}
-
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="completed"] {
-}
-
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="denied"] {
-  opacity: 0.7;
-}
-
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="error"],
-.systemsculpt-tool-call-wrapper .systemsculpt-collapsible-drawer[data-state="failed"] {
-  border-color: var(--text-error);
-  background-color: rgba(var(--background-modifier-error-rgb), 0.05);
-}
-
-/* Loading state styling */
-/* Duplicate loading style removed; using the compact version above */
-
 /* Mobile responsiveness */
 @media (max-width: 768px) {
   .systemsculpt-tool-call-actions {
@@ -3300,37 +3171,6 @@
   .systemsculpt-tool-call-deny {
     width: 100%;
     justify-content: center;
-  }
-}
-
-/* ========================================================================== */
-/* == Streaming UI Logic                                                   == */
-/* ========================================================================== */
-
-.systemsculpt-collapsible-drawer.is-streaming-reasoning.systemsculpt-collapsed {
-  animation: pulsating-glow-reasoning 2s ease-in-out infinite;
-  border-color: var(--text-accent-translucent);
-}
-
-.systemsculpt-collapsible-drawer.is-streaming-reasoning.systemsculpt-collapsed .systemsculpt-collapsible-header .systemsculpt-collapsible-title::after {
-  content: '...';
-  display: inline-block;
-  animation: ellipsis-animation 1.5s infinite steps(3, end);
-  width: 1.2em;
-  text-align: left;
-  vertical-align: bottom;
-  position: absolute;
-}
-
-@keyframes pulsating-glow-reasoning {
-  0% {
-    box-shadow: 0 0 2px 0px transparent, inset 0 0 2px 0px transparent;
-  }
-  50% {
-    box-shadow: 0 0 5px 1px var(--text-accent-translucent), inset 0 0 4px 0px var(--text-accent-translucent);
-  }
-  100% {
-    box-shadow: 0 0 2px 0px transparent, inset 0 0 2px 0px transparent;
   }
 }
 
@@ -14123,10 +13963,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   color: var(--text-normal);
 }
 
-/* Hide individual pending tool call drawers when batch approver is active */
-.systemsculpt-message.has-batch-approval .systemsculpt-tool-call-wrapper[data-state="pending"] {
-    display: none !important;
-}
+/* Batch approver overlay removed; keep pending lines visible in the tree UI */
 
 /* Mobile responsiveness */
 @media (max-width: 600px) {
@@ -14151,6 +13988,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     width: 100%;
   }
 } 
+
 
 /* diff-viewer.css */
 /**
@@ -14408,8 +14246,145 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   }
 } 
 
+/* chat-structured-block.css */
+/* Shared tree-style layout for chat view structured content */
+.systemsculpt-chat-structured-block {
+  margin: 6px 0;
+  font-family: var(--font-monospace);
+  font-size: inherit;
+}
+
+.systemsculpt-chat-structured-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 1px;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-chat-structured-bullet {
+  width: 1.6ch;
+  height: 1.6ch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  font-size: inherit;
+  line-height: 1;
+}
+
+.systemsculpt-chat-structured-bullet.is-active {
+  border: 2px solid var(--text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: systemsculpt-chat-structured-spin 1s linear infinite;
+  color: transparent;
+}
+
+.systemsculpt-chat-structured-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+
+.systemsculpt-chat-structured-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: inherit;
+  color: var(--text-muted);
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.35;
+  padding: 0;
+}
+
+.systemsculpt-chat-structured-line-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.systemsculpt-chat-structured-line-actions .ss-button {
+  font-size: var(--font-ui-smallest);
+  line-height: 1.2;
+}
+
+.systemsculpt-chat-structured-line-prefix {
+  min-width: 4ch;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text-faint);
+  white-space: pre;
+}
+
+.systemsculpt-chat-tree .systemsculpt-chat-structured-line-prefix {
+  text-align: right;
+}
+
+.systemsculpt-chat-structured-line-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-chat-structured-line-text .systemsculpt-chat-structured-label {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.systemsculpt-chat-structured-line-text .systemsculpt-chat-structured-detail {
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-tree.systemsculpt-chat-tree--empty .systemsculpt-chat-structured-lines {
+  display: none;
+}
+
+@keyframes systemsculpt-chat-structured-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+
 /* tool-call-ui.css */
-/* Token badge for inline tool call display */
+/* Tool-call specific overrides for shared structured layout */
+.systemsculpt-tool-call-group[data-group-status="failed"] .systemsculpt-chat-structured-title {
+  color: var(--color-red);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-tool-call-group[data-group-status="denied"] .systemsculpt-chat-structured-title {
+  color: var(--color-orange);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-tool-call-group .systemsculpt-chat-structured-bullet.is-failed {
+  color: var(--color-red);
+}
+
+.systemsculpt-tool-call-group .systemsculpt-chat-structured-bullet.is-denied {
+  color: var(--color-orange);
+}
+
+.systemsculpt-tool-call-group .systemsculpt-chat-structured-line[data-state="failed"] {
+  color: var(--color-red);
+}
+
+.systemsculpt-tool-call-group .systemsculpt-chat-structured-line[data-state="denied"] {
+  color: var(--color-orange);
+}
+
+/* Token badge for inline tool call display (legacy support) */
 .systemsculpt-tool-inline .systemsculpt-tool-tokens {
   margin-left: 6px;
   color: var(--text-muted);
@@ -14623,6 +14598,62 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     gap: 4px;
   }
 } 
+
+
+/* tool-approval-panel.css */
+.ss-approval-card {
+  margin-top: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ss-approval-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ss-approval-head-left { min-width: 0; }
+
+.ss-approval-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: 1.2;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ss-approval-subtitle {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smallest);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ss-approval-actions { display: inline-flex; gap: 6px; }
+
+.ss-approval-card button {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ss-approval-body { padding: 8px; }
+
+.systemsculpt-chat-structured-line-text { min-width: 24ch; }
+
 
 /* tool-results.css */
 /**
@@ -15000,30 +15031,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   to { transform: rotate(360deg); }
 }
 
-/* ╔══════════════════════════════════════════════════════════╗
-   ║  Tool Call Wrapper States                                 ║
-   ╚══════════════════════════════════════════════════════════╝ */
-
-.systemsculpt-tool-call-wrapper {
-  margin: 4px 0;
-  /* Ensure wrapper takes full width within message content */
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.systemsculpt-tool-call-wrapper[data-state="executing"] .systemsculpt-tool-inline {
-  background: var(--background-modifier-hover);
-}
-
-.systemsculpt-tool-call-wrapper[data-state="denied"] .systemsculpt-tool-inline {
-  opacity: 0.7;
-}
-
-.systemsculpt-tool-call-wrapper[data-state="failed"] .systemsculpt-tool-inline {
-  border-color: rgba(var(--color-red-rgb), 0.3);
-}
-
 /* Inline diff preview attached under a tool call */
 .systemsculpt-inline-diff {
   margin-top: 8px;
@@ -15066,6 +15073,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     height: 14px;
   }
 }
+
 
 /* codemirror-diff.css */
 /* CodeMirror Diff Overlay Styles */
@@ -16732,13 +16740,19 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-messages-container .systemsculpt-content-part,
 .systemsculpt-messages-container .systemsculpt-unified-part,
 .systemsculpt-messages-container .markdown-rendered,
+.systemsculpt-messages-container .systemsculpt-chat-structured-block,
+.systemsculpt-messages-container .systemsculpt-chat-structured-header,
+.systemsculpt-messages-container .systemsculpt-chat-structured-title,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line-text,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line-actions,
+.systemsculpt-messages-container .systemsculpt-chat-structured-bullet,
 .systemsculpt-messages-container .systemsculpt-collapsible-drawer,
 .systemsculpt-messages-container .systemsculpt-collapsible-header,
 .systemsculpt-messages-container .systemsculpt-collapsible-title,
 .systemsculpt-messages-container .systemsculpt-drawer-title,
 .systemsculpt-messages-container .systemsculpt-drawer-header,
-.systemsculpt-messages-container .systemsculpt-reasoning-wrapper,
-.systemsculpt-messages-container .systemsculpt-tool-call-wrapper {
+.systemsculpt-messages-container .systemsculpt-reasoning-wrapper {
   font-size: inherit;
 }
 
@@ -16761,7 +16775,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-messages-container pre[class*="language-"]::before {
   font-size: var(--chat-code-label-font-size) !important;
 }
-
 
 
 /* embeddings-progress.css */
