@@ -14654,6 +14654,117 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 
 .systemsculpt-chat-structured-line-text { min-width: 24ch; }
 
+.ss-approval-card--deck {
+  margin-top: 0;
+  border-color: var(--background-modifier-border);
+  box-shadow: none;
+}
+
+.ss-approval-card--deck .ss-approval-header {
+  background: var(--background-secondary-alt);
+}
+
+.ss-approval-card--deck .ss-approval-body {
+  padding: 10px 12px;
+}
+
+.ss-approval-host {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ss-approval-deck {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+}
+
+.ss-approval-deck__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.ss-approval-deck__title {
+  font-weight: 600;
+  font-size: var(--ss-font-size-md);
+  color: var(--text-normal);
+}
+
+.ss-approval-deck__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ss-approval-chip {
+  padding: 4px 10px;
+  background: var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  font-size: var(--ss-font-size-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ss-approval-deck__bulk {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.ss-approval-deck__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ss-approval-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ss-approval-group + .ss-approval-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ss-approval-group__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ss-approval-group__title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-approval-group__meta {
+  color: var(--text-muted);
+  font-size: var(--ss-font-size-xs);
+}
+
+.ss-approval-group__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ss-approval-card-host .ss-approval-card {
+  width: 100%;
+}
+
 
 /* tool-results.css */
 /**
