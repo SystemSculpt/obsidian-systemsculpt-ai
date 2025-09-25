@@ -10490,7 +10490,8 @@
 /* Native Obsidian Modal Recording Styles */
 
 /* Mobile-optimized content within native modal */
-.systemsculpt-recording-modal-native-mobile .modal-content {
+.systemsculpt-recording-modal-native-mobile .modal-content,
+.platform-ui-mobile.systemsculpt-recording-modal-native-mobile .modal-content {
   max-width: 90vw;
   width: 420px;
   margin: 0 auto;
@@ -10503,7 +10504,8 @@
   padding: 0;
 }
 
-.systemsculpt-recording-content-mobile {
+.systemsculpt-recording-content-mobile,
+.platform-ui-mobile .systemsculpt-recording-content {
   gap: 20px;
 }
 
@@ -10514,7 +10516,8 @@
   padding: 8px 0;
 }
 
-.systemsculpt-recording-status-mobile {
+.systemsculpt-recording-status-mobile,
+.platform-ui-mobile .systemsculpt-recording-status {
   font-size: 16px;
   color: var(--text-muted);
   text-align: center;
@@ -10533,7 +10536,8 @@
   border: 1px solid var(--background-modifier-border);
 }
 
-.systemsculpt-recording-timer-mobile {
+.systemsculpt-recording-timer-mobile,
+.platform-ui-mobile .systemsculpt-recording-timer {
   font-size: 28px;
   font-weight: 700;
   color: var(--text-accent);
@@ -10554,7 +10558,8 @@
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.systemsculpt-recording-visualizer-mobile {
+.systemsculpt-recording-visualizer-mobile,
+.platform-ui-mobile .systemsculpt-recording-visualizer {
   width: 100%;
   height: 100px;
   background: var(--background-secondary);
@@ -10569,13 +10574,15 @@
   gap: 12px;
 }
 
-.systemsculpt-recording-buttons-mobile {
+.systemsculpt-recording-buttons-mobile,
+.platform-ui-mobile .systemsculpt-recording-buttons {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.systemsculpt-recording-stop-mobile {
+.systemsculpt-recording-stop-mobile,
+.platform-ui-mobile .systemsculpt-recording-stop {
   min-height: 52px !important;
   font-size: 16px !important;
   font-weight: 600 !important;
@@ -10587,7 +10594,9 @@
 }
 
 .systemsculpt-recording-stop-mobile:hover,
-.systemsculpt-recording-stop-mobile:active {
+.systemsculpt-recording-stop-mobile:active,
+.platform-ui-mobile .systemsculpt-recording-stop:hover,
+.platform-ui-mobile .systemsculpt-recording-stop:active {
   transform: scale(0.98);
 }
 
@@ -10648,6 +10657,7 @@
     height: 50px;
   }
 }
+
 
 /* floating-widget.css */
 /* SystemSculpt Floating Widget Base Styling */

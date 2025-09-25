@@ -4,7 +4,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.1.3-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-4.1.4-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
@@ -154,10 +154,16 @@ Ribbon icons include Chat, Chat History, Janitor, Similar Notes, and Search.
 
 ## 📱 Mobile, privacy, and reliability
 
-- Designed for mobile and desktop with responsive UI and touch‑friendly controls
-- Local‑first: your vault stays on your device
+- Designed for mobile and desktop with responsive UI and touch-friendly controls
+- Local-first: your vault stays on your device
 - Your API keys talk directly to your chosen providers
 - Works offline when using local models
+
+## 🪜 Platform Context
+
+- A shared `PlatformContext` singleton now powers every mobile/desktop branch.
+- Desktop defaults to native `fetch` + streaming; mobile and constrained endpoints (e.g., OpenRouter) automatically pivot to Obsidian `requestUrl` with virtual SSE replay.
+- UI components emit `platform-ui-<variant>` classes so styling and behavioral toggles stay in sync across chat, recorder, and transcription flows.
 - Clear, actionable errors and optional debug tools
 
 ---
