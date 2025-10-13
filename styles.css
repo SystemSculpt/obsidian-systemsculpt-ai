@@ -899,6 +899,13 @@
   gap: 0.75rem;
 }
 
+.systemsculpt-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
 .systemsculpt-model-icon-container {
   flex-shrink: 0;
   width: 28px;
@@ -1366,7 +1373,6 @@
 .systemsculpt-settings-link:hover {
   color: var(--interactive-accent);
 }
-
 
 
 /* grid.css */
@@ -12002,33 +12008,39 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
 .systemsculpt-status-container {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
 }
 
-.systemsculpt-status-icon {
+.systemsculpt-status-progress {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.systemsculpt-status-icon.is-spinning {
-  animation: systemsculpt-rotate 1.1s linear infinite;
-}
-
-@keyframes systemsculpt-rotate {
-  100% { transform: rotate(360deg); }
-}
-
-.systemsculpt-status-value {
+  min-width: 32px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  font-size: 0.85em;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--text-muted);
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
-.systemsculpt-status-value.status-running { color: var(--interactive-accent); }
-.systemsculpt-status-value.status-complete { color: var(--text-success); }
-.systemsculpt-status-value.status-idle { color: var(--text-muted); }
+.systemsculpt-status-progress[data-state="running"] {
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
 
-.systemsculpt-status-sub-info { font-variant-numeric: tabular-nums; opacity: 0.9; }
-.systemsculpt-status-sub-info.count-info { color: var(--text-muted); }
+.systemsculpt-status-progress[data-state="complete"] {
+  color: var(--text-success, var(--color-green, #4caf50));
+  background: color-mix(in srgb, var(--text-success, var(--color-green, #4caf50)) 18%, transparent);
+}
+
+.systemsculpt-status-progress[data-state="error"] {
+  color: var(--text-error, var(--color-red, #e53935));
+  background: color-mix(in srgb, var(--text-error, var(--color-red, #e53935)) 18%, transparent);
+}
+
 
 /* progress-modal.css */
 /**
@@ -14820,12 +14832,29 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
    ╚══════════════════════════════════════════════════════════╝ */
 
 .ss-modal__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 14px;
   background: var(--background-modifier-form-field);
   border-radius: 6px;
   margin-bottom: 12px;
   font-size: 14px;
   color: var(--text-muted);
+}
+
+.ss-modal__summary-text {
+  line-height: 1.4;
+}
+
+.ss-modal__summary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ss-modal__summary-actions .ss-button {
+  margin: 0;
 }
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -14938,6 +14967,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
     padding: 6px 10px;
   }
 }
+
 
 /* tool-states.css */
 /**
@@ -15408,210 +15438,6 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   align-items: center;
   justify-content: space-between;
 } 
-
-/* title-generation-notice.css */
-/* Title Generation Notice Styles */
-
-.systemsculpt-title-notice {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  z-index: 1000;
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 16px;
-  min-width: 280px;
-  max-width: 400px;
-  opacity: 0;
-  transform: translateX(100%);
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.systemsculpt-title-notice--visible {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.systemsculpt-title-notice-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.systemsculpt-title-notice-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-normal);
-  margin: 0;
-}
-
-.systemsculpt-title-notice-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  cursor: pointer;
-  opacity: 0.7;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  color: var(--text-muted);
-}
-
-.systemsculpt-title-notice-close:hover {
-  opacity: 1;
-  background-color: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-.systemsculpt-title-notice-progress-text {
-  font-size: 13px;
-  color: var(--text-normal);
-  margin-bottom: 8px;
-  line-height: 1.4;
-}
-
-.systemsculpt-title-notice-progress-bg {
-  width: 100%;
-  height: 6px;
-  background-color: var(--background-modifier-border);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.systemsculpt-title-notice-progress-bar {
-  height: 100%;
-  background-color: var(--text-accent);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-  width: 0%;
-  background: linear-gradient(90deg, var(--text-accent), var(--text-accent-hover));
-  background-size: 200% 100%;
-  animation: progress-shimmer 2s infinite;
-}
-
-.systemsculpt-title-notice-progress-bar--error {
-  background-color: var(--text-error) !important;
-  animation: none !important;
-}
-
-@keyframes progress-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-.systemsculpt-title-notice-countdown {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--background-modifier-border);
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.systemsculpt-title-notice-countdown--visible {
-  opacity: 1;
-}
-
-/* Animation for sliding out */
-@keyframes slide-out-right {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-}
-
-/* title-generation-modal.css */
-/* Title Generation Modal - Fresh, standardized styling */
-
-/* Identifier to scope any specific overrides */
-.ss-title-modal {
-  /* rely on standardized modal for base layout */
-}
-
-/* Smaller context textarea */
-.ss-title-modal__context-textarea {
-  width: 100%;
-  min-height: 60px;
-  max-height: 100px;
-  height: 60px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  font-size: 13px;
-  line-height: 1.4;
-  resize: vertical; /* allow manual expansion if needed */
-}
-
-/* Progress area */
-.ss-title-modal__progress {
-  display: none;
-  margin-top: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  padding: 10px 12px;
-}
-
-.ss-title-modal__progress--visible {
-  display: block;
-}
-
-.ss-title-modal__progress-text {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-.ss-title-modal__progress-bar-container {
-  position: relative;
-  width: 100%;
-  height: 8px;
-  background: var(--background-modifier-border);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.ss-title-modal__progress-bar {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, var(--interactive-accent), var(--interactive-accent-hover));
-  background-size: 200% 100%;
-  animation: ss-title-progress 2s linear infinite;
-}
-
-.ss-title-modal__progress-bar--error {
-  background: var(--text-error);
-  animation: none;
-}
-
-@keyframes ss-title-progress {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Footer hint inside button */
-.ss-title-modal__shortcut {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-left: 6px;
-}
-
-
-
 
 /* update-drawer.css */
 /* 
@@ -23458,6 +23284,14 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-bottom: 4px;
 }
 
+.note-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+
 .note-title .internal-link {
   font-weight: 500;
   color: var(--text-normal);
@@ -23762,6 +23596,29 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   margin-top: 16px;
 }
 
+.embeddings-view-processing .processing-secondary-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.embeddings-view-processing .processing-secondary-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.embeddings-view-processing .processing-secondary-actions button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
 .systemsculpt-progress-text {
   font-size: 12px;
   color: var(--text-muted);
@@ -23898,6 +23755,7 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
+
 
 /* misc.css */
 /**
