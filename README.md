@@ -4,7 +4,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.3.0-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-4.4.0-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
@@ -18,7 +18,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 ## 🚀 Core capabilities
 
 - **Chat, your way**
-  - Use OpenAI‑compatible providers (OpenAI, OpenRouter, Groq, local servers), Anthropic via adapter, or local models (LM Studio, Ollama)
+  - Use OpenAI‑compatible providers (OpenAI, OpenRouter, MiniMax, Groq, local servers), Anthropic via adapter, or local models (LM Studio, Ollama)
   - Streaming, reasoning blocks, mobile‑friendly UI
   - Per‑chat model selection; saved chats to Markdown; chat history and resume
 
@@ -37,6 +37,10 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
   - “Similar Notes” panel that updates for the active file or chat
   - Exclusions (folders/files), progress UI, and an embeddings status bar
   - Bring your own embeddings endpoint/model (OpenAI‑compatible), or pick a provider in settings
+- **Daily Vault automations**
+  - Auto-create or remind daily notes with configurable templates and schedules
+  - Weekly review prompts and a live status bar with streak, weekly, and monthly activity
+  - Ribbon shortcut with streak badge for instant access to today's note
 
 - **Models, prompts, templates, titles**
   - Unified model selection across providers; favorites and quick picks
@@ -58,7 +62,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 ## 🧭 Getting started
 
 1) Open Settings → SystemSculpt AI → Models & Prompts
-- Choose a provider (OpenAI, OpenRouter, Anthropic, LM Studio, Ollama, or any OpenAI‑compatible endpoint)
+- Choose a provider (OpenAI, OpenRouter, MiniMax, Anthropic, LM Studio, Ollama, or any OpenAI‑compatible endpoint)
 - Enter your endpoint and API key if required
 
 2) Start a chat
@@ -75,7 +79,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 5) Enable Similar Notes (optional)
 - Settings → Embeddings & Search → Enable, then pick a provider
-- If using a custom endpoint, set API endpoint + key + model (for example: `text-embedding-004`)
+- If using a custom endpoint, set API endpoint + key + model (for example: `openrouter/openai/text-embedding-3-small`)
 - Click “Start Now” to process your vault; open the “Similar Notes” panel from the command palette
 
 6) Power‑ups
