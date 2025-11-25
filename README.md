@@ -190,20 +190,6 @@ npm install
 npm run build
 ```
 
----
-
-## 🔁 Local build sync (optional)
-
-If you like mirroring the built plugin into multiple local vaults or sibling repositories, use the new opt-in sync script instead of editing `esbuild.config.mjs`:
-
-1. Copy `systemsculpt-sync.config.json.example` to `systemsculpt-sync.config.json` (or another file) and edit the absolute paths you want to target. You can define multiple destinations and whether they should receive the bundled Daily Vault system snapshot.
-2. Run `npm run sync:local` (defaults to `./systemsculpt-sync.config.json`) or `npm run sync:local -- --config /path/to/custom-config.json` whenever you need to update those mirrors.
-3. Optionally set `SYSTEMSCULPT_SYNC_CONFIG=/path/to/config.json` so the build script can remind you which config is active when running `npm run dev`.
-
-Nothing is copied automatically anymore—your local vault data stays put unless you explicitly launch the sync script.
-
----
-
 ## 🧪 Example workflows
 
 <details>
