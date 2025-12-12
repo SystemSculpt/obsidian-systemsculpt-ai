@@ -13,8 +13,6 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 </div>
 
-> **2025-11-10:** The System Sculpt Admin app and Rust DevRunner now live in their own sibling repositories (`~/gits/systemsculpt-admin` and `~/gits/rust-devrunner`). Clone them next to this plugin repo and set `DEV_RUNNER_DIR` / `SYSTEMSCULPT_ADMIN_DIR` if you customize the folder layout.
-
 ---
 
 ## 🚀 Core capabilities
@@ -238,7 +236,7 @@ MIT License – see `LICENSE`.
 - Docs: `https://systemsculpt.com`
 - Videos: `https://youtube.com/@SystemSculpt`
 - Discord: `https://discord.gg/3gNUZJWxnJ`
-- Email: `systemsculpt@gmail.com`
+- Email: `support@systemsculpt.com`
 
 <div align="center">
 
