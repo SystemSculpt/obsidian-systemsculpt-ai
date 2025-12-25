@@ -35,3 +35,6 @@ backups
 .aider*
 .DS_Store
 run.sh
+
+# Claude Code DevLogs
+devlogs/
