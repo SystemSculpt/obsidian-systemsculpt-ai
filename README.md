@@ -4,7 +4,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.4.3-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-4.4.4-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
@@ -151,6 +151,7 @@ All tools are scoped to your vault with built‑in content limits to keep the UI
 - Open Similar Notes Panel
 - Open SystemSculpt Search
 - Open SystemSculpt AI Settings
+- Open SystemSculpt Benchmark
 
 Ribbon icons include Chat, Chat History, Janitor, Similar Notes, and Search.
 
