@@ -13708,6 +13708,74 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Tool compatibility warning banner in ChatView */
+.systemsculpt-tool-warning-banner {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 8px 8px 8px;
+  background-color: var(--background-modifier-error);
+  border: 1px solid var(--background-modifier-error-hover);
+  border-radius: var(--radius-m);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-tool-warning-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-tool-warning-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--text-error);
+}
+
+.systemsculpt-tool-warning-text {
+  flex: 1;
+}
+
+/* Agent Status Modal styles */
+.systemsculpt-agent-status-section {
+  margin-bottom: 16px;
+}
+
+.systemsculpt-agent-status-section h3 {
+  margin: 0 0 8px 0;
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.systemsculpt-agent-status-section p {
+  margin: 0;
+}
+
+.systemsculpt-agent-status-tools {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+
+.systemsculpt-agent-status-tools > li {
+  margin-bottom: 8px;
+}
+
+.systemsculpt-agent-status-tools ul {
+  margin: 4px 0 0 0;
+  padding-left: 16px;
+  list-style: disc;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.systemsculpt-agent-status-more {
+  font-style: italic;
+  color: var(--text-faint);
 } 
 
 /* update-drawer.css */
