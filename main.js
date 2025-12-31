@@ -20753,14 +20753,14 @@ var init_TypedEventEmitter = __esm({
 });
 
 // src/views/chatview/ToolCallManager.ts
-var ToolCallManager;
+var _ToolCallManager, ToolCallManager;
 var init_ToolCallManager = __esm({
   "src/views/chatview/ToolCallManager.ts"() {
     init_TypedEventEmitter();
     init_toolPolicy();
     init_tooling();
     init_errorLogger();
-    ToolCallManager = class {
+    _ToolCallManager = class _ToolCallManager {
       constructor(mcpService, chatView) {
         // Single source of truth - all tool calls by ID
         this.toolCalls = /* @__PURE__ */ new Map();
@@ -20853,9 +20853,6 @@ var init_ToolCallManager = __esm({
       on(event, handler) {
         return this.events.on(event, handler);
       }
-      /**
-       * Create a new tool call from an LLM request
-       */
       getToolAvailability(toolName) {
         var _a, _b, _c, _d;
         const name = String(toolName != null ? toolName : "").trim();
@@ -20863,15 +20860,18 @@ var init_ToolCallManager = __esm({
           return { ok: false, error: { code: "INVALID_TOOL_NAME", message: "Tool call is missing a function name." } };
         }
         if (name.startsWith("mcp-")) {
-          const settings = (_c = (_b = (_a = this.chatView) == null ? void 0 : _a.plugin) == null ? void 0 : _b.settings) != null ? _c : {};
-          if (!settings.mcpEnabled) {
-            return { ok: false, error: { code: "MCP_DISABLED", message: "MCP tools are disabled." } };
-          }
           const { serverId, canonicalName } = splitToolName(name);
           if (!serverId) {
             return { ok: false, error: { code: "INVALID_MCP_TOOL_NAME", message: `Invalid MCP tool name: ${name}` } };
           }
           const normalizedServerId = serverId.toLowerCase();
+          if (_ToolCallManager.INTERNAL_SERVERS.has(normalizedServerId)) {
+            return { ok: true, serverId: normalizedServerId };
+          }
+          const settings = (_c = (_b = (_a = this.chatView) == null ? void 0 : _a.plugin) == null ? void 0 : _b.settings) != null ? _c : {};
+          if (!settings.mcpEnabled) {
+            return { ok: false, error: { code: "MCP_DISABLED", message: "MCP tools are disabled." } };
+          }
           const servers = Array.isArray(settings.mcpServers) ? settings.mcpServers : [];
           const server = servers.find((s) => {
             var _a2;
@@ -21408,6 +21408,12 @@ var init_ToolCallManager = __esm({
         return terminalCalls.slice(0, limit);
       }
     };
+    /**
+     * Create a new tool call from an LLM request
+     */
+    // Internal servers that are always available without settings checks
+    _ToolCallManager.INTERNAL_SERVERS = /* @__PURE__ */ new Set(["mcp-filesystem", "mcp-youtube"]);
+    ToolCallManager = _ToolCallManager;
   }
 });
 
