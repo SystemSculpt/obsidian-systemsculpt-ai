@@ -20295,6 +20295,22 @@ function getToolApprovalDecision(functionName, allowlist = []) {
 function shouldAutoApproveTool(functionName, allowlist = []) {
   return getToolApprovalDecision(functionName, allowlist).autoApprove;
 }
+function requiresUserApproval(toolName, trustedToolNames) {
+  if (trustedToolNames.has(toolName)) {
+    return false;
+  }
+  const { serverId, canonicalName } = splitToolName(toolName);
+  if (serverId === "mcp-youtube") {
+    return false;
+  }
+  if (serverId === "mcp-filesystem") {
+    return DESTRUCTIVE_FILESYSTEM_TOOLS.has(canonicalName);
+  }
+  if (serverId && serverId.startsWith("mcp-") && !INTERNAL_SERVERS.has(serverId)) {
+    return true;
+  }
+  return false;
+}
 function extractPrimaryPathArg(toolName, args) {
   var _a;
   const base = String(toolName != null ? toolName : "").replace(/^mcp[-_][^_]+_/, "");
@@ -20315,8 +20331,11 @@ function extractPrimaryPathArg(toolName, args) {
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return null;
 }
+var DESTRUCTIVE_FILESYSTEM_TOOLS, INTERNAL_SERVERS;
 var init_toolPolicy = __esm({
   "src/utils/toolPolicy.ts"() {
+    DESTRUCTIVE_FILESYSTEM_TOOLS = /* @__PURE__ */ new Set(["write", "edit", "move", "trash"]);
+    INTERNAL_SERVERS = /* @__PURE__ */ new Set(["mcp-filesystem", "mcp-youtube"]);
   }
 });
 
@@ -20814,11 +20833,14 @@ var init_ToolCallManager = __esm({
         }
       }
       /**
-       * All tools are auto-approved by default.
-       * No user confirmation required for any tool execution.
+       * Determine if a tool should be auto-approved without user confirmation.
+       * Returns false for destructive tools (write, edit, move, trash) and external MCP tools
+       * unless they've been trusted for this session.
        */
-      shouldAutoApprove(_toolName) {
-        return true;
+      shouldAutoApprove(toolName) {
+        var _a, _b;
+        const trustedToolNames = (_b = (_a = this.chatView) == null ? void 0 : _a.trustedToolNames) != null ? _b : /* @__PURE__ */ new Set();
+        return !requiresUserApproval(toolName, trustedToolNames);
       }
       /**
        * Provide OpenAI-compatible tools (internal registry + MCP).
@@ -36964,6 +36986,27 @@ var ToolCallTreeRenderer = class extends import_obsidian80.Component {
     this.lineToGroup = /* @__PURE__ */ new WeakMap();
     this.parent = parent;
   }
+  /** Get the ToolCallManager from the parent MessageRenderer */
+  getToolCallManager() {
+    var _a, _b;
+    return (_b = (_a = this.parent).getToolCallManager) == null ? void 0 : _b.call(_a);
+  }
+  /** Get the ChatView from the ToolCallManager */
+  getChatView() {
+    var _a;
+    return (_a = this.getToolCallManager()) == null ? void 0 : _a["chatView"];
+  }
+  /** Get the trusted tool names from the current chat session */
+  getTrustedToolNames() {
+    var _a, _b;
+    return (_b = (_a = this.getChatView()) == null ? void 0 : _a.trustedToolNames) != null ? _b : /* @__PURE__ */ new Set();
+  }
+  /** Check if a tool call requires user approval */
+  toolRequiresApproval(toolCall) {
+    var _a, _b, _c;
+    const toolName = (_c = (_b = (_a = toolCall.request) == null ? void 0 : _a.function) == null ? void 0 : _b.name) != null ? _c : "";
+    return requiresUserApproval(toolName, this.getTrustedToolNames());
+  }
   notifyDomContentChanged(target) {
     try {
       target.dispatchEvent(new CustomEvent("systemsculpt-dom-content-changed", { bubbles: true }));
@@ -37346,6 +37389,7 @@ var ToolCallTreeRenderer = class extends import_obsidian80.Component {
       group.titleEl.textContent = "";
       setBulletSymbol(group.bulletEl, "");
       group.bulletEl.classList.remove("is-active", "is-failed", "is-denied");
+      this.removeAllowAllButton(group);
       return;
     }
     const activity = this.computeActivity(calls);
@@ -37362,6 +37406,44 @@ var ToolCallTreeRenderer = class extends import_obsidian80.Component {
       group.bulletEl.classList.add("is-denied");
     }
     setBulletSymbol(group.bulletEl, BULLET_SYMBOLS[status]);
+    const pendingDestructive = calls.filter(
+      (tc) => tc.state === "pending" && this.toolRequiresApproval(tc)
+    );
+    if (pendingDestructive.length > 1) {
+      this.renderAllowAllButton(group, pendingDestructive.length);
+    } else {
+      this.removeAllowAllButton(group);
+    }
+  }
+  /**
+   * Render an "Allow All" button when multiple pending destructive calls exist.
+   */
+  renderAllowAllButton(group, count) {
+    let container = group.wrapper.querySelector(".systemsculpt-allow-all-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.className = "systemsculpt-allow-all-container";
+      group.wrapper.insertBefore(container, group.linesContainer);
+    }
+    container.empty();
+    const chatView = this.getChatView();
+    const btn = container.createEl("button", {
+      cls: "systemsculpt-button systemsculpt-button-primary systemsculpt-button-small",
+      text: `Allow All (${count})`
+    });
+    btn.addEventListener("click", (e) => {
+      var _a;
+      e.stopPropagation();
+      e.preventDefault();
+      (_a = chatView == null ? void 0 : chatView.approveAllPendingToolCalls) == null ? void 0 : _a.call(chatView);
+    });
+  }
+  /**
+   * Remove the "Allow All" button from a group.
+   */
+  removeAllowAllButton(group) {
+    const container = group.wrapper.querySelector(".systemsculpt-allow-all-container");
+    container == null ? void 0 : container.remove();
   }
   computeActivity(calls) {
     var _a;
@@ -37761,16 +37843,71 @@ var ToolCallTreeRenderer = class extends import_obsidian80.Component {
     return canonical;
   }
   populateActions(line, representativeToolCall) {
+    var _a, _b, _c;
     const actions = line.querySelector(".systemsculpt-chat-structured-line-actions");
     if (!actions) {
+      console.log("[ToolApproval] No actions container found");
       return;
     }
     actions.empty();
     actions.style.removeProperty("display");
-    if (representativeToolCall.state === "pending") {
+    if (representativeToolCall.state !== "pending") {
       actions.style.display = "none";
       return;
     }
+    const toolName = (_c = (_b = (_a = representativeToolCall.request) == null ? void 0 : _a.function) == null ? void 0 : _b.name) != null ? _c : "";
+    const requiresApproval = this.toolRequiresApproval(representativeToolCall);
+    console.log("[ToolApproval] Tool:", toolName, "State:", representativeToolCall.state, "RequiresApproval:", requiresApproval);
+    if (!requiresApproval) {
+      actions.style.display = "none";
+      return;
+    }
+    this.renderApprovalButtons(actions, representativeToolCall);
+  }
+  /**
+   * Render the approval action buttons for a pending tool call.
+   */
+  renderApprovalButtons(container, toolCall) {
+    var _a, _b, _c;
+    const toolCallManager = this.getToolCallManager();
+    const chatView = this.getChatView();
+    console.log("[ToolApproval] renderApprovalButtons - toolCallManager:", !!toolCallManager, "chatView:", !!chatView);
+    if (!toolCallManager) {
+      console.log("[ToolApproval] No toolCallManager, skipping button render");
+      return;
+    }
+    const toolName = (_c = (_b = (_a = toolCall.request) == null ? void 0 : _a.function) == null ? void 0 : _b.name) != null ? _c : "";
+    const { canonicalName } = splitToolName(toolName);
+    const buttonGroup = container.createDiv({ cls: "systemsculpt-approval-buttons" });
+    const allowBtn = buttonGroup.createEl("button", {
+      cls: "systemsculpt-button systemsculpt-button-primary systemsculpt-button-small",
+      text: "Allow"
+    });
+    allowBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      toolCallManager.approveToolCall(toolCall.id);
+    });
+    const alwaysBtn = buttonGroup.createEl("button", {
+      cls: "systemsculpt-button systemsculpt-button-secondary systemsculpt-button-small",
+      text: "Always Allow",
+      attr: { title: `Trust "${canonicalName || toolName}" for this session` }
+    });
+    alwaysBtn.addEventListener("click", (e) => {
+      var _a2;
+      e.stopPropagation();
+      e.preventDefault();
+      (_a2 = chatView == null ? void 0 : chatView.trustToolForSession) == null ? void 0 : _a2.call(chatView, toolName);
+    });
+    const blockBtn = buttonGroup.createEl("button", {
+      cls: "systemsculpt-button systemsculpt-button-danger systemsculpt-button-small",
+      text: "Block"
+    });
+    blockBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      toolCallManager.denyToolCall(toolCall.id);
+    });
   }
   isMutatingToolCall(toolCall) {
     const fn = getFunctionDataFromToolCall(toolCall);
@@ -37997,6 +38134,10 @@ var MessageRenderer2 = class extends import_obsidian82.Component {
     this.markdownRenderer = new MarkdownMessageRenderer(app);
     this.toolCallRenderer = new ToolCallTreeRenderer(this);
     this.addChild(this.toolCallRenderer);
+  }
+  /** Get the tool call manager for accessing approval state */
+  getToolCallManager() {
+    return this.toolCallManager;
   }
   async renderMessage({
     app,
@@ -47142,6 +47283,8 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     this.chatVersion = 0;
     this.webSearchEnabled = false;
     this.agentMode = true;
+    /** Tools trusted for this chat session (cleared on chat reload/close) */
+    this.trustedToolNames = /* @__PURE__ */ new Set();
     this.dragDropCleanup = null;
     this.chatExportService = null;
     this.debugLogService = null;
@@ -47864,6 +48007,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     this.ensureCoreServicesReady();
     this.chatId = chatId;
     this.isFullyLoaded = false;
+    this.trustedToolNames.clear();
     try {
       const chatData = await this.chatStorage.loadChat(chatId);
       if (!chatData) {
@@ -47919,6 +48063,33 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     } catch (error) {
       this.handleError(`Failed to load chat: ${error.message}`);
       this.isFullyLoaded = true;
+    }
+  }
+  /**
+   * Trust a specific tool for the remainder of this chat session.
+   * Also auto-approves any pending tool calls with the same name.
+   */
+  trustToolForSession(toolName) {
+    var _a, _b;
+    this.trustedToolNames.add(toolName);
+    if (this.toolCallManager) {
+      const pendingCalls = this.toolCallManager.getPendingToolCalls();
+      for (const tc of pendingCalls) {
+        const tcToolName = (_b = (_a = tc.request) == null ? void 0 : _a.function) == null ? void 0 : _b.name;
+        if (tcToolName === toolName) {
+          this.toolCallManager.approveToolCall(tc.id);
+        }
+      }
+    }
+  }
+  /**
+   * Approve all pending tool calls at once.
+   */
+  approveAllPendingToolCalls() {
+    if (!this.toolCallManager) return;
+    const pendingCalls = this.toolCallManager.getPendingToolCalls();
+    for (const tc of pendingCalls) {
+      this.toolCallManager.approveToolCall(tc.id);
     }
   }
   async renderMessagesInChunks() {
