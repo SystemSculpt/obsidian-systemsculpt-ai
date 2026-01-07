@@ -34994,7 +34994,7 @@ var ChatStorageService = class {
     this.toolCallManager = toolCallManager;
   }
   // Master save method - always saves in the new, simple format
-  async saveChat(chatId, messages, selectedModelId, contextFiles, customPromptFilePath, systemPromptType, systemPromptPath, title, chatFontSize) {
+  async saveChat(chatId, messages, selectedModelId, contextFiles, customPromptFilePath, systemPromptType, systemPromptPath, title, chatFontSize, agentMode) {
     try {
       const { version } = await this.saveChatSimple(
         chatId,
@@ -35005,14 +35005,15 @@ var ChatStorageService = class {
         systemPromptType,
         systemPromptPath,
         title,
-        chatFontSize
+        chatFontSize,
+        agentMode
       );
       return { version };
     } catch (error) {
       throw new Error(`Failed to save chat to ${chatId}.md`);
     }
   }
-  async saveChatSimple(chatId, messages, selectedModelId, contextFiles, customPromptFilePath, systemPromptType, systemPromptPath, title, chatFontSize) {
+  async saveChatSimple(chatId, messages, selectedModelId, contextFiles, customPromptFilePath, systemPromptType, systemPromptPath, title, chatFontSize, agentMode) {
     let filePath = `[unknown-path]/${chatId}.md`;
     try {
       filePath = `${this.chatDirectory}/${chatId}.md`;
@@ -35046,7 +35047,8 @@ var ChatStorageService = class {
           type: systemPromptType || "general-use",
           path: systemPromptType === "custom" && systemPromptPath ? systemPromptPath : void 0
         },
-        chatFontSize: chatFontSize || "medium"
+        chatFontSize: chatFontSize || "medium",
+        agentMode: agentMode !== void 0 ? agentMode : true
       };
       if (contextFiles && contextFiles.size > 0) {
         metadata.context_files = Array.from(contextFiles).map((path4) => ({
@@ -35253,7 +35255,8 @@ ${messagesContent}`;
       context_files: ((_a = metadata.context_files) == null ? void 0 : _a.map((f) => f.path)) || [],
       systemPromptType: ((_b = metadata.systemMessage) == null ? void 0 : _b.type) || "general-use",
       systemPromptPath: (_c = metadata.systemMessage) == null ? void 0 : _c.path,
-      chatFontSize: metadata.chatFontSize
+      chatFontSize: metadata.chatFontSize,
+      agentMode: metadata.agentMode !== void 0 ? metadata.agentMode : true
     };
   }
   /**
@@ -35767,7 +35770,8 @@ ${messagesContent}`;
         title,
         version: 0,
         context_files: contextFiles.length > 0 ? contextFiles : void 0,
-        systemPromptType: "general-use"
+        systemPromptType: "general-use",
+        agentMode: true
       };
       return result;
     } catch (error) {
@@ -35803,7 +35807,8 @@ ${messagesContent}`;
           lastModified: timestamp,
           title: "Recovered Chat",
           version: 0,
-          systemPromptType: "general-use"
+          systemPromptType: "general-use",
+          agentMode: true
         };
       }
       return null;
@@ -46635,7 +46640,7 @@ var CustomPromptFileSuggestModal2 = class extends import_obsidian103.SuggestModa
 };
 var StandardChatSettingsModal = class extends StandardModal {
   constructor(app, options) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     super(app);
     this.result = null;
     this.presetButtons = {};
@@ -46809,6 +46814,7 @@ var StandardChatSettingsModal = class extends StandardModal {
     this.currentTitle = (_c = options.chatTitle) != null ? _c : "";
     this.currentModelId = (_d = options.currentModelId) != null ? _d : "";
     this.currentChatFontSize = ((_e = options.chatView) == null ? void 0 : _e.chatFontSize) || options.plugin.settings.chatFontSize || "medium";
+    this.currentAgentMode = ((_f = options.chatView) == null ? void 0 : _f.agentMode) !== void 0 ? options.chatView.agentMode : true;
     this.modalEl.addClass("ss-chat-settings-modal");
     this.setSize("large");
   }
@@ -46865,6 +46871,7 @@ var StandardChatSettingsModal = class extends StandardModal {
       const rightPanel = contentEl.createDiv("ss-chat-settings-modal__right-panel");
       this.createTitleSection(leftPanel);
       this.createModelSection(leftPanel);
+      this.createAgentModeSection(leftPanel);
       this.createChatFontSizeSection(leftPanel);
       this.createSystemPromptTypeSection(leftPanel, false);
       this.createPromptEditorSection(rightPanel);
@@ -46928,6 +46935,19 @@ var StandardChatSettingsModal = class extends StandardModal {
     });
     this.changeModelButton.addEventListener("click", this.openModelSelectModal);
     this.updateModelDisplay();
+  }
+  createAgentModeSection(containerEl) {
+    const section = containerEl.createDiv("ss-chat-settings-modal__section");
+    section.createEl("h3", { text: "Agent Mode (Tools)", cls: "ss-chat-settings-modal__section-title" });
+    const agentModeSetting = new import_obsidian103.Setting(section).setName("Enable Agent Mode").setDesc("Allow the AI to use tools like web search, file operations, and other capabilities. When disabled, the AI can only respond with text.").addToggle((toggle) => {
+      toggle.setValue(this.currentAgentMode).onChange(async (value) => {
+        this.currentAgentMode = value;
+        if (this.options.chatView) {
+          this.options.chatView.agentMode = value;
+          await this.options.chatView.saveChat();
+        }
+      });
+    });
   }
   createChatFontSizeSection(containerEl) {
     const section = containerEl.createDiv("ss-chat-settings-modal__section");
@@ -47152,6 +47172,7 @@ var StandardChatSettingsModal = class extends StandardModal {
       if (this.options.chatView) {
         this.options.chatView.systemPromptType = result.type;
         this.options.chatView.systemPromptPath = result.path;
+        this.options.chatView.agentMode = this.currentAgentMode;
         if (result.modelId && typeof this.options.chatView.setSelectedModelId === "function") {
           await this.options.chatView.setSelectedModelId(result.modelId);
         } else {
@@ -47333,7 +47354,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     if (this.systemPromptType === "custom" && !this.systemPromptPath) {
       this.systemPromptPath = plugin.settings.systemPromptPath;
     }
-    this.agentMode = true;
+    this.agentMode = initialState.agentMode !== void 0 ? initialState.agentMode : true;
     this.layoutChangeHandler = this.onLayoutChange.bind(this);
   }
   ensureCoreServicesReady() {
@@ -47405,7 +47426,8 @@ var ChatView6 = class extends import_obsidian104.ItemView {
         this.systemPromptType,
         this.systemPromptPath,
         this.chatTitle,
-        this.chatFontSize
+        this.chatFontSize,
+        this.agentMode
       );
       this.chatVersion = savedChat.version || this.chatVersion;
       const wasNewChat = !this.isFullyLoaded;
@@ -47886,7 +47908,8 @@ var ChatView6 = class extends import_obsidian104.ItemView {
       systemPromptType: this.systemPromptType,
       systemPromptPath: this.systemPromptPath,
       version: this.chatVersion,
-      chatFontSize: this.chatFontSize
+      chatFontSize: this.chatFontSize,
+      agentMode: this.agentMode
     };
   }
   async setState(state) {
@@ -47902,7 +47925,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     if (!(state == null ? void 0 : state.chatId)) {
       this.chatId = "";
       this.initializeChatTitle();
-      this.agentMode = true;
+      this.agentMode = (state == null ? void 0 : state.agentMode) !== void 0 ? state.agentMode : true;
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       const useLatestPrompt = (_a = this.plugin.settings.useLatestSystemPromptForNewChats) != null ? _a : true;
@@ -47946,7 +47969,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
       this.chatVersion = state.version !== void 0 ? state.version : -1;
       this.systemPromptType = state.systemPromptType || "general-use";
       this.systemPromptPath = this.systemPromptType === "custom" ? state.systemPromptPath : void 0;
-      this.agentMode = true;
+      this.agentMode = state.agentMode !== void 0 ? state.agentMode : true;
       if (state.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
         setTimeout(() => {
@@ -47972,7 +47995,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
     this.chatVersion = state.version !== void 0 ? state.version : -1;
     this.systemPromptType = state.systemPromptType || "general-use";
     this.systemPromptPath = this.systemPromptType === "custom" ? state.systemPromptPath : void 0;
-    this.agentMode = true;
+    this.agentMode = state.agentMode !== void 0 ? state.agentMode : true;
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
       setTimeout(() => {
@@ -48029,7 +48052,7 @@ var ChatView6 = class extends import_obsidian104.ItemView {
       this.chatVersion = chatData.version || 0;
       this.systemPromptType = chatData.systemPromptType || "general-use";
       this.systemPromptPath = this.systemPromptType === "custom" ? chatData.systemPromptPath : void 0;
-      this.agentMode = true;
+      this.agentMode = chatData.agentMode !== void 0 ? chatData.agentMode : true;
       this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
       setTimeout(() => {
         if (this.chatContainer) {
