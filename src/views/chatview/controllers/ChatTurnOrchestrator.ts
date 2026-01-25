@@ -42,6 +42,7 @@ type Host = {
   updateStreamingStatus: (el: HTMLElement, status: string, text: string, metrics?: StreamingMetrics) => void;
   setStreamingFootnote?: (el: HTMLElement, text: string) => void;
   clearStreamingFootnote?: (el: HTMLElement) => void;
+  onCompatibilityNotice?: (info: { modelId: string; tools?: boolean; images?: boolean; source: "cached" | "runtime" }) => void;
 };
 
 export interface ChatTurnOptions {
@@ -69,6 +70,19 @@ export class ChatTurnOrchestrator {
     this.ai = host.aiService;
     this.streamer = host.streamingController;
     this.tools = host.toolCallManager;
+  }
+
+  private notifyCompatibility(modelId: string, info: { tools?: boolean; images?: boolean; source: "cached" | "runtime" }): void {
+    if (!this.host.onCompatibilityNotice) return;
+    if (!info.tools && !info.images) return;
+    try {
+      this.host.onCompatibilityNotice({
+        modelId,
+        tools: !!info.tools,
+        images: !!info.images,
+        source: info.source,
+      });
+    } catch {}
   }
 
   public async runTurn(options: ChatTurnOptions): Promise<void> {
@@ -143,9 +157,6 @@ export class ChatTurnOrchestrator {
     } finally {
       metricsTracker.stop();
       this.host.hideStreamingStatus(messageEl);
-      if (this.host.clearStreamingFootnote) {
-        try { this.host.clearStreamingFootnote(messageEl); } catch {}
-      }
       this.finalizeActiveAssistantMessage();
       this.resetContinuationState();
     }
@@ -177,6 +188,14 @@ export class ChatTurnOrchestrator {
     const skipTools = retryContext?.skipTools || knownToolIncompat;
     const skipImages = retryContext?.skipImages || knownImageIncompat;
     const effectiveAgentMode = this.host.agentMode() && !skipTools;
+
+    if (knownToolIncompat || knownImageIncompat) {
+      this.notifyCompatibility(modelId, {
+        tools: knownToolIncompat,
+        images: knownImageIncompat,
+        source: "cached",
+      });
+    }
 
     // Build provider stream request using the same inputs as StreamFactory but via helper
     const { toApiBaseMessages } = await import('../../../utils/messages/toApiMessages');
@@ -299,6 +318,12 @@ export class ChatTurnOrchestrator {
               metadata: { modelId },
             });
           }
+
+          this.notifyCompatibility(modelId, {
+            tools: shouldRetryWithoutTools,
+            images: shouldRetryWithoutImages,
+            source: "runtime",
+          });
 
           // Clean up listeners before retry
           unsubscribers.forEach((u) => { try { u(); } catch {} });

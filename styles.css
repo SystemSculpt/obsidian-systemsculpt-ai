@@ -12027,6 +12027,16 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   max-width: 280px;
 }
 
+/* Toggle state styling for agent mode chip */
+.systemsculpt-chip.is-on {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.systemsculpt-chip.is-off {
+  opacity: 0.85;
+}
+
 
 /* resume-chat.css */
 /* Resume Chat Button Container */

@@ -140,3 +140,13 @@
 .systemsculpt-model-indicator-section.inline .systemsculpt-chip {
   max-width: 280px;
 }
+
+/* Toggle state styling for agent mode chip */
+.systemsculpt-chip.is-on {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.systemsculpt-chip.is-off {
+  opacity: 0.85;
+}

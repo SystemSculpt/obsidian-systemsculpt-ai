@@ -47,9 +47,31 @@ export const uiSetup = {
     };
 
     applyReducedMotionClass(chatView.plugin.settings);
+    const hasCompatibilityChange = (oldSettings?: SystemSculptSettings, newSettings?: SystemSculptSettings): boolean => {
+      const oldTools = Object.keys(oldSettings?.runtimeToolIncompatibleModels || {});
+      const newTools = Object.keys(newSettings?.runtimeToolIncompatibleModels || {});
+      if (oldTools.length !== newTools.length) return true;
+      const newToolSet = new Set(newTools);
+      for (const key of oldTools) {
+        if (!newToolSet.has(key)) return true;
+      }
+
+      const oldImages = Object.keys(oldSettings?.runtimeImageIncompatibleModels || {});
+      const newImages = Object.keys(newSettings?.runtimeImageIncompatibleModels || {});
+      if (oldImages.length !== newImages.length) return true;
+      const newImageSet = new Set(newImages);
+      for (const key of oldImages) {
+        if (!newImageSet.has(key)) return true;
+      }
+
+      return false;
+    };
     chatView.registerEvent(
-      chatView.app.workspace.on("systemsculpt:settings-updated", (_old, newSettings) => {
+      chatView.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings) => {
         applyReducedMotionClass(newSettings);
+        if (hasCompatibilityChange(oldSettings, newSettings)) {
+          void uiSetup.updateToolCompatibilityWarning(chatView);
+        }
       })
     );
 
@@ -72,8 +94,6 @@ export const uiSetup = {
       },
       plugin: chatView.plugin,
     });
-
-    // Agent mode is always enabled.
 
     // Messages container
     chatView.chatContainer = container.createEl("div", { cls: "systemsculpt-messages-container" });
@@ -254,6 +274,7 @@ export const uiSetup = {
     
     // Initialize system prompt indicator
     await chatView.updateSystemPromptIndicator();
+    await chatView.updateAgentModeIndicator();
 
     // Check if we need to prompt for initial model selection
     if (!chatView.plugin.settings.selectedModelId && !chatView.plugin.hasPromptedForDefaultModel) {
@@ -409,6 +430,7 @@ export const uiSetup = {
    * Ensures buttons are always in the correct order:
    * 1. Model button
    * 2. System Prompt button
+   * 3. Agent Mode button
    */
   ensureButtonOrder: function(chatView: ChatView): void {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -426,6 +448,11 @@ export const uiSetup = {
     // 2. System Prompt button (always second)
     if (chatView.systemPromptIndicator) {
       buttons.push(chatView.systemPromptIndicator);
+    }
+
+    // 3. Agent Mode button (always third)
+    if (chatView.agentModeIndicator) {
+      buttons.push(chatView.agentModeIndicator);
     }
     
     // Remove all buttons from the section
@@ -545,7 +572,7 @@ export const uiSetup = {
       return;
     }
 
-    // Agent mode is OFF - ensure the system prompt indicator exists and is visible
+    // Ensure the system prompt indicator exists and is visible
     if (chatView.systemPromptIndicator) {
       chatView.systemPromptIndicator.style.display = "";
     }
@@ -617,14 +644,14 @@ export const uiSetup = {
       chatView.systemPromptIndicator.empty();
     }
 
-    // Set interactive attributes since agent mode is OFF
+    // Set interactive attributes
     chatView.systemPromptIndicator.setAttrs({
       role: "button",
       tabindex: 0,
       'aria-label': 'Change system prompt'
     });
 
-    // Agent mode is OFF - show the actual prompt type and allow changes
+    // Show the actual prompt type and allow changes
     let promptLabel = "System Prompt";
     
     switch (chatView.systemPromptType) {
@@ -658,8 +685,12 @@ export const uiSetup = {
       const arrowSpan = chatView.systemPromptIndicator.createSpan({ cls: "systemsculpt-model-indicator-arrow" });
       setIcon(arrowSpan, "chevron-down");
       
-    chatView.systemPromptIndicator.setAttr('aria-label', `Current system prompt: ${promptLabel}. Click to change.`);
-    chatView.systemPromptIndicator.setAttr('title', `Current system prompt: ${promptLabel}`);
+    const agentModeNote = (chatView.systemPromptType === "agent" && !chatView.agentMode)
+      ? " Agent Mode is off; enable it to use tools."
+      : "";
+    const promptTitle = `Current system prompt: ${promptLabel}. Click to change.${agentModeNote}`;
+    chatView.systemPromptIndicator.setAttr('aria-label', promptTitle);
+    chatView.systemPromptIndicator.setAttr('title', promptTitle);
     if (chatView.systemPromptIndicator) {
       chatView.systemPromptIndicator.removeClass('systemsculpt-system-prompt-locked');
     }
@@ -670,10 +701,56 @@ export const uiSetup = {
     // Token counter update removed
   },
 
+  updateAgentModeIndicator: async function(chatView: ChatView): Promise<void> {
+    const container = chatView.containerEl.children[1] as HTMLElement;
+    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
+    if (!modelSection) return;
+
+    if (!chatView.agentModeIndicator) {
+      chatView.agentModeIndicator = modelSection.createEl("div", {
+        cls: "systemsculpt-model-indicator systemsculpt-chip systemsculpt-agent-mode-indicator",
+      }) as HTMLElement;
+
+      chatView.registerDomEvent(chatView.agentModeIndicator, "click", async () => {
+        await chatView.setAgentMode(!chatView.agentMode);
+      });
+
+      chatView.registerDomEvent(chatView.agentModeIndicator, "keydown", (event: KeyboardEvent) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          (event.target as HTMLElement)?.click();
+        }
+      });
+    } else {
+      chatView.agentModeIndicator.empty();
+    }
+
+    const isOn = !!chatView.agentMode;
+    chatView.agentModeIndicator.toggleClass("is-on", isOn);
+    chatView.agentModeIndicator.toggleClass("is-off", !isOn);
+
+    chatView.agentModeIndicator.setAttrs({
+      role: "button",
+      tabindex: 0,
+      "aria-label": isOn
+        ? "Agent Mode enabled. Click to disable."
+        : "Agent Mode disabled. Click to enable.",
+      title: isOn
+        ? "Agent Mode enabled (click to disable)"
+        : "Agent Mode disabled (click to enable)",
+    });
+
+    const iconSpan = chatView.agentModeIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
+    setIcon(iconSpan, "wrench");
+    chatView.agentModeIndicator.createSpan({ text: `Agent ${isOn ? "On" : "Off"}` });
+
+    this.ensureButtonOrder(chatView);
+  },
+
   /**
    * Updates the tool compatibility warning banner.
-   * Shows a warning when the current model doesn't support tool calling.
-   * This is called after model selection changes.
+   * Shows a warning when the current model doesn't support tools or images.
+   * Tool warnings are suppressed when Agent Mode is disabled.
    */
   updateToolCompatibilityWarning: async function(chatView: ChatView): Promise<void> {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -708,7 +785,10 @@ export const uiSetup = {
       const toolIncompat = !toolCompat.isCompatible && toolCompat.confidence === "high";
       const imageIncompat = !imageCompat.isCompatible && imageCompat.confidence === "high";
 
-      if (toolIncompat || imageIncompat) {
+      const shouldWarnTools = chatView.agentMode && toolIncompat;
+      const shouldWarnImages = imageIncompat;
+
+      if (shouldWarnTools || shouldWarnImages) {
         // Create banner if it doesn't exist
         if (!banner) {
           const composer = container.querySelector(".systemsculpt-chat-composer");
@@ -736,9 +816,9 @@ export const uiSetup = {
         const textEl = banner.querySelector(".systemsculpt-tool-warning-text");
         if (textEl) {
           const modelName = getDisplayName(canonicalId);
-          if (toolIncompat && imageIncompat) {
+          if (shouldWarnTools && shouldWarnImages) {
             textEl.textContent = `${modelName} doesn't support agent tools or images.`;
-          } else if (toolIncompat) {
+          } else if (shouldWarnTools) {
             textEl.textContent = `${modelName} doesn't support agent tools. Switch to Claude, GPT-4, etc.`;
           } else {
             textEl.textContent = `${modelName} doesn't support images. Image context will be skipped.`;

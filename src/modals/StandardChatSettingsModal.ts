@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Setting, SuggestModal, TFile, Notice, setIcon } from "obsidian";
+import { App, ButtonComponent, Setting, SuggestModal, TFile, Notice, ToggleComponent, setIcon } from "obsidian";
 import { SystemPromptPreset } from "../types";
 import { SystemSculptModel } from "../types/llm";
 import { ChatMessage } from "../types";
@@ -91,6 +91,7 @@ export class StandardChatSettingsModal extends StandardModal {
   private changeDefaultButton: ButtonComponent;
   private selectedFileInfo: HTMLElement;
   private promptTextEditor: HTMLTextAreaElement;
+  private agentModeToggle?: ToggleComponent;
 
   // State
   private currentPrompt: string;
@@ -303,13 +304,19 @@ export class StandardChatSettingsModal extends StandardModal {
       .setName("Enable Agent Mode")
       .setDesc("Allow the AI to use tools like web search, file operations, and other capabilities. When disabled, the AI can only respond with text.")
       .addToggle(toggle => {
+        this.agentModeToggle = toggle;
         toggle
           .setValue(this.currentAgentMode)
           .onChange(async (value: boolean) => {
+            if (value === this.currentAgentMode) return;
             this.currentAgentMode = value;
             if (this.options.chatView) {
-              this.options.chatView.agentMode = value;
-              await this.options.chatView.saveChat();
+              if (typeof this.options.chatView.setAgentMode === "function") {
+                await this.options.chatView.setAgentMode(value, { showNotice: false });
+              } else {
+                this.options.chatView.agentMode = value;
+                await this.options.chatView.saveChat();
+              }
             }
           });
       });
@@ -581,7 +588,32 @@ export class StandardChatSettingsModal extends StandardModal {
   }
 
   private selectPreset = async (type: "general-use" | "concise" | "agent" | "custom") => {
-    // Agent Mode selection no longer requires license
+    if (type === "agent" && !this.currentAgentMode) {
+      const result = await showPopup(
+        this.app,
+        "The Agent prompt works best with Agent Mode enabled so the assistant can use tools. Enable Agent Mode now?",
+        {
+          title: "Agent Mode Required",
+          icon: "wrench",
+          primaryButton: "Enable Agent Mode",
+          secondaryButton: "Cancel",
+        }
+      );
+      if (!result?.confirmed) {
+        return;
+      }
+
+      this.currentAgentMode = true;
+      this.agentModeToggle?.setValue(true);
+      if (this.options.chatView) {
+        if (typeof this.options.chatView.setAgentMode === "function") {
+          await this.options.chatView.setAgentMode(true, { showNotice: false });
+        } else {
+          this.options.chatView.agentMode = true;
+          await this.options.chatView.saveChat();
+        }
+      }
+    }
 
     this.currentType = type;
 
@@ -809,7 +841,13 @@ export class StandardChatSettingsModal extends StandardModal {
       if (this.options.chatView) {
         this.options.chatView.systemPromptType = result.type;
         this.options.chatView.systemPromptPath = result.path;
-        this.options.chatView.agentMode = this.currentAgentMode;
+        if (this.options.chatView.agentMode !== this.currentAgentMode) {
+          if (typeof this.options.chatView.setAgentMode === "function") {
+            await this.options.chatView.setAgentMode(this.currentAgentMode, { showNotice: false });
+          } else {
+            this.options.chatView.agentMode = this.currentAgentMode;
+          }
+        }
         // Apply model change via ChatView API if provided; this persists and updates indicators
         if (result.modelId && typeof this.options.chatView.setSelectedModelId === 'function') {
           await this.options.chatView.setSelectedModelId(result.modelId);
@@ -829,6 +867,7 @@ export class StandardChatSettingsModal extends StandardModal {
         // Update UI elements
         this.options.chatView.updateModelIndicator();
         this.options.chatView.updateSystemPromptIndicator();
+        this.options.chatView.updateAgentModeIndicator();
         // Keep the empty-chat status panel in sync
         if (this.options.chatView.messages.length === 0) {
           this.options.chatView.displayChatStatus();

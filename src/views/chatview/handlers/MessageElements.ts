@@ -66,11 +66,6 @@ export function hideStreamingStatus(messageEl: HTMLElement, liveRegionEl: HTMLEl
       indicatorInstances.delete(messageEl);
     });
   }
-  // Also clear any streaming footnote when hiding status
-  const footnoteEl = messageEl.querySelector('.systemsculpt-streaming-footnote') as HTMLElement | null;
-  if (footnoteEl) {
-    footnoteEl.remove();
-  }
   if (liveRegionEl) {
     liveRegionEl.textContent = "";
   }

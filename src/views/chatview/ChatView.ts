@@ -14,7 +14,7 @@ import { LoadChatModal } from "./LoadChatModal";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 import { StandardModelSelectionModal } from "../../modals/StandardModelSelectionModal";
 
-import { ensureCanonicalId, getDisplayName } from "../../utils/modelUtils";
+import { ensureCanonicalId, getDisplayName, getModelLabelWithProvider } from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
 import { GENERAL_USE_PRESET } from "../../constants/prompts";
 import { ToolCallManager } from "./ToolCallManager";
@@ -47,6 +47,7 @@ export class ChatView extends ItemView {
   public selectedModelId: string;
   public modelIndicator: HTMLElement;
   public systemPromptIndicator: HTMLElement;
+  public agentModeIndicator: HTMLElement;
   public currentModelName: string = "";
   public currentModelSupportsWebSearch: boolean | null = null;
   public currentModelSupportedParameters: string[] = [];
@@ -71,6 +72,8 @@ export class ChatView extends ItemView {
   private settings: SystemSculptSettings;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
+  private warnedToolIncompatModels: Set<string> = new Set();
+  private warnedImageIncompatModels: Set<string> = new Set();
   /**
    * Virtualized chat rendering state
    * --------------------------------
@@ -187,6 +190,8 @@ export class ChatView extends ItemView {
   }
   updateModelIndicator = () => uiSetup.updateModelIndicator(this);
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
+  updateAgentModeIndicator = () => uiSetup.updateAgentModeIndicator(this);
+  updateToolCompatibilityWarning = () => uiSetup.updateToolCompatibilityWarning(this);
   addMessage = (role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage) =>
     messageHandling.addMessage(this, role, content, existingMessageId, completeMessage);
   loadMessages = () => messageHandling.loadMessages(this);
@@ -377,6 +382,46 @@ export class ChatView extends ItemView {
       // Handle other types of errors
       // Error already logged and Notice shown by errorLogger
     }
+  }
+
+  public async notifyCompatibilityNotice(info: { modelId: string; tools?: boolean; images?: boolean; source?: "cached" | "runtime" }): Promise<void> {
+    const tools = !!info.tools && this.agentMode;
+    const images = !!info.images;
+    if (!tools && !images) return;
+
+    const canonicalId = info.modelId ? ensureCanonicalId(info.modelId) : "";
+    const modelLabel = canonicalId ? getModelLabelWithProvider(canonicalId) : (info.modelId || "this model");
+
+    let shouldNotify = false;
+    if (tools && !this.warnedToolIncompatModels.has(canonicalId)) {
+      this.warnedToolIncompatModels.add(canonicalId);
+      shouldNotify = true;
+    }
+    if (images && !this.warnedImageIncompatModels.has(canonicalId)) {
+      this.warnedImageIncompatModels.add(canonicalId);
+      shouldNotify = true;
+    }
+
+    if (shouldNotify) {
+      let message = "";
+      if (tools && images) {
+        message = `Agent tools and images are disabled for ${modelLabel}. Switch to a compatible model to use them.`;
+      } else if (tools) {
+        const reason = info.source === "runtime" ? " because the provider rejected tool calls" : "";
+        message = `Agent tools are disabled for ${modelLabel}${reason}. Switch to a tool-capable model or run /agent status.`;
+      } else {
+        const reason = info.source === "runtime" ? " because the provider rejected image inputs" : "";
+        message = `Image context was skipped for ${modelLabel}${reason}. Switch to a vision-capable model to include images.`;
+      }
+      try {
+        new Notice(message, 8000);
+      } catch {}
+    }
+
+    // Refresh the warning banner so it reflects runtime incompatibility updates.
+    try {
+      await uiSetup.updateToolCompatibilityWarning(this);
+    } catch {}
   }
 
   public hasConfiguredProvider(): boolean {
@@ -617,11 +662,14 @@ export class ChatView extends ItemView {
         promptLabel = "General Use";
         break;
     }
+    const promptNote = (this.systemPromptType === "agent" && !this.agentMode)
+      ? " (Agent Mode off)"
+      : "";
     createPill({
       icon: this.systemPromptType === 'agent' ? 'folder-open' : 'sparkles',
       label: 'Prompt',
       value: promptLabel,
-      title: `Current system prompt: ${promptLabel}`,
+      title: `Current system prompt: ${promptLabel}${promptNote}`,
       onClick: async () => {
         const { StandardSystemPromptSelectionModal } = await import('../../modals/StandardSystemPromptSelectionModal');
         const modal = new StandardSystemPromptSelectionModal({
@@ -652,6 +700,21 @@ export class ChatView extends ItemView {
           }
         });
         modal.open();
+      }
+    });
+
+    // Agent Mode
+    const agentModeEnabled = !!this.agentMode;
+    createPill({
+      icon: 'wrench',
+      label: 'Agent Mode',
+      value: agentModeEnabled ? 'On' : 'Off',
+      isOn: agentModeEnabled,
+      title: agentModeEnabled
+        ? 'Agent Mode enabled (click to disable tools)'
+        : 'Agent Mode disabled (click to enable tools)',
+      onClick: async () => {
+        await this.setAgentMode(!this.agentMode);
       }
     });
 
@@ -868,6 +931,7 @@ export class ChatView extends ItemView {
       this.contextManager?.clearContext();
       this.updateModelIndicator();
       this.updateSystemPromptIndicator();
+      this.updateAgentModeIndicator();
       // Don't render messages here - let onOpen handle it after UI is ready
       // this.renderMessagesInChunks();
       this.isFullyLoaded = true; // New chat is immediately loaded
@@ -979,6 +1043,7 @@ export class ChatView extends ItemView {
         this.systemPromptPath = undefined;
         this.updateModelIndicator();
         this.updateSystemPromptIndicator();
+        this.updateAgentModeIndicator();
         this.contextManager?.clearContext();
         this.isFullyLoaded = true; // Mark as loaded even when chat not found
         return;
@@ -1031,6 +1096,7 @@ export class ChatView extends ItemView {
       // Update UI indicators
       await this.updateModelIndicator();
       await this.updateSystemPromptIndicator();
+      await this.updateAgentModeIndicator();
       
       if (this.inputHandler) {
         this.inputHandler.onModelChange();
@@ -1806,6 +1872,38 @@ export class ChatView extends ItemView {
     this.focusInput();
     // Centralized sync + broadcast
     this.notifySettingsChanged();
+  }
+
+  public async setAgentMode(enabled: boolean, options?: { showNotice?: boolean }): Promise<void> {
+    const nextValue = !!enabled;
+    if (this.agentMode === nextValue) return;
+
+    this.agentMode = nextValue;
+    this.updateViewState();
+
+    await this.saveChat();
+
+    try {
+      await this.updateAgentModeIndicator();
+    } catch {}
+    try {
+      await this.updateSystemPromptIndicator();
+    } catch {}
+    try {
+      await this.updateToolCompatibilityWarning();
+    } catch {}
+
+    if (this.messages.length === 0) {
+      this.displayChatStatus();
+    }
+
+    this.notifySettingsChanged();
+
+    if (options?.showNotice !== false) {
+      try {
+        new Notice(`Agent Mode ${nextValue ? "enabled" : "disabled"}`, 2000);
+      } catch {}
+    }
   }
 
   private getChatExportService(): ChatExportService {

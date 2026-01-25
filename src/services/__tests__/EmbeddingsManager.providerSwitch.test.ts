@@ -418,6 +418,33 @@ describe("EmbeddingsManager provider switching", () => {
     });
   });
 
+  describe("SystemSculpt provider refresh", () => {
+    it("recreates the provider when license key or base URL changes", () => {
+      const pluginStub = createPluginStub({
+        licenseKey: "old-license",
+        serverUrl: "https://api.systemsculpt.com/api/v1",
+      });
+
+      const manager = new EmbeddingsManager(pluginStub.app as any, pluginStub as any);
+      const initialProvider = (manager as any).provider;
+      expect((initialProvider as any).licenseKey).toBe("old-license");
+
+      pluginStub.settings.licenseKey = "new-license";
+      manager.syncFromSettings();
+
+      const updatedProvider = (manager as any).provider;
+      expect(updatedProvider).not.toBe(initialProvider);
+      expect((updatedProvider as any).licenseKey).toBe("new-license");
+
+      const providerAfterLicense = updatedProvider;
+      pluginStub.settings.serverUrl = "https://notes.systemsculpt.com/api/v1";
+      manager.syncFromSettings();
+
+      const updatedProviderAfterUrl = (manager as any).provider;
+      expect(updatedProviderAfterUrl).not.toBe(providerAfterLicense);
+    });
+  });
+
   describe("hasAnyEmbeddings behavior", () => {
     it("returns true when storage has vectors for current namespace prefix", () => {
       const pluginStub = createPluginStub();

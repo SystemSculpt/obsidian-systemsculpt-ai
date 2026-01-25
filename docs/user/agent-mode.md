@@ -9,6 +9,10 @@ Agent Mode lets the model request structured tool calls that run inside your vau
 3. You approve or deny the call.
 4. The tool runs, and the result is returned to the model in-context.
 
+## Enable/disable
+
+Agent Mode is per-chat. Use the **Agent Mode** chip next to Model/Prompt in the chat toolbar, or open **Chat Settings** (gear icon) to toggle it.
+
 ## Built-in tools
 
 Tool names below match the MCP tool definitions in:

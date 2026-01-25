@@ -296,6 +296,9 @@ export class InputHandler extends Component {
       updateStreamingStatus: this.updateStreamingStatus.bind(this),
       setStreamingFootnote: this.setStreamingFootnote.bind(this),
       clearStreamingFootnote: this.clearStreamingFootnote.bind(this),
+      onCompatibilityNotice: (info) => {
+        void this.chatView?.notifyCompatibilityNotice?.(info);
+      },
     });
     // Orchestrator is a plain class; no need to register as child component
 

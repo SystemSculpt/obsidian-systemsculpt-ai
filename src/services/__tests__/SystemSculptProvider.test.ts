@@ -56,7 +56,7 @@ describe("SystemSculptProvider", () => {
     });
   });
 
-  it("treats authentication failures on 429 as LICENSE_INVALID", async () => {
+  it("treats authentication throttling on 429 as RATE_LIMITED (not license invalid)", async () => {
     httpRequest.mockRejectedValue({
       status: 429,
       text: JSON.stringify({ error: "too many authentication failures" }),
@@ -67,8 +67,24 @@ describe("SystemSculptProvider", () => {
 
     await expect(provider.generateEmbeddings(["valid input"])).rejects.toMatchObject({
       status: 429,
-      code: "LICENSE_INVALID",
-      licenseRelated: true,
+      code: "RATE_LIMITED",
+      licenseRelated: false,
+    });
+  });
+
+  it("does not treat non-auth 403 JSON responses as license errors", async () => {
+    httpRequest.mockRejectedValue({
+      status: 403,
+      text: JSON.stringify({ error: "REQUEST_BLOCKED", message: "Request blocked by gateway policy" }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const provider = new SystemSculptProvider("test-license");
+
+    await expect(provider.generateEmbeddings(["valid input"])).rejects.toMatchObject({
+      status: 403,
+      code: "HTTP_ERROR",
+      licenseRelated: false,
     });
   });
 

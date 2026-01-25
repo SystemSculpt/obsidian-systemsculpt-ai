@@ -670,9 +670,13 @@ export class SystemSculptProvider implements EmbeddingsProvider {
             });
           }
         }
-        // Stop immediately on auth/license errors - no point retrying
-        const isAuthError = normalized.code === 'LICENSE_INVALID' || status === 401 || status === 403;
-        if (isCircuit || isAuthError) break;
+        // Stop immediately on auth/license or rate-limit errors - no point retrying
+        const isAuthError = normalized.licenseRelated
+          || normalized.code === 'LICENSE_INVALID'
+          || status === 401
+          || status === 402;
+        const isRateLimited = normalized.code === 'RATE_LIMITED' || status === 429;
+        if (isCircuit || isAuthError || isRateLimited) break;
         if (attempt < this.maxRetries && !isCircuit) {
           // Only retry once on networkish errors
           if (refused && attempt >= 2) break;
@@ -955,17 +959,18 @@ export class SystemSculptProvider implements EmbeddingsProvider {
       }
       return 'INVALID_RESPONSE';
     }
-    if (isAuthFailureMessage(message)) {
-      return 'LICENSE_INVALID';
-    }
+    const authFailure = isAuthFailureMessage(message);
     if (status === 401 || status === 402) {
       return 'LICENSE_INVALID';
     }
     if (status === 403) {
-      return 'LICENSE_INVALID';
+      return authFailure ? 'LICENSE_INVALID' : 'HTTP_ERROR';
     }
     if (status === 429) {
       return 'RATE_LIMITED';
+    }
+    if (authFailure) {
+      return 'LICENSE_INVALID';
     }
     if (status === 0) {
       return 'NETWORK_ERROR';

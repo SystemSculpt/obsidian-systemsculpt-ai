@@ -1,4 +1,5 @@
 import { Component, Notice, setIcon } from 'obsidian';
+import { showPopup } from '../../core/ui';
 import type SystemSculptPlugin from '../../main';
 import type { ChatView } from './ChatView';
 import { SystemPromptService } from '../../services/SystemPromptService';
@@ -309,6 +310,28 @@ export class AgentSelectionMenu extends Component {
 
   private async selectAgent(agent: AgentItem): Promise<void> {
     try {
+      if (agent.type === 'agent' && !this.chatView.agentMode) {
+        const result = await showPopup(
+          this.plugin.app,
+          "The Agent prompt works best with Agent Mode enabled so the assistant can use tools. Enable Agent Mode now?",
+          {
+            title: "Agent Mode Required",
+            icon: "wrench",
+            primaryButton: "Enable Agent Mode",
+            secondaryButton: "Cancel",
+          }
+        );
+        if (!result?.confirmed) {
+          return;
+        }
+        if (typeof this.chatView.setAgentMode === "function") {
+          await this.chatView.setAgentMode(true, { showNotice: false });
+        } else {
+          this.chatView.agentMode = true;
+          await this.chatView.saveChat();
+        }
+      }
+
       // Update chat view with selected agent
       this.chatView.systemPromptType = agent.type;
       

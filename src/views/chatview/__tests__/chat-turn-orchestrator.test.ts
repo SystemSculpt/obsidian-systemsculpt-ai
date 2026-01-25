@@ -7,6 +7,7 @@ import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import type { App } from "obsidian";
 import { RuntimeIncompatibilityService } from "../../../services/RuntimeIncompatibilityService";
+import { SystemSculptError, ERROR_CODES } from "../../../utils/errors";
 
 // Clear singleton between tests
 beforeEach(() => {
@@ -392,5 +393,78 @@ describe("ChatTurnOrchestrator compact assistant handling", () => {
 
     expect(result).toBeNull();
     expect(host.onError).not.toHaveBeenCalled();
+  });
+
+  test("notifies host when tools are disabled after runtime rejection", async () => {
+    const messages: ChatMessage[] = [];
+    const chatRoot = document.createElement("div");
+    document.body.appendChild(chatRoot);
+
+    let streamCalls = 0;
+    const streamingController = {
+      stream: jest.fn(async (_stream: AsyncGenerator<any>, messageEl: HTMLElement, messageId: string) => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          throw new SystemSculptError("Tools not supported", ERROR_CODES.STREAM_ERROR, 400, {
+            shouldResubmitWithoutTools: true,
+          });
+        }
+        return {
+          messageId,
+          messageEl,
+          message: { role: "assistant", content: "", message_id: messageId } as ChatMessage,
+          completed: true,
+        };
+      }),
+      finalizeMessage: jest.fn(),
+    } as any;
+
+    const host = {
+      app: {} as App,
+      plugin: createMockPlugin(),
+      aiService: { streamMessage: jest.fn(() => createAsyncStream()) } as any,
+      streamingController,
+      toolCallManager: undefined,
+      messageRenderer: {} as any,
+      getMessages: jest.fn(() => messages),
+      getSelectedModelId: jest.fn(() => "test-model"),
+      getSystemPrompt: jest.fn(() => ({ type: "default", path: "default" })),
+      getContextFiles: jest.fn(() => new Set<string>()),
+      getChatId: jest.fn(() => "chat-1"),
+      getDebugLogger: jest.fn(() => null),
+      agentMode: jest.fn(() => true),
+      webSearchEnabled: jest.fn(() => false),
+      createAssistantMessageContainer: jest.fn(() => {
+        const messageEl = document.createElement("div");
+        messageEl.dataset.messageId = "assistant-1";
+        const contentEl = document.createElement("div");
+        messageEl.appendChild(contentEl);
+        chatRoot.appendChild(messageEl);
+        return { messageEl, contentEl };
+      }),
+      generateMessageId: jest.fn(() => "assistant-1"),
+      onAssistantResponse: jest.fn(async () => {}),
+      onError: jest.fn(),
+      onCompatibilityNotice: jest.fn(),
+      showStreamingStatus: jest.fn(),
+      hideStreamingStatus: jest.fn(),
+      updateStreamingStatus: jest.fn(),
+      setStreamingFootnote: jest.fn(),
+      clearStreamingFootnote: jest.fn(),
+    } as unknown as ConstructorParameters<typeof ChatTurnOrchestrator>[0];
+
+    const orchestrator = new ChatTurnOrchestrator(host);
+    const controller = new AbortController();
+    await (orchestrator as any).streamAssistant({ includeContextFiles: false, signal: controller.signal });
+
+    expect(streamingController.stream).toHaveBeenCalledTimes(2);
+    expect(host.onCompatibilityNotice).toHaveBeenCalledWith({
+      modelId: "test-model",
+      tools: true,
+      images: false,
+      source: "runtime",
+    });
+
+    document.body.removeChild(chatRoot);
   });
 });

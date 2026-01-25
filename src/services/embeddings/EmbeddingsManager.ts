@@ -102,6 +102,8 @@ export class EmbeddingsManager {
   private queryCooldownUntil: number = 0;
   private lastDimensionNoticeAt: number = 0;
   private failedFiles: Map<string, FailedEmbeddingFile> = new Map();
+  private lastLicenseKey: string;
+  private lastSystemSculptBaseUrl: string;
 
   constructor(
     private app: App,
@@ -113,6 +115,8 @@ export class EmbeddingsManager {
     this.storage = new EmbeddingsStorage(EmbeddingsStorage.buildDbName(this.plugin.settings.vaultInstanceId || ""));
     this.preprocessor = new ContentPreprocessor();
     this.search = new VectorSearch();
+    this.lastLicenseKey = (this.plugin.settings.licenseKey || "").trim();
+    this.lastSystemSculptBaseUrl = SystemSculptEnvironment.resolveBaseUrl(this.plugin.settings);
     this.provider = this.createProvider();
     this.processor = new EmbeddingsProcessor(
       this.provider,
@@ -971,13 +975,20 @@ export class EmbeddingsManager {
   public syncFromSettings(): void {
     const nextConfig = this.buildConfig(undefined, this.plugin.settings);
     const prevConfig = this.config;
+    const nextLicenseKey = (this.plugin.settings.licenseKey || "").trim();
+    const nextSystemSculptBaseUrl = SystemSculptEnvironment.resolveBaseUrl(this.plugin.settings);
+    const systemsculptConfigChanged =
+      nextConfig.provider.providerId === "systemsculpt"
+      && (this.lastLicenseKey !== nextLicenseKey
+        || this.lastSystemSculptBaseUrl !== nextSystemSculptBaseUrl);
 
     const providerChanged =
       prevConfig.provider.providerId !== nextConfig.provider.providerId
       || (prevConfig.provider.customEndpoint || "") !== (nextConfig.provider.customEndpoint || "")
       || (prevConfig.provider.customApiKey || "") !== (nextConfig.provider.customApiKey || "")
       || (prevConfig.provider.customModel || "") !== (nextConfig.provider.customModel || "")
-      || (prevConfig.provider.model || "") !== (nextConfig.provider.model || "");
+      || (prevConfig.provider.model || "") !== (nextConfig.provider.model || "")
+      || systemsculptConfigChanged;
 
     const processingChanged =
       prevConfig.batchSize !== nextConfig.batchSize
@@ -988,6 +999,8 @@ export class EmbeddingsManager {
       JSON.stringify(prevConfig.exclusions) !== JSON.stringify(nextConfig.exclusions);
 
     this.config = nextConfig;
+    this.lastLicenseKey = nextLicenseKey;
+    this.lastSystemSculptBaseUrl = nextSystemSculptBaseUrl;
 
     if (providerChanged) {
       this.provider = this.createProvider();
@@ -1189,7 +1202,7 @@ export class EmbeddingsManager {
 
   private async handleVaultFailure(error: EmbeddingsProviderError, processedCount: number): Promise<void> {
     // On license/auth errors, don't auto-retry - user needs to fix their license
-    const isLicenseError = error.licenseRelated || error.code === 'LICENSE_INVALID' || error.status === 401 || error.status === 403;
+    const isLicenseError = error.licenseRelated || error.code === 'LICENSE_INVALID' || error.status === 401 || error.status === 402;
 
     const fallbackMs = isLicenseError
       ? 24 * 60 * 60 * 1000 // 24 hour cooldown for license errors - don't spam
