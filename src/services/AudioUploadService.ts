@@ -1,6 +1,7 @@
 import { App, TFile, requestUrl } from "obsidian";
-import { validateFileSize } from "../utils/FileValidator";
+import { validateFileSize, formatFileSize } from "../utils/FileValidator";
 import { logMobileError } from "../utils/errorHandling";
+import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 
 /**
  * Service responsible for audio upload and transcription
@@ -29,10 +30,14 @@ export class AudioUploadService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     try {
+      const maxSizeLabel = formatFileSize(AUDIO_UPLOAD_MAX_BYTES);
       // Validate file size first
-      const isValidSize = await validateFileSize(file, this.app);
+      const isValidSize = await validateFileSize(file, this.app, {
+        maxBytes: AUDIO_UPLOAD_MAX_BYTES,
+        maxLabel: maxSizeLabel,
+      });
       if (!isValidSize) {
-        throw new Error("File size exceeds the maximum limit of 25MB");
+        throw new Error(`File size exceeds the maximum limit of ${maxSizeLabel}`);
       }
 
       // Read file from vault
@@ -81,6 +86,9 @@ export class AudioUploadService {
       });
 
       if (response.status !== 200) {
+        if (response.status === 413) {
+          throw new Error(`File size exceeds the maximum limit of ${maxSizeLabel}`);
+        }
         throw new Error(`Audio upload failed: ${response.status}`);
       }
       const result = JSON.parse(response.text);

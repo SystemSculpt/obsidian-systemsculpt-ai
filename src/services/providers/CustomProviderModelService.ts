@@ -7,6 +7,7 @@ import SystemSculptPlugin from "../../main";
 import { isAnthropicEndpoint, ANTHROPIC_MODELS } from "../../constants/anthropic";
 import { ProviderModel } from "./adapters/BaseProviderAdapter";
 import { getFunctionProfiler } from "../FunctionProfiler";
+import { isAuthFailureMessage } from "../../utils/errors";
 
 /**
  * Service for managing custom provider models
@@ -174,7 +175,7 @@ export class CustomProviderModelService extends BaseProviderService {
         return models;
       } else {
         // Only increment failure count for auth-related failures; avoid punishing transient network issues
-        const isAuthRelated = (result.error || "").toLowerCase().includes('401') || (result.error || "").toLowerCase().includes('unauthorized') || (result.error || "").toLowerCase().includes('api key');
+        const isAuthRelated = isAuthFailureMessage(result.error || "");
         if (isAuthRelated) {
           await this.handleProviderFailure(provider.id, provider.name, result.error);
         } else {
@@ -190,7 +191,7 @@ export class CustomProviderModelService extends BaseProviderService {
         errorCode: 'MODEL_LOAD_FAILED',
         message: error instanceof Error ? error.message : 'Unknown error loading models',
         endpoint: provider.endpoint,
-        authRelated: error.message?.includes('401') || error.message?.includes('unauthorized') || error.message?.includes('api key'),
+        authRelated: isAuthFailureMessage(error instanceof Error ? error.message : String(error)),
         context: {
           hasApiKey: !!provider.apiKey,
           endpoint: provider.endpoint
@@ -199,7 +200,7 @@ export class CustomProviderModelService extends BaseProviderService {
       
       // Only track failure for auth-related errors; otherwise skip auto-disable
       const msg = error instanceof Error ? error.message : String(error);
-      const isAuthRelated = msg.toLowerCase().includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('api key');
+      const isAuthRelated = isAuthFailureMessage(msg);
       if (isAuthRelated) {
         await this.handleProviderFailure(provider.id, provider.name, msg);
       } else {

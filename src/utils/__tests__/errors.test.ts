@@ -6,6 +6,7 @@ import {
   SystemSculptError,
   getErrorMessage,
   ErrorCode,
+  isAuthFailureMessage,
 } from "../errors";
 
 describe("errors", () => {
@@ -123,6 +124,18 @@ describe("errors", () => {
 
       expect(error.metadata?.customProp).toBe("value");
       expect(error.metadata?.count).toBe(42);
+    });
+  });
+
+  describe("isAuthFailureMessage", () => {
+    it("detects common authentication failure messages", () => {
+      expect(isAuthFailureMessage("Invalid API key")).toBe(true);
+      expect(isAuthFailureMessage("401 Unauthorized")).toBe(true);
+      expect(isAuthFailureMessage("Too many authentication failures")).toBe(true);
+    });
+
+    it("does not flag rate limit messages", () => {
+      expect(isAuthFailureMessage("Rate limit exceeded")).toBe(false);
     });
   });
 

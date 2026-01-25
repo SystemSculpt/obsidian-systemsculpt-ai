@@ -85,6 +85,19 @@ describe("StreamingErrorHandler", () => {
       });
     });
 
+    it("treats 429 authentication failures as auth errors", async () => {
+      const response = createMockResponse(429, {
+        error: { message: "Too many authentication failures" },
+      });
+
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, true)
+      ).rejects.toMatchObject({
+        code: ERROR_CODES.INVALID_LICENSE,
+        message: "Too many authentication failures",
+      });
+    });
+
     it("handles 401 authentication error", async () => {
       const response = createMockResponse(401, {
         error: { message: "Invalid API key" },

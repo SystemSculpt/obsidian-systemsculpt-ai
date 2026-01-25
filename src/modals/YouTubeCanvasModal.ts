@@ -6,9 +6,10 @@ import {
   YouTubeTranscriptService,
   type YouTubeTranscriptResult,
   type CaptionTrack,
-  type AvailableLanguagesResult,
 } from "../services/YouTubeTranscriptService";
-import { getLanguageName } from "../constants/languages";
+import { areLanguageCodesEquivalent, getLanguageName } from "../constants/languages";
+import { selectPreferredYouTubeLanguage } from "../utils/youtubeLanguages";
+import type { StreamEvent } from "../streaming/types";
 
 // ============================================================================
 // Types
@@ -73,6 +74,8 @@ export class YouTubeCanvasModal extends StandardModal {
   private activeTab: ContentType | null = null;
   private generatingType: ContentType | null = null;
   private abortController: AbortController | null = null;
+  private readonly GENERATION_IDLE_TIMEOUT_MS = 60000;
+  private readonly GENERATION_MAX_DURATION_MS = 300000;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
@@ -166,7 +169,7 @@ export class YouTubeCanvasModal extends StandardModal {
     this.getTranscriptBtn = this.addActionButton("Get Transcript", () => this.fetchTranscript(), false, "download");
     this.getTranscriptBtn.style.display = "none";
 
-    this.generateBtn = this.addActionButton("Generate", () => this.startGeneration(), false, "sparkles");
+    this.generateBtn = this.addActionButton("Generate", () => this.handleGenerateAction(), false, "sparkles");
     this.generateBtn.style.display = "none";
 
     this.createNoteBtn = this.addActionButton("Create Note", () => this.createNote(), true, "file-plus");
@@ -311,7 +314,10 @@ export class YouTubeCanvasModal extends StandardModal {
 
       this.metadata = metadata;
       this.availableLanguages = languagesResult?.languages || [];
-      this.selectedLanguage = languagesResult?.defaultLanguage || null;
+      this.selectedLanguage = selectPreferredYouTubeLanguage(
+        languagesResult,
+        this.getPreferredLanguageFallbacks()
+      );
 
       this.renderPreview();
       this.renderLanguageSelector();
@@ -413,6 +419,20 @@ export class YouTubeCanvasModal extends StandardModal {
     }
   }
 
+  private getPreferredLanguageFallbacks(): string[] {
+    const preferred: string[] = [];
+    const locale = typeof navigator !== "undefined" ? navigator.language : "";
+    if (locale) {
+      preferred.push(locale);
+      const base = locale.split("-")[0];
+      if (base && base !== locale) {
+        preferred.push(base);
+      }
+    }
+    preferred.push("en");
+    return Array.from(new Set(preferred.map((value) => value.trim()).filter(Boolean)));
+  }
+
   private getTrackDisplayName(track: CaptionTrack): string {
     // Use the track's native name if it looks like a language name,
     // otherwise fall back to our lookup
@@ -447,9 +467,21 @@ export class YouTubeCanvasModal extends StandardModal {
     this.disableInputs(true);
 
     try {
+      const requestedLanguage = this.selectedLanguage || undefined;
       this.transcript = await this.transcriptService.getTranscript(this.currentUrl, {
-        lang: this.selectedLanguage || undefined,
+        lang: requestedLanguage,
       });
+
+      if (
+        requestedLanguage &&
+        this.transcript?.lang &&
+        !areLanguageCodesEquivalent(requestedLanguage, this.transcript.lang)
+      ) {
+        new Notice(
+          `Transcript returned in ${getLanguageName(this.transcript.lang)} instead of ${getLanguageName(requestedLanguage)}.`,
+          6000
+        );
+      }
 
       this.renderTranscript();
       this.buildToggleSection();
@@ -492,6 +524,21 @@ export class YouTubeCanvasModal extends StandardModal {
   // Content Generation
   // ==========================================================================
 
+  private handleGenerateAction(): void {
+    if (this.state === "generating") {
+      this.cancelGeneration();
+      return;
+    }
+
+    void this.startGeneration();
+  }
+
+  private cancelGeneration(): void {
+    if (!this.abortController) return;
+    this.abortController.abort();
+    this.updateStatus("Cancelling generation...", "info");
+  }
+
   private async startGeneration(): Promise<void> {
     const selectedTypes = this.getSelectedContentTypes();
     if (selectedTypes.length === 0) {
@@ -512,6 +559,7 @@ export class YouTubeCanvasModal extends StandardModal {
     this.updateStatus("Generating content...", "info");
     this.disableInputs(true);
     this.abortController = new AbortController();
+    this.updateGenerateButtonState();
 
     try {
       for (const contentType of selectedTypes) {
@@ -570,24 +618,61 @@ export class YouTubeCanvasModal extends StandardModal {
     const stream = this.plugin.aiService.streamMessage({
       messages,
       model: this.plugin.settings.selectedModelId,
+      signal: this.abortController?.signal,
     });
 
     let output = "";
+    const iterator = stream[Symbol.asyncIterator]();
+    const startTime = Date.now();
+    let hasReceivedEvent = false;
 
-    for await (const event of stream) {
-      if (this.abortController?.signal.aborted) {
-        throw new DOMException("Aborted", "AbortError");
+    const closeIterator = async () => {
+      if (typeof iterator.return === "function") {
+        try {
+          await iterator.return();
+        } catch {}
       }
+    };
 
-      if (event.type === "content") {
-        output += event.text;
-        this.generatedContent[contentType] = output;
-        this.renderActiveTabContent();
+    try {
+      while (true) {
+        if (this.abortController?.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
 
-        if (this.tabContent) {
-          this.tabContent.scrollTop = this.tabContent.scrollHeight;
+        const elapsedMs = Date.now() - startTime;
+        const remainingMs = this.GENERATION_MAX_DURATION_MS - elapsedMs;
+        if (remainingMs <= 0) {
+          throw new Error("Generation timed out after 5 minutes");
+        }
+
+        const timeoutMs = hasReceivedEvent
+          ? Math.min(this.GENERATION_IDLE_TIMEOUT_MS, remainingMs)
+          : remainingMs;
+
+        const result = await this.readStreamEventWithTimeout(
+          iterator,
+          timeoutMs,
+          "Generation timed out while waiting for output"
+        );
+
+        if (result.done) break;
+
+        hasReceivedEvent = true;
+        const event = result.value;
+        if (event.type === "content") {
+          output += event.text;
+          this.generatedContent[contentType] = output;
+          this.renderActiveTabContent();
+
+          if (this.tabContent) {
+            this.tabContent.scrollTop = this.tabContent.scrollHeight;
+          }
         }
       }
+    } catch (error) {
+      await closeIterator();
+      throw error;
     }
 
     this.generatedContent[contentType] = output.trim();
@@ -599,6 +684,26 @@ export class YouTubeCanvasModal extends StandardModal {
     if (this.contentToggles.keyPoints) types.push("keyPoints");
     if (this.contentToggles.studyNotes) types.push("studyNotes");
     return types;
+  }
+
+  private async readStreamEventWithTimeout(
+    iterator: AsyncIterator<StreamEvent>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<IteratorResult<StreamEvent>> {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const timeoutPromise = new Promise<IteratorResult<StreamEvent>>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([iterator.next(), timeoutPromise]);
+    } finally {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   // ==========================================================================
@@ -671,15 +776,20 @@ export class YouTubeCanvasModal extends StandardModal {
     if (!this.generateBtn) return;
 
     const selectedTypes = this.getSelectedContentTypes();
-    this.generateBtn.disabled = selectedTypes.length === 0;
+    const isGenerating = this.state === "generating";
+    this.generateBtn.disabled = !isGenerating && selectedTypes.length === 0;
 
     const btnTextNode = Array.from(this.generateBtn.childNodes).find(
       (node) => node.nodeType === Node.TEXT_NODE
     );
 
     if (btnTextNode) {
-      const allGenerated = selectedTypes.length > 0 && selectedTypes.every((type) => this.generatedContent[type]);
-      btnTextNode.textContent = allGenerated ? "Regenerate" : "Generate";
+      if (isGenerating) {
+        btnTextNode.textContent = "Cancel";
+      } else {
+        const allGenerated = selectedTypes.length > 0 && selectedTypes.every((type) => this.generatedContent[type]);
+        btnTextNode.textContent = allGenerated ? "Regenerate" : "Generate";
+      }
     }
   }
 
@@ -821,12 +931,13 @@ created: ${timestamp}
 
     if (this.generateBtn) {
       this.generateBtn.style.display = showPostTranscript ? "inline-flex" : "none";
-      this.generateBtn.disabled = this.state === "generating";
     }
 
     if (this.createNoteBtn) {
       this.createNoteBtn.style.display = showCreateNote ? "inline-flex" : "none";
     }
+
+    this.updateGenerateButtonState();
   }
 
   private updateStatus(message: string, tone: "info" | "success" | "error"): void {
@@ -839,7 +950,9 @@ created: ${timestamp}
     if (this.urlInput) this.urlInput.disabled = disabled;
     if (this.folderInput) this.folderInput.disabled = disabled;
     if (this.getTranscriptBtn) this.getTranscriptBtn.disabled = disabled;
-    if (this.generateBtn) this.generateBtn.disabled = disabled;
+    if (this.generateBtn) {
+      this.generateBtn.disabled = disabled && this.state !== "generating";
+    }
     if (this.createNoteBtn) this.createNoteBtn.disabled = disabled;
 
     this.languageSection?.querySelectorAll("button").forEach((btn) => {
@@ -849,6 +962,8 @@ created: ${timestamp}
     this.toggleSection?.querySelectorAll("input[type='checkbox']").forEach((input) => {
       (input as HTMLInputElement).disabled = disabled;
     });
+
+    this.updateGenerateButtonState();
   }
 
   private hideAllSections(): void {

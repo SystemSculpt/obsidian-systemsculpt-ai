@@ -601,6 +601,28 @@ describe("CustomProviderModelService", () => {
       expect(provider.failureCount).toBe(3);
       expect(provider.isEnabled).toBe(false);
     });
+
+    it("treats authentication failures in 429 responses as auth-related", async () => {
+      const provider: CustomProvider = {
+        id: "auth429",
+        name: "Auth429Provider",
+        endpoint: "http://test",
+        apiKey: "bad-key",
+        isEnabled: true,
+        failureCount: 0,
+      };
+      mockPlugin.settings.customProviders = [provider];
+
+      mockPlugin.customProviderService.testConnection.mockResolvedValue({
+        success: false,
+        error: "API error 429: too many authentication failures",
+      });
+
+      const service = CustomProviderModelService.getInstance(mockPlugin as any);
+      await service.getModelsFromProvider(provider);
+
+      expect(provider.failureCount).toBe(1);
+    });
   });
 
   describe("resetProviderFailureCount (private)", () => {

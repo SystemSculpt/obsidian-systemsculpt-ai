@@ -13,6 +13,7 @@ import { tokenCounter } from '../../../utils/TokenCounter';
 import { errorLogger } from '../../../utils/errorLogger';
 import { EmbeddingsProviderError, EmbeddingsProviderErrorCode, isEmbeddingsProviderError } from './ProviderError';
 import { DEFAULT_EMBEDDING_MODEL } from '../../../constants/embeddings';
+import { isAuthFailureMessage } from '../../../utils/errors';
 
 export class SystemSculptProvider implements EmbeddingsProvider {
   readonly id = 'systemsculpt';
@@ -953,6 +954,9 @@ export class SystemSculptProvider implements EmbeddingsProvider {
         return 'HOST_UNAVAILABLE';
       }
       return 'INVALID_RESPONSE';
+    }
+    if (isAuthFailureMessage(message)) {
+      return 'LICENSE_INVALID';
     }
     if (status === 401 || status === 402) {
       return 'LICENSE_INVALID';

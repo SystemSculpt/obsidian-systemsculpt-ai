@@ -36,6 +36,35 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 type ErrorMessageFunction = (model?: string) => string;
 type ErrorMessageValue = string | ErrorMessageFunction;
 
+const AUTH_FAILURE_SNIPPETS = [
+  "invalid api key",
+  "api key invalid",
+  "api key missing",
+  "missing api key",
+  "authentication failed",
+  "authentication failure",
+  "authentication error",
+  "too many authentication failures",
+  "unauthorized",
+  "unauthorised",
+  "not authorized",
+  "invalid token",
+  "token invalid",
+  "bad credentials",
+  "access denied",
+  "permission denied",
+  "forbidden"
+];
+
+export function isAuthFailureMessage(message?: string | null): boolean {
+  if (!message) return false;
+  const normalized = String(message).toLowerCase();
+  if (/\b401\b/.test(normalized) || /\b403\b/.test(normalized)) {
+    return true;
+  }
+  return AUTH_FAILURE_SNIPPETS.some((snippet) => normalized.includes(snippet));
+}
+
 
 export class SystemSculptError extends Error {
   constructor(
@@ -99,5 +128,4 @@ export function getErrorMessage(code: ErrorCode, model?: string): string {
   }
   return message;
 }
-
 

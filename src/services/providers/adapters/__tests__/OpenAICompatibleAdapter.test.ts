@@ -443,6 +443,15 @@ describe("OpenAICompatibleAdapter", () => {
       expect(error.message).toContain("Rate limit");
     });
 
+    it("treats 429 auth failures as authentication errors", () => {
+      const error = adapter.handleError({
+        status: 429,
+        data: { error: { message: "Too many authentication failures" } },
+      });
+
+      expect(error.message).toContain("Authentication failed");
+    });
+
     it("uses error data message when available", () => {
       const error = adapter.handleError({
         status: 500,

@@ -1,6 +1,7 @@
 import { TFile, requestUrl } from "obsidian";
 import { DocumentUploadService } from "../DocumentUploadService";
 import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
+import { DOCUMENT_UPLOAD_MAX_BYTES } from "../../constants/uploadLimits";
 
 // Mock requestUrl
 jest.mock("obsidian", () => {
@@ -12,9 +13,13 @@ jest.mock("obsidian", () => {
 });
 
 // Mock file validator
-jest.mock("../../utils/FileValidator", () => ({
-  validateFileSize: jest.fn(async () => true),
-}));
+jest.mock("../../utils/FileValidator", () => {
+  const actual = jest.requireActual("../../utils/FileValidator");
+  return {
+    ...actual,
+    validateFileSize: jest.fn(async () => true),
+  };
+});
 
 // Mock file types
 jest.mock("../../constants/fileTypes", () => ({
@@ -130,6 +135,25 @@ describe("DocumentUploadService", () => {
 
         await expect(service.uploadDocument(file)).rejects.toThrow(
           "exceeds the maximum limit"
+        );
+      });
+
+      it("uses the document upload size limit", async () => {
+        const { validateFileSize } = require("../../utils/FileValidator");
+        validateFileSize.mockResolvedValueOnce(true);
+
+        requestUrlMock.mockResolvedValueOnce({
+          status: 200,
+          text: JSON.stringify({ documentId: "doc-123", status: "queued" }),
+        });
+
+        const file = createMockFile("test.pdf", "pdf");
+        await service.uploadDocument(file);
+
+        expect(validateFileSize).toHaveBeenCalledWith(
+          file,
+          mockApp,
+          expect.objectContaining({ maxBytes: DOCUMENT_UPLOAD_MAX_BYTES })
         );
       });
 
@@ -262,6 +286,20 @@ describe("DocumentUploadService", () => {
         await expect(service.uploadDocument(file)).rejects.toThrow(
           "Invalid or expired license key"
         );
+      });
+
+      it("throws file-too-large error on 413", async () => {
+        requestUrlMock.mockResolvedValueOnce({
+          status: 413,
+          text: "Request Entity Too Large",
+        });
+
+        const file = createMockFile("test.pdf", "pdf");
+
+        await expect(service.uploadDocument(file)).rejects.toMatchObject({
+          code: ERROR_CODES.FILE_TOO_LARGE,
+          statusCode: 413,
+        });
       });
 
       it("throws on other HTTP errors", async () => {

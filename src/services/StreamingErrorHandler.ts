@@ -1,4 +1,4 @@
-import { SystemSculptError, ERROR_CODES, ErrorCode, getErrorMessage } from "../utils/errors";
+import { SystemSculptError, ERROR_CODES, ErrorCode, getErrorMessage, isAuthFailureMessage } from "../utils/errors";
 
 /**
  * Helper class for handling streaming errors
@@ -60,6 +60,8 @@ export class StreamingErrorHandler {
           let model: string | undefined = data.model;
           const upstreamMessage =
             typeof data.error?.message === 'string' ? data.error.message.trim() : '';
+          const authFailure = isAuthFailureMessage(upstreamMessage);
+          const authStatus = status === 401 || status === 403;
 
           if (!model && typeof data.error?.message === 'string') {
             const match = data.error.message.match(/model\s+`?([\w\-\.\/]+)`?/i);
@@ -80,16 +82,16 @@ export class StreamingErrorHandler {
             model = 'unknown';
           }
 
-          if (status === 404 || (upstreamMessage.includes('model') && upstreamMessage.includes('does not exist'))) {
+          if (authFailure || authStatus) {
+            errorCode = ERROR_CODES.INVALID_LICENSE;
+            errorMessage = upstreamMessage || 'Invalid API key or authentication error.';
+          } else if (status === 404 || (upstreamMessage.includes('model') && upstreamMessage.includes('does not exist'))) {
             errorCode = ERROR_CODES.MODEL_UNAVAILABLE;
             errorMessage = upstreamMessage || `Model ${model} is unavailable with this provider.`;
             shouldResubmit = true;
           } else if (status === 429) {
             errorCode = ERROR_CODES.QUOTA_EXCEEDED;
             errorMessage = data.error.message || 'Rate limit or quota exceeded. Please try again later.';
-          } else if (status === 401) {
-            errorCode = ERROR_CODES.INVALID_LICENSE;
-            errorMessage = data.error.message || 'Invalid API key or authentication error.';
           } else {
             errorCode = (data.error.code || ERROR_CODES.STREAM_ERROR) as ErrorCode;
             errorMessage = data.error.message || 'An error occurred with the provider.';

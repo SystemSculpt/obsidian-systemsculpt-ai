@@ -1,5 +1,6 @@
 import { TFile, requestUrl } from "obsidian";
 import { AudioUploadService } from "../AudioUploadService";
+import { AUDIO_UPLOAD_MAX_BYTES } from "../../constants/uploadLimits";
 
 // Mock requestUrl
 jest.mock("obsidian", () => {
@@ -11,14 +12,22 @@ jest.mock("obsidian", () => {
 });
 
 // Mock file validator
-jest.mock("../../utils/FileValidator", () => ({
-  validateFileSize: jest.fn(async () => true),
-}));
+jest.mock("../../utils/FileValidator", () => {
+  const actual = jest.requireActual("../../utils/FileValidator");
+  return {
+    ...actual,
+    validateFileSize: jest.fn(async () => true),
+  };
+});
 
 // Mock error handling
-jest.mock("../../utils/errorHandling", () => ({
-  logMobileError: jest.fn(),
-}));
+jest.mock("../../utils/errorHandling", () => {
+  const actual = jest.requireActual("../../utils/errorHandling");
+  return {
+    ...actual,
+    logMobileError: jest.fn(),
+  };
+});
 
 const createMockApp = () => {
   return {
@@ -82,6 +91,25 @@ describe("AudioUploadService", () => {
 
         await expect(service.uploadAudio(file)).rejects.toThrow(
           "exceeds the maximum limit"
+        );
+      });
+
+      it("uses the audio upload size limit", async () => {
+        const { validateFileSize } = require("../../utils/FileValidator");
+        validateFileSize.mockResolvedValueOnce(true);
+
+        requestUrlMock.mockResolvedValueOnce({
+          status: 200,
+          text: JSON.stringify({ documentId: "audio-123", status: "queued" }),
+        });
+
+        const file = createMockFile("test.mp3");
+        await service.uploadAudio(file);
+
+        expect(validateFileSize).toHaveBeenCalledWith(
+          file,
+          mockApp,
+          expect.objectContaining({ maxBytes: AUDIO_UPLOAD_MAX_BYTES })
         );
       });
 

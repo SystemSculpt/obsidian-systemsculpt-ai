@@ -9,6 +9,7 @@ import { DebugLogger } from "../../../utils/debugLogger";
 import { errorLogger } from "../../../utils/errorLogger";
 import { AI_PROVIDERS, SERVICE_HEADERS } from "../../../constants/externalServices";
 import { mapAssistantToolCallsForApi, normalizeOpenAITools, transformToolsForModel } from "../../../utils/tooling";
+import { isAuthFailureMessage } from "../../../utils/errors";
 
 export class OpenAICompatibleAdapter extends BaseProviderAdapter {
   getCapabilities(): ProviderCapabilities {
@@ -99,7 +100,7 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
     try {
       await this.getModels();
     } catch (error: any) {
-      if (error.message.includes("401") || error.message.includes("Invalid API key")) {
+      if (isAuthFailureMessage(error?.message) || error?.message?.includes("Invalid API key")) {
         throw new Error("Invalid API key. Please check your API key and try again.");
       }
       throw error;
@@ -407,6 +408,18 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
   }
 
   handleError(error: any): Error {
+    const message =
+      typeof error?.data?.error?.message === "string"
+        ? error.data.error.message
+        : typeof error?.data?.message === "string"
+          ? error.data.message
+          : typeof error?.message === "string"
+            ? error.message
+            : typeof error?.text === "string"
+              ? error.text
+              : "";
+    const authFailure = isAuthFailureMessage(message);
+
     if (error.status === 401) {
       return new Error("Invalid API key. Please check your API key and try again.");
     } else if (error.status === 403) {
@@ -414,7 +427,14 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
     } else if (error.status === 404) {
       return new Error("API endpoint not found. Please check the URL and try again.");
     } else if (error.status === 429) {
+      if (authFailure) {
+        return new Error("Authentication failed due to too many failed attempts. Please check your API key and try again in a few minutes.");
+      }
       return new Error("Rate limit exceeded. Please try again later.");
+    }
+
+    if (authFailure) {
+      return new Error("Invalid API key. Please check your API key and try again.");
     }
     
     return new Error(

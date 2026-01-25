@@ -4,6 +4,7 @@
 
 - Confirm your provider API key and endpoint in **Overview & Setup**.
 - Some providers require specific base URLs or headers; verify the provider’s docs.
+- If you see “API error 429: too many authentication failures,” update your API key/license and retry after a few minutes (the provider may temporarily lock out repeated failed auth attempts).
 - If you’re on mobile, some transports/streaming behaviors differ; try switching models/providers to isolate the issue.
 
 ## Chat can’t stream / weird partial output

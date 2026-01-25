@@ -47,6 +47,29 @@ export const SUPPORTED_LANGUAGES: Record<string, string> = {
   "mr": "Marathi"
 };
 
+export const normalizeLanguageCode = (code: string): string => {
+  return (code || "").trim().toLowerCase().replace(/_/g, "-");
+};
+
+export const getBaseLanguageCode = (code: string): string => {
+  const normalized = normalizeLanguageCode(code);
+  return normalized.split("-")[0] || normalized;
+};
+
+export const areLanguageCodesEquivalent = (left: string, right: string): boolean => {
+  const leftNormalized = normalizeLanguageCode(left);
+  const rightNormalized = normalizeLanguageCode(right);
+  if (!leftNormalized || !rightNormalized) return false;
+  if (leftNormalized === rightNormalized) return true;
+  return getBaseLanguageCode(leftNormalized) === getBaseLanguageCode(rightNormalized);
+};
+
 export const getLanguageName = (code: string): string => {
-  return SUPPORTED_LANGUAGES[code] || code;
+  const raw = (code || "").trim();
+  if (!raw) return raw;
+
+  const normalized = normalizeLanguageCode(raw);
+  const base = getBaseLanguageCode(normalized);
+
+  return SUPPORTED_LANGUAGES[normalized] || SUPPORTED_LANGUAGES[base] || raw;
 };

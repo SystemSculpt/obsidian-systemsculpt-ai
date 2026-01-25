@@ -1,0 +1,2 @@
+export const DOCUMENT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+export const AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;

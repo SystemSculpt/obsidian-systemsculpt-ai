@@ -118,6 +118,29 @@ describe("FileValidator", () => {
         expect.any(Object)
       );
     });
+
+    it("supports custom max size and labels", async () => {
+      const mockFile = {
+        name: "custom.txt",
+        stat: { size: 2048 },
+      } as unknown as TFile;
+
+      await validateFileSize(mockFile, mockApp, {
+        maxBytes: 1024,
+        maxLabel: "1 KB",
+        title: "Custom Limit",
+        description: "Custom description",
+      });
+
+      expect(showPopup).toHaveBeenCalledWith(
+        mockApp,
+        expect.stringContaining("maximum allowed size is 1 KB"),
+        expect.objectContaining({
+          title: "Custom Limit",
+          description: "Custom description",
+        })
+      );
+    });
   });
 
   describe("validateBrowserFileSize", () => {
@@ -177,6 +200,24 @@ describe("FileValidator", () => {
           description: "Please reduce the file size or choose a smaller file.",
           primaryButton: "OK",
         })
+      );
+    });
+
+    it("supports custom max size for browser files", async () => {
+      const mockFile = {
+        name: "browser.txt",
+        size: 2048,
+      } as File;
+
+      await validateBrowserFileSize(mockFile, mockApp, {
+        maxBytes: 1024,
+        maxLabel: "1 KB",
+      });
+
+      expect(showPopup).toHaveBeenCalledWith(
+        mockApp,
+        expect.stringContaining("maximum allowed size is 1 KB"),
+        expect.any(Object)
       );
     });
   });

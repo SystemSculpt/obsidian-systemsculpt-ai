@@ -1,6 +1,7 @@
 import { App, TFile, requestUrl } from "obsidian";
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
-import { validateFileSize } from "../utils/FileValidator";
+import { validateFileSize, formatFileSize } from "../utils/FileValidator";
+import { DOCUMENT_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 import {
   getDocumentMimeType,
   normalizeFileExtension,
@@ -36,6 +37,7 @@ export class DocumentUploadService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     try {
+      const maxSizeLabel = formatFileSize(DOCUMENT_UPLOAD_MAX_BYTES);
       // Check if license is valid
       if (!this.licenseKey?.trim()) {
         throw new SystemSculptError(
@@ -46,10 +48,13 @@ export class DocumentUploadService {
       }
 
       // Validate file size first
-      const isValidSize = await validateFileSize(file, this.app);
+      const isValidSize = await validateFileSize(file, this.app, {
+        maxBytes: DOCUMENT_UPLOAD_MAX_BYTES,
+        maxLabel: maxSizeLabel,
+      });
       if (!isValidSize) {
         throw new SystemSculptError(
-          "File size exceeds the maximum limit of 25MB",
+          `File size exceeds the maximum limit of ${maxSizeLabel}`,
           ERROR_CODES.FILE_TOO_LARGE,
           413
         );
@@ -125,6 +130,13 @@ export class DocumentUploadService {
             "Invalid or expired license key",
             ERROR_CODES.INVALID_LICENSE,
             403
+          );
+        }
+        if (response.status === 413) {
+          throw new SystemSculptError(
+            `File size exceeds the maximum limit of ${maxSizeLabel}`,
+            ERROR_CODES.FILE_TOO_LARGE,
+            413
           );
         }
         throw new SystemSculptError(

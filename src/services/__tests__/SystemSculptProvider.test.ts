@@ -56,6 +56,22 @@ describe("SystemSculptProvider", () => {
     });
   });
 
+  it("treats authentication failures on 429 as LICENSE_INVALID", async () => {
+    httpRequest.mockRejectedValue({
+      status: 429,
+      text: JSON.stringify({ error: "too many authentication failures" }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const provider = new SystemSculptProvider("bad-license");
+
+    await expect(provider.generateEmbeddings(["valid input"])).rejects.toMatchObject({
+      status: 429,
+      code: "LICENSE_INVALID",
+      licenseRelated: true,
+    });
+  });
+
   it("splits client-side batches larger than 25 texts before contacting the API", async () => {
     httpRequest.mockImplementation(({ body }: { body: string }) => {
       const payload = JSON.parse(body);
