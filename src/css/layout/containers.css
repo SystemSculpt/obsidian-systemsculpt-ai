@@ -1,0 +1,567 @@
+/**
+ * Container Components
+ * 
+ * Styles for layout containers and content wrappers
+ */
+
+.systemsculpt-action-container {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: center;
+  z-index: 10;
+}
+
+/* Reasoning container styles removed - using unified collapsible drawer */
+
+.systemsculpt-response-container {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.systemsculpt-response-container {
+  max-height: 200px;
+}
+
+.systemsculpt-checkbox-container {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-is-enabled .systemsculpt-checkbox-toggle {
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-checkbox-container.systemsculpt-is-enabled .systemsculpt-checkbox-toggle:before {
+  transform: translateX(20px);
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle {
+  background-color: var(--background-modifier-border);
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle:before {
+  animation: bounce 1s infinite;
+}
+
+.systemsculpt-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  margin: var(--size-4-2) 0;
+  position: relative;
+}
+
+.systemsculpt-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  margin: 16px 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active
+  .systemsculpt-drag-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-messages-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 0.75rem 0.75rem 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.systemsculpt-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.systemsculpt-model-icon-container {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--interactive-accent);
+  border-radius: 6px;
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-model-icon-container svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-message-container {
+  padding: 8px 0;
+}
+
+.systemsculpt-model-icon-container svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  margin: var(--size-4-2) 0;
+  position: relative;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle {
+  background-color: var(--background-modifier-border);
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle:before {
+  animation: bounce 1s infinite;
+}
+
+.systemsculpt-context-action-container {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.systemsculpt-content-container.systemsculpt-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.systemsculpt-custom-model-name-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.systemsculpt-edit-button-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-scroll-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.systemsculpt-license-container .systemsculpt-setting-item-control {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.systemsculpt-license-container .systemsculpt-setting-item-control input {
+  flex: 1;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  gap: 1rem;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.systemsculpt-stream-container {
+  display: inline;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.systemsculpt-stream-container > * {
+  display: inline;
+}
+
+.systemsculpt-stream-container p {
+  display: inline;
+  margin: 0;
+}
+
+.systemsculpt-extension-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.systemsculpt-extension-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-prompt-creation-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+/* Removed - using unified collapsible drawer */
+
+.systemsculpt-stream-container p {
+  display: inline;
+  margin: 0;
+}
+
+.systemsculpt-stream-container p {
+  display: inline;
+  margin: 0;
+}
+
+.systemsculpt-popup-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: color-mix(in srgb, rgb(0, 0, 0) 50%, var(--ss-layer-base));
+  z-index: 1000;
+  padding: 16px;
+  animation: popup-fade-in 0.2s ease-out;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing {
+  animation: popup-fade-out 0.2s ease-out forwards;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
+  animation: popup-slide-down 0.2s ease-out forwards;
+}
+
+.systemsculpt-textarea-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-modal-button-container button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-results-container {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  min-width: 300px;
+  overflow: hidden;
+}
+
+/* Removed - using unified collapsible drawer */
+
+/* Reasoning container styles removed - using unified collapsible drawer */
+
+/* Reasoning container styles removed - using unified collapsible drawer */
+  transform: translateY(-4px);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-input-container {
+  position: relative;
+  width: 100%;
+}
+
+
+.systemsculpt-modal-button-container button:not(.systemsculpt-mod-cta) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+}
+
+.systemsculpt-template-content-container,
+.systemsculpt-note-preview {
+  height: 120px;
+}
+
+.systemsculpt-template-content-container,
+.systemsculpt-note-preview {
+  height: 120px;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
+  animation: popup-slide-down 0.2s ease-out forwards;
+}
+
+.systemsculpt-model-message-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-preview-container {
+  position: fixed;
+  z-index: 1000;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  pointer-events: none;
+  max-width: min(800px, 80vw);
+  max-height: min(600px, 80vh);
+  overflow: hidden;
+}
+
+.systemsculpt-stream-container > * {
+  display: inline;
+}
+
+.systemsculpt-checkbox-container.systemsculpt-testing .systemsculpt-checkbox-toggle:before {
+  animation: bounce 1s infinite;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing {
+  animation: popup-fade-out 0.2s ease-out forwards;
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
+  animation: popup-slide-down 0.2s ease-out forwards;
+}
+
+.systemsculpt-template-content-container {
+  height: 200px;
+  position: relative;
+  border-radius: 0;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+
+.systemsculpt-template-content-container,
+.systemsculpt-note-preview {
+  height: 120px;
+}
+
+.systemsculpt-template-content-container,
+.systemsculpt-note-preview {
+  height: 120px;
+}
+
+.systemsculpt-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--background-primary);
+  position: relative;
+  padding: 0 0 var(--systemsculpt-status-bar-offset, 0px) 0;
+  margin: 0;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active
+  .systemsculpt-drag-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-model-selection-container {
+  padding: 12px;
+}
+
+.systemsculpt-preset-button-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+.systemsculpt-license-container .systemsculpt-setting-item-control input {
+  flex: 1;
+}
+
+.systemsculpt-notice-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.ss-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.systemsculpt-sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.systemsculpt-split-container {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+
+.systemsculpt-content-container {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.systemsculpt-content-container.systemsculpt-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.systemsculpt-modal-button-container button {
+  padding: var(--size-4-1) var(--size-4-3);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  transition: all 0.15s ease-in-out;
+}
+
+.systemsculpt-modal-button-container button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+}
+
+.systemsculpt-modal-button-container button:not(.systemsculpt-mod-cta) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-chat-sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.systemsculpt-model-name-container {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0px;
+  padding: 1px 0;
+}
+
+.systemsculpt-model-name-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.systemsculpt-modal-button-container button {
+  padding: var(--size-4-1) var(--size-4-3);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  transition: all 0.15s ease-in-out;
+}
+
+.systemsculpt-modal-button-container button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+}
+
+.systemsculpt-modal-button-container button:not(.systemsculpt-mod-cta) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-preview-pdf-container {
+  width: 100%;
+  height: 70vh;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.systemsculpt-settings-info-container {
+  width: 100%;
+  max-width: min(800px, 95%);
+  margin: 0 auto 16px;
+  text-align: center;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  padding: 0 8px;
+}
+
+.systemsculpt-settings-link {
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.systemsculpt-settings-link:hover {
+  color: var(--interactive-accent);
+}

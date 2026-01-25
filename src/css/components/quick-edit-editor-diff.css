@@ -1,0 +1,52 @@
+/* Quick Edit – in-editor diff overlay (CodeMirror) */
+
+.ss-qe-editor-diff-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 2px 10px;
+  border-left: 3px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 75%, transparent);
+  font-family: var(--font-interface);
+}
+
+.ss-qe-editor-diff-actions button {
+  flex: 0 0 auto;
+  margin: 0 !important;
+}
+
+.ss-qe-editor-diff-actions button + button {
+  margin-left: 10px !important;
+}
+
+.ss-qe-editor-diff-widget {
+  display: block;
+  margin: 0;
+  padding: 0;
+}
+
+.ss-qe-editor-diff-widget__code {
+  display: block;
+  padding: 2px 10px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  border-left: 3px solid transparent;
+}
+
+.ss-qe-editor-diff-widget--added .ss-qe-editor-diff-widget__code {
+  background: color-mix(in srgb, rgb(var(--color-green-rgb, 46, 204, 113)) 10%, var(--background-primary));
+  border-left-color: var(--color-green);
+  color: var(--text-normal);
+}
+
+.ss-qe-editor-diff-widget--removed .ss-qe-editor-diff-widget__code {
+  background: color-mix(in srgb, rgb(var(--color-red-rgb, 231, 76, 60)) 10%, var(--background-primary));
+  border-left-color: var(--color-red);
+  color: var(--text-normal);
+  text-decoration: line-through;
+  opacity: 0.8;
+}

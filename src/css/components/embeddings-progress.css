@@ -1,0 +1,210 @@
+/**
+ * SystemSculpt Embeddings Progress Notification Styles
+ * 
+ * Rich progress UI with pause/resume/cancel controls
+ */
+
+.systemsculpt-progress-notification {
+  max-width: 400px;
+  min-width: 300px;
+  /* Ensure notifications don't overlap settings containers */
+  position: relative;
+  z-index: 500; /* Lower than modal overlays */
+}
+
+.systemsculpt-progress-notification .notice-content {
+  padding: 0;
+}
+
+.systemsculpt-progress-notification .progress-container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header */
+.systemsculpt-progress-notification .progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.systemsculpt-progress-notification .progress-title {
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+.systemsculpt-progress-notification .progress-close {
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-progress-notification .progress-close:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Progress Bar */
+.systemsculpt-progress-notification .progress-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-progress-notification .progress-bar {
+  height: 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.systemsculpt-progress-notification .progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, 
+    var(--interactive-accent) 0%, 
+    var(--interactive-accent-hover) 100%);
+  border-radius: 4px;
+  transition: transform 0.3s ease;
+  transform-origin: left center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Removed animated stripes - clean progress bar with no distractions */
+
+.systemsculpt-progress-notification .progress-text {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Message Area */
+.systemsculpt-progress-notification .progress-message {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  white-space: pre-line;
+  line-height: 1.4;
+  max-height: 60px;
+  overflow-y: auto;
+}
+
+/* Action Buttons */
+.systemsculpt-progress-notification .progress-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.systemsculpt-progress-notification .progress-actions button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: var(--font-ui-small);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-progress-notification .progress-actions button span {
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-progress-notification .progress-actions button.mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+}
+
+.systemsculpt-progress-notification .progress-actions button.mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-progress-notification .progress-actions button.mod-warning {
+  background-color: var(--ss-layer-base);
+  color: var(--text-error);
+  border: 1px solid var(--text-error);
+}
+
+.systemsculpt-progress-notification .progress-actions button.mod-warning:hover {
+  background-color: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+/* Completion State */
+.systemsculpt-progress-complete {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.systemsculpt-progress-complete .complete-icon {
+  color: var(--text-success);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-progress-complete .complete-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.systemsculpt-progress-complete .complete-message {
+  flex: 1;
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+/* Error State */
+.systemsculpt-progress-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.systemsculpt-progress-error .error-icon {
+  color: var(--text-error);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-progress-error .error-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.systemsculpt-progress-error .error-message {
+  flex: 1;
+  font-size: var(--font-ui-medium);
+  color: var(--text-error);
+}
+
+/* Mobile Adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-progress-notification {
+    max-width: 90vw;
+  }
+  
+  .systemsculpt-progress-notification .progress-container {
+    padding: 12px;
+  }
+  
+  .systemsculpt-progress-notification .progress-actions button {
+    padding: 8px;
+    font-size: var(--font-ui-smaller);
+  }
+}

@@ -1,0 +1,334 @@
+/* SystemSculpt Quick Edit Widget Styling */
+
+.systemsculpt-quick-edit-widget {
+  /* Inherits base floating widget styles */
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+/* Input Section */
+.ss-quick-edit-input-section {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ss-quick-edit-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  font-family: var(--font-interface);
+  outline: none;
+  transition: border-color 0.2s ease;
+  resize: vertical;
+  line-height: 1.4;
+  min-height: 72px;
+}
+
+.ss-quick-edit-input:focus {
+  border-color: var(--text-accent);
+  box-shadow: 0 0 0 2px var(--text-accent-hover);
+}
+
+.ss-quick-edit-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: var(--background-secondary);
+}
+
+.ss-quick-edit-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.ss-quick-edit-submit-btn {
+  padding: 8px 16px;
+  background-color: var(--text-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  white-space: nowrap;
+}
+
+.ss-quick-edit-submit-btn:hover:not(:disabled) {
+  background-color: var(--text-accent-hover);
+  transform: translateY(-1px);
+}
+
+.ss-quick-edit-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ss-quick-edit-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ss-quick-edit-cancel-btn {
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ss-quick-edit-cancel-btn:hover:not(:disabled) {
+  background-color: var(--background-modifier-hover);
+}
+
+.ss-quick-edit-confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.ss-quick-edit-confirm-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--text-success);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ss-quick-edit-confirm-btn:hover:not(:disabled) {
+  background-color: color-mix(in srgb, rgb(46, 204, 113) 85%, var(--ss-layer-base));
+}
+
+.ss-quick-edit-discard-btn {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ss-quick-edit-discard-btn:hover:not(:disabled) {
+  background-color: var(--background-modifier-hover);
+}
+
+.ss-quick-edit-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.ss-quick-edit-status--success {
+  color: var(--text-success);
+}
+
+.ss-quick-edit-status--error {
+  color: var(--text-error);
+}
+
+/* Activity Log */
+.ss-quick-edit-activity-log {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ss-quick-edit-activity-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-quick-edit-activity-entry:last-child {
+  border-bottom: none;
+}
+
+.ss-quick-edit-activity-entry--active {
+  color: var(--text-normal);
+}
+
+.ss-quick-edit-activity-check {
+  color: var(--text-success);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.ss-quick-edit-activity-spinner {
+  color: var(--text-accent);
+  font-size: 11px;
+  flex-shrink: 0;
+  animation: ss-quick-edit-spin 1s linear infinite;
+}
+
+@keyframes ss-quick-edit-spin {
+  0% { content: "◐"; }
+  25% { content: "◓"; }
+  50% { content: "◑"; }
+  75% { content: "◒"; }
+  100% { content: "◐"; }
+}
+
+.ss-quick-edit-activity-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Proposal Summary */
+.ss-quick-edit-proposal-summary {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--text-accent) 10%, var(--background-primary));
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text-accent) 30%, var(--background-modifier-border));
+}
+
+.ss-quick-edit-proposal-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.ss-quick-edit-proposal-item {
+  font-size: 13px;
+  color: var(--text-normal);
+  padding: 3px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Assistant response */
+.ss-quick-edit-response,
+.ss-quick-edit-modal__response {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-quick-edit-response-header,
+.ss-quick-edit-modal__response-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.ss-quick-edit-response-body,
+.ss-quick-edit-modal__response-body {
+  font-size: 13px;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+
+.ss-quick-edit-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ss-quick-edit-modal__input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  font-family: var(--font-interface);
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 100px;
+  transition: border-color 0.2s ease;
+}
+
+.ss-quick-edit-modal__input:focus {
+  border-color: var(--text-accent);
+  box-shadow: 0 0 0 2px var(--text-accent-hover);
+}
+
+.ss-quick-edit-modal__status {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.ss-quick-edit-modal__status--success {
+  color: var(--text-success);
+}
+
+.ss-quick-edit-modal__status--error {
+  color: var(--text-error);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-quick-edit-widget {
+    width: calc(100vw - 20px) !important;
+    max-width: none;
+    left: 10px !important;
+    right: 10px !important;
+    bottom: 10px !important;
+  }
+  
+  .ss-quick-edit-input-section {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .ss-quick-edit-input {
+    width: 100%;
+  }
+  
+  .ss-quick-edit-action-row,
+  .ss-quick-edit-confirm-row {
+    flex-direction: column;
+  }
+
+  .ss-quick-edit-submit-btn,
+  .ss-quick-edit-cancel-btn,
+  .ss-quick-edit-confirm-btn,
+  .ss-quick-edit-discard-btn {
+    width: 100%;
+  }
+}
+
+/* Focus trap for accessibility */
+.systemsculpt-quick-edit-widget:focus-within {
+  box-shadow: 0 6px 30px color-mix(in srgb, rgb(0, 0, 0) 25%, var(--ss-layer-base));
+}

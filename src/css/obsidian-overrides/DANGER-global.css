@@ -1,0 +1,20 @@
+/**
+ * DANGER: Global Obsidian Overrides
+ *
+ * THIS FILE SHOULD REMAIN EMPTY.
+ *
+ * If you need to add CSS that affects Obsidian's global UI (not scoped to
+ * SystemSculpt views), you MUST:
+ *
+ * 1. Get explicit approval before adding any styles here
+ * 2. Document WHY this global override is absolutely necessary
+ * 3. Ensure it cannot be achieved with a scoped selector
+ * 4. Test thoroughly that it doesn't break other plugins or Obsidian's UI
+ *
+ * Any CSS added here is a potential source of bugs like the folder
+ * indentation issue (favorite-toggle.css:477 from Dec 2025).
+ *
+ * The CSS lint script (npm run lint:css) will flag problematic selectors.
+ */
+
+/* NO GLOBAL OVERRIDES - KEEP THIS FILE EMPTY */

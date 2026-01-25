@@ -1,0 +1,10 @@
+{
+  "pluginTargets": [
+    {
+      "path": "/absolute/path/to/your/vault/.obsidian/plugins/systemsculpt-ai"
+    }
+  ],
+  "mirrorTargets": [
+    { "path": "/absolute/path/to/another/folder/systemsculpt-ai-build" }
+  ]
+}

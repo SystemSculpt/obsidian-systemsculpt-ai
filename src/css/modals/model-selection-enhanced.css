@@ -1,0 +1,800 @@
+/**
+ * Model Selection Modal - Native Obsidian Style
+ * 
+ * Minimal styling that closely matches Obsidian's native modal appearance
+ */
+
+/* === Base Modal - Fix height issues === */
+/* Target the actual modal container more specifically */
+.modal-container .systemsculpt-model-selection-modal.ss-modal,
+.systemsculpt-model-selection-modal.ss-modal {
+  height: calc(85vh - 40px) !important; /* Account for modal margins */
+  max-height: calc(85vh - 40px) !important;
+  min-height: 400px;
+  width: 600px;
+  max-width: 90vw;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+/* Override the large modal fixed height completely */
+.modal-container .systemsculpt-model-selection-modal.ss-modal--large,
+.systemsculpt-model-selection-modal.ss-modal--large {
+  height: calc(85vh - 40px) !important;
+}
+
+/* Ensure Obsidian's modal class doesn't interfere */
+.modal.mod-dim .systemsculpt-model-selection-modal {
+  height: calc(85vh - 40px) !important;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__header {
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; /* Critical for flexbox children */
+  overflow: hidden;
+}
+
+/* Custom content (filters) should not grow */
+.systemsculpt-model-selection-modal .ss-modal__custom-content {
+  flex-shrink: 0;
+}
+
+/* Search bar should not grow */
+.systemsculpt-model-selection-modal .ss-modal__search {
+  flex-shrink: 0;
+}
+
+/* Fix for bottom content being cut off - make list properly scrollable */
+.systemsculpt-model-selection-modal .ss-modal__list {
+  flex: 1 1 auto;
+  overflow-y: scroll !important; /* Force scrollbar to always show */
+  overflow-x: hidden;
+  min-height: 0; /* Critical for proper scrolling */
+  max-height: calc(85vh - 200px) !important; /* Ensure it doesn't exceed available space */
+  padding-bottom: 24px !important; /* Even more padding to ensure last item is visible */
+  margin-bottom: 0;
+  position: relative; /* Ensure proper stacking context */
+}
+
+/* Add extra safety margin at the bottom of the list */
+.systemsculpt-model-selection-modal .ss-modal__list::after {
+  content: "";
+  display: block;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Ensure the modal footer doesn't overlap content */
+.systemsculpt-model-selection-modal .ss-modal__footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  z-index: 10;
+}
+
+/* === Filter Bar === */
+.ss-model-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  min-height: 40px;
+  overflow: hidden; /* Prevent horizontal scroll */
+}
+
+.ss-model-filter-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0; /* Allow shrinking */
+}
+
+.ss-model-filter-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.ss-model-filter-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: nowrap; /* Prevent wrapping */
+  overflow: hidden; /* Hide overflow instead of scrolling */
+}
+
+.ss-model-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* === Provider Selection Button - Native Style === */
+.ss-provider-selection-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.ss-provider-selection-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.ss-provider-selection-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.ss-provider-selection-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ss-provider-selection-text {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.ss-provider-selection-label {
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ss-provider-selection-count {
+  font-size: 9px;
+  color: var(--text-faint);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ss-provider-selection-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.ss-provider-selection-arrow svg {
+  width: 10px;
+  height: 10px;
+  color: var(--text-faint);
+  transition: transform 0.1s ease;
+}
+
+.ss-provider-selection-button:hover .ss-provider-selection-arrow svg {
+  transform: translateX(1px);
+}
+
+/* === Provider Selection Modal === */
+.systemsculpt-provider-selection-description {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+
+.systemsculpt-provider-selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+/* === Provider Toggle Items === */
+.systemsculpt-provider-toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.systemsculpt-provider-toggle-item:hover {
+  background: var(--background-secondary);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-provider-toggle-item.is-selected {
+  background: var(--background-primary-alt);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.systemsculpt-provider-toggle-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.systemsculpt-provider-toggle-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-provider-toggle-item.is-selected .systemsculpt-provider-toggle-icon {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-provider-toggle-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.systemsculpt-provider-toggle-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.systemsculpt-provider-toggle-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-provider-toggle-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-provider-toggle-button {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-provider-toggle-button:hover {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary);
+}
+
+.systemsculpt-provider-toggle-button.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* === Modal Button Container === */
+.systemsculpt-modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* === Favorites Count === */
+.ss-favorites-count {
+  font-size: 9px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, rgb(255, 255, 255) 20%, var(--ss-layer-base));
+  color: var(--text-on-accent);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 12px;
+  text-align: center;
+  margin-left: 2px;
+}
+
+/* When favorites button is not active, use different styling */
+.ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  color: var(--text-muted);
+}
+
+.theme-dark .ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: color-mix(in srgb, rgb(255, 255, 255) 10%, var(--ss-layer-base));
+}
+
+
+
+/* === Refresh Button === */
+.ss-model-refresh-button {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ss-model-refresh-button:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.ss-model-refresh-button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ss-spin {
+  animation: ss-spin 1s linear infinite;
+}
+
+@keyframes ss-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* === Favorites Button === */
+.ss-favorites-button .systemsculpt-favorites-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.1s ease;
+}
+
+.ss-favorites-button .systemsculpt-favorites-filter:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ss-favorites-button .systemsculpt-favorites-filter.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ss-favorites-button .systemsculpt-favorites-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.ss-favorites-button .systemsculpt-favorites-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* === Search Area === */
+.systemsculpt-model-selection-modal .ss-modal__search {
+  margin: 8px 16px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__search-input {
+  height: 32px;
+  padding: 0 32px 0 32px;
+  border-radius: 16px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  background: var(--background-primary);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__search-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__search-icon {
+  left: 12px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__search-clear {
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background-modifier-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__search-clear:hover {
+  background: var(--background-modifier-hover-more);
+}
+
+/* === Model List === */
+.systemsculpt-model-selection-modal .ss-modal__list {
+  padding: 8px 16px 24px 16px; /* Increased bottom padding */
+  gap: 4px;
+  background: var(--background-primary);
+  /* Remove duplicate styles since we set them above */
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--background-primary);
+  transition: all 0.1s ease;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item:hover {
+  border-color: var(--interactive-accent) !important;
+  background: var(--background-secondary) !important;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active {
+  border-color: var(--interactive-accent) !important;
+  background: var(--background-primary-alt) !important;
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+  position: relative;
+  animation: ss-selected-pulse 0.3s ease-out;
+}
+
+@keyframes ss-selected-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 2px var(--interactive-accent);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 4px var(--interactive-accent);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 2px var(--interactive-accent);
+  }
+}
+
+/* Fix: Selected models should also show hover effects */
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active:hover {
+  background: var(--background-secondary-alt) !important;
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+/* Add "SELECTED" badge to the currently active model */
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active::before {
+  content: "SELECTED";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  z-index: 2;
+  box-shadow: 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+}
+
+/* Adjust existing badges when "SELECTED" badge is present */
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active .provider-badge {
+  margin-right: 60px; /* Make room for the SELECTED badge */
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: all 0.1s ease;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Enhanced icon styling for selected model */
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active .ss-modal__item-icon {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-active .ss-modal__item-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item-description {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* Special styling for current model when shown outside filter results */
+.systemsculpt-model-selection-modal .ss-modal__item.ss-current-model:not(.ss-active) {
+  opacity: 0.85;
+  border-style: dashed;
+  border-color: var(--interactive-accent-hover);
+  background: var(--background-secondary);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-current-model:not(.ss-active)::after {
+  content: "Current Model (filtered out)";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  z-index: 2;
+}
+
+/* === Provider Badges === */
+.systemsculpt-model-selection-modal .provider-badge {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-model-selection-modal .provider-badge[data-badge="New"] {
+  background: var(--color-green);
+  color: white;
+  border-color: var(--color-green);
+}
+
+.systemsculpt-model-selection-modal .provider-badge[data-badge="Beta"] {
+  background: var(--color-orange);
+  color: white;
+  border-color: var(--color-orange);
+}
+
+.systemsculpt-model-selection-modal .provider-badge[data-badge="Agent"] {
+  background: var(--color-purple);
+  color: white;
+  border-color: var(--color-purple);
+}
+
+.systemsculpt-model-selection-modal .provider-badge[data-badge="Legacy"] {
+  background: var(--color-red);
+  color: white;
+  border-color: var(--color-red);
+  opacity: 0.8;
+}
+
+/* === Empty State === */
+.systemsculpt-model-selection-modal .systemsculpt-favorites-empty-state {
+  margin: 24px;
+  padding: 32px;
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* Ensure empty state doesn't break scrolling */
+.systemsculpt-model-selection-modal .ss-modal__empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-model-selection-modal .systemsculpt-favorites-empty-state svg {
+  width: 32px;
+  height: 32px;
+  color: var(--text-faint);
+  margin-bottom: 12px;
+}
+
+.systemsculpt-model-selection-modal .systemsculpt-favorites-empty-state h4 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.systemsculpt-model-selection-modal .systemsculpt-favorites-empty-state p {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* === Mobile Responsiveness === */
+@media (max-width: 768px) {
+  .systemsculpt-model-selection-modal.ss-modal {
+    width: 95vw;
+    height: 80vh;
+    max-height: none;
+  }
+  
+  .ss-model-filter-bar {
+    padding: 6px 8px;
+    gap: 4px;
+    flex-direction: column;
+    min-height: auto;
+  }
+  
+  .ss-model-filter-section {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .ss-model-filter-controls {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  
+  .ss-provider-filter-button {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+  
+  .ss-provider-label {
+    display: none; /* Hide labels on mobile */
+  }
+  
+  .ss-model-refresh-button {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+  
+  .ss-model-refresh-button span:last-child {
+    display: none; /* Hide text on mobile */
+  }
+  
+  /* Keep favorites text visible on mobile */
+  .ss-favorites-button .systemsculpt-favorites-label {
+    display: inline; /* Show favorites text on mobile */
+  }
+  
+  /* Make favorites button consistent with other buttons on mobile */
+  .ss-favorites-button .systemsculpt-favorites-filter {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ss-model-filter-bar {
+    padding: 4px 6px;
+  }
+  
+  .systemsculpt-model-selection-modal .ss-modal__item {
+    padding: 6px 8px;
+  }
+  
+  .systemsculpt-model-selection-modal .ss-modal__item-title {
+    font-size: 13px;
+  }
+  
+  .systemsculpt-model-selection-modal .ss-modal__item-description {
+    font-size: 11px;
+  }
+}
+
+/* Force full opacity on all model items */
+.systemsculpt-model-selection-modal .ss-modal__item,
+.systemsculpt-model-selection-modal .ss-modal__item.is-favorite,
+.systemsculpt-model-selection-modal .ss-modal__item:not(.is-favorite),
+.systemsculpt-model-selection-modal.favorites-active .ss-modal__item,
+.systemsculpt-model-selection-modal.show-favorites .ss-modal__item {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Additional fix to ensure proper scrolling */
+.systemsculpt-model-selection-modal {
+  /* Ensure the modal container itself is properly sized */
+  .modal {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 85vh !important;
+    max-height: 85vh !important;
+  }
+  
+  /* Debug helper - add visible scrollbar to verify scrolling works */
+  .ss-modal__list::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  .ss-modal__list::-webkit-scrollbar-track {
+    background: var(--background-modifier-border);
+  }
+  
+  .ss-modal__list::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 4px;
+  }
+  
+  .ss-modal__list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-normal);
+  }
+}

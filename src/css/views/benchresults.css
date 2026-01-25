@@ -1,0 +1,244 @@
+/* Benchmark Results View */
+
+.systemsculpt-benchresults-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Header */
+.benchresults-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.benchresults-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.benchresults-refresh-btn {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.benchresults-refresh-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.benchresults-refresh-btn.is-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Content */
+.benchresults-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* Leaderboard list */
+.benchresults-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Entry */
+.benchresults-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.1s ease;
+}
+
+.benchresults-entry:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Rank */
+.benchresults-rank {
+  width: 28px;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.benchresults-rank-first {
+  color: var(--text-accent);
+}
+
+/* Model info */
+.benchresults-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.benchresults-model {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.benchresults-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.benchresults-date {
+  white-space: nowrap;
+}
+
+.benchresults-points {
+  white-space: nowrap;
+}
+
+/* SVG bar container */
+.benchresults-bar-container {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.benchresults-svg-bar {
+  display: block;
+}
+
+.benchresults-bar-bg {
+  fill: var(--background-modifier-border);
+}
+
+.benchresults-bar-fill {
+  transition: width 0.2s ease;
+}
+
+.benchresults-bar-fill.benchresults-score-high {
+  fill: var(--text-success);
+}
+
+.benchresults-bar-fill.benchresults-score-medium {
+  fill: var(--text-warning);
+}
+
+.benchresults-bar-fill.benchresults-score-low {
+  fill: var(--text-error);
+}
+
+/* Score */
+.benchresults-score {
+  width: 38px;
+  flex-shrink: 0;
+  text-align: right;
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.benchresults-score.benchresults-score-high {
+  color: var(--text-success);
+}
+
+.benchresults-score.benchresults-score-medium {
+  color: var(--text-warning);
+}
+
+.benchresults-score.benchresults-score-low {
+  color: var(--text-error);
+}
+
+/* Empty state */
+.benchresults-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.benchresults-empty-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  color: var(--text-faint);
+}
+
+.benchresults-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.benchresults-empty-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.benchresults-empty-desc {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Error state */
+.benchresults-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.benchresults-error-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  color: var(--text-error);
+}
+
+.benchresults-error-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.benchresults-error-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-error);
+  margin-bottom: 4px;
+}
+
+.benchresults-error-message {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 300px;
+  word-break: break-word;
+}
+
+/* Loading state */
+.benchresults-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+}

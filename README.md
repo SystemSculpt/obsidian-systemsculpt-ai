@@ -4,12 +4,12 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.4.7-blue.svg)](https://github.com/SystemSculpt/obsidian-systemsculpt-plugin)
+[![Version](https://img.shields.io/badge/version-4.4.7-blue.svg)](https://github.com/systemsculpt/obsidian-systemsculpt-ai)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
 
-[**Get Started**](#-installation) • [**Documentation**](https://systemsculpt.com) • [**Video Tutorials**](https://youtube.com/@SystemSculpt)
+[**Get Started**](#-installation) • [**Docs (Repo)**](docs/README.md) • [**Website**](https://systemsculpt.com) • [**Video Tutorials**](https://youtube.com/@SystemSculpt)
 
 </div>
 
@@ -40,7 +40,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 - **Daily Vault automations**
   - Auto-create or remind daily notes with configurable templates and schedules
   - Weekly review prompts and a live status bar with streak, weekly, and monthly activity
-  - Ribbon shortcut with streak badge for instant access to today's note
+  - Commands for opening/creating daily notes and running reviews
 
 - **Models, prompts, templates, titles**
   - Unified model selection across providers; favorites and quick picks
@@ -61,7 +61,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 ## 🧭 Getting started
 
-1) Open Settings → SystemSculpt AI → Models & Prompts
+1) Open Settings → SystemSculpt AI → Overview & Setup
 - Choose a provider (OpenAI, OpenRouter, MiniMax, Anthropic, LM Studio, Ollama, or any OpenAI‑compatible endpoint)
 - Enter your endpoint and API key if required
 
@@ -80,7 +80,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 5) Enable Similar Notes (optional)
 - Settings → Embeddings & Search → Enable, then pick a provider
 - If using a custom endpoint, set API endpoint + key + model (for example: `openrouter/openai/text-embedding-3-small`)
-- Click “Start Now” to process your vault; open the “Similar Notes” panel from the command palette
+- Open the “Similar Notes” panel from the command palette or ribbon; embeddings process in the background as needed
 
 6) Power‑ups
 - Templates: Command palette → “Open Template Selection”
@@ -123,6 +123,7 @@ When Agent Mode is on, the model can request tools that work inside your vault. 
 - Listing and navigation: `list_items`, `open`
 - Search: `find` (by name), `search` (grep)
 - Context & analysis: `context` (manage included files)
+- YouTube: `youtube_transcript` (extract captions/transcript text)
 
 All tools are scoped to your vault with built‑in content limits to keep the UI responsive.
 
@@ -133,9 +134,12 @@ All tools are scoped to your vault with built‑in content limits to keep the UI
 - **Overview & Setup**: connect providers and API keys; activate license if you have one
 - **Models & Prompts**: pick chat/title/post‑processing models; choose prompts; manage favorites
 - **Chat & Templates**: chat defaults, agent mode defaults, template hotkeys
+- **Daily Vault**: daily notes, templates, reminders, streaks, review flows
+- **Automations**: configure and run workflow automations
 - **Embeddings & Search**: enable embeddings, provider and model selection, exclusions, processing controls
 - **Audio & Transcription**: microphone selection, transcription options, post‑processing
 - **Files & Backup**: directories for attachments, recordings, chats, extractions; automatic backups and restore
+- **Data**: imports and external sources (where enabled)
 - **Advanced**: additional controls for power users
 
 ---
@@ -153,7 +157,7 @@ All tools are scoped to your vault with built‑in content limits to keep the UI
 - Open SystemSculpt AI Settings
 - Open SystemSculpt Benchmark
 
-Ribbon icons include Chat, Chat History, Janitor, Similar Notes, and Search.
+Ribbon icons include Chat, Chat History, Janitor, Similar Notes, Search, Meeting Processor, and YouTube Canvas.
 
 ---
 
@@ -183,7 +187,7 @@ Ribbon icons include Chat, Chat History, Janitor, Similar Notes, and Search.
 ### Manual installation
 ```bash
 cd /path/to/vault/.obsidian/plugins/
-git clone https://github.com/SystemSculpt/obsidian-systemsculpt-plugin systemsculpt-ai
+git clone https://github.com/systemsculpt/obsidian-systemsculpt-ai systemsculpt-ai
 cd systemsculpt-ai
 npm install
 npm run build
@@ -235,6 +239,7 @@ MIT License – see `LICENSE`.
 ## 🤝 Community & support
 
 - Docs: `https://systemsculpt.com`
+- Repo docs: `docs/README.md`
 - Videos: `https://youtube.com/@SystemSculpt`
 - Discord: `https://discord.gg/3gNUZJWxnJ`
 - Email: `support@systemsculpt.com`

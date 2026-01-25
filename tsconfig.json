@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "module": "ESNext",
+    "target": "ES2018",
+    "allowJs": true,
+    "noImplicitAny": true,
+    "moduleResolution": "node",
+    "importHelpers": true,
+    "isolatedModules": true,
+    "strictNullChecks": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "typeRoots": [
+      "src/types",
+      "node_modules/@types"
+    ],
+    "paths": {
+      "@/*": ["Nexus/src/*"],
+      "gpt-tokenizer": ["src/types/gpt-tokenizer"],
+      "obsidian": ["node_modules/obsidian"]
+    },
+    "jsx": "react-jsx",
+    "lib": [
+      "DOM",
+      "ES2018"
+    ]
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "../node_modules",
+    "tests",
+    "src/__tests__/**/*",
+    "**/__tests__/**/*",
+    "**/*.test.ts",
+    "research/**"
+  ]
+}

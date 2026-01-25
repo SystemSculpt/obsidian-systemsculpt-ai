@@ -1,0 +1,282 @@
+/**
+ * Progress Modal Component
+ *
+ * Styles for the document conversion progress modal
+ */
+
+/* Main modal container */
+.systemsculpt-progress-modal {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: var(--ss-color-bg-primary, var(--background-primary, #ffffff));
+  border-radius: 12px;
+  padding: 20px;
+  width: 350px;
+  max-width: 90vw;
+  box-shadow: 0 4px 20px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  z-index: 1000; /* Above most elements but not settings modals */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--background-modifier-border);
+  animation: slide-in-right 0.3s ease forwards;
+}
+
+/* Modal header */
+.systemsculpt-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-progress-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0;
+  flex: 1;
+}
+
+.systemsculpt-progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  font-size: 1.4em;
+}
+
+/* Progress bar */
+.systemsculpt-progress-bar-track {
+  width: 100%;
+  height: 10px;
+  background: var(--background-modifier-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.systemsculpt-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 5px;
+  transition: width 0.25s ease;
+  width: 0%;
+}
+
+/* Progress status */
+.systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-normal);
+  font-size: 0.95em;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.systemsculpt-progress-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+.systemsculpt-progress-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-progress-percent {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress steps */
+.systemsculpt-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-progress-step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.systemsculpt-progress-step-text {
+  flex: 1;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+/* Active step */
+.systemsculpt-progress-step.active {
+  background: rgb(var(--interactive-accent-rgb));
+}
+
+.systemsculpt-progress-step.active .systemsculpt-progress-step-icon {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-progress-step.active .systemsculpt-progress-step-text {
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+.systemsculpt-progress-step.error {
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 10%, var(--ss-layer-base));
+  border: 1px solid color-mix(in srgb, rgb(var(--color-red-rgb)) 30%, var(--ss-layer-base));
+}
+
+/* Completed step */
+.systemsculpt-progress-step.completed .systemsculpt-progress-step-icon {
+  background: var(--color-green);
+  color: white;
+}
+
+/* Buttons */
+.systemsculpt-progress-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.systemsculpt-progress-button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+  border: none;
+}
+
+.systemsculpt-progress-button:hover {
+  background: var(--background-modifier-border-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-progress-button.primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-progress-button.primary:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.systemsculpt-progress-detail {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.systemsculpt-progress-detail.is-hidden {
+  display: none;
+}
+
+.systemsculpt-progress-modal.is-complete .systemsculpt-progress-bar {
+  background: var(--text-success);
+}
+
+.systemsculpt-progress-modal.is-error .systemsculpt-progress-bar {
+  background: var(--color-red);
+}
+
+/* Completion dialog */
+.systemsculpt-completion-dialog {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: var(--ss-color-bg-primary, var(--background-primary, #ffffff));
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 20px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--background-modifier-border);
+  max-width: 350px;
+  animation: slide-in-right 0.3s ease forwards;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.systemsculpt-completion-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.systemsculpt-completion-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-green);
+  font-size: 1.4em;
+}
+
+.systemsculpt-completion-title {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0;
+  flex: 1;
+}
+
+.systemsculpt-completion-message {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.systemsculpt-completion-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Animation for spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.systemsculpt-spinner {
+  animation: spin 1s linear infinite;
+}

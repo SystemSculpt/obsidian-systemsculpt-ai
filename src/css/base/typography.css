@@ -1,0 +1,80 @@
+/**
+ * Typography styles for SystemSculpt
+ * 
+ * This file contains typography-related styles that leverage Obsidian's theming system.
+ * These styles provide consistent text formatting across all components.
+ */
+
+/* Base typography */
+.systemsculpt-container {
+  font-family: var(--font-text);
+  font-size: var(--font-ui-medium);
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+/* Headings */
+.systemsculpt-heading-1 {
+  font-size: var(--font-ui-larger);
+  font-weight: var(--font-bold);
+  margin-bottom: 1rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-heading-2 {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+}
+
+.systemsculpt-heading-3 {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-bold);
+  margin-bottom: 0.5rem;
+  color: var(--text-normal);
+}
+
+/* Text styles */
+.systemsculpt-text-normal {
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+.systemsculpt-text-muted {
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-small {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-accent {
+  color: var(--text-accent);
+}
+
+.systemsculpt-text-error {
+  color: var(--text-error);
+}
+
+/* Links */
+.systemsculpt-link {
+  color: var(--text-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.systemsculpt-link:hover {
+  text-decoration: underline;
+}
+
+/* Code blocks */
+.systemsculpt-code {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  background-color: var(--background-secondary);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}

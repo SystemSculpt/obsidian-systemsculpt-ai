@@ -1,0 +1,264 @@
+/**
+ * Tool Call Results - Modal-specific styling
+ *
+ * Simplified styles for tool call result display in modals
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Modal Sections                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__section {
+  margin-bottom: 24px;
+}
+
+.ss-modal__section-header {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-modal__section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-modal__section-title--success {
+  color: var(--text-success);
+}
+
+.ss-modal__section-title--error {
+  color: var(--text-error);
+}
+
+.ss-modal__section-content {
+  padding: 0;
+}
+
+.ss-modal__subsection {
+  margin-bottom: 16px;
+}
+
+.ss-modal__subsection-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Table Display                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ss-modal__table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+}
+
+.ss-modal__table-key {
+  width: 30%;
+  color: var(--text-muted);
+}
+
+.ss-modal__table-value {
+  color: var(--text-normal);
+  word-break: break-word;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Code Display                                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__code {
+  margin: 0;
+  padding: 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-modal__code--scrollable {
+  max-height: clamp(140px, 35vh, 200px);
+  overflow-y: auto;
+}
+
+.ss-modal__code::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ss-modal__code::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.ss-modal__inline-code {
+  padding: 2px 4px;
+  background: var(--background-modifier-form-field);
+  border-radius: 3px;
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Text Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__text--muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Summary Display                                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--background-modifier-form-field);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.ss-modal__summary-text {
+  line-height: 1.4;
+}
+
+.ss-modal__summary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ss-modal__summary-actions .ss-button {
+  margin: 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Grid Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ss-modal__grid-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  transition: background-color 0.2s ease;
+  border: 1px solid var(--ss-layer-base);
+}
+
+.ss-modal__grid-item:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border);
+}
+
+.ss-modal__grid-item--directory {
+  background: var(--background-secondary);
+}
+
+.ss-modal__grid-item--file {
+  background: var(--background-secondary);
+}
+
+.ss-modal__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  List Display                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__list {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.ss-modal__list li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Display                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.ss-modal__error {
+  padding: 0;
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 3%, var(--ss-layer-base));
+  border: 1px solid color-mix(in srgb, rgb(var(--color-red-rgb)) 20%, var(--ss-layer-base));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ss-modal__error-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 5%, var(--ss-layer-base));
+  border-bottom: 1px solid color-mix(in srgb, rgb(var(--color-red-rgb)) 15%, var(--ss-layer-base));
+}
+
+.ss-modal__error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-error);
+}
+
+.ss-modal__error-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ss-modal__error-content {
+  padding: 14px 16px;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Mobile Responsiveness                                    ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (max-width: 600px) {
+  .ss-modal__grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .ss-modal__code--scrollable {
+    max-height: 300px;
+  }
+  
+  .ss-modal__grid-item {
+    padding: 6px 10px;
+  }
+}

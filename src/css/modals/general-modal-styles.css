@@ -1,0 +1,361 @@
+/* General Modal Styles - Replaces All Inline Styles
+ * 
+ * This file contains CSS classes to replace hundreds of inline styles
+ * scattered across modal TypeScript files.
+ */
+
+/* ============================================================================
+   BUTTON CONTAINERS
+   ============================================================================ */
+
+.ss-modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.ss-modal-button-container--centered {
+  justify-content: center;
+}
+
+.ss-modal-button-container--start {
+  justify-content: flex-start;
+}
+
+.ss-modal-button-container--grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+/* ============================================================================
+   FORM ELEMENTS  
+   ============================================================================ */
+
+.ss-modal-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 16px;
+  transition: border-color 0.2s ease;
+}
+
+.ss-modal-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.ss-modal-input--small {
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.ss-modal-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 14px;
+  resize: vertical;
+  transition: border-color 0.2s ease;
+}
+
+.ss-modal-textarea:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.ss-modal-textarea--small {
+  min-height: 60px;
+}
+
+/* ============================================================================
+   LABELS AND TEXT
+   ============================================================================ */
+
+.ss-modal-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+  display: block;
+}
+
+.ss-modal-label--small {
+  font-size: 0.9em;
+  color: #666;
+  margin-bottom: 0.5em;
+}
+
+.ss-modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-modal-title--large {
+  margin-top: 1em;
+}
+
+.ss-modal-description {
+  margin: 16px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.ss-modal-shortcut-hint {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+/* ============================================================================
+   CONTAINERS AND LAYOUT
+   ============================================================================ */
+
+.ss-modal-container {
+  border-radius: 12px !important;
+  padding: 0 !important;
+  width: 450px !important;
+  max-width: 95vw !important;
+}
+
+.ss-modal-container--wide {
+  width: 500px !important;
+}
+
+.ss-modal-container--narrow {
+  width: 400px !important;
+}
+
+.ss-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-modal-content {
+  margin: 0 20px 16px;
+}
+
+.ss-modal-section {
+  margin-bottom: 16px;
+}
+
+.ss-modal-flex-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ss-modal-flex-container--large-gap {
+  gap: 8px;
+}
+
+/* ============================================================================
+   PROGRESS ELEMENTS
+   ============================================================================ */
+
+.ss-modal-progress-container {
+  margin: 0 20px 16px;
+  display: none;
+}
+
+.ss-modal-progress-container--visible {
+  display: block;
+}
+
+.ss-modal-progress-text {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.ss-modal-progress-bar-container {
+  width: 100%;
+  height: 4px;
+  background-color: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ss-modal-progress-bar {
+  width: 0%;
+  height: 100%;
+  background-color: var(--interactive-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ============================================================================
+   INTERACTIVE ELEMENTS
+   ============================================================================ */
+
+.ss-modal-icon {
+  width: 16px;
+  height: 16px;
+  cursor: help;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.ss-modal-icon:hover {
+  color: var(--text-normal);
+}
+
+.ss-modal-icon--warning {
+  color: var(--color-orange);
+}
+
+/* ============================================================================
+   FILTER AND CONTROL ELEMENTS
+   ============================================================================ */
+
+.ss-modal-filters-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ss-modal-refresh-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.ss-modal-refresh-icon {
+  margin-right: 4px;
+}
+
+.ss-modal-refresh-icon--spinning {
+  animation: ss-spin 1s linear infinite;
+}
+
+/* ============================================================================
+   BUTTON STYLES
+   ============================================================================ */
+
+.ss-modal-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border: none;
+}
+
+.ss-modal-button--primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ss-modal-button--primary:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.ss-modal-button--secondary {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-normal);
+}
+
+.ss-modal-button--secondary:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ss-modal-button--small {
+  margin-top: 8px;
+}
+
+/* ============================================================================
+   SPACING UTILITIES
+   ============================================================================ */
+
+.ss-modal-margin-right-8 {
+  margin-right: 8px;
+}
+
+.ss-modal-margin-top-8 {
+  margin-top: 8px;
+}
+
+.ss-modal-margin-top-16 {
+  margin-top: 16px;
+}
+
+.ss-modal-flex-grow {
+  flex-grow: 1;
+  min-width: 0; /* Allows flex shrinking below content size */
+}
+
+/* ============================================================================
+   SPECIAL COMPONENTS
+   ============================================================================ */
+
+.ss-modal-custom-prompt-info {
+  display: none;
+}
+
+.ss-modal-custom-prompt-info--visible {
+  display: block;
+}
+
+.ss-modal-locked-section {
+  padding: 16px;
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  opacity: 0.7;
+}
+
+.ss-modal-default-settings {
+  background-color: var(--background-secondary);
+  padding: 12px;
+  border-radius: var(--radius-s);
+  margin-top: 16px;
+}
+
+.ss-modal-default-settings-title {
+  margin-top: 0;
+}
+
+.ss-modal-default-settings-description {
+  margin-bottom: 12px;
+}
+
+.ss-modal-prompt-editor-locked {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.ss-modal-change-file-button {
+  display: none;
+}
+
+.ss-modal-change-file-button--visible {
+  display: block;
+}
+
+/* ============================================================================
+   ANIMATION UTILITIES
+   ============================================================================ */
+
+@keyframes ss-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+} 

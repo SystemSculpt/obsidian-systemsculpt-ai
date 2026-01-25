@@ -1,0 +1,100 @@
+/**
+ * SystemSculpt CSS Architecture
+ *
+ * This is the main CSS import file that consolidates all component styles.
+ * Files are imported in order of specificity and dependency.
+ */
+
+/* Base styles */
+@import 'base/variables.css';
+@import 'base/reset.css';
+@import 'base/animations.css';
+@import 'animations/chat-animations.css';  /* New chat-specific animations */
+@import 'base/media-queries.css';
+@import 'base/typography.css';
+
+/* Constants */
+@import 'constants/responsive-breakpoints.css';
+
+/* Layout components */
+@import 'layout/containers.css';
+@import 'layout/grid.css';
+@import 'layout/drawer.css';
+
+/* UI Components */
+@import 'components/ss-buttons.css';  /* Button system */
+@import 'standardized-modal.css';  /* Standardized Modal system */
+@import 'components/cards.css';
+@import 'components/automations.css';
+@import 'components/messages.css';
+@import 'components/chat-view-messages-toolbar.css';
+@import 'components/scroll-performance.css';  /* Scroll performance optimizations */
+@import 'components/modals.css';
+@import 'components/inputs.css';
+@import 'components/loaders.css';
+@import 'components/streaming-indicator.css';  /* Enhanced streaming status indicator */
+@import 'components/load-chat.css';  /* Load chat modal styles */
+@import 'components/tooltips.css';
+@import 'components/checkboxes.css';
+@import 'components/buttons.css';
+@import 'components/icons.css';
+@import 'components/tables.css';
+@import 'components/recorder.css';  /* Recorder component styles */
+@import 'components/floating-widget.css';  /* Base floating widget component */
+@import 'components/quick-edit-widget.css';  /* Quick edit floating widget */
+@import 'components/quick-edit-editor-diff.css';  /* Quick Edit editor diff overlay */
+@import 'components/meeting-processor.css';  /* Meeting processor modal */
+@import 'components/youtube-canvas.css';  /* YouTube Canvas modal */
+@import 'components/custom-endpoint.css';  /* Custom endpoint settings styles */
+@import 'components/favorite-toggle.css';  /* Favorite toggle component */
+@import 'components/daily-setup.css';  /* Daily note navigator styling */
+@import 'components/progress-modal.css';  /* Progress modal styling */
+@import 'components/model-indicator.css';  /* Model indicator component */
+@import 'components/resume-chat.css';  /* Resume chat button styling */
+@import 'components/diff-viewer.css';  /* Diff viewer component styles */
+@import 'components/chat-structured-block.css';  /* Shared tree layout for chat structured blocks */
+@import 'components/chat-activity-block.css';  /* Consolidated activity drawer for reasoning/tool blocks */
+@import 'components/tool-call-ui.css';  /* Enhanced tool call UI components */
+@import 'components/tool-results.css';  /* Enhanced tool call results display */
+@import 'components/tool-states.css';  /* Tool call state transitions and animations */
+@import 'components/tool-approval.css';  /* Tool approval buttons for destructive operations */
+@import 'components/notices.css';
+@import 'components/update-drawer.css';  /* Update notification drawer styling */
+@import 'components/slash-commands.css';  /* Slash command menu styles */
+@import 'components/agent-selection-menu.css';  /* Agent selection menu styles */
+@import 'components/mermaid.css';
+@import 'components/font-size-fix.css';  /* Font size inheritance fix */
+@import 'components/embeddings-progress.css';  /* Embeddings progress notification */
+@import 'components/similar-notes-view.css';  /* Similar notes view */
+@import 'components/large-text.css';  /* Large text content handling with collapse/expand */
+@import 'components/systemsculpt-search.css';  /* New SystemSculpt Search modal (standalone design) */
+@import 'context-selection.css';  /* Context file selector modal with native Obsidian styling */
+@import 'modals/general-modal-styles.css';  /* General modal styles - replaces all inline styles */
+@import 'modals/model-selection-enhanced.css';  /* Enhanced model selection modal - MUST be after standardized-modal.css */
+@import 'modals/janitor-modal.css';  /* Modern Janitor modal styling */
+@import 'modals/changelog-modal.css';  /* Changelog modal styling */
+@import 'modals/embeddings-status-modal.css';  /* Embeddings status modal */
+@import 'modals/bulk-automation-modal.css';  /* Bulk automation confirmation and progress widgets */
+
+
+/* View-specific styles */
+@import 'views/chat.css';
+@import 'views/model-select.css';
+@import 'views/settings.css';
+@import 'views/preview.css';
+@import 'views/context.css';
+@import 'views/custom-provider.css';
+@import 'views/chat-settings-modal.css';
+@import 'views/embeddings-view.css';  /* Embeddings view - automatic similar notes panel */
+@import 'views/benchview.css';  /* Benchmark view */
+@import 'views/benchresults.css';  /* Benchmark results leaderboard */
+
+/* Miscellaneous styles */
+@import 'misc.css';
+
+/* Obsidian Overrides - AUDIT TARGET for any Obsidian selectors */
+@import 'obsidian-overrides/view-content.css';  /* Scoped overrides for plugin views only */
+/* @import 'obsidian-overrides/DANGER-global.css'; - INTENTIONALLY NOT IMPORTED - should remain empty */
+
+/* Fixes */
+@import 'fixes/mobile-ui-fixes.css';

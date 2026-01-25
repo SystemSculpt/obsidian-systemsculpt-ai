@@ -1,0 +1,129 @@
+/**
+ * Checkbox styles for SystemSculpt
+ * 
+ * This file contains styles for custom checkboxes that match Obsidian's design system.
+ */
+
+/* Custom checkbox container */
+.systemsculpt-checkbox-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding-left: 28px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Hide the browser's default checkbox */
+.systemsculpt-checkbox-container input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+/* Create a custom checkbox */
+.systemsculpt-checkbox {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 18px;
+  width: 18px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+/* On mouse-over, add a background color */
+.systemsculpt-checkbox-container:hover input ~ .systemsculpt-checkbox {
+  background-color: var(--background-secondary);
+}
+
+/* When the checkbox is checked, add accent background */
+.systemsculpt-checkbox-container input:checked ~ .systemsculpt-checkbox {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* Create the checkmark/indicator (hidden when not checked) */
+.systemsculpt-checkbox:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+/* Show the checkmark when checked */
+.systemsculpt-checkbox-container input:checked ~ .systemsculpt-checkbox:after {
+  display: block;
+}
+
+/* Style the checkmark/indicator */
+.systemsculpt-checkbox-container .systemsculpt-checkbox:after {
+  left: 6px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Disabled state */
+.systemsculpt-checkbox-container.disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.systemsculpt-checkbox-container.disabled input ~ .systemsculpt-checkbox {
+  background-color: var(--background-secondary);
+  border-color: var(--background-modifier-border);
+}
+
+/* Toggle switch variant */
+.systemsculpt-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.systemsculpt-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.systemsculpt-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--background-modifier-border);
+  transition: .4s;
+  border-radius: 34px;
+}
+
+.systemsculpt-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--background-primary);
+  transition: .4s;
+  border-radius: 50%;
+}
+
+.systemsculpt-toggle input:checked + .systemsculpt-toggle-slider {
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-toggle input:checked + .systemsculpt-toggle-slider:before {
+  transform: translateX(16px);
+}

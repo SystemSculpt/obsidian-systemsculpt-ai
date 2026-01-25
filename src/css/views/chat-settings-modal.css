@@ -1,0 +1,193 @@
+/* src/css/views/chat-settings-modal.css */
+
+/* Fix modal height and scrolling */
+.ss-chat-settings-modal {
+  height: 85vh !important;
+  max-height: 85vh !important;
+}
+
+/* Override StandardModal's content styling to enable scrolling */
+.ss-chat-settings-modal .ss-modal__content {
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  padding: 20px;
+  flex: 1;
+  min-height: 0; /* Important for flex containers to allow shrinking */
+}
+
+/* Make the modal content scrollable and inherit default Obsidian modal styles */
+.ss-chat-settings-modal .modal-content {
+  padding: var(--modal-padding, 20px); /* fallback if --modal-padding not defined */
+  display: block;
+  overflow-y: auto;
+  max-height: 80vh;
+}
+
+/* Remove two-panel layout: stack vertically */
+.ss-chat-settings-modal__left-panel,
+.ss-chat-settings-modal__right-panel {
+  display: block;
+  padding: 0;
+  border: none;
+  min-width: auto;
+  gap: 0;
+  overflow: visible;
+  height: auto;
+  box-sizing: border-box;
+}
+
+/* Remove card-like section styling, use Obsidian's setting-item blocks */
+.ss-chat-settings-modal__section {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: var(--size-4-4);
+  display: block;
+}
+
+/* Section titles: use Obsidian's heading styles */
+.ss-chat-settings-modal__section-title {
+  font-size: var(--font-ui-large);
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0 0 var(--size-4-2) 0;
+  padding: 0;
+  border: none;
+}
+
+/* Use Obsidian's default input styles */
+.ss-chat-settings-modal__title-input,
+.ss-chat-settings-modal__prompt-textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Prompt textarea: proper height handling with scrolling */
+.ss-chat-settings-modal__prompt-textarea {
+  min-height: 200px;
+  max-height: 60vh; /* Allow growth but not beyond viewport */
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-y: auto; /* Enable scrolling for long content */
+  font-family: var(--font-monospace);
+  line-height: 1.5;
+}
+
+/* Button containers: vertical spacing */
+.ss-chat-settings-modal__title-controls,
+.ss-chat-settings-modal__model-controls,
+.ss-chat-settings-modal__prompt-type-buttons,
+.ss-chat-settings-modal__prompt-type-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+}
+
+/* Preset buttons: minimal styling, mostly inherit */
+.ss-preset-button {
+  cursor: pointer;
+  padding: var(--size-4-1) var(--size-4-3);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.ss-preset-button:hover {
+  background-color: var(--background-modifier-hover);
+}
+.ss-preset-button.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* Disabled preset button state for agent mode */
+.ss-preset-button-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  border-color: var(--background-modifier-border);
+}
+.ss-preset-button-disabled:hover {
+  background-color: var(--background-secondary-alt);
+  cursor: not-allowed;
+}
+
+/* Info text */
+.ss-chat-settings-modal__prompt-type-details,
+.ss-chat-settings-modal__prompt-editor-note {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: var(--size-4-3);
+}
+
+/* Footer: use default modal footer styles */
+.ss-chat-settings-modal .modal-button-container {
+  padding: var(--size-4-3) var(--size-4-5);
+  border-top: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+}
+
+/* Default settings section styling */
+.ss-chat-settings-modal__default-settings-section {
+  margin-top: var(--size-4-4);
+  padding-top: var(--size-4-4);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.default-settings-container {
+  background-color: var(--background-secondary);
+  padding: var(--size-4-3);
+  border-radius: var(--radius-s);
+  margin-top: var(--size-4-3);
+}
+
+/* Ensure prompt editor section has proper spacing */
+.ss-chat-settings-modal__prompt-editor-section {
+  margin-bottom: var(--size-4-4);
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 600px) {
+  .ss-chat-settings-modal {
+    height: 95vh !important;
+    max-height: 95vh !important;
+    width: 95vw !important;
+    max-width: 95vw !important;
+  }
+  
+  .ss-chat-settings-modal .ss-modal__content {
+    padding: 12px;
+  }
+  
+  /* Reduce textarea height on mobile */
+  .ss-chat-settings-modal__prompt-textarea {
+    min-height: 150px;
+    max-height: 50vh; /* Allow growth but keep reasonable on mobile */
+  }
+  
+  /* Stack buttons vertically on mobile */
+  .ss-chat-settings-modal__title-controls,
+  .ss-chat-settings-modal__model-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .ss-chat-settings-modal__title-controls input,
+  .ss-chat-settings-modal__model-controls input {
+    margin-bottom: var(--size-4-2);
+  }
+  
+  /* Make preset buttons full width on mobile */
+  .ss-preset-button {
+    width: 100%;
+    text-align: center;
+  }
+}

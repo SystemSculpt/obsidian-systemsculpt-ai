@@ -1,0 +1,369 @@
+/**
+ * Input Components - Modern UI System
+ *
+ * Elegant form controls with glassmorphism and smooth interactions
+ */
+
+
+.systemsculpt-chat-search input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 1em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-chat-search input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-textarea:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-input-action-button.disabled:hover {
+  background-color: var(--background-modifier-form-field);
+  transform: none;
+}
+
+
+.systemsculpt-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-textarea-modal {
+  max-width: 800px;
+  width: 90vw;
+}
+
+.systemsculpt-custom-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-input-container {
+  position: relative;
+  width: 100%;
+}
+
+.systemsculpt-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-input-action-button.disabled {
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.systemsculpt-input-action-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.systemsculpt-input-action-button.disabled:hover {
+  background-color: var(--background-modifier-form-field);
+  transform: none;
+}
+
+.systemsculpt-model-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.systemsculpt-providers-button {
+  box-sizing: border-box !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 4px;
+  background-color: var(--background-secondary-alt) !important;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 30px !important;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-textarea-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-custom-input-container {
+  position: relative;
+  width: 100%;
+}
+
+.systemsculpt-prompt-creation-title-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-input-action-button:hover {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-prompt-creation-title-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-input-section,
+.systemsculpt-text-modification-modal .systemsculpt-preview-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-custom-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.systemsculpt-input-action-button:active {
+  transform: translateY(0);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Input Action Buttons - Unified Design                    ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-input-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  
+  /* Modern glass effect */
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 30%, var(--ss-layer-base));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 30%, var(--ss-layer-base));
+  border-radius: 12px;
+  
+  color: var(--text-muted);
+  cursor: pointer;
+  
+  /* Shadow and transitions */
+  box-shadow: 
+    0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 4%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-input-action-button:hover:not(.disabled) {
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 15%, var(--ss-layer-base));
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base));
+  color: var(--interactive-accent);
+  transform: translateY(-2px); /* Remove scale to prevent size change */
+  box-shadow: 
+    0 6px 16px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-input-action-button:active:not(.disabled) {
+  transform: translateY(0); /* Remove scale to prevent size change */
+}
+
+/* Active/Enabled state - glowing primary color, no size/transform changes */
+.systemsculpt-input-action-button.active:not(.disabled),
+.systemsculpt-input-action-button.systemsculpt-is-enabled:not(.disabled) {
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 35%, var(--ss-layer-base));  /* Brightest state */
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 60%, var(--ss-layer-base));
+  color: var(--interactive-accent);  /* Use accent color, not white */
+  box-shadow: 
+    0 8px 24px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base)),
+    0 3px 10px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 15%, var(--ss-layer-base));
+}
+
+.systemsculpt-input-action-button.active:not(.disabled):hover {
+  /* Keep the same transform as regular hover - no additional scaling */
+  transform: translateY(-2px);
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 25%, var(--ss-layer-base));  /* Less bright for visual feedback */
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 50%, var(--ss-layer-base));
+  box-shadow: 
+    0 6px 20px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base)),
+    0 2px 8px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 10%, var(--ss-layer-base));
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Recording Button - Active State                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes recording-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+
+.systemsculpt-input-action-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  transform: none;
+}
+
+.systemsculpt-input-action-button.disabled:hover {
+  background-color: var(--background-modifier-form-field);
+  transform: none;
+}
+
+.systemsculpt-context-search input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+
+.systemsculpt-license-container .systemsculpt-setting-item-control input {
+  flex: 1;
+}
+
+.systemsculpt-textarea {
+  flex-grow: 1;
+  resize: none;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-textarea {
+  width: 100%;
+  flex-grow: 1;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  transition: all 0.2s ease;
+  overflow-y: auto;
+}
+
+.systemsculpt-textarea-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-textarea-modal {
+  max-width: 800px;
+  width: 90vw;
+}
+
+.systemsculpt-textarea:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+/* Clean up - duplicate chat input styles removed (defined in chat.css) */
+
+.systemsculpt-chat-search input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-context-search input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 16px;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-context-search input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+
+
+.systemsculpt-providers-button {
+  box-sizing: border-box !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 4px;
+  background-color: var(--background-secondary-alt) !important;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 30px !important;
+  transition: all 0.2s ease;
+}
+
+
+.systemsculpt-prompt-creation-title-input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-prompt-creation-title-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-prompt-creation-title-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+/*
+  Input action button styles removed - Now using ss-button component classes
+  The systemsculpt-input-action-button class has been replaced with ss-button classes in the code
+*/

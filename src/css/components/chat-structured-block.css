@@ -1,0 +1,105 @@
+/* Shared tree-style layout for chat view structured content */
+.systemsculpt-chat-structured-block {
+  margin: 6px 0;
+  font-family: var(--font-monospace);
+  font-size: inherit;
+}
+
+.systemsculpt-chat-structured-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 1px;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-chat-structured-bullet {
+  width: 1.6ch;
+  height: 1.6ch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  font-size: inherit;
+  line-height: 1;
+}
+
+.systemsculpt-chat-structured-bullet.is-active {
+  border: 2px solid var(--text-muted);
+  border-top-color: var(--ss-layer-base);
+  border-radius: 50%;
+  animation: systemsculpt-chat-structured-spin 1s linear infinite;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-chat-structured-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+
+.systemsculpt-chat-structured-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: inherit;
+  color: var(--text-muted);
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.35;
+  padding: 0;
+}
+
+.systemsculpt-chat-structured-line-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.systemsculpt-chat-structured-line-actions .ss-button {
+  font-size: var(--font-ui-smallest);
+  line-height: 1.2;
+}
+
+.systemsculpt-chat-structured-line-prefix {
+  min-width: 4ch;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text-faint);
+  white-space: pre;
+}
+
+.systemsculpt-chat-tree .systemsculpt-chat-structured-line-prefix {
+  text-align: right;
+}
+
+.systemsculpt-chat-structured-line-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-chat-structured-line-text .systemsculpt-chat-structured-label {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.systemsculpt-chat-structured-line-text .systemsculpt-chat-structured-detail {
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-tree.systemsculpt-chat-tree--empty .systemsculpt-chat-structured-lines {
+  display: none;
+}
+
+@keyframes systemsculpt-chat-structured-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

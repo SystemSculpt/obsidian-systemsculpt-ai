@@ -1,0 +1,145 @@
+/**
+ * Icon styles for SystemSculpt
+ * 
+ * This file contains styles for icons used throughout the plugin.
+ */
+
+/* Base icon styles */
+.systemsculpt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+  flex-shrink: 0;
+}
+
+/* Icon sizes */
+.systemsculpt-icon-xs {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-icon-md {
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-icon-lg {
+  width: 24px;
+  height: 24px;
+}
+
+.systemsculpt-icon-xl {
+  width: 32px;
+  height: 32px;
+}
+
+/* Icon colors */
+.systemsculpt-icon-muted {
+  color: var(--text-muted);
+}
+
+.systemsculpt-icon-normal {
+  color: var(--text-normal);
+}
+
+.systemsculpt-icon-accent {
+  color: var(--text-accent);
+}
+
+.systemsculpt-icon-error {
+  color: var(--text-error);
+}
+
+.systemsculpt-icon-success {
+  color: var(--background-modifier-success);
+}
+
+.systemsculpt-icon-warning {
+  color: var(--color-yellow);
+}
+
+/* Icon with background */
+.systemsculpt-icon-with-bg {
+  padding: 6px;
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+}
+
+/* Icon button */
+.systemsculpt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background-color: var(--ss-layer-base);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.systemsculpt-icon-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Animated icons */
+.systemsculpt-icon-spin {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-icon-pulse {
+  animation: systemsculpt-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes systemsculpt-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes systemsculpt-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Icon with text */
+.systemsculpt-icon-with-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-icon-with-text .systemsculpt-icon {
+  flex-shrink: 0;
+}
+
+/* Icon list */
+.systemsculpt-icon-list {
+  display: flex;
+  gap: 4px;
+}
+
+/* Icon grid */
+.systemsculpt-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 8px;
+}

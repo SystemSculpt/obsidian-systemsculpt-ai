@@ -1,0 +1,142 @@
+/**
+ * Model Indicator Component
+ * 
+ * Styles for the model indicator in chat view
+ */
+
+/* Base chip style for compact, tabbable pills */
+.systemsculpt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ensure inner text truncates cleanly inside pills */
+.systemsculpt-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Keep legacy classes working while using the shared chip look */
+.systemsculpt-model-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+
+.systemsculpt-chip:hover,
+.systemsculpt-model-indicator:hover {
+  background-color: var(--background-secondary-alt);
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-chip:focus-visible,
+.systemsculpt-model-indicator:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.systemsculpt-model-indicator.systemsculpt-no-model {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.systemsculpt-model-indicator-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.systemsculpt-model-indicator-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-chip:hover .systemsculpt-model-indicator-icon,
+.systemsculpt-model-indicator:hover .systemsculpt-model-indicator-icon {
+  color: var(--text-normal);
+}
+
+.systemsculpt-model-indicator-arrow {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.systemsculpt-model-indicator-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Locked system prompt state when agent mode is active */
+.systemsculpt-system-prompt-locked {
+  opacity: 0.7;
+  cursor: default !important;
+  pointer-events: none; /* Prevent all interactions */
+}
+
+.systemsculpt-system-prompt-locked:hover {
+  background-color: var(--ss-layer-base) !important; /* Remove hover effect */
+}
+
+.systemsculpt-system-prompt-locked .systemsculpt-model-indicator-arrow {
+  color: var(--text-accent);
+}
+
+.systemsculpt-system-prompt-locked .systemsculpt-model-indicator-arrow svg {
+  color: var(--text-accent);
+}
+
+/* Locked model state when agent mode is active */
+.systemsculpt-model-locked {
+  opacity: 0.7;
+  cursor: default !important;
+  pointer-events: none; /* Prevent all interactions */
+}
+
+.systemsculpt-model-locked:hover {
+  background-color: var(--ss-layer-base) !important; /* Remove hover effect */
+}
+
+.systemsculpt-model-locked .systemsculpt-model-indicator-arrow {
+  color: var(--text-accent);
+}
+
+.systemsculpt-model-locked .systemsculpt-model-indicator-arrow svg {
+  color: var(--text-accent);
+}
+
+/* Inline pill sizing for compact row placement */
+.systemsculpt-model-indicator-section.inline .systemsculpt-chip {
+  max-width: 280px;
+}

@@ -1,0 +1,182 @@
+/**
+ * Enhanced Streaming Indicator
+ *
+ * Modern streaming status indicator with typing dots animation
+ * and live elapsed time display.
+ */
+
+/* Typing dots pulse animation */
+@keyframes ss-typing-pulse {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Fade in animation */
+@keyframes ss-indicator-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Fade out animation */
+@keyframes ss-indicator-fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Main container */
+.ss-streaming-indicator {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--ss-layer-elevated);
+  border: 1px solid var(--ss-border-soft);
+  border-radius: var(--ss-radius-md);
+  font-size: var(--ss-font-size-sm);
+  color: var(--text-muted);
+  margin-top: 8px;
+  align-self: flex-start;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: border-color var(--ss-transition-fast), background var(--ss-transition-fast);
+}
+
+.ss-streaming-indicator.ss-visible {
+  animation: ss-indicator-fade-in 0.2s ease forwards;
+}
+
+.ss-streaming-indicator.ss-hiding {
+  animation: ss-indicator-fade-out 0.15s ease forwards;
+}
+
+/* Header row: dots + label */
+.ss-streaming-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Typing dots container */
+.ss-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Individual dot */
+.ss-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ss-radius-circle);
+  background: var(--text-muted);
+  animation: ss-typing-pulse 1.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.ss-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ss-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Status label */
+.ss-streaming-label {
+  font-weight: var(--ss-font-weight-medium);
+  letter-spacing: 0.01em;
+  transition: color var(--ss-transition-fast);
+}
+
+/* Metrics row */
+.ss-streaming-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-monospace);
+  font-size: var(--ss-font-size-xs);
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
+/* Metric items */
+.ss-metric {
+  white-space: nowrap;
+}
+
+/* Status-specific styling: reasoning */
+.ss-streaming-indicator[data-status="reasoning"] {
+  border-color: var(--ss-border-accent-soft);
+  background: var(--ss-surface-accent);
+}
+
+.ss-streaming-indicator[data-status="reasoning"] .ss-dot {
+  background: var(--text-accent);
+}
+
+.ss-streaming-indicator[data-status="reasoning"] .ss-streaming-label {
+  color: var(--text-accent);
+}
+
+/* Status-specific styling: tool_calls and executing_tools */
+.ss-streaming-indicator[data-status="tool_calls"],
+.ss-streaming-indicator[data-status="executing_tools"] {
+  border-color: var(--ss-border-soft);
+  background: var(--ss-layer-highlight);
+}
+
+.ss-streaming-indicator[data-status="tool_calls"] .ss-dot,
+.ss-streaming-indicator[data-status="executing_tools"] .ss-dot {
+  background: var(--text-normal);
+}
+
+.ss-streaming-indicator[data-status="tool_calls"] .ss-streaming-label,
+.ss-streaming-indicator[data-status="executing_tools"] .ss-streaming-label {
+  color: var(--text-normal);
+}
+
+/* Status-specific styling: content/preparing (default) */
+.ss-streaming-indicator[data-status="content"],
+.ss-streaming-indicator[data-status="preparing"] {
+  border-color: var(--ss-border-soft);
+}
+
+.ss-streaming-indicator[data-status="content"] .ss-dot,
+.ss-streaming-indicator[data-status="preparing"] .ss-dot {
+  background: var(--text-muted);
+}
+
+/* Reduced motion: disable animations */
+@media (prefers-reduced-motion: reduce) {
+  .ss-streaming-indicator,
+  .ss-streaming-indicator.ss-visible,
+  .ss-streaming-indicator.ss-hiding {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .ss-dot {
+    animation: none;
+    opacity: 0.6;
+    transform: none;
+  }
+}

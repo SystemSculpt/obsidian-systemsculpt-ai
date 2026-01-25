@@ -10380,6 +10380,108 @@
   white-space: pre-wrap;
 }
 
+/* Language Section */
+.ss-youtube-canvas-modal__language-section {
+  margin-bottom: var(--ss-space-md);
+  padding: var(--ss-space-md);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-layer-muted);
+}
+
+.ss-youtube-canvas-modal__language-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-sm);
+  margin-bottom: var(--ss-space-sm);
+  font-size: var(--ss-font-size-sm);
+  font-weight: var(--ss-font-weight-medium);
+  color: var(--text-muted);
+}
+
+.ss-youtube-canvas-modal__language-header svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ss-youtube-canvas-modal__language-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-sm);
+}
+
+.ss-youtube-canvas-modal__language-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-xs);
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ss-radius-full);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--ss-font-size-sm);
+  cursor: pointer;
+  transition: all var(--ss-transition-fast);
+}
+
+.ss-youtube-canvas-modal__language-chip:hover:not(:disabled) {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.ss-youtube-canvas-modal__language-chip--active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: default;
+}
+
+.ss-youtube-canvas-modal__language-chip--active:hover {
+  background: var(--interactive-accent);
+}
+
+.ss-youtube-canvas-modal__language-chip:disabled {
+  opacity: 0.7;
+}
+
+.ss-youtube-canvas-modal__language-chip-code {
+  color: var(--text-muted);
+  font-size: var(--ss-font-size-xs);
+}
+
+.ss-youtube-canvas-modal__language-chip--active .ss-youtube-canvas-modal__language-chip-code {
+  color: var(--text-on-accent);
+  opacity: 0.8;
+}
+
+.ss-youtube-canvas-modal__language-chip-check {
+  display: flex;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.ss-youtube-canvas-modal__language-chip-check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ss-youtube-canvas-modal__language-chip-badge {
+  font-size: 9px;
+  font-weight: var(--ss-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  border-radius: var(--ss-radius-sm);
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.ss-youtube-canvas-modal__language-chip--active .ss-youtube-canvas-modal__language-chip-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-on-accent);
+}
+
 /* Status */
 .ss-youtube-canvas-modal__status {
   padding: var(--ss-space-sm) var(--ss-space-md);
@@ -13560,6 +13662,63 @@ body:not(.theme-dark) .systemsculpt-favorite-toggle:not(.is-favorite):hover svg 
   display: flex;
   align-items: center;
   flex-shrink: 0;
+}
+
+/* Inline tool actions (for chronological inline display) */
+.systemsculpt-inline-tool-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.systemsculpt-inline-tool-actions .systemsculpt-button {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smallest);
+  line-height: 1.4;
+  min-height: unset;
+  border-radius: 4px;
+}
+
+/* Inline tool line layout */
+.systemsculpt-inline-tool-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Approval preview container */
+.systemsculpt-approval-preview {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-approval-diff {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.systemsculpt-approval-ops ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.systemsculpt-approval-ops li {
+  margin: 4px 0;
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-approval-ops code {
+  font-family: var(--font-monospace);
+  background: var(--background-primary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: var(--font-ui-smaller);
 }
 
 

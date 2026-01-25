@@ -1,0 +1,25 @@
+/* ========================================================================== */
+/* == Responsive Breakpoints                                              == */
+/* ========================================================================== */
+
+:root {
+  /* Mobile breakpoints */
+  --mobile-max-width: 480px;
+  --tablet-min-width: 600px;
+  --desktop-min-width: 1024px;
+  
+  /* Toolbar opacity values */
+  --toolbar-opacity-hidden: 0;
+  --toolbar-opacity-partial: 0.6;
+  --toolbar-opacity-visible: 0.8;
+  --toolbar-opacity-full: 1;
+  
+  /* Backdrop blur intensity */
+  --toolbar-backdrop-blur: 4px;
+  
+  /* Toolbar scaling on interaction */
+  --toolbar-scale-active: 1.05;
+  
+  /* Border radius for toolbars */
+  --toolbar-border-radius: 12px;
+}

@@ -1,0 +1,209 @@
+/**
+ * Scroll Performance Optimizations
+ * 
+ * CSS optimizations specifically designed to improve scrolling performance
+ * during AI message generation and large conversation handling
+ */
+
+/* ========================================================================== */
+/* == Global Scroll Performance Hints                                     == */
+/* ========================================================================== */
+
+/* Optimize message containers for smooth scrolling - SAFE VERSION */
+.systemsculpt-message {
+  /* Enable hardware acceleration for smooth scrolling */
+  transform: translateZ(0);
+  /* Remove containment - it was breaking height calculation */
+  /* contain: style paint; */
+  /* Reduce repaints on scroll */
+  backface-visibility: hidden;
+}
+
+/* Group container removed */
+
+/* ========================================================================== */
+/* == Toolbar Performance During Scrolling                               == */
+/* ========================================================================== */
+
+/* Reduce expensive effects when scrolling */
+.systemsculpt-messages-container:not(:hover) .systemsculpt-message-button-toolbar,
+.systemsculpt-messages-container:not(:hover) .systemsculpt-message-button-toolbar-collapsed,
+.systemsculpt-messages-container:not(:hover) .systemsculpt-message-button-toolbar-expanded {
+  /* Disable transitions during active scrolling for performance */
+  transition: none !important;
+  /* Force opacity to 0 to reduce rendering load */
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Re-enable effects when scrolling stops */
+.systemsculpt-messages-container:hover .systemsculpt-message-button-toolbar,
+.systemsculpt-messages-container:hover .systemsculpt-message-button-toolbar-collapsed,
+.systemsculpt-messages-container:hover .systemsculpt-message-button-toolbar-expanded {
+  transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
+}
+
+/* ========================================================================== */
+/* == Content Optimization for Large Conversations                       == */
+/* ========================================================================== */
+
+/* Optimize code blocks and content for scrolling */
+.systemsculpt-content-part pre,
+.systemsculpt-message-content pre {
+  /* Remove containment that breaks sizing */
+  /* contain: layout style; */
+  /* Reduce reflow impact */
+  overflow: auto;
+  /* Enable smooth scrolling within code blocks */
+  scroll-behavior: auto; /* Override smooth to prevent conflicts */
+}
+
+/* Optimize content parts for scroll performance */
+.systemsculpt-content-part {
+  /* Remove containment to avoid sizing issues */
+  /* contain: style paint; */
+  /* Optimize for frequent updates during generation */
+  will-change: auto; /* Reset will-change when not actively changing */
+}
+
+/* ========================================================================== */
+/* == Responsive Scroll Optimizations                                     == */
+/* ========================================================================== */
+
+/* Mobile-specific scroll optimizations */
+@media (max-width: 768px) {
+  .systemsculpt-messages-container {
+    /* Optimize touch scrolling */
+    -webkit-overflow-scrolling: touch;
+    /* Reduce momentum scrolling conflicts */
+    overscroll-behavior-y: contain;
+  }
+  
+  /* Only hide toolbars on very small screens (phones in portrait) */
+  /* This preserves functionality on iPad split-view and larger screens */
+}
+
+/* Improved responsive toolbar handling for touch devices */
+@media (max-width: var(--mobile-max-width)) {
+  /* Only hide on very small screens like phones */
+  .systemsculpt-message-button-toolbar,
+  .systemsculpt-message-button-toolbar-collapsed,
+  .systemsculpt-message-button-toolbar-expanded {
+    /* Reduce complexity on very small screens only */
+    display: none !important;
+  }
+}
+
+/* Touch-friendly action buttons for devices without hover */
+@media (hover: none) {
+  /* Make collapsed toolbar visible by default on touch devices */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-partial) !important;
+    visibility: visible !important;
+    background: color-mix(in srgb, rgb(var(--background-primary-rgb)) 80%, var(--ss-layer-base)) !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    border-radius: var(--toolbar-border-radius) !important;
+    backdrop-filter: blur(var(--toolbar-backdrop-blur)) !important;
+    -webkit-backdrop-filter: blur(var(--toolbar-backdrop-blur)) !important;
+  }
+  
+  /* Full visibility when touched/active */
+  .systemsculpt-message:active .systemsculpt-message-button-toolbar-collapsed,
+  .systemsculpt-message-button-toolbar-collapsed:active {
+    opacity: var(--toolbar-opacity-full) !important;
+    transform: translateY(0) scale(var(--toolbar-scale-active)) !important;
+  }
+  
+  /* Ensure buttons within collapsed toolbar are visible */
+  .systemsculpt-message-button-toolbar-collapsed .systemsculpt-message-button {
+    opacity: var(--toolbar-opacity-full) !important;
+    visibility: visible !important;
+  }
+}
+
+/* Tablet-friendly: Allow toolbars on larger touch devices */
+@media (hover: none) and (min-width: var(--tablet-min-width)) {
+  /* iPad and larger tablets should show toolbars */
+  .systemsculpt-message-button-toolbar,
+  .systemsculpt-message-button-toolbar-collapsed,
+  .systemsculpt-message-button-toolbar-expanded {
+    display: flex !important; /* Override any hiding rules */
+  }
+  
+  /* Make collapsed toolbar more visible on tablets */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-visible) !important;
+    visibility: visible !important;
+  }
+}
+
+/* Desktop with fine pointer: Original hover behavior */
+@media (hover: hover) and (pointer: fine) {
+  /* Desktop users get original hover-based interaction */
+  .systemsculpt-message-button-toolbar-collapsed {
+    opacity: var(--toolbar-opacity-hidden);
+    visibility: hidden;
+  }
+  
+  .systemsculpt-message:hover .systemsculpt-message-button-toolbar-collapsed:not(.hidden) {
+    opacity: var(--toolbar-opacity-full);
+    visibility: visible;
+  }
+}
+
+/* ========================================================================== */
+/* == Animation Performance                                               == */
+/* ========================================================================== */
+
+/* Optimize animations for devices with limited GPU */
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-reduced-motion .systemsculpt-messages-container {
+    /* Disable smooth scrolling for reduced motion */
+    scroll-behavior: auto !important;
+  }
+  
+  .systemsculpt-reduced-motion .systemsculpt-message,
+  /* group class removed */
+  .systemsculpt-reduced-motion .systemsculpt-content-part {
+    /* Remove hardware acceleration hints for reduced motion */
+    transform: none;
+    will-change: auto;
+    contain: none;
+  }
+}
+
+/* High performance mode for modern browsers - group class removed */
+
+/* ========================================================================== */
+/* == Scroll Snap Optimizations (Experimental)                           == */
+/* ========================================================================== */
+
+/* Optional: Enable scroll snapping for better UX (disabled by default) */
+.systemsculpt-messages-container.scroll-snap-enabled {
+  scroll-snap-type: y proximity;
+}
+
+.systemsculpt-messages-container.scroll-snap-enabled .systemsculpt-message {
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+}
+
+/* ========================================================================== */
+/* == Memory and GPU Optimizations                                        == */
+/* ========================================================================== */
+
+/* Optimize for GPU memory usage */
+.systemsculpt-messages-container {
+  /* Limit GPU layer creation */
+  transform-style: flat;
+  /* Optimize compositing */
+  isolation: isolate;
+}
+
+/* Prevent unnecessary layer creation for hidden elements */
+.systemsculpt-message-button-toolbar[style*="opacity: 0"],
+.systemsculpt-message-button-toolbar-collapsed[style*="opacity: 0"],
+.systemsculpt-message-button-toolbar-expanded[style*="opacity: 0"] {
+  transform: none !important;
+  will-change: auto !important;
+}

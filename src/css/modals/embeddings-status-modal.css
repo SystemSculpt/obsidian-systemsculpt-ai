@@ -1,0 +1,337 @@
+/**
+ * Embeddings Status Modal
+ *
+ * Real-time embeddings status display with provider info, stats, and controls
+ */
+
+.systemsculpt-embeddings-status-modal.ss-modal--medium {
+  width: 480px;
+  max-width: 95vw;
+}
+
+.ss-embeddings-status {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ss-embeddings-provider-card {
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-embeddings-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ss-embeddings-status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ss-embeddings-status-indicator--idle {
+  background: var(--color-green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-green) 20%, transparent);
+}
+
+.ss-embeddings-status-indicator--active {
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  animation: ss-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes ss-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.ss-embeddings-provider-title {
+  flex: 1;
+}
+
+.ss-embeddings-provider-status {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-embeddings-provider-details {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.ss-embeddings-detail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.ss-embeddings-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.ss-embeddings-detail-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ss-embeddings-detail-value {
+  font-size: 13px;
+  color: var(--text-normal);
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.ss-embeddings-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.ss-embeddings-stat-card {
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  border: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.ss-embeddings-stat-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.ss-embeddings-stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-normal);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-embeddings-stat-label {
+  font-size: 12px;
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+.ss-embeddings-stat-subtext {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ss-embeddings-progress-section {
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-embeddings-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ss-embeddings-progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--interactive-accent);
+  animation: ss-spin 1s linear infinite;
+}
+
+.ss-embeddings-progress-text {
+  font-size: 13px;
+  color: var(--text-normal);
+  flex: 1;
+}
+
+.ss-embeddings-progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ss-embeddings-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.ss-embeddings-error-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
+  border: 1px solid color-mix(in srgb, var(--color-red) 30%, var(--background-modifier-border));
+  border-radius: 8px;
+}
+
+.ss-embeddings-error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--color-red);
+  flex-shrink: 0;
+}
+
+.ss-embeddings-error-text {
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.4;
+}
+
+.ss-embeddings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.ss-embeddings-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  flex: 1;
+}
+
+.ss-embeddings-action-button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.ss-embeddings-action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ss-embeddings-action-button--primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ss-embeddings-action-button--primary:hover:not(:disabled) {
+  background: var(--interactive-accent-hover);
+  border-color: var(--interactive-accent-hover);
+}
+
+.ss-embeddings-action-button--danger {
+  background: var(--color-red);
+  color: white;
+  border-color: var(--color-red);
+}
+
+.ss-embeddings-action-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-red) 80%, black);
+  border-color: color-mix(in srgb, var(--color-red) 80%, black);
+}
+
+.ss-embeddings-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.ss-embeddings-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.ss-embeddings-notice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+@media (max-width: 500px) {
+  .ss-embeddings-provider-details {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .ss-embeddings-detail-item {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ss-embeddings-detail-label {
+    min-width: 60px;
+  }
+
+  .ss-embeddings-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-embeddings-stat-card {
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .ss-embeddings-stat-icon {
+    margin-bottom: 0;
+  }
+
+  .ss-embeddings-actions {
+    flex-direction: column;
+  }
+}

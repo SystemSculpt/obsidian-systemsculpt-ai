@@ -1,0 +1,174 @@
+/**
+ * Grid Components
+ * 
+ * Styles for grid layouts and content organization
+ */
+
+.systemsculpt-context-grid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  min-height: 0;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-track {
+  background: var(--background-primary);
+  border-radius: 4px;
+}
+
+.systemsculpt-preview-frontmatter-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.systemsculpt-utility-button-grid {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+.systemsculpt-chat-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 4px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-track {
+  background: var(--background-primary);
+  border-radius: 4px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}
+
+.systemsculpt-pro-promotion .systemsculpt-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.systemsculpt-model-grid {
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  overflow-y: scroll;
+  padding-right: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-grid {
+  flex-grow: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: clamp(8px, 1.5vw, 12px);
+  overflow-y: auto;
+  padding: 0 4px 8px 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  max-width: 100%;
+  align-items: start;
+  align-content: start;
+}
+
+.systemsculpt-context-grid::-webkit-scrollbar-track {
+  background: var(--background-primary);
+  border-radius: 4px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-chat-grid::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}

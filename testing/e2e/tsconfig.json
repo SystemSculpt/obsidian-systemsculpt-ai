@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node", "mocha", "@wdio/globals/types", "webdriverio", "wdio-obsidian-service"],
+    "typeRoots": ["./types", "../node_modules/@types", "../node_modules"],
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": ["./specs/**/*.ts", "./specs-live/**/*.ts", "./utils/**/*.ts", "./types/**/*.d.ts"]
+}

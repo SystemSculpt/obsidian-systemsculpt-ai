@@ -1,0 +1,168 @@
+/**
+ * Tool Call States - Simplified inline display styling
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Inline Tool Call Display                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 14px;
+  min-height: 36px;
+  /* Ensure inline tool call fills the assistant container width */
+  width: 100%;
+  box-sizing: border-box;
+  /* Allow children to shrink correctly so actions never overflow */
+  min-width: 0;
+  /* Ensure the inline row never visually overflows its parent */
+  overflow: hidden;
+}
+
+.systemsculpt-tool-inline:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Tool name */
+.systemsculpt-tool-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  /* Take remaining space, allow shrinking, and ellipsize */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status text */
+.systemsculpt-tool-status {
+  color: var(--text-muted);
+  font-size: 13px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Actions container */
+.systemsculpt-tool-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  /* Keep buttons visible; they should not shrink below intrinsic width */
+  flex-shrink: 0;
+  min-width: max-content;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Status Icons                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  /* Keep icon visible even when text truncates */
+  min-width: 18px;
+}
+
+.systemsculpt-tool-status-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-tool-status-icon--success {
+  color: var(--text-success);
+  animation: checkmark 0.3s ease-out;
+}
+
+.systemsculpt-tool-status-icon--error {
+  color: var(--text-error);
+}
+
+.systemsculpt-tool-status-icon--denied {
+  color: var(--text-warning);
+}
+
+.systemsculpt-tool-status-icon--pending {
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-status-icon--executing {
+  color: var(--interactive-accent);
+}
+
+@keyframes checkmark {
+  from {
+    transform: scale(0) rotate(-45deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Simple Loading Spinner                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Inline diff preview attached under a tool call */
+.systemsculpt-inline-diff {
+  margin-top: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+
+/* Header/actions removed for a cleaner inline diff */
+
+.systemsculpt-inline-diff__body {
+  max-height: none;
+  overflow: visible;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Mobile Optimizations                                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (max-width: 600px) {
+  .systemsculpt-tool-inline {
+    padding: 6px 10px;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  
+  .systemsculpt-tool-actions {
+    width: 100%;
+    margin-top: 8px;
+    justify-content: flex-end;
+  }
+  
+  .systemsculpt-tool-status-icon {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .systemsculpt-tool-status-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+}

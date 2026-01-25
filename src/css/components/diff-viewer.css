@@ -1,0 +1,292 @@
+/**
+ * Diff Viewer Styles - Optimized for tool call UI
+ */
+
+.systemsculpt-diff-viewer {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: hidden;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Compact Header */
+.systemsculpt-diff-header {
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-diff-file-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.systemsculpt-diff-filename {
+  font-family: var(--font-monospace);
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-diff-stats {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smallest);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--background-modifier-form-field);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: fit-content;
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-no-changes {
+  color: var(--text-faint);
+  background: var(--background-modifier-hover);
+}
+
+/* Individual spans for additions and deletions */
+.systemsculpt-diff-additions {
+  color: var(--color-green);
+}
+
+.systemsculpt-diff-deletions {
+  color: var(--color-red);
+}
+
+.systemsculpt-diff-total {
+  color: var(--text-muted);
+}
+
+/* Background colors based on what types of changes exist */
+.systemsculpt-diff-stats.systemsculpt-diff-has-additions {
+  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-has-deletions {
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-diff-stats.systemsculpt-diff-has-additions.systemsculpt-diff-has-deletions {
+  background: color-mix(in srgb, rgb(var(--color-orange-rgb)) 10%, var(--ss-layer-base));
+}
+
+/* Content */
+.systemsculpt-diff-content {
+  max-height: clamp(120px, 30vh, 200px);
+  overflow-y: auto;
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-diff-no-changes-notice {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Hunks */
+.systemsculpt-diff-hunk {
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+}
+
+.systemsculpt-diff-hunk:last-child {
+  border-bottom: none;
+}
+
+.systemsculpt-diff-hunk-separated {
+  margin-top: 8px;
+  border-top: 2px solid var(--background-modifier-border);
+  position: relative;
+}
+
+.systemsculpt-diff-hunk-separated::before {
+  content: '⋯';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--background-primary);
+  color: var(--text-faint);
+  padding: 0 8px;
+  font-size: var(--font-ui-smallest);
+}
+
+.systemsculpt-diff-hunk-header {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smallest);
+  padding: 6px 10px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-diff-lines {
+  /* Container for lines in a hunk */
+}
+
+/* Lines */
+.systemsculpt-diff-line {
+  display: flex;
+  align-items: stretch;
+  min-height: 18px;
+  line-height: 18px;
+  font-size: var(--font-ui-smaller);
+  border-left: 2px solid var(--ss-layer-base);
+}
+
+.systemsculpt-diff-line-added {
+  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 8%, var(--ss-layer-base));
+  border-left-color: var(--color-green);
+}
+
+.systemsculpt-diff-line-removed {
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 8%, var(--ss-layer-base));
+  border-left-color: var(--color-red);
+}
+
+.systemsculpt-diff-line-unchanged {
+  background: var(--background-primary);
+  opacity: 0.7;
+}
+
+.systemsculpt-diff-line:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-diff-line-added:hover {
+  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 12%, var(--ss-layer-base));
+}
+
+.systemsculpt-diff-line-removed:hover {
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 12%, var(--ss-layer-base));
+}
+
+/* Line numbers (optional, compact) */
+
+.systemsculpt-diff-line-number {
+  min-width: 36px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  text-align: right;
+  padding: 0 4px;
+  background: var(--background-modifier-hover);
+  border-right: 1px solid var(--background-modifier-border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.systemsculpt-diff-line-number-old {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-diff-line-number-new {
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-diff-line-added .systemsculpt-diff-line-number-new {
+  color: var(--color-green);
+}
+
+.systemsculpt-diff-line-removed .systemsculpt-diff-line-number-old {
+  color: var(--color-red);
+}
+
+/* Prefix symbols */
+.systemsculpt-diff-prefix {
+  width: 16px;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-diff-line-added .systemsculpt-diff-prefix {
+  color: var(--color-green);
+}
+
+.systemsculpt-diff-line-removed .systemsculpt-diff-prefix {
+  color: var(--color-red);
+}
+
+.systemsculpt-diff-line-unchanged .systemsculpt-diff-prefix {
+  color: var(--ss-layer-base);
+}
+
+/* Line content */
+.systemsculpt-diff-line-content {
+  flex: 1;
+  padding: 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-family: var(--font-monospace);
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-diff-line-added {
+  background: color-mix(in srgb, rgb(34, 197, 94) 8%, var(--ss-layer-base));
+}
+
+.theme-dark .systemsculpt-diff-line-removed {
+  background: color-mix(in srgb, rgb(239, 68, 68) 8%, var(--ss-layer-base));
+}
+
+.theme-dark .systemsculpt-diff-line-added:hover {
+  background: color-mix(in srgb, rgb(34, 197, 94) 12%, var(--ss-layer-base));
+}
+
+.theme-dark .systemsculpt-diff-line-removed:hover {
+  background: color-mix(in srgb, rgb(239, 68, 68) 12%, var(--ss-layer-base));
+}
+
+/* Light theme adjustments */
+.theme-light .systemsculpt-diff-line-added {
+  background: color-mix(in srgb, rgb(34, 197, 94) 6%, var(--ss-layer-base));
+}
+
+.theme-light .systemsculpt-diff-line-removed {
+  background: color-mix(in srgb, rgb(239, 68, 68) 6%, var(--ss-layer-base));
+}
+
+.theme-light .systemsculpt-diff-line-added:hover {
+  background: color-mix(in srgb, rgb(34, 197, 94) 10%, var(--ss-layer-base));
+}
+
+.theme-light .systemsculpt-diff-line-removed:hover {
+  background: color-mix(in srgb, rgb(239, 68, 68) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-diff-truncated {
+  padding: 6px 10px;
+  font-size: var(--font-ui-smallest);
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  .systemsculpt-diff-line-number {
+    min-width: 24px;
+  }
+
+  .systemsculpt-diff-prefix {
+    width: 14px;
+  }
+  
+  .systemsculpt-diff-line-content {
+    padding: 0 4px;
+  }
+} 

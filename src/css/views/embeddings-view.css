@@ -1,0 +1,646 @@
+/* Embeddings View - Main container */
+.systemsculpt-embeddings-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Header section - ultra compact */
+.embeddings-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  flex-shrink: 0;
+}
+
+.embeddings-view-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-weight: 500;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  transition: box-shadow 0.3s ease;
+}
+
+.embeddings-view-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.embeddings-view-file-name {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  font-weight: 400;
+  text-align: center;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embeddings-view-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+}
+
+.embeddings-view-title.refreshing {
+  animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+@keyframes subtle-pulse {
+  0% { 
+    box-shadow: 0 0 0 0 var(--ss-layer-base);
+    opacity: 0.6;
+  }
+  50% { 
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--interactive-accent) 12%, var(--ss-layer-base));
+    opacity: 0.75;
+  }
+  100% { 
+    box-shadow: 0 0 0 0 var(--ss-layer-base);
+    opacity: 0.6;
+  }
+}
+
+
+/* Status section - hidden */
+.embeddings-view-status {
+  display: none;
+}
+
+/* Results container - more space */
+.embeddings-view-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.results-container {
+  padding: 0;
+}
+
+/* Individual result items - more compact and fully clickable */
+.similar-note-item {
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-radius: 4px;
+  margin: 1px 0;
+  border: 1px solid var(--ss-layer-base);
+}
+
+.similar-note-item:hover {
+  background-color: var(--background-modifier-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  border-color: var(--background-modifier-border-hover);
+}
+
+.similar-note-item:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px color-mix(in srgb, rgb(0, 0, 0) 5%, var(--ss-layer-base));
+}
+
+.similar-note-item:last-child {
+  border-bottom: none;
+}
+
+/* Score indicator - override the similar-notes-view.css properly */
+.systemsculpt-embeddings-view .note-score {
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-top: 2px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Remove the span styling since we're styling the container directly */
+.systemsculpt-embeddings-view .note-score span {
+  font-size: inherit;
+  font-weight: inherit;
+  padding: 0;
+  border-radius: 0;
+  min-width: auto;
+  text-align: inherit;
+  display: contents;
+}
+
+/* Score colors using Obsidian's native semantic colors with transparency */
+.systemsculpt-embeddings-view .note-score.score-high {
+  background-color: color-mix(in srgb, var(--text-success) 50%, var(--ss-layer-base));
+  color: var(--text-on-accent);
+  text-shadow: 0 0 2px color-mix(in srgb, rgb(0, 0, 0) 80%, var(--ss-layer-base));
+}
+
+.systemsculpt-embeddings-view .note-score.score-medium {
+  background-color: color-mix(in srgb, var(--text-warning) 50%, var(--ss-layer-base));
+  color: var(--text-on-accent);
+  text-shadow: 0 0 2px color-mix(in srgb, rgb(0, 0, 0) 80%, var(--ss-layer-base));
+}
+
+.systemsculpt-embeddings-view .note-score.score-low {
+  background-color: color-mix(in srgb, var(--text-error) 50%, var(--ss-layer-base));
+  color: var(--text-on-accent);
+  text-shadow: 0 0 2px color-mix(in srgb, rgb(0, 0, 0) 80%, var(--ss-layer-base));
+}
+
+/* Note content */
+.note-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-title {
+  margin-bottom: 4px;
+}
+
+.note-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+
+.note-title .internal-link {
+  font-weight: 500;
+  color: var(--text-normal);
+  text-decoration: none;
+  display: block;
+  line-height: 1.3;
+  cursor: inherit; /* Inherit cursor from parent card */
+}
+
+.note-title .internal-link:hover {
+  color: var(--text-accent);
+  text-decoration: none; /* Remove underline since whole card is clickable */
+}
+
+/* Visual indicator that the whole card is clickable */
+.systemsculpt-embeddings-view .similar-note-item:hover .note-title .internal-link {
+  color: var(--text-accent);
+}
+
+.note-excerpt {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+  margin-bottom: 4px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+/* Metadata row - more compact */
+.note-metadata {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.note-path {
+  opacity: 0.7;
+}
+
+.note-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.note-tags .tag {
+  background-color: var(--tag-background);
+  color: var(--tag-color);
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-size: 9px;
+}
+
+.note-date {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+/* Consolidated empty states - more compact */
+.embeddings-view-empty,
+.embeddings-view-no-results,
+.embeddings-view-error,
+.embeddings-view-disabled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  text-align: center;
+  flex: 1;
+}
+
+.empty-icon,
+.no-results-icon,
+.error-icon,
+.disabled-icon {
+  width: 40px;
+  height: 40px;
+  opacity: 0.4;
+  margin-bottom: 12px;
+}
+
+.empty-title,
+.no-results-title,
+.error-title,
+.disabled-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-normal);
+  margin-bottom: 6px;
+}
+
+.empty-description,
+.no-results-description,
+.error-message,
+.disabled-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.3;
+  max-width: 280px;
+}
+
+.error-icon {
+  opacity: 0.5;
+  color: var(--text-error);
+}
+
+.error-title {
+  color: var(--text-error);
+}
+
+/* Loading state */
+.embeddings-view-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  flex: 1;
+}
+
+/* Compact loading for quick searches */
+.embeddings-view-loading.compact {
+  padding: 24px 20px;
+  min-height: 120px;
+}
+
+.systemsculpt-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--background-modifier-border);
+  border-top: 2px solid var(--text-accent);
+  border-radius: 50%;
+  animation: embeddings-view-spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+/* Small spinner for quick loading */
+.systemsculpt-loading-spinner.small {
+  width: 18px;
+  height: 18px;
+  border-width: 1.5px;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-loading-text {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Small text for quick loading */
+.systemsculpt-loading-text.small {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+@keyframes embeddings-view-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .embeddings-view-header {
+    padding: 8px 12px;
+  }
+  
+  .similar-note-item {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  
+  .note-score {
+    width: 35px;
+  }
+  
+  .note-metadata {
+    font-size: 10px;
+  }
+}
+
+
+
+/* Scrollbar styling */
+.embeddings-view-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.embeddings-view-results::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}
+
+.embeddings-view-results::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 3px;
+}
+
+.embeddings-view-results::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-bg-hover);
+}
+
+/* Processing state */
+.embeddings-view-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  text-align: center;
+  min-height: 240px;
+}
+
+.embeddings-view-processing .processing-icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.embeddings-view-processing .processing-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  color: var(--text-normal);
+}
+
+.embeddings-view-processing .processing-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.4;
+  max-width: 280px;
+}
+
+.embeddings-view-processing .processing-tip {
+  font-size: 12px;
+  color: var(--text-faint);
+  background: var(--background-modifier-form-field);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Action buttons for large vault prompt */
+.embeddings-view-processing .processing-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  justify-content: center;
+}
+
+.embeddings-view-processing .processing-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--interactive-normal);
+  background: var(--interactive-normal);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.embeddings-view-processing .processing-actions button:hover {
+  background: var(--interactive-hover);
+  border-color: var(--interactive-hover);
+}
+
+.embeddings-view-processing .processing-actions button.mod-muted {
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  border-color: var(--background-modifier-border);
+}
+
+.embeddings-view-processing .processing-actions button.mod-muted:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.embeddings-view-processing .processing-actions button.mod-cta {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.embeddings-view-processing .processing-actions button.mod-cta:hover {
+  background: var(--interactive-accent-hover);
+  border-color: var(--interactive-accent-hover);
+}
+
+/* Processing progress elements */
+.processing-progress {
+  width: 100%;
+  max-width: 240px;
+  margin-top: 16px;
+}
+
+.embeddings-view-processing .processing-secondary-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.embeddings-view-processing .processing-secondary-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.embeddings-view-processing .processing-secondary-actions button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.systemsculpt-progress-bar {
+  width: 100%;
+  height: 4px;
+  background-color: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.systemsculpt-progress-fill {
+  height: 100%;
+  background-color: var(--interactive-accent);
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated stripes for processing state */
+.systemsculpt-progress-fill.processing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    45deg,
+    var(--ss-layer-base) 25%,
+    color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base)) 25%,
+    color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base)) 50%,
+    var(--ss-layer-base) 50%,
+    var(--ss-layer-base) 75%,
+    color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base)) 75%,
+    color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base))
+  );
+  background-size: 16px 16px;
+  animation: embeddings-view-progress-stripes 1.2s linear infinite;
+}
+
+@keyframes embeddings-view-progress-stripes {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 16px 16px;
+  }
+}
+
+/* Drag and Drop Styles for Similar Notes */
+.similar-note-draggable {
+  position: relative;
+}
+
+.similar-note-draggable::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-muted);
+  opacity: 0.3;
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>') no-repeat center;
+  mask-size: 12px;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.similar-note-draggable:hover::after {
+  opacity: 0.6;
+}
+
+.similar-note-dragging {
+  opacity: 0.5;
+  transform: rotate(2deg);
+  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.similar-note-dragging::after {
+  opacity: 0.8;
+  background: var(--interactive-accent);
+}
+
+/* Context indicator for notes already in chat context */
+.similar-note-in-context {
+  border: 2px solid var(--text-success);
+  background: color-mix(in srgb, var(--text-success) 8%, var(--background-primary));
+}
+
+.similar-note-in-context:hover {
+  background: color-mix(in srgb, var(--text-success) 12%, var(--background-modifier-hover));
+  border-color: var(--text-success);
+}
+
+/* Adjust draggable indicator for notes in context */
+.similar-note-in-context.similar-note-draggable::after {
+  background: var(--text-success);
+  opacity: 0.6;
+}
+
+.similar-note-in-context.similar-note-draggable:hover::after {
+  opacity: 0.8;
+}
+
+/* Chat view drop zone feedback */
+.systemsculpt-chat-view.drag-over-from-similar-notes {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  transition: background 0.2s ease;
+}
+
+.systemsculpt-chat-view.drag-over-from-similar-notes::before {
+  content: 'Drop to add to context';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+}

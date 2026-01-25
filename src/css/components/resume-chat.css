@@ -1,0 +1,98 @@
+/* Resume Chat Button Container */
+.systemsculpt-resume-chat-button {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px;
+  padding-right: 50px !important; /* 50px from right edge */
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  z-index: 10;
+  margin-bottom: 16px;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* Resume Chat Button */
+.systemsculpt-resume-chat-btn {
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-resume-chat-btn:hover {
+  background: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-resume-chat-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgb(0, 0, 0);
+}
+
+/* Add icon to button */
+.systemsculpt-resume-chat-btn::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  background-color: currentColor;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'%3E%3C/path%3E%3C/svg%3E");
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  mask-position: center;
+}
+
+/* Dark mode adjustments */
+.theme-dark .systemsculpt-resume-chat-button {
+  background: var(--background-primary);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .systemsculpt-resume-chat-button {
+    padding: 12px;
+  }
+
+  .systemsculpt-resume-chat-btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+
+  .systemsculpt-resume-chat-btn::before {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Reading mode specific adjustments */
+.markdown-reading-view .systemsculpt-resume-chat-button {
+  margin-top: 0;
+  margin-left: -16px;
+  margin-right: -16px;
+  border-radius: 0;
+  padding-right: 50px !important; /* Maintain 50px from right edge */
+}
+
+/* Source mode specific adjustments */
+.cm-editor .systemsculpt-resume-chat-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: auto;
+  background: var(--ss-layer-base);
+  border: none;
+  padding: 8px;
+  padding-right: 50px !important; /* Maintain 50px from right edge */
+}

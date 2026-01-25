@@ -1,0 +1,160 @@
+.systemsculpt-message-content,
+.systemsculpt-content-part {
+  position: relative;
+  overflow: visible;
+}
+
+.systemsculpt-message {
+  position: relative;
+  z-index: 0;
+}
+
+.systemsculpt-message:hover {
+  z-index: 12000;
+}
+
+.systemsculpt-message:hover .systemsculpt-message-content,
+.systemsculpt-message-content:hover,
+.systemsculpt-content-part:hover {
+  z-index: 12000;
+}
+
+.systemsculpt-message-toolbar {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px;
+  background: var(--background-secondary);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 20%, var(--ss-layer-base));
+  border-radius: 999px;
+  box-shadow: 0 6px 20px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base)), 0 2px 6px color-mix(in srgb, rgb(0, 0, 0) 6%, var(--ss-layer-base));
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), 6px, 0) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 12001;
+  transition: opacity 120ms ease, transform 160ms ease;
+  white-space: nowrap;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  overflow: visible;
+}
+
+/* Do not reserve extra space after content just because toolbar is positioned after it */
+.systemsculpt-message-content > .systemsculpt-message-toolbar,
+.systemsculpt-content-part > .systemsculpt-message-toolbar {
+  margin-top: 0;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-toolbar {
+  left: 0 !important;
+  right: auto !important;
+  top: 100% !important;
+  bottom: auto !important;
+  flex-direction: row !important;
+}
+
+.systemsculpt-user-message .systemsculpt-message-toolbar {
+  left: auto !important;
+  right: 0 !important;
+  top: 100% !important;
+  bottom: auto !important;
+  flex-direction: row-reverse !important;
+}
+
+.systemsculpt-message-toolbar.ss-flip-up {
+  top: auto;
+  bottom: 100%;
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), -6px, 0) scale(0.98);
+}
+
+.systemsculpt-message:hover .systemsculpt-message-toolbar,
+.systemsculpt-message-content:hover > .systemsculpt-message-toolbar,
+.systemsculpt-content-part:hover > .systemsculpt-message-toolbar {
+  opacity: 1;
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), 2px, 0) scale(1);
+  pointer-events: auto;
+  z-index: 12001;
+}
+
+.systemsculpt-message:hover .systemsculpt-message-toolbar.ss-flip-up,
+.systemsculpt-message-content:hover > .systemsculpt-message-toolbar.ss-flip-up,
+.systemsculpt-content-part:hover > .systemsculpt-message-toolbar.ss-flip-up {
+  transform: translate3d(var(--ss-toolbar-shift-x, 0px), -2px, 0) scale(1);
+}
+
+.systemsculpt-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 25%, var(--ss-layer-base));
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.systemsculpt-toolbar-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 35%, var(--ss-layer-base));
+}
+
+.systemsculpt-toolbar-btn.ss-success {
+  background: var(--background-modifier-success);
+  border-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-toolbar-btn.ss-confirm {
+  background: var(--background-modifier-warning);
+  border-color: var(--background-modifier-warning);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 700px) {
+  .systemsculpt-message-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate3d(var(--ss-toolbar-shift-x, 0px), 2px, 0) scale(1);
+    gap: 0;
+    padding: 2px;
+    background: var(--ss-layer-base);
+    border: none;
+    box-shadow: none;
+  }
+
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-more {
+    margin-right: 4px;
+  }
+
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-btn {
+    display: none;
+  }
+
+  .systemsculpt-message-toolbar.ss-open .systemsculpt-toolbar-btn,
+  .systemsculpt-message-toolbar .systemsculpt-toolbar-more {
+    display: inline-flex;
+  }
+
+  .systemsculpt-message-toolbar.ss-open {
+    background: var(--background-secondary);
+    border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 20%, var(--ss-layer-base));
+    box-shadow: 0 6px 20px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base)), 0 2px 6px color-mix(in srgb, rgb(0, 0, 0) 6%, var(--ss-layer-base));
+    gap: 6px;
+    padding: 4px;
+    border-radius: 999px;
+  }
+}

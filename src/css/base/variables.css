@@ -1,0 +1,101 @@
+/**
+ * CSS Variables for SystemSculpt
+ * 
+ * This file contains design tokens and custom properties that leverage Obsidian's theming system.
+ * These variables provide a consistent design language across all components.
+ * 
+ * All variables use the 'ss-' prefix for consistency and to avoid collisions with Obsidian variables.
+ */
+
+:root {
+  /* 
+   * Color system 
+   * Maps Obsidian theme colors to semantic design tokens
+   */
+  --ss-color-primary: var(--interactive-accent);
+  --ss-color-primary-hover: var(--interactive-accent-hover);
+  --ss-color-secondary: var(--background-modifier-hover);
+  --ss-color-secondary-hover: var(--background-modifier-border);
+  --ss-color-danger: color-mix(
+    in srgb,
+    rgb(var(--color-red-rgb, 231, 76, 60)) 88%,
+    var(--background-primary, #111111) 12%
+  );
+  --ss-color-danger-hover: color-mix(
+    in srgb,
+    rgb(var(--color-red-rgb, 231, 76, 60)) 95%,
+    #000000 5%
+  );
+  --ss-color-success: var(--background-modifier-success);
+  --ss-color-warning: var(--color-yellow);
+  
+  /* Text colors */
+  --ss-color-text-normal: var(--text-normal);
+  --ss-color-text-muted: var(--text-muted);
+  --ss-color-text-accent: var(--text-accent);
+  --ss-color-text-on-primary: var(--text-on-accent);
+  
+  /* Border and background colors */
+  --ss-color-border: var(--background-modifier-border);
+  --ss-color-border-hover: var(--background-modifier-border-hover);
+  --ss-color-bg-primary: var(--background-primary);
+  --ss-color-bg-secondary: var(--background-secondary);
+  --ss-color-bg-hover: var(--background-modifier-hover);
+  
+  /* Spacing system */
+  --ss-space-xxs: 2px;
+  --ss-space-xs: 4px;
+  --ss-space-sm: 8px;
+  --ss-space-md: 16px;
+  --ss-space-lg: 24px;
+  --ss-space-xl: 32px;
+  --ss-space-xxl: 48px;
+  
+  /* Typography */
+  --ss-font-size-xs: 11px;
+  --ss-font-size-sm: 12px;
+  --ss-font-size-md: 14px;
+  --ss-font-size-lg: 16px;
+  --ss-font-size-xl: 18px;
+  --ss-font-weight-normal: 400;
+  --ss-font-weight-medium: 500;
+  --ss-font-weight-bold: 600;
+  
+  /* Borders & Radius */
+  --ss-radius-sm: 4px;
+  --ss-radius-md: 6px;
+  --ss-radius-lg: 8px;
+  --ss-radius-circle: 50%;
+  --ss-border-width: 1px;
+  
+  /* Transitions */
+  --ss-transition-fast: 0.15s ease;
+  --ss-transition-normal: 0.2s ease;
+  --ss-transition-slow: 0.3s ease;
+  
+  /* Shadows */
+  --ss-shadow-sm: 0 2px 4px rgb(0, 0, 0);
+  --ss-shadow-md: 0 2px 8px rgb(0, 0, 0);
+  --ss-shadow-lg: 0 4px 12px rgb(0, 0, 0);
+
+  /*
+   * Opaque surface + border tokens
+   * Used anywhere we previously relied on rgba()/transparent blends so the UI stays
+   * fully opaque even when composing over exotic Obsidian themes.
+   */
+  --ss-layer-base: var(--background-primary);
+  --ss-layer-muted: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary));
+  --ss-layer-elevated: color-mix(in srgb, var(--background-secondary) 85%, var(--background-primary));
+  --ss-layer-highlight: color-mix(in srgb, var(--background-modifier-hover) 80%, var(--background-primary));
+  --ss-border-soft: color-mix(in srgb, var(--background-modifier-border) 65%, var(--background-primary));
+  --ss-border-strong: color-mix(in srgb, var(--background-modifier-border) 85%, var(--background-primary));
+  --ss-border-accent-soft: color-mix(in srgb, var(--text-accent) 35%, var(--background-primary));
+  --ss-border-accent-strong: color-mix(in srgb, var(--text-accent) 55%, var(--background-primary));
+  --ss-surface-accent: color-mix(in srgb, var(--text-accent) 18%, var(--background-secondary));
+  --ss-surface-warning: color-mix(in srgb, var(--color-yellow, #ffcc00) 18%, var(--background-secondary));
+  --ss-surface-success: color-mix(in srgb, var(--color-green, #2ecc71) 18%, var(--background-secondary));
+  --ss-surface-danger: color-mix(in srgb, var(--color-red, #e74c3c) 18%, var(--background-secondary));
+  --ss-shadow-soft: 0 10px 30px color-mix(in srgb, #000000 25%, var(--background-primary));
+  --ss-shadow-strong: 0 12px 40px color-mix(in srgb, #000000 35%, var(--background-primary));
+  --ss-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 30%, var(--background-primary));
+}

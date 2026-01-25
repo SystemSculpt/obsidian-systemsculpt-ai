@@ -1,0 +1,581 @@
+/**
+ * SystemSculpt Janitor Modal Styles
+ * 
+ * Modern, responsive styling for the Janitor modal and its submodals.
+ * Follows the StandardModal design system and Obsidian's native look and feel.
+ */
+
+/* ============================================================================
+   MAIN JANITOR MODAL
+   ============================================================================ */
+
+.ss-janitor-modal {
+  /* Ensure proper size and positioning */
+  max-width: 800px;
+  width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* Let the content handle scrolling */
+}
+
+.ss-janitor-modal .ss-modal__header {
+  background: linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%);
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.ss-janitor-modal .ss-modal__title {
+  color: var(--text-accent);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ss-janitor-modal .ss-modal__description {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ============================================================================
+   SECTIONS LAYOUT
+   ============================================================================ */
+
+.ss-janitor-modal .ss-modal__content {
+  /* Enable scrolling for the content area */
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0; /* Critical for proper flexbox scrolling */
+}
+
+.ss-janitor-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 4px 0 20px 0; /* Add bottom padding for scroll comfort */
+}
+
+.ss-janitor-section {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.ss-janitor-section:hover {
+  border-color: var(--background-modifier-border-hover);
+  box-shadow: 0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+}
+
+.ss-janitor-section-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: linear-gradient(90deg, var(--background-primary) 0%, var(--background-secondary) 100%);
+}
+
+.ss-janitor-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ss-janitor-section-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ss-janitor-section-content {
+  padding: 20px;
+  position: relative;
+  transition: opacity 0.2s ease;
+}
+
+/* ============================================================================
+   LOADING OVERLAY AND STATES
+   ============================================================================ */
+
+.ss-janitor-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--background-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.ss-janitor-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
+}
+
+.ss-janitor-loading-icon {
+  width: 32px;
+  height: 32px;
+  animation: ss-spin 1s linear infinite;
+  color: var(--text-accent);
+}
+
+.ss-janitor-loading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ss-janitor-loading-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-janitor-loading-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* ============================================================================
+   ERROR STATES
+   ============================================================================ */
+
+.ss-janitor-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.ss-janitor-error-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--text-error);
+}
+
+.ss-janitor-error-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-janitor-error-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-error);
+}
+
+.ss-janitor-error-message {
+  font-size: 14px;
+  color: var(--text-muted);
+  max-width: 400px;
+  line-height: 1.4;
+}
+
+@keyframes ss-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   STATS CARDS
+   ============================================================================ */
+
+.ss-janitor-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ss-janitor-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.ss-janitor-stat-card:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.ss-janitor-stat-card--warning {
+  border-color: var(--color-orange);
+  background-color: color-mix(in srgb, rgb(var(--color-orange-rgb)) 10%, var(--ss-layer-base));
+}
+
+.ss-janitor-stat-card--success {
+  border-color: var(--color-green);
+  background-color: color-mix(in srgb, rgb(var(--color-green-rgb)) 10%, var(--ss-layer-base));
+}
+
+.ss-janitor-stat-card--muted {
+  opacity: 0.7;
+}
+
+.ss-janitor-stat-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+.ss-janitor-stat-card--warning .ss-janitor-stat-icon {
+  color: var(--color-orange);
+}
+
+.ss-janitor-stat-card--success .ss-janitor-stat-icon {
+  color: var(--color-green);
+}
+
+.ss-janitor-stat-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.ss-janitor-stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+
+.ss-janitor-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   ACTION BUTTONS
+   ============================================================================ */
+
+.ss-janitor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.ss-janitor-actions .ss-button {
+  min-width: 140px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.ss-janitor-actions .ss-button.ss-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* ============================================================================
+   CONFIRMATION MODALS
+   ============================================================================ */
+
+.ss-janitor-preview {
+  margin-top: 16px;
+}
+
+.ss-janitor-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+}
+
+.ss-janitor-preview-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-janitor-preview-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  background-color: var(--background-primary);
+}
+
+.ss-janitor-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  transition: background-color 0.1s ease;
+}
+
+.ss-janitor-preview-item:last-child {
+  border-bottom: none;
+}
+
+.ss-janitor-preview-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ss-janitor-preview-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-janitor-preview-path {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-janitor-preview-size {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--background-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.ss-janitor-preview-more {
+  padding: 12px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  border-top: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+/* ============================================================================
+   EMPTY CONTENT PREVIEW SECTIONS
+   ============================================================================ */
+
+.ss-janitor-preview-section {
+  margin-bottom: 20px;
+}
+
+.ss-janitor-preview-section:last-child {
+  margin-bottom: 0;
+}
+
+.ss-janitor-preview-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+}
+
+.ss-janitor-preview-section-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-janitor-preview-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
+
+.ss-janitor-modal .ss-modal__content {
+  /* Custom scrollbar for better UX */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-bg);
+}
+
+.ss-janitor-modal .ss-modal__content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ss-janitor-modal .ss-modal__content::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+  border-radius: 4px;
+}
+
+.ss-janitor-modal .ss-modal__content::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.ss-janitor-modal .ss-modal__content::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+/* ============================================================================
+   MOBILE RESPONSIVENESS
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .ss-janitor-modal {
+    width: 95vw;
+    max-height: 90vh;
+  }
+
+  .ss-janitor-sections {
+    gap: 16px;
+  }
+
+  .ss-janitor-section-header {
+    padding: 12px 16px;
+  }
+
+  .ss-janitor-section-content {
+    padding: 16px;
+  }
+
+  .ss-janitor-stats {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .ss-janitor-stat-card {
+    padding: 10px;
+  }
+
+  .ss-janitor-actions {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ss-janitor-actions .ss-button {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .ss-janitor-preview-list {
+    max-height: 200px;
+  }
+
+  .ss-janitor-preview-item {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .ss-janitor-preview-path {
+    /* Allow text to wrap on mobile for better readability */
+    white-space: normal;
+    word-break: break-all;
+  }
+}
+
+@media (max-width: 480px) {
+  .ss-janitor-modal .ss-modal__title {
+    font-size: 18px;
+  }
+
+  .ss-janitor-section-title {
+    font-size: 15px;
+  }
+
+  .ss-janitor-stat-value {
+    font-size: 14px;
+  }
+
+  .ss-janitor-stat-label {
+    font-size: 10px;
+  }
+}
+
+/* ============================================================================
+   ACCESSIBILITY AND FOCUS STATES
+   ============================================================================ */
+
+.ss-janitor-section:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base));
+}
+
+.ss-janitor-stat-card:focus-within {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.ss-janitor-preview-item:focus-within {
+  background-color: var(--background-modifier-hover);
+  outline: none;
+}
+
+/* ============================================================================
+   HIGH CONTRAST THEME SUPPORT
+   ============================================================================ */
+
+@media (prefers-contrast: high) {
+  .ss-janitor-section {
+    border-width: 2px;
+  }
+
+  .ss-janitor-stat-card {
+    border-width: 2px;
+  }
+
+  .ss-janitor-preview-item {
+    border-bottom-width: 2px;
+  }
+}
+
+/* ============================================================================
+   REDUCED MOTION SUPPORT
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-janitor-section,
+  .ss-janitor-stat-card,
+  .ss-janitor-preview-item,
+  .ss-janitor-section-content {
+    transition: none;
+  }
+
+  .ss-janitor-loading-icon {
+    animation: none;
+  }
+}

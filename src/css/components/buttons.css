@@ -1,0 +1,156 @@
+/**
+ * Button styles for SystemSculpt
+ * 
+ * This file contains styles for buttons that match Obsidian's design system.
+ * These styles complement the ss-buttons.css file with additional button variants.
+ */
+
+/* Base button styles */
+.systemsculpt-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: all 0.05s ease;
+  border: 1px solid var(--ss-layer-base);
+  gap: 6px;
+}
+
+/* Button variants */
+.systemsculpt-button-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-button-primary:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-button-secondary {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.systemsculpt-button-secondary:hover {
+  background-color: var(--background-secondary);
+}
+
+.systemsculpt-button-danger {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-button-danger:hover {
+  background-color: var(--text-error);
+}
+
+.systemsculpt-button-ghost {
+  background-color: var(--ss-layer-base);
+  color: var(--text-muted);
+}
+
+.systemsculpt-button-ghost:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-button-link {
+  background-color: var(--ss-layer-base);
+  color: var(--text-accent);
+  padding: 0;
+  border: none;
+  text-decoration: underline;
+}
+
+.systemsculpt-button-link:hover {
+  color: var(--text-accent-hover);
+  text-decoration: none;
+}
+
+/* Button sizes */
+.systemsculpt-button-small {
+  padding: 4px 8px;
+  font-size: var(--font-ui-smaller);
+}
+
+.systemsculpt-button-large {
+  padding: 8px 16px;
+  font-size: var(--font-ui-medium);
+}
+
+/* Button states */
+.systemsculpt-button:disabled,
+.systemsculpt-button.disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.systemsculpt-button.loading {
+  position: relative;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-button.loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(255, 255, 255);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Icon button */
+.systemsculpt-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background-color: var(--ss-layer-base);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.05s ease;
+  border: none;
+}
+
+.systemsculpt-icon-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Button group */
+.systemsculpt-button-group {
+  display: inline-flex;
+}
+
+.systemsculpt-button-group .systemsculpt-button {
+  border-radius: 0;
+}
+
+.systemsculpt-button-group .systemsculpt-button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.systemsculpt-button-group .systemsculpt-button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

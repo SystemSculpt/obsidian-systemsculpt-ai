@@ -1,0 +1,581 @@
+/**
+ * Card Components
+ * 
+ * Styles for card containers, card content, and card actions
+ */
+
+.systemsculpt-model-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected {
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected:hover {
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
+}
+
+.systemsculpt-chat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  position: relative;
+}
+
+.systemsculpt-chat-card {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.systemsculpt-chat-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.systemsculpt-chat-card.selected {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-card.selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-chat-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.systemsculpt-chat-card:hover {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-chat-card:hover .systemsculpt-favorite-button {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing {
+  opacity: 1;
+  cursor: wait;
+  background-color: var(--background-modifier-border);
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-custom-provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.systemsculpt-custom-provider-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
+}
+
+.systemsculpt-custom-provider-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-custom-provider-card-status {
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-success);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing {
+  opacity: 1;
+  cursor: wait;
+  background-color: var(--background-modifier-border);
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-custom-provider-card-status:hover {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card-status:hover {
+  opacity: 1;
+}
+
+.systemsculpt-custom-model-card .systemsculpt-favorite-button {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 4px;
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-model-card {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: clamp(8px, 1.5vw, 12px);
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  height: fit-content;
+  min-height: clamp(120px, 20vh, 160px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-card {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.systemsculpt-model-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-model-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.systemsculpt-model-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-custom-provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-card-action {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: none;
+  border: none;
+}
+
+.systemsculpt-custom-provider-card-action.systemsculpt-delete:hover {
+  color: var(--text-error);
+}
+
+.systemsculpt-custom-provider-card-action:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.systemsculpt-custom-provider-card-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.systemsculpt-custom-provider-card-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: 1em;
+  margin: 0;
+}
+
+.systemsculpt-custom-provider-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-success);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-custom-provider-card-status {
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-success);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.systemsculpt-custom-provider-card-status.disabled {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing {
+  opacity: 1;
+  cursor: wait;
+  background-color: var(--background-modifier-border);
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-custom-provider-card-status:hover {
+  opacity: 1;
+}
+
+.systemsculpt-custom-provider-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 4px rgb(0, 0, 0);
+}
+
+.systemsculpt-model-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-model-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-custom-provider-card-action.systemsculpt-delete:hover {
+  color: var(--text-error);
+}
+
+.systemsculpt-custom-provider-card-action:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.systemsculpt-model-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.systemsculpt-chat-card.systemsculpt-keyboard-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.systemsculpt-custom-provider-card-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: 1em;
+  margin: 0;
+}
+
+.systemsculpt-chat-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.systemsculpt-custom-provider-card-action {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: none;
+  border: none;
+}
+
+.systemsculpt-custom-provider-card-action.systemsculpt-delete:hover {
+  color: var(--text-error);
+}
+
+.systemsculpt-custom-provider-card-action:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.systemsculpt-context-card {
+  position: relative;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--background-primary);
+  border: 1px solid var(--ss-layer-base);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.systemsculpt-context-card.systemsculpt-is-added {
+  background: var(--background-primary-alt);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-context-card.systemsculpt-is-added .systemsculpt-context-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected {
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-context-card.systemsculpt-is-selected:hover {
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-model-card.selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-secondary-alt);
+}
+
+.systemsculpt-custom-model-card {
+  min-height: unset;
+  height: auto;
+  padding: 6px 32px 6px 12px;
+  gap: 0;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-model-card .systemsculpt-favorite-button {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 4px;
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-custom-provider-card-status.systemsculpt-testing svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-chat-card.selected {
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-card.selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-chat-card:hover .systemsculpt-favorite-button {
+  opacity: 1;
+}
+
+.systemsculpt-context-card.systemsculpt-is-added .systemsculpt-context-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected {
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+}
+
+.systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected:hover {
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
+}
+
+.systemsculpt-custom-provider-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-provider-card-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-card-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
+.systemsculpt-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.systemsculpt-theme-dark .systemsculpt-context-card.systemsculpt-is-selected:hover {
+  box-shadow: 0 3px 10px rgb(0, 0, 0);
+}
+
+.systemsculpt-chat-card:hover {
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-chat-card:hover .systemsculpt-favorite-button {
+  opacity: 1;
+}
+
+.systemsculpt-context-card.systemsculpt-is-added {
+  background: var(--background-primary-alt);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-context-card.systemsculpt-is-added .systemsculpt-context-check {
+  opacity: 1;
+  transform: scale(1);
+}

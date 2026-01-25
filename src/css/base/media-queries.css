@@ -1,0 +1,59 @@
+/**
+ * Media Queries for Responsive Design
+ * 
+ * Contains all responsive breakpoints and device-specific styles
+ */
+
+/* Small screens */
+@media (max-width: 600px) {
+  .systemsculpt-file-meta {
+    display: block;
+    margin-top: 4px;
+  }
+  
+  .systemsculpt-context-meta {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  
+  .systemsculpt-model-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+  }
+}
+
+/* Medium screens */
+@media (min-width: 600px) {
+  .systemsculpt-file-meta {
+    display: inline;
+  }
+  
+  .systemsculpt-context-type-group,
+  .systemsculpt-context-meta-group {
+    display: flex;
+  }
+  
+  .systemsculpt-model-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+}
+
+/* Mobile and tablet */
+@media (max-width: 768px) {
+  .systemsculpt-custom-provider-manager-modal {
+    height: 100vh;
+    width: 95vw;
+    padding: 16px;
+  }
+}
+
+/* Touch screens */
+@media (hover: none) {
+  .systemsculpt-preview {
+    display: none;
+  }
+}
+
+/* REMOVED - All mobile button CSS deleted */

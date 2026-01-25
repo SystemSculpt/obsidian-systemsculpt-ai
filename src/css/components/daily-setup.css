@@ -1,0 +1,89 @@
+.systemsculpt-daily-navigator {
+  max-width: min(560px, 92vw);
+}
+
+.systemsculpt-daily-navigator .modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.daily-navigator-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+}
+
+.daily-navigator-subtitle {
+  margin: 4px 0 12px;
+  color: var(--text-muted);
+}
+
+.daily-navigator-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.daily-navigator-quick-actions button {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.daily-navigator-submit {
+  align-self: flex-start;
+}
+
+.daily-navigator-recent {
+  margin-top: 8px;
+}
+
+.daily-navigator-recent h3 {
+  font-size: 1em;
+  margin-bottom: 8px;
+}
+
+.daily-navigator-recent-list {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-navigator-recent-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.daily-navigator-recent-item:hover,
+.daily-navigator-recent-item:focus {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--ss-layer-base));
+  box-shadow: 0 4px 10px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base));
+}
+
+.daily-navigator-recent-label {
+  font-weight: 500;
+}
+
+.daily-navigator-recent-item .is-available {
+  color: var(--text-success);
+}
+
+.daily-navigator-recent-item .is-missing {
+  color: var(--text-warning);
+}
+
+.daily-navigator-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+@media (max-width: 600px) {
+  .daily-navigator-quick-actions button {
+    flex: 1 1 100%;
+  }
+}

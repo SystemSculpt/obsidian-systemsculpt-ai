@@ -1,0 +1,129 @@
+/* SystemSculpt Floating Widget Base Styling */
+
+.systemsculpt-floating-widget {
+  position: fixed;
+  z-index: 1000;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  padding: 0;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--background-modifier-border);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  transform: translateY(-10px);
+  opacity: 0;
+  min-width: 250px;
+  max-width: 500px;
+}
+
+.systemsculpt-floating-widget.visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.systemsculpt-floating-widget-title {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: move;
+  user-select: none;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  border-radius: 8px 8px 0 0;
+}
+
+.systemsculpt-floating-widget-title svg {
+  color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.systemsculpt-floating-widget-content {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Hover effects */
+.systemsculpt-floating-widget:hover {
+  box-shadow: 0 6px 25px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+}
+
+.systemsculpt-floating-widget-title:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Active state when dragging */
+.systemsculpt-floating-widget-title:active {
+  cursor: grabbing;
+  background-color: var(--background-modifier-active);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .systemsculpt-floating-widget {
+    max-width: calc(100vw - 40px);
+    min-width: calc(100vw - 40px);
+  }
+}
+
+/* Animation keyframes */
+@keyframes float-in {
+  from {
+    transform: translateY(-20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes float-out {
+  from {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-20px) scale(0.95);
+    opacity: 0;
+  }
+}
+
+/* Specific positioning classes */
+.systemsculpt-floating-widget--top-right {
+  top: 50px;
+  right: 20px;
+}
+
+.systemsculpt-floating-widget--bottom-right {
+  bottom: 20px;
+  right: 20px;
+}
+
+.systemsculpt-floating-widget--top-left {
+  top: 50px;
+  left: 20px;
+}
+
+.systemsculpt-floating-widget--bottom-left {
+  bottom: 20px;
+  left: 20px;
+}
+
+.systemsculpt-floating-widget--center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.systemsculpt-floating-widget--center.visible {
+  transform: translate(-50%, -50%);
+}

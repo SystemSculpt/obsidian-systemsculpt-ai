@@ -1,0 +1,1212 @@
+/**
+ * Message Components - Modern Design System
+ *
+ * Clean, elegant message styling with visual hierarchy
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Base Message Container                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-messages-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.systemsculpt-message-content p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-message-content li > ol {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-container {
+  padding: 8px 0;
+  width: 100%;
+}
+
+/* Grouping removed: messages are a flat list; each message is a single container */
+
+/* Unified Message Parts - ensure they fit within container */
+.systemsculpt-unified-part {
+  max-width: 100%;
+  box-sizing: border-box;
+  /* Let internal components manage their overflow, but avoid horizontal spill */
+  overflow-x: hidden;
+}
+
+/* Content parts should be transparent inside groups, visible outside */
+.systemsculpt-content-part {
+  color: var(--text-normal);
+  margin: 8px 0;
+  padding: 8px 12px;
+  display: block;
+  width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+  /* Default: match base surface to avoid see-through artifacts */
+  background: var(--ss-layer-base);
+  border: none;
+  border-radius: 6px;
+  /* Smooth transitions for hover effects */
+  transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
+  /* Guard against overflow from very long strings */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Content parts get a subtle card background */
+.systemsculpt-message .systemsculpt-content-part {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Remove hover background/glow for content parts */
+.systemsculpt-content-part:hover {
+  background-color: var(--background-primary);
+}
+
+/* Ensure proper spacing between multiple content parts */
+.systemsculpt-content-part + .systemsculpt-content-part {
+  margin-top: 8px;
+}
+
+/* Consistent spacing with other unified parts (reasoning, tool calls) */
+.systemsculpt-unified-part + .systemsculpt-content-part,
+.systemsculpt-content-part + .systemsculpt-unified-part {
+  margin-top: 8px;
+}
+
+/* Show copy button when hovering code blocks inside chat messages */
+.systemsculpt-message-content pre:hover .copy-code-button,
+.systemsculpt-content-part pre:hover .copy-code-button {
+  opacity: 1;
+}
+
+/* Ensure content parts in assistant messages have correct text color */
+.systemsculpt-assistant-message .systemsculpt-content-part {
+  color: var(--text-normal);
+}
+
+/* Remove top margin from first paragraph in content part */
+.systemsculpt-content-part p:first-of-type {
+  margin-top: 0;
+}
+
+/* Remove bottom margin from last paragraph in content part */
+.systemsculpt-content-part p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  System Messages                                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-system-message {
+  align-self: center;
+  max-width: 90%;
+  margin: 12px auto;
+  padding: 12px 16px;
+  text-align: center;
+  
+  /* Distinct tint for system messages */
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, rgb(var(--text-muted-rgb)) 8%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--text-muted-rgb)) 5%, var(--ss-layer-base))
+  );
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 25%, var(--ss-layer-base));
+  border-radius: 12px;
+  
+  /* Subtle shadow */
+  box-shadow: 
+    0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 4%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base));
+}
+
+.systemsculpt-system-message .systemsculpt-message-content {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.95em;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Messages                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-user-message .systemsculpt-message-content {
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-error-message {
+  padding: 16px 20px;
+  margin: 12px 0;
+  text-align: center;
+  
+  /* Error styling */
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, rgb(var(--text-error-rgb)) 10%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--text-error-rgb)) 5%, var(--ss-layer-base))
+  );
+  border: 1px solid color-mix(in srgb, rgb(var(--text-error-rgb)) 30%, var(--ss-layer-base));
+  border-radius: 12px;
+  color: var(--text-error);
+  
+  /* Icon and animation */
+  position: relative;
+  animation: shakeIn 0.4s ease-out;
+}
+
+@keyframes shakeIn {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.systemsculpt-message-content pre {
+  margin: 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: var(--chat-code-label-font-size);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Assistant Messages                                       ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-assistant-message {
+  align-self: flex-start;
+  max-width: 85%;
+  margin: 8px 0;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  background: var(--background-secondary);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 20%, var(--ss-layer-base));
+  border-radius: 12px;
+  box-shadow: 0 3px 10px color-mix(in srgb, rgb(0, 0, 0) 6%, var(--ss-layer-base)), 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 2%, var(--ss-layer-base));
+  animation: slideInLeft 0.3s ease-out;
+  transition: all 0.2s ease;
+}
+
+/* If an assistant message contains reasoning, ensure it initializes at full width
+   immediately so the reasoning drawer does not "grow" during streaming */
+.systemsculpt-assistant-message.has-reasoning {
+  width: 100%;
+}
+
+.systemsculpt-assistant-message:hover {
+  box-shadow: 
+    0 5px 15px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base)),
+    0 2px 5px color-mix(in srgb, rgb(0, 0, 0) 3%, var(--ss-layer-base));
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-content {
+  color: var(--text-normal);
+  line-height: 1.6;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-label {
+  color: var(--text-accent);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  opacity: 0.8;
+}
+
+.systemsculpt-message-content > * {
+  clear: both;
+  display: block;
+}
+
+.systemsculpt-message-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  max-height: 70vh;
+  object-fit: contain;
+  padding: 16px;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-label {
+  color: var(--text-accent);
+}
+
+.systemsculpt-message-content li {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content li > ol {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Wiki-links styling in messages */
+.systemsculpt-message-content a.internal-link {
+  color: var(--link-color);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.1s ease;
+}
+
+.systemsculpt-message-content a.internal-link:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}
+
+/* Style for user messages with accent background */
+.systemsculpt-user-message .systemsculpt-message-content a.internal-link {
+  color: var(--text-on-accent);
+  opacity: 0.9;
+}
+
+.systemsculpt-user-message .systemsculpt-message-content a.internal-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.systemsculpt-message-label {
+  color: var(--text-accent);
+}
+
+.systemsculpt-message-label {
+  font-size: var(--chat-label-font-size);
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.systemsculpt-message-label {
+  color: var(--text-on-accent);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.systemsculpt-assistant-message .systemsculpt-message-content {
+  color: var(--text-normal);
+}
+
+/* Legacy button and toolbar styles removed - using modern floating design */
+
+.systemsculpt-popup-message {
+  color: var(--text-normal);
+  line-height: 1.5;
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming {
+  color: white;
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-message-content {
+  color: var(--text-normal);
+}
+
+.systemsculpt-message-content {
+  color: var(--text-normal);
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  user-select: text;
+  -webkit-user-select: text;
+  /* Prevent long tokens from leaking outside the message card */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.systemsculpt-message-content > * {
+  clear: both;
+  display: block;
+}
+
+.systemsculpt-message-content a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.systemsculpt-message-content a:hover {
+  text-decoration: underline;
+}
+
+/* ────────────────────────────────────────────────────────────
+   Floating message toolbar (overlay on hover)
+   Appears below the message without shifting layout
+   Works for both legacy content and unified content parts
+   ──────────────────────────────────────────────────────────── */
+
+/* toolbar styles moved to components/chat-view-messages-toolbar.css */
+
+.systemsculpt-message-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--interactive-accent);
+  background-color: var(--background-primary);
+  border-radius: 0 4px 4px 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content h6 {
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content li {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content li > ol {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message-content p {
+  margin: 0.5em 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content p:first-of-type {
+  margin-top: 0;
+}
+
+.systemsculpt-message-content p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Web Search Citations Styles */
+.systemsculpt-citations-container {
+  margin-top: 1.25rem;
+  font-size: var(--chat-citation-font-size);
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.systemsculpt-citations-divider {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 0.5rem 0;
+}
+
+.systemsculpt-citations-header {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+  font-size: var(--chat-citation-header-font-size);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.systemsculpt-citations-header::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: var(--text-accent);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'%3E%3Cpath fill='none' d='M0 0h24v24H0z'/%3E%3Cpath d='M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 2c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 3c1.82 0 3.413.973 4.288 2.428l-1.714 1.029A3 3 0 0 0 12 9a3 3 0 0 0-3 3c0 .88.377 1.673.982 2.224l-1.453 1.358A5 5 0 0 1 7 12c0-2.76 2.24-5 5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z' fill='color-mix(in srgb, rgb(128, 128, 128) 100%, var(--ss-layer-base))'/%3E%3C/svg%3E");
+  mask-size: cover;
+  mask-repeat: no-repeat;
+}
+
+.systemsculpt-citations-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.systemsculpt-citation-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title {
+  font-weight: 500;
+  color: var(--text-accent);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-citation-url {
+  font-size: var(--chat-citation-url-font-size);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-citation-snippet {
+  font-size: var(--chat-citation-font-size);
+  color: var(--text-muted);
+  line-height: 1.5;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.systemsculpt-message-content pre {
+  margin: 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: var(--chat-code-label-font-size);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.systemsculpt-message-content::after {
+  pointer-events: none;
+}
+
+.systemsculpt-message-content {
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message-text {
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+
+/* Legacy hover behavior removed - handled by modern floating toolbar */
+
+.systemsculpt-model-message-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-user-message .systemsculpt-message-label {
+  color: var(--text-on-accent);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.systemsculpt-drag-message {
+  background: var(--background-secondary);
+  color: var(--text-accent);
+  padding: 16px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgb(0, 0, 0);
+  border: 1px solid var(--background-modifier-border);
+  animation: fade-in 0.2s ease;
+  text-align: center;
+  min-width: 200px;
+  white-space: nowrap;
+}
+
+
+.systemsculpt-message-content {
+  color: var(--text-normal);
+}
+
+.systemsculpt-message-label {
+  color: var(--text-accent);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Base Message Styles                                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-message {
+  position: relative;
+  width: auto;
+  padding: 12px 16px;
+  margin: 8px 4px;
+  border-radius: 16px;
+  
+  /* Smooth transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Removed duplicate - using unified ultra-compact button styling */
+
+
+
+.systemsculpt-message-button.systemsculpt-confirming {
+  width: auto;
+  min-width: 20px;
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming span {
+  font-size: var(--chat-button-text-font-size);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-success {
+  color: white;
+  background-color: var(--background-modifier-success);
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming {
+  color: white;
+  background-color: var(--interactive-accent);
+}
+
+.systemsculpt-message-button.systemsculpt-success.systemsculpt-confirming:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-message-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-message-container {
+  padding: 8px 0;
+  width: 100%;
+}
+
+.systemsculpt-message-content {
+  color: var(--text-normal);
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content > * {
+  clear: both;
+  display: block;
+}
+
+.systemsculpt-message-content a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.systemsculpt-message-content a:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-message-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--interactive-accent);
+  background-color: var(--background-primary);
+  border-radius: 0 4px 4px 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content h6 {
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content li {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content li > ol {
+  margin: 0.25em 0;
+}
+
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message-content p {
+  margin: 0.5em 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-message-content p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Web Search Citations Styles */
+.systemsculpt-citations-container {
+  margin-top: 1.25rem;
+  font-size: var(--chat-citation-font-size);
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.systemsculpt-citations-divider {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 0.5rem 0;
+}
+
+.systemsculpt-citations-header {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-normal);
+  font-size: var(--chat-citation-header-font-size);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.systemsculpt-citations-header::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: var(--text-accent);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'%3E%3Cpath fill='none' d='M0 0h24v24H0z'/%3E%3Cpath d='M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 2c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 3c1.82 0 3.413.973 4.288 2.428l-1.714 1.029A3 3 0 0 0 12 9a3 3 0 0 0-3 3c0 .88.377 1.673.982 2.224l-1.453 1.358A5 5 0 0 1 7 12c0-2.76 2.24-5 5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z' fill='color-mix(in srgb, rgb(128, 128, 128) 100%, var(--ss-layer-base))'/%3E%3C/svg%3E");
+  mask-size: cover;
+  mask-repeat: no-repeat;
+}
+
+.systemsculpt-citations-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.systemsculpt-citation-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title {
+  font-weight: 500;
+  color: var(--text-accent);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.systemsculpt-citation-title:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-citation-url {
+  font-size: var(--chat-citation-url-font-size);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-citation-snippet {
+  font-size: var(--chat-citation-font-size);
+  color: var(--text-muted);
+  line-height: 1.5;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.systemsculpt-message-content pre {
+  margin: 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: var(--chat-code-label-font-size);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.systemsculpt-message-content::after {
+  pointer-events: none;
+}
+
+.systemsculpt-message-content {
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-message-content ol {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.systemsculpt-message-text {
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+
+/* Legacy hover behavior removed - modern toolbar uses pure CSS */
+
+
+/* Removed - using unified positioning */
+
+.systemsculpt-message-content {
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-message-label {
+  color: var(--text-on-accent);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+/* Removed duplicate hover rule */
+
+.systemsculpt-notice-message {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  User Messages                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-user-message {
+  align-self: flex-end;
+  max-width: 85%;
+  margin: 8px 0;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  background: var(--background-secondary);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 20%, var(--ss-layer-base));
+  border-radius: 12px;
+  box-shadow: 0 3px 10px color-mix(in srgb, rgb(0, 0, 0) 6%, var(--ss-layer-base)), 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 2%, var(--ss-layer-base));
+  animation: slideInRight 0.3s ease-out;
+}
+
+.systemsculpt-user-message:hover {
+  box-shadow: 
+    0 6px 16px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 25%, var(--ss-layer-base)),
+    0 2px 6px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base));
+}
+
+.systemsculpt-user-message .systemsculpt-message-content {
+  color: var(--text-normal);
+  line-height: 1.6;
+}
+
+.systemsculpt-user-message .systemsculpt-message-label {
+  color: var(--text-accent);
+  opacity: 0.8;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.systemsculpt-message-content code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content h6 {
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+  display: block;
+  width: 100%;
+}
+
+/* Removed duplicate hover rule */
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: var(--chat-code-label-font-size);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming span {
+  font-size: var(--chat-button-text-font-size);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.systemsculpt-message:hover::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -40px;
+  height: 40px;
+  z-index: 99;
+  pointer-events: none;
+}
+
+.systemsculpt-message-button.systemsculpt-danger:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-danger.systemsculpt-confirming:hover {
+  color: white;
+  background-color: var(--background-modifier-error);
+}
+
+.systemsculpt-message-button.systemsculpt-confirming {
+  width: auto;
+  min-width: 20px;
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-message-button.systemsculpt-confirming span {
+  font-size: var(--chat-button-text-font-size);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.systemsculpt-message-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--interactive-accent);
+  background-color: var(--background-primary);
+  border-radius: 0 4px 4px 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content p {
+  margin: 0.5em 0;
+  display: block;
+  width: 100%;
+}
+
+.systemsculpt-message-content p:first-of-type {
+  margin-top: 0;
+}
+
+.systemsculpt-message-content p:last-of-type {
+  margin-bottom: 0;
+}
+
+.systemsculpt-message-content pre {
+  margin: 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-message-content pre[class*="language-"]::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5em;
+  left: 1em;
+  font-size: var(--chat-code-label-font-size);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.systemsculpt-message::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -40px;
+  pointer-events: none;
+}
+
+.systemsculpt-message-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-message-content a:hover {
+  text-decoration: underline;
+}
+
+.systemsculpt-message-content::after {
+  pointer-events: none;
+}
+
+/* Removed - using unified toolbar positioning */
+
+.systemsculpt-message-edit-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Assistant message specific styling */
+.systemsculpt-assistant-message .systemsculpt-message-content {
+  /* Styles for the general content area of an assistant message if needed */
+}
+
+/* Styling for the new wrapper around the assistant's textual response */
+.systemsculpt-assistant-text-content-wrapper {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m); /* Medium radius, adjust as needed */
+  padding: var(--size-4-3); /* Equivalent to 10px if base is 8px for var(--size-4-1) being 4px */
+  margin-top: var(--size-4-2); /* Add some space above this container if it's not the first element */
+  background-color: var(--background-secondary-alt); /* Slightly different background to distinguish if needed */
+}
+
+/* Ensure markdown within the new wrapper is styled correctly */
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered p:last-of-type {
+  margin-bottom: 0;
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered ul,
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered ol {
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+  padding-left: var(--size-4-5); /* Default list padding */
+}
+
+.systemsculpt-assistant-text-content-wrapper .markdown-rendered pre {
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+
+.systemsculpt-message-content pre.systemsculpt-code-block {
+  margin: 1em 0;
+  background-color: var(--background-primary-alt);
+  border-radius: 8px;
+  position: relative;
+}
+
+.systemsculpt-code-copy-button {
+  display: none !important;
+}
+
+.systemsculpt-content-part pre,
+.systemsculpt-content-part .markdown-rendered pre {
+  margin: 1em 0;
+  padding: 2em 1em 1em;
+  background-color: var(--background-primary-alt, var(--background-primary));
+  border-radius: 8px;
+  overflow-x: auto;
+  position: relative;
+}
+
+.systemsculpt-content-part pre code {
+  user-select: text;
+}
+
+
+/* ========================================================================== */
+/* == End Compact Drawer Grouping                                          == */
+/* ========================================================================== */
+
+/* ========================================================================== */
+/* == Chat Font Size Classes                                              == */
+/* ========================================================================== */
+
+/* Define CSS custom properties for different text sizes */
+.systemsculpt-messages-container {
+  /* Default (medium) sizes */
+  --chat-base-font-size: 1em;
+  --chat-label-font-size: 0.8rem;
+  --chat-citation-font-size: 0.85rem;
+  --chat-citation-header-font-size: 0.9rem;
+  --chat-citation-url-font-size: 0.8rem;
+  --chat-code-label-font-size: 0.8em;
+  --chat-button-text-font-size: 0.9em;
+  --chat-compact-button-font-size: 9px;
+}
+
+/* Small size overrides */
+.systemsculpt-messages-container.systemsculpt-chat-small {
+  --chat-base-font-size: 0.75em;
+  --chat-label-font-size: 0.7rem;
+  --chat-citation-font-size: 0.75rem;
+  --chat-citation-header-font-size: 0.8rem;
+  --chat-citation-url-font-size: 0.7rem;
+  --chat-code-label-font-size: 0.75em;
+  --chat-button-text-font-size: 0.85em;
+  --chat-compact-button-font-size: 8px;
+}
+
+/* Medium size (default) */
+.systemsculpt-messages-container.systemsculpt-chat-medium {
+  /* Uses default values defined above */
+}
+
+/* Large size overrides */
+.systemsculpt-messages-container.systemsculpt-chat-large {
+  --chat-base-font-size: 1.3em;
+  --chat-label-font-size: 0.95rem;
+  --chat-citation-font-size: 1rem;
+  --chat-citation-header-font-size: 1.1rem;
+  --chat-citation-url-font-size: 0.95rem;
+  --chat-code-label-font-size: 0.9em;
+  --chat-button-text-font-size: 1em;
+  --chat-compact-button-font-size: 11px;
+}
+
+/* Apply the base font size to the container */
+.systemsculpt-messages-container {
+  font-size: var(--chat-base-font-size);
+}
+
+/* ========================================================================== */
+/* == End Chat Font Size Classes                                          == */
+/* ========================================================================== */

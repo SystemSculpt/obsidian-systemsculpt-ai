@@ -1,0 +1,291 @@
+/**
+ * Chat Animations - Smooth UI Transitions
+ *
+ * Entrance animations, state transitions, and micro-interactions
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Message Entrance Animations                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Typing Indicator Animation                               ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 60%, var(--ss-layer-base));
+  border-radius: 16px;
+  margin: 8px 0;
+}
+
+.systemsculpt-typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingPulse 1.4s ease-in-out infinite;
+}
+
+.systemsculpt-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.systemsculpt-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingPulse {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Loading States                                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.systemsculpt-loading::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--ss-layer-base),
+    color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 10%, var(--ss-layer-base)),
+    var(--ss-layer-base)
+  );
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  to {
+    left: 100%;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Pulse Effects                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base));
+  }
+  50% {
+    box-shadow: 0 0 20px 10px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 0%, var(--ss-layer-base));
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Smooth State Transitions                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-transition-opacity {
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-transition-transform {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-transition-all {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Button Press Effects                                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-button-press {
+  transition: transform 0.1s ease;
+}
+
+.systemsculpt-button-press:active {
+  transform: scale(0.95);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Error Shake                                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes errorShake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+.systemsculpt-error-shake {
+  animation: errorShake 0.5s ease-out;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Success Check                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes successCheck {
+  0% {
+    transform: scale(0) rotate(45deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(45deg);
+  }
+  100% {
+    transform: scale(1) rotate(45deg);
+    opacity: 1;
+  }
+}
+
+.systemsculpt-success-check {
+  animation: successCheck 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Floating Action Button                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes fabEntrance {
+  from {
+    opacity: 0;
+    transform: scale(0) rotate(-180deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+.systemsculpt-fab-entrance {
+  animation: fabEntrance 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Reduced Motion Support                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-reduced-motion,
+  .systemsculpt-reduced-motion *,
+  .systemsculpt-reduced-motion *::before,
+  .systemsculpt-reduced-motion *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .systemsculpt-reduced-motion .systemsculpt-typing-indicator,
+  .systemsculpt-reduced-motion .systemsculpt-loading::after {
+    display: none;
+  }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Glow Effects                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow: 
+      0 0 5px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 50%, var(--ss-layer-base)),
+      0 0 10px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base)),
+      0 0 15px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 10%, var(--ss-layer-base));
+  }
+  50% {
+    box-shadow: 
+      0 0 10px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 60%, var(--ss-layer-base)),
+      0 0 20px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base)),
+      0 0 30px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base));
+  }
+}
+
+.systemsculpt-glow-pulse {
+  animation: glowPulse 2s ease-in-out infinite;
+}

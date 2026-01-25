@@ -1,0 +1,134 @@
+/* Large Text Component Styles */
+
+.systemsculpt-large-text-container {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 8px 0;
+  background-color: var(--background-modifier-form-field);
+}
+
+.systemsculpt-large-text-preview {
+  margin-bottom: 12px;
+  max-height: 150px;
+  overflow: hidden;
+  position: relative;
+}
+
+.systemsculpt-text-truncation {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-size: 0.9em;
+}
+
+.systemsculpt-large-text-indicator {
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.systemsculpt-large-text-stats {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.systemsculpt-large-text-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.systemsculpt-view-button,
+.systemsculpt-save-button,
+.systemsculpt-copy-button {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-view-button:hover,
+.systemsculpt-save-button:hover,
+.systemsculpt-copy-button:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--border-color-hover);
+}
+
+/* Large Text Modal Styles - Using Obsidian Modal */
+
+.large-text-modal-container {
+  width: 100%;
+}
+
+.large-text-viewer {
+  /* Styles are applied via JavaScript to ensure proper Obsidian integration */
+}
+
+.large-text-modal-buttons {
+  /* Styles are applied via JavaScript for consistency */
+}
+
+/* Notice Styles */
+
+.systemsculpt-notice {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: var(--text-normal);
+  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  z-index: 1001;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive Design */
+
+@media (max-width: 768px) {
+  .systemsculpt-large-text-indicator {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .systemsculpt-large-text-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  
+  .systemsculpt-modal-content {
+    max-width: 95vw;
+    max-height: 95vh;
+  }
+  
+  .systemsculpt-modal-header {
+    padding: 12px 16px;
+  }
+  
+  .systemsculpt-large-text-viewer {
+    padding: 16px;
+    font-size: 12px;
+  }
+}

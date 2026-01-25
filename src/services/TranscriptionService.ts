@@ -1,0 +1,1524 @@
+import { Plugin, Notice, Menu, TFile, MarkdownView, requestUrl, App, normalizePath } from "obsidian";
+import { PlatformContext } from "./PlatformContext";
+import { SystemSculptService } from "./SystemSculptService";
+import type { SystemSculptSettings } from "../types";
+import { SYSTEMSCULPT_API_HEADERS } from "../constants/api";
+import type SystemSculptPlugin from "../main";
+import { logDebug, logInfo, logWarning, logError, logMobileError } from "../utils/errorHandling";
+import { AudioResampler } from "./AudioResampler";
+import { SerialTaskQueue } from "../utils/SerialTaskQueue";
+
+// Match server-side configuration
+const SUPPORTED_AUDIO_EXTENSIONS = ["wav", "m4a", "webm", "ogg", "mp3"];
+const MIME_TYPE_MAP = {
+  wav: "audio/wav",
+  m4a: "audio/mp4",
+  webm: "audio/webm",
+  ogg: "audio/ogg;codecs=opus",
+  mp3: "audio/mpeg",
+} as const;
+
+// Maximum file size for upload (2GB)
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
+
+// Expected sample rates for different formats
+const EXPECTED_SAMPLE_RATES: Record<string, number> = {
+  wav: 16000,
+  m4a: 16000,
+  mp3: 16000,
+  webm: 48000,
+  ogg: 16000
+};
+
+export interface TranscriptionContext {
+  type: "note" | "chat";
+  timestamped?: boolean;
+  onProgress?: (progress: number, status: string) => void;
+  /** When true, avoid raising Obsidian Notices (for inline recorder UI). */
+  suppressNotices?: boolean;
+}
+
+export class TranscriptionService {
+  private static instance: TranscriptionService;
+  private plugin: SystemSculptPlugin;
+  private app: App;
+  private sculptService: SystemSculptService;
+  private platform: PlatformContext;
+  private transcriptionQueue = new SerialTaskQueue();
+  private retryCount: number = 0;
+  private maxRetries: number = 2; // Maximum of 2 retries (3 attempts total)
+  private retryDelay: number = 5000; // 5 seconds between retries
+  private audioResampler: AudioResampler;
+  private uploadQueue: Promise<string>[] = [];
+  private activeUploads = 0;
+  private maxConcurrentUploads = 1; // Process uploads one at a time to avoid rate limiting
+
+  private constructor(plugin: SystemSculptPlugin) {
+    this.plugin = plugin;
+    this.app = plugin.app;
+    // Use singleton instance instead of creating new one
+    this.sculptService = SystemSculptService.getInstance(plugin);
+    this.platform = PlatformContext.get();
+    this.audioResampler = new AudioResampler();
+  }
+
+  /**
+   * Build a multipart/form-data request body from form fields.
+   * Returns a Uint8Array suitable as a Request body along with the boundary string.
+   */
+  private async buildMultipartBody(
+    formFields: Array<{ name: string; value: string | Blob; filename?: string }>,
+    boundary: string
+  ): Promise<Uint8Array> {
+    const encoder = new TextEncoder();
+    const parts: Uint8Array[] = [];
+
+    for (const field of formFields) {
+      parts.push(encoder.encode(`--${boundary}\r\n`));
+
+      if (field.value instanceof Blob) {
+        const contentType = field.value.type || 'application/octet-stream';
+        const filename = field.filename || 'file';
+        parts.push(
+          encoder.encode(
+            `Content-Disposition: form-data; name="${field.name}"; filename="${filename}"\r\n`
+          )
+        );
+        parts.push(encoder.encode(`Content-Type: ${contentType}\r\n`));
+        parts.push(encoder.encode('\r\n'));
+        parts.push(new Uint8Array(await field.value.arrayBuffer()));
+        parts.push(encoder.encode('\r\n'));
+      } else {
+        parts.push(
+          encoder.encode(
+            `Content-Disposition: form-data; name="${field.name}"\r\n`
+          )
+        );
+        parts.push(encoder.encode('\r\n'));
+        parts.push(encoder.encode(String(field.value)));
+        parts.push(encoder.encode('\r\n'));
+      }
+    }
+
+    parts.push(encoder.encode(`--${boundary}--\r\n`));
+    const totalSize = parts.reduce((sum, p) => sum + p.length, 0);
+    const body = new Uint8Array(totalSize);
+    let offset = 0;
+    for (const p of parts) {
+      body.set(p, offset);
+      offset += p.length;
+    }
+    return body;
+  }
+
+  /**
+   * Parse an NDJSON text payload by scanning line-by-line and returning the last JSON object
+   * that contains either { text } or { error } while surfacing progress callbacks.
+   */
+  private parseNdjsonText(
+    rawText: string,
+    onProgress?: (progress: number, status: string) => void
+  ): any {
+    const lines = rawText.trim().split('\n');
+    let finalResponse: any = null;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj && obj.progress_update && typeof onProgress === 'function') {
+          const p = Number(obj.progress_update.progress);
+          const s = String(obj.progress_update.status || '');
+          if (!Number.isNaN(p)) onProgress(p, s);
+        }
+        if (obj && (obj.text || obj.error)) {
+          finalResponse = obj;
+        }
+      } catch {}
+    }
+    return finalResponse ?? {};
+  }
+
+  /**
+   * Stream and parse an NDJSON response from fetch, emitting progress as it arrives.
+   * Returns the last JSON object with a text/error field.
+   */
+  private async parseNdjsonStream(
+    response: Response,
+    onProgress?: (progress: number, status: string) => void
+  ): Promise<any> {
+    if (!response.body) {
+      // Fallback to text parsing when stream not available
+      const text = await response.text();
+      return this.parseNdjsonText(text, onProgress);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResponse: any = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const obj = JSON.parse(trimmed);
+          if (obj && obj.progress_update && typeof onProgress === 'function') {
+            const p = Number(obj.progress_update.progress);
+            const s = String(obj.progress_update.status || '');
+            if (!Number.isNaN(p)) onProgress(p, s);
+          }
+          if (obj && (obj.text || obj.error)) {
+            finalResponse = obj;
+          }
+        } catch {}
+      }
+    }
+    // Flush any remaining buffer as a complete line
+    const tail = buffer.trim();
+    if (tail) {
+      try {
+        const obj = JSON.parse(tail);
+        if (obj && (obj.text || obj.error)) finalResponse = obj;
+      } catch {}
+    }
+    return finalResponse ?? {};
+  }
+
+  static getInstance(
+    plugin: SystemSculptPlugin
+  ): TranscriptionService {
+    if (!TranscriptionService.instance) {
+      TranscriptionService.instance = new TranscriptionService(plugin);
+    }
+    return TranscriptionService.instance;
+  }
+
+  private async parseErrorResponse(
+    response: Response
+  ): Promise<{ message: string; data?: any }> {
+    try {
+      const data = await response.json();
+      if (data.error) {
+        if (typeof data.error === "string") {
+          return { message: data.error, data };
+        }
+        if (data.error.message) {
+          return { message: data.error.message, data };
+        }
+        return { message: JSON.stringify(data.error), data };
+      }
+      return { message: response.statusText, data };
+    } catch (e) {
+      return { message: response.statusText };
+    }
+  }
+
+  /**
+   * Transcribe an audio file
+   * @param file The audio file to transcribe
+   * @param blob The audio file blob
+   * @param context Transcription context
+   * @returns Promise resolving to the transcription text
+   */
+  private async transcribeAudio(
+    file: TFile,
+    blob: Blob,
+    context?: TranscriptionContext
+  ): Promise<string> {
+    // Add a unique request ID to prevent duplicate processing
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+    // Determine endpoint and compose fields based on provider
+    const isCustom = this.plugin.settings.transcriptionProvider === "custom";
+    const customEndpoint = isCustom ? (this.plugin.settings.customTranscriptionEndpoint || '').toLowerCase() : '';
+    const isGroqCustom = isCustom && customEndpoint.includes('groq.com');
+    const GROQ_SIZE_LIMIT_BYTES = 25 * 1024 * 1024; // 25MB
+
+    // If user selected Groq directly but the blob is too large, use our server which chunks for Groq.
+    const mustProxyLargeGroq = isGroqCustom && blob.size > GROQ_SIZE_LIMIT_BYTES;
+
+    let endpoint: string;
+    let headers: Record<string, string> = {};
+    const formFields: Array<{ name: string; value: string | Blob; filename?: string }> = [];
+
+    if (mustProxyLargeGroq || !isCustom) {
+      // Use SystemSculpt server proxy (supports NDJSON streaming and chunking)
+      endpoint = `${this.sculptService.baseUrl}/audio/transcriptions`;
+      headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
+      if (this.plugin.settings.licenseKey) headers['x-license-key'] = this.plugin.settings.licenseKey;
+
+      // Server expects file + optional requestId and timestamped flag
+      formFields.push({ name: 'file', value: blob, filename: file.name });
+      formFields.push({ name: 'requestId', value: requestId });
+      if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
+    } else {
+      // Custom endpoint
+      endpoint = this.plugin.settings.customTranscriptionEndpoint;
+      // Authorization header if provided
+      if (this.plugin.settings.customTranscriptionApiKey) {
+        headers['Authorization'] = `Bearer ${this.plugin.settings.customTranscriptionApiKey}`;
+        if (endpoint.toLowerCase().includes('groq.com')) {
+          headers['X-Request-ID'] = `obsidian-client-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+          headers['Accept'] = 'application/json';
+        }
+      }
+      headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
+
+      if (isGroqCustom) {
+        const fileName = blob.type.includes('webm')
+          ? 'recording.webm'
+          : blob.type.includes('mp4')
+          ? 'recording.m4a'
+          : 'recording.wav';
+        const mimeType = blob.type || (fileName.endsWith('.webm')
+          ? 'audio/webm'
+          : fileName.endsWith('.m4a')
+          ? 'audio/mp4'
+          : fileName.endsWith('.wav')
+          ? 'audio/wav'
+          : 'audio/mpeg');
+        const fileBlob = new Blob([await blob.arrayBuffer()], { type: mimeType });
+        formFields.push({ name: 'file', value: fileBlob, filename: fileName });
+        formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-large-v3' });
+        if (context?.timestamped) {
+          formFields.push({ name: 'response_format', value: 'verbose_json' });
+          formFields.push({ name: 'timestamp_granularities[]', value: 'segment' });
+        } else {
+          formFields.push({ name: 'response_format', value: 'text' });
+        }
+        formFields.push({ name: 'language', value: 'en' });
+      } else {
+        // OpenAI or other compatible custom endpoints
+        formFields.push({ name: 'file', value: blob, filename: file.name });
+        formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-1' });
+        formFields.push({ name: 'requestId', value: requestId });
+        if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
+      }
+    }
+
+    // Build multipart body
+    const boundary = 'WebKitFormBoundary' + Math.random().toString(36).substring(2, 15);
+    const formDataArray = await this.buildMultipartBody(formFields, boundary);
+    const requestBodyBuffer: ArrayBuffer = formDataArray.buffer as ArrayBuffer;
+    headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
+
+    // Implement retry mechanism for 500 errors
+    let retryCount = 0;
+    let lastError: Error | null = null;
+
+    while (retryCount <= this.maxRetries) {
+      // Define formDataPreview and currentFormDataVersion at the start of the while loop scope
+      // These are needed in the main catch block if an error occurs.
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      const firstBytes = formDataArray.slice(0, 300);
+      const lastBytes = formDataArray.slice(-200);
+      const formDataPreview = {
+        boundary: boundary,
+        totalSize: formDataArray.length,
+        formDataStart: decoder.decode(firstBytes),
+        formDataEnd: decoder.decode(lastBytes),
+        fieldCount: formFields.length,
+        fields: formFields.map(f => ({ name: f.name, type: f.value instanceof Blob ? 'Blob' : 'string', filename: f.filename }))
+      };
+      const currentFormDataVersion = "v4.0-platform-context";
+
+      try {
+        const retryText = retryCount > 0 ? `Retry ${retryCount}/${this.maxRetries}: ` : "";
+        context?.onProgress?.(10, `${retryText}Uploading audio...`);
+
+        // Update progress (after endpoint/header determination)
+        context?.onProgress?.(30, `${retryText}Transcribing audio...`);
+
+
+        const transportOptions = { endpoint };
+        const preferredTransport = this.platform.preferredTransport(transportOptions);
+        const canStream = this.platform.supportsStreaming(transportOptions);
+        let response: Response;
+
+        if (preferredTransport === 'requestUrl') {
+          const transportResponse = await requestUrl({
+            url: endpoint,
+            method: 'POST',
+            headers: { ...headers },
+            body: requestBodyBuffer,
+            throw: false,
+          });
+
+          let responseBody: string;
+          const responseHeaders = new Headers();
+
+          if (transportResponse.headers && transportResponse.headers['content-type']) {
+            responseHeaders.set('content-type', transportResponse.headers['content-type']);
+          }
+
+          if (transportResponse.text) {
+            responseBody = transportResponse.text;
+          } else if (transportResponse.json) {
+            responseBody = JSON.stringify(transportResponse.json);
+            responseHeaders.set('content-type', 'application/json');
+          } else if (transportResponse.arrayBuffer) {
+            const decoder = new TextDecoder();
+            responseBody = decoder.decode(new Uint8Array(transportResponse.arrayBuffer));
+          } else {
+            responseBody = '';
+          }
+
+          const fallbackContentType = transportResponse.headers?.['content-type'] || '';
+          if (fallbackContentType.includes('application/x-ndjson') || responseBody.includes('\n{')) {
+            const finalResponse = this.parseNdjsonText(responseBody, context?.onProgress);
+            responseBody = JSON.stringify(finalResponse || {});
+            responseHeaders.set('content-type', 'application/json');
+          }
+
+          response = new Response(responseBody, {
+            status: transportResponse.status || 500,
+            statusText: transportResponse.status >= 200 && transportResponse.status < 300 ? 'OK' : 'Error',
+            headers: responseHeaders
+          });
+        } else {
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: requestBodyBuffer,
+          });
+        }
+
+        
+        // Get content type from headers
+        const contentType = response.headers.get('content-type') || '';
+
+        if (!response.ok) {
+          let rawResponseText = '';
+          try {
+            rawResponseText = await response.text();
+          } catch (e) {
+          }
+          
+          let errorMessage = `HTTP ${response.status}`;
+          let errorToLog: Error & { additionalInfo?: any };
+          const additionalLogInfo: any = {
+            formDataVersion: currentFormDataVersion, // Use updated version
+            endpoint,
+            status: response.status,
+            statusText: response.statusText,
+            headers: contentType ? { 'content-type': contentType } : {},
+            retryCount: retryCount + 1,
+            provider: this.plugin.settings.transcriptionProvider,
+            formDataDebug: formDataPreview, // formDataPreview is defined above
+            rawResponseText: rawResponseText ? rawResponseText.substring(0, 1000) + (rawResponseText.length > 1000 ? '...' : '') : "N/A",
+          };
+
+          try {
+            const errorData = JSON.parse(rawResponseText || "{}");
+            
+            if (errorData?.error?.message) {
+              errorMessage = errorData.error.message;
+            } else if (errorData?.error) {
+              errorMessage = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error);
+            } else if (errorData?.message) {
+              errorMessage = errorData.message;
+            }
+            errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
+            additionalLogInfo.parsedErrorData = errorData;
+
+          } catch (jsonParseError) {
+            const e = jsonParseError instanceof Error ? jsonParseError : new Error(String(jsonParseError));
+            errorMessage = `Failed to parse server error response as JSON (HTTP ${response.status}). Parser error: ${e.message}`;
+            errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
+            additionalLogInfo.jsonParsingError = e.message;
+          }
+        
+          errorToLog.additionalInfo = additionalLogInfo;
+          
+          await logMobileError("TranscriptionService", `API Error (HTTP ${response.status}) on attempt ${retryCount + 1}`, errorToLog, additionalLogInfo);
+          
+          throw errorToLog;
+        }
+
+        // Status is 200, now try to parse (stream NDJSON on desktop)
+        let rawResponseTextFor200: string = "";
+        let responseData: any;
+
+        try {
+          if (contentType.includes('application/x-ndjson') && canStream) {
+            responseData = await this.parseNdjsonStream(response, context?.onProgress);
+          } else {
+            rawResponseTextFor200 = await response.text();
+            if (contentType.includes('application/x-ndjson')) {
+              responseData = this.parseNdjsonText(rawResponseTextFor200, context?.onProgress);
+            } else {
+              responseData = JSON.parse(rawResponseTextFor200 || '{}');
+            }
+          }
+        } catch (jsonParseError) {
+          const e = jsonParseError instanceof Error ? jsonParseError : new Error(String(jsonParseError));
+          let errorMessage = e.message; // Default to original error message
+          
+          // Check if this is the specific NDJSON parsing issue
+          if (contentType.includes('application/x-ndjson') && e.message.includes('Unexpected non-whitespace character after JSON')) {
+            errorMessage = `NDJSON parsing failed. The server returned streaming JSON but it couldn't be processed properly. This might be due to response format incompatibility.`;
+          } else if (!contentType.includes('application/x-ndjson') && e.name === 'SyntaxError') {
+             // Only override if it was a SyntaxError AND we weren't expecting NDJSON
+             errorMessage = `HTTP 200 but failed to parse response as JSON. Parser error: ${e.message}`;
+          }
+          const errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
+          
+          const additionalLogInfo: any = {
+            formDataVersion: currentFormDataVersion,
+            endpoint,
+            status: response.status,
+            headers: response.headers,
+            retryCount: retryCount + 1,
+            provider: this.plugin.settings.transcriptionProvider,
+            formDataDebug: formDataPreview,
+            rawResponseText: rawResponseTextFor200 ? rawResponseTextFor200.substring(0, 1000) + (rawResponseTextFor200.length > 1000 ? '...' : '') : "N/A",
+            jsonParsingError: e.message,
+            contentType: contentType,
+            location: "transcribeAudio - HTTP 200 JSON parse failed"
+          };
+          errorToLog.additionalInfo = additionalLogInfo;
+          
+          // Log this specific failure point before throwing
+          await logMobileError(
+            "TranscriptionService.transcribeAudio", 
+            `HTTP 200 with unparseable JSON on attempt ${retryCount + 1}. Error: ${e.message}`,
+            errorToLog, 
+            additionalLogInfo
+          );
+          
+          throw errorToLog; // This error will be caught by the outer try-catch and potentially retried or rethrown
+        }
+
+        // Update progress
+        context?.onProgress?.(70, `${retryText}Processing response...`);
+
+        // Parse response
+
+        let transcriptionText = "";
+
+        // Handle different response formats
+        if (this.plugin.settings.transcriptionProvider === "custom" && 
+            this.plugin.settings.customTranscriptionEndpoint.includes("groq.com")) {
+          // Groq API response format
+          if (context?.timestamped && responseData.segments) {
+            // Convert segments to SRT format (simplified)
+            transcriptionText = responseData.segments.map((segment: any, index: number) => {
+              const start = this.formatTimestamp(segment.start);
+              const end = this.formatTimestamp(segment.end);
+              return `${index + 1}\n${start} --> ${end}\n${segment.text.trim()}\n`;
+            }).join('\n');
+            } else {
+            transcriptionText = responseData.text || "";
+          }
+                } else {
+          // SystemSculpt or other API response format
+          if (typeof responseData === 'string') {
+            transcriptionText = responseData;
+          } else if (responseData.text) {
+            transcriptionText = responseData.text;
+          } else if (responseData.data?.text) {
+            transcriptionText = responseData.data.text;
+          } else {
+            throw new Error("Invalid response format: no transcription text found");
+          }
+        }
+
+        if (!transcriptionText?.trim()) {
+          throw new Error("Empty transcription text received");
+        }
+
+        // Update progress
+        context?.onProgress?.(100, "Transcription complete!");
+
+        return transcriptionText.trim();
+
+      } catch (error) {
+        // Store the error for potential re-throw if this is the last attempt
+        let currentError = error instanceof Error ? error : new Error(String(error));
+        if ((error as any)?.additionalInfo && !(currentError as any).additionalInfo) {
+          (currentError as any).additionalInfo = (error as any).additionalInfo;
+        }
+        lastError = currentError;
+
+        const isFinalAttempt = retryCount >= this.maxRetries;
+        
+        if (isFinalAttempt) { 
+          const finalLogAdditionalInfo = {
+            finalAttempt: retryCount + 1,
+            maxRetries: this.maxRetries,
+            endpoint: this.plugin.settings.transcriptionProvider === "custom" ? 
+              this.plugin.settings.customTranscriptionEndpoint : 
+              `${this.sculptService.baseUrl}/audio/transcriptions`,
+            fileSize: `${Math.round(blob.size / 1024)}KB`,
+            provider: this.plugin.settings.transcriptionProvider,
+            ...((lastError as any).additionalInfo || {}),
+          };
+          // Ensure formDataVersion is current if lastError didn't have it or had an old one
+          finalLogAdditionalInfo.formDataVersion = (lastError as any).additionalInfo?.formDataVersion || currentFormDataVersion;
+
+          await logMobileError("TranscriptionService", `All ${this.maxRetries + 1} attempts failed. Final error: ${lastError.message}`, lastError, finalLogAdditionalInfo);
+        } else {
+        }
+
+        const messageForRetryCheck = lastError.message.toLowerCase();
+        const is500Error = messageForRetryCheck.includes("500") ||
+                           messageForRetryCheck.includes("internal_error") ||
+                           messageForRetryCheck.includes("server error") ||
+                           messageForRetryCheck.includes("failed to parse server error response as json");
+
+        const isNetworkError = messageForRetryCheck.includes("network error") ||
+                               messageForRetryCheck.includes("connectivity") ||
+                               messageForRetryCheck.includes("offline") ||
+                               messageForRetryCheck.includes("request failed") ||
+                               messageForRetryCheck.includes("connection was lost");
+
+        const shouldRetry = (is500Error || isNetworkError) && retryCount < this.maxRetries;
+
+        if (shouldRetry) {
+          retryCount++;
+          const backoffMs = 1000 * Math.pow(2, retryCount - 1);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        } else {
+          throw lastError;
+        }
+      }
+    }
+
+    // This should never be reached, but just in case
+    throw lastError || new Error("Unknown transcription error");
+  }
+
+  /**
+   * Format timestamp for SRT format
+   */
+  private formatTimestamp(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
+  }
+
+  /**
+   * Find the longest common suffix/prefix between two strings
+   * @param str1 First string
+   * @param str2 Second string
+   * @param maxOverlapLength Maximum overlap length to consider
+   * @returns The length of the overlap
+   */
+  private findOverlap(str1: string, str2: string, maxOverlapLength: number = 150): number {
+    // Limit the search to a reasonable length
+    const searchLength = Math.min(str1.length, str2.length, maxOverlapLength);
+
+    // Normalize strings for better matching
+    const normalizedStr1 = str1.toLowerCase().trim();
+    const normalizedStr2 = str2.toLowerCase().trim();
+
+    // First try exact matching for the best possible overlap
+    for (let i = searchLength; i > 10; i--) { // Require at least 10 chars for exact match
+      const suffix = normalizedStr1.slice(-i);
+      const prefix = normalizedStr2.slice(0, i);
+
+      if (suffix === prefix) {
+        return i;
+      }
+    }
+
+    // If exact matching fails, try fuzzy matching for partial overlaps
+    // This helps with transcription errors at chunk boundaries
+    for (let i = Math.min(100, searchLength); i > 20; i--) { // Use smaller window for fuzzy matching
+      const suffix = normalizedStr1.slice(-i);
+      const prefix = normalizedStr2.slice(0, i);
+
+      // Calculate similarity (percentage of matching words)
+      const suffixWords = suffix.split(/\s+/);
+      const prefixWords = prefix.split(/\s+/);
+
+      // Skip if too few words to compare
+      if (suffixWords.length < 3 || prefixWords.length < 3) continue;
+
+      // Count matching words
+      let matchCount = 0;
+      for (const word of suffixWords) {
+        if (word.length > 2 && prefixWords.includes(word)) { // Only count words with 3+ chars
+          matchCount++;
+        }
+      }
+
+      // If more than 70% of words match, consider it an overlap
+      const similarity = matchCount / suffixWords.length;
+      if (similarity > 0.7) {
+        // Find the position where the overlap starts in str2
+        // by looking for the first matching word
+        for (let j = 0; j < prefixWords.length; j++) {
+          if (prefixWords[j].length > 2 && suffixWords.includes(prefixWords[j])) {
+            // Calculate approximate position
+            const approxPos = normalizedStr2.indexOf(prefixWords.slice(j).join(' '));
+            if (approxPos >= 0) {
+              return approxPos;
+            }
+          }
+        }
+
+        // Fallback to using the full prefix length
+        return prefix.length;
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Check if text contains timestamps in SRT or VTT format
+   * @param text The text to check
+   * @returns True if the text contains timestamps
+   */
+  private hasTimestamps(text: string): boolean {
+    // Check for SRT format timestamps (00:00:00,000 --> 00:00:00,000)
+    const srtPattern = /\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/;
+
+    // Check for VTT format timestamps (00:00:00.000 --> 00:00:00.000)
+    const vttPattern = /\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}/;
+
+    return srtPattern.test(text) || vttPattern.test(text);
+  }
+
+  /**
+   * Parse timestamps from text in SRT or VTT format
+   * @param text The text containing timestamps
+   * @returns Array of parsed timestamps with their positions
+   */
+  private parseTimestamps(text: string): Array<{
+    index: number,
+    startTime: string,
+    endTime: string,
+    startSeconds: number,
+    endSeconds: number
+  }> {
+    const result: Array<{
+      index: number,
+      startTime: string,
+      endTime: string,
+      startSeconds: number,
+      endSeconds: number
+    }> = [];
+
+    // Match both SRT and VTT format timestamps
+    const timestampRegex = /(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}[,\.]\d{3})/g;
+
+    let match;
+    while ((match = timestampRegex.exec(text)) !== null) {
+      const startTime = match[1];
+      const endTime = match[2];
+
+      // Convert timestamp to seconds
+      const startSeconds = this.timestampToSeconds(startTime);
+      const endSeconds = this.timestampToSeconds(endTime);
+
+      result.push({
+        index: match.index,
+        startTime,
+        endTime,
+        startSeconds,
+        endSeconds
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Convert a timestamp string to seconds
+   * @param timestamp Timestamp in format 00:00:00,000 or 00:00:00.000
+   * @returns Time in seconds
+   */
+  private timestampToSeconds(timestamp: string): number {
+    // Replace comma with dot for consistent parsing
+    const normalizedTimestamp = timestamp.replace(',', '.');
+
+    // Split into hours, minutes, seconds
+    const parts = normalizedTimestamp.split(':');
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+
+    // Handle seconds and milliseconds
+    const secondsParts = parts[2].split('.');
+    const seconds = parseInt(secondsParts[0], 10);
+    const milliseconds = secondsParts.length > 1 ? parseInt(secondsParts[1], 10) : 0;
+
+    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+  }
+
+  /**
+   * Convert seconds to a timestamp string
+   * @param seconds Time in seconds
+   * @param format Format to use ('srt' or 'vtt')
+   * @returns Formatted timestamp string
+   */
+  private secondsToTimestamp(seconds: number, format: 'srt' | 'vtt' = 'srt'): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const milliseconds = Math.floor((seconds % 1) * 1000);
+
+    // Format with leading zeros
+    const hoursStr = hours.toString().padStart(2, '0');
+    const minutesStr = minutes.toString().padStart(2, '0');
+    const secsStr = secs.toString().padStart(2, '0');
+    const millisecondsStr = milliseconds.toString().padStart(3, '0');
+
+    // Use comma for SRT, dot for VTT
+    const separator = format === 'srt' ? ',' : '.';
+
+    return `${hoursStr}:${minutesStr}:${secsStr}${separator}${millisecondsStr}`;
+  }
+
+  /**
+   * Adjust timestamps in a text by adding an offset
+   * @param text Text containing timestamps
+   * @param offsetSeconds Offset to add to timestamps in seconds
+   * @returns Text with adjusted timestamps
+   */
+  private adjustTimestamps(text: string, offsetSeconds: number): string {
+    if (offsetSeconds === 0) {
+      return text;
+    }
+
+    // Parse timestamps
+    const timestamps = this.parseTimestamps(text);
+
+    // If no timestamps found, return original text
+    if (timestamps.length === 0) {
+      return text;
+    }
+
+    // Determine format (SRT or VTT)
+    const format = text.includes(',') ? 'srt' : 'vtt';
+    const separator = format === 'srt' ? ',' : '.';
+
+    // Sort timestamps by index in reverse order to avoid changing positions
+    timestamps.sort((a, b) => b.index - a.index);
+
+    // Create a copy of the text to modify
+    let result = text;
+
+    // Replace each timestamp with adjusted version
+    for (const timestamp of timestamps) {
+      const newStartSeconds = Math.max(0, timestamp.startSeconds + offsetSeconds);
+      const newEndSeconds = Math.max(0, timestamp.endSeconds + offsetSeconds);
+
+      const newStartTime = this.secondsToTimestamp(newStartSeconds, format);
+      const newEndTime = this.secondsToTimestamp(newEndSeconds, format);
+
+      const originalTimestamp = `${timestamp.startTime} --> ${timestamp.endTime}`;
+      const newTimestamp = `${newStartTime} --> ${newEndTime}`;
+
+      // Replace the timestamp in the text
+      result = result.substring(0, timestamp.index) +
+               newTimestamp +
+               result.substring(timestamp.index + originalTimestamp.length);
+    }
+
+    return result;
+  }
+
+  /**
+   * Parse SRT formatted text into entries
+   * @param text SRT formatted text
+   * @returns Array of SRT entries with index, timestamp, and content
+   */
+  private parseSrtEntries(text: string): Array<{
+    index: number,
+    entryNumber: number,
+    timestamp: string,
+    content: string
+  }> {
+    const result: Array<{
+      index: number,
+      entryNumber: number,
+      timestamp: string,
+      content: string
+    }> = [];
+
+    // Split the text into entries (separated by double newlines)
+    const entries = text.split(/\n\s*\n/).filter(entry => entry.trim().length > 0);
+
+    for (const entry of entries) {
+      const lines = entry.trim().split('\n');
+
+      // Need at least 3 lines for a valid SRT entry (number, timestamp, content)
+      if (lines.length < 3) continue;
+
+      // First line should be the entry number
+      const entryNumber = parseInt(lines[0], 10);
+      if (isNaN(entryNumber)) continue;
+
+      // Second line should be the timestamp
+      const timestamp = lines[1];
+      if (!timestamp.includes('-->')) continue;
+
+      // Remaining lines are the content
+      const content = lines.slice(2).join('\n');
+
+      result.push({
+        index: text.indexOf(entry),
+        entryNumber,
+        timestamp,
+        content
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if SRT entries are in reverse order (descending numbers)
+   * @param entries Array of SRT entries
+   * @returns True if entries are in reverse order
+   */
+  private isReversedSrtNumbering(entries: Array<{entryNumber: number}>): boolean {
+    if (entries.length < 2) return false;
+
+    // Check if the first entry has a higher number than the last entry
+    const firstNumber = entries[0].entryNumber;
+    const lastNumber = entries[entries.length - 1].entryNumber;
+
+    // Also check if the numbers are consistently decreasing
+    let isConsistentlyDecreasing = true;
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].entryNumber >= entries[i-1].entryNumber) {
+        isConsistentlyDecreasing = false;
+        break;
+      }
+    }
+
+    return firstNumber > lastNumber && isConsistentlyDecreasing;
+  }
+
+  /**
+   * Check if SRT entries have unusual numbering (non-sequential, very high numbers, etc.)
+   * @param entries Array of SRT entries
+   * @returns True if entries have unusual numbering
+   */
+  private hasUnusualSrtNumbering(entries: Array<{entryNumber: number}>): boolean {
+    if (entries.length < 2) return false;
+
+    // Consider any numbering that doesn't start with 1 as unusual
+    if (entries[0].entryNumber !== 1) return true;
+
+    // Check if entries are in reverse order (descending)
+    const isReversed = this.isReversedSrtNumbering(entries);
+    if (isReversed) return true;
+
+    // For normal ascending order, check for non-sequential numbering
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].entryNumber !== entries[i-1].entryNumber + 1) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Renumber SRT entries in text
+   * @param text SRT formatted text
+   * @param startNumber The number to start from
+   * @returns Text with renumbered entries
+   */
+  private renumberSrtEntries(text: string, startNumber: number): string {
+    const entries = this.parseSrtEntries(text);
+
+    if (entries.length === 0) {
+      return text;
+    }
+
+    // Check if entries are in reverse order (like 357, 356, 355...)
+    const isReversed = this.isReversedSrtNumbering(entries);
+
+    // If entries are reversed, sort them by position in the text
+    // Otherwise, keep them in their original order for proper sequential numbering
+    let sortedEntries = [...entries];
+
+    // For both normal and reversed cases, we need to process entries in reverse order
+    // to avoid changing positions when we modify the text
+    sortedEntries.sort((a, b) => b.index - a.index);
+
+    // Create a copy of the text to modify
+    let result = text;
+
+    // Replace each entry number with the new number
+    for (let i = 0; i < sortedEntries.length; i++) {
+      const entry = sortedEntries[i];
+
+      // If entries were reversed, we need to assign numbers in reverse order
+      // to maintain the same sequence but with correct numbering
+      const newEntryNumber = isReversed
+        ? startNumber + (sortedEntries.length - 1 - i)
+        : startNumber + i;
+
+      // Replace the entry number in the text
+      const originalEntryNumber = entry.entryNumber.toString();
+      const newEntryNumberStr = newEntryNumber.toString();
+
+      // Find the exact position of the entry number at the beginning of the entry
+      const entryStart = result.indexOf(entry.timestamp, entry.index) - originalEntryNumber.length - 1;
+      if (entryStart >= 0) {
+        result = result.substring(0, entryStart) +
+                newEntryNumberStr +
+                result.substring(entryStart + originalEntryNumber.length);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if text is in SRT format
+   * @param text The text to check
+   * @returns True if the text is in SRT format
+   */
+  private isSrtFormat(text: string): boolean {
+    // Check for SRT format: numbered entries followed by timestamps
+    const srtPattern = /^\d+\s*\n\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/m;
+    return srtPattern.test(text);
+  }
+
+  /**
+   * Merge multiple chunk transcriptions into a single result with overlap detection
+   * and timestamp adjustment for timestamped transcriptions
+   * @param transcriptions Array of transcription texts
+   * @returns Merged transcription text
+   */
+  private mergeTranscriptions(
+    transcriptions: string[]
+  ): string {
+    if (transcriptions.length === 0) {
+      return "";
+    }
+
+    if (transcriptions.length === 1) {
+      // For single transcriptions, always check and fix SRT numbering
+      const isSrt = this.isSrtFormat(transcriptions[0]);
+      if (isSrt) {
+        const entries = this.parseSrtEntries(transcriptions[0]);
+
+        // Check for any numbering issues
+        const isReversed = this.isReversedSrtNumbering(entries);
+        const hasUnusual = this.hasUnusualSrtNumbering(entries);
+        const firstNumber = entries.length > 0 ? entries[0].entryNumber : 0;
+
+        // Log detailed information about the numbering
+
+        // Always renumber entries to ensure they start from 1
+        // This fixes both reversed and unusual numbering cases
+        if (entries.length > 0 && (isReversed || hasUnusual || firstNumber !== 1)) {
+
+          // Create a new SRT file with correct sequential numbering
+          let result = "";
+
+          // Always sort entries by their position in the text (index)
+          // This ensures correct chronological order regardless of original numbering
+          const sortedEntries = [...entries].sort((a, b) => a.index - b.index);
+
+          for (let i = 0; i < sortedEntries.length; i++) {
+            const entry = sortedEntries[i];
+            const entryNumber = i + 1;
+
+            // Add a separator between entries
+            if (i > 0) {
+              result += "\n\n";
+            }
+
+            // Add the entry with new sequential numbering
+            result += `${entryNumber}\n${entry.timestamp}\n${entry.content}`;
+          }
+
+          return result;
+        }
+      }
+
+      return transcriptions[0];
+    }
+
+    // Check if we're dealing with timestamped transcriptions
+    const hasTimestamps = this.hasTimestamps(transcriptions[0]);
+    const isSrt = this.isSrtFormat(transcriptions[0]);
+
+    if (hasTimestamps && isSrt) {
+      // For timestamped transcriptions with SRT format
+      let result = "";
+
+      // We'll collect all entries from all chunks and renumber them sequentially
+      let allEntries: Array<{
+        index: number,
+        entryNumber: number,
+        timestamp: string,
+        content: string,
+        chunkIndex: number
+      }> = [];
+
+      // First pass: collect all entries from all chunks
+      for (let i = 0; i < transcriptions.length; i++) {
+        const transcription = transcriptions[i];
+
+        // Parse entries from this chunk
+        const entries = this.parseSrtEntries(transcription);
+
+        // Log if we detect reversed or unusual numbering
+        if (this.isReversedSrtNumbering(entries)) {
+        }
+
+        // Check for unusual numbering (other than simple reversed numbering)
+        if (this.hasUnusualSrtNumbering(entries)) {
+        }
+
+        // Add chunk index to each entry
+        entries.forEach(entry => {
+          allEntries.push({
+            ...entry,
+            chunkIndex: i
+          });
+        });
+      }
+
+      // Always renumber entries for consistency, regardless of whether unusual numbering was detected
+
+      // Sort entries by chunk index first to maintain the correct order of chunks
+      // Then by their position within each chunk to maintain chronological order
+      allEntries.sort((a, b) => {
+        // First sort by chunk index
+        if (a.chunkIndex !== b.chunkIndex) {
+          return a.chunkIndex - b.chunkIndex;
+        }
+
+        // Within the same chunk, sort by position in text
+        // This ensures correct chronological order regardless of original numbering
+        return a.index - b.index;
+      });
+
+      // Create a completely new SRT file with sequential numbering starting from 1
+      for (let i = 0; i < allEntries.length; i++) {
+        const entry = allEntries[i];
+        const entryNumber = i + 1; // Always start from 1 and increment sequentially
+
+        // Add a separator between entries
+        if (i > 0) {
+          result += "\n\n";
+        }
+
+        // Add the entry with new sequential numbering
+        result += `${entryNumber}\n${entry.timestamp}\n${entry.content}`;
+      }
+
+      return result;
+    } else if (hasTimestamps) {
+      // For other timestamped formats (non-SRT)
+      let result = "";
+
+      // Process each chunk's transcription
+      for (let i = 0; i < transcriptions.length; i++) {
+        const transcription = transcriptions[i];
+
+        // Add a separator between chunks
+        if (i > 0) {
+          result += "\n\n";
+        }
+
+        result += transcription;
+      }
+
+      return result;
+    } else {
+      // For regular transcriptions, use enhanced text-based merging with improved continuity
+      let result = transcriptions[0];
+
+      // Process each subsequent transcription
+      for (let i = 1; i < transcriptions.length; i++) {
+        const current = transcriptions[i];
+
+        // Find overlap between the end of the result and the start of the current chunk
+        // Use a larger search window for better overlap detection
+        const overlapLength = this.findOverlap(result, current, 300);
+
+        if (overlapLength > 0) {
+          // Append only the non-overlapping part of the current chunk
+          result += current.slice(overlapLength);
+        } else {
+          // If no overlap found, try to create a more natural transition
+
+          // Check if the last character of result is already a punctuation or space
+          const lastChar = result.charAt(result.length - 1);
+          const endsWithPunctuation = /[.!?]/.test(lastChar);
+          const endsWithSpace = /\s/.test(lastChar);
+
+          // Check if the first character of current is uppercase (potential new sentence)
+          const firstChar = current.charAt(0);
+          const startsWithUppercase = /[A-Z]/.test(firstChar);
+
+          if (endsWithPunctuation) {
+            // If result ends with punctuation, add a space before the new chunk
+            result += " ";
+            result += current;
+          } else if (endsWithSpace) {
+            // If result already ends with space, just append
+            result += current;
+          } else {
+            // No punctuation or space at the end
+            // If the next chunk starts with uppercase, add period and space
+            if (startsWithUppercase) {
+              result += ". " + current;
+            } else {
+              // Otherwise just add a space for continuity
+              result += " " + current;
+            }
+          }
+        }
+      }
+
+      return result;
+    }
+  }
+
+  // Legacy multipart helpers removed. All flows use buildMultipartBody now.
+
+  /**
+   * Transcribe an audio file
+   * @param file The audio file to transcribe
+   * @param context Optional transcription context
+   * @returns Promise resolving to the transcription text
+   */
+  async transcribeFile(file: TFile, context?: TranscriptionContext): Promise<string> {
+    const { promise, ahead } = this.transcriptionQueue.enqueue(() => this.processTranscription(file, context));
+    this.debug("transcription enqueued", { filePath: file.path, ahead });
+
+    if (ahead > 0) {
+      const waitMessage =
+        ahead === 1
+          ? "Waiting for the previous transcription to finish..."
+          : `Waiting for ${ahead} transcriptions ahead to finish...`;
+      context?.onProgress?.(2, waitMessage);
+    }
+
+    return promise;
+  }
+
+  private async processTranscription(file: TFile, context?: TranscriptionContext): Promise<string> {
+    const extension = file.extension.toLowerCase();
+    if (!SUPPORTED_AUDIO_EXTENSIONS.includes(extension)) {
+      throw new Error(`Unsupported file type: ${extension}`);
+    }
+
+    if (file.stat.size > MAX_FILE_SIZE) {
+      throw new Error(`File too large. Maximum allowed size is ${Math.floor(MAX_FILE_SIZE / (1024 * 1024))}MB.`);
+    }
+
+    try {
+      this.info("Starting transcription pipeline", {
+        filePath: file.path,
+        size: file.stat.size,
+        extension
+      });
+      if (
+        this.plugin.settings.transcriptionProvider === "systemsculpt" &&
+        (!this.plugin.settings.licenseKey || !this.plugin.settings.licenseValid)
+      ) {
+        throw new Error(
+          "A valid SystemSculpt license is required to use the SystemSculpt API for transcription. Please enter a valid license key or switch to a custom transcription provider in the settings."
+        );
+      }
+
+      context?.onProgress?.(0, "Reading audio file...");
+
+      let arrayBuffer: ArrayBuffer;
+      try {
+        arrayBuffer = await this.plugin.app.vault.readBinary(file);
+        this.debug("Read audio file from vault", { filePath: file.path });
+      } catch (readError) {
+        try {
+          const fs = require("fs");
+          const path = require("path");
+
+          let vaultPath = "";
+          // @ts-ignore - basePath may exist on some adapter implementations
+          if (this.plugin.app.vault.adapter.basePath) {
+            // @ts-ignore
+            vaultPath = this.plugin.app.vault.adapter.basePath;
+          } else {
+            const errorMatch = readError instanceof Error && readError.message.match(/open '(.+?)'/);
+
+            if (errorMatch && errorMatch[1]) {
+              const fullErrorPath = errorMatch[1];
+              vaultPath = fullErrorPath.replace(new RegExp(`${file.path}$`), "");
+              vaultPath = vaultPath.replace(/\/$/, "");
+            }
+          }
+
+          if (!vaultPath) {
+            throw new Error("Could not determine vault path");
+          }
+
+          const absolutePath = path.join(vaultPath, file.path);
+          this.debug("Falling back to direct fs read", { absolutePath });
+
+          arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+            fs.readFile(absolutePath, (err: any, data: Buffer) => {
+              if (err) {
+                reject(new Error(`Failed to read file directly: ${err.message}`));
+                return;
+              }
+              const arrayCopy = new Uint8Array(data.byteLength);
+              arrayCopy.set(data);
+              resolve(arrayCopy.buffer);
+            });
+          });
+        } catch (fsError) {
+          throw new Error(
+            `Failed to read audio file. Original error: ${
+              readError instanceof Error ? readError.message : String(readError)
+            }`
+          );
+        }
+      }
+
+      let processedArrayBuffer = arrayBuffer;
+      let mimeType = MIME_TYPE_MAP[extension as keyof typeof MIME_TYPE_MAP];
+      let wasResampled = false;
+
+      const isMobile = this.platform.isMobile();
+      const resamplingEnabled = this.plugin.settings.enableAutoAudioResampling ?? true;
+
+      if (this.plugin.settings.transcriptionProvider === "systemsculpt" && !isMobile && resamplingEnabled) {
+        const targetSampleRate = EXPECTED_SAMPLE_RATES[extension] || 16000;
+
+        try {
+          context?.onProgress?.(10, "Checking audio compatibility...");
+          this.debug("Checking audio compatibility", { targetSampleRate });
+
+          const { needsResampling, currentSampleRate } = await this.audioResampler.checkNeedsResampling(
+            arrayBuffer,
+            mimeType,
+            targetSampleRate
+          );
+
+          if (needsResampling) {
+            context?.onProgress?.(15, "Converting audio format for optimal processing...");
+            if (!context?.suppressNotices) {
+              new Notice(
+                `Audio needs conversion from ${currentSampleRate}Hz to ${targetSampleRate}Hz. This may take a moment...`,
+                5000
+              );
+            }
+
+            const startTime = Date.now();
+            const resampleResult = await this.audioResampler.resampleAudio(arrayBuffer, targetSampleRate, mimeType);
+            const resampleTime = Date.now() - startTime;
+
+            processedArrayBuffer = resampleResult.buffer;
+            mimeType = "audio/wav";
+            wasResampled = true;
+
+            if (resampleTime > 2000) {
+              context?.onProgress?.(18, "Audio conversion complete!");
+            }
+            this.debug("Audio resampled", {
+              targetSampleRate,
+              durationMs: resampleTime
+            });
+          }
+        } catch (resampleError) {
+          if (!context?.suppressNotices) {
+            new Notice("Audio format conversion failed. Attempting with original file...", 3000);
+          }
+          this.warn("Audio resampling failed", {
+            error: resampleError instanceof Error ? resampleError.message : String(resampleError)
+          });
+        }
+      } else if (this.plugin.settings.transcriptionProvider === "systemsculpt" && isMobile) {
+        try {
+          const { needsResampling, currentSampleRate } = await this.audioResampler.checkNeedsResampling(
+            arrayBuffer,
+            mimeType,
+            EXPECTED_SAMPLE_RATES[extension] || 16000
+          );
+
+          if (needsResampling) {
+            if (!context?.suppressNotices) {
+              new Notice(
+                `⚠️ Audio format (${currentSampleRate}Hz) may not be compatible. Consider converting on desktop for best results.`,
+                7000
+              );
+            }
+          }
+        } catch (e) {
+          // Ignore check errors on mobile
+        }
+      }
+
+      const blob = new Blob([processedArrayBuffer], {
+        type: mimeType
+      });
+
+      context?.onProgress?.(20, "Uploading audio file...");
+      this.debug("Queueing transcription upload", {
+        wasResampled,
+        mimeType
+      });
+
+      const transcriptionText = await this.queueTranscription(file, blob, context, wasResampled);
+
+      context?.onProgress?.(100, "Transcription complete!");
+      this.info("Transcription pipeline finished", {
+        filePath: file.path,
+        characters: transcriptionText.length
+      });
+
+      return transcriptionText;
+    } catch (error) {
+      const catchedError = error instanceof Error ? error : new Error(String(error));
+
+      const existingAdditionalInfo = (catchedError as any).additionalInfo;
+      const currentFormDataVersionForCatch = "v2.9-native-fetch-ndjson";
+      let finalAdditionalInfoToLog: any = {
+        location: "transcribeFile catch block",
+        originalErrorName: catchedError.name,
+        formDataVersion: currentFormDataVersionForCatch,
+        provider: this.plugin.settings.transcriptionProvider,
+        file: { name: file.name, path: file.path, size: file.stat.size },
+        ...(existingAdditionalInfo || {})
+      };
+
+      if (existingAdditionalInfo) {
+        finalAdditionalInfoToLog.formDataVersion =
+          existingAdditionalInfo.formDataVersion || currentFormDataVersionForCatch;
+        finalAdditionalInfoToLog.provider =
+          existingAdditionalInfo.provider || this.plugin.settings.transcriptionProvider;
+      }
+
+      await logMobileError(
+        "TranscriptionService.transcribeFile",
+        `Unhandled error in transcription process: ${catchedError.message}`,
+        catchedError,
+        finalAdditionalInfoToLog
+      );
+
+      if (!context?.suppressNotices) {
+        new Notice(`Transcription failed: ${catchedError.message.substring(0, 120)}... (See debug log)`);
+      }
+
+      this.error("Transcription pipeline failed", catchedError, { filePath: file.path });
+      throw catchedError;
+    }
+  }
+
+  /**
+   * Queue a transcription request to avoid rate limiting
+   */
+  private async queueTranscription(
+    file: TFile,
+    blob: Blob,
+    context?: TranscriptionContext,
+    wasResampled: boolean = false
+  ): Promise<string> {
+    this.debug("queueTranscription invoked", { filePath: file.path, wasResampled });
+    // Check if we need to wait
+    if (this.activeUploads >= this.maxConcurrentUploads) {
+      this.debug("transcription queued behind active upload", {
+        activeUploads: this.activeUploads
+      });
+      // Show user-friendly message about queueing
+      const waitNotice = context?.suppressNotices
+        ? null
+        : new Notice(`Another transcription is in progress. Your file will be processed next...`, 0);
+      
+      // Update progress to show we're waiting
+      context?.onProgress?.(20, "Waiting for previous transcription to complete...");
+      
+      // Wait with periodic updates
+      let waitTime = 0;
+      while (this.activeUploads >= this.maxConcurrentUploads) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        waitTime += 500;
+        
+        // Update wait message every 2 seconds
+        if (waitTime % 2000 === 0) {
+          context?.onProgress?.(20, `Waiting in queue (${Math.round(waitTime / 1000)}s)...`);
+          this.debug("still waiting for upload slot", { waitMs: waitTime });
+        }
+      }
+      
+      // Remove wait notice
+      waitNotice?.hide();
+      
+      // Show that we're starting now
+      context?.onProgress?.(25, "Starting transcription...");
+    }
+
+    this.activeUploads++;
+    this.debug("transcription upload slot acquired", {
+      filePath: file.path,
+      activeUploads: this.activeUploads
+    });
+    
+    try {
+      // If file was resampled, adjust the progress message
+      if (wasResampled) {
+        context?.onProgress?.(30, "Uploading converted audio...");
+      }
+      
+      // Process the transcription
+      const result = await this.transcribeAudio(file, blob, context);
+      this.info("transcribeAudio completed", { filePath: file.path });
+      return result;
+    } finally {
+      this.activeUploads--;
+      this.debug("transcription slot released", {
+        filePath: file.path,
+        activeUploads: this.activeUploads
+      });
+      
+      // If there are more uploads waiting, log it
+      if (this.transcriptionQueue.size > 0) {
+        this.debug("pending transcriptions remain in queue", { queueSize: this.transcriptionQueue.size });
+      }
+    }
+  }
+
+  private getDiagnostics(): Record<string, unknown> {
+    return {
+      activeUploads: this.activeUploads,
+      maxConcurrentUploads: this.maxConcurrentUploads,
+      queueSize: this.transcriptionQueue.size,
+      retryCount: this.retryCount
+    };
+  }
+
+  private debug(message: string, data: Record<string, unknown> = {}): void {
+    logDebug("TranscriptionService", message, { ...this.getDiagnostics(), ...data });
+  }
+
+  private info(message: string, data: Record<string, unknown> = {}): void {
+    logInfo("TranscriptionService", message, { ...this.getDiagnostics(), ...data });
+  }
+
+  private warn(message: string, data: Record<string, unknown> = {}): void {
+    logWarning("TranscriptionService", message, { ...this.getDiagnostics(), ...data });
+  }
+
+  private error(message: string, error: Error, data: Record<string, unknown> = {}): void {
+    logError("TranscriptionService", `${message} ${JSON.stringify(data)}`, error);
+  }
+
+  unload() {
+    // Clean up resources
+    if (this.audioResampler) {
+      this.audioResampler.dispose();
+    }
+  }
+}

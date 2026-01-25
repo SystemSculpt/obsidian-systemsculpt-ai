@@ -1,0 +1,271 @@
+/**
+ * Slash Command Menu Styles
+ * 
+ * A sleek dropdown menu that appears when users type "/" in the chat input.
+ * Follows Obsidian's native UI patterns and is responsive for mobile devices.
+ */
+
+/* Main menu container */
+.systemsculpt-slash-command-menu {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  min-width: 400px;
+  max-width: 500px;
+  max-height: 300px;
+  overflow: hidden;
+  font-family: var(--font-interface);
+  z-index: 1000;
+  display: none;
+}
+
+/* Search container (now at bottom) */
+.systemsculpt-slash-search-container {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  gap: 8px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+/* Search icon */
+.systemsculpt-slash-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-slash-search-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Search input */
+.systemsculpt-slash-search-input {
+  flex: 1;
+  background: var(--ss-layer-base);
+  border: none;
+  outline: none;
+  color: var(--text-normal);
+  font-size: 14px;
+  font-family: var(--font-interface);
+  padding: 4px 0;
+}
+
+.systemsculpt-slash-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Results container (now at top) */
+.systemsculpt-slash-results-container {
+  max-height: 240px;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+/* Result item */
+.systemsculpt-slash-result-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background-color 0.1s ease;
+  gap: 12px;
+}
+
+.systemsculpt-slash-result-item:last-child {
+  border-bottom: none;
+}
+
+.systemsculpt-slash-result-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-slash-result-item.is-selected {
+  background-color: var(--background-modifier-active-hover);
+}
+
+/* Result icon */
+.systemsculpt-slash-result-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.systemsculpt-slash-result-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-slash-result-item.is-selected .systemsculpt-slash-result-icon {
+  color: var(--interactive-accent);
+}
+
+/* Result content */
+.systemsculpt-slash-result-content {
+  flex: 1;
+  min-width: 0; /* Allow text to truncate */
+}
+
+/* Result title */
+.systemsculpt-slash-result-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-slash-result-item.is-selected .systemsculpt-slash-result-title {
+  color: var(--interactive-accent);
+}
+
+/* Result description */
+.systemsculpt-slash-result-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Scrollbar styling for results container */
+.systemsculpt-slash-results-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-track {
+  background: var(--background-modifier-border);
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 2px;
+}
+
+.systemsculpt-slash-results-container::-webkit-scrollbar-thumb:hover {
+  background: var(--text-normal);
+}
+
+/* Empty state (when no commands match search) */
+.systemsculpt-slash-empty-state {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Mobile responsive design */
+@media (max-width: 600px) {
+  .systemsculpt-slash-command-menu {
+    min-width: 320px;
+    max-width: calc(100vw - 20px);
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+  }
+  
+  .systemsculpt-slash-search-container {
+    padding: 10px 14px;
+  }
+  
+  .systemsculpt-slash-search-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  .systemsculpt-slash-result-item {
+    padding: 12px 14px;
+    gap: 14px;
+  }
+  
+  .systemsculpt-slash-result-title {
+    font-size: 15px;
+  }
+  
+  .systemsculpt-slash-result-description {
+    font-size: 13px;
+  }
+}
+
+/* Small mobile screens */
+@media (max-width: 400px) {
+  .systemsculpt-slash-command-menu {
+    min-width: 280px;
+  }
+  
+  .systemsculpt-slash-result-item {
+    padding: 10px 12px;
+  }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .systemsculpt-slash-command-menu {
+    box-shadow: 0 4px 16px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  }
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-slash-command-menu {
+  box-shadow: 0 4px 16px color-mix(in srgb, rgb(0, 0, 0) 30%, var(--ss-layer-base));
+}
+
+/* Animation for menu appearance */
+.systemsculpt-slash-command-menu {
+  transform-origin: top left;
+  animation: systemsculpt-slash-menu-appear 0.1s ease-out;
+}
+
+@keyframes systemsculpt-slash-menu-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Focus states for accessibility */
+.systemsculpt-slash-search-input:focus {
+  /* No visible focus ring since the container handles focus styling */
+}
+
+.systemsculpt-slash-search-container:focus-within {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Selection highlighting for keyboard navigation */
+.systemsculpt-slash-result-item.is-selected {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .systemsculpt-slash-command-menu {
+    border-width: 2px;
+  }
+  
+  .systemsculpt-slash-result-item.is-selected {
+    outline-width: 3px;
+  }
+} 

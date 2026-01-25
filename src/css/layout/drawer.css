@@ -1,0 +1,1342 @@
+/**
+ * Collapsible Drawer Styles
+ *
+ * Unified collapse/expand UI used for reasoning, tool calls, etc.
+ */
+/* ========================================================================== */
+/* == Collapsible Drawer Component Styles                                  == */
+/* == (Originally from components/collapsible-drawer.css)                == */
+/* ========================================================================== */
+
+/**
+ * Collapsible Drawer Component Styles
+ * 
+ * Base styles for all collapsible drawers (reasoning, tool calls, etc.)
+ * Provides consistent collapse/expand behavior and visual styling
+ */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Collapsible Drawer - Base Container                      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-collapsible-drawer {
+  /* Layout */
+  margin: 8px 0;
+  padding: 8px;
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+  
+  /* Glass morphism design */
+  width: 100%; /* Use full available width from start */
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 30%, var(--ss-layer-base));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 25%, var(--ss-layer-base));
+  border-radius: 12px;
+  
+  /* Shadow for depth */
+  box-shadow: 
+    0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 4%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 3%, var(--ss-layer-base));
+  
+  /* Grid layout - no animation */
+  display: grid !important;
+  grid-template-rows: auto 0fr !important;
+  overflow: visible;
+  
+  /* No transitions - instant display */
+  transition: none !important;
+  
+  /* Interaction states */
+  z-index: 1;
+  pointer-events: auto !important;
+}
+
+/* ========================================================================== */
+/* == Message Group Drawer Styling (Clean border-only design)             == */
+/* ========================================================================== */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Message Group Drawers - Refined Styles                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-collapsible-drawer {
+  width: 100% !important; /* Use full container width */
+  margin: 10px 0 !important;
+  background: color-mix(in srgb, rgb(var(--background-primary-rgb)) 40%, var(--ss-layer-base)) !important;
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 20%, var(--ss-layer-base)) !important;
+  border-radius: 10px !important;
+  position: relative !important;
+  isolation: isolate !important;
+  box-sizing: border-box !important; /* Include padding and border in width */
+}
+
+/* Hover glow effects to indicate interactivity - border glow removed */
+.systemsculpt-collapsible-drawer:hover {
+  /* border-color: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 90%, var(--ss-layer-base)); */
+  /* box-shadow: 0 0 0 1px color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 30%, var(--ss-layer-base)); */
+}
+
+
+/* Collapsed state for container - FORCE COLLAPSE STATE */
+.systemsculpt-collapsible-drawer.systemsculpt-collapsed {
+  /* Grid collapses the second row to 0fr - FORCE WITH !important */
+  grid-template-rows: auto 0fr !important;
+  /* Container should only show header when collapsed */
+  padding-bottom: 4px; /* Maintain consistent padding */
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Drawer Header - Interactive Controls                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-collapsible-header {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  width: 100%;
+  
+  /* Interactive styling */
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+  font-weight: 600;
+  color: var(--text-muted);
+  
+  /* Hover area */
+  border-radius: 8px;
+  background: var(--ss-layer-base);
+  
+  /* Transitions */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Stacking */
+  position: relative;
+  z-index: 10;
+  pointer-events: auto !important;
+  isolation: isolate;
+}
+
+.systemsculpt-collapsible-header:hover {
+  color: var(--text-normal);
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 5%, var(--ss-layer-base));
+  transform: translateX(2px);
+}
+
+/* Icon styles */
+.systemsculpt-collapsible-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* No transitions */
+}
+
+.systemsculpt-collapsible-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Title styles */
+.systemsculpt-collapsible-title {
+  font-weight: 600;
+  font-size: inherit; /* Changed from 14px to inherit font size from messages container */
+  color: var(--text-normal);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Expand/Collapse Arrow - Smooth Animation                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-collapsible-header::after {
+  content: "▼";
+  font-size: 11px;
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: none;
+}
+
+.systemsculpt-collapsed .systemsculpt-collapsible-header::after {
+  transform: rotate(-90deg);
+}
+
+.systemsculpt-collapsible-header:hover::after {
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover::after {
+  transform: rotate(-90deg);
+}
+
+/* ========================================================================== */
+/* == Hover and Expanded State Effects                                     == */
+/* ========================================================================== */
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Hover & Expanded States                                  ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-collapsible-drawer:hover {
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 40%, var(--ss-layer-base));
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base));
+  box-shadow: 
+    0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 6%, var(--ss-layer-base)),
+    0 2px 4px color-mix(in srgb, rgb(0, 0, 0) 2%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base));
+  z-index: 10 !important;
+  isolation: isolate;
+}
+
+/* Expanded state - use full width from the start */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) {
+  grid-template-rows: auto 1fr !important;
+  width: 100%; /* Use full available width */
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base));
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 35%, var(--ss-layer-base));
+  box-shadow: 
+    0 4px 16px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 10%, var(--ss-layer-base)),
+    0 2px 6px color-mix(in srgb, rgb(0, 0, 0) 3%, var(--ss-layer-base)),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base));
+}
+
+/* Header hover state when drawer is collapsed */
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover {
+  color: var(--interactive-accent);
+}
+
+/* Icon hover state when collapsed */
+.systemsculpt-collapsed .systemsculpt-collapsible-header:hover .systemsculpt-collapsible-icon {
+  /* No scaling animation */
+}
+
+/* Icon color when expanded */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) .systemsculpt-collapsible-icon {
+  color: var(--interactive-accent);
+}
+
+/* Arrow color when expanded */
+.systemsculpt-collapsible-drawer:not(.systemsculpt-collapsed) .systemsculpt-collapsible-header::after {
+  color: var(--interactive-accent);
+}
+
+/* Content wrapper styles - SINGLE DEFINITION FOR ALL DRAWER CONTENT */
+.systemsculpt-collapsible-content {
+  /* Grid positioning - makes this the second row of the grid container */
+  grid-row: 2;
+  
+  /* Critical properties for grid animation */
+  overflow: hidden;
+  min-height: 0;
+  
+  /* Spacing and visibility when expanded */
+  padding-top: 4px;
+  margin-top: 8px;
+  opacity: 1;
+  visibility: visible;
+  
+  /* No transition - instant display */
+  transition: none;
+}
+
+/* Collapsed content - fade out during collapse and REMOVE ALL SPACING */
+.systemsculpt-collapsed .systemsculpt-collapsible-content {
+  opacity: 0;
+  visibility: hidden;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s 0.25s;
+}
+
+/* Utility classes for specific drawer types to customize */
+.systemsculpt-collapsible-drawer.with-status-indicator .systemsculpt-collapsible-header {
+  /* Allow space for status indicators */
+}
+
+.systemsculpt-collapsible-drawer.error-state {
+  border-color: var(--text-error);
+  background-color: color-mix(in srgb, rgb(var(--background-modifier-error-rgb)) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-collapsible-drawer.success-state {
+  border-color: var(--text-success);
+  background-color: color-mix(in srgb, rgb(var(--background-modifier-success-rgb)) 10%, var(--ss-layer-base));
+}
+
+/* REMOVED - Merged into main definition at line 373 */
+
+/* Unified part styling for message chronological display */
+.systemsculpt-unified-part.systemsculpt-collapsible-drawer {
+  /* Specific styles for unified message parts */
+}
+
+/* Content part containerization - more differentiated for LLM response text */
+.systemsculpt-content-part {
+  margin: 4px 0;
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  line-height: 1.6;
+  box-shadow: 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+}
+
+/* Content parts within message groups - removed conflicting styles */
+/* Styles moved to messages.css for proper cascade */
+
+/* ========================================================================== */
+/* == Unified Content Styles (shared by reasoning, tool calls, etc.)       == */
+/* ========================================================================== */
+
+/* Base content container - shared by all drawer content types */
+.systemsculpt-drawer-content-container {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Base text content - shared text styling */
+.systemsculpt-drawer-content-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Monospace variant for code-like content */
+.systemsculpt-drawer-content-text.monospace {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+/* ========================================================================== */
+/* == Specific Content Type Styling (minimal overrides)                    == */
+/* ========================================================================== */
+
+/* Reasoning content – keep typography identical to normal Markdown */
+.systemsculpt-reasoning-scroll-container {
+  display: block;
+  width: 100%;
+  max-height: 100px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  padding: 12px 14px 12px 16px;
+  margin-top: 8px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, rgb(var(--background-secondary-rgb)) 92%, var(--ss-layer-base)) 0%,
+    color-mix(in srgb, rgb(var(--background-secondary-rgb)) 82%, var(--ss-layer-base)) 100%
+  );
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 50%, var(--ss-layer-base));
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 6%, var(--ss-layer-base)),
+    0 6px 16px color-mix(in srgb, rgb(0, 0, 0) 12%, var(--ss-layer-base));
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  scrollbar-width: thin;
+}
+
+.systemsculpt-reasoning-text {
+  font-family: var(--font-text);
+  font-size: inherit;
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: normal;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.systemsculpt-reasoning-scroll-container:hover {
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 45%, var(--ss-layer-base));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 8%, var(--ss-layer-base)),
+    0 8px 20px color-mix(in srgb, rgb(0, 0, 0) 16%, var(--ss-layer-base));
+}
+
+.systemsculpt-reasoning-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-reasoning-scroll-container::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 55%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 35%, var(--ss-layer-base))
+  );
+  border-radius: 999px;
+}
+
+.systemsculpt-reasoning-scroll-container::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}
+
+.systemsculpt-reasoning-text > *:first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-reasoning-text > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Guard against legacy "monospace" class still lingering */
+.systemsculpt-reasoning-text.monospace {
+  font-family: var(--font-text);
+  color: var(--text-normal);
+}
+
+/* Tool response content - uses base styles */
+.systemsculpt-tool-response-body {
+  /* Inherits from .systemsculpt-drawer-content-container and .systemsculpt-drawer-content-text */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.systemsculpt-tool-response-body pre {
+  background: var(--background-secondary);
+  padding: 6px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+
+.systemsculpt-tool-response-body code {
+  background: var(--background-secondary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+/* ========================================================================== */
+/* == Tool Call Content Styles (content inside drawers)                    == */
+/* ========================================================================== */
+
+/* Tool Call Status Indicators - Enhanced with animations */
+.systemsculpt-tool-call-status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+  margin-left: 8px;
+}
+
+.systemsculpt-tool-call-status-indicator svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+
+.systemsculpt-tool-call-status-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.systemsculpt-tool-call-status-indicator.completed {
+  color: var(--text-success);
+  animation: successPulse 0.5s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.completed svg {
+  animation: checkmarkAnim 0.3s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.completed::after {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, rgb(var(--color-green-rgb)) 30%, var(--ss-layer-base)),
+    var(--ss-layer-base)
+  );
+  opacity: 1;
+  animation: rippleEffect 0.6s ease-out;
+}
+
+@keyframes successPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes checkmarkAnim {
+  0% { transform: scale(0) rotate(-45deg); }
+  50% { transform: scale(1.2) rotate(10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes rippleEffect {
+  from {
+    width: 0;
+    height: 0;
+    opacity: 1;
+  }
+  to {
+    width: 40px;
+    height: 40px;
+    opacity: 0;
+  }
+}
+
+.systemsculpt-tool-call-status-indicator.denied {
+  color: var(--text-error);
+  animation: shakeAnim 0.3s ease-out;
+}
+
+.systemsculpt-tool-call-status-indicator.denied svg {
+  animation: xmarkAnim 0.3s ease-out;
+}
+
+@keyframes shakeAnim {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@keyframes xmarkAnim {
+  0% { transform: scale(0) rotate(45deg); }
+  50% { transform: scale(1.2) rotate(-10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+.systemsculpt-tool-call-status-indicator.executing {
+  color: var(--text-warning);
+}
+
+.systemsculpt-tool-call-status-indicator.executing svg {
+  animation: spinAnim 1s linear infinite;
+}
+
+@keyframes spinAnim {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.systemsculpt-tool-call-status-indicator.pending {
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-call-status-indicator.pending svg {
+  animation: breatheAnim 2s ease-in-out infinite;
+}
+
+@keyframes breatheAnim {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.systemsculpt-tool-call-status-indicator.error {
+  color: var(--text-error);
+  animation: errorFlashAnim 0.5s ease-out;
+}
+
+@keyframes errorFlashAnim {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes systemsculpt-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.systemsculpt-tool-call-status-indicator svg.systemsculpt-spinning {
+  animation: systemsculpt-spin 1s linear infinite;
+}
+
+/* Open File Button */
+.systemsculpt-tool-call-open-file-btn {
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  height: 24px !important;
+  line-height: 1 !important;
+  border-radius: 3px !important;
+  background: var(--background-modifier-form-field) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  margin-left: 8px !important;
+  flex-shrink: 0 !important;
+  transition: all 0.15s ease !important;
+}
+
+.systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.systemsculpt-tool-call-open-file-btn:active {
+  transform: translateY(1px) !important;
+}
+
+/* Dark theme adjustments */
+.theme-dark .systemsculpt-tool-call-open-file-btn {
+  background: color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base)) !important;
+  border-color: color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base)) !important;
+}
+
+.theme-dark .systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+/* Light theme adjustments */
+.theme-light .systemsculpt-tool-call-open-file-btn {
+  background: color-mix(in srgb, rgb(0, 0, 0) 3%, var(--ss-layer-base)) !important;
+  border-color: color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base)) !important;
+}
+
+.theme-light .systemsculpt-tool-call-open-file-btn:hover {
+  background: var(--interactive-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+/* Tool Call Content Styles */
+.systemsculpt-tool-call-content {
+  /* Inherits from .systemsculpt-drawer-content-container */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Tool Call Summary */
+.systemsculpt-tool-call-summary {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Collapsible Details Toggle */
+.systemsculpt-tool-call-details-toggle {
+  font-size: 11px;
+  color: var(--text-accent);
+  cursor: pointer;
+  padding: 2px 0;
+  margin: 4px 0 2px 0;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: color 0.2s ease;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.systemsculpt-tool-call-details-toggle:hover {
+  color: var(--text-accent-hover);
+  text-decoration-style: solid;
+}
+
+/* Collapsible Details Container */
+.systemsculpt-tool-call-details-container {
+  max-height: 200px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  opacity: 1;
+}
+
+.systemsculpt-tool-call-details-container.systemsculpt-collapsed {
+  /* Use transform instead of max-height for smoother animation */
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.systemsculpt-tool-call-details {
+  padding: 4px 0;
+}
+
+.systemsculpt-tool-call-args {
+  margin: 6px 0;
+  padding: 6px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-call-args-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.systemsculpt-tool-call-args-content {
+  /* Container for arguments */
+}
+
+.systemsculpt-tool-call-arg {
+  font-size: 11px;
+  margin-bottom: 3px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.systemsculpt-tool-call-arg:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-tool-call-arg-key {
+  color: var(--text-muted);
+  font-weight: 500;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-tool-call-arg-key::after {
+  content: ":";
+}
+
+.systemsculpt-tool-call-arg-value {
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  background: var(--ss-layer-base);
+  padding: 1px 0;
+  border-radius: 3px;
+  word-break: break-word;
+  flex: 1;
+}
+
+/* Tool Response Section (matching arguments styling) */
+.systemsculpt-tool-call-response {
+  margin: 6px 0 !important;
+  padding: 6px !important;
+  background: var(--background-primary) !important;
+  border-radius: 4px !important;
+  border: 1px solid var(--background-modifier-border) !important;
+}
+
+.systemsculpt-tool-call-response-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.systemsculpt-tool-call-response-content {
+  max-height: clamp(90px, 22vh, 120px) !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  color: var(--text-normal) !important;
+  padding: 0 !important;
+}
+
+.systemsculpt-tool-response-json {
+  background: var(--background-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-response-text {
+  /* Uses base .systemsculpt-drawer-content-text styles */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.systemsculpt-tool-response-error {
+  border-color: var(--text-error);
+  background: color-mix(in srgb, rgb(var(--background-modifier-error-rgb)) 10%, var(--ss-layer-base));
+}
+
+.systemsculpt-tool-response-error-json {
+  background: color-mix(in srgb, rgb(var(--background-modifier-error-rgb)) 20%, var(--ss-layer-base));
+  color: var(--text-error);
+  padding: 4px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* Loading state for tool responses */
+.systemsculpt-tool-response-executing {
+  opacity: 0.8;
+}
+
+.systemsculpt-tool-response-loading {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* State-specific styling (opacity only, no border colors) */
+.systemsculpt-tool-call-denied {
+  opacity: 1;
+}
+
+.systemsculpt-tool-call-executing {
+  opacity: 1;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  Tool Call Actions - Modern Buttons                       ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+.systemsculpt-tool-call-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, rgb(var(--background-secondary-rgb)) 80%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--background-modifier-form-field-rgb)) 60%, var(--ss-layer-base))
+  );
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 5%, var(--ss-layer-base));
+  animation: fadeInUpActions 0.3s ease-out;
+}
+
+@keyframes fadeInUpActions {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.systemsculpt-tool-call-approve,
+.systemsculpt-tool-call-deny {
+  flex: 1;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.systemsculpt-tool-call-approve {
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 10%, var(--ss-layer-base));
+  border: 1.5px solid color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base));
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-tool-call-approve:hover {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 16px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 30%, var(--ss-layer-base)),
+    0 2px 6px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base));
+}
+
+.systemsculpt-tool-call-deny {
+  background: color-mix(in srgb, rgb(var(--text-error-rgb)) 10%, var(--ss-layer-base));
+  border: 1.5px solid color-mix(in srgb, rgb(var(--text-error-rgb)) 30%, var(--ss-layer-base));
+  color: var(--text-error);
+}
+
+.systemsculpt-tool-call-deny:hover {
+  background: var(--text-error);
+  border-color: var(--text-error);
+  color: var(--text-on-accent);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 16px color-mix(in srgb, rgb(var(--text-error-rgb)) 30%, var(--ss-layer-base)),
+    0 2px 6px color-mix(in srgb, rgb(var(--text-error-rgb)) 20%, var(--ss-layer-base));
+}
+
+.systemsculpt-tool-call-approve:active,
+.systemsculpt-tool-call-deny:active {
+  transform: translateY(0);
+}
+
+.systemsculpt-tool-call-view-file {
+  flex: 1;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-call-view-file:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-tool-call-view-file:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.theme-dark .systemsculpt-tool-call-view-file {
+  background: color-mix(in srgb, rgb(255, 255, 255) 5%, var(--ss-layer-base));
+  border-color: color-mix(in srgb, rgb(255, 255, 255) 15%, var(--ss-layer-base));
+}
+
+.theme-dark .systemsculpt-tool-call-view-file:hover {
+  background: color-mix(in srgb, rgb(255, 255, 255) 10%, var(--ss-layer-base));
+}
+
+.theme-light .systemsculpt-tool-call-view-file {
+  background: color-mix(in srgb, rgb(0, 0, 0) 3%, var(--ss-layer-base));
+  border-color: color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+}
+
+.theme-light .systemsculpt-tool-call-view-file:hover {
+  background: color-mix(in srgb, rgb(0, 0, 0) 5%, var(--ss-layer-base));
+}
+
+
+/* ========================================================================== */
+/* == Tool Call Result Display (legacy support)                            == */
+/* ========================================================================== */
+
+.systemsculpt-tool-call-result {
+  margin: 8px 0 !important;
+  padding: 8px !important;
+  background: var(--background-primary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 4px !important;
+}
+
+.systemsculpt-tool-call-result-header {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.systemsculpt-tool-call-result-content {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  font-family: var(--font-monospace) !important;
+  color: var(--text-normal) !important;
+  background: var(--ss-layer-base) !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  max-height: clamp(90px, 22vh, 120px) !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+
+.systemsculpt-tool-call-result-content pre {
+  margin: 0 !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  color: inherit !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+
+.systemsculpt-tool-call-result-content code {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  color: inherit !important;
+}
+
+/* Enhanced tool result display */
+.systemsculpt-tool-result-container {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.systemsculpt-tool-result-header {
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-tool-result-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-result-content {
+  padding: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.systemsculpt-tool-result-summary {
+  background: var(--background-modifier-form-field);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+.systemsculpt-tool-result-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.systemsculpt-tool-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  transition: background 0.15s ease;
+}
+
+.systemsculpt-tool-result-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-tool-result-item.directory {
+  font-weight: 500;
+}
+
+.systemsculpt-tool-result-item .item-icon {
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.systemsculpt-tool-result-item .item-name {
+  flex: 1;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+}
+
+.systemsculpt-tool-result-item .item-number {
+  flex-shrink: 0;
+  width: 20px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+.systemsculpt-tool-result-item .item-content {
+  flex: 1;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-tool-result-text,
+.systemsculpt-tool-result-raw {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.systemsculpt-tool-result-json {
+  margin-top: 8px;
+}
+
+.systemsculpt-tool-result-truncated {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--background-modifier-hover);
+  border-radius: 4px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-tool-result-expand-btn {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.systemsculpt-tool-result-expand-btn:hover {
+  opacity: 0.8;
+}
+
+/* Rolling window visual feedback and smooth animations */
+.systemsculpt-collapsible-drawer.auto-collapsed .systemsculpt-collapsible-header {
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.systemsculpt-collapsible-drawer.auto-collapsed:hover .systemsculpt-collapsible-header {
+  opacity: 1;
+}
+
+/* Smooth collapse animation for FIFO */
+.systemsculpt-collapsible-drawer.auto-collapsing {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1), opacity 0.25s cubic-bezier(0.4, 0, 1, 1) !important;
+  transform: scale(0.95);
+  opacity: 0;
+}
+
+/* REMOVED legacy raw container (now unused) */
+
+/* Override heading styles for Result */
+.systemsculpt-tool-call-result h4 {
+  font-weight: 500 !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  margin: 0 0 2px 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  border: none !important;
+}
+
+/* Enhanced: Compact inline header actions for pending tool-calls */
+.systemsculpt-tool-call-compact-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  animation: slideInActions 0.3s ease-out;
+}
+
+@keyframes slideInActions {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.ss-tool-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: linear-gradient(
+    135deg,
+    var(--background-modifier-form-field),
+    var(--background-secondary)
+  );
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.ss-tool-compact-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, rgb(255, 255, 255) 30%, var(--ss-layer-base));
+  transform: translate(-50%, -50%);
+  /* No transition for width/height changes */
+}
+
+.ss-tool-compact-btn:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+}
+
+.ss-tool-compact-btn:hover::before {
+  width: 40px;
+  height: 40px;
+}
+
+.ss-tool-compact-btn:active {
+  transform: scale(0.95);
+}
+
+.ss-tool-compact-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.ss-tool-compact-approve {
+  color: var(--text-success);
+}
+
+.ss-tool-compact-approve:hover {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, rgb(var(--color-green-rgb)) 10%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--color-green-rgb)) 5%, var(--ss-layer-base))
+  );
+  border-color: var(--text-success);
+}
+
+.ss-tool-compact-approve:hover svg {
+  transform: rotate(15deg) scale(1.1);
+}
+
+.ss-tool-compact-deny {
+  color: var(--text-error);
+}
+
+.ss-tool-compact-deny:hover {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, rgb(var(--color-red-rgb)) 10%, var(--ss-layer-base)),
+    color-mix(in srgb, rgb(var(--color-red-rgb)) 5%, var(--ss-layer-base))
+  );
+  border-color: var(--text-error);
+}
+
+.ss-tool-compact-deny:hover svg {
+  transform: rotate(-15deg) scale(1.1);
+}
+
+/* Ensure compatibility with new drawer design */
+.systemsculpt-tool-call-result.systemsculpt-collapsed .systemsculpt-tool-call-result-content {
+  opacity: 0;
+  padding: 0 8px;
+}
+
+/* Scrollbar styling for legacy result content */
+.systemsculpt-tool-call-result-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.systemsculpt-tool-call-result-content::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-bg);
+  border-radius: 3px;
+}
+
+.systemsculpt-tool-call-result-content::-webkit-scrollbar-track {
+  background-color: var(--scrollbar-bg);
+  border-radius: 3px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .systemsculpt-tool-call-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .systemsculpt-tool-call-approve,
+  .systemsculpt-tool-call-deny {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@keyframes ellipsis-animation {
+  0% { content: '.'; }
+  50% { content: '..'; }
+  100% { content: '...'; }
+}
+
+/* ========================================================================== */
+/* == Compact Drawer Grouping - Override Margins for Messages with Drawers == */
+/* ========================================================================== */
+
+/* 
+ * CORRECTED: Target drawers within consecutive messages in the group,
+ * not consecutive wrappers within the same message
+ */
+
+/* Group spacing rules removed; flat list layout uses standard margins */
+
+/* ========================================================================== */
+/* == End Compact Drawer Grouping Overrides                               == */
+/* ========================================================================== */

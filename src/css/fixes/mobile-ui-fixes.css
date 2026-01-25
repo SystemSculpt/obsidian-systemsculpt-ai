@@ -1,0 +1,143 @@
+/**
+ * Mobile UI Fixes
+ * 
+ * Consolidated fixes for all mobile UI issues in SystemSculpt
+ * Handles toolbar buttons, favorites button across all contexts
+ */
+
+/* ========================================
+   FAVORITES BUTTON (ALL CONTEXTS)
+   ======================================== */
+
+/* Base favorites button visibility */
+.is-mobile .systemsculpt-favorites-filter,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px !important;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+/* Ensure icon is visible */
+.is-mobile .systemsculpt-favorites-icon,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-icon {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.is-mobile .systemsculpt-favorites-icon svg,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-icon svg {
+  width: 14px !important;
+  height: 14px !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Ensure label is visible - override any hiding rules */
+.is-mobile .systemsculpt-favorites-label,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-label,
+.is-mobile .systemsculpt-favorites-filter span:not(.svg-icon),
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter span:not(.svg-icon) {
+  display: inline !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Hover states */
+.is-mobile .systemsculpt-favorites-filter:hover,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Active state */
+.is-mobile .systemsculpt-favorites-filter.is-active,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.is-mobile .systemsculpt-favorites-filter.is-active svg,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter.is-active svg {
+  color: var(--text-on-accent) !important;
+}
+
+/* Favorites count badge */
+.is-mobile .ss-favorites-count,
+.is-mobile .ss-favorites-button .ss-favorites-count {
+  font-size: 9px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, rgb(255, 255, 255) 20%, var(--ss-layer-base));
+  color: var(--text-on-accent);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 12px;
+  text-align: center;
+  margin-left: 2px;
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.is-mobile .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count,
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  color: var(--text-muted);
+}
+
+.is-mobile .theme-dark .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count,
+.is-mobile .theme-dark .ss-favorites-button .systemsculpt-favorites-filter:not(.is-active) .ss-favorites-count {
+  background: color-mix(in srgb, rgb(255, 255, 255) 10%, var(--ss-layer-base));
+}
+
+/* ========================================
+   MODAL-SPECIFIC ADJUSTMENTS
+   ======================================== */
+
+/* Modal favorites button specific styles */
+.is-mobile .ss-favorites-button {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+   ======================================== */
+
+@media (max-width: 768px) {
+  /* Specific override for model selection modal */
+  .is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+    padding: 3px 6px !important;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Even smaller screens */
+  .is-mobile .systemsculpt-favorites-filter,
+  .is-mobile .ss-favorites-button .systemsculpt-favorites-filter {
+    padding: 2px 4px !important;
+    font-size: 10px;
+  }
+}

@@ -1,0 +1,889 @@
+/**
+ * Standardized Modal System
+ *
+ * This file contains all styles for the standardized modal system.
+ * The goal is to provide a consistent, reusable set of components
+ * for all modals in the SystemSculpt plugin.
+ *
+ * Components include:
+ * - Modal containers with various sizes
+ * - Header, content, and footer sections
+ * - List items with consistent styling
+ * - Search components with clear functionality
+ * - Filter buttons for toggling options
+ * - Loading and empty states
+ * 
+ * All classes use the 'ss-' prefix to avoid collisions.
+ */
+
+/* Base styles */
+.ss-modal {
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  color: var(--text-normal);
+  display: flex;
+  flex-direction: column;
+  max-width: 90vw;
+  max-height: 85vh;
+  width: 90vw;
+  animation: ss-fade-in 0.2s ease-out;
+  overflow: hidden;
+}
+
+/* Size variations */
+.ss-modal--small {
+  width: 400px;
+  height: auto;
+}
+
+.ss-modal--medium {
+  width: 550px;
+  height: auto;
+  max-height: 75vh;
+}
+
+.ss-modal--large {
+  width: 650px;
+  height: 600px; /* Fixed height to prevent jumping */
+  max-height: 85vh; /* Keep max-height for smaller screens */
+}
+
+
+
+.ss-modal--fullwidth {
+  width: 90vw;
+  height: 90vh;
+  max-width: 1200px;
+}
+
+/* Header */
+.ss-modal__header {
+  background-color: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.ss-modal__title-container {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ss-modal__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ss-modal__description {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.ss-modal__close-button {
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: -2px;
+  margin-left: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  background: var(--ss-layer-base);
+  border: none;
+}
+
+.ss-modal__close-button:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+/* Content */
+.ss-modal__content {
+  padding: 16px 20px;
+  overflow: hidden; /* Change from overflow-y: auto to hidden to let list handle scrolling */
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-modal__custom-content {
+  margin-bottom: 16px;
+}
+
+/* --- Filter Container --- */
+.ss-modal__filter-container {
+  display: grid; /* Use grid layout */
+  grid-template-columns: repeat(auto-fit, minmax(120px, max-content)); /* Auto-fit columns */
+  gap: 10px; /* Consistent gap between grid items */
+  align-items: center; /* Vertically align items */
+  padding: 12px 20px; /* Consistent padding */
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border); /* Add border if needed */
+}
+
+/* --- Base Filter Button Style (Applies to both provider and favorites) --- */
+.ss-filter-button,
+.systemsculpt-favorites-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center; /* Center content */
+  height: 34px; /* Consistent height */
+  padding: 0 12px; /* Consistent padding */
+  border-radius: 6px; /* Consistent border radius */
+  font-size: 14px; /* Consistent font size */
+  font-weight: 500; /* Consistent font weight */
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary); /* Default background */
+  color: var(--text-muted); /* Default text color */
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  gap: 6px; /* Gap between icon and text */
+  margin-right: 0; /* Remove specific margins, rely on grid gap */
+}
+
+/* Hover state for all filter buttons */
+.ss-filter-button:hover,
+.systemsculpt-favorites-filter:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+/* Active state for Provider filter buttons */
+.ss-filter-button.ss-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.ss-filter-button.ss-active .ss-filter-button__icon svg {
+  color: var(--text-on-accent); /* Ensure icon color matches */
+}
+
+
+/* Active state for Favorites filter button */
+.systemsculpt-favorites-filter.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.systemsculpt-favorites-filter.is-active .svg-icon {
+   color: var(--text-on-accent); /* Ensure icon color matches */
+}
+
+
+/* Specific styles for Provider button icon/text */
+.ss-filter-button__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.ss-filter-button__text {
+  /* font-size is handled by base style */
+  /* font-weight is handled by base style */
+}
+
+/* Specific styles for Favorites button icon */
+.systemsculpt-favorites-filter .svg-icon {
+  /* margin-right: 6px; /* Use gap instead */
+  width: 16px; /* Match provider icon size */
+  height: 16px; /* Match provider icon size */
+  color: var(--text-muted); /* Default icon color */
+  transition: all 0.2s ease;
+}
+
+/* Remove old badge styles if not used */
+.ss-filter-button__badge {
+  /* Remove or adjust if badges are not part of the design */
+  display: none;
+}
+
+/* Focus state */
+.ss-filter-button:focus-visible,
+.systemsculpt-favorites-filter:focus-visible {
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--background-modifier-border-focus); /* Improved focus ring */
+}
+
+/* Responsive adjustments (Optional, based on previous attempt) */
+@media (max-width: 600px) {
+  .ss-modal__filter-container {
+    /* Grid handles wrapping automatically, but adjust columns if needed */
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); /* Allow more buttons per row on smaller screens */
+    padding: 12px; /* Adjust padding */
+    gap: 8px; /* Slightly smaller gap */
+  }
+  .ss-filter-button,
+  .systemsculpt-favorites-filter {
+    /* width: 100%; /* Let grid handle width */
+    justify-content: center; /* Center content */
+    margin-right: 0; /* Ensure no margin interferes */
+  }
+  
+  /* Adjust list height for mobile */
+  .ss-modal__list {
+    height: 300px; /* Smaller height for mobile */
+    min-height: 300px;
+  }
+  
+  /* Adjust modal height for mobile */
+  .ss-modal--large {
+    height: 500px; /* Smaller overall height for mobile */
+  }
+}
+
+/* Search */
+.ss-modal__search {
+  position: relative;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.ss-modal__search-input {
+  width: 100%;
+  height: 36px;
+  padding: 8px 36px 8px 36px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 14px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  text-indent: 24px;
+}
+
+.ss-modal__search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 20%, var(--ss-layer-base));
+}
+
+.ss-modal__search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  width: 16px;
+  height: 16px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.ss-modal__search-clear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  display: none;
+  z-index: 1;
+}
+
+.ss-modal__search-input:not(:placeholder-shown) + .ss-modal__search-clear {
+  display: block;
+}
+
+.ss-modal__search-clear:hover {
+  color: var(--text-normal);
+}
+
+/* List */
+.ss-modal__list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  gap: 4px;
+  padding-bottom: 4px;
+  /* Remove fixed height for better flexibility */
+  flex: 1 1 auto; /* Allow list to grow and shrink */
+  min-height: 0; /* Important for proper flex behavior */
+}
+
+/* 
+ * NOTE: The ss-modal__item styling has been moved to favorite-toggle.css
+ * to use a grid layout that properly positions the favorite toggle and provider badge
+ * without overlap. The commented styles below are kept for reference only.
+ */
+/*
+.ss-modal__item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+  position: relative;
+  gap: 8px;
+}
+*/
+
+.ss-modal__item:hover,
+.ss-modal__item:focus {
+  background-color: var(--background-modifier-hover);
+}
+
+.ss-modal__item.ss-active {
+  background-color: var(--background-primary-alt);
+}
+
+.ss-modal__item.ss-active .ss-modal__item-icon {
+  color: var(--interactive-accent);
+}
+
+/* 
+ * The following item content styles are now managed through the grid layout
+ * in favorite-toggle.css, but we keep the color and text styles here.
+ */
+.ss-modal__item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-modal__item-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-modal__item-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-hover);
+  color: var(--text-muted);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.ss-modal__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  height: 150px;
+}
+
+.ss-modal__empty-state-icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+/* Footer */
+.ss-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-top: 1px solid var(--background-modifier-border);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Misc */
+.ss-modal__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--text-muted);
+  height: 150px;
+  text-align: center;
+}
+
+.ss-modal__loading::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: ss-spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+.ss-modal__loading svg {
+  animation: ss-spin 1s linear infinite;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+}
+
+.ss-modal__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--text-error);
+  height: 150px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.ss-modal__error::before {
+  content: "!";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: var(--text-error);
+  color: var(--background-primary);
+  border-radius: 50%;
+  font-weight: bold;
+  margin-bottom: 16px;
+}
+
+@keyframes ss-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Thumbnails and Image Previews */
+.ss-modal__item-thumbnail {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  position: relative;
+  box-shadow: 0 2px 4px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  cursor: pointer;
+}
+
+.ss-modal__item-thumbnail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1;
+}
+
+.ss-modal__item-thumbnail:hover::before {
+  opacity: 1;
+}
+
+.ss-modal__item-thumbnail::after {
+  content: '👁️';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  color: white;
+  font-size: 16px;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2;
+  text-shadow: 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 50%, var(--ss-layer-base));
+}
+
+.ss-modal__item-thumbnail:hover::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.ss-modal__item-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.ss-modal__item-thumbnail:hover img {
+  transform: scale(1.1);
+}
+
+/* Hover preview (for desktop) */
+.ss-preview-container {
+  position: fixed;
+  z-index: 9999;
+  background-color: var(--background-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px color-mix(in srgb, rgb(0, 0, 0) 40%, var(--ss-layer-base));
+  padding: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ss-preview-title {
+  font-weight: bold;
+  text-align: center;
+  font-size: 14px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.ss-preview-container img {
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  display: block;
+}
+
+/* Expanded preview (for mobile) */
+.ss-modal__item.expanded {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+}
+
+.ss-modal__item.expanded .ss-modal__item-thumbnail {
+  width: 48px;
+  height: 48px;
+  margin-left: 0;
+}
+
+.ss-modal__item-preview {
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+  overflow: hidden;
+  border-radius: 6px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  animation: ss-fade-in 0.2s ease;
+  background-color: var(--background-secondary);
+}
+
+.ss-modal__item-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+}
+
+/* Animation for fade-in effect */
+@keyframes ss-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ss-modal-thumbnail {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  object-fit: cover;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ss-modal-thumbnail:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 6px color-mix(in srgb, rgb(0, 0, 0) 30%, var(--ss-layer-base));
+}
+
+/* System Prompt Modal specific styles */
+.ss-modal__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ss-modal__title-input-container {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.ss-modal__title-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 14px;
+}
+
+.ss-modal__model-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ss-modal__model-display {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 14px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ss-modal__model-display:hover {
+  background-color: var(--background-secondary-alt);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.ss-modal__model-display::after {
+  content: "\2BC6"; /* Down arrow Unicode character */
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ss-modal__section {
+  margin-bottom: 24px;
+}
+
+.ss-modal__section-header {
+  margin-bottom: 12px;
+}
+
+.ss-modal__section-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.ss-modal__prompt-editor {
+  margin-top: 12px;
+  margin-bottom: 20px;
+}
+
+.ss-modal__prompt-textarea {
+  width: 100%;
+  height: 200px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 14px;
+  font-family: var(--font-monospace);
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+}
+
+/* System prompt modal */
+.ss-system-prompt-modal .ss-modal__content {
+  padding-bottom: 0;
+}
+
+.ss-system-prompt-modal .ss-modal__prompt-preview {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 14px;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+/* Layout for two-panel modal (e.g., Chat Settings) */
+.ss-chat-modal-layout {
+  display: flex;
+  gap: 20px; /* Adjust gap as needed */
+}
+
+.ss-chat-modal-layout .ss-modal__content {
+  display: flex;
+  gap: 20px;
+  padding: 0; /* Remove default padding if layout handles it */
+}
+
+.ss-chat-modal-left-panel,
+.ss-chat-modal-right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px; /* Spacing between elements within a panel */
+  padding: 16px 20px; /* Add padding back to panels */
+  overflow-y: auto; /* Allow panels to scroll independently */
+}
+
+.ss-chat-modal-left-panel {
+  flex: 1; /* Adjust flex ratio as needed, e.g., 1 for equal */
+  min-width: 250px; /* Ensure left panel doesn't collapse too much */
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.ss-chat-modal-right-panel {
+  flex: 2; /* Adjust flex ratio as needed, e.g., 2 for wider right panel */
+  min-width: 300px;
+}
+
+/* Ensure prompt editor takes available space */
+.ss-chat-modal-right-panel .ss-modal__prompt-editor {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-chat-modal-right-panel .ss-prompt-editor-container {
+  flex-grow: 1;
+  display: flex;
+}
+
+.ss-chat-modal-right-panel .ss-prompt-textarea {
+  flex-grow: 1; /* Allow textarea to fill vertical space */
+  height: auto; /* Override fixed height */
+  min-height: 200px; /* Set a minimum height */
+}
+
+.ss-chat-modal-right-panel .ss-prompt-editor-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- Specific Modal Overrides --- */
+
+
+
+/* Ensure all list items remain fully visible */
+.ss-modal__list .ss-modal__item {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transition: background-color 0.15s ease;
+}
+
+/* Prevent any parent state from making items semi-transparent */
+.ss-modal--with-filters .ss-modal__item,
+.ss-modal__list.filtered .ss-modal__item {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Add specific styling for the sort dropdown if needed */
+.ss-modal-sort-container {
+  /* Container for the dropdown, allows alignment */
+  display: flex;
+  align-items: center;
+  margin-left: auto; /* Push to the right within the filter container */
+}
+.ss-modal-sort-container .ss-sort-dropdown {
+  /* Example: Adjust width or appearance */
+  min-width: 150px;
+  height: 34px; /* Match filter button height */
+  font-size: 14px; /* Match filter button font size */
+  border-radius: 6px; /* Match filter button border radius */
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  padding-left: 8px; /* Adjust padding */
+  padding-right: 8px;
+}
+
+/* Search result highlighting */
+.ss-hl {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: underline;
+  border-radius: 2px;
+}
+
+/* Detail text styling */
+.ss-modal__detail {
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+/* Failed file indicator */
+.ss-modal__item--failed {
+  border-left: 3px solid var(--text-error);
+  background-color: color-mix(in srgb, var(--text-error) 8%, var(--background-primary));
+}
+
+.ss-modal__item--failed:hover {
+  background-color: color-mix(in srgb, var(--text-error) 12%, var(--background-primary));
+}
+
+.ss-modal__item--failed .ss-modal__item-title {
+  color: var(--text-error);
+}
+
+/* Summary section for pending files modal */
+.ss-modal__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: var(--background-secondary);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.ss-modal__summary-text {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.ss-modal__summary-actions {
+  display: flex;
+  gap: 8px;
+}

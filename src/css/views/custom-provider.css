@@ -1,0 +1,394 @@
+/* 
+ * Custom Provider Interface - Minimal Modern Design
+ */
+
+/* Reset and base styles */
+.systemsculpt-custom-provider-modal,
+.systemsculpt-custom-provider-manager-modal {
+  --modal-width: 480px;
+  --modal-padding: 16px;
+  --border-radius: 6px;
+  --inner-padding: 12px;
+  
+  width: var(--modal-width);
+  max-width: 85vw;
+  border-radius: var(--border-radius);
+  background-color: var(--background-primary);
+  box-shadow: 0 2px 20px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  margin: 0 auto;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* ===== PROVIDER MANAGER (LIST VIEW) ===== */
+.systemsculpt-custom-provider-manager-modal {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-height: 80vh;
+}
+
+/* Header */
+.systemsculpt-custom-provider-manager-header {
+  padding: var(--inner-padding) var(--modal-padding);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-provider-manager-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  margin-right: 12px;
+}
+
+.systemsculpt-custom-provider-manager-back:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-manager-header h2 {
+  margin: 0;
+  font-size: 1.2em;
+  font-weight: 600;
+  flex-grow: 1;
+}
+
+/* Content */
+.systemsculpt-custom-provider-manager-content {
+  padding: var(--inner-padding) var(--modal-padding);
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.systemsculpt-custom-provider-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Empty state - compact and centered */
+.systemsculpt-custom-provider-manager-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-custom-provider-manager-empty-icon {
+  font-size: 2em;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.systemsculpt-custom-provider-manager-empty-text {
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+/* Provider Card - Compact and clean */
+.systemsculpt-custom-provider-card {
+  border-radius: var(--border-radius);
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  padding: 12px;
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-custom-provider-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 5px color-mix(in srgb, rgb(0, 0, 0) 5%, var(--ss-layer-base));
+}
+
+/* Card Header */
+.systemsculpt-custom-provider-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.systemsculpt-custom-provider-card-name {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.systemsculpt-custom-provider-card-action {
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-provider-card-action:hover {
+  color: var(--text-error);
+  background-color: color-mix(in srgb, rgb(var(--text-error-rgb)) 10%, var(--ss-layer-base));
+}
+
+/* Card Details */
+.systemsculpt-custom-provider-card-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 8px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  align-items: center;
+}
+
+.systemsculpt-custom-provider-card-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-card-detail:nth-child(odd) {
+  justify-self: start;
+}
+
+.systemsculpt-custom-provider-card-detail:nth-child(even) {
+  justify-self: end;
+}
+
+/* Bottom actions bar */
+.systemsculpt-custom-provider-manager-actions {
+  padding: var(--inner-padding) var(--modal-padding);
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.systemsculpt-custom-provider-manager-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  transition: background-color 0.15s ease;
+}
+
+.systemsculpt-custom-provider-manager-button:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-custom-provider-manager-button-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-custom-provider-manager-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ===== ADD/EDIT PROVIDER FORM ===== */
+.systemsculpt-custom-provider-modal {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-height: 80vh;
+}
+
+.systemsculpt-custom-provider-header {
+  padding: var(--inner-padding) var(--modal-padding);
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-custom-provider-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  margin-right: 12px;
+}
+
+.systemsculpt-custom-provider-back:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.2em;
+  font-weight: 600;
+  flex-grow: 1;
+}
+
+/* Form content */
+.systemsculpt-custom-provider-form {
+  padding: var(--inner-padding) var(--modal-padding);
+  overflow-y: auto;
+}
+
+/* Form groups */
+.systemsculpt-custom-provider-form-group {
+  margin-bottom: 14px;
+}
+
+.systemsculpt-custom-provider-form-group:last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-custom-provider-form-group label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 4px;
+  font-size: 0.85em;
+}
+
+.systemsculpt-custom-provider-form-group input,
+.systemsculpt-custom-provider-form-group select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  font-size: 0.9em;
+  transition: border-color 0.15s ease;
+}
+
+.systemsculpt-custom-provider-form-group input:focus,
+.systemsculpt-custom-provider-form-group select:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-custom-provider-form-validation {
+  color: var(--text-error);
+  font-size: 0.8em;
+  margin-top: 4px;
+  display: none;
+}
+
+.systemsculpt-custom-provider-form-group.error input,
+.systemsculpt-custom-provider-form-group.error select {
+  border-color: var(--text-error);
+}
+
+.systemsculpt-custom-provider-form-group.error .systemsculpt-custom-provider-form-validation {
+  display: block;
+}
+
+/* Presets section */
+.systemsculpt-custom-provider-presets {
+  margin-bottom: 16px;
+}
+
+.systemsculpt-custom-provider-presets label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 6px;
+  font-size: 0.85em;
+}
+
+.systemsculpt-custom-provider-preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-button-secondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background-color: var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 0.8em;
+  border: none;
+  cursor: pointer;
+}
+
+.systemsculpt-custom-provider-button-secondary:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Form actions */
+.systemsculpt-custom-provider-form-actions {
+  padding: var(--inner-padding) var(--modal-padding);
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Testing state */
+.systemsculpt-testing {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.systemsculpt-testing svg {
+  animation: spin 1s linear infinite;
+}
+
+.api-key-container {
+  position: relative;
+  width: 100%;
+}
+
+.api-key-container input {
+  width: 100%;
+  padding-right: 40px; /* Make room for the button */
+}
+
+.show-hide-password {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  background: none;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.show-hide-password:hover {
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-form-validation {
+  color: var(--text-error);
+  font-size: 0.8em;
+  margin-top: 4px;
+}
+
+.systemsculpt-custom-provider-form-group.error input,
+.systemsculpt-custom-provider-form-group.error select {
+  border-color: var(--text-error);
+} 

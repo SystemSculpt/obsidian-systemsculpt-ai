@@ -1,0 +1,396 @@
+/**
+ * Loader Components
+ * 
+ * Styles for loaders, spinners, and loading indicators
+ */
+
+/* Core spinner animation - this is the standard animation for all spinners */
+@keyframes ss-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Core loader styles */
+.systemsculpt-loader {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.5em;
+}
+
+.systemsculpt-loader svg {
+  animation: ss-spin 1s linear infinite;
+  width: 1em;
+  height: 1em;
+}
+
+.systemsculpt-loader-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+}
+
+/* Message content wrappers for streaming responses */
+.systemsculpt-content-wrapper {
+  flex: 1;
+  width: 100%;
+}
+
+.systemsculpt-indicator-container {
+  position: relative;
+  display: block;
+  margin-top: 8px;
+  pointer-events: none;
+}
+
+/* Note: Main streaming indicator styles moved to streaming-indicator.css */
+
+/* Inline footnote under the generating indicator */
+.systemsculpt-streaming-footnote {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin-top: 8px;
+  line-height: 1.3;
+}
+
+/* Compact footnote layout */
+.systemsculpt-streaming-footnote { display: block; }
+
+.systemsculpt-streaming-footnote .ss-footnote-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  position: relative;
+  cursor: help;
+  margin-right: 6px;
+}
+
+.systemsculpt-streaming-footnote .ss-footnote-text {
+  color: var(--text-muted);
+}
+
+.systemsculpt-streaming-footnote .ss-footnote-tooltip {
+  position: absolute;
+  left: 0;
+  top: 120%;
+  max-width: 320px;
+  white-space: normal;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow-s);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 1000;
+}
+
+.systemsculpt-streaming-footnote:hover .ss-footnote-icon .ss-footnote-tooltip,
+.systemsculpt-streaming-footnote .ss-footnote-icon:hover .ss-footnote-tooltip,
+.systemsculpt-streaming-footnote .ss-footnote-icon:focus .ss-footnote-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Preview loading styles */
+.systemsculpt-preview-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px;
+  min-height: 200px;
+  position: absolute;
+  inset: 0;
+  background: var(--background-primary);
+  z-index: 1;
+}
+
+.systemsculpt-preview-loading svg {
+  width: 32px;
+  height: 32px;
+  animation: ss-spin 1s linear infinite;
+}
+
+/* Standard loading spinner */
+.systemsculpt-loading-spinner {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.systemsculpt-loading-spinner svg {
+  width: 1em;
+  height: 1em;
+  animation: ss-spin 1s linear infinite;
+}
+
+/* Loading text container */
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Standard inline loading state */
+.systemsculpt-loading {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  position: relative;
+  padding-left: 1.5em;
+}
+
+.systemsculpt-loading::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  border-right-color: var(--ss-layer-base);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+/* Button loading states have been moved to ss-buttons.css */
+/* Use .ss-button.ss-loading instead */
+
+.systemsculpt-progress-spinner {
+  animation: ss-spin 2s linear infinite;
+}
+
+.systemsculpt-preview-loading svg {
+  width: 32px;
+  height: 32px;
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-ss-button.systemsculpt-is-loading {
+  position: relative;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-ss-button.systemsculpt-is-loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(255, 255, 255);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: ss-loading-spin 0.8s linear infinite;
+  opacity: 1;
+}
+
+.systemsculpt-credit-balance.systemsculpt-loading {
+  position: relative;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-credit-balance.systemsculpt-loading::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+  border-top-color: var(--ss-layer-base);
+  animation: token-loading 0.6s linear infinite;
+}
+
+.systemsculpt-content-container.systemsculpt-loading {
+  opacity: 1;
+  pointer-events: none;
+}
+
+.systemsculpt-context-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-context-loading svg {
+  width: 24px;
+  height: 24px;
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  gap: 1rem;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.systemsculpt-loading-container svg {
+  animation: ss-spin 1s linear infinite;
+  width: 1.5em;
+  height: 1.5em;
+  margin-right: 0.5em;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-context-loading svg {
+  width: 24px;
+  height: 24px;
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-loading {
+  opacity: 1;
+  pointer-events: none;
+}
+
+.systemsculpt-loading {
+  position: relative;
+  color: var(--ss-layer-base);
+}
+
+.systemsculpt-loading::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+  border-top-color: var(--ss-layer-base);
+  animation: token-loading 0.6s linear infinite;
+}
+
+.systemsculpt-loading {
+  display: inline;
+  position: relative;
+  margin-left: 0.1rem;
+  margin-right: 0.1rem;
+  margin-top: 0.15rem;
+  animation: pulse 1.5s infinite;
+  color: var(--text-accent);
+  font-size: 0.8em;
+  line-height: inherit;
+  vertical-align: baseline;
+  user-select: none;
+}
+
+.systemsculpt-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-loading .systemsculpt-lucide-loader-2 {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-loading-animation {
+  font-size: 24px;
+  animation: pulse 1.5s infinite;
+  color: var(--text-accent);
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  gap: 1rem;
+}
+
+.systemsculpt-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.systemsculpt-loading-spinner {
+  color: var(--text-muted);
+  animation: ss-spin 2s linear infinite;
+}
+
+.systemsculpt-loading-spinner svg {
+  width: 32px;
+  height: 32px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Spinner animation optimization - Apply transform-origin to center */
+.systemsculpt-loader svg,
+.systemsculpt-loading-spinner svg,
+.systemsculpt-preview-loading svg,
+.systemsculpt-context-loading svg,
+.systemsculpt-loading::before,
+.systemsculpt-ss-button.systemsculpt-is-loading::after,
+.systemsculpt-loading .systemsculpt-lucide-loader-2 {
+  transform-origin: center center;
+}

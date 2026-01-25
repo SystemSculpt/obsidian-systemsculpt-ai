@@ -1,0 +1,326 @@
+.systemsculpt-bulk-confirm-widget,
+.systemsculpt-bulk-progress-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  animation: slide-up-fade-in 0.3s ease;
+  overflow: hidden;
+}
+
+@keyframes slide-up-fade-in {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.systemsculpt-bulk-widget-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-bulk-widget-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.systemsculpt-bulk-confirm-widget .systemsculpt-bulk-widget-icon {
+  background: color-mix(in srgb, var(--color-yellow) 20%, transparent);
+  color: var(--color-yellow);
+}
+
+.systemsculpt-bulk-progress-widget .systemsculpt-bulk-widget-icon {
+  background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-bulk-widget-icon.processing svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.systemsculpt-bulk-widget-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-bulk-widget-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.systemsculpt-bulk-widget-close:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-bulk-widget-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-bulk-widget-description {
+  font-size: 0.9em;
+  color: var(--text-normal);
+  font-weight: 500;
+}
+
+.systemsculpt-bulk-widget-info {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-widget-status {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-widget-count {
+  font-size: 0.9em;
+  color: var(--text-normal);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.systemsculpt-bulk-widget-progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.systemsculpt-bulk-widget-progress-fill {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.systemsculpt-bulk-progress-widget.is-complete .systemsculpt-bulk-widget-progress-fill {
+  background: var(--color-green);
+}
+
+.systemsculpt-bulk-progress-widget.is-complete .systemsculpt-bulk-widget-icon {
+  background: color-mix(in srgb, var(--color-green) 20%, transparent);
+  color: var(--color-green);
+}
+
+.systemsculpt-bulk-progress-widget.is-error .systemsculpt-bulk-widget-progress-fill {
+  background: var(--color-red);
+}
+
+.systemsculpt-bulk-progress-widget.is-error .systemsculpt-bulk-widget-icon {
+  background: color-mix(in srgb, var(--color-red) 20%, transparent);
+  color: var(--color-red);
+}
+
+.systemsculpt-bulk-progress-widget.is-stopped .systemsculpt-bulk-widget-progress-fill {
+  background: color-mix(in srgb, var(--text-muted) 70%, var(--background-modifier-border));
+}
+
+.systemsculpt-bulk-progress-widget.is-stopped .systemsculpt-bulk-widget-icon {
+  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-widget-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.systemsculpt-bulk-batch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-size: 0.85em;
+  transition: background 0.2s ease;
+}
+
+.systemsculpt-bulk-batch-item.is-complete {
+  background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+}
+
+.systemsculpt-bulk-batch-item.is-error {
+  background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
+}
+
+.systemsculpt-bulk-batch-item.is-skipped {
+  background: color-mix(in srgb, var(--text-muted) 12%, var(--background-secondary));
+}
+
+.systemsculpt-bulk-batch-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.systemsculpt-bulk-batch-item.is-complete .systemsculpt-bulk-batch-icon {
+  color: var(--color-green);
+}
+
+.systemsculpt-bulk-batch-item.is-error .systemsculpt-bulk-batch-icon {
+  color: var(--color-red);
+}
+
+.systemsculpt-bulk-batch-item.is-skipped .systemsculpt-bulk-batch-icon {
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-batch-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+}
+
+.systemsculpt-bulk-batch-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.systemsculpt-bulk-batch-status svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-bulk-batch-item:not(.is-complete):not(.is-error) .systemsculpt-bulk-batch-status svg {
+  animation: spin 1s linear infinite;
+}
+
+.systemsculpt-bulk-batch-item.is-complete .systemsculpt-bulk-batch-status {
+  color: var(--color-green);
+}
+
+.systemsculpt-bulk-batch-item.is-error .systemsculpt-bulk-batch-status {
+  color: var(--color-red);
+}
+
+.systemsculpt-bulk-batch-item.is-skipped .systemsculpt-bulk-batch-status {
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-widget-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.systemsculpt-bulk-widget-buttons button,
+.systemsculpt-bulk-widget-button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+  border: none;
+}
+
+.systemsculpt-bulk-widget-buttons button:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-cta:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-danger {
+  background: color-mix(in srgb, var(--color-red) 20%, var(--background-modifier-border));
+  color: var(--text-normal);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-danger:hover {
+  background: color-mix(in srgb, var(--color-red) 40%, var(--background-modifier-border));
+}
+
+.systemsculpt-bulk-widget-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 0.82em;
+  line-height: 1.35;
+}
+
+.systemsculpt-bulk-widget-detail.is-hidden {
+  display: none;
+}
+
+.systemsculpt-bulk-widget-detail-primary {
+  font-weight: 600;
+}
+
+.systemsculpt-bulk-widget-detail-secondary {
+  color: var(--text-muted);
+}
+
+.systemsculpt-bulk-progress-widget.is-minimized .systemsculpt-bulk-widget-body {
+  display: none;
+}
+
+.systemsculpt-bulk-progress-widget.is-minimized {
+  width: auto;
+}
+
+.systemsculpt-bulk-progress-widget.is-minimized .systemsculpt-bulk-widget-header {
+  border-bottom: none;
+}

@@ -1,0 +1,327 @@
+import { ToolCallManager } from "../ToolCallManager";
+import type { ToolCallRequest } from "../../../types/toolCalls";
+
+const flush = async (): Promise<void> =>
+  await new Promise((resolve) => setImmediate(resolve));
+
+const createManager = (settings: Record<string, unknown> = {}) => {
+  const chatView = {
+    agentMode: true,
+    trustedToolNames: new Set<string>(),
+    plugin: {
+      settings,
+    },
+  } as any;
+
+  const manager = new ToolCallManager({} as any, chatView);
+  return manager;
+};
+
+const createManagerWithMcpTools = (tools: any[], settings: Record<string, unknown> = {}) => {
+  const chatView = {
+    agentMode: true,
+    trustedToolNames: new Set<string>(),
+    plugin: {
+      settings,
+    },
+  } as any;
+  const mcpService = {
+    getAvailableTools: jest.fn().mockResolvedValue(tools),
+  } as any;
+  return new ToolCallManager(mcpService, chatView);
+};
+
+const createRequest = (id: string, name: string, args: Record<string, unknown> = {}): ToolCallRequest => ({
+  id,
+  type: "function",
+  function: {
+    name,
+    arguments: JSON.stringify(args),
+  },
+});
+
+describe("ToolCallManager tooling settings", () => {
+  test("auto-approves all tools by default", async () => {
+    const manager = createManager({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    manager.registerTool(
+      {
+        name: "read_file",
+        description: "Read a file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+      },
+      async (args: any) => ({ path: String(args?.path ?? ""), content: "ok" })
+    );
+
+    manager.registerTool(
+      {
+        name: "write_file",
+        description: "Write a file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" }, content: { type: "string" } },
+          required: ["path", "content"],
+        },
+      },
+      async () => ({ ok: true })
+    );
+
+    // Internal registered tools auto-approve (no MCP prefix)
+    expect(manager.shouldAutoApprove("read_file")).toBe(true);
+    expect(manager.shouldAutoApprove("write_file")).toBe(true);
+    // External MCP servers require approval
+    expect(manager.shouldAutoApprove("mcp-shell_run_command")).toBe(false);
+
+    const readCall = manager.createToolCall(createRequest("call_read", "read_file", { path: "A" }), "msg-1", false);
+    const writeCall = manager.createToolCall(createRequest("call_write", "write_file", { path: "B", content: "C" }), "msg-1", false);
+    await flush();
+
+    expect(readCall.autoApproved).toBe(true);
+    expect(writeCall.autoApproved).toBe(true);
+    expect(["executing", "completed"]).toContain(readCall.state);
+    expect(["executing", "completed"]).toContain(writeCall.state);
+  });
+
+  test("all tools execute immediately without pending state", async () => {
+    const manager = createManager({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    let resolveWrite: (() => void) | null = null;
+    manager.registerTool(
+      {
+        name: "write_file",
+        description: "Write a file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" }, content: { type: "string" } },
+          required: ["path", "content"],
+        },
+      },
+      async () =>
+        await new Promise((resolve) => {
+          resolveWrite = () => resolve({ ok: true });
+        })
+    );
+
+    expect(manager.shouldAutoApprove("write_file")).toBe(true);
+
+    const toolCall = manager.createToolCall(
+      createRequest("call_write", "write_file", { path: "A", content: "ok" }),
+      "msg-2",
+      false
+    );
+    await flush();
+    expect(toolCall.autoApproved).toBe(true);
+    expect(["executing", "completed"]).toContain(toolCall.state);
+
+    resolveWrite?.();
+    await flush();
+    expect(toolCall.state).toBe("completed");
+  });
+
+  test("enforces toolingConcurrencyLimit and drains queue as executions finish", async () => {
+    const manager = createManager({
+      toolingConcurrencyLimit: 2,
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    let active = 0;
+    let maxActive = 0;
+    const resolvers = new Map<string, () => void>();
+
+    manager.registerTool(
+      {
+        name: "delay",
+        description: "Delay until resolved",
+        parameters: {
+          type: "object",
+          properties: { key: { type: "string" } },
+          required: ["key"],
+        },
+      },
+      async (args: any) => {
+        const key = String(args?.key ?? "");
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        return await new Promise((resolve) => {
+          resolvers.set(key, () => {
+            active -= 1;
+            resolve({ key });
+          });
+        });
+      }
+    );
+
+    const tcA = manager.createToolCall(createRequest("call_A", "delay", { key: "A" }), "msg-3", false);
+    const tcB = manager.createToolCall(createRequest("call_B", "delay", { key: "B" }), "msg-3", false);
+    const tcC = manager.createToolCall(createRequest("call_C", "delay", { key: "C" }), "msg-3", false);
+
+    manager.approveToolCall(tcA.id);
+    manager.approveToolCall(tcB.id);
+    manager.approveToolCall(tcC.id);
+    await flush();
+
+    const executing = [tcA, tcB, tcC].filter((tc) => tc.state === "executing");
+    expect(executing).toHaveLength(2);
+    expect([tcA, tcB, tcC].some((tc) => tc.state === "approved")).toBe(true);
+    expect(maxActive).toBe(2);
+
+    resolvers.get("A")?.();
+    await flush();
+    expect([tcA, tcB, tcC].filter((tc) => tc.state === "executing")).toHaveLength(2);
+    expect(maxActive).toBe(2);
+
+    resolvers.get("B")?.();
+    resolvers.get("C")?.();
+    await flush();
+
+    expect(tcA.state).toBe("completed");
+    expect(tcB.state).toBe("completed");
+    expect(tcC.state).toBe("completed");
+  });
+
+  test("fails hung tools after toolingToolCallTimeoutMs and frees the queue", async () => {
+    const manager = createManager({
+      toolingConcurrencyLimit: 1,
+      toolingToolCallTimeoutMs: 40,
+    });
+
+    manager.registerTool(
+      {
+        name: "hang",
+        description: "Never resolves",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+      async () => await new Promise(() => {})
+    );
+
+    let resolveNext: (() => void) | null = null;
+    manager.registerTool(
+      {
+        name: "next",
+        description: "Resolves when allowed",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+      async () =>
+        await new Promise((resolve) => {
+          resolveNext = () => resolve({ ok: true });
+        })
+    );
+
+    const tcHang = manager.createToolCall(createRequest("call_hang", "hang"), "msg-4", false);
+    const tcNext = manager.createToolCall(createRequest("call_next", "next"), "msg-4", false);
+
+    manager.approveToolCall(tcHang.id);
+    manager.approveToolCall(tcNext.id);
+    await flush();
+
+    expect(tcHang.state).toBe("executing");
+    expect(tcNext.state).toBe("approved");
+
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline && tcHang.state !== "failed") {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await flush();
+    }
+
+    expect(tcHang.state).toBe("failed");
+    expect(tcHang.result?.error?.code).toBe("TIMEOUT");
+
+    while (Date.now() < deadline && tcNext.state === "approved") {
+      await flush();
+    }
+
+    expect(tcNext.state).toBe("executing");
+    resolveNext?.();
+    await flush();
+    expect(tcNext.state).toBe("completed");
+  });
+
+  test("respects toolingMaxToolResultsInContext and includes failed calls", async () => {
+    const manager = createManager({
+      toolingConcurrencyLimit: 1,
+      toolingMaxToolResultsInContext: 2,
+      toolingToolCallTimeoutMs: 0,
+      mcpServers: [{ id: "mcp-disabled", name: "Disabled", transport: "http", isEnabled: false }],
+    });
+
+    manager.registerTool(
+      {
+        name: "ok",
+        description: "Ok tool",
+        parameters: { type: "object", properties: { n: { type: "number" } }, required: ["n"] },
+      },
+      async (args: any) => ({ n: Number(args?.n ?? 0) })
+    );
+
+    const tc1 = manager.createToolCall(createRequest("call_1", "ok", { n: 1 }), "msg-5", true);
+    const tc2 = manager.createToolCall(createRequest("call_2", "ok", { n: 2 }), "msg-5", true);
+    const tc3 = manager.createToolCall(createRequest("call_3", "ok", { n: 3 }), "msg-5", true);
+
+    for (let i = 0; i < 50; i++) {
+      if (tc1.state === "completed" && tc2.state === "completed" && tc3.state === "completed") {
+        break;
+      }
+      await flush();
+    }
+
+    expect(tc1.state).toBe("completed");
+    expect(tc2.state).toBe("completed");
+    expect(tc3.state).toBe("completed");
+
+    // Make ordering deterministic for the "last N" sort key.
+    tc1.executionCompletedAt = 100;
+    tc2.executionCompletedAt = 200;
+    tc3.executionCompletedAt = 300;
+
+    // Add a failed call (disabled MCP server) - should be included in terminal results
+    const failed = manager.createToolCall(
+      createRequest("call_failed", "mcp-disabled_something", {}),
+      "msg-5",
+      true
+    );
+    expect(failed.state).toBe("failed");
+    failed.timestamp = 400;
+
+    const results = manager.getToolResultsForContext();
+    const ids = results.map((tc) => tc.id);
+
+    // Should have 2 results (maxToolResultsInContext) including the most recent (call_3) and failed
+    expect(results).toHaveLength(2);
+    expect(new Set(ids)).toEqual(new Set(["call_failed", "call_3"]));
+  });
+
+  test("sanitizes MCP tool schemas when building OpenAI tools", async () => {
+    const manager = createManagerWithMcpTools([
+      {
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          description: "Read",
+          strict: true,
+          parameters: {
+            type: "object",
+            properties: {
+              paths: { type: "array" },
+              offset: { type: "number" },
+              length: { type: "number" },
+            },
+            required: ["paths"],
+          },
+        },
+      },
+    ]);
+
+    const tools = await manager.getOpenAITools();
+    expect(tools).toHaveLength(1);
+    expect(tools[0].function.parameters.required).toEqual(["paths"]);
+    expect(tools[0].function.strict).toBeUndefined();
+  });
+});

@@ -1,0 +1,448 @@
+/**
+ * Similar Notes View Styles
+ * 
+ * Native Obsidian-style list view for displaying similar notes with similarity scores
+ */
+
+.systemsculpt-similar-notes-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.similar-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--size-4-2) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  position: relative;
+  z-index: 1;
+}
+
+.similar-notes-title {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+.similar-notes-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.similar-notes-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.similar-notes-refresh {
+  padding: var(--size-2-2);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.similar-notes-refresh:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.similar-notes-refresh svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+/* Status Bar */
+.similar-notes-status {
+  padding: var(--size-2-3) var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.similar-notes-status:empty {
+  display: none;
+}
+
+.systemsculpt-status-text {
+  color: var(--text-muted);
+}
+
+/* Results Container */
+.similar-notes-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  background-color: var(--background-primary);
+}
+
+.results-container {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Result Item - styled like native Obsidian list items */
+.similar-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+  cursor: pointer;
+  position: relative;
+}
+
+.similar-note-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.similar-note-item:last-child {
+  border-bottom: none;
+}
+
+/* Score Indicator - simple and subtle */
+.note-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-4-8);
+  height: var(--size-4-6);
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  border-radius: var(--radius-s);
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.note-score.score-high {
+  background-color: var(--color-green);
+  color: var(--text-on-accent);
+}
+
+.note-score.score-medium {
+  background-color: var(--color-yellow);
+  color: var(--text-on-accent);
+}
+
+.note-score.score-low {
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* Note Content */
+.note-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  min-width: 0; /* Enable text truncation */
+}
+
+.note-title {
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-medium);
+  line-height: var(--line-height-tight);
+  margin: 0;
+}
+
+.note-title .internal-link {
+  color: var(--text-normal);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.note-title .internal-link:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.note-excerpt {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+/* Metadata */
+.note-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  margin-top: var(--size-2-1);
+}
+
+.note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+}
+
+.note-tags .tag {
+  padding: 1px var(--size-2-2);
+  background-color: var(--tag-background);
+  color: var(--tag-color);
+  border-radius: var(--tag-radius);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+}
+
+.note-date {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  color: var(--text-faint);
+}
+
+.note-path {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* Loading State */
+.similar-notes-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4-12) var(--size-4-6);
+  text-align: center;
+}
+
+.systemsculpt-loading-spinner {
+  width: var(--size-4-8);
+  height: var(--size-4-8);
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: systemsculpt-spin 1s linear infinite;
+  margin-bottom: var(--size-4-4);
+}
+
+@keyframes systemsculpt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.systemsculpt-loading-text {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+/* Empty State */
+.similar-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4-12) var(--size-4-6);
+  text-align: center;
+}
+
+.empty-icon {
+  margin-bottom: var(--size-4-4);
+  color: var(--text-faint);
+}
+
+.empty-icon svg {
+  width: var(--size-4-12);
+  height: var(--size-4-12);
+}
+
+.empty-title {
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-3);
+}
+
+.empty-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  max-width: 280px;
+}
+
+/* Initializing State */
+.similar-notes-initializing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4-12) var(--size-4-6);
+  text-align: center;
+}
+
+.initializing-icon {
+  margin-bottom: var(--size-4-4);
+  color: var(--text-muted);
+}
+
+.initializing-icon svg {
+  width: var(--size-4-12);
+  height: var(--size-4-12);
+}
+
+.initializing-title {
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-3);
+}
+
+.initializing-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  max-width: 320px;
+  margin-bottom: var(--size-4-4);
+}
+
+.retry-button {
+  padding: var(--size-2-2) var(--size-4-3);
+  background-color: var(--interactive-normal);
+  color: var(--text-on-accent);
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+}
+
+.retry-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+/* Disabled State */
+.similar-notes-disabled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4-12) var(--size-4-6);
+  text-align: center;
+}
+
+.disabled-icon {
+  margin-bottom: var(--size-4-4);
+  color: var(--text-faint);
+}
+
+.disabled-icon svg {
+  width: var(--size-4-12);
+  height: var(--size-4-12);
+}
+
+.disabled-title {
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-3);
+}
+
+.disabled-description {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  max-width: 320px;
+}
+
+/* Error State */
+.similar-notes-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4-12) var(--size-4-6);
+  text-align: center;
+}
+
+.error-icon {
+  margin-bottom: var(--size-4-4);
+  color: var(--text-error);
+}
+
+.error-icon svg {
+  width: var(--size-4-12);
+  height: var(--size-4-12);
+}
+
+.error-title {
+  font-weight: var(--font-medium);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-3);
+}
+
+.error-message {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  max-width: 300px;
+  line-height: var(--line-height-normal);
+}
+
+/* Mobile Adjustments */
+@media (max-width: 768px) {
+  .similar-notes-header {
+    padding: var(--size-2-3) var(--size-4-2);
+  }
+  
+  .similar-notes-status {
+    padding: var(--size-2-2) var(--size-4-2);
+  }
+  
+  .similar-note-item {
+    padding: var(--size-2-3) var(--size-4-2);
+    gap: var(--size-4-2);
+  }
+  
+  .note-score {
+    min-width: var(--size-4-6);
+    height: var(--size-4-5);
+    font-size: 10px;
+  }
+  
+  .note-excerpt {
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* Scrollbar styling */
+.similar-notes-results::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+}
+
+.similar-notes-results::-webkit-scrollbar-track {
+  background: var(--ss-layer-base);
+}
+
+.similar-notes-results::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-bg);
+  border-radius: var(--scrollbar-thumb-radius);
+}
+
+.similar-notes-results::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-bg-hover);
+}

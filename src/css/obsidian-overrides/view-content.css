@@ -1,0 +1,20 @@
+/**
+ * Obsidian View Content Overrides - SystemSculpt Plugin
+ *
+ * IMPORTANT: This file contains scoped CSS that targets Obsidian's native
+ * .workspace-leaf-content selector BUT ONLY when our plugin views are active.
+ *
+ * ALL selectors here MUST include [data-type="systemsculpt-*"] to ensure
+ * they only affect our plugin's views, not other plugins or Obsidian's UI.
+ *
+ * The CSS lint script (npm run lint:css) will catch any unscoped selectors.
+ */
+
+/* Scoped workspace leaf content styles for SystemSculpt views */
+.workspace-leaf-content[data-type="systemsculpt-chat"] {
+  /* Chat view specific overrides */
+}
+
+.workspace-leaf-content[data-type="systemsculpt-settings"] {
+  /* Settings view specific overrides */
+}

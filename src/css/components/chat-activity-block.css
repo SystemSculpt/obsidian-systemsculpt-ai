@@ -1,0 +1,384 @@
+/**
+ * Activity Drawer - Consolidated container for reasoning and tool call blocks
+ * 
+ * Groups consecutive non-content parts (reasoning + tool calls) into a single
+ * collapsible drawer that auto-collapses after streaming to highlight the answer.
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Activity Drawer Container
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer {
+  margin: 6px 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 20%, var(--ss-layer-base));
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 30%, var(--ss-layer-base));
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.systemsculpt-activity-drawer:hover {
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base));
+}
+
+.systemsculpt-activity-drawer.needs-approval {
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 55%, var(--ss-layer-base));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Activity Drawer Header (always visible summary line)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.systemsculpt-activity-drawer-header:hover {
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 8%, var(--ss-layer-base));
+  color: var(--text-normal);
+}
+
+.systemsculpt-activity-drawer-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-accent);
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-activity-drawer-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-activity-drawer-title {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-activity-drawer-count {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  background: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 50%, var(--ss-layer-base));
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.systemsculpt-activity-drawer-status {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  background: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 50%, var(--ss-layer-base));
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.systemsculpt-activity-drawer-status:empty {
+  display: none;
+}
+
+.systemsculpt-activity-drawer.needs-approval .systemsculpt-activity-drawer-status {
+  color: var(--text-accent);
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 18%, var(--ss-layer-base));
+  border: 1px solid color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 35%, var(--ss-layer-base));
+}
+
+.systemsculpt-activity-drawer.tools-active .systemsculpt-activity-drawer-status {
+  color: var(--text-muted);
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 45%, var(--ss-layer-base));
+}
+
+.systemsculpt-activity-drawer-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-activity-drawer-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Activity Drawer Content (collapsible body)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer-content {
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Collapsed State
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer.is-collapsed .systemsculpt-activity-drawer-content {
+  display: none;
+}
+
+.systemsculpt-activity-drawer.is-collapsed .systemsculpt-activity-drawer-chevron {
+  transform: rotate(-90deg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Streaming State (expanded with pulsing indicator)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer.is-streaming .systemsculpt-activity-drawer-icon {
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Compact Nested Blocks (reasoning and tool calls inside activity drawer)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-activity-drawer .systemsculpt-reasoning-wrapper,
+.systemsculpt-activity-drawer .systemsculpt-tool-call-group {
+  margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.systemsculpt-activity-drawer .systemsculpt-chat-structured-header {
+  padding: 4px 0;
+  font-size: var(--font-ui-smaller);
+  gap: 4px;
+}
+
+.systemsculpt-activity-drawer .systemsculpt-chat-structured-bullet {
+  width: 1.2ch;
+  height: 1.2ch;
+}
+
+.systemsculpt-activity-drawer .systemsculpt-reasoning-scroll-container {
+  max-height: 80px;
+  margin-top: 0;
+  margin-left: -4px;
+  padding: 0 10px 4px 4px;
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 60%, var(--ss-layer-base));
+  border-radius: 6px;
+  scrollbar-gutter: stable;
+}
+
+.systemsculpt-activity-drawer .systemsculpt-chat-structured-lines {
+  gap: 2px;
+}
+
+.systemsculpt-activity-drawer .systemsculpt-chat-structured-line {
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Inline Collapsible Blocks
+
+   Inline collapsible containers for reasoning and tool call blocks that appear
+   in chronological order within the message flow (replacing the separate drawer).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.systemsculpt-inline-collapsible {
+  margin: 6px 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 20%, var(--ss-layer-base));
+  border: 1px solid color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 30%, var(--ss-layer-base));
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.systemsculpt-inline-collapsible:hover {
+  border-color: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 40%, var(--ss-layer-base));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Inline Block Header
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.systemsculpt-inline-collapsible-header:hover {
+  background: color-mix(in srgb, rgb(var(--interactive-accent-rgb)) 8%, var(--ss-layer-base));
+  color: var(--text-normal);
+}
+
+.systemsculpt-inline-collapsible-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-inline-collapsible-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-inline-collapsible-title {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-inline-collapsible-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.systemsculpt-inline-collapsible-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Inline Block Content
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-collapsible-content {
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Collapsed State
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-collapsible.is-collapsed .systemsculpt-inline-collapsible-content {
+  display: none;
+}
+
+.systemsculpt-inline-collapsible.is-collapsed .systemsculpt-inline-collapsible-chevron {
+  transform: rotate(-90deg);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Streaming State
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-collapsible.is-streaming .systemsculpt-inline-collapsible-icon {
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Type-Specific Styling
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Reasoning blocks */
+.systemsculpt-inline-reasoning .systemsculpt-inline-collapsible-icon {
+  color: var(--text-accent);
+}
+
+/* Tool call blocks */
+.systemsculpt-inline-tool_call .systemsculpt-inline-collapsible-icon {
+  color: var(--color-orange);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Inline Reasoning Content
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-reasoning .systemsculpt-inline-reasoning-text {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  background: color-mix(in srgb, rgb(var(--background-secondary-rgb)) 60%, var(--ss-layer-base));
+  border-radius: 6px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+  scrollbar-gutter: stable;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Inline Tool Call Content
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-tool-detail {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-smaller);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 50%, var(--ss-layer-base));
+}
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-tool-status.is-success {
+  color: var(--color-green);
+}
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-tool-status.is-error {
+  color: var(--color-red);
+}
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-tool-status.is-pending {
+  color: var(--text-muted);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Inline Tool Call Content Elements
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.systemsculpt-inline-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-inline-tool-summary {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-inline-tool-error {
+  font-size: var(--font-ui-smaller);
+  color: var(--color-red);
+  margin-top: 4px;
+  padding-left: 4px;
+}

@@ -1,40 +1,63 @@
-server
-.cursor*
-.eslintrc.js
-obsidian.d.ts
-**/__pycache__/**
-node_modules
-.env
-*-error.log
+# Node / JS
+node_modules/
 package-lock.json
-yarn.lock
-.npmrc
-.contentcopy
-data.json
-data copy.json
-.hotreload
-.copyover
-styles.css
-dist
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+artifacts/
+coverage/
 main.js
-.gitignore
-LICENSE
-tsconfig.json
-types.d.ts
-versions.json
-assets
-manifest.json
-fabric_templates
-main.py
-fabric
-.venv
-server/templates
-ending.md
-.gitignore
-backups
-.aider*
-.DS_Store
+styles.css
+*.js.map
+*.tsbuildinfo
+build/
+
+# Local env / config (never commit secrets)
+.env
+.env.*
+!.env.local.example
+config.json
+systemsculpt-sync.config.json
 run.sh
 
-# Claude Code DevLogs
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# Python tooling (local)
+.venv/
+.pytest_cache/
+
+# Local tool configs (should not be tracked)
+.claude/
+.codex/
+.pi/
+.serena/
+.conductor/
+.cache/
+
+# Obsidian vaults / local state
+.obsidian/
+vault/
+
+# E2E artifacts (generated)
+testing/e2e/.wdio/
+testing/e2e/logs/
+testing/e2e/reports/
+testing/e2e/screenshots/
+testing/e2e/video/
+testing/e2e/.obsidian-cache/
+testing/e2e/fixtures/.tmp-vaults/
+testing/e2e/fixtures/vault/.obsidian/
+
+# Misc local dirs
+logs/
 devlogs/
+backups/

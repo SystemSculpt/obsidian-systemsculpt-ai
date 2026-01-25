@@ -1,0 +1,792 @@
+/**
+ * Modal Components
+ *
+ * Styles for all modal dialogs, popups, and overlays
+ */
+
+.ss-modal__textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-medium);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+
+/*
+ * Button styles have been moved to ss-buttons.css
+ * Use .ss-button and .ss-button--secondary instead
+ */
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * Button styles have been moved to ss-buttons.css
+ * Use .ss-button and .ss-button--secondary instead
+ */
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-header
+  h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button:hover {
+  background-color: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-input-section,
+.systemsculpt-text-modification-modal .systemsculpt-preview-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-modal-content {
+  display: flex;
+  gap: 20px;
+  height: calc(100% - 120px);
+  padding: 20px;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-preview-content {
+  flex-grow: 1;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-textarea {
+  flex-grow: 1;
+  resize: none;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-text-modification-modal label {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-empty-text {
+  font-size: 0.9em;
+  text-align: center;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-preview-content {
+  flex-grow: 1;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-text);
+  line-height: 1.5;
+}
+
+.systemsculpt-modal-buttons button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.systemsculpt-modal-buttons button.systemsculpt-mod-warning {
+  background-color: var(--background-modifier-error);
+  border: 1px solid var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-content {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  position: sticky; /* Make it stick to the bottom */
+  bottom: 0;
+  background-color: var(--background-primary); /* Ensure it has a background */
+  z-index: 1; /* Ensure it stays on top of scrolling content */
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-loading svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-model-selection-modal {
+  height: min(85vh, 900px);
+  width: clamp(300px, 95%, 1200px);
+  padding: clamp(8px, 2vw, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.5vw, 16px);
+  overflow: hidden;
+  margin: 0 auto;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.systemsculpt-model-selection-modal {
+  max-width: min(800px, 95vw);
+  max-height: 80vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px !important;
+  box-sizing: border-box;
+  margin: 0 auto;
+  align-items: center;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  padding: var(--size-4-1) 0;
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-content {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-text {
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-preview-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-preset-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-header
+  h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-back:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  height: 32px;
+  min-width: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none !important;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border: none !important;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-button-primary:hover {
+  background-color: var(--interactive-accent-hover) !important;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-context-modal {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  background-color: var(--background-modifier-border);
+  color: var(--text-normal);
+  border: none;
+  transition: background-color 0.2s ease;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-loading svg {
+  animation: systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-systemsculpt-spin 1s linear infinite;
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button.systemsculpt-mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-button:hover {
+  background-color: var(--background-modifier-border-hover);
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  input::placeholder {
+  color: var(--text-muted);
+}
+
+.systemsculpt-text-modification-modal .systemsculpt-input-section,
+.systemsculpt-text-modification-modal .systemsculpt-preview-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  label {
+  color: var(--text-normal);
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-back:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-empty-icon {
+  font-size: 2em;
+  opacity: 0.5;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-back:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-manager-modal
+  .systemsculpt-custom-provider-manager-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.systemsculpt-modal-content {
+  padding: var(--size-4-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-modal {
+  max-width: 500px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+}
+
+.systemsculpt-modal {
+  max-width: 600px;
+  max-height: 80vh;
+  border-radius: var(--radius-l);
+  padding: var(--size-4-4);
+  background-color: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.systemsculpt-modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.systemsculpt-modal-button-container button {
+  padding: var(--size-4-1) var(--size-4-3);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  transition: all 0.15s ease-in-out;
+}
+
+.systemsculpt-modal-button-container button.systemsculpt-mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-modal-button-container button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.systemsculpt-modal-button-container button:not(.systemsculpt-mod-cta) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.systemsculpt-modal-buttons button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.systemsculpt-modal-buttons button.systemsculpt-mod-warning {
+  background-color: var(--background-modifier-error);
+  border: 1px solid var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-content {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: visible;
+  padding: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select {
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  width: 100%;
+  height: 32px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select {
+  padding-right: 24px;
+  appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 16px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-preset-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-presets
+  label {
+  color: var(--text-normal);
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s ease;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-back:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: visible;
+  padding: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  input,
+.systemsculpt-custom-provider-modal
+  .systemsculpt-custom-provider-form-group
+  select {
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  width: 100%;
+  height: 32px;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.systemsculpt-template-modal {
+  max-width: 800px;
+  width: 90vw;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.systemsculpt-custom-provider-modal .systemsculpt-custom-provider-header h2 {
+  margin: 0;
+  font-size: 1.3em;
+  color: var(--text-normal);
+}
+
+.systemsculpt-audio-transcription-modal .systemsculpt-progress-status-text {
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-modal {
+   max-width: min(800px, 95vw);
+   max-height: 80vh;
+   width: 100%;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   padding: 16px !important;
+   box-sizing: border-box;
+   margin: 0 auto;
+   align-items: center;
+   background-color: var(--background-primary);
+}
+
+.systemsculpt-text-modification-modal {
+   width: 80vw;
+   height: 80vh;
+   max-width: 1200px;
+   max-height: 800px;
+}
+
+.systemsculpt-extension-container .systemsculpt-extension-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  font-size: 0.7em;
+  background-color: var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Embedding-related styles have been moved to components/embeddings.css */
+
+
+/* Hover preview tooltip */
+.systemsculpt-hover-preview {
+  position: absolute;
+  z-index: 1000;
+  max-width: 400px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 14px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
+  font-size: 0.9em;
+  max-height: 300px;
+  overflow-y: auto;
+  pointer-events: none;
+}

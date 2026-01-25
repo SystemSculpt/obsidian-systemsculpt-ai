@@ -1,0 +1,61 @@
+/**
+ * Custom Endpoint Settings Styles
+ *
+ * Styles for the custom transcription endpoint settings in the recorder tab
+ */
+
+.ss-custom-endpoint-settings {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+.ss-custom-endpoint-info {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  border-left: 3px solid var(--text-accent);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ss-custom-endpoint-settings .setting-item {
+  border-top: none;
+  padding-top: 12px;
+}
+
+.ss-custom-endpoint-settings .setting-item:first-child {
+  padding-top: 0;
+}
+
+/* Preset buttons container */
+.ss-custom-endpoint-settings .setting-item-control {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Preset buttons */
+.ss-custom-endpoint-settings button {
+  min-width: 80px;
+}
+
+/* Model selection container */
+.ss-model-selection-container {
+  display: flex;
+  width: 100%;
+}
+
+/* Model dropdown */
+.ss-model-selection-container select {
+  width: 100%;
+  margin-right: 0;
+}
+
+/* Model text input */
+.ss-model-selection-container input {
+  width: 100%;
+}

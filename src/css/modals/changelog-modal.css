@@ -1,0 +1,142 @@
+/* Changelog Modal - scoped styles */
+
+.ss-changelog-modal .ss-modal__header {
+  gap: 8px;
+}
+
+.ss-changelog-modal .ss-modal__subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ss-changelog-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ss-changelog-version-select {
+  flex: 0 0 auto;
+  max-width: 280px;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+/* Make content scroll within the content area while header/footer remain fixed */
+.ss-changelog-modal .ss-modal__content {
+  overflow: hidden;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0; /* critical for flex child scrolling */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px; /* space for scrollbar */
+}
+
+.ss-changelog-modal .systemsculpt-changelog-notes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-notes-inner {
+  padding-right: 6px;
+}
+
+/* Enhance markdown readability inside modal */
+.ss-changelog-modal .markdown-preview-view {
+  --md-heading-color: var(--text-normal);
+}
+
+.ss-changelog-modal .markdown-preview-view h1,
+.ss-changelog-modal .markdown-preview-view h2,
+.ss-changelog-modal .markdown-preview-view h3 {
+  color: var(--text-normal);
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.ss-changelog-modal .markdown-preview-view p,
+.ss-changelog-modal .markdown-preview-view ul,
+.ss-changelog-modal .markdown-preview-view ol {
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+.ss-changelog-modal .markdown-preview-view blockquote {
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.ss-changelog-modal .markdown-preview-view code {
+  background: var(--background-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .markdown-preview-view pre code {
+  display: block;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+/* Footer layout: space between left and right groups */
+.ss-changelog-modal .ss-modal__footer {
+  justify-content: space-between;
+}
+
+.ss-changelog-modal .ss-modal__footer-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Custom scrollbar */
+.ss-changelog-modal .systemsculpt-changelog-modal {
+  scrollbar-width: thin;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.ss-changelog-modal .systemsculpt-changelog-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+/* Responsive adjustments */
+@media (max-width: 680px) {
+  .ss-changelog-header-controls {
+    flex-wrap: wrap;
+  }
+  .ss-changelog-version-select {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  .ss-changelog-modal .ss-modal__content {
+    padding: 12px;
+  }
+}
+
+

@@ -1,0 +1,70 @@
+/* Mermaid diagram enhancements – SystemSculpt */
+
+/* Ensure diagram containers can host absolutely-positioned buttons */
+.mermaid {
+  position: relative;
+}
+
+/* Expand button overlay */
+.systemsculpt-mermaid-expand-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.12s ease-in-out;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* Always show for now – can fade on hover later */
+.systemsculpt-mermaid-expand-btn {
+  opacity: 0.8;
+}
+
+/* Ensure hover emphasises */
+.mermaid:hover .systemsculpt-mermaid-expand-btn {
+  opacity: 1;
+}
+
+/* Expanded preview modal layout */
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-diagram {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.systemsculpt-mermaid-preview-modal button.ss-mermaid-copy-btn {
+  margin-top: 8px;
+}
+
+/* Mermaid theme – map to Obsidian CSS variables for seamless theming */
+.mermaid .node rect,
+.mermaid .node circle,
+.mermaid .node polygon {
+  fill: var(--background-secondary) !important;
+  stroke: var(--interactive-accent) !important;
+}
+
+.mermaid .node text {
+  fill: var(--text-normal) !important;
+}
+
+.mermaid .edgePath path {
+  stroke: var(--interactive-accent) !important;
+}
+
+.mermaid .edgeLabel text {
+  fill: var(--text-muted) !important;
+}
+
+.mermaid .cluster rect {
+  fill: var(--background-primary) !important;
+  stroke: var(--interactive-accent) !important;
+} 

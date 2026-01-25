@@ -1,0 +1,116 @@
+/**
+ * Tool Approval UI Styles
+ *
+ * Styles for the approve/deny buttons shown for destructive tool calls
+ * and the "Allow All" button for multiple pending calls.
+ */
+
+/* Approval button group container */
+.systemsculpt-approval-buttons {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.systemsculpt-approval-buttons .systemsculpt-button {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smallest);
+  line-height: 1.4;
+  min-height: unset;
+  border-radius: 4px;
+}
+
+/* Make "Always Allow" button more subtle */
+.systemsculpt-approval-buttons .systemsculpt-button-secondary {
+  opacity: 0.85;
+}
+
+.systemsculpt-approval-buttons .systemsculpt-button-secondary:hover {
+  opacity: 1;
+}
+
+/* "Allow All" container in group header */
+.systemsculpt-allow-all-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 4px 0;
+  margin-bottom: 2px;
+}
+
+.systemsculpt-allow-all-container .systemsculpt-button {
+  padding: 2px 10px;
+  font-size: var(--font-ui-smaller);
+}
+
+/* Subtle highlight for pending lines that need approval */
+.systemsculpt-chat-structured-line[data-state="pending"] {
+  background-color: var(--background-modifier-hover);
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+/* Ensure actions container displays properly when visible */
+.systemsculpt-chat-structured-line-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Inline tool actions (for chronological inline display) */
+.systemsculpt-inline-tool-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.systemsculpt-inline-tool-actions .systemsculpt-button {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smallest);
+  line-height: 1.4;
+  min-height: unset;
+  border-radius: 4px;
+}
+
+/* Inline tool line layout */
+.systemsculpt-inline-tool-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Approval preview container */
+.systemsculpt-approval-preview {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.systemsculpt-approval-diff {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.systemsculpt-approval-ops ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.systemsculpt-approval-ops li {
+  margin: 4px 0;
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-approval-ops code {
+  font-family: var(--font-monospace);
+  background: var(--background-primary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: var(--font-ui-smaller);
+}

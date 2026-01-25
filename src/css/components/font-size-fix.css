@@ -1,0 +1,61 @@
+/**
+ * Font Size Fix for Chat Messages
+ * 
+ * Ensures font size inheritance works properly in chat views
+ */
+
+/* Apply base font size with higher specificity */
+.systemsculpt-messages-container.systemsculpt-chat-small {
+  font-size: 0.75em !important;
+}
+
+.systemsculpt-messages-container.systemsculpt-chat-medium {
+  font-size: 1em !important;
+}
+
+.systemsculpt-messages-container.systemsculpt-chat-large {
+  font-size: 1.3em !important;
+}
+
+/* Ensure font size inherits to message content */
+.systemsculpt-messages-container .systemsculpt-message,
+.systemsculpt-messages-container .systemsculpt-message-content,
+.systemsculpt-messages-container .systemsculpt-message-content p,
+.systemsculpt-messages-container .systemsculpt-message-content div,
+.systemsculpt-messages-container .systemsculpt-message-content span,
+.systemsculpt-messages-container .systemsculpt-content-part,
+.systemsculpt-messages-container .systemsculpt-unified-part,
+.systemsculpt-messages-container .markdown-rendered,
+.systemsculpt-messages-container .systemsculpt-chat-structured-block,
+.systemsculpt-messages-container .systemsculpt-chat-structured-header,
+.systemsculpt-messages-container .systemsculpt-chat-structured-title,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line-text,
+.systemsculpt-messages-container .systemsculpt-chat-structured-line-actions,
+.systemsculpt-messages-container .systemsculpt-chat-structured-bullet,
+.systemsculpt-messages-container .systemsculpt-collapsible-drawer,
+.systemsculpt-messages-container .systemsculpt-collapsible-header,
+.systemsculpt-messages-container .systemsculpt-collapsible-title,
+.systemsculpt-messages-container .systemsculpt-reasoning-wrapper {
+  font-size: inherit;
+}
+
+/* Override any fixed font sizes from Obsidian's defaults */
+.systemsculpt-messages-container .markdown-rendered p,
+.systemsculpt-messages-container .markdown-rendered div,
+.systemsculpt-messages-container .markdown-rendered span {
+  font-size: inherit !important;
+}
+
+/* Specific overrides for elements that use fixed sizes */
+.systemsculpt-messages-container .systemsculpt-message-label {
+  font-size: var(--chat-label-font-size) !important;
+}
+
+.systemsculpt-messages-container .systemsculpt-citations-container {
+  font-size: var(--chat-citation-font-size) !important;
+}
+
+.systemsculpt-messages-container pre[class*="language-"]::before {
+  font-size: var(--chat-code-label-font-size) !important;
+}

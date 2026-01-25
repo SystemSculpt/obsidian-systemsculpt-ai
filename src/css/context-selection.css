@@ -1,0 +1,153 @@
+/**
+ * Context Selection Modal - Minimal CSS that works with Obsidian's native modal structure
+ */
+
+/* Filter buttons container */
+.ss-context-filter-container {
+  display: flex;
+  gap: var(--size-2-2);
+  margin: var(--size-4-3) 0;
+  flex-wrap: wrap;
+}
+
+.ss-context-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: var(--size-2-2) var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  transition: all var(--anim-duration-fast) ease;
+}
+
+.ss-context-filter-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ss-context-filter-btn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* File list container */
+.ss-context-file-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin: var(--size-4-3) 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+/* Individual file items */
+.ss-context-file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: background-color var(--anim-duration-fast) ease;
+}
+
+.ss-context-file-item:last-child {
+  border-bottom: none;
+}
+
+.ss-context-file-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-context-file-item.is-selected {
+  background: var(--background-modifier-active-hover);
+}
+
+.ss-context-file-item.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ss-context-file-icon {
+  width: var(--icon-m);
+  height: var(--icon-m);
+  color: var(--icon-color);
+  flex-shrink: 0;
+}
+
+.ss-context-file-item.is-selected .ss-context-file-icon {
+  color: var(--interactive-accent);
+}
+
+.ss-context-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ss-context-file-name {
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-context-file-path {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: var(--size-2-1);
+}
+
+.ss-context-file-item input[type="checkbox"] {
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  flex-shrink: 0;
+}
+
+/* Empty state */
+.ss-context-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--size-4-8);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.ss-context-empty div:first-child {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  color: var(--icon-color-disabled);
+  margin-bottom: var(--size-4-2);
+}
+
+.ss-context-empty p {
+  margin: 0;
+  font-size: var(--font-ui-medium);
+}
+
+/* Load more button */
+.ss-context-load-more {
+  width: 100%;
+  padding: var(--size-4-2);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  transition: all var(--anim-duration-fast) ease;
+}
+
+.ss-context-load-more:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}

@@ -1,0 +1,414 @@
+
+/**
+ * SystemSculpt settings view – pared down, Obsidian-native styling
+ */
+
+.ss-settings-layout {
+  margin-top: var(--size-4-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-4);
+}
+
+.ss-settings-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.ss-tab-button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-2-3) var(--size-4-2);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ss-tab-button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-tab-button.mod-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.systemsculpt-tab-content {
+  display: none;
+}
+
+.systemsculpt-tab-content.is-active {
+  display: block;
+}
+
+.ss-setting-subtext {
+  margin-top: var(--size-2-2);
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.ss-inline-note {
+  margin-top: var(--size-4-2);
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.ss-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.ss-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  text-decoration: none;
+  color: var(--text-accent);
+  font-size: 0.9em;
+}
+
+.ss-settings-link:hover {
+  text-decoration: underline;
+}
+
+.ss-settings-link-icon svg {
+  width: var(--size-2-3);
+  height: var(--size-2-3);
+}
+
+.ss-help-links {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.ss-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  text-decoration: none;
+  color: var(--text-accent);
+  font-size: 0.9em;
+}
+
+.ss-help-link:hover {
+  text-decoration: underline;
+}
+
+.ss-help-link-icon svg {
+  width: var(--size-2-3);
+  height: var(--size-2-3);
+}
+
+.ss-help-separator {
+  color: var(--text-muted);
+  margin: 0 var(--size-2-1);
+}
+
+.ss-restore-defaults-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.ss-version-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: 0 var(--size-3-1);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.ss-version-pill--latest {
+  color: var(--text-success);
+}
+
+.ss-version-pill--outdated {
+  color: var(--text-warning);
+}
+
+.ss-version-pill--error {
+  color: var(--text-error);
+}
+
+.ss-version-update {
+  margin-left: var(--size-4-2);
+  font-size: 0.85em;
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.ss-version-update:hover {
+  text-decoration: underline;
+}
+
+.ss-settings-search-results {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.ss-search-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.ss-search-result {
+  padding-top: var(--size-3-2);
+  border-top: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.ss-search-result:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.ss-search-result:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-search-title {
+  font-weight: 600;
+}
+
+.ss-search-desc {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.ss-search-tab {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.ss-search-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ss-search-count {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.ss-search-highlight {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-s);
+}
+
+/* ============================================================================
+   Readwise Integration Styles
+   ============================================================================ */
+
+.readwise-status {
+  margin-left: var(--size-4-2);
+  font-size: 0.85em;
+  padding: var(--size-2-1) var(--size-2-3);
+  border-radius: var(--radius-s);
+}
+
+.readwise-status.mod-success {
+  color: var(--text-success);
+  background: var(--background-modifier-success);
+}
+
+.readwise-status.mod-error {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.readwise-status.mod-warning {
+  color: var(--text-warning);
+}
+
+/* Validated button state */
+.setting-item button.mod-success {
+  background: var(--background-modifier-success);
+  color: var(--text-success);
+  border-color: var(--background-modifier-success);
+}
+
+.readwise-sync-status-container {
+  margin: var(--size-4-3) 0;
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.readwise-sync-info {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-bottom: var(--size-2-2);
+}
+
+.readwise-sync-info:last-child {
+  margin-bottom: 0;
+}
+
+.readwise-sync-error {
+  font-size: 0.9em;
+  color: var(--text-error);
+  margin-top: var(--size-2-2);
+  padding: var(--size-2-2);
+  background: var(--background-modifier-error);
+  border-radius: var(--radius-s);
+}
+
+.readwise-sync-actions {
+  margin-top: var(--size-4-3);
+}
+
+.readwise-progress {
+  margin-top: var(--size-4-2);
+  padding: var(--size-4-2);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+}
+
+.readwise-progress-bar {
+  height: 4px;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.readwise-progress-text {
+  margin-top: var(--size-2-2);
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+/* Settings item heading for sub-sections */
+.setting-item-heading {
+  margin-top: var(--size-4-4);
+  margin-bottom: var(--size-4-2);
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: 0.95em;
+}
+
+/* ============================================================================
+   Readwise Sync Widget - Bottom Right Floating Notification
+   ============================================================================ */
+
+.readwise-sync-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 280px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.readwise-sync-widget.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.readwise-sync-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--size-4-2) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.readwise-sync-widget-title {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.readwise-sync-widget-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 1.2em;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.readwise-sync-widget-close:hover {
+  color: var(--text-normal);
+}
+
+.readwise-sync-widget-content {
+  padding: var(--size-4-3);
+}
+
+.readwise-sync-widget-item {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: var(--size-2-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.readwise-sync-widget-progress {
+  height: 4px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.readwise-sync-widget-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.readwise-sync-widget-stats {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-top: var(--size-2-2);
+  text-align: right;
+}
+
+/* Success state */
+.readwise-sync-widget.mod-success .readwise-sync-widget-title {
+  color: var(--text-success);
+}
+
+.readwise-sync-widget.mod-success .readwise-sync-widget-progress-bar {
+  background: var(--text-success);
+}
+
+/* Error state */
+.readwise-sync-widget.mod-error .readwise-sync-widget-title {
+  color: var(--text-error);
+}
+
+.readwise-sync-widget.mod-error .readwise-sync-widget-progress-bar {
+  background: var(--text-error);
+}
