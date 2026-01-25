@@ -63,6 +63,20 @@ describe("ToolCallManager auto-approval policy", () => {
     expect(manager.shouldAutoApprove("mcp-filesystem_trash")).toBe(false);
   });
 
+  test("destructive filesystem tools can auto-approve when confirmations are disabled", () => {
+    const manager = createManager({ toolingRequireApprovalForDestructiveTools: false });
+
+    expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
+    expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(true);
+  });
+
+  test("allowlisted mutating tools auto-approve", () => {
+    const manager = createManager({ mcpAutoAcceptTools: ["mcp-filesystem:write"] });
+
+    expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
+    expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(false);
+  });
+
   test("external MCP server tools require approval", () => {
     const manager = createManager();
 

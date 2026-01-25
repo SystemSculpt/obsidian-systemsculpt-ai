@@ -27,6 +27,7 @@ Model and prompt defaults:
 Chat experience defaults:
 
 - Chat UI preferences and defaults (where available)
+- Agent Mode safety approvals and allowlist
 - Favorite models and quick picks
 - Template selection and insertion behavior
 
@@ -97,4 +98,3 @@ Power-user and diagnostics:
 - [Commands & hotkeys](commands.md)
 - [Agent Mode](agent-mode.md)
 - [Troubleshooting](troubleshooting.md)
-

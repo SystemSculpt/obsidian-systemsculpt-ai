@@ -377,5 +377,5 @@ test("search tool details render comma separated terms", () => {
     expect(line.dataset.state).toBe("failed");
   });
 
-  // Note: Approval deck tests removed - all tools are now auto-approved
+  // Approval UI coverage lives in the approval panel tests.
 });

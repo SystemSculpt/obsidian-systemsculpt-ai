@@ -130,6 +130,11 @@ export class SettingsManager {
       migratedSettings.mcpAutoAcceptTools = DEFAULT_SETTINGS.mcpAutoAcceptTools;
     }
 
+    if (typeof migratedSettings.toolingRequireApprovalForDestructiveTools !== "boolean") {
+      migratedSettings.toolingRequireApprovalForDestructiveTools =
+        DEFAULT_SETTINGS.toolingRequireApprovalForDestructiveTools;
+    }
+
     if ("toolingAutoApproveReadOnly" in migratedSettings) {
       delete (migratedSettings as any).toolingAutoApproveReadOnly;
     }
@@ -345,6 +350,11 @@ export class SettingsManager {
       
       if (originalLength !== deduplicatedLength) {
       }
+    }
+
+    if (typeof validatedSettings.toolingRequireApprovalForDestructiveTools !== "boolean") {
+      validatedSettings.toolingRequireApprovalForDestructiveTools =
+        defaultSettings.toolingRequireApprovalForDestructiveTools;
     }
 
     const concurrencyRaw = Number(validatedSettings.toolingConcurrencyLimit);
@@ -767,36 +777,10 @@ export class SettingsManager {
   }
 
   /**
-   * Clean up phantom tools from settings.
-   * NOTE: mcpEnabledTools and mcpAutoAcceptTools are deprecated - all tools now auto-approve.
-   * This method is kept for backward compatibility but no longer performs cleanup.
-   */
-  private async cleanupPhantomTools(settings: SystemSculptSettings): Promise<SystemSculptSettings> {
-    // Deprecated: mcpEnabledTools and mcpAutoAcceptTools are no longer used.
-    // All tools are enabled and auto-approved by default.
-    return settings;
-  }
-
-  /**
-   * Perform async validation including phantom tool cleanup
+   * Perform async validation.
    */
   private async validateSettingsAsync(settings: SystemSculptSettings): Promise<SystemSculptSettings> {
-    // First do the synchronous validation
-    const syncValidatedSettings = this.validateSettings(settings);
-    
-    // Then do the asynchronous phantom tool cleanup
-    const asyncValidatedSettings = await this.cleanupPhantomTools(syncValidatedSettings);
-    
-    return asyncValidatedSettings;
-  }
-
-  /**
-   * Manually trigger phantom tool cleanup.
-   * NOTE: Deprecated - mcpEnabledTools and mcpAutoAcceptTools are no longer used.
-   * All tools are enabled and auto-approved by default.
-   */
-  public async cleanupPhantomToolsManually(): Promise<void> {
-    // No-op: deprecated settings are no longer used
+    return this.validateSettings(settings);
   }
 
   /**

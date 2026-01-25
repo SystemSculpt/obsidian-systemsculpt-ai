@@ -177,7 +177,7 @@ export class InputHandler extends Component {
     this.chatView = options.chatView;
     
     // Tool-call UI updates are handled per-turn by the orchestrator
-    // Note: All tools are auto-approved now - no manual approval flow needed
+    // Approval prompts are surfaced by the tool call UI when required.
 
     // InputHandler initialized with RecorderService - silent setup
     this.recorderService = RecorderService.getInstance(this.app, this.plugin, {

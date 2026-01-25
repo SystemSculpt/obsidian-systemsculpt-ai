@@ -327,11 +327,11 @@ export interface SystemSculptSettings {
   mcpEnabledTools: string[]; // @deprecated - No longer used. All tools from internal servers are always available.
   mcpAutoAcceptTools: string[]; // Array of "serverId:toolName" for mutating tools that auto-accept without confirmation
   mcpEnabled: boolean; // @deprecated - No longer used. Internal MCP servers are always enabled.
-  mcpAutoAccept: boolean; // @deprecated - Global auto-accept, use mcpAutoAcceptTools instead
 
   /**
    * Tool execution policy for Agent + MCP
    */
+  toolingRequireApprovalForDestructiveTools: boolean;
   toolingConcurrencyLimit: number;
   toolingToolCallTimeoutMs: number;
   toolingMaxToolResultsInContext: number;
@@ -592,8 +592,8 @@ Raw transcript:`,
   mcpEnabledTools: [], // @deprecated - no longer used, all internal tools always available
   mcpAutoAcceptTools: [],
   mcpEnabled: true, // @deprecated - internal MCP is always enabled
-  mcpAutoAccept: false,
 
+  toolingRequireApprovalForDestructiveTools: true,
   toolingConcurrencyLimit: 3,
   toolingToolCallTimeoutMs: 30000,
   toolingMaxToolResultsInContext: 15,

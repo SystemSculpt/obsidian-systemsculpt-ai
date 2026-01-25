@@ -63,6 +63,15 @@ export class ToolCallManager {
     return Math.max(0, Math.min(10 * 60 * 1000, Math.floor(raw)));
   }
 
+  private getRequireDestructiveApproval(): boolean {
+    const raw = this.chatView?.plugin?.settings?.toolingRequireApprovalForDestructiveTools;
+    return raw !== false;
+  }
+
+  private getAutoApproveAllowlist(): string[] {
+    return (this.chatView?.plugin?.settings?.mcpAutoAcceptTools || []).slice();
+  }
+
   public getMaxToolResultsInContext(): number {
     const raw = Number(this.chatView?.plugin?.settings?.toolingMaxToolResultsInContext);
     if (!Number.isFinite(raw)) return 15;
@@ -93,11 +102,15 @@ export class ToolCallManager {
   /**
    * Determine if a tool should be auto-approved without user confirmation.
    * Returns false for destructive tools (write, edit, move, trash) and external MCP tools
-   * unless they've been trusted for this session.
+   * unless trusted for this session, allowlisted, or approvals are disabled in settings.
    */
   public shouldAutoApprove(toolName: string): boolean {
     const trustedToolNames = this.chatView?.trustedToolNames ?? new Set<string>();
-    return !requiresUserApproval(toolName, trustedToolNames);
+    return !requiresUserApproval(toolName, {
+      trustedToolNames,
+      requireDestructiveApproval: this.getRequireDestructiveApproval(),
+      autoApproveAllowlist: this.getAutoApproveAllowlist(),
+    });
   }
 
   /**
@@ -354,8 +367,8 @@ export class ToolCallManager {
     toolRegistry: ToolDefinition[];
     settings: {
       autoApprovePolicy: {
-        nonMutating: boolean;
-        mutatingAllowlist: string[];
+        requireDestructiveApproval: boolean;
+        autoApproveAllowlist: string[];
       };
       concurrencyLimit: number;
       toolCallTimeoutMs: number;
@@ -382,8 +395,8 @@ export class ToolCallManager {
       toolRegistry: Array.from(this.toolRegistry.values()).map((entry) => entry.definition),
       settings: {
         autoApprovePolicy: {
-          nonMutating: true,
-          mutatingAllowlist: (this.chatView?.plugin?.settings?.mcpAutoAcceptTools || []).slice(),
+          requireDestructiveApproval: this.getRequireDestructiveApproval(),
+          autoApproveAllowlist: this.getAutoApproveAllowlist(),
         },
         concurrencyLimit: this.getToolingConcurrencyLimit(),
         toolCallTimeoutMs: this.getToolingToolCallTimeoutMs(),

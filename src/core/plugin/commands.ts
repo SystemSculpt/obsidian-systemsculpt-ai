@@ -42,7 +42,6 @@ export class CommandManager {
     this.registerOpenBenchView();
     this.registerOpenBenchResultsView();
     this.registerQuickFileEdit();
-    this.registerCleanupPhantomTools();
     this.registerDebugCommands();
     this.registerEmbeddingsDatabaseCommands();
     this.registerDailyVaultCommands();
@@ -542,22 +541,6 @@ export class CommandManager {
         }
         return true;
       }
-    });
-  }
-
-  private registerCleanupPhantomTools() {
-    this.plugin.addCommand({
-      id: "cleanup-phantom-tools",
-      name: "Clean Up Phantom MCP Tools",
-      callback: async () => {
-        try {
-          new Notice("Cleaning up phantom MCP tools...", 3000);
-          await this.plugin.getSettingsManager().cleanupPhantomToolsManually();
-          new Notice("Phantom tool cleanup completed! Check console for details.", 5000);
-        } catch (error) {
-          new Notice("Failed to clean up phantom tools.", 10000);
-        }
-      },
     });
   }
 

@@ -7,6 +7,7 @@ import {
   getToolApprovalDecision,
   shouldAutoApproveTool,
   isMutatingTool,
+  requiresUserApproval,
   extractPrimaryPathArg,
 } from "../toolPolicy";
 
@@ -104,6 +105,50 @@ describe("tool approval policy", () => {
     const decision = getToolApprovalDecision("", []);
     expect(decision.autoApprove).toBe(false);
     expect(decision.reason).toBe("invalid");
+  });
+});
+
+describe("requiresUserApproval", () => {
+  it("requires approval for destructive filesystem tools by default", () => {
+    expect(requiresUserApproval("mcp-filesystem_write", { trustedToolNames: new Set() })).toBe(true);
+    expect(requiresUserApproval("mcp-filesystem_edit", { trustedToolNames: new Set() })).toBe(true);
+  });
+
+  it("auto-approves destructive filesystem tools when toggle is disabled", () => {
+    expect(
+      requiresUserApproval("mcp-filesystem_write", {
+        trustedToolNames: new Set(),
+        requireDestructiveApproval: false,
+      })
+    ).toBe(false);
+  });
+
+  it("auto-approves allowlisted destructive tools", () => {
+    expect(
+      requiresUserApproval("mcp-filesystem_write", {
+        trustedToolNames: new Set(),
+        autoApproveAllowlist: ["mcp-filesystem:write"],
+      })
+    ).toBe(false);
+  });
+
+  it("external tools require approval unless allowlisted", () => {
+    expect(
+      requiresUserApproval("mcp-shell_run_command", {
+        trustedToolNames: new Set(),
+      })
+    ).toBe(true);
+    expect(
+      requiresUserApproval("mcp-shell_run_command", {
+        trustedToolNames: new Set(),
+        autoApproveAllowlist: ["mcp-shell:run_command"],
+      })
+    ).toBe(false);
+  });
+
+  it("respects trusted tool names", () => {
+    const trusted = new Set(["mcp-filesystem_write"]);
+    expect(requiresUserApproval("mcp-filesystem_write", { trustedToolNames: trusted })).toBe(false);
   });
 });
 

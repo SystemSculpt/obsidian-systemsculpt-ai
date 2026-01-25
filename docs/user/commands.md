@@ -78,7 +78,6 @@ Notes:
 | Open SystemSculpt Janitor |  | Opens the Janitor modal |
 | Open SystemSculpt Benchmark |  | Runs the built-in benchmark UI |
 | Open SystemSculpt Benchmark Results |  | Opens the benchmark results viewer |
-| Clean Up Phantom MCP Tools |  | Repairs tool registry issues if tools got “stuck” |
 | YouTube Canvas - Extract transcript and create note |  | Creates a note from a YouTube transcript |
 
 ## Diagnostics (advanced)

@@ -91,10 +91,23 @@ export class ToolCallTreeRenderer extends Component {
     return this.getChatView()?.trustedToolNames ?? new Set<string>();
   }
 
+  private getAutoApproveAllowlist(): string[] {
+    return (this.getChatView()?.plugin?.settings?.mcpAutoAcceptTools || []).slice();
+  }
+
+  private getRequireDestructiveApproval(): boolean {
+    const raw = this.getChatView()?.plugin?.settings?.toolingRequireApprovalForDestructiveTools;
+    return raw !== false;
+  }
+
   /** Check if a tool call requires user approval */
   private toolRequiresApproval(toolCall: ToolCall): boolean {
     const toolName = toolCall.request?.function?.name ?? "";
-    return requiresUserApproval(toolName, this.getTrustedToolNames());
+    return requiresUserApproval(toolName, {
+      trustedToolNames: this.getTrustedToolNames(),
+      requireDestructiveApproval: this.getRequireDestructiveApproval(),
+      autoApproveAllowlist: this.getAutoApproveAllowlist(),
+    });
   }
 
   /** Get the App instance from the parent MessageRenderer */

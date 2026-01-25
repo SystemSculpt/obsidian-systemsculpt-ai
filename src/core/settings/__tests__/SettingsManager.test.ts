@@ -48,6 +48,7 @@ jest.mock("../../../types", () => ({
     selectedModelProviders: [],
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
+    toolingRequireApprovalForDestructiveTools: true,
     toolingConcurrencyLimit: 4,
     defaultAgentBudget: 10,
     agentDefaultAction: "approve",
@@ -401,6 +402,13 @@ describe("SettingsManager", () => {
     });
 
     describe("tooling settings validation", () => {
+      it("defaults invalid toolingRequireApprovalForDestructiveTools", () => {
+        const result = validateSettings({
+          ...DEFAULT_SETTINGS,
+          toolingRequireApprovalForDestructiveTools: "nope",
+        });
+        expect(result.toolingRequireApprovalForDestructiveTools).toBe(true);
+      });
 
       it("clamps toolingConcurrencyLimit to min 1", () => {
         const result = validateSettings({

@@ -11,10 +11,6 @@
 - Try a different provider/model to confirm it’s not provider-specific.
 - If the provider rejects tools or images, the plugin may retry without them (you’ll usually see an inline notice/footnote in the UI).
 
-## Agent Mode tools look “stuck” or duplicated
-
-- Command palette → **Clean Up Phantom MCP Tools**
-
 ## Similar Notes empty / embeddings not processing
 
 1. Confirm **Embeddings & Search** is enabled and a model is selected.

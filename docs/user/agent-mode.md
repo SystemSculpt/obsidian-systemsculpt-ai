@@ -44,3 +44,11 @@ Tool names below match the MCP tool definitions in:
 - Approve destructive operations carefully (especially bulk edits/moves).
 - If something looks off, deny the call and ask the model to explain its plan first.
 
+## Safety toggle
+
+In **Settings → Chat & Templates → Agent Mode safety**, you can:
+
+- Require approval for destructive tools (`write`/`edit`/`move`/`trash`).
+- Add an auto-approve allowlist for specific mutating tools (advanced).
+
+External MCP tools still require approval unless explicitly allowlisted.

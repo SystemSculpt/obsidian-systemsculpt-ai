@@ -699,15 +699,13 @@ export class ChatView extends ItemView {
   }
 
   public supportsWebSearch(): boolean {
-    if (this.currentModelSupportsWebSearch !== null) {
-      if (this.currentModelSupportsWebSearch) {
+    if (this.currentModelSupportsWebSearch === true) {
+      return true;
+    }
+
+    if (Array.isArray(this.currentModelSupportedParameters) && this.currentModelSupportedParameters.length > 0) {
+      if (this.currentModelSupportedParameters.includes('web_search_options') || this.currentModelSupportedParameters.includes('plugins')) {
         return true;
-      }
-      if (Array.isArray(this.currentModelSupportedParameters) && this.currentModelSupportedParameters.length > 0) {
-        if (this.currentModelSupportedParameters.includes('web_search_options') || this.currentModelSupportedParameters.includes('plugins')) {
-          return true;
-        }
-        return false;
       }
     }
 
@@ -730,7 +728,7 @@ export class ChatView extends ItemView {
         const model = await this.plugin.modelService.getModelById(canonicalId);
         if (model) {
           if (Array.isArray(model.capabilities)) {
-            modelSupportsWebSearch = model.capabilities.length > 0 ? model.capabilities.includes('web_search') : null;
+            modelSupportsWebSearch = model.capabilities.includes('web_search') ? true : null;
           } else {
             modelSupportsWebSearch = null;
           }
@@ -744,7 +742,7 @@ export class ChatView extends ItemView {
         supportedParameters = [];
       }
     } else {
-      modelSupportsWebSearch = false;
+      modelSupportsWebSearch = null;
       supportedParameters = [];
     }
 

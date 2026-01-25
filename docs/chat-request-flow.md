@@ -66,7 +66,7 @@ The request `messages` array is produced inside `ContextFileService.prepareMessa
 
 - Model availability: errors bubble to `ChatView.handleError()` which switches models or prompts user.
 - Images: detection and conditional retry without images when unsupported.
-- Tools: conditional inclusion based on Agent Mode and provider capability; read-only tools auto-approve, mutating tools require approval unless allowlisted in settings.
+- Tools: conditional inclusion based on Agent Mode and provider capability; read-only tools auto-approve, destructive tools require approval unless allowlisted or confirmations are disabled in settings.
 - Tool schemas are normalized before requests: all properties are marked required for provider compatibility and any `strict` flags are stripped.
 - Continuations: after tools finish, if no newer user message exists, run another assistant stream without resending context files.
 

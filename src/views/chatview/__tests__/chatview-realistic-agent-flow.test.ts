@@ -292,7 +292,7 @@ describe("ChatView realistic agent flow", () => {
     await waitFor(() => readStarted.includes("A") && readStarted.includes("B"));
     expect(executionStartedIds).toEqual(expect.arrayContaining(["call_readA12345678", "call_readB12345678"]));
 
-    // All tools auto-approve now - write_file also goes straight to executing
+    // Internal (non-MCP) tools auto-approve; write_file goes straight to executing.
     const writeCall = createdToolCalls.find((tc) => tc.request?.function?.name === "write_file");
     expect(writeCall?.state).toBe("executing");
     expect(writeCall?.autoApproved).toBe(true);
@@ -325,4 +325,3 @@ describe("ChatView realistic agent flow", () => {
     document.body.removeChild(chatView.containerEl);
   });
 });
-

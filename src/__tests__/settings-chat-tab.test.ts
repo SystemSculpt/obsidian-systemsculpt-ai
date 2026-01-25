@@ -36,6 +36,7 @@ const createPluginStub = (app: App) => {
       enableSystemSculptProvider: false,
       mcpServers: [],
       mcpAutoAcceptTools: [],
+      toolingRequireApprovalForDestructiveTools: true,
       favoriteModels: [],
     },
     modelService: {
@@ -72,6 +73,8 @@ describe("Chat tab native layout", () => {
     await displayChatTabContent(container, tab);
 
     const names = Array.from(container.querySelectorAll('.setting-item .setting-item-name')).map((el) => el.textContent?.trim());
+    expect(names).toContain("Require approval for destructive tools");
+    expect(names).toContain("Auto-approve tool list");
     expect(names).toContain("Favorite models");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });

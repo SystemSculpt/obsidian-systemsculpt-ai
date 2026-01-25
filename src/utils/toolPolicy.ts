@@ -31,6 +31,44 @@ export type ToolApprovalDecision = {
   reason: "non-mutating" | "allowlisted" | "mutating-default" | "invalid";
 };
 
+export type ToolApprovalPolicy = {
+  trustedToolNames?: Set<string>;
+  requireDestructiveApproval?: boolean;
+  autoApproveAllowlist?: string[];
+};
+
+function normalizeToolAllowlist(allowlist: string[] = []): Set<string> {
+  return new Set(
+    (Array.isArray(allowlist) ? allowlist : [])
+      .map((entry) => String(entry ?? "").trim().toLowerCase())
+      .filter((entry) => entry.length > 0)
+  );
+}
+
+export function isToolAllowlisted(functionName: string, allowlist: string[] = []): boolean {
+  const name = String(functionName ?? "").trim().toLowerCase();
+  if (!name) return false;
+
+  const normalizedAllowlist = normalizeToolAllowlist(allowlist);
+  if (normalizedAllowlist.size === 0) return false;
+
+  if (normalizedAllowlist.has(name)) {
+    return true;
+  }
+
+  const { canonicalName } = splitToolName(name);
+  if (canonicalName && normalizedAllowlist.has(canonicalName)) {
+    return true;
+  }
+
+  const mcpKey = toMcpToolKey(name);
+  if (mcpKey && normalizedAllowlist.has(mcpKey)) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Heuristic to determine if a tool mutates the vault or performs high-risk actions.
  */
@@ -92,27 +130,7 @@ export function getToolApprovalDecision(functionName: string, allowlist: string[
     return { autoApprove: true, reason: "non-mutating" };
   }
 
-  const normalizedAllowlist = new Set(
-    (Array.isArray(allowlist) ? allowlist : [])
-      .map((entry) => String(entry ?? "").toLowerCase())
-      .filter((entry) => entry.length > 0)
-  );
-  if (normalizedAllowlist.size === 0) {
-    return { autoApprove: false, reason: "mutating-default" };
-  }
-
-  const lowerName = name.toLowerCase();
-  if (normalizedAllowlist.has(lowerName)) {
-    return { autoApprove: true, reason: "allowlisted" };
-  }
-
-  const { canonicalName } = splitToolName(name);
-  if (canonicalName && normalizedAllowlist.has(canonicalName)) {
-    return { autoApprove: true, reason: "allowlisted" };
-  }
-
-  const mcpKey = toMcpToolKey(name);
-  if (mcpKey && normalizedAllowlist.has(mcpKey)) {
+  if (isToolAllowlisted(name, allowlist)) {
     return { autoApprove: true, reason: "allowlisted" };
   }
 
@@ -140,36 +158,53 @@ const INTERNAL_SERVERS = new Set(["mcp-filesystem", "mcp-youtube"]);
  * Determine if a tool requires explicit user approval before execution.
  *
  * - Built-in filesystem: only write, edit, move, trash require approval
+ * - Allowlisted mutating tools can auto-approve
+ * - Settings can disable destructive tool confirmations
  * - YouTube: never requires approval (read-only)
  * - External MCP servers: all tools require approval
  *
  * @param toolName - The full tool name (e.g., "mcp-filesystem_write")
- * @param trustedToolNames - Set of tool names trusted for this session
+ * @param policy - Policy inputs including trusted tool names and allowlist
  * @returns true if the tool requires user approval, false if it can auto-execute
  */
 export function requiresUserApproval(
   toolName: string,
-  trustedToolNames: Set<string>
+  policy: ToolApprovalPolicy = {}
 ): boolean {
   // If trusted for this session, no approval needed
-  if (trustedToolNames.has(toolName)) {
+  if (policy.trustedToolNames?.has(toolName)) {
     return false;
   }
 
   const { serverId, canonicalName } = splitToolName(toolName);
+  if (!serverId) {
+    return false;
+  }
 
   // YouTube: read-only, never needs approval
   if (serverId === "mcp-youtube") {
     return false;
   }
 
+  const requireDestructiveApproval = policy.requireDestructiveApproval !== false;
+  const allowlisted = isToolAllowlisted(toolName, policy.autoApproveAllowlist || []);
+
   // Filesystem: only specific destructive tools
   if (serverId === "mcp-filesystem") {
-    return DESTRUCTIVE_FILESYSTEM_TOOLS.has(canonicalName);
+    if (!DESTRUCTIVE_FILESYSTEM_TOOLS.has(canonicalName)) {
+      return false;
+    }
+    if (!requireDestructiveApproval) {
+      return false;
+    }
+    return !allowlisted;
   }
 
   // External MCP servers: all tools require approval
   if (serverId && serverId.startsWith("mcp-") && !INTERNAL_SERVERS.has(serverId)) {
+    if (allowlisted) {
+      return false;
+    }
     return true;
   }
 
