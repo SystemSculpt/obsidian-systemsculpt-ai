@@ -442,6 +442,57 @@ describe("ContextFileService", () => {
       expect(result[0].role).toBe("system");
       expect(result[0].content).toContain("helpful AI assistant");
     });
+
+    it("injects Bases syntax guide when the latest user message references a .base file", async () => {
+      const messages: ChatMessage[] = [{ role: "user", content: "Open Projects.base and update filters" }];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(),
+        undefined,
+        undefined,
+        false,
+        true,
+        undefined,
+        "Custom system prompt"
+      );
+
+      expect(result[0].role).toBe("system");
+      expect(String(result[0].content)).toContain("<obsidian_bases_syntax_guide>");
+    });
+
+    it("injects Bases syntax guide when a tool call targets a .base path", async () => {
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Update the database view" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              request: {
+                function: {
+                  arguments: JSON.stringify({ path: "Views/Projects.base" }),
+                },
+              },
+            },
+          ] as any,
+        } as any,
+      ];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(),
+        undefined,
+        undefined,
+        false,
+        true,
+        undefined,
+        "Custom system prompt"
+      );
+
+      expect(result[0].role).toBe("system");
+      expect(String(result[0].content)).toContain("<obsidian_bases_syntax_guide>");
+    });
   });
 
   describe("optimizeToolResultsContext", () => {

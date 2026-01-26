@@ -13,6 +13,7 @@ import {
   writeAdapterText,
   statAdapterPath,
 } from "../utils";
+import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
 
 /**
  * File operations for MCP Filesystem tools (read, write, edit)
@@ -190,6 +191,7 @@ export class FileOperations {
     }
     
     const normalizedPath = normalizePath(normalizeVaultPath(path));
+    const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
     const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 
     if (file && file instanceof TFile) {
@@ -202,8 +204,14 @@ export class FileOperations {
       if (ifExists === 'append') {
         const current = await this.app.vault.read(file);
         const newContent = current + (appendNewline && !current.endsWith('\n') ? '\n' : '') + content;
+        if (isBaseFile) {
+          assertValidObsidianBasesYaml(normalizedPath || path, newContent);
+        }
         await this.app.vault.modify(file, newContent);
       } else {
+        if (isBaseFile) {
+          assertValidObsidianBasesYaml(normalizedPath || path, content);
+        }
         await this.app.vault.modify(file, content);
       }
     } else if (this.shouldUseAdapter(normalizedPath)) {
@@ -215,6 +223,14 @@ export class FileOperations {
       if (exists && ifExists === "error") {
         throw new Error(`File already exists: ${path}`);
       }
+      let nextContent = content;
+      if (exists && ifExists === "append") {
+        const current = await readAdapterText(adapter, normalizedPath);
+        nextContent = current + (appendNewline && !current.endsWith("\n") ? "\n" : "") + content;
+      }
+      if (isBaseFile) {
+        assertValidObsidianBasesYaml(normalizedPath || path, nextContent);
+      }
       if (createDirs) {
         const lastSlash = normalizedPath.lastIndexOf("/");
         if (lastSlash > 0) {
@@ -222,13 +238,11 @@ export class FileOperations {
           await ensureAdapterFolder(adapter, folderPath);
         }
       }
-      let nextContent = content;
-      if (exists && ifExists === "append") {
-        const current = await readAdapterText(adapter, normalizedPath);
-        nextContent = current + (appendNewline && !current.endsWith("\n") ? "\n" : "") + content;
-      }
       await writeAdapterText(adapter, normalizedPath, nextContent);
     } else {
+      if (isBaseFile) {
+        assertValidObsidianBasesYaml(normalizedPath || path, content);
+      }
       // Ensure parent directories exist if requested
       if (createDirs) {
         const lastSlash = normalizedPath.lastIndexOf('/');
@@ -279,6 +293,7 @@ export class FileOperations {
 
     // Read file content and normalize line endings
     const normalizedPath = normalizePath(normalizeVaultPath(filePath));
+    const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
     if (this.shouldUseAdapter(normalizedPath)) {
       const adapter: any = this.app.vault.adapter as any;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
@@ -295,6 +310,9 @@ export class FileOperations {
       }
 
       const diff = createSimpleDiff(content, modifiedContent, filePath);
+      if (isBaseFile) {
+        assertValidObsidianBasesYaml(normalizedPath || filePath, modifiedContent);
+      }
       await writeAdapterText(adapter, normalizedPath, modifiedContent);
       return diff;
     }
@@ -331,6 +349,9 @@ export class FileOperations {
     const diff = createSimpleDiff(content, modifiedContent, resolvedPath);
 
     // Apply the changes to the file
+    if (isBaseFile) {
+      assertValidObsidianBasesYaml(resolvedPath, modifiedContent);
+    }
     await this.app.vault.modify(abstractFile, modifiedContent);
 
     return diff;

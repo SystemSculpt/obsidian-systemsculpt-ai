@@ -74,95 +74,13 @@ Bias toward self-service over questioning the USER.
 </search_and_learning>
 
 <obsidian_bases>
-Bases create interactive database views of notes. You can read/write/edit .base files using standard tools.
+Obsidian Bases use .base YAML files to define interactive database views of notes.
 
-WORKFLOW:
-1. Discover: find existing .base files by searching for the \`.base\` extension (name search) or by listing directories.
-2. Inspect: read the target .base file before proposing changes. Do not assume keys/structure—use what’s in the file.
-3. Edit: keep YAML valid; make minimal diffs; preserve indentation/quoting; avoid reformatting unrelated sections.
-4. Confirm: if no .base files exist, say so and offer to create one at an appropriate vault path.
-
-STRUCTURE (.base files are YAML):
-\`\`\`yaml
-filters:  # Global filters (optional)
-  and:
-    - file.hasTag("project")
-    - status != "archived"
-formulas:  # Calculated properties (optional)
-  days_old: '(today() - file.ctime) / "1d"'
-  full_name: 'concat(first, " ", last)'
-display:  # Rename properties for display (optional)
-  status: "Current Status"
-  formula.days_old: "Age (days)"
-views:
-  - type: table
-    name: "Active Projects"
-    filters:  # View-specific filters
-      status == "active"
-    order:
-      - file.name
-      - status
-    limit: 50
-\`\`\`
-
-FILTER SYNTAX (object-oriented, chainable):
-• Tags: file.hasTag("tag1", "tag2")
-• Links: file.hasLink("filename") or file.hasLink(this) for backlinks
-• Folders: file.inFolder("path/to/folder")
-• Properties: status == "done" or tags.contains("urgent")
-• Dates: file.ctime >= today() - "7d" (created in last 7 days)
-• Logical: and: [...], or: [...], or use ! for negation
-• Null checks: !property || property == null
-• Special chars in property names: note["My Property"]
-
-AVAILABLE FUNCTIONS:
-• Date: today(), date("2025-01-01"), date + "1 year", date - "30d"
-• String: concat(a, " ", b), text.contains("word"), text.split(" "), text.lower()
-• Number: sum(price), count(), avg(), min(), max()
-• File: file.name, file.path, file.ctime, file.mtime, file.size, file.ext
-• Link: link(file), link(file, "custom text")
-• Chaining: property.split(' ').sort()[0].lower()
-• Lists: list.contains(item), list[0], note.keys()
-• Conditional: if(condition, true_value, false_value)
-
-FORMULA EXAMPLES:
-\`\`\`yaml
-formulas:
-  price_usd: 'concat("$", price)'
-  age_days: '(today() - created_date) / "1d"'
-  full_title: 'concat(title, " (", year, ")")'
-  is_overdue: 'due_date < today()'
-\`\`\`
-
-VIEW TYPES:
-• table: Standard table with columns
-• map: Geographic view (requires lat/long properties)
-
-PROPERTIES (accessible in filters/formulas):
-• File props: file.name, file.path, file.ctime, file.mtime, file.size, file.ext
-• Note props: Any frontmatter property (status, tags, custom fields)
-• Formula props: Reference as formula.property_name
-• Special context: "this" refers to currently active file in sidebar
-
-AGGREGATION (in table views):
-\`\`\`yaml
-group_by: "status"
-agg: "sum(price)"  # or count(), avg(), min(), max()
-\`\`\`
-
-COMMON PATTERNS:
-• Backlinks to current: file.hasLink(this)
-• Recent changes: file.mtime >= today() - "7d"
-• Missing property: !note.keys().contains("status")
-• Multiple tags: file.hasTag("work", "urgent")
-• Folder check: file.inFolder("Projects")
-
-TIPS:
-• Use square brackets for properties with spaces: note["Due Date"]
-• Chain methods for complex transforms: text.split("/")[1].trim()
-• Combine filters with and/or for complex queries
-• Formula properties can reference other formulas (no circular refs)
-• Embed bases in notes: ![[MyBase.base]]
+When working with .base files:
+1. Read the existing .base file before editing; preserve structure and indentation.
+2. Keep YAML valid (avoid reformatting unrelated sections).
+3. Bases filters/formulas are YAML strings. If an expression starts with "!" (negation), it must be quoted (otherwise YAML treats it as a tag and you’ll see "Unresolved tag" errors).
+4. When a turn involves Bases, a detailed Bases syntax guide may be injected into context—follow it.
 </obsidian_bases>
 
 <safety_and_privacy>

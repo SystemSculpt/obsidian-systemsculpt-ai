@@ -6,6 +6,8 @@ import { errorLogger } from "../utils/errorLogger";
 import { simpleHash } from "../utils/cryptoUtils";
 import { mapAssistantToolCallsForApi, buildToolResultMessagesFromToolCalls, pruneToolMessagesNotFollowingToolCalls } from "../utils/tooling";
 import { ToolCall } from "../types/toolCalls";
+import { mentionsObsidianBases } from "../utils/obsidianBases";
+import { OBSIDIAN_BASES_SYNTAX_GUIDE } from "../constants/prompts/obsidianBasesSyntaxGuide";
 
 /**
  * Service responsible for handling context files and message preparation
@@ -84,6 +86,41 @@ export class ContextFileService {
 
       return merged;
     });
+  }
+
+  private shouldInjectObsidianBasesGuide(messages: ChatMessage[], contextFiles: Set<string>): boolean {
+    // Trigger if the latest user message mentions Bases, or if any context/tool call references a `.base`.
+    const lastUserMessage = [...messages].reverse().find((m) => m?.role === "user");
+    if (typeof lastUserMessage?.content === "string" && mentionsObsidianBases(lastUserMessage.content)) {
+      return true;
+    }
+
+    for (const entry of contextFiles) {
+      if (!entry || typeof entry !== "string") continue;
+      if (entry.toLowerCase().includes(".base")) return true;
+    }
+
+    for (const msg of messages) {
+      if (msg?.role !== "assistant") continue;
+      const toolCalls = (msg as any)?.tool_calls;
+      if (!Array.isArray(toolCalls)) continue;
+
+      for (const tc of toolCalls) {
+        const rawArgs = tc?.request?.function?.arguments;
+        if (typeof rawArgs !== "string") continue;
+        try {
+          const parsed = JSON.parse(rawArgs);
+          const p = parsed?.path;
+          if (typeof p === "string" && p.toLowerCase().endsWith(".base")) {
+            return true;
+          }
+        } catch {
+          if (rawArgs.toLowerCase().includes(".base")) return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -254,6 +291,11 @@ export class ContextFileService {
       if (!systemPromptContent) {
         systemPromptContent = "You are a helpful AI assistant. Provide clear, accurate, and relevant information.";
       }
+    }
+
+    // Conditionally augment the system prompt with Bases syntax help when relevant.
+    if (systemPromptContent && this.shouldInjectObsidianBasesGuide(messages, contextFiles)) {
+      systemPromptContent = `${systemPromptContent}\n\n${OBSIDIAN_BASES_SYNTAX_GUIDE}`;
     }
 
     // Add system message if we have content

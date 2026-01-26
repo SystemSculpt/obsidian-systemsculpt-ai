@@ -49,6 +49,11 @@ export class ToolCallManager {
   private readonly MAX_FAILED_TOOL_REPEAT_ATTEMPTS = 2;
   private readonly MAX_DENIED_TOOL_REPEAT_ATTEMPTS = 1;
 
+  // Obsidian Bases (.base) YAML validation loop guard
+  private readonly MAX_BASE_YAML_RETRY_ATTEMPTS = 3;
+  private readonly BASE_YAML_RETRY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly baseYamlValidationFailures: Map<string, { count: number; lastAt: number }> = new Map();
+
   constructor(mcpService: MCPService, chatView?: any) {
     this.mcpService = mcpService;
     this.chatView = chatView;
@@ -542,7 +547,8 @@ export class ToolCallManager {
       }
 
       // Execute the tool, respecting timeouts and concurrency limits
-      const result = await this.executeToolWithTimeout(toolCall.request.function.name, args, options);
+      let result = await this.executeToolWithTimeout(toolCall.request.function.name, args, options);
+      result = this.applyBaseYamlRetryGuard(toolCall.request.function.name, args, result);
 
       // Update with result
       toolCall.executionCompletedAt = Date.now();
@@ -607,6 +613,69 @@ export class ToolCallManager {
         toolCall 
       });
     }
+  }
+
+  private applyBaseYamlRetryGuard(toolName: string, args: any, result: ToolCallResult): ToolCallResult {
+    const name = String(toolName ?? "");
+    if (!name.startsWith("mcp-filesystem_")) return result;
+    if (!(name.endsWith("_write") || name.endsWith("_edit"))) return result;
+
+    const rawPath = args && typeof args.path === "string" ? args.path : "";
+    const path = String(rawPath ?? "").trim();
+    if (!path || !path.toLowerCase().endsWith(".base")) return result;
+
+    const key = path.toLowerCase();
+
+    if (result.success) {
+      this.baseYamlValidationFailures.delete(key);
+      return result;
+    }
+
+    if (result.error?.code !== "BASE_YAML_INVALID") {
+      return result;
+    }
+
+    const now = Date.now();
+    const prev = this.baseYamlValidationFailures.get(key);
+    const baseCount = prev && now - prev.lastAt <= this.BASE_YAML_RETRY_WINDOW_MS ? prev.count : 0;
+    const count = baseCount + 1;
+    this.baseYamlValidationFailures.set(key, { count, lastAt: now });
+
+    const error = {
+      ...(result.error || {}),
+      details: {
+        ...(result.error?.details || {}),
+        path,
+        attempts: count,
+        maxAttempts: this.MAX_BASE_YAML_RETRY_ATTEMPTS,
+      },
+    };
+
+    if (count >= this.MAX_BASE_YAML_RETRY_ATTEMPTS) {
+      return {
+        success: false,
+        error: {
+          ...error,
+          code: TOOL_LOOP_ERROR_CODE,
+          message:
+            `Stopped after ${this.MAX_BASE_YAML_RETRY_ATTEMPTS} invalid YAML attempts writing ${path}. ` +
+            "Fix the YAML and try again.",
+          details: {
+            ...(error.details || {}),
+            originalCode: "BASE_YAML_INVALID",
+          },
+        },
+      };
+    }
+
+    const attemptLine = `\n\nBases YAML validation failed (attempt ${count}/${this.MAX_BASE_YAML_RETRY_ATTEMPTS}). Fix the YAML and retry.`;
+    return {
+      success: false,
+      error: {
+        ...error,
+        message: `${error.message || "Invalid YAML."}${attemptLine}`,
+      },
+    };
   }
 
   /**
