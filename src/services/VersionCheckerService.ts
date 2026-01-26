@@ -413,7 +413,7 @@ export class VersionCheckerService {
   private openChangelogTab(): void {
     import('../modals/ChangeLogModal')
       .then(({ ChangeLogModal }) => {
-        const modal = new ChangeLogModal(this.app);
+        const modal = new ChangeLogModal(this.app, this.plugin);
         modal.open();
       })
       .catch(() => {

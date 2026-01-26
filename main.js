@@ -2717,6 +2717,723 @@ var init_StandardModelSelectionModal = __esm({
   }
 });
 
+// src/utils/errorLogger.ts
+var errorLogger_exports = {};
+__export(errorLogger_exports, {
+  errorLogger: () => errorLogger
+});
+var LEVEL_ORDER, ErrorLogger, errorLogger;
+var init_errorLogger = __esm({
+  "src/utils/errorLogger.ts"() {
+    LEVEL_ORDER = {
+      error: 0,
+      warn: 1,
+      info: 2,
+      debug: 3
+    };
+    ErrorLogger = class _ErrorLogger {
+      constructor() {
+        this.history = [];
+        this.maxHistory = 500;
+        this.debugMode = false;
+        this.minimumLevel = "warn";
+      }
+      static getInstance() {
+        if (!_ErrorLogger.instance) {
+          _ErrorLogger.instance = new _ErrorLogger();
+        }
+        return _ErrorLogger.instance;
+      }
+      setDebugMode(enabled) {
+        this.debugMode = !!enabled;
+      }
+      setMinimumLevel(level) {
+        this.minimumLevel = level;
+      }
+      log(level, message, error, context) {
+        const entry = {
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          level,
+          message,
+          context: context && Object.keys(context).length > 0 ? context : void 0,
+          error: this.serializeError(error)
+        };
+        if (!entry.error) delete entry.error;
+        this.history.push(entry);
+        if (this.history.length > this.maxHistory) {
+          this.history.shift();
+        }
+        if (!this.shouldEmit(level)) {
+          return;
+        }
+        const consoleArgs = [`[SystemSculpt][${level.toUpperCase()}] ${message}`];
+        if (entry.context) {
+          consoleArgs.push(entry.context);
+        }
+        if (error instanceof Error) {
+          consoleArgs.push(error);
+        } else if (typeof error !== "undefined") {
+          consoleArgs.push(error);
+        }
+        try {
+          this.resolveConsoleMethod(level).apply(console, consoleArgs);
+        } catch (e) {
+          console.log(`[SystemSculpt][${level.toUpperCase()}] ${message}`);
+        }
+      }
+      error(message, error, context) {
+        this.log("error", message, error, context);
+      }
+      warn(message, context) {
+        this.log("warn", message, void 0, context);
+      }
+      info(message, context) {
+        this.log("info", message, void 0, context);
+      }
+      debug(message, context) {
+        this.log("debug", message, void 0, context);
+      }
+      getHistory() {
+        return [...this.history];
+      }
+      clearHistory() {
+        this.history = [];
+      }
+      exportLogs() {
+        try {
+          return JSON.stringify(this.history, null, 2);
+        } catch (e) {
+          return "[]";
+        }
+      }
+      shouldEmit(level) {
+        if (this.debugMode) return true;
+        return LEVEL_ORDER[level] <= LEVEL_ORDER[this.minimumLevel];
+      }
+      resolveConsoleMethod(level) {
+        if (typeof console === "undefined") {
+          return () => {
+          };
+        }
+        switch (level) {
+          case "error":
+            return console.error ? console.error.bind(console) : console.log.bind(console);
+          case "warn":
+            return console.warn ? console.warn.bind(console) : console.log.bind(console);
+          case "info":
+            return console.info ? console.info.bind(console) : console.log.bind(console);
+          default:
+            return console.debug ? console.debug.bind(console) : console.log.bind(console);
+        }
+      }
+      serializeError(error) {
+        if (!error) return void 0;
+        if (error instanceof Error) {
+          const output = {
+            name: error.name,
+            message: error.message
+          };
+          if (typeof error.stack === "string") {
+            output.stack = error.stack;
+          }
+          const extra = error;
+          if (typeof extra.code !== "undefined") {
+            output.code = extra.code;
+          }
+          if (typeof extra.status !== "undefined") {
+            output.status = extra.status;
+          }
+          if (typeof extra.retryInMs === "number") {
+            output.retryInMs = extra.retryInMs;
+          }
+          if (typeof extra.details !== "undefined") {
+            output.details = extra.details;
+          }
+          return output;
+        }
+        if (typeof error === "object") {
+          try {
+            return JSON.parse(JSON.stringify(error));
+          } catch (e) {
+            return { message: String(error) };
+          }
+        }
+        return { message: String(error) };
+      }
+    };
+    errorLogger = ErrorLogger.getInstance();
+  }
+});
+
+// src/utils/httpClient.ts
+var httpClient_exports = {};
+__export(httpClient_exports, {
+  httpRequest: () => httpRequest,
+  isHostTemporarilyDisabled: () => isHostTemporarilyDisabled
+});
+function getHost(url) {
+  try {
+    return new URL(url).host;
+  } catch (e) {
+    return "";
+  }
+}
+function isLocalHost(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname === "host.docker.internal";
+  } catch (e) {
+    return false;
+  }
+}
+function normalizeHeaders(method, headers, body) {
+  const out = { ...headers || {} };
+  const m = (method || "GET").toUpperCase();
+  if (m === "GET") {
+    for (const k of Object.keys(out)) {
+      if (k.toLowerCase() === "content-type") delete out[k];
+    }
+  } else if (body && !Object.keys(out).some((k) => k.toLowerCase() === "content-type")) {
+    out["Content-Type"] = "application/json";
+  }
+  if (!Object.keys(out).some((k) => k.toLowerCase() === "user-agent")) {
+    out["User-Agent"] = USER_AGENT;
+  }
+  return out;
+}
+async function httpRequest(opts) {
+  var _a;
+  const method = opts.method || "GET";
+  const headers = normalizeHeaders(method, opts.headers, opts.body);
+  const host = getHost(opts.url);
+  const localHost = isLocalHost(opts.url);
+  const now = Date.now();
+  const state = hostState.get(host);
+  const disabled = !!((state == null ? void 0 : state.disabledUntil) && state.disabledUntil > now);
+  const timeoutMs = Math.max(0, Number(opts.timeoutMs || 0));
+  async function withTimeout2(promise) {
+    if (!timeoutMs) return promise;
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("Request timed out"));
+      }, timeoutMs);
+      promise.then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      }).catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+  async function requestLocalViaNode() {
+    const url = new URL(opts.url);
+    const isHttps = url.protocol === "https:";
+    const httpLib = require("http");
+    const httpsLib = require("https");
+    const lib = isHttps ? httpsLib : httpLib;
+    return await new Promise((resolve, reject) => {
+      const req = lib.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port ? Number(url.port) : void 0,
+          method,
+          path: `${url.pathname}${url.search}`,
+          headers
+        },
+        (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => {
+            if (Buffer.isBuffer(chunk)) {
+              chunks.push(chunk);
+            } else {
+              chunks.push(Buffer.from(chunk));
+            }
+          });
+          res.on("end", () => {
+            var _a2;
+            clearTimer();
+            const text = Buffer.concat(chunks).toString("utf8");
+            const headersOut = {};
+            for (const [key, value] of Object.entries(res.headers)) {
+              if (typeof value === "string") {
+                headersOut[key] = value;
+              } else if (Array.isArray(value)) {
+                headersOut[key] = value.join(", ");
+              }
+            }
+            resolve({ status: (_a2 = res.statusCode) != null ? _a2 : 0, text, headers: headersOut });
+          });
+        }
+      );
+      const timer = timeoutMs ? setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
+      const clearTimer = () => {
+        if (timer) clearTimeout(timer);
+      };
+      req.on("error", (error) => {
+        clearTimer();
+        reject(error);
+      });
+      req.on("close", clearTimer);
+      if (opts.body) {
+        req.write(opts.body);
+      }
+      req.end();
+    });
+  }
+  if (disabled) {
+    const waitMs = (state.disabledUntil || 0) - now;
+    const mins = Math.max(1, Math.round(waitMs / 6e4));
+    const message = `Host temporarily unavailable (circuit open). Retry in ~${mins} min.`;
+    try {
+      const { errorLogger: errorLogger3 } = await Promise.resolve().then(() => (init_errorLogger(), errorLogger_exports));
+      errorLogger3.debug("HTTP circuit open; skipping request", { source: "httpClient", method: "httpRequest", metadata: { host, retryInMs: waitMs } });
+    } catch (e) {
+    }
+    const shortError = new Error(message);
+    shortError.status = 0;
+    shortError.retryInMs = waitMs;
+    throw shortError;
+  }
+  try {
+    const r = localHost ? await requestLocalViaNode() : await withTimeout2(Obsidian.requestUrl({ url: opts.url, method, headers, body: opts.body, throw: false }));
+    const status = r.status || 0;
+    const text = r.text;
+    let parsed = void 0;
+    try {
+      parsed = text ? JSON.parse(text) : void 0;
+    } catch (e) {
+    }
+    if (!status || status >= 400) {
+      const hdrs2 = r.headers || {};
+      throw { status: status || 500, text, json: parsed, headers: hdrs2, message: text || parsed && (((_a = parsed.error) == null ? void 0 : _a.message) || parsed.message) || `HTTP ${status}` };
+    }
+    const hdrs = r.headers || {};
+    if (host) hostState.set(host, { failures: 0, disabledUntil: void 0 });
+    return { status, text, json: parsed, headers: hdrs };
+  } catch (err) {
+    const msg = String((err == null ? void 0 : err.message) || "");
+    const status = typeof (err == null ? void 0 : err.status) === "number" ? err.status : void 0;
+    const responseText = typeof (err == null ? void 0 : err.text) === "string" ? err.text : "";
+    const looksHtml = responseText.trim().startsWith("<");
+    const isGatewayish = status === 502 || status === 503 || status === 504;
+    const isHtmlForbidden = status === 403 && looksHtml;
+    const isServerDegraded = isGatewayish || !!status && status >= 500 && looksHtml;
+    const isNetworkish = msg.includes("net::ERR") || msg.includes("ENOTFOUND") || msg.includes("ECONN") || msg.includes("ECONNRESET") || msg.includes("REFUSED");
+    const shouldBackoff = isNetworkish || isServerDegraded;
+    if (host) {
+      const nextState = hostState.get(host) || { failures: 0, disabledUntil: void 0 };
+      if (shouldBackoff) {
+        nextState.failures += 1;
+        const backoffMinutes = nextState.failures <= 1 ? 0 : Math.min(60, 2 * Math.pow(2, Math.min(5, nextState.failures - 2)));
+        if (backoffMinutes > 0) {
+          nextState.disabledUntil = Date.now() + backoffMinutes * 60 * 1e3;
+        }
+      } else {
+        nextState.failures = 0;
+        nextState.disabledUntil = void 0;
+      }
+      hostState.set(host, nextState);
+      try {
+        const { errorLogger: errorLogger3 } = await Promise.resolve().then(() => (init_errorLogger(), errorLogger_exports));
+        const metadata = { host, failures: nextState.failures, disabledUntil: nextState.disabledUntil, status, message: msg, htmlForbidden: isHtmlForbidden };
+        if (shouldBackoff) {
+          errorLogger3.warn("HTTP gateway error; circuit update", { source: "httpClient", method: "httpRequest", metadata });
+        } else if (isHtmlForbidden) {
+          errorLogger3.debug("HTTP 403 HTML forbidden; ignoring for circuit", { source: "httpClient", method: "httpRequest", metadata });
+        } else {
+          errorLogger3.debug("HTTP error; circuit reset", { source: "httpClient", method: "httpRequest", metadata });
+        }
+      } catch (e) {
+      }
+    }
+    throw err;
+  }
+}
+function isHostTemporarilyDisabled(url) {
+  const host = getHost(url);
+  if (!host) return { disabled: false, retryInMs: 0 };
+  const s = hostState.get(host);
+  const now = Date.now();
+  if ((s == null ? void 0 : s.disabledUntil) && s.disabledUntil > now) {
+    return { disabled: true, retryInMs: s.disabledUntil - now };
+  }
+  return { disabled: false, retryInMs: 0 };
+}
+var Obsidian, hostState, USER_AGENT;
+var init_httpClient = __esm({
+  "src/utils/httpClient.ts"() {
+    Obsidian = __toESM(require("obsidian"), 1);
+    hostState = /* @__PURE__ */ new Map();
+    USER_AGENT = "SystemSculpt-Obsidian";
+  }
+});
+
+// src/constants/api.ts
+var api_exports = {};
+__export(api_exports, {
+  API_BASE_URL: () => API_BASE_URL,
+  DEVELOPMENT_MODE: () => DEVELOPMENT_MODE,
+  SYSTEMSCULPT_API_ENDPOINTS: () => SYSTEMSCULPT_API_ENDPOINTS,
+  SYSTEMSCULPT_API_HEADERS: () => SYSTEMSCULPT_API_HEADERS,
+  WEBSITE_API_BASE_URL: () => WEBSITE_API_BASE_URL,
+  getServerUrl: () => getServerUrl
+});
+function getServerUrl(productionUrl, developmentUrl) {
+  return DEVELOPMENT_MODE === "DEVELOPMENT" ? developmentUrl : productionUrl;
+}
+var DEVELOPMENT_MODE, API_BASE_URL, WEBSITE_API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS, SYSTEMSCULPT_API_HEADERS;
+var init_api = __esm({
+  "src/constants/api.ts"() {
+    DEVELOPMENT_MODE = "PRODUCTION";
+    API_BASE_URL = getServerUrl(
+      "https://api.systemsculpt.com/api/v1",
+      "http://localhost:3001/api/v1"
+    );
+    WEBSITE_API_BASE_URL = getServerUrl(
+      "https://systemsculpt.com/api/plugin",
+      "http://localhost:3000/api/plugin"
+    );
+    SYSTEMSCULPT_API_ENDPOINTS = {
+      PLUGINS: {
+        LATEST: (pluginId) => `/plugins/${pluginId}/latest`,
+        RELEASES: (pluginId) => `/plugins/${pluginId}/releases`
+      },
+      LICENSE: {
+        VALIDATE: () => `/license/validate`
+      },
+      MODELS: {
+        LIST: "/models",
+        GET: (modelId) => `/models/${modelId}`
+      },
+      CHAT: {
+        COMPLETIONS: "/chat/completions"
+      },
+      EMBEDDINGS: {
+        GENERATE: "/embeddings"
+      },
+      SYSTEM_PROMPTS: {
+        GET: (id) => `/system-prompts/${id}`,
+        LIST: "/system-prompts"
+      },
+      DOCUMENTS: {
+        PROCESS: "/documents/process",
+        GET: (id) => `/documents/${id}`,
+        DOWNLOAD: (id) => `/documents/${id}/download`
+      },
+      YOUTUBE: {
+        TRANSCRIPTS: "/youtube/transcripts",
+        TRANSCRIPT_STATUS: (jobId) => `/youtube/transcripts/${jobId}`
+      }
+    };
+    SYSTEMSCULPT_API_HEADERS = {
+      DEFAULT: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-SystemSculpt-Client": "obsidian-plugin"
+      },
+      WITH_LICENSE: (licenseKey) => ({
+        ...SYSTEMSCULPT_API_HEADERS.DEFAULT,
+        "x-license-key": licenseKey
+      })
+    };
+  }
+});
+
+// src/constants/externalServices.ts
+function getExternalUrl(productionUrl, developmentUrl) {
+  return DEVELOPMENT_MODE === "DEVELOPMENT" && developmentUrl ? developmentUrl : productionUrl;
+}
+var GITHUB_API, AI_PROVIDERS, LOCAL_SERVICES, SYSTEMSCULPT_WEBSITE, MCP_DOCS, SERVICE_HEADERS;
+var init_externalServices = __esm({
+  "src/constants/externalServices.ts"() {
+    init_api();
+    GITHUB_API = {
+      BASE_URL: getExternalUrl(
+        "https://api.github.com",
+        "https://api.github.com"
+        // GitHub API doesn't have a dev alternative
+      ),
+      RELEASES: (owner, repo) => `${GITHUB_API.BASE_URL}/repos/${owner}/${repo}/releases`,
+      RELEASE_URL: (owner, repo) => `https://github.com/${owner}/${repo}/releases`
+    };
+    AI_PROVIDERS = {
+      OPENAI: {
+        BASE_URL: getExternalUrl("https://api.openai.com/v1"),
+        AUDIO_TRANSCRIPTIONS: getExternalUrl("https://api.openai.com/v1/audio/transcriptions")
+      },
+      ANTHROPIC: {
+        BASE_URL: getExternalUrl("https://api.anthropic.com/v1"),
+        LEGACY_BASE: getExternalUrl("https://api.anthropic.com")
+        // For older integrations
+      },
+      OPENROUTER: {
+        BASE_URL: getExternalUrl("https://openrouter.ai/api/v1"),
+        CHAT_COMPLETIONS: getExternalUrl("https://openrouter.ai/api/v1/chat/completions"),
+        MODELS: getExternalUrl("https://openrouter.ai/api/v1/models")
+      },
+      MINIMAX: {
+        BASE_URL: getExternalUrl("https://api.minimax.io/v1")
+      },
+      MOONSHOT: {
+        BASE_URL: getExternalUrl("https://api.moonshot.ai/v1")
+      },
+      GROQ: {
+        BASE_URL: getExternalUrl("https://api.groq.com/openai/v1"),
+        AUDIO_TRANSCRIPTIONS: getExternalUrl("https://api.groq.com/openai/v1/audio/transcriptions")
+      }
+    };
+    LOCAL_SERVICES = {
+      OLLAMA: {
+        BASE_URL: "http://localhost:11434/v1"
+      },
+      LM_STUDIO: {
+        BASE_URL: "http://localhost:1234/v1"
+      },
+      LOCAL_AI: {
+        CHAT_COMPLETIONS: "http://localhost:8000/v1/chat/completions",
+        MODELS: "http://localhost:8000/v1/models"
+      },
+      LOCAL_WHISPER: {
+        AUDIO_TRANSCRIPTIONS: "http://localhost:9000/v1/audio/transcriptions"
+      }
+    };
+    SYSTEMSCULPT_WEBSITE = {
+      BASE_URL: getExternalUrl("https://systemsculpt.com", "http://localhost:3000"),
+      // Website development server
+      LIFETIME: getExternalUrl("https://systemsculpt.com/lifetime", "http://localhost:3000/lifetime"),
+      MONTHLY: getExternalUrl("https://systemsculpt.com/resources/a05a7abf-b8bb-41cf-9190-8b795d117fda", "http://localhost:3000/resources/a05a7abf-b8bb-41cf-9190-8b795d117fda"),
+      DOCS: getExternalUrl("https://systemsculpt.com/docs", "http://localhost:3000/docs"),
+      SUPPORT: getExternalUrl("https://systemsculpt.com/contact", "http://localhost:3000/contact"),
+      LICENSE: getExternalUrl("https://systemsculpt.com/resources?tab=license", "http://localhost:3000/resources?tab=license"),
+      FEEDBACK: getExternalUrl(
+        "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A",
+        "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A"
+      )
+    };
+    MCP_DOCS = {
+      BASE_URL: "https://modelcontextprotocol.io"
+      // No dev alternative
+    };
+    SERVICE_HEADERS = {
+      OPENROUTER: {
+        "HTTP-Referer": SYSTEMSCULPT_WEBSITE.BASE_URL,
+        "X-Title": "SystemSculpt AI"
+      }
+    };
+  }
+});
+
+// src/services/ChangeLogService.ts
+var ChangeLogService_exports = {};
+__export(ChangeLogService_exports, {
+  ChangeLogService: () => ChangeLogService,
+  GITHUB_OWNER: () => GITHUB_OWNER,
+  GITHUB_REPO: () => GITHUB_REPO
+});
+function getHeader(headers, name) {
+  if (!headers) return void 0;
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return void 0;
+}
+function toIsoOrUndefined(value) {
+  if (typeof value !== "string") return void 0;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : void 0;
+}
+function formatReleaseDate(iso) {
+  if (!iso) return (/* @__PURE__ */ new Date()).toLocaleDateString();
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return (/* @__PURE__ */ new Date()).toLocaleDateString();
+  return date.toLocaleDateString(void 0, { year: "numeric", month: "short", day: "numeric" });
+}
+function normalizeVersion(raw) {
+  if (typeof raw !== "string") return "Unknown";
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase().startsWith("v") && trimmed.length > 1 && /\d/.test(trimmed[1])) {
+    return trimmed.slice(1);
+  }
+  return trimmed;
+}
+function isValidCacheFile(value) {
+  if (!value || typeof value !== "object") return false;
+  const cache = value;
+  if (cache.schemaVersion !== 1) return false;
+  if (typeof cache.fetchedAt !== "number") return false;
+  if (!Array.isArray(cache.entries)) return false;
+  return true;
+}
+function rateLimitRetryMs(err) {
+  var _a;
+  const headers = (err == null ? void 0 : err.headers) || ((_a = err == null ? void 0 : err.response) == null ? void 0 : _a.headers) || {};
+  const resetRaw = getHeader(headers, "x-ratelimit-reset");
+  const remainingRaw = getHeader(headers, "x-ratelimit-remaining");
+  const status = typeof (err == null ? void 0 : err.status) === "number" ? err.status : void 0;
+  const remaining = remainingRaw ? Number.parseInt(remainingRaw, 10) : NaN;
+  const resetSeconds = resetRaw ? Number.parseInt(resetRaw, 10) : NaN;
+  const isPrimaryLimit = status === 403 && Number.isFinite(remaining) && remaining <= 0 && Number.isFinite(resetSeconds) && resetSeconds > 0;
+  if (!isPrimaryLimit) return 0;
+  const retryAtMs = resetSeconds * 1e3;
+  return Math.max(0, retryAtMs - Date.now());
+}
+function buildFallbackEntry(message) {
+  return [
+    {
+      version: "Unavailable",
+      date: (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "short", day: "numeric" }),
+      notes: message,
+      url: ChangeLogService.getReleasesPageUrl()
+    }
+  ];
+}
+var GITHUB_OWNER, GITHUB_REPO, CACHE_FILE_NAME, CACHE_TTL_MS, memoryCache, inFlightFetch, ChangeLogService;
+var init_ChangeLogService = __esm({
+  "src/services/ChangeLogService.ts"() {
+    init_externalServices();
+    GITHUB_OWNER = "SystemSculpt";
+    GITHUB_REPO = "obsidian-systemsculpt-ai";
+    CACHE_FILE_NAME = "changelog-github-releases.v1.json";
+    CACHE_TTL_MS = 60 * 60 * 1e3;
+    memoryCache = null;
+    inFlightFetch = null;
+    ChangeLogService = class _ChangeLogService {
+      static getReleasesPageUrl() {
+        return GITHUB_API.RELEASE_URL(GITHUB_OWNER, GITHUB_REPO);
+      }
+      static async warmCache(plugin) {
+        try {
+          await _ChangeLogService.getReleases(plugin, { forceRefresh: false, allowStale: true });
+        } catch (e) {
+        }
+      }
+      static async getReleases(plugin, options = {}) {
+        var _a, _b, _c;
+        if (!(plugin == null ? void 0 : plugin.storage)) {
+          return buildFallbackEntry("Changelog unavailable: storage not initialized.");
+        }
+        const now = Date.now();
+        const forceRefresh = (_a = options.forceRefresh) != null ? _a : false;
+        const allowStale = (_b = options.allowStale) != null ? _b : true;
+        const storage = plugin.storage;
+        const cacheFromDisk = await storage.readFile("cache", CACHE_FILE_NAME, true);
+        const diskCache = isValidCacheFile(cacheFromDisk) ? cacheFromDisk : null;
+        if (diskCache) memoryCache = diskCache;
+        const cache = memoryCache;
+        const isFresh = !!(cache && now - cache.fetchedAt < CACHE_TTL_MS);
+        const isRateLimited = !!((cache == null ? void 0 : cache.rateLimitedUntil) && now < cache.rateLimitedUntil);
+        if (!forceRefresh) {
+          if (((_c = cache == null ? void 0 : cache.entries) == null ? void 0 : _c.length) && (isFresh || isRateLimited)) {
+            return cache.entries;
+          }
+        }
+        if (inFlightFetch && !forceRefresh) {
+          return await inFlightFetch;
+        }
+        const fetchPromise = (async () => {
+          var _a2, _b2, _c2, _d;
+          const apiUrl = `${GITHUB_API.RELEASES(GITHUB_OWNER, GITHUB_REPO)}?per_page=100`;
+          try {
+            const headers = {
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28"
+            };
+            if (!forceRefresh && (cache == null ? void 0 : cache.etag)) {
+              headers["If-None-Match"] = cache.etag;
+            } else if (!forceRefresh && (cache == null ? void 0 : cache.lastModified)) {
+              headers["If-Modified-Since"] = cache.lastModified;
+            }
+            const { httpRequest: httpRequest2 } = await Promise.resolve().then(() => (init_httpClient(), httpClient_exports));
+            const response = await httpRequest2({
+              url: apiUrl,
+              method: "GET",
+              headers,
+              timeoutMs: 15e3
+            });
+            if (response.status === 304) {
+              if ((_a2 = cache == null ? void 0 : cache.entries) == null ? void 0 : _a2.length) {
+                const updated = {
+                  ...cache,
+                  fetchedAt: now,
+                  rateLimitedUntil: void 0
+                };
+                memoryCache = updated;
+                await storage.writeFile("cache", CACHE_FILE_NAME, updated);
+                return updated.entries;
+              }
+              return buildFallbackEntry("Changelog temporarily unavailable (no cached copy).");
+            }
+            if (response.status !== 200) {
+              if (allowStale && ((_b2 = cache == null ? void 0 : cache.entries) == null ? void 0 : _b2.length)) return cache.entries;
+              return buildFallbackEntry("Changelog temporarily unavailable due to a network error.");
+            }
+            const list = Array.isArray(response.json) ? response.json : [];
+            const entries = list.filter((r) => r && typeof r === "object" && !r.draft).map((r) => {
+              var _a3;
+              const publishedAt = (_a3 = toIsoOrUndefined(r.published_at)) != null ? _a3 : toIsoOrUndefined(r.created_at);
+              return {
+                version: normalizeVersion(r.tag_name),
+                date: formatReleaseDate(publishedAt),
+                notes: typeof r.body === "string" && r.body.trim().length > 0 ? r.body : "No release notes provided.",
+                url: typeof r.html_url === "string" ? r.html_url : _ChangeLogService.getReleasesPageUrl()
+              };
+            }).filter((entry) => entry.version !== "Unknown");
+            const etag = getHeader(response.headers, "etag");
+            const lastModified = getHeader(response.headers, "last-modified");
+            const nextCache = {
+              schemaVersion: 1,
+              fetchedAt: now,
+              etag,
+              lastModified,
+              entries
+            };
+            memoryCache = nextCache;
+            await storage.writeFile("cache", CACHE_FILE_NAME, nextCache);
+            return entries;
+          } catch (error) {
+            const retryInMs = rateLimitRetryMs(error);
+            if (retryInMs > 0) {
+              const until = Date.now() + retryInMs;
+              if (memoryCache) {
+                memoryCache = { ...memoryCache, rateLimitedUntil: until };
+                await storage.writeFile("cache", CACHE_FILE_NAME, memoryCache);
+              }
+              if (allowStale && ((_c2 = cache == null ? void 0 : cache.entries) == null ? void 0 : _c2.length)) {
+                return cache.entries;
+              }
+              const retryAt = new Date(until).toLocaleTimeString(void 0, { hour: "numeric", minute: "2-digit" });
+              return buildFallbackEntry(`Changelog temporarily unavailable due to GitHub API rate limiting. Try again after ${retryAt}.`);
+            }
+            if (allowStale && ((_d = cache == null ? void 0 : cache.entries) == null ? void 0 : _d.length)) {
+              return cache.entries;
+            }
+            const message = (error == null ? void 0 : error.message) ? String(error.message) : "";
+            if (message.toLowerCase().includes("timed out")) {
+              return buildFallbackEntry("Changelog temporarily unavailable (request timed out).");
+            }
+            return buildFallbackEntry("Changelog temporarily unavailable due to a network error.");
+          } finally {
+            if (inFlightFetch === fetchPromise) {
+              inFlightFetch = null;
+            }
+          }
+        })();
+        inFlightFetch = fetchPromise;
+        return await fetchPromise;
+      }
+      static findIndexByVersion(entries, version) {
+        if (!version) return 0;
+        const candidates = [version, version.startsWith("v") ? version.substring(1) : `v${version}`];
+        const index = entries.findIndex((e) => candidates.includes(e.version));
+        return index >= 0 ? index : 0;
+      }
+    };
+  }
+});
+
 // src/commands/RunAudioAnalysis.ts
 var RunAudioAnalysis_exports = {};
 __export(RunAudioAnalysis_exports, {
@@ -3020,154 +3737,6 @@ var init_favorites = __esm({
       modelSortOrder: "default"
       // Default to natural order
     };
-  }
-});
-
-// src/utils/errorLogger.ts
-var errorLogger_exports = {};
-__export(errorLogger_exports, {
-  errorLogger: () => errorLogger
-});
-var LEVEL_ORDER, ErrorLogger, errorLogger;
-var init_errorLogger = __esm({
-  "src/utils/errorLogger.ts"() {
-    LEVEL_ORDER = {
-      error: 0,
-      warn: 1,
-      info: 2,
-      debug: 3
-    };
-    ErrorLogger = class _ErrorLogger {
-      constructor() {
-        this.history = [];
-        this.maxHistory = 500;
-        this.debugMode = false;
-        this.minimumLevel = "warn";
-      }
-      static getInstance() {
-        if (!_ErrorLogger.instance) {
-          _ErrorLogger.instance = new _ErrorLogger();
-        }
-        return _ErrorLogger.instance;
-      }
-      setDebugMode(enabled) {
-        this.debugMode = !!enabled;
-      }
-      setMinimumLevel(level) {
-        this.minimumLevel = level;
-      }
-      log(level, message, error, context) {
-        const entry = {
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          level,
-          message,
-          context: context && Object.keys(context).length > 0 ? context : void 0,
-          error: this.serializeError(error)
-        };
-        if (!entry.error) delete entry.error;
-        this.history.push(entry);
-        if (this.history.length > this.maxHistory) {
-          this.history.shift();
-        }
-        if (!this.shouldEmit(level)) {
-          return;
-        }
-        const consoleArgs = [`[SystemSculpt][${level.toUpperCase()}] ${message}`];
-        if (entry.context) {
-          consoleArgs.push(entry.context);
-        }
-        if (error instanceof Error) {
-          consoleArgs.push(error);
-        } else if (typeof error !== "undefined") {
-          consoleArgs.push(error);
-        }
-        try {
-          this.resolveConsoleMethod(level).apply(console, consoleArgs);
-        } catch (e) {
-          console.log(`[SystemSculpt][${level.toUpperCase()}] ${message}`);
-        }
-      }
-      error(message, error, context) {
-        this.log("error", message, error, context);
-      }
-      warn(message, context) {
-        this.log("warn", message, void 0, context);
-      }
-      info(message, context) {
-        this.log("info", message, void 0, context);
-      }
-      debug(message, context) {
-        this.log("debug", message, void 0, context);
-      }
-      getHistory() {
-        return [...this.history];
-      }
-      clearHistory() {
-        this.history = [];
-      }
-      exportLogs() {
-        try {
-          return JSON.stringify(this.history, null, 2);
-        } catch (e) {
-          return "[]";
-        }
-      }
-      shouldEmit(level) {
-        if (this.debugMode) return true;
-        return LEVEL_ORDER[level] <= LEVEL_ORDER[this.minimumLevel];
-      }
-      resolveConsoleMethod(level) {
-        if (typeof console === "undefined") {
-          return () => {
-          };
-        }
-        switch (level) {
-          case "error":
-            return console.error ? console.error.bind(console) : console.log.bind(console);
-          case "warn":
-            return console.warn ? console.warn.bind(console) : console.log.bind(console);
-          case "info":
-            return console.info ? console.info.bind(console) : console.log.bind(console);
-          default:
-            return console.debug ? console.debug.bind(console) : console.log.bind(console);
-        }
-      }
-      serializeError(error) {
-        if (!error) return void 0;
-        if (error instanceof Error) {
-          const output = {
-            name: error.name,
-            message: error.message
-          };
-          if (typeof error.stack === "string") {
-            output.stack = error.stack;
-          }
-          const extra = error;
-          if (typeof extra.code !== "undefined") {
-            output.code = extra.code;
-          }
-          if (typeof extra.status !== "undefined") {
-            output.status = extra.status;
-          }
-          if (typeof extra.retryInMs === "number") {
-            output.retryInMs = extra.retryInMs;
-          }
-          if (typeof extra.details !== "undefined") {
-            output.details = extra.details;
-          }
-          return output;
-        }
-        if (typeof error === "object") {
-          try {
-            return JSON.parse(JSON.stringify(error));
-          } catch (e) {
-            return { message: String(error) };
-          }
-        }
-        return { message: String(error) };
-      }
-    };
-    errorLogger = ErrorLogger.getInstance();
   }
 });
 
@@ -3986,77 +4555,6 @@ var init_PromptBuilder = __esm({
   }
 });
 
-// src/constants/api.ts
-var api_exports = {};
-__export(api_exports, {
-  API_BASE_URL: () => API_BASE_URL,
-  DEVELOPMENT_MODE: () => DEVELOPMENT_MODE,
-  SYSTEMSCULPT_API_ENDPOINTS: () => SYSTEMSCULPT_API_ENDPOINTS,
-  SYSTEMSCULPT_API_HEADERS: () => SYSTEMSCULPT_API_HEADERS,
-  WEBSITE_API_BASE_URL: () => WEBSITE_API_BASE_URL,
-  getServerUrl: () => getServerUrl
-});
-function getServerUrl(productionUrl, developmentUrl) {
-  return DEVELOPMENT_MODE === "DEVELOPMENT" ? developmentUrl : productionUrl;
-}
-var DEVELOPMENT_MODE, API_BASE_URL, WEBSITE_API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS, SYSTEMSCULPT_API_HEADERS;
-var init_api = __esm({
-  "src/constants/api.ts"() {
-    DEVELOPMENT_MODE = "PRODUCTION";
-    API_BASE_URL = getServerUrl(
-      "https://api.systemsculpt.com/api/v1",
-      "http://localhost:3001/api/v1"
-    );
-    WEBSITE_API_BASE_URL = getServerUrl(
-      "https://systemsculpt.com/api/plugin",
-      "http://localhost:3000/api/plugin"
-    );
-    SYSTEMSCULPT_API_ENDPOINTS = {
-      PLUGINS: {
-        LATEST: (pluginId) => `/plugins/${pluginId}/latest`,
-        RELEASES: (pluginId) => `/plugins/${pluginId}/releases`
-      },
-      LICENSE: {
-        VALIDATE: () => `/license/validate`
-      },
-      MODELS: {
-        LIST: "/models",
-        GET: (modelId) => `/models/${modelId}`
-      },
-      CHAT: {
-        COMPLETIONS: "/chat/completions"
-      },
-      EMBEDDINGS: {
-        GENERATE: "/embeddings"
-      },
-      SYSTEM_PROMPTS: {
-        GET: (id) => `/system-prompts/${id}`,
-        LIST: "/system-prompts"
-      },
-      DOCUMENTS: {
-        PROCESS: "/documents/process",
-        GET: (id) => `/documents/${id}`,
-        DOWNLOAD: (id) => `/documents/${id}/download`
-      },
-      YOUTUBE: {
-        TRANSCRIPTS: "/youtube/transcripts",
-        TRANSCRIPT_STATUS: (jobId) => `/youtube/transcripts/${jobId}`
-      }
-    };
-    SYSTEMSCULPT_API_HEADERS = {
-      DEFAULT: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-SystemSculpt-Client": "obsidian-plugin"
-      },
-      WITH_LICENSE: (licenseKey) => ({
-        ...SYSTEMSCULPT_API_HEADERS.DEFAULT,
-        "x-license-key": licenseKey
-      })
-    };
-  }
-});
-
 // src/constants/webSearch.ts
 var WEB_SEARCH_CONFIG, MOBILE_STREAM_CONFIG;
 var init_webSearch = __esm({
@@ -4441,211 +4939,6 @@ var init_streaming = __esm({
     import_obsidian16 = require("obsidian");
     init_errorLogger();
     init_webSearch();
-  }
-});
-
-// src/utils/httpClient.ts
-var httpClient_exports = {};
-__export(httpClient_exports, {
-  httpRequest: () => httpRequest,
-  isHostTemporarilyDisabled: () => isHostTemporarilyDisabled
-});
-function getHost(url) {
-  try {
-    return new URL(url).host;
-  } catch (e) {
-    return "";
-  }
-}
-function isLocalHost(url) {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname === "host.docker.internal";
-  } catch (e) {
-    return false;
-  }
-}
-function normalizeHeaders(method, headers, body) {
-  const out = { ...headers || {} };
-  const m = (method || "GET").toUpperCase();
-  if (m === "GET") {
-    for (const k of Object.keys(out)) {
-      if (k.toLowerCase() === "content-type") delete out[k];
-    }
-  } else if (body && !Object.keys(out).some((k) => k.toLowerCase() === "content-type")) {
-    out["Content-Type"] = "application/json";
-  }
-  if (!Object.keys(out).some((k) => k.toLowerCase() === "user-agent")) {
-    out["User-Agent"] = USER_AGENT;
-  }
-  return out;
-}
-async function httpRequest(opts) {
-  var _a;
-  const method = opts.method || "GET";
-  const headers = normalizeHeaders(method, opts.headers, opts.body);
-  const host = getHost(opts.url);
-  const localHost = isLocalHost(opts.url);
-  const now = Date.now();
-  const state = hostState.get(host);
-  const disabled = !!((state == null ? void 0 : state.disabledUntil) && state.disabledUntil > now);
-  const timeoutMs = Math.max(0, Number(opts.timeoutMs || 0));
-  async function withTimeout2(promise) {
-    if (!timeoutMs) return promise;
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error("Request timed out"));
-      }, timeoutMs);
-      promise.then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      }).catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-    });
-  }
-  async function requestLocalViaNode() {
-    const url = new URL(opts.url);
-    const isHttps = url.protocol === "https:";
-    const httpLib = require("http");
-    const httpsLib = require("https");
-    const lib = isHttps ? httpsLib : httpLib;
-    return await new Promise((resolve, reject) => {
-      const req = lib.request(
-        {
-          protocol: url.protocol,
-          hostname: url.hostname,
-          port: url.port ? Number(url.port) : void 0,
-          method,
-          path: `${url.pathname}${url.search}`,
-          headers
-        },
-        (res) => {
-          const chunks = [];
-          res.on("data", (chunk) => {
-            if (Buffer.isBuffer(chunk)) {
-              chunks.push(chunk);
-            } else {
-              chunks.push(Buffer.from(chunk));
-            }
-          });
-          res.on("end", () => {
-            var _a2;
-            clearTimer();
-            const text = Buffer.concat(chunks).toString("utf8");
-            const headersOut = {};
-            for (const [key, value] of Object.entries(res.headers)) {
-              if (typeof value === "string") {
-                headersOut[key] = value;
-              } else if (Array.isArray(value)) {
-                headersOut[key] = value.join(", ");
-              }
-            }
-            resolve({ status: (_a2 = res.statusCode) != null ? _a2 : 0, text, headers: headersOut });
-          });
-        }
-      );
-      const timer = timeoutMs ? setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
-      const clearTimer = () => {
-        if (timer) clearTimeout(timer);
-      };
-      req.on("error", (error) => {
-        clearTimer();
-        reject(error);
-      });
-      req.on("close", clearTimer);
-      if (opts.body) {
-        req.write(opts.body);
-      }
-      req.end();
-    });
-  }
-  if (disabled) {
-    const waitMs = (state.disabledUntil || 0) - now;
-    const mins = Math.max(1, Math.round(waitMs / 6e4));
-    const message = `Host temporarily unavailable (circuit open). Retry in ~${mins} min.`;
-    try {
-      const { errorLogger: errorLogger3 } = await Promise.resolve().then(() => (init_errorLogger(), errorLogger_exports));
-      errorLogger3.debug("HTTP circuit open; skipping request", { source: "httpClient", method: "httpRequest", metadata: { host, retryInMs: waitMs } });
-    } catch (e) {
-    }
-    const shortError = new Error(message);
-    shortError.status = 0;
-    shortError.retryInMs = waitMs;
-    throw shortError;
-  }
-  try {
-    const r = localHost ? await requestLocalViaNode() : await withTimeout2(Obsidian.requestUrl({ url: opts.url, method, headers, body: opts.body, throw: false }));
-    const status = r.status || 0;
-    const text = r.text;
-    let parsed = void 0;
-    try {
-      parsed = text ? JSON.parse(text) : void 0;
-    } catch (e) {
-    }
-    if (!status || status >= 400) {
-      const hdrs2 = r.headers || {};
-      throw { status: status || 500, text, json: parsed, headers: hdrs2, message: text || parsed && (((_a = parsed.error) == null ? void 0 : _a.message) || parsed.message) || `HTTP ${status}` };
-    }
-    const hdrs = r.headers || {};
-    if (host) hostState.set(host, { failures: 0, disabledUntil: void 0 });
-    return { status, text, json: parsed, headers: hdrs };
-  } catch (err) {
-    const msg = String((err == null ? void 0 : err.message) || "");
-    const status = typeof (err == null ? void 0 : err.status) === "number" ? err.status : void 0;
-    const responseText = typeof (err == null ? void 0 : err.text) === "string" ? err.text : "";
-    const looksHtml = responseText.trim().startsWith("<");
-    const isGatewayish = status === 502 || status === 503 || status === 504;
-    const isHtmlForbidden = status === 403 && looksHtml;
-    const isServerDegraded = isGatewayish || !!status && status >= 500 && looksHtml;
-    const isNetworkish = msg.includes("net::ERR") || msg.includes("ENOTFOUND") || msg.includes("ECONN") || msg.includes("ECONNRESET") || msg.includes("REFUSED");
-    const shouldBackoff = isNetworkish || isServerDegraded;
-    if (host) {
-      const nextState = hostState.get(host) || { failures: 0, disabledUntil: void 0 };
-      if (shouldBackoff) {
-        nextState.failures += 1;
-        const backoffMinutes = nextState.failures <= 1 ? 0 : Math.min(60, 2 * Math.pow(2, Math.min(5, nextState.failures - 2)));
-        if (backoffMinutes > 0) {
-          nextState.disabledUntil = Date.now() + backoffMinutes * 60 * 1e3;
-        }
-      } else {
-        nextState.failures = 0;
-        nextState.disabledUntil = void 0;
-      }
-      hostState.set(host, nextState);
-      try {
-        const { errorLogger: errorLogger3 } = await Promise.resolve().then(() => (init_errorLogger(), errorLogger_exports));
-        const metadata = { host, failures: nextState.failures, disabledUntil: nextState.disabledUntil, status, message: msg, htmlForbidden: isHtmlForbidden };
-        if (shouldBackoff) {
-          errorLogger3.warn("HTTP gateway error; circuit update", { source: "httpClient", method: "httpRequest", metadata });
-        } else if (isHtmlForbidden) {
-          errorLogger3.debug("HTTP 403 HTML forbidden; ignoring for circuit", { source: "httpClient", method: "httpRequest", metadata });
-        } else {
-          errorLogger3.debug("HTTP error; circuit reset", { source: "httpClient", method: "httpRequest", metadata });
-        }
-      } catch (e) {
-      }
-    }
-    throw err;
-  }
-}
-function isHostTemporarilyDisabled(url) {
-  const host = getHost(url);
-  if (!host) return { disabled: false, retryInMs: 0 };
-  const s = hostState.get(host);
-  const now = Date.now();
-  if ((s == null ? void 0 : s.disabledUntil) && s.disabledUntil > now) {
-    return { disabled: true, retryInMs: s.disabledUntil - now };
-  }
-  return { disabled: false, retryInMs: 0 };
-}
-var Obsidian, hostState, USER_AGENT;
-var init_httpClient = __esm({
-  "src/utils/httpClient.ts"() {
-    Obsidian = __toESM(require("obsidian"), 1);
-    hostState = /* @__PURE__ */ new Map();
-    USER_AGENT = "SystemSculpt-Obsidian";
   }
 });
 
@@ -23133,90 +23426,6 @@ var init_LocalLLMScanner = __esm({
   }
 });
 
-// src/constants/externalServices.ts
-function getExternalUrl(productionUrl, developmentUrl) {
-  return DEVELOPMENT_MODE === "DEVELOPMENT" && developmentUrl ? developmentUrl : productionUrl;
-}
-var GITHUB_API, AI_PROVIDERS, LOCAL_SERVICES, SYSTEMSCULPT_WEBSITE, MCP_DOCS, SERVICE_HEADERS;
-var init_externalServices = __esm({
-  "src/constants/externalServices.ts"() {
-    init_api();
-    GITHUB_API = {
-      BASE_URL: getExternalUrl(
-        "https://api.github.com",
-        "https://api.github.com"
-        // GitHub API doesn't have a dev alternative
-      ),
-      RELEASES: (owner, repo) => `${GITHUB_API.BASE_URL}/repos/${owner}/${repo}/releases`,
-      RELEASE_URL: (owner, repo) => `https://github.com/${owner}/${repo}/releases`
-    };
-    AI_PROVIDERS = {
-      OPENAI: {
-        BASE_URL: getExternalUrl("https://api.openai.com/v1"),
-        AUDIO_TRANSCRIPTIONS: getExternalUrl("https://api.openai.com/v1/audio/transcriptions")
-      },
-      ANTHROPIC: {
-        BASE_URL: getExternalUrl("https://api.anthropic.com/v1"),
-        LEGACY_BASE: getExternalUrl("https://api.anthropic.com")
-        // For older integrations
-      },
-      OPENROUTER: {
-        BASE_URL: getExternalUrl("https://openrouter.ai/api/v1"),
-        CHAT_COMPLETIONS: getExternalUrl("https://openrouter.ai/api/v1/chat/completions"),
-        MODELS: getExternalUrl("https://openrouter.ai/api/v1/models")
-      },
-      MINIMAX: {
-        BASE_URL: getExternalUrl("https://api.minimax.io/v1")
-      },
-      MOONSHOT: {
-        BASE_URL: getExternalUrl("https://api.moonshot.ai/v1")
-      },
-      GROQ: {
-        BASE_URL: getExternalUrl("https://api.groq.com/openai/v1"),
-        AUDIO_TRANSCRIPTIONS: getExternalUrl("https://api.groq.com/openai/v1/audio/transcriptions")
-      }
-    };
-    LOCAL_SERVICES = {
-      OLLAMA: {
-        BASE_URL: "http://localhost:11434/v1"
-      },
-      LM_STUDIO: {
-        BASE_URL: "http://localhost:1234/v1"
-      },
-      LOCAL_AI: {
-        CHAT_COMPLETIONS: "http://localhost:8000/v1/chat/completions",
-        MODELS: "http://localhost:8000/v1/models"
-      },
-      LOCAL_WHISPER: {
-        AUDIO_TRANSCRIPTIONS: "http://localhost:9000/v1/audio/transcriptions"
-      }
-    };
-    SYSTEMSCULPT_WEBSITE = {
-      BASE_URL: getExternalUrl("https://systemsculpt.com", "http://localhost:3000"),
-      // Website development server
-      LIFETIME: getExternalUrl("https://systemsculpt.com/lifetime", "http://localhost:3000/lifetime"),
-      MONTHLY: getExternalUrl("https://systemsculpt.com/resources/a05a7abf-b8bb-41cf-9190-8b795d117fda", "http://localhost:3000/resources/a05a7abf-b8bb-41cf-9190-8b795d117fda"),
-      DOCS: getExternalUrl("https://systemsculpt.com/docs", "http://localhost:3000/docs"),
-      SUPPORT: getExternalUrl("https://systemsculpt.com/contact", "http://localhost:3000/contact"),
-      LICENSE: getExternalUrl("https://systemsculpt.com/resources?tab=license", "http://localhost:3000/resources?tab=license"),
-      FEEDBACK: getExternalUrl(
-        "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A",
-        "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A"
-      )
-    };
-    MCP_DOCS = {
-      BASE_URL: "https://modelcontextprotocol.io"
-      // No dev alternative
-    };
-    SERVICE_HEADERS = {
-      OPENROUTER: {
-        "HTTP-Referer": SYSTEMSCULPT_WEBSITE.BASE_URL,
-        "X-Title": "SystemSculpt AI"
-      }
-    };
-  }
-});
-
 // src/modals/SystemPromptCreatorModal.ts
 var import_obsidian46, SystemPromptCreatorModal;
 var init_SystemPromptCreatorModal = __esm({
@@ -23846,92 +24055,6 @@ var init_FolderSuggester = __esm({
         this.inputEl.blur();
         this.close();
         super.selectSuggestion(content, evt);
-      }
-    };
-  }
-});
-
-// src/services/ChangeLogService.ts
-function parseLinkHeader(header) {
-  if (!header) return {};
-  const links = {};
-  const parts = header.split(",");
-  parts.forEach((part) => {
-    const section = part.split(";");
-    if (section.length < 2) return;
-    const url = section[0].replace(/<(.*)>/, "$1").trim();
-    const name = section[1].replace(/rel="(.*)"/, "$1").trim();
-    links[name] = url;
-  });
-  return links;
-}
-var GITHUB_OWNER, GITHUB_REPO, GITHUB_RELEASES_URL, cachedReleases, lastFetchTime, CACHE_DURATION, ChangeLogService;
-var init_ChangeLogService = __esm({
-  "src/services/ChangeLogService.ts"() {
-    init_externalServices();
-    init_api();
-    GITHUB_OWNER = "SystemSculpt";
-    GITHUB_REPO = "obsidian-systemsculpt-ai";
-    GITHUB_RELEASES_URL = GITHUB_API.RELEASES(GITHUB_OWNER, GITHUB_REPO);
-    cachedReleases = null;
-    lastFetchTime = 0;
-    CACHE_DURATION = 30 * 60 * 1e3;
-    ChangeLogService = class _ChangeLogService {
-      static getReleasesPageUrl() {
-        return GITHUB_API.RELEASE_URL(GITHUB_OWNER, GITHUB_REPO);
-      }
-      static async getReleases(forceRefresh = false) {
-        var _a;
-        const now = Date.now();
-        if (!forceRefresh && cachedReleases && now - lastFetchTime < CACHE_DURATION) {
-          return cachedReleases;
-        }
-        let allReleases = [];
-        const apiUrl = `${API_BASE_URL}${SYSTEMSCULPT_API_ENDPOINTS.PLUGINS.RELEASES("systemsculpt-ai")}?limit=50`;
-        try {
-          const { httpRequest: httpRequest2 } = await Promise.resolve().then(() => (init_httpClient(), httpClient_exports));
-          const response = await httpRequest2({ url: apiUrl, method: "GET" });
-          if (response.status === 200) {
-            const list = ((_a = response.json) == null ? void 0 : _a.data) || [];
-            const entries = list.map((r) => ({
-              version: r.version,
-              date: r.date ? new Date(r.date).toLocaleDateString() : (/* @__PURE__ */ new Date()).toLocaleDateString(),
-              notes: r.notes || "No release notes provided.",
-              url: r.url || _ChangeLogService.getReleasesPageUrl()
-            }));
-            allReleases = entries;
-          } else {
-            if (cachedReleases) return cachedReleases;
-            return [
-              {
-                version: "Unavailable",
-                date: (/* @__PURE__ */ new Date()).toLocaleDateString(),
-                notes: "Changelog unavailable due to a network error.",
-                url: _ChangeLogService.getReleasesPageUrl()
-              }
-            ];
-          }
-          cachedReleases = allReleases;
-          lastFetchTime = now;
-          return allReleases;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (cachedReleases) return cachedReleases;
-          return [
-            {
-              version: "Unavailable",
-              date: (/* @__PURE__ */ new Date()).toLocaleDateString(),
-              notes: "Changelog unavailable due to a network error.",
-              url: _ChangeLogService.getReleasesPageUrl()
-            }
-          ];
-        }
-      }
-      static findIndexByVersion(entries, version) {
-        if (!version) return 0;
-        const candidates = [version, version.startsWith("v") ? version.substring(1) : `v${version}`];
-        const index = entries.findIndex((e) => candidates.includes(e.version));
-        return index >= 0 ? index : 0;
       }
     };
   }
@@ -35350,7 +35473,7 @@ var init_ChangeLogModal = __esm({
     init_standard();
     init_ChangeLogService();
     ChangeLogModal = class extends StandardModal {
-      constructor(app, options = {}) {
+      constructor(app, plugin, options = {}) {
         super(app);
         this.entries = [];
         this.currentIndex = 0;
@@ -35364,6 +35487,7 @@ var init_ChangeLogModal = __esm({
         this.touchStartX = null;
         this.touchStartY = null;
         this.touchStartTime = null;
+        this.plugin = plugin;
         this.options = options;
         this.setSize("large");
         this.component = new import_obsidian148.Component();
@@ -35453,7 +35577,7 @@ var init_ChangeLogModal = __esm({
         await this.renderCurrent();
       }
       async loadEntries() {
-        this.entries = await ChangeLogService.getReleases();
+        this.entries = await ChangeLogService.getReleases(this.plugin);
         this.currentIndex = ChangeLogService.findIndexByVersion(this.entries, this.options.startVersion);
         if (this.currentIndex < 0 || this.currentIndex >= this.entries.length) {
           this.currentIndex = 0;
@@ -35536,7 +35660,7 @@ var init_ChangeLogModal = __esm({
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
-  default: () => SystemSculptPlugin65
+  default: () => SystemSculptPlugin64
 });
 module.exports = __toCommonJS(main_exports);
 
@@ -39918,7 +40042,6 @@ async function renderReleaseEntry(entry, parentEl, tabInstance) {
   (0, import_obsidian64.setIcon)(linkEl, "external-link");
 }
 async function displayChangeLogTabContent(containerEl, tabInstance) {
-  const app = tabInstance.plugin.app;
   containerEl.empty();
   if (containerEl.classList.contains("systemsculpt-tab-content")) {
     containerEl.dataset.tab = "changelog";
@@ -39955,7 +40078,7 @@ async function displayChangeLogTabContent(containerEl, tabInstance) {
     updateLoadMoreButtonState();
   }
   try {
-    allFetchedReleases = await ChangeLogService.getReleases();
+    allFetchedReleases = await ChangeLogService.getReleases(tabInstance.plugin);
     loadingEl.remove();
     if (allFetchedReleases.length === 0) {
       changelogListEl.createEl("p", { text: "No changelog information available at the moment." });
@@ -43350,9 +43473,9 @@ var ChatStorageService = class {
 ${(0, import_obsidian73.stringifyYaml)(metadata)}---
 
 ${messagesContent}`;
-      const SystemSculptPlugin66 = this.app.plugins.plugins["systemsculpt-ai"];
-      if (SystemSculptPlugin66 && SystemSculptPlugin66.directoryManager) {
-        await SystemSculptPlugin66.directoryManager.ensureDirectoryByPath(this.chatDirectory);
+      const SystemSculptPlugin65 = this.app.plugins.plugins["systemsculpt-ai"];
+      if (SystemSculptPlugin65 && SystemSculptPlugin65.directoryManager) {
+        await SystemSculptPlugin65.directoryManager.ensureDirectoryByPath(this.chatDirectory);
       } else {
         const exists = await this.app.vault.adapter.exists(this.chatDirectory);
         if (!exists) {
@@ -71375,7 +71498,7 @@ var _VersionCheckerService = class _VersionCheckerService {
    */
   openChangelogTab() {
     Promise.resolve().then(() => (init_ChangeLogModal(), ChangeLogModal_exports)).then(({ ChangeLogModal: ChangeLogModal2 }) => {
-      const modal = new ChangeLogModal2(this.app);
+      const modal = new ChangeLogModal2(this.app, this.plugin);
       modal.open();
     }).catch(() => {
       new import_obsidian149.Notice("Unable to open changelog modal.", 4e3);
@@ -84749,7 +84872,7 @@ init_FavoritesService();
 init_PlatformContext();
 init_editor_diff();
 ErrorCollectorService.initializeEarlyLogsCapture();
-var SystemSculptPlugin65 = class extends import_obsidian168.Plugin {
+var SystemSculptPlugin64 = class extends import_obsidian168.Plugin {
   constructor() {
     super(...arguments);
     this.recorderService = null;
@@ -86511,6 +86634,8 @@ Recent Error Notes:`);
       return;
     }
     this.isPreloadingDone = true;
+    void Promise.resolve().then(() => (init_ChangeLogService(), ChangeLogService_exports)).then(({ ChangeLogService: ChangeLogService2 }) => ChangeLogService2.warmCache(this)).catch(() => {
+    });
     logger.debug("Background preload completed", {
       source: "SystemSculptPlugin"
     });

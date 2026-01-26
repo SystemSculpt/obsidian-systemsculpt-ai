@@ -2193,6 +2193,11 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.isPreloadingDone = true;
 
+    // Best-effort warmup so changelog works offline and avoids repeated GitHub calls.
+    void import("./services/ChangeLogService")
+      .then(({ ChangeLogService }) => ChangeLogService.warmCache(this))
+      .catch(() => {});
+
     logger.debug("Background preload completed", {
       source: "SystemSculptPlugin",
     });

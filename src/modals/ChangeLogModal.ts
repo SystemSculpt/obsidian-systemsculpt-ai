@@ -1,12 +1,14 @@
 import { App, setIcon, MarkdownRenderer, Component } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard";
 import { ChangeLogService, ChangeLogEntry } from "../services/ChangeLogService";
+import type SystemSculptPlugin from "../main";
 
 export interface ChangeLogModalOptions {
   startVersion?: string;
 }
 
 export class ChangeLogModal extends StandardModal {
+  private plugin: Pick<SystemSculptPlugin, "storage">;
   private options: ChangeLogModalOptions;
   private entries: ChangeLogEntry[] = [];
   private currentIndex: number = 0;
@@ -22,8 +24,9 @@ export class ChangeLogModal extends StandardModal {
   private touchStartY: number | null = null;
   private touchStartTime: number | null = null;
 
-  constructor(app: App, options: ChangeLogModalOptions = {}) {
+  constructor(app: App, plugin: Pick<SystemSculptPlugin, "storage">, options: ChangeLogModalOptions = {}) {
     super(app);
+    this.plugin = plugin;
     this.options = options;
     this.setSize("large");
     this.component = new Component();
@@ -135,7 +138,7 @@ export class ChangeLogModal extends StandardModal {
   }
 
   private async loadEntries(): Promise<void> {
-    this.entries = await ChangeLogService.getReleases();
+    this.entries = await ChangeLogService.getReleases(this.plugin);
     this.currentIndex = ChangeLogService.findIndexByVersion(this.entries, this.options.startVersion);
     if (this.currentIndex < 0 || this.currentIndex >= this.entries.length) {
       this.currentIndex = 0;
@@ -226,5 +229,4 @@ export class ChangeLogModal extends StandardModal {
     } catch {}
   }
 }
-
 

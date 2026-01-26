@@ -79,14 +79,16 @@ jest.mock("../../services/ChangeLogService", () => ({
 
 describe("ChangeLogModal", () => {
   let mockApp: App;
+  let mockPlugin: any;
   let modal: ChangeLogModal;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockApp = new App();
+    mockPlugin = { storage: {} };
 
-    modal = new ChangeLogModal(mockApp);
+    modal = new ChangeLogModal(mockApp, mockPlugin);
   });
 
   afterEach(() => {
@@ -100,7 +102,7 @@ describe("ChangeLogModal", () => {
 
     it("accepts options with startVersion", () => {
       const options: ChangeLogModalOptions = { startVersion: "1.4.0" };
-      const modalWithOptions = new ChangeLogModal(mockApp, options);
+      const modalWithOptions = new ChangeLogModal(mockApp, mockPlugin, options);
 
       expect(modalWithOptions).toBeInstanceOf(ChangeLogModal);
     });
@@ -110,7 +112,7 @@ describe("ChangeLogModal", () => {
     it("loads changelog entries", async () => {
       await modal.onOpen();
 
-      expect(ChangeLogService.getReleases).toHaveBeenCalled();
+      expect(ChangeLogService.getReleases).toHaveBeenCalledWith(mockPlugin);
     });
 
     it("creates version select dropdown", async () => {
@@ -141,7 +143,7 @@ describe("ChangeLogModal", () => {
     it("finds startVersion in entries", async () => {
       (ChangeLogService.findIndexByVersion as jest.Mock).mockReturnValue(1);
 
-      const modalWithVersion = new ChangeLogModal(mockApp, { startVersion: "1.4.0" });
+      const modalWithVersion = new ChangeLogModal(mockApp, mockPlugin, { startVersion: "1.4.0" });
       await modalWithVersion.onOpen();
 
       expect(ChangeLogService.findIndexByVersion).toHaveBeenCalledWith(
@@ -230,7 +232,7 @@ describe("ChangeLogModal", () => {
 
       const windowOpenSpy = jest.spyOn(window, "open").mockImplementation(() => null);
 
-      const testModal = new ChangeLogModal(mockApp);
+      const testModal = new ChangeLogModal(mockApp, mockPlugin);
       await testModal.onOpen();
       (testModal as any).openOnGitHub();
 
@@ -248,7 +250,7 @@ describe("ChangeLogModal", () => {
         { version: "1.0.0", date: "2024-01-01", notes: "Notes", url: null },
       ]);
 
-      const modalNoUrl = new ChangeLogModal(mockApp);
+      const modalNoUrl = new ChangeLogModal(mockApp, mockPlugin);
       await modalNoUrl.onOpen();
       (modalNoUrl as any).openOnGitHub();
 
@@ -270,7 +272,7 @@ describe("ChangeLogModal", () => {
         { version: "1.3.0", date: "2024-01-05", notes: "Notes", url: "url" },
       ]);
 
-      const testModal = new ChangeLogModal(mockApp);
+      const testModal = new ChangeLogModal(mockApp, mockPlugin);
       await testModal.onOpen();
 
       const select = (testModal as any).versionSelectEl as HTMLSelectElement;
@@ -285,7 +287,7 @@ describe("ChangeLogModal", () => {
         { version: "1.3.0", date: "2024-01-05", notes: "Notes", url: "url" },
       ]);
 
-      const testModal = new ChangeLogModal(mockApp);
+      const testModal = new ChangeLogModal(mockApp, mockPlugin);
       await testModal.onOpen();
 
       const select = (testModal as any).versionSelectEl as HTMLSelectElement;
@@ -298,7 +300,7 @@ describe("ChangeLogModal", () => {
     it("handles empty entries gracefully", async () => {
       (ChangeLogService.getReleases as jest.Mock).mockResolvedValue([]);
 
-      const emptyModal = new ChangeLogModal(mockApp);
+      const emptyModal = new ChangeLogModal(mockApp, mockPlugin);
       await emptyModal.onOpen();
 
       // Should not throw
@@ -317,7 +319,7 @@ describe("ChangeLogModal", () => {
         { version: "1.0.0", date: "2024-01-01", notes: null, url: null },
       ]);
 
-      const modalNoNotes = new ChangeLogModal(mockApp);
+      const modalNoNotes = new ChangeLogModal(mockApp, mockPlugin);
       await modalNoNotes.onOpen();
 
       // Verify markdown was rendered with fallback

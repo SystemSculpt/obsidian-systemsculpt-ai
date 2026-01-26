@@ -1,7 +1,5 @@
-import { App, Notice, setIcon, MarkdownRenderer } from "obsidian";
-import SystemSculptPlugin from "../main";
+import { Notice, setIcon, MarkdownRenderer } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { GITHUB_API } from '../constants/externalServices';
 import { ChangeLogService, ChangeLogEntry } from "../services/ChangeLogService";
 
 const RELEASES_PER_BATCH = 10;
@@ -26,7 +24,6 @@ async function renderReleaseEntry(entry: ChangeLogEntry, parentEl: HTMLElement, 
 }
 
 export async function displayChangeLogTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-    const app = tabInstance.plugin.app;
     containerEl.empty();
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "changelog";
@@ -72,7 +69,7 @@ export async function displayChangeLogTabContent(containerEl: HTMLElement, tabIn
     }
 
     try {
-        allFetchedReleases = await ChangeLogService.getReleases();
+        allFetchedReleases = await ChangeLogService.getReleases(tabInstance.plugin);
         loadingEl.remove();
 
         if (allFetchedReleases.length === 0) {
