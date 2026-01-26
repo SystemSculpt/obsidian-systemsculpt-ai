@@ -41,6 +41,12 @@ describe("sanitizeToolCallId", () => {
       expect(result).toBe(raw);
     });
 
+    it("preserves Anthropic-style toolu_ ids", () => {
+      const raw = "toolu_01A2B3C4D5E6F7G8H9";
+      const result = sanitizeToolCallId(raw, 0, state);
+      expect(result).toBe(raw);
+    });
+
     it("preserves valid ID with longer suffix", () => {
       const result = sanitizeToolCallId("call_abcdefghij12345", 0, state);
       expect(result).toBe("call_abcdefghij12345");
@@ -66,9 +72,9 @@ describe("sanitizeToolCallId", () => {
       expect(result2).toBe("call_abc");
     });
 
-    it("generates new ID for wrong prefix", () => {
+    it("preserves safe IDs even with unknown prefixes", () => {
       const result = sanitizeToolCallId("badprefix_abc12345", 0, state);
-      expect(result).toMatch(/^call_/);
+      expect(result).toBe("badprefix_abc12345");
     });
 
     it("generates new ID for empty string", () => {
@@ -130,7 +136,7 @@ describe("sanitizeToolCallId", () => {
       const newState = createToolCallIdState();
       newState.usedIds.add("call_invalidid");
 
-      const result = sanitizeToolCallId("invalid-id", 2, newState);
+      const result = sanitizeToolCallId("invalid id", 2, newState);
 
       expect(result).toMatch(/^call_/);
       expect(result).not.toBe("call_invalidid");
@@ -155,7 +161,7 @@ describe("sanitizeToolCallId", () => {
   describe("edge cases", () => {
     it("handles numeric-looking raw ID", () => {
       const result = sanitizeToolCallId("12345678", 0, state);
-      expect(result).toMatch(/^call_/);
+      expect(result).toBe("12345678");
     });
 
     it("handles raw ID that is just 'call_'", () => {

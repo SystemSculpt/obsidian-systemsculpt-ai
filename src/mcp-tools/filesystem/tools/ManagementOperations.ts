@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, Notice } from "obsidian";
+import { App, TFile, TFolder, normalizePath, Notice } from "obsidian";
 import SystemSculptPlugin from "../../../main";
 import { 
   ManageWorkspaceParams, 
@@ -7,7 +7,7 @@ import {
   ContextManagementResult
 } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
-import { getFilesFromFolder } from "../utils";
+import { getFilesFromFolder, normalizeVaultPath } from "../utils";
 import { openFileInMainWorkspace } from '../../../utils/workspaceUtils';
 
 /**
@@ -31,7 +31,7 @@ export class ManagementOperations {
     let shouldRestoreFocus = true;
 
     for (const file of files) {
-      const filePath = file.path;
+      const filePath = normalizePath(normalizeVaultPath(file.path));
       const { leaf, action } = await openFileInMainWorkspace(this.app, filePath);
 
       if (leaf) {
@@ -84,7 +84,8 @@ export class ManagementOperations {
       
       for (const path of paths) {
         try {
-          const abstractFile = this.app.vault.getAbstractFileByPath(path);
+          const normalized = normalizePath(normalizeVaultPath(path));
+          const abstractFile = this.app.vault.getAbstractFileByPath(normalized);
           
           if (!abstractFile) {
             results.push({ path, success: false, reason: "File or directory not found" });
@@ -189,13 +190,14 @@ export class ManagementOperations {
       for (const path of paths) {
         try {
           // Normalize the path to match how files are stored in context
-          const wikiLink = `[[${path}]]`;
+          const normalized = normalizePath(normalizeVaultPath(path));
+          const wikiLink = `[[${normalized}]]`;
           const hasFile = currentChatView.contextManager.hasContextFile(wikiLink) || 
-                         currentChatView.contextManager.hasContextFile(path);
+                         currentChatView.contextManager.hasContextFile(normalized);
 
           if (hasFile) {
             // Remove from context using the new public method
-            const removed = await currentChatView.contextManager.removeFromContextFiles(path);
+            const removed = await currentChatView.contextManager.removeFromContextFiles(normalized);
             if (removed) {
               results.push({ path, success: true });
               totalFilesProcessed++;

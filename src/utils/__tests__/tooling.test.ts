@@ -351,6 +351,19 @@ describe("buildToolResultMessagesFromToolCalls", () => {
     expect(result[0].content).toBe("Result data");
   });
 
+  it("provides fallback content when successful tool call returns undefined", () => {
+    const toolCalls = [
+      {
+        id: "call_123",
+        state: "completed",
+        result: { success: true },
+      },
+    ];
+    const result = buildToolResultMessagesFromToolCalls(toolCalls);
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toContain("Tool executed successfully");
+  });
+
   it("JSON stringifies object data", () => {
     const toolCalls = [
       {

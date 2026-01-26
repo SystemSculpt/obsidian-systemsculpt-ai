@@ -8,6 +8,7 @@ import type { ToolCall } from "../../../types/toolCalls";
 import type { App } from "obsidian";
 import { RuntimeIncompatibilityService } from "../../../services/RuntimeIncompatibilityService";
 import { SystemSculptError, ERROR_CODES } from "../../../utils/errors";
+import { TOOL_LOOP_ERROR_CODE } from "../../../utils/tooling";
 
 // Clear singleton between tests
 beforeEach(() => {
@@ -466,5 +467,62 @@ describe("ChatTurnOrchestrator compact assistant handling", () => {
     });
 
     document.body.removeChild(chatRoot);
+  });
+
+  test("halts continuation when loop guard tool error is present", async () => {
+    const messages: ChatMessage[] = [];
+    const toolCalls: ToolCall[] = [
+      {
+        id: "tc_loop",
+        messageId: "assistant-1",
+        state: "failed",
+        timestamp: Date.now(),
+        request: {
+          id: "tc_loop",
+          type: "function",
+          function: { name: "mcp-filesystem_move", arguments: "{\"from\":\"A\",\"to\":\"B\"}" },
+        },
+        result: {
+          success: false,
+          error: { code: TOOL_LOOP_ERROR_CODE, message: "Blocked repeated tool call" },
+        },
+      },
+    ];
+
+    const toolCallManager = {
+      getToolCallsForMessage: jest.fn(() => toolCalls),
+      on: jest.fn(() => () => {}),
+    } as any;
+
+    const host = {
+      app: {} as App,
+      plugin: createMockPlugin(),
+      aiService: {} as any,
+      streamingController: {} as any,
+      toolCallManager,
+      messageRenderer: {} as any,
+      getMessages: jest.fn(() => messages),
+      getSelectedModelId: jest.fn(() => "test-model"),
+      getSystemPrompt: jest.fn(() => ({ type: "default", path: "default" })),
+      getContextFiles: jest.fn(() => new Set<string>()),
+      agentMode: jest.fn(() => true),
+      webSearchEnabled: jest.fn(() => false),
+      createAssistantMessageContainer: jest.fn(() => ({ messageEl: document.createElement("div"), contentEl: document.createElement("div") })),
+      generateMessageId: jest.fn(() => "generated-1"),
+      onAssistantResponse: jest.fn(async () => {}),
+      onError: jest.fn(),
+      showStreamingStatus: jest.fn(),
+      hideStreamingStatus: jest.fn(),
+      updateStreamingStatus: jest.fn(),
+      setStreamingFootnote: jest.fn(),
+      clearStreamingFootnote: jest.fn(),
+    } as unknown as ConstructorParameters<typeof ChatTurnOrchestrator>[0];
+
+    const orchestrator = new ChatTurnOrchestrator(host);
+    const controller = new AbortController();
+    const result = await (orchestrator as any).continueAfterTools("assistant-1", controller.signal);
+
+    expect(result).toBeNull();
+    expect(host.onError).toHaveBeenCalled();
   });
 });

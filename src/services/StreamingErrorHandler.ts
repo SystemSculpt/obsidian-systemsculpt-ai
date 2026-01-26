@@ -1,5 +1,55 @@
 import { SystemSculptError, ERROR_CODES, ErrorCode, getErrorMessage, isAuthFailureMessage } from "../utils/errors";
 
+const IMAGE_UNSUPPORTED_PATTERNS = [
+  "does not support image",
+  "image input not supported",
+  "vision not supported",
+  "unknown field: image_url",
+  "additional properties are not allowed: 'image_url'",
+  "unsupported type: image_url",
+  "model does not support vision",
+  "multimodal input not supported",
+  "image_url is not supported",
+  "content type image_url not supported",
+];
+
+const CONTENT_STRING_MISMATCH_PATTERNS = [
+  "must be a string",
+  "must be string",
+  "should be a string",
+  "should be string",
+  "expected string",
+  "expected a string",
+  "is not of type string",
+  "is not a string",
+];
+
+const MESSAGE_CONTENT_PATTERNS = [
+  /messages\[\d+\]\.content/,
+  /messages\.\d+\.content/,
+  /message content/,
+];
+
+const isImageUnsupportedMessage = (message: string): boolean => {
+  const lc = (message || "").toLowerCase();
+  if (!lc) return false;
+
+  if (IMAGE_UNSUPPORTED_PATTERNS.some((pattern) => lc.includes(pattern))) {
+    return true;
+  }
+
+  const hasContentMismatch = CONTENT_STRING_MISMATCH_PATTERNS.some((pattern) => lc.includes(pattern));
+  if (!hasContentMismatch) {
+    return false;
+  }
+
+  if (MESSAGE_CONTENT_PATTERNS.some((pattern) => pattern.test(lc))) {
+    return true;
+  }
+
+  return lc.includes("messages") && lc.includes("content");
+};
+
 /**
  * Helper class for handling streaming errors
  */
@@ -53,6 +103,29 @@ export class StreamingErrorHandler {
       const requestId = data?.request_id || data?.requestId || data?.error?.request_id;
       const errorType = data?.error?.type;
       const errorHttpCode = data?.error?.http_code;
+
+      if (isCustomProvider) {
+        if (typeof data?.error === "string") {
+          data.error = { message: data.error };
+        }
+
+        if (!data?.error) {
+          const fallbackMessage =
+            typeof data?.message === "string"
+              ? data.message
+              : typeof data?.detail === "string"
+                ? data.detail
+                : Array.isArray(data?.errors)
+                  ? data.errors
+                      .map((entry: any) => entry?.message || entry?.detail || entry)
+                      .filter((entry: any) => typeof entry === "string" && entry.trim().length > 0)
+                      .join("; ")
+                  : "";
+          if (fallbackMessage && fallbackMessage.trim().length > 0) {
+            data.error = { message: fallbackMessage };
+          }
+        }
+      }
 
       if (data.error) {
         if (isCustomProvider) {
@@ -118,6 +191,8 @@ export class StreamingErrorHandler {
           if (
             lcCustom.includes('does not support tools') ||
             lcCustom.includes('tools not supported') ||
+            lcCustom.includes('tool calling not supported') ||
+            lcCustom.includes('tool calling is not supported') ||
             lcCustom.includes('tool_calls not supported') ||
             lcCustom.includes('function calling not supported') ||
             lcCustom.includes('function_calling not supported') ||
@@ -139,19 +214,7 @@ export class StreamingErrorHandler {
             metadata.toolSupport = false;
           }
           // Detect image input rejection for non-vision models
-          if (
-            lcCustom.includes('does not support image') ||
-            lcCustom.includes('image input not supported') ||
-            lcCustom.includes('vision not supported') ||
-            lcCustom.includes("unknown field: image_url") ||
-            lcCustom.includes("additional properties are not allowed: 'image_url'") ||
-            lcCustom.includes('unsupported type: image_url') ||
-            // OpenRouter-specific patterns
-            lcCustom.includes('model does not support vision') ||
-            lcCustom.includes('multimodal input not supported') ||
-            lcCustom.includes('image_url is not supported') ||
-            lcCustom.includes('content type image_url not supported')
-          ) {
+          if (isImageUnsupportedMessage(lcCustom)) {
             metadata.shouldResubmitWithoutImages = true;
             metadata.imageSupport = false;
           }
@@ -213,6 +276,8 @@ export class StreamingErrorHandler {
             if (
               lcUpstream.includes('does not support tools') ||
               lcUpstream.includes('tools not supported') ||
+              lcUpstream.includes('tool calling not supported') ||
+              lcUpstream.includes('tool calling is not supported') ||
               lcUpstream.includes('tool_calls not supported') ||
               lcUpstream.includes('function calling not supported') ||
               lcUpstream.includes('function_calling not supported') ||
@@ -232,19 +297,7 @@ export class StreamingErrorHandler {
             }
 
             // Detect upstream rejection of image input for non-vision models
-            if (
-              lcUpstream.includes('does not support image') ||
-              lcUpstream.includes('image input not supported') ||
-              lcUpstream.includes('vision not supported') ||
-              lcUpstream.includes("unknown field: image_url") ||
-              lcUpstream.includes("additional properties are not allowed: 'image_url'") ||
-              lcUpstream.includes('unsupported type: image_url') ||
-              // OpenRouter-specific patterns
-              lcUpstream.includes('model does not support vision') ||
-              lcUpstream.includes('multimodal input not supported') ||
-              lcUpstream.includes('image_url is not supported') ||
-              lcUpstream.includes('content type image_url not supported')
-            ) {
+            if (isImageUnsupportedMessage(lcUpstream)) {
               (metadata as any).shouldResubmitWithoutImages = true;
               (metadata as any).imageSupport = false;
             }

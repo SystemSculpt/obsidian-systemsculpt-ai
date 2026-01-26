@@ -192,6 +192,62 @@ describe("RecorderService", () => {
 
       expect(callCount).toBe(2);
     });
+
+    it("honors stop pressed while starting (single tap)", async () => {
+      const { RecordingSession } = require("../recorder/RecordingSession");
+
+      const startDeferred = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((res) => {
+          resolve = res;
+        });
+        return { promise, resolve };
+      })();
+
+      let onComplete: ((result: any) => void) | null = null;
+      const stopMock = jest.fn(() => {
+        onComplete?.({
+          filePath: "SystemSculpt/Recordings/test.webm",
+          blob: new Blob(["test"], { type: "audio/webm" }),
+          startedAt: Date.now(),
+          durationMs: 50,
+        });
+      });
+
+      (RecordingSession as jest.Mock).mockImplementationOnce((options: any) => {
+        onComplete = options.onComplete;
+        return {
+          start: jest.fn().mockReturnValue(startDeferred.promise),
+          stop: stopMock,
+          dispose: jest.fn(),
+          isActive: jest.fn().mockReturnValue(true),
+          getMediaStream: jest.fn().mockReturnValue(null),
+          getOutputPath: jest.fn().mockReturnValue("SystemSculpt/Recordings/test.webm"),
+        };
+      });
+
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+      const togglePromise = service.toggleRecording();
+
+      for (let i = 0; i < 4; i++) {
+        const openMock = (service as any).ui.open as jest.Mock;
+        if (openMock.mock.calls.length > 0) break;
+        await Promise.resolve();
+      }
+
+      const openMock = (service as any).ui.open as jest.Mock;
+      expect(openMock).toHaveBeenCalledTimes(1);
+      const stopCallback = openMock.mock.calls[0][0] as () => void;
+
+      stopCallback();
+      expect(stopMock).not.toHaveBeenCalled();
+
+      startDeferred.resolve();
+      await togglePromise;
+
+      expect(stopMock).toHaveBeenCalledTimes(1);
+      expect((service as any).isRecording).toBe(false);
+    });
   });
 
   describe("notifyListeners (private)", () => {

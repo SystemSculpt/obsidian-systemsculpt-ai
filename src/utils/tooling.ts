@@ -2,6 +2,8 @@ import type { ChatMessage } from "../types";
 import type { ToolCall } from "../types/toolCalls";
 import { deterministicId } from "./id";
 
+export const TOOL_LOOP_ERROR_CODE = "TOOL_LOOP_DETECTED";
+
 export type OpenAITool = {
   type: "function";
   function: {
@@ -152,6 +154,47 @@ export function mapAssistantToolCallsForApi(rawToolCalls: any[]): any[] {
     .filter((tc) => tc !== null);
 }
 
+export function normalizeToolCallArguments(rawArgs: unknown): string {
+  if (typeof rawArgs !== "string") {
+    try {
+      return JSON.stringify(rawArgs ?? "");
+    } catch {
+      return "";
+    }
+  }
+
+  const trimmed = rawArgs.trim();
+  if (!trimmed) return "";
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return JSON.stringify(sortJsonValue(parsed));
+  } catch {
+    return trimmed;
+  }
+}
+
+export function buildToolCallSignature(toolName: string, rawArgs: unknown): string {
+  const safeName = String(toolName || "").trim();
+  const normalizedArgs = normalizeToolCallArguments(rawArgs);
+  return `${safeName}::${normalizedArgs}`;
+}
+
+function sortJsonValue(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    const sortedKeys = Object.keys(value).sort();
+    const result: Record<string, unknown> = {};
+    for (const key of sortedKeys) {
+      result[key] = sortJsonValue(value[key]);
+    }
+    return result;
+  }
+  return value;
+}
+
 export function pruneToolMessagesNotFollowingToolCalls(messages: ChatMessage[]): { messages: ChatMessage[]; dropped: number } {
   const sanitized: ChatMessage[] = [];
   let allowedToolCallIds: Set<string> | null = null;
@@ -190,16 +233,36 @@ export function pruneToolMessagesNotFollowingToolCalls(messages: ChatMessage[]):
 
 export function buildToolResultMessagesFromToolCalls(toolCalls: any[]): ChatMessage[] {
   const messages: ChatMessage[] = [] as any;
+  const defaultSuccessPayload = JSON.stringify({
+    result: "Tool executed successfully but returned no content",
+    status: "completed",
+  });
+
+  const safeStringify = (value: any, fallback: string): string => {
+    if (typeof value === "string") return value;
+    try {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized === "string") return serialized;
+    } catch {}
+    return fallback;
+  };
+
   for (const toolCall of toolCalls || []) {
     let toolContent: string;
     const state = toolCall.state;
     const result = toolCall.result;
     if (state === 'completed' && result?.success) {
-      toolContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+      toolContent = safeStringify(result.data, defaultSuccessPayload);
     } else if (state === 'failed' || (state === 'completed' && !result?.success)) {
-      toolContent = JSON.stringify({ error: result?.error || { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' } });
+      toolContent = safeStringify(
+        { error: result?.error || { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' } },
+        JSON.stringify({ error: { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' } })
+      );
     } else if (state === 'denied') {
-      toolContent = JSON.stringify({ error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } });
+      toolContent = safeStringify(
+        { error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } },
+        JSON.stringify({ error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } })
+      );
     } else {
       continue;
     }

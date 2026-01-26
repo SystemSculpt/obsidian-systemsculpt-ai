@@ -36,6 +36,7 @@ export class RecorderService {
   private sessionCompletionPromise: Promise<void> | null = null;
   private sessionCompletionResolver: (() => void) | null = null;
   private toggleQueue: Promise<void> = Promise.resolve();
+  private stopRequestedDuringStart = false;
 
   private constructor(app: App, plugin: SystemSculptPlugin, options: RecorderOptions) {
     this.app = app;
@@ -104,6 +105,7 @@ export class RecorderService {
       return;
     }
 
+    this.stopRequestedDuringStart = false;
     await this.waitForSessionLifecycle();
     this.lifecycleState = "starting";
     this.debug("startRecording transitioning to starting state");
@@ -118,7 +120,7 @@ export class RecorderService {
 
       this.debug("opening recorder UI", { directoryPath, format: format.extension });
       this.ui.open(() => {
-        void this.stopRecording();
+        this.requestStop();
       });
       this.ui.setStatus("Preparing recorder...");
 
@@ -147,6 +149,14 @@ export class RecorderService {
       });
 
       await session.start();
+      if (this.stopRequestedDuringStart) {
+        this.debug("stop requested during start; stopping immediately");
+        this.stopRequestedDuringStart = false;
+        this.isRecording = true;
+        this.lifecycleState = "recording";
+        await this.stopRecording();
+        return;
+      }
       this.info("Recording started", {
         preferredMicrophone: this.plugin.settings.preferredMicrophoneId ?? null
       });
@@ -166,10 +176,26 @@ export class RecorderService {
       this.session?.dispose();
       this.session = null;
       this.lifecycleState = "idle";
+      this.stopRequestedDuringStart = false;
       this.resolveSessionLifecycle();
       this.error("startRecording failed", normalized);
       this.handleError(normalized);
     }
+  }
+
+  private requestStop(): void {
+    this.debug("requestStop invoked");
+    if (!this.isRecording && this.lifecycleState === "starting") {
+      this.stopRequestedDuringStart = true;
+      this.lifecycleState = "stopping";
+      this.updateStatus("Stopping recording...");
+      this.ui.setRecordingState(false);
+      this.ui.stopTimer();
+      this.notifyListeners();
+      return;
+    }
+
+    void this.stopRecording();
   }
 
   private async stopRecording(): Promise<void> {
@@ -319,6 +345,7 @@ export class RecorderService {
 
     this.isRecording = false;
     this.lifecycleState = "idle";
+    this.stopRequestedDuringStart = false;
     this.ui.stopTimer();
     this.ui.detachStream();
     this.resolveSessionLifecycle();

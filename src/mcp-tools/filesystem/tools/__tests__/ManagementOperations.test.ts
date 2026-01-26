@@ -9,6 +9,14 @@ jest.mock("../../utils", () => ({
   getFilesFromFolder: jest.fn((folder) => {
     return folder.children?.filter((c: any) => c instanceof TFile) || [];
   }),
+  normalizeVaultPath: jest.fn((value) =>
+    String(value ?? "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "")
+  ),
 }));
 
 // Mock workspaceUtils
@@ -97,6 +105,14 @@ describe("ManagementOperations", () => {
 
       expect(result.opened).toContain("test.md");
       expect(result.errors).toHaveLength(0);
+      expect(mockOpenFileInMainWorkspace).toHaveBeenCalledWith(app, "test.md");
+    });
+
+    it("normalizes leading slashes in workspace paths", async () => {
+      await mgmtOps.manageWorkspace({
+        files: [{ path: "/test.md" }],
+      });
+
       expect(mockOpenFileInMainWorkspace).toHaveBeenCalledWith(app, "test.md");
     });
 
@@ -199,6 +215,21 @@ describe("ManagementOperations", () => {
         expect(result.processed).toBe(1);
         expect(result.results[0].success).toBe(true);
         expect(mockDocumentContextManager.addFileToContext).toHaveBeenCalled();
+      });
+
+      it("adds single file to context with leading slash", async () => {
+        const mockFile = new TFile({ path: "test.md" });
+        (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) =>
+          p === "test.md" ? mockFile : null
+        );
+
+        const result = await mgmtOps.manageContext({
+          action: "add",
+          paths: ["/test.md"],
+        });
+
+        expect(result.processed).toBe(1);
+        expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith("test.md");
       });
 
       it("handles file not found", async () => {

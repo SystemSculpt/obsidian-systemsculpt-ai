@@ -63,6 +63,37 @@ describe("normalizeLineEndings", () => {
   });
 });
 
+describe("normalizeVaultPath", () => {
+  const { normalizeVaultPath } = require("../utils");
+
+  it("trims whitespace", () => {
+    expect(normalizeVaultPath("  docs/file.md  ")).toBe("docs/file.md");
+  });
+
+  it("converts backslashes to forward slashes", () => {
+    expect(normalizeVaultPath("docs\\file.md")).toBe("docs/file.md");
+  });
+
+  it("collapses repeated slashes", () => {
+    expect(normalizeVaultPath("docs//sub//file.md")).toBe("docs/sub/file.md");
+  });
+
+  it("strips leading slashes", () => {
+    expect(normalizeVaultPath("/docs/file.md")).toBe("docs/file.md");
+  });
+
+  it("strips trailing slashes", () => {
+    expect(normalizeVaultPath("docs/folder/")).toBe("docs/folder");
+  });
+
+  it("returns empty string for empty-ish input", () => {
+    expect(normalizeVaultPath("")).toBe("");
+    expect(normalizeVaultPath("   ")).toBe("");
+    expect(normalizeVaultPath(null as any)).toBe("");
+    expect(normalizeVaultPath(undefined as any)).toBe("");
+  });
+});
+
 describe("createSimpleDiff", () => {
   it("returns no changes for identical content", () => {
     const content = "line1\nline2\nline3";
@@ -519,8 +550,19 @@ describe("validatePath", () => {
     expect(validatePath("docs/subfolder/file.md", ["docs"])).toBe(true);
   });
 
+  it("normalizes leading slashes in path and allowedPaths", () => {
+    expect(validatePath("/docs/file.md", ["docs"])).toBe(true);
+    expect(validatePath("docs/file.md", ["/docs"])).toBe(true);
+    expect(validatePath("/docs/file.md", ["/docs"])).toBe(true);
+  });
+
   it("returns true when allowed path is root", () => {
     expect(validatePath("any/path", ["/"])).toBe(true);
+  });
+
+  it("does not allow prefix matches outside path boundary", () => {
+    expect(validatePath("docs2/file.md", ["docs"])).toBe(false);
+    expect(validatePath("docs-and-more/file.md", ["docs"])).toBe(false);
   });
 
   it("returns false when path is outside allowed paths", () => {

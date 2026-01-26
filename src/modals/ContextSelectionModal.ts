@@ -14,6 +14,10 @@ interface FileItem {
   searchText: string;
 }
 
+export interface ContextSelectionModalOptions {
+  isFileAlreadyInContext?: (file: TFile) => boolean;
+}
+
 export class ContextSelectionModal extends Modal {
   private files: FileItem[] = [];
   private filteredFiles: FileItem[] = [];
@@ -23,17 +27,25 @@ export class ContextSelectionModal extends Modal {
   private onSelect: (files: TFile[]) => void;
   private plugin: SystemSculptPlugin;
   private addButton: ButtonComponent | null = null;
+  private readonly isFileAlreadyInContext?: (file: TFile) => boolean;
+  private readonly MAX_RENDERED_FILES = 100;
+  private renderedCount = 0;
+  private listContainer: HTMLElement | null = null;
+  private loadMoreButton: HTMLButtonElement | null = null;
+  private fileItemControlsByPath = new Map<string, { el: HTMLElement; checkbox: HTMLInputElement }>();
 
-  constructor(app: App, onSelect: (files: TFile[]) => void, plugin: SystemSculptPlugin) {
+  constructor(app: App, onSelect: (files: TFile[]) => void, plugin: SystemSculptPlugin, options?: ContextSelectionModalOptions) {
     super(app);
     this.onSelect = onSelect;
     this.plugin = plugin;
+    this.isFileAlreadyInContext = options?.isFileAlreadyInContext;
     this.initializeFiles();
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.renderedCount = 0;
     
     // Simple title using Obsidian's titleEl
     this.titleEl.setText("Add Context Files");
@@ -73,6 +85,7 @@ export class ContextSelectionModal extends Modal {
 
     // File list container
     const listContainer = contentEl.createDiv("ss-context-file-list");
+    this.listContainer = listContainer;
     this.renderFileList(listContainer);
 
     // Simple button container using Setting for consistency
@@ -93,6 +106,9 @@ export class ContextSelectionModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.selectedFiles.clear();
+    this.fileItemControlsByPath.clear();
+    this.listContainer = null;
+    this.loadMoreButton = null;
   }
 
   private initializeFiles() {
@@ -140,6 +156,7 @@ export class ContextSelectionModal extends Modal {
     }
     
     this.filteredFiles = filtered;
+    this.renderedCount = 0;
     
     // Re-render file list
     const listContainer = this.contentEl.querySelector(".ss-context-file-list") as HTMLElement;
@@ -150,6 +167,8 @@ export class ContextSelectionModal extends Modal {
 
   private renderFileList(container: HTMLElement) {
     container.empty();
+    this.fileItemControlsByPath.clear();
+    this.loadMoreButton = null;
     
     if (this.filteredFiles.length === 0) {
       const empty = container.createDiv("ss-context-empty");
@@ -159,64 +178,105 @@ export class ContextSelectionModal extends Modal {
       return;
     }
 
-    // Render files (limit to 100 for performance)
-    const visibleFiles = this.filteredFiles.slice(0, 100);
-    
-    visibleFiles.forEach(item => {
-      const fileEl = container.createDiv("ss-context-file-item");
-      const isSelected = this.selectedFiles.has(item.file);
-      
-      if (isSelected) {
-        fileEl.addClass("is-selected");
-      }
-      
-      // Icon
-      const iconEl = fileEl.createDiv("ss-context-file-icon");
-      setIcon(iconEl, FILE_TYPES[item.type].icon);
-      
-      // Info
-      const infoEl = fileEl.createDiv("ss-context-file-info");
-      infoEl.createDiv({ text: item.file.basename, cls: "ss-context-file-name" });
-      infoEl.createDiv({ text: item.file.path, cls: "ss-context-file-path" });
-      
-      // Checkbox
-      const checkbox = fileEl.createEl("input", { type: "checkbox" });
-      checkbox.checked = isSelected;
-      
-      // Click handler
-      fileEl.onclick = () => this.toggleFileSelection(item.file);
-    });
+    const end = Math.min(this.MAX_RENDERED_FILES, this.filteredFiles.length);
+    this.appendFileItems(container, 0, end);
+    this.renderedCount = end;
 
-    if (this.filteredFiles.length > 100) {
-      const loadMore = container.createEl("button", {
-        text: `Show ${this.filteredFiles.length - 100} more files`,
-        cls: "ss-context-load-more"
-      });
-      loadMore.onclick = () => {
-        // Simple implementation: just show all files
-        container.empty();
-        this.filteredFiles.forEach(item => {
-          // Same rendering logic as above but for all files
-        });
-      };
-    }
+    this.updateLoadMoreButton(container);
   }
 
   private toggleFileSelection(file: TFile) {
+    if (this.isFileAlreadyInContext?.(file)) {
+      return;
+    }
+
     if (this.selectedFiles.has(file)) {
       this.selectedFiles.delete(file);
     } else {
       this.selectedFiles.add(file);
     }
-    
-    // Re-render to update selection states
-    const listContainer = this.contentEl.querySelector(".ss-context-file-list") as HTMLElement;
-    if (listContainer) {
-      this.renderFileList(listContainer);
+
+    const controls = this.fileItemControlsByPath.get(file.path);
+    if (controls) {
+      controls.el.toggleClass("is-selected", this.selectedFiles.has(file));
+      controls.checkbox.checked = this.selectedFiles.has(file);
     }
     
     // Update button
     this.updateAddButtonState();
+  }
+
+  private appendFileItems(container: HTMLElement, start: number, end: number): void {
+    for (let index = start; index < end; index++) {
+      const item = this.filteredFiles[index];
+      if (!item) continue;
+
+      const fileEl = container.createDiv("ss-context-file-item");
+      const isAlreadyInContext = this.isFileAlreadyInContext?.(item.file) ?? false;
+      const isSelected = this.selectedFiles.has(item.file);
+      const isChecked = isAlreadyInContext || isSelected;
+
+      if (isSelected) {
+        fileEl.addClass("is-selected");
+      }
+      if (isAlreadyInContext) {
+        fileEl.addClass("is-attached");
+      }
+
+      // Icon
+      const iconEl = fileEl.createDiv("ss-context-file-icon");
+      setIcon(iconEl, FILE_TYPES[item.type].icon);
+
+      // Info
+      const infoEl = fileEl.createDiv("ss-context-file-info");
+      infoEl.createDiv({ text: item.file.basename, cls: "ss-context-file-name" });
+      infoEl.createDiv({ text: item.file.path, cls: "ss-context-file-path" });
+      if (isAlreadyInContext) {
+        infoEl.createDiv({ text: "Already in context", cls: "ss-context-file-badge" });
+      }
+
+      // Checkbox
+      const checkbox = fileEl.createEl("input", { type: "checkbox" }) as HTMLInputElement;
+      checkbox.checked = isChecked;
+      checkbox.disabled = isAlreadyInContext;
+
+      this.fileItemControlsByPath.set(item.file.path, { el: fileEl, checkbox });
+
+      // Click handler
+      if (!isAlreadyInContext) {
+        fileEl.onclick = () => this.toggleFileSelection(item.file);
+      }
+    }
+  }
+
+  private updateLoadMoreButton(container: HTMLElement): void {
+    if (this.loadMoreButton) {
+      this.loadMoreButton.remove();
+      this.loadMoreButton = null;
+    }
+
+    const remaining = this.filteredFiles.length - this.renderedCount;
+    if (remaining <= 0) return;
+
+    const button = container.createEl("button", {
+      text: `Show ${remaining} more file${remaining === 1 ? "" : "s"}`,
+      cls: "ss-context-load-more",
+    }) as HTMLButtonElement;
+    button.onclick = () => {
+      if (!this.listContainer) return;
+      const start = this.renderedCount;
+      const end = Math.min(this.renderedCount + this.MAX_RENDERED_FILES, this.filteredFiles.length);
+      // Remove button before appending so it stays at the bottom.
+      if (this.loadMoreButton) {
+        this.loadMoreButton.remove();
+        this.loadMoreButton = null;
+      }
+      this.appendFileItems(this.listContainer, start, end);
+      this.renderedCount = end;
+      this.updateLoadMoreButton(this.listContainer);
+    };
+
+    this.loadMoreButton = button;
   }
 
   private updateAddButton(btn: ButtonComponent) {

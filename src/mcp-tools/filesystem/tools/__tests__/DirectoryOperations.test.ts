@@ -10,6 +10,14 @@ jest.mock("../../utils", () => ({
     if (path === "blocked/dir" || path === "blocked/file.md") return false;
     return true;
   }),
+  normalizeVaultPath: jest.fn((value) =>
+    String(value ?? "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "")
+  ),
   formatBytes: jest.fn((bytes) => `${bytes} bytes`),
   runWithConcurrency: jest.fn(async (items, fn) => {
     const results = [];
@@ -91,6 +99,14 @@ describe("DirectoryOperations", () => {
       });
 
       expect(result.results[0].success).toBe(true);
+      expect(app.vault.createFolder).toHaveBeenCalledWith("new/folder");
+    });
+
+    it("normalizes leading slashes when creating directories", async () => {
+      await dirOps.createDirectories({
+        paths: ["/new/folder"],
+      });
+
       expect(app.vault.createFolder).toHaveBeenCalledWith("new/folder");
     });
 

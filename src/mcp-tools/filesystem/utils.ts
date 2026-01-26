@@ -19,9 +19,15 @@ export function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-const normalizeVaultPath = (value: string): string => {
-  return value.replace(/\\/g, "/").replace(/^\/+/, "");
-};
+export function normalizeVaultPath(value: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+}
 
 export function isHiddenSystemPath(path: string): boolean {
   const raw = String(path ?? "").trim();
@@ -218,11 +224,24 @@ export async function listAdapterDirectory(adapter: any, dirPath: string): Promi
  * Validate that a path is allowed within the given allowed paths
  */
 export function validatePath(path: string, allowedPaths: string[]): boolean {
-  const normalizedPath = normalizePath(path);
+  const normalizedPath = normalizePath(normalizeVaultPath(path));
+  if (normalizedPath.length === 0) {
+    return allowedPaths.some((allowedPath) => {
+      const allowedNormalized = normalizePath(normalizeVaultPath(String(allowedPath ?? "")));
+      return allowedNormalized.length === 0 || allowedPath === "/";
+    });
+  }
   
   // Check if path is within allowed paths
   for (const allowedPath of allowedPaths) {
-    if (allowedPath === "/" || normalizedPath.startsWith(allowedPath)) {
+    if (allowedPath === "/") {
+      return true;
+    }
+    const allowedNormalized = normalizePath(normalizeVaultPath(String(allowedPath ?? "")));
+    if (!allowedNormalized) {
+      return true;
+    }
+    if (normalizedPath === allowedNormalized || normalizedPath.startsWith(`${allowedNormalized}/`)) {
       return true;
     }
   }

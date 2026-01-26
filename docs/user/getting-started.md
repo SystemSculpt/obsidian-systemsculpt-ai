@@ -40,6 +40,7 @@ See: [Settings overview](settings.md).
 Common ways to give the model context:
 
 - Drag notes/files into the chat
+- Use the paperclip button to attach context files (they’ll appear above the message box; click `x` to remove)
 - Type `@` to mention a file (if enabled in the chat UI)
 - Use **Chat with File** from the command palette while viewing a note
 - Attach an image (requires a vision-capable model/provider)
@@ -55,4 +56,3 @@ See: [Agent Mode](agent-mode.md).
 Similar Notes is powered by embeddings (vector search) and must be enabled in settings.
 
 See: [Similar Notes](similar-notes.md).
-

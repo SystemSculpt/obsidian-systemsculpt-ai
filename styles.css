@@ -15746,6 +15746,15 @@ mark.ss-hl {
   cursor: not-allowed;
 }
 
+.ss-context-file-item.is-attached {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.ss-context-file-item.is-attached:hover {
+  background: var(--background-primary);
+}
+
 .ss-context-file-icon {
   width: var(--icon-m);
   height: var(--icon-m);
@@ -15777,6 +15786,12 @@ mark.ss-hl {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: var(--size-2-1);
+}
+
+.ss-context-file-badge {
+  margin-top: var(--size-2-1);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
 }
 
 .ss-context-file-item input[type="checkbox"] {

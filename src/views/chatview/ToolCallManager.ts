@@ -21,7 +21,7 @@ import {
 } from "../../types/toolCalls";
 import { MCPService } from "./MCPService";
 import { splitToolName, requiresUserApproval } from "../../utils/toolPolicy";
-import { buildOpenAIToolDefinition } from "../../utils/tooling";
+import { buildOpenAIToolDefinition, buildToolCallSignature, TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { errorLogger } from "../../utils/errorLogger";
 
 export class ToolCallManager {
@@ -44,6 +44,10 @@ export class ToolCallManager {
   // Tool execution scheduler (limits concurrency and applies per-call timeouts)
   private readonly executionQueue: Array<{ toolCallId: string; options?: ToolExecutionOptions }> = [];
   private activeExecutions = 0;
+
+  // Loop guard: prevent repeated failed/denied tool calls within a single assistant turn
+  private readonly MAX_FAILED_TOOL_REPEAT_ATTEMPTS = 2;
+  private readonly MAX_DENIED_TOOL_REPEAT_ATTEMPTS = 1;
 
   constructor(mcpService: MCPService, chatView?: any) {
     this.mcpService = mcpService;
@@ -204,6 +208,50 @@ export class ToolCallManager {
     return { ok: true };
   }
 
+  private getToolCallSignature(request: ToolCallRequest): string | null {
+    const toolName = request?.function?.name ?? "";
+    if (!toolName) return null;
+    return buildToolCallSignature(toolName, request?.function?.arguments);
+  }
+
+  private getToolCallRepeatStats(messageId: string, signature: string): { failed: number; denied: number } {
+    let failed = 0;
+    let denied = 0;
+
+    for (const call of this.toolCalls.values()) {
+      if (call.messageId !== messageId) continue;
+      const toolName = call.request?.function?.name ?? "";
+      if (!toolName) continue;
+      const callSignature = buildToolCallSignature(toolName, call.request?.function?.arguments);
+      if (callSignature !== signature) continue;
+
+      if (call.state === "denied" || call.result?.error?.code === "USER_DENIED") {
+        denied += 1;
+        continue;
+      }
+
+      if (call.state === "failed" || (call.state === "completed" && call.result && call.result.success === false)) {
+        failed += 1;
+      }
+    }
+
+    return { failed, denied };
+  }
+
+  private getRepeatBlockMessage(stats: { failed: number; denied: number }): string | null {
+    if (stats.denied >= this.MAX_DENIED_TOOL_REPEAT_ATTEMPTS) {
+      const attempts = stats.denied;
+      return `Tool call was denied ${attempts} time${attempts === 1 ? "" : "s"} for this request. Repeating the same tool call is blocked to prevent an agent loop. Update the instructions and try again.`;
+    }
+
+    if (stats.failed >= this.MAX_FAILED_TOOL_REPEAT_ATTEMPTS) {
+      const attempts = stats.failed;
+      return `Tool call failed ${attempts} time${attempts === 1 ? "" : "s"} for this request (retry limit ${this.MAX_FAILED_TOOL_REPEAT_ATTEMPTS}). Repeating the same tool call is blocked to prevent an agent loop. Fix the underlying issue and try again.`;
+    }
+
+    return null;
+  }
+
   public createToolCall(
     request: ToolCallRequest,
     messageId: string,
@@ -212,6 +260,55 @@ export class ToolCallManager {
     const toolName = request?.function?.name ?? '';
     const availability = this.getToolAvailability(toolName);
     const effectiveAutoApprove = availability.ok ? (autoApprove || (toolName ? this.shouldAutoApprove(toolName) : false)) : false;
+
+    if (availability.ok) {
+      const signature = this.getToolCallSignature(request);
+      if (signature) {
+        const repeatStats = this.getToolCallRepeatStats(messageId, signature);
+        const repeatMessage = this.getRepeatBlockMessage(repeatStats);
+        if (repeatMessage) {
+          const blockedToolCall: ToolCall = {
+            id: request.id,
+            messageId,
+            request,
+            state: "failed",
+            timestamp: Date.now(),
+            autoApproved: false,
+            ...(availability.serverId ? { serverId: availability.serverId } : {}),
+            result: {
+              success: false,
+              error: {
+                code: TOOL_LOOP_ERROR_CODE,
+                message: repeatMessage,
+                details: {
+                  signature,
+                  failedAttempts: repeatStats.failed,
+                  deniedAttempts: repeatStats.denied,
+                  maxFailedAttempts: this.MAX_FAILED_TOOL_REPEAT_ATTEMPTS,
+                  maxDeniedAttempts: this.MAX_DENIED_TOOL_REPEAT_ATTEMPTS,
+                },
+              },
+            },
+          };
+
+          this.toolCalls.set(blockedToolCall.id, blockedToolCall);
+          this.events.emit('tool-call:created', { toolCall: blockedToolCall });
+          try {
+            errorLogger.debug("Blocked repeated tool call to prevent loop", {
+              source: "ToolCallManager",
+              method: "createToolCall",
+              metadata: {
+                messageId,
+                toolCallId: blockedToolCall.id,
+                toolName,
+                repeatStats,
+              },
+            });
+          } catch {}
+          return blockedToolCall;
+        }
+      }
+    }
 
     const toolCall: ToolCall = {
       id: request.id,

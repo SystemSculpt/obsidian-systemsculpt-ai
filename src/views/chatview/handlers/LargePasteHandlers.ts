@@ -3,6 +3,16 @@ import type SystemSculptPlugin from "../../../main";
 import { validateBrowserFileSize } from "../../../utils/FileValidator";
 import { LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../../constants/largeText";
 
+const IMAGE_PASTE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
+
+const isClipboardImageFile = (file: File): boolean => {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  const name = file.name || "";
+  const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "";
+  return !!ext && IMAGE_PASTE_EXTENSIONS.has(ext);
+};
+
 export interface LargePasteContext {
   app: App;
   plugin: SystemSculptPlugin;
@@ -62,6 +72,7 @@ export async function handlePaste(ctx: LargePasteContext, e: ClipboardEvent): Pr
 
   const pastedText = dt.getData("text/plain") ?? "";
   const allFiles = Array.from(dt.files);
+  const hasImageFiles = allFiles.some((file) => isClipboardImageFile(file));
 
   if (!allFiles.length && pastedText) {
     const warningLevel = LargeTextHelpers.getTextWarningLevel(pastedText);
@@ -139,7 +150,7 @@ export async function handlePaste(ctx: LargePasteContext, e: ClipboardEvent): Pr
     }
   }
 
-  if (pastedText) {
+  if (pastedText && !hasImageFiles) {
     if (LargeTextHelpers.shouldCollapseInHistory(pastedText)) {
       await handleLargeTextPaste(ctx, pastedText);
     } else {
@@ -147,5 +158,3 @@ export async function handlePaste(ctx: LargePasteContext, e: ClipboardEvent): Pr
     }
   }
 }
-
-

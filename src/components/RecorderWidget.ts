@@ -139,15 +139,18 @@ export function createRecorderWidget(options: RecorderWidgetOptions): RecorderWi
   stopButton.dataset.recorderStop = "true";
   stopButton.className = "ss-recorder-mini__stop mod-cta";
   stopButton.textContent = "Stop";
-  stopButton.addEventListener("pointerdown", (event) => {
+  let stopRequested = false;
+  const requestStop = (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
-  });
-  stopButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
+    if (stopRequested) return;
+    stopRequested = true;
+    stopButton.disabled = true;
+    stopButton.textContent = "Stopping…";
     onStop();
-  });
+  };
+  stopButton.addEventListener("pointerup", requestStop);
+  stopButton.addEventListener("click", requestStop);
   header.appendChild(stopButton);
 
   const timer = document.createElement("div");

@@ -98,7 +98,10 @@ export class FileContextManager {
         const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
         await documentContextManager.addFilesToContext(files, this, { showNotices: true, saveChanges: true, maxFiles: 100 });
       },
-      this.plugin
+      this.plugin,
+      {
+        isFileAlreadyInContext: (file) => this.hasContextFile(`[[${file.path}]]`),
+      }
     );
     modal.open();
   }

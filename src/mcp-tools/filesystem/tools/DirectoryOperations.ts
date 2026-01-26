@@ -14,6 +14,7 @@ import {
   formatBytes,
   runWithConcurrency,
   shouldExcludeFromSearch,
+  normalizeVaultPath,
   isHiddenSystemPath,
   ensureAdapterFolder,
   listAdapterDirectory,
@@ -52,7 +53,7 @@ export class DirectoryOperations {
         return { path, success: false, error: `Access denied: ${path}` };
       }
       
-      const normalizedPath = normalizePath(path);
+      const normalizedPath = normalizePath(normalizeVaultPath(path));
       
       try {
         if (this.shouldUseAdapter(normalizedPath)) {
@@ -94,7 +95,7 @@ export class DirectoryOperations {
         }
         
         const MAX_RESULTS = FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3; // Capped to ~75 items max to stay under 25k chars
-        const normalizedPath = path === "/" ? "" : normalizePath(path);
+        const normalizedPath = normalizePath(normalizeVaultPath(path));
         if (normalizedPath && this.shouldUseAdapter(normalizedPath)) {
           const adapter: any = this.app.vault.adapter as any;
           const pathResult: { path: string, files?: FileInfo[], directories?: DirectoryInfo[], summary?: string } = { path };
@@ -393,14 +394,17 @@ export class DirectoryOperations {
             continue;
           }
 
+          const normalizedSource = normalizePath(normalizeVaultPath(source));
+          const normalizedDestination = normalizePath(normalizeVaultPath(destination));
+
           // Get the source file/folder
-          const sourceFile = this.app.vault.getAbstractFileByPath(normalizePath(source));
+          const sourceFile = this.app.vault.getAbstractFileByPath(normalizedSource);
           if (!sourceFile) {
             throw new Error(`Item not found: ${source}`);
           }
 
           // Move/rename operation
-          await this.app.fileManager.renameFile(sourceFile, normalizePath(destination));
+          await this.app.fileManager.renameFile(sourceFile, normalizedDestination);
           results.push({ source, destination, success: true });
         } catch (error: any) {
           results.push({ source, destination, success: false, error: error?.message || String(error) });
@@ -475,14 +479,15 @@ export class DirectoryOperations {
     }
     
     // Get the file/folder
-    const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    const normalizedPath = normalizePath(normalizeVaultPath(path));
+    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
     if (!file) {
       throw new Error(`File not found: ${path}`);
     }
     
     // Move to Obsidian's .trash folder using vault adapter
-    const normalizedPath = normalizePath(file.path);
-    await this.app.vault.adapter.trashLocal(normalizedPath);
+    const adapterPath = normalizePath(normalizeVaultPath(file.path));
+    await this.app.vault.adapter.trashLocal(adapterPath);
     
     return { path, success: true };
   }

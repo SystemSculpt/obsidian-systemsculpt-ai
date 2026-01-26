@@ -43,14 +43,19 @@ function isValidToolCallId(id: string): boolean {
   const trimmed = typeof id === "string" ? id.trim() : "";
   if (trimmed.length === 0) return false;
 
-  // Keep IDs stable across providers (OpenAI uses call_*, OpenRouter/Gemini uses tool_*).
-  // We only reject obviously unsafe shapes (whitespace, extremely long strings).
+  // Keep IDs stable across providers (OpenAI uses call_*, OpenRouter/Gemini uses tool_*,
+  // Anthropic uses toolu_*, and some gateways emit custom prefixes). We only reject
+  // obviously unsafe shapes (whitespace, extremely long strings, trailing separators).
   if (trimmed.length > 200) return false;
 
-  // Providers vary wildly in tool call id formats and lengths (some are very short).
   // Preserve as-is when it is safe to embed in HTML attributes / CSS selectors.
   // Allow common separators seen in the wild: ':', '-', '.', '/'.
-  return /^(call|tool)_[a-zA-Z0-9_:\-./]{1,}$/.test(trimmed);
+  if (!/^[a-zA-Z0-9_:\-./]+$/.test(trimmed)) return false;
+
+  // Avoid IDs that end with separators (often incomplete / placeholder IDs).
+  if (/[:\-._/]$/.test(trimmed)) return false;
+
+  return true;
 }
 
 function generateToolCallId(seed: string | undefined, index: number): string {

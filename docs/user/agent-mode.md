@@ -48,6 +48,15 @@ Tool names below match the MCP tool definitions in:
 - Approve destructive operations carefully (especially bulk edits/moves).
 - If something looks off, deny the call and ask the model to explain its plan first.
 
+## Tool loop guard
+
+To prevent infinite approval loops, Agent Mode blocks repeated tool calls within the same assistant turn:
+
+- Denied tools are blocked from repeating for that turn.
+- Failed tools get up to two attempts per turn; further repeats are blocked.
+
+When this happens, you’ll see a tool error indicating the loop guard fired. Fix the underlying issue (path, frontmatter, permissions) and send a new message to try again.
+
 ## Safety toggle
 
 In **Settings → Chat & Templates → Agent Mode safety**, you can:

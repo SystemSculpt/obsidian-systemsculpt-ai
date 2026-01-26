@@ -48,6 +48,45 @@ describe("RecorderWidget", () => {
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 
+  it("fires onStop when stop button receives pointerup (touch)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onStop = jest.fn();
+    createRecorderWidget({
+      host,
+      plugin: makePlugin(),
+      variant: "desktop",
+      onStop,
+    });
+
+    const stopButton = host.querySelector("button[data-recorder-stop='true']") as HTMLButtonElement;
+    expect(stopButton).toBeTruthy();
+
+    stopButton.dispatchEvent(new Event("pointerup", { bubbles: true, cancelable: true }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onStop once even if pointerup and click both fire", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onStop = jest.fn();
+    createRecorderWidget({
+      host,
+      plugin: makePlugin(),
+      variant: "desktop",
+      onStop,
+    });
+
+    const stopButton = host.querySelector("button[data-recorder-stop='true']") as HTMLButtonElement;
+    expect(stopButton).toBeTruthy();
+
+    stopButton.dispatchEvent(new Event("pointerup", { bubbles: true, cancelable: true }));
+    stopButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
   it("does not use stop button as drag handle", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

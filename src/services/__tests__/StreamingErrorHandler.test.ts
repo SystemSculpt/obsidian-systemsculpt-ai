@@ -85,6 +85,18 @@ describe("StreamingErrorHandler", () => {
       });
     });
 
+    it("uses top-level message when error wrapper is missing", async () => {
+      const response = createMockResponse(400, {
+        message: "Tool calling is not supported for this model",
+      });
+
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, true)
+      ).rejects.toMatchObject({
+        message: "Tool calling is not supported for this model",
+      });
+    });
+
     it("treats 429 authentication failures as auth errors", async () => {
       const response = createMockResponse(429, {
         error: { message: "Too many authentication failures" },
@@ -151,6 +163,8 @@ describe("StreamingErrorHandler", () => {
       const toolErrorPatterns = [
         "does not support tools",
         "tools not supported",
+        "tool calling not supported",
+        "tool calling is not supported",
         "tool_calls not supported",
         "function calling not supported",
         "function_calling not supported",
@@ -173,6 +187,33 @@ describe("StreamingErrorHandler", () => {
           const metadata = (err as SystemSculptError).metadata;
           expect(metadata.shouldResubmitWithoutTools).toBe(true);
           expect(metadata.toolSupport).toBe(false);
+        }
+      }
+    });
+
+    it("detects image not supported errors for custom providers", async () => {
+      const imageErrorPatterns = [
+        "does not support image",
+        "image input not supported",
+        "vision not supported",
+        "unknown field: image_url",
+        "additional properties are not allowed: 'image_url'",
+        "unsupported type: image_url",
+        "Invalid type for 'messages[0].content': expected string",
+        "messages[0].content must be a string",
+      ];
+
+      for (const pattern of imageErrorPatterns) {
+        const response = createMockResponse(400, {
+          error: { message: pattern },
+        });
+
+        try {
+          await StreamingErrorHandler.handleStreamError(response, true);
+        } catch (err) {
+          const metadata = (err as SystemSculptError).metadata;
+          expect(metadata.shouldResubmitWithoutImages).toBe(true);
+          expect(metadata.imageSupport).toBe(false);
         }
       }
     });
@@ -334,6 +375,8 @@ describe("StreamingErrorHandler", () => {
         "unknown field: image_url",
         "additional properties are not allowed: 'image_url'",
         "unsupported type: image_url",
+        "Invalid type for 'messages[0].content': expected string",
+        "messages[0].content must be a string",
       ];
 
       for (const pattern of imageErrorPatterns) {

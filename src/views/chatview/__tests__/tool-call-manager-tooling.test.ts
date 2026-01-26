@@ -1,5 +1,6 @@
 import { ToolCallManager } from "../ToolCallManager";
 import type { ToolCallRequest } from "../../../types/toolCalls";
+import { TOOL_LOOP_ERROR_CODE } from "../../../utils/tooling";
 
 const flush = async (): Promise<void> =>
   await new Promise((resolve) => setImmediate(resolve));
@@ -296,6 +297,68 @@ describe("ToolCallManager tooling settings", () => {
     // Should have 2 results (maxToolResultsInContext) including the most recent (call_3) and failed
     expect(results).toHaveLength(2);
     expect(new Set(ids)).toEqual(new Set(["call_failed", "call_3"]));
+  });
+
+  test("blocks repeated tool calls after denial in the same turn", async () => {
+    const manager = createManager({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    const first = manager.createToolCall(
+      createRequest("call_move_1", "mcp-filesystem_move", { from: "A", to: "B" }),
+      "msg-loop",
+      false
+    );
+    manager.denyToolCall(first.id);
+    expect(first.state).toBe("denied");
+
+    const second = manager.createToolCall(
+      createRequest("call_move_2", "mcp-filesystem_move", { to: "B", from: "A" }),
+      "msg-loop",
+      false
+    );
+    expect(second.state).toBe("failed");
+    expect(second.result?.error?.code).toBe(TOOL_LOOP_ERROR_CODE);
+  });
+
+  test("blocks repeated tool calls after repeated failures in the same turn", async () => {
+    const manager = createManager({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    let executions = 0;
+    manager.registerTool(
+      {
+        name: "edit_file",
+        description: "Edit a file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+      },
+      async () => {
+        executions += 1;
+        throw new Error("Simulated failure");
+      }
+    );
+
+    const first = manager.createToolCall(createRequest("call_edit_1", "edit_file", { path: "A" }), "msg-fail", false);
+    for (let i = 0; i < 10 && first.state !== "failed"; i++) {
+      await flush();
+    }
+    expect(first.state).toBe("failed");
+
+    const second = manager.createToolCall(createRequest("call_edit_2", "edit_file", { path: "A" }), "msg-fail", false);
+    for (let i = 0; i < 10 && second.state !== "failed"; i++) {
+      await flush();
+    }
+    expect(second.state).toBe("failed");
+
+    const third = manager.createToolCall(createRequest("call_edit_3", "edit_file", { path: "A" }), "msg-fail", false);
+    expect(third.state).toBe("failed");
+    expect(third.result?.error?.code).toBe(TOOL_LOOP_ERROR_CODE);
+    expect(executions).toBe(2);
   });
 
   test("sanitizes MCP tool schemas when building OpenAI tools", async () => {

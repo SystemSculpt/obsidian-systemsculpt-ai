@@ -703,6 +703,21 @@ export class ChatView extends ItemView {
       }
     });
 
+    // Context
+    const contextCount = this.contextManager?.getContextFiles?.().size ?? 0;
+    createPill({
+      icon: "paperclip",
+      label: "Context",
+      value: contextCount === 0 ? "None" : `${contextCount} file${contextCount === 1 ? "" : "s"}`,
+      title:
+        contextCount === 0
+          ? "Attach notes, documents, images, or audio to this chat"
+          : `Context files attached: ${contextCount} (click to add more)`,
+      onClick: async () => {
+        await this.contextManager?.addContextFile?.();
+      },
+    });
+
     // Agent Mode
     const agentModeEnabled = !!this.agentMode;
     createPill({

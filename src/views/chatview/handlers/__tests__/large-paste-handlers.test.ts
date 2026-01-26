@@ -191,4 +191,48 @@ describe("LargePasteHandlers", () => {
     expect(logSpy).toHaveBeenCalled();
     logSpy.mockRestore();
   });
+
+  it("skips inserting text when image files are present", async () => {
+    const app = new App();
+    app.vault.createBinary = jest.fn(async () => {});
+    app.vault.getAbstractFileByPath = jest.fn((path: string) => new TFile({ path }));
+
+    const addFileToContext = jest.fn(async () => {});
+    const insertTextAtCursor = jest.fn();
+    const plugin = {
+      settings: { attachmentsDirectory: "Attachments" },
+      directoryManager: { ensureDirectoryByPath: jest.fn(async () => {}) },
+    } as any;
+
+    const fakeImage = {
+      name: "clipboard.png",
+      type: "image/png",
+      arrayBuffer: jest.fn(async () => new ArrayBuffer(4)),
+    };
+
+    const event = {
+      clipboardData: {
+        getData: jest.fn(() => "data:image/png;base64,abcd"),
+        files: [fakeImage],
+      },
+      preventDefault: jest.fn(),
+    } as any;
+
+    await handlePaste(
+      {
+        app,
+        plugin,
+        addFileToContext,
+        insertTextAtCursor,
+        getPendingLargeTextContent: () => null,
+        setPendingLargeTextContent: jest.fn(),
+      },
+      event
+    );
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(validateBrowserFileSize).toHaveBeenCalled();
+    expect(addFileToContext).toHaveBeenCalled();
+    expect(insertTextAtCursor).not.toHaveBeenCalled();
+  });
 });

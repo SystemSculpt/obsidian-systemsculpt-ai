@@ -496,7 +496,7 @@ export class InputHandler extends Component {
           );
         }
 
-        // Run orchestrated assistant stream with at most one continuation
+        // Run orchestrated assistant stream with bounded tool continuations
         await this.orchestrator.runTurn({
           includeContextFiles: true,
           signal,

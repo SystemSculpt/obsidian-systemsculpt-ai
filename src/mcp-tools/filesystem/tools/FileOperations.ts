@@ -5,6 +5,7 @@ import {
   validatePath,
   normalizeLineEndings,
   createSimpleDiff,
+  normalizeVaultPath,
   isHiddenSystemPath,
   ensureAdapterFolder,
   adapterPathExists,
@@ -61,7 +62,8 @@ export class FileOperations {
         files.push({ path, content: "", error: "Access denied" });
         continue;
       }
-      const file = this.app.vault.getAbstractFileByPath(path);
+      const normalizedPath = normalizePath(normalizeVaultPath(path));
+      const file = this.app.vault.getAbstractFileByPath(normalizedPath);
       if (file instanceof TFile) {
         try {
           const fullContent = await this.app.vault.read(file);
@@ -106,18 +108,18 @@ export class FileOperations {
           };
           
           files.push({ 
-            path, 
+            path: normalizedPath || path, 
             content: windowContent,
             metadata
           });
         } catch (err) {
           files.push({ path, content: "", error: "Failed to read file" });
         }
-      } else if (this.shouldUseAdapter(path)) {
+      } else if (this.shouldUseAdapter(normalizedPath || path)) {
         try {
           const adapter: any = this.app.vault.adapter as any;
-          const fullContent = await readAdapterText(adapter, path);
-          const stat = await statAdapterPath(adapter, path);
+          const fullContent = await readAdapterText(adapter, normalizedPath || path);
+          const stat = await statAdapterPath(adapter, normalizedPath || path);
           const fileSize = stat?.size ?? fullContent.length;
 
           const windowStart = Math.max(0, Math.min(actualOffset, fileSize));
@@ -153,7 +155,7 @@ export class FileOperations {
           };
 
           files.push({
-            path,
+            path: normalizedPath || path,
             content: windowContent,
             metadata,
           });
@@ -187,12 +189,12 @@ export class FileOperations {
       throw new Error(`Content too large (${content.length} characters). Maximum allowed is ${FILESYSTEM_LIMITS.MAX_CONTENT_SIZE} characters`);
     }
     
-    const normalizedPath = normalizePath(path);
+    const normalizedPath = normalizePath(normalizeVaultPath(path));
     const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 
     if (file && file instanceof TFile) {
       if (ifExists === 'skip') {
-        return { path, success: true };
+        return { path: normalizedPath || path, success: true };
       }
       if (ifExists === 'error') {
         throw new Error(`File already exists: ${path}`);
@@ -208,7 +210,7 @@ export class FileOperations {
       const adapter: any = this.app.vault.adapter as any;
       const exists = await adapterPathExists(adapter, normalizedPath);
       if (exists && ifExists === "skip") {
-        return { path, success: true };
+        return { path: normalizedPath || path, success: true };
       }
       if (exists && ifExists === "error") {
         throw new Error(`File already exists: ${path}`);
@@ -238,7 +240,7 @@ export class FileOperations {
       await this.app.vault.create(normalizedPath, content);
     }
     
-    return { path, success: true };
+    return { path: normalizedPath || path, success: true };
   }
 
   private resolveFolderNotePath(requestedPath: string): string | null {
@@ -276,7 +278,7 @@ export class FileOperations {
     const strict = (params as any).strict ?? true;
 
     // Read file content and normalize line endings
-    const normalizedPath = normalizePath(filePath);
+    const normalizedPath = normalizePath(normalizeVaultPath(filePath));
     if (this.shouldUseAdapter(normalizedPath)) {
       const adapter: any = this.app.vault.adapter as any;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));

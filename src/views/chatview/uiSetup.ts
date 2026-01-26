@@ -226,6 +226,9 @@ export const uiSetup = {
         files.add(wikilink);
         chatView.contextManager.setContextFiles(Array.from(files));
         await chatView.saveChat();
+        if (chatView.messages.length === 0) {
+          chatView.displayChatStatus();
+        }
         // Token counter update removed
       },
       onError: (error) => chatView.handleError(error),

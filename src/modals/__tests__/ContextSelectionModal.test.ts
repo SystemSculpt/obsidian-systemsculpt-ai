@@ -408,6 +408,21 @@ describe("ContextSelectionModal", () => {
       const loadMore = modal.contentEl.querySelector(".ss-context-load-more");
       expect(loadMore).not.toBeNull();
     });
+
+    it("loads more files when 'show more' is clicked", () => {
+      const manyFiles = Array.from({ length: 150 }, (_, i) => new TFile({ path: `file${i}.md` }));
+      (app.vault as any).getFiles = jest.fn().mockReturnValue(manyFiles);
+      modal = new ContextSelectionModal(app, onSelect, plugin);
+      modal.onOpen();
+
+      const loadMore = modal.contentEl.querySelector(".ss-context-load-more") as HTMLButtonElement | null;
+      expect(loadMore).not.toBeNull();
+      loadMore?.click();
+
+      const items = modal.contentEl.querySelectorAll(".ss-context-file-item");
+      expect(items.length).toBe(150);
+      expect(modal.contentEl.querySelector(".ss-context-load-more")).toBeNull();
+    });
   });
 
   describe("file rendering", () => {

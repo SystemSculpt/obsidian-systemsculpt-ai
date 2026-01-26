@@ -10,6 +10,7 @@ import type { ChatDebugLogService } from '../ChatDebugLogService';
 import { StreamingMetricsTracker, StreamingMetrics } from '../StreamingMetricsTracker';
 import { SystemSculptError } from '../../../utils/errors';
 import { RuntimeIncompatibilityService } from '../../../services/RuntimeIncompatibilityService';
+import { TOOL_LOOP_ERROR_CODE } from '../../../utils/tooling';
 
 type Host = {
   app: App;
@@ -485,6 +486,14 @@ export class ChatTurnOrchestrator {
     }
 
     newlyHandledToolCalls.forEach(tc => continuationState.seenToolCalls.add(tc.id));
+
+    const loopBlocked = newlyHandledToolCalls.find((tc) => tc?.result?.error?.code === TOOL_LOOP_ERROR_CODE);
+    if (loopBlocked) {
+      const message = loopBlocked.result?.error?.message
+        || "Stopped repeated tool calls to prevent an agent loop. Update your request and try again.";
+      this.host.onError(new Error(message));
+      return null;
+    }
 
     // If user typed a new message meanwhile, don't continue – last message is user
     const msgs = this.host.getMessages();

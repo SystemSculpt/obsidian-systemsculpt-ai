@@ -11,6 +11,14 @@ jest.mock("../../utils", () => ({
     if (path === "blocked/file.md") return false;
     return true;
   }),
+  normalizeVaultPath: jest.fn((value) =>
+    String(value ?? "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "")
+  ),
   normalizeLineEndings: jest.fn((text) => text.replace(/\r\n/g, "\n")),
   createSimpleDiff: jest.fn((original, modified, path) => `diff for ${path}`),
   isHiddenSystemPath: jest.fn(() => false),
@@ -200,6 +208,25 @@ describe("FileOperations", () => {
 
       expect(result.files[0].content).toBe("content");
     });
+
+    it("normalizes leading slashes in paths", async () => {
+      const mockFile = new TFile({
+        path: "test.md",
+        stat: { ctime: 1000, mtime: 2000, size: 10 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) =>
+        p === "test.md" ? mockFile : null
+      );
+      (app.vault.read as jest.Mock).mockResolvedValue("content");
+
+      const result = await fileOps.readFiles({
+        paths: ["/test.md"],
+      } as any);
+
+      expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith("test.md");
+      expect(result.files[0].path).toBe("test.md");
+      expect(result.files[0].content).toBe("content");
+    });
   });
 
   describe("writeFile", () => {
@@ -227,6 +254,19 @@ describe("FileOperations", () => {
 
       expect(result.success).toBe(true);
       expect(app.vault.create).toHaveBeenCalledWith("new.md", "hello");
+    });
+
+    it("normalizes leading slashes when creating new file", async () => {
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+
+      const result = await fileOps.writeFile({
+        path: "/new.md",
+        content: "hello",
+      });
+
+      expect(result.success).toBe(true);
+      expect(app.vault.create).toHaveBeenCalledWith("new.md", "hello");
+      expect(result.path).toBe("new.md");
     });
 
     it("creates parent directories when createDirs is true", async () => {
