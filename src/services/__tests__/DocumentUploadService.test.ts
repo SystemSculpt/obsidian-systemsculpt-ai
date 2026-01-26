@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { TFile, requestUrl } from "obsidian";
 import { DocumentUploadService } from "../DocumentUploadService";
 import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
@@ -43,6 +45,10 @@ const createMockApp = () => {
 };
 
 describe("DocumentUploadService", () => {
+  const pdfFixturePath = process.env.SYSTEMSCULPT_TEST_PDF_PATH;
+  const shouldRunPdfFixtureTest =
+    typeof pdfFixturePath === "string" && fs.existsSync(pdfFixturePath);
+
   let mockApp: ReturnType<typeof createMockApp>;
   let service: DocumentUploadService;
   let requestUrlMock: jest.Mock;
@@ -134,7 +140,7 @@ describe("DocumentUploadService", () => {
         const file = createMockFile("large.pdf", "pdf");
 
         await expect(service.uploadDocument(file)).rejects.toThrow(
-          "exceeds the maximum limit"
+          "maximum upload limit"
         );
       });
 
@@ -272,6 +278,34 @@ describe("DocumentUploadService", () => {
 
         expect(mockApp.vault.readBinary).toHaveBeenCalledWith(file);
       });
+
+      (shouldRunPdfFixtureTest ? it : it.skip)(
+        "uploads real PDF bytes from disk when fixture path is provided",
+        async () => {
+          const fixturePath = pdfFixturePath as string;
+          const pdfBytes = fs.readFileSync(fixturePath);
+          const arrayBuffer = pdfBytes.buffer.slice(
+            pdfBytes.byteOffset,
+            pdfBytes.byteOffset + pdfBytes.byteLength
+          );
+
+          mockApp.vault.readBinary.mockResolvedValueOnce(arrayBuffer);
+          requestUrlMock.mockResolvedValueOnce({
+            status: 200,
+            text: JSON.stringify({ documentId: "doc-1", status: "queued" }),
+          });
+
+          const fileName = path.basename(fixturePath);
+          const file = createMockFile(fileName, "pdf");
+          Object.defineProperty(file, "stat", { value: { size: pdfBytes.byteLength } });
+
+          await service.uploadDocument(file);
+
+          const callArgs = requestUrlMock.mock.calls[0][0];
+          expect(callArgs.body).toBeInstanceOf(ArrayBuffer);
+          expect(callArgs.body.byteLength).toBeGreaterThan(pdfBytes.byteLength);
+        }
+      );
     });
 
     describe("error handling", () => {
@@ -292,6 +326,34 @@ describe("DocumentUploadService", () => {
         requestUrlMock.mockResolvedValueOnce({
           status: 413,
           text: "Request Entity Too Large",
+        });
+
+        const file = createMockFile("test.pdf", "pdf");
+
+        await expect(service.uploadDocument(file)).rejects.toMatchObject({
+          code: ERROR_CODES.FILE_TOO_LARGE,
+          statusCode: 413,
+        });
+      });
+
+      it("treats string 413 status as file-too-large", async () => {
+        requestUrlMock.mockResolvedValueOnce({
+          status: "413",
+          text: "Request Entity Too Large",
+        });
+
+        const file = createMockFile("test.pdf", "pdf");
+
+        await expect(service.uploadDocument(file)).rejects.toMatchObject({
+          code: ERROR_CODES.FILE_TOO_LARGE,
+          statusCode: 413,
+        });
+      });
+
+      it("detects payload-too-large errors even without 413 status", async () => {
+        requestUrlMock.mockResolvedValueOnce({
+          status: 500,
+          text: "FUNCTION_PAYLOAD_TOO_LARGE",
         });
 
         const file = createMockFile("test.pdf", "pdf");

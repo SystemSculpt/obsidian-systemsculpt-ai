@@ -37,7 +37,8 @@ export class DocumentUploadService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     try {
-      const maxSizeLabel = formatFileSize(DOCUMENT_UPLOAD_MAX_BYTES);
+      const maxBytes = DOCUMENT_UPLOAD_MAX_BYTES;
+      const maxSizeLabel = formatFileSize(maxBytes);
       // Check if license is valid
       if (!this.licenseKey?.trim()) {
         throw new SystemSculptError(
@@ -49,15 +50,11 @@ export class DocumentUploadService {
 
       // Validate file size first
       const isValidSize = await validateFileSize(file, this.app, {
-        maxBytes: DOCUMENT_UPLOAD_MAX_BYTES,
+        maxBytes,
         maxLabel: maxSizeLabel,
       });
       if (!isValidSize) {
-        throw new SystemSculptError(
-          `File size exceeds the maximum limit of ${maxSizeLabel}`,
-          ERROR_CODES.FILE_TOO_LARGE,
-          413
-        );
+        throw this.buildFileTooLargeError(file, maxBytes);
       }
 
       const normalizedExtension = normalizeFileExtension(file.extension);
@@ -115,34 +112,29 @@ export class DocumentUploadService {
         throw: false,
       });
 
-      if (response.status !== 200) {
+      const statusCode = this.normalizeStatusCode(response.status);
+      if (statusCode !== 200) {
         // Try to get more detailed error information
-        let errorText = "";
-        try {
-          errorText = response.text;
-        } catch (textError) {
-          // Handle error silently
-        }
+        const errorText = this.extractErrorText(response.text);
+        const isPayloadTooLarge =
+          statusCode === 413 ||
+          /payload too large|function_payload_too_large/i.test(errorText);
 
         // Handle specific error cases
-        if (response.status === 403) {
+        if (statusCode === 403) {
           throw new SystemSculptError(
             "Invalid or expired license key",
             ERROR_CODES.INVALID_LICENSE,
             403
           );
         }
-        if (response.status === 413) {
-          throw new SystemSculptError(
-            `File size exceeds the maximum limit of ${maxSizeLabel}`,
-            ERROR_CODES.FILE_TOO_LARGE,
-            413
-          );
+        if (isPayloadTooLarge) {
+          throw this.buildFileTooLargeError(file, maxBytes, errorText);
         }
         throw new SystemSculptError(
-          `Upload failed: ${response.status} ${errorText ? `- ${errorText}` : ''}`,
+          `Upload failed: ${statusCode || response.status} ${errorText ? `- ${errorText}` : ''}`,
           ERROR_CODES.PROCESSING_ERROR,
-          response.status
+          statusCode || 500
         );
       }
 
@@ -168,5 +160,54 @@ export class DocumentUploadService {
         500
       );
     }
+  }
+
+  private normalizeStatusCode(status: unknown): number {
+    if (typeof status === "number" && Number.isFinite(status)) {
+      return status;
+    }
+    if (typeof status === "string") {
+      const parsed = Number.parseInt(status, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
+  private extractErrorText(rawText?: string): string {
+    if (!rawText) {
+      return "";
+    }
+    try {
+      const parsed = JSON.parse(rawText);
+      return (
+        parsed?.error?.message ??
+        parsed?.error ??
+        parsed?.message ??
+        rawText
+      );
+    } catch {
+      return rawText;
+    }
+  }
+
+  private buildFileTooLargeError(
+    file: TFile,
+    maxBytes: number,
+    details?: string
+  ): SystemSculptError {
+    const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
+    const sizeLabel = fileSize ? formatFileSize(fileSize) : "unknown size";
+    const limitLabel = formatFileSize(maxBytes);
+    const message = fileSize
+      ? `File size (${sizeLabel}) exceeds the maximum upload limit (${limitLabel}). Please reduce the file size or split the document.`
+      : `File size exceeds the maximum upload limit (${limitLabel}). Please reduce the file size or split the document.`;
+
+    return new SystemSculptError(message, ERROR_CODES.FILE_TOO_LARGE, 413, {
+      fileSize,
+      maxBytes,
+      details,
+    });
   }
 }

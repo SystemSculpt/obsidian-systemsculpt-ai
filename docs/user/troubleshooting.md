@@ -12,6 +12,11 @@
 - Try a different provider/model to confirm it’s not provider-specific.
 - If the provider rejects tools or images, the plugin may retry without them (you’ll usually see an inline notice/footnote in the UI).
 
+## Document conversion fails (PDF/Office)
+
+- Conversions are capped at ~4.4 MB due to serverless upload limits. Larger files will fail with “413 Request Entity Too Large”.
+- Reduce the file size (compress/export) or split the document into smaller PDFs before converting.
+
 ## Similar Notes empty / embeddings not processing
 
 1. Confirm **Embeddings & Search** is enabled and a model is selected.

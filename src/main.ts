@@ -636,6 +636,15 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "settings.tab.register",
+      label: "settings tab",
+      optional: true,
+      run: () => {
+        this.ensureSettingsTab();
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "monitor.freeze",
       label: "freeze monitor",
       optional: true,
@@ -1548,8 +1557,7 @@ export default class SystemSculptPlugin extends Plugin {
     const logger = this.getLogger();
 
     try {
-      this.settingsTab = new SystemSculptSettingTab(this.app, this);
-      this.addSettingTab(this.settingsTab);
+      this.ensureSettingsTab();
 
       if (!this.directoryManager) {
         await this.initializeDirectories();
@@ -1584,6 +1592,14 @@ export default class SystemSculptPlugin extends Plugin {
         source: "SystemSculptPlugin",
       });
     }
+  }
+
+  private ensureSettingsTab(): void {
+    if (this.settingsTab) {
+      return;
+    }
+    this.settingsTab = new SystemSculptSettingTab(this.app, this);
+    this.addSettingTab(this.settingsTab);
   }
 
   // DIRECTORY MANAGEMENT METHODS

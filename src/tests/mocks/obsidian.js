@@ -116,6 +116,26 @@ class Component {
   }
 }
 
+class EditorSuggest extends Component {
+  constructor(app) {
+    super();
+    this.app = app;
+    this.limit = 20;
+  }
+
+  onTrigger() {
+    return null;
+  }
+
+  getSuggestions() {
+    return [];
+  }
+
+  renderSuggestion() {}
+
+  selectSuggestion() {}
+}
+
 class Modal extends Component {
   constructor(app) {
     super();
@@ -286,7 +306,19 @@ class Plugin extends Component {
   }
 
   addRibbonIcon(icon, title, callback) {
-    const ribbon = { icon, title, callback };
+    const ribbon = {
+      icon,
+      title,
+      callback,
+      removed: false,
+      remove: () => {
+        if (ribbon.removed) {
+          return;
+        }
+        ribbon.removed = true;
+        this._ribbons = this._ribbons.filter((item) => item !== ribbon);
+      },
+    };
     this._ribbons.push(ribbon);
     return ribbon;
   }
@@ -643,6 +675,7 @@ module.exports = {
   WorkspaceLeaf,
   ItemView,
   Component,
+  EditorSuggest,
   Modal,
   SuggestModal,
   AbstractInputSuggest,

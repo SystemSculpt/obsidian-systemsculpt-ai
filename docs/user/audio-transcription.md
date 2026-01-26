@@ -22,4 +22,4 @@ See: [Commands & hotkeys](commands.md) and [Ribbon icons](ribbon-icons.md).
 
 - If transcription fails, first confirm your provider key/endpoint and that the selected model supports audio/transcription on your provider.
 - If you’re using a local transcription server, confirm it’s reachable from Obsidian and not blocked by OS/network restrictions.
-
+- Audio uploads are capped at ~4.4 MB due to serverless upload limits. Split or trim longer recordings before uploading.

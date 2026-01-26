@@ -90,7 +90,7 @@ describe("AudioUploadService", () => {
         const file = createMockFile("large-audio.mp3");
 
         await expect(service.uploadAudio(file)).rejects.toThrow(
-          "exceeds the maximum limit"
+          "maximum upload limit"
         );
       });
 
@@ -246,6 +246,32 @@ describe("AudioUploadService", () => {
 
         await expect(service.uploadAudio(file)).rejects.toThrow(
           "Audio upload failed: 403"
+        );
+      });
+
+      it("treats 413 as file-too-large", async () => {
+        requestUrlMock.mockResolvedValueOnce({
+          status: 413,
+          text: "Request Entity Too Large",
+        });
+
+        const file = createMockFile("test.mp3");
+
+        await expect(service.uploadAudio(file)).rejects.toThrow(
+          "maximum upload limit"
+        );
+      });
+
+      it("detects payload-too-large errors even without 413 status", async () => {
+        requestUrlMock.mockResolvedValueOnce({
+          status: 500,
+          text: "FUNCTION_PAYLOAD_TOO_LARGE",
+        });
+
+        const file = createMockFile("test.mp3");
+
+        await expect(service.uploadAudio(file)).rejects.toThrow(
+          "maximum upload limit"
         );
       });
 
