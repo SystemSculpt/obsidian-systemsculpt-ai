@@ -51,6 +51,7 @@ export class YouTubeTranscriptService {
   private platform: PlatformContext;
   private readonly MAX_POLL_ATTEMPTS = 60; // 5 minutes max at 5s intervals
   private readonly POLL_INTERVAL_MS = 5000;
+  private readonly CANONICAL_WATCH_BASE_URL = "https://www.youtube.com/watch?v=";
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -91,6 +92,7 @@ export class YouTubeTranscriptService {
     if (!videoId) {
       throw new Error("Invalid YouTube URL format");
     }
+    const canonicalUrl = `${this.CANONICAL_WATCH_BASE_URL}${videoId}`;
 
     const licenseKey = this.plugin.settings.licenseKey;
     if (!licenseKey || !this.plugin.settings.licenseValid) {
@@ -103,7 +105,7 @@ export class YouTubeTranscriptService {
     const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
 
     const body = JSON.stringify({
-      url,
+      url: canonicalUrl,
       lang: options?.lang,
     });
 
@@ -241,6 +243,7 @@ export class YouTubeTranscriptService {
     if (!videoId) {
       throw new Error("Invalid YouTube URL format");
     }
+    const canonicalUrl = `${this.CANONICAL_WATCH_BASE_URL}${videoId}`;
 
     const licenseKey = this.plugin.settings.licenseKey;
     if (!licenseKey || !this.plugin.settings.licenseValid) {
@@ -249,7 +252,7 @@ export class YouTubeTranscriptService {
       );
     }
 
-    const endpoint = `${WEBSITE_API_BASE_URL}/youtube/languages?url=${encodeURIComponent(url)}`;
+    const endpoint = `${WEBSITE_API_BASE_URL}/youtube/languages?url=${encodeURIComponent(canonicalUrl)}`;
     const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
 
     console.log("[YouTubeTranscriptService] Fetching available languages:", { videoId });

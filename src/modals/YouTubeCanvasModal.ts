@@ -68,6 +68,7 @@ export class YouTubeCanvasModal extends StandardModal {
   private metadata: YouTubeMetadata | null = null;
   private availableLanguages: CaptionTrack[] = [];
   private selectedLanguage: string | null = null;
+  private languagesFetchError: string | null = null;
   private transcript: YouTubeTranscriptResult | null = null;
   private contentToggles: ContentToggleState = { summary: true, keyPoints: false, studyNotes: false };
   private generatedContent: GeneratedContent = {};
@@ -301,12 +302,14 @@ export class YouTubeCanvasModal extends StandardModal {
   private async loadPreviewAndLanguages(url: string): Promise<void> {
     this.setState("loading_preview");
     this.updateStatus("Loading video info...", "info");
+    this.languagesFetchError = null;
 
     try {
       // Fetch metadata and available languages in parallel
       const [metadata, languagesResult] = await Promise.all([
         this.metadataService.getMetadata(url),
         this.transcriptService.getAvailableLanguages(url).catch((err) => {
+          this.languagesFetchError = err instanceof Error ? err.message : "Failed to fetch captions list";
           console.warn("[YouTubeCanvasModal] Failed to fetch languages:", err);
           return null;
         }),
@@ -323,8 +326,16 @@ export class YouTubeCanvasModal extends StandardModal {
       this.renderLanguageSelector();
       this.setState("preview_ready");
 
-      if (this.availableLanguages.length === 0) {
-        this.updateStatus("Video preview loaded (no captions available)", "info");
+      if (this.languagesFetchError) {
+        this.updateStatus(
+          `Video preview loaded (captions list unavailable: ${this.languagesFetchError}). You can still try "Get Transcript".`,
+          "error"
+        );
+      } else if (this.availableLanguages.length === 0) {
+        this.updateStatus(
+          `Video preview loaded (no captions detected). You can still try "Get Transcript".`,
+          "info"
+        );
       } else {
         this.updateStatus("Select a language and fetch the transcript", "success");
       }
@@ -454,11 +465,6 @@ export class YouTubeCanvasModal extends StandardModal {
   private async fetchTranscript(): Promise<void> {
     if (!this.currentUrl) return;
 
-    if (this.availableLanguages.length === 0) {
-      new Notice("This video has no captions available");
-      return;
-    }
-
     this.setState("fetching_transcript");
     const langName = this.selectedLanguage
       ? getLanguageName(this.selectedLanguage)
@@ -471,6 +477,7 @@ export class YouTubeCanvasModal extends StandardModal {
       this.transcript = await this.transcriptService.getTranscript(this.currentUrl, {
         lang: requestedLanguage,
       });
+      this.syncLanguagesFromTranscriptMetadata();
 
       if (
         requestedLanguage &&
@@ -484,6 +491,7 @@ export class YouTubeCanvasModal extends StandardModal {
       }
 
       this.renderTranscript();
+      this.renderLanguageSelector();
       this.buildToggleSection();
       this.setState("transcript_ready");
       this.updateStatus(`Transcript ready (${getLanguageName(this.transcript.lang)})`, "success");
@@ -906,7 +914,7 @@ created: ${timestamp}
 
   private updateButtonVisibility(): void {
     const hasLanguages = this.availableLanguages.length > 0;
-    const showGetTranscript = this.state === "preview_ready" && hasLanguages;
+    const showGetTranscript = this.state === "preview_ready";
     const showPostTranscript = ["transcript_ready", "generating", "generation_complete"].includes(this.state);
     const hasGeneratedContent = Object.values(this.generatedContent).some(Boolean);
     const showCreateNote = showPostTranscript && hasGeneratedContent;
@@ -988,9 +996,45 @@ created: ${timestamp}
     this.transcript = null;
     this.availableLanguages = [];
     this.selectedLanguage = null;
+    this.languagesFetchError = null;
     this.generatedContent = {};
     this.activeTab = null;
     this.loadSettings();
+  }
+
+  private syncLanguagesFromTranscriptMetadata(): void {
+    if (!this.transcript?.metadata?.availableLangs?.length) {
+      return;
+    }
+
+    if (this.availableLanguages.length > 0) {
+      return;
+    }
+
+    const uniqueCodes = Array.from(
+      new Set(this.transcript.metadata.availableLangs.map((value) => value.trim()).filter(Boolean))
+    );
+
+    if (uniqueCodes.length === 0) {
+      return;
+    }
+
+    this.availableLanguages = uniqueCodes.map((languageCode) => ({
+      languageCode,
+      name: getLanguageName(languageCode),
+      kind: "standard",
+      isTranslatable: true,
+    }));
+
+    // Captions exist, so clear any earlier languages fetch failure.
+    this.languagesFetchError = null;
+
+    if (!this.selectedLanguage && this.transcript.lang) {
+      const matchingTrack = this.availableLanguages.find((track) =>
+        areLanguageCodesEquivalent(track.languageCode, this.transcript?.lang ?? "")
+      );
+      this.selectedLanguage = matchingTrack?.languageCode ?? this.transcript.lang;
+    }
   }
 
   private resetToIdle(): void {

@@ -609,6 +609,7 @@ var init_MobileDetection = __esm({
         return { name, version, os };
       }
       detectDevice(userAgent) {
+        var _a, _b, _c, _d;
         let type = "unknown";
         let model = "Unknown";
         let vendor = "Unknown";
@@ -643,7 +644,11 @@ var init_MobileDetection = __esm({
         } else {
           type = "desktop";
         }
-        const screenSize = `${screen.width}x${screen.height}`;
+        const screenAny = typeof screen !== "undefined" ? screen : void 0;
+        const windowAny = typeof window !== "undefined" ? window : void 0;
+        const width = (_b = (_a = screenAny == null ? void 0 : screenAny.width) != null ? _a : windowAny == null ? void 0 : windowAny.innerWidth) != null ? _b : 0;
+        const height = (_d = (_c = screenAny == null ? void 0 : screenAny.height) != null ? _c : windowAny == null ? void 0 : windowAny.innerHeight) != null ? _d : 0;
+        const screenSize = `${width}x${height}`;
         return { type, model, vendor, screenSize };
       }
       detectCapabilities() {
@@ -19431,6 +19436,7 @@ var init_YouTubeTranscriptService = __esm({
         this.MAX_POLL_ATTEMPTS = 60;
         // 5 minutes max at 5s intervals
         this.POLL_INTERVAL_MS = 5e3;
+        this.CANONICAL_WATCH_BASE_URL = "https://www.youtube.com/watch?v=";
         this.plugin = plugin;
         this.platform = PlatformContext.get();
       }
@@ -19463,6 +19469,7 @@ var init_YouTubeTranscriptService = __esm({
         if (!videoId) {
           throw new Error("Invalid YouTube URL format");
         }
+        const canonicalUrl = `${this.CANONICAL_WATCH_BASE_URL}${videoId}`;
         const licenseKey = this.plugin.settings.licenseKey;
         if (!licenseKey || !this.plugin.settings.licenseValid) {
           throw new Error(
@@ -19472,7 +19479,7 @@ var init_YouTubeTranscriptService = __esm({
         const endpoint = `${WEBSITE_API_BASE_URL}/youtube/transcripts`;
         const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
         const body = JSON.stringify({
-          url,
+          url: canonicalUrl,
           lang: options == null ? void 0 : options.lang
         });
         console.log("[YouTubeTranscriptService] Requesting transcript:", { videoId, lang: options == null ? void 0 : options.lang });
@@ -19576,13 +19583,14 @@ var init_YouTubeTranscriptService = __esm({
         if (!videoId) {
           throw new Error("Invalid YouTube URL format");
         }
+        const canonicalUrl = `${this.CANONICAL_WATCH_BASE_URL}${videoId}`;
         const licenseKey = this.plugin.settings.licenseKey;
         if (!licenseKey || !this.plugin.settings.licenseValid) {
           throw new Error(
             "A valid SystemSculpt license is required to use the YouTube transcript feature"
           );
         }
-        const endpoint = `${WEBSITE_API_BASE_URL}/youtube/languages?url=${encodeURIComponent(url)}`;
+        const endpoint = `${WEBSITE_API_BASE_URL}/youtube/languages?url=${encodeURIComponent(canonicalUrl)}`;
         const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
         console.log("[YouTubeTranscriptService] Fetching available languages:", { videoId });
         const transportOptions = { endpoint };
@@ -31146,6 +31154,7 @@ var init_YouTubeCanvasModal = __esm({
         this.metadata = null;
         this.availableLanguages = [];
         this.selectedLanguage = null;
+        this.languagesFetchError = null;
         this.transcript = null;
         this.contentToggles = { summary: true, keyPoints: false, studyNotes: false };
         this.generatedContent = {};
@@ -31326,10 +31335,12 @@ var init_YouTubeCanvasModal = __esm({
       async loadPreviewAndLanguages(url) {
         this.setState("loading_preview");
         this.updateStatus("Loading video info...", "info");
+        this.languagesFetchError = null;
         try {
           const [metadata, languagesResult] = await Promise.all([
             this.metadataService.getMetadata(url),
             this.transcriptService.getAvailableLanguages(url).catch((err) => {
+              this.languagesFetchError = err instanceof Error ? err.message : "Failed to fetch captions list";
               console.warn("[YouTubeCanvasModal] Failed to fetch languages:", err);
               return null;
             })
@@ -31343,8 +31354,16 @@ var init_YouTubeCanvasModal = __esm({
           this.renderPreview();
           this.renderLanguageSelector();
           this.setState("preview_ready");
-          if (this.availableLanguages.length === 0) {
-            this.updateStatus("Video preview loaded (no captions available)", "info");
+          if (this.languagesFetchError) {
+            this.updateStatus(
+              `Video preview loaded (captions list unavailable: ${this.languagesFetchError}). You can still try "Get Transcript".`,
+              "error"
+            );
+          } else if (this.availableLanguages.length === 0) {
+            this.updateStatus(
+              `Video preview loaded (no captions detected). You can still try "Get Transcript".`,
+              "info"
+            );
           } else {
             this.updateStatus("Select a language and fetch the transcript", "success");
           }
@@ -31443,10 +31462,6 @@ var init_YouTubeCanvasModal = __esm({
       async fetchTranscript() {
         var _a;
         if (!this.currentUrl) return;
-        if (this.availableLanguages.length === 0) {
-          new import_obsidian115.Notice("This video has no captions available");
-          return;
-        }
         this.setState("fetching_transcript");
         const langName = this.selectedLanguage ? getLanguageName(this.selectedLanguage) : "default";
         this.updateStatus(`Fetching transcript in ${langName}...`, "info");
@@ -31456,6 +31471,7 @@ var init_YouTubeCanvasModal = __esm({
           this.transcript = await this.transcriptService.getTranscript(this.currentUrl, {
             lang: requestedLanguage
           });
+          this.syncLanguagesFromTranscriptMetadata();
           if (requestedLanguage && ((_a = this.transcript) == null ? void 0 : _a.lang) && !areLanguageCodesEquivalent(requestedLanguage, this.transcript.lang)) {
             new import_obsidian115.Notice(
               `Transcript returned in ${getLanguageName(this.transcript.lang)} instead of ${getLanguageName(requestedLanguage)}.`,
@@ -31463,6 +31479,7 @@ var init_YouTubeCanvasModal = __esm({
             );
           }
           this.renderTranscript();
+          this.renderLanguageSelector();
           this.buildToggleSection();
           this.setState("transcript_ready");
           this.updateStatus(`Transcript ready (${getLanguageName(this.transcript.lang)})`, "success");
@@ -31810,7 +31827,7 @@ ${this.transcript.text}
       }
       updateButtonVisibility() {
         const hasLanguages = this.availableLanguages.length > 0;
-        const showGetTranscript = this.state === "preview_ready" && hasLanguages;
+        const showGetTranscript = this.state === "preview_ready";
         const showPostTranscript = ["transcript_ready", "generating", "generation_complete"].includes(this.state);
         const hasGeneratedContent = Object.values(this.generatedContent).some(Boolean);
         const showCreateNote = showPostTranscript && hasGeneratedContent;
@@ -31877,9 +31894,41 @@ ${this.transcript.text}
         this.transcript = null;
         this.availableLanguages = [];
         this.selectedLanguage = null;
+        this.languagesFetchError = null;
         this.generatedContent = {};
         this.activeTab = null;
         this.loadSettings();
+      }
+      syncLanguagesFromTranscriptMetadata() {
+        var _a, _b, _c, _d;
+        if (!((_c = (_b = (_a = this.transcript) == null ? void 0 : _a.metadata) == null ? void 0 : _b.availableLangs) == null ? void 0 : _c.length)) {
+          return;
+        }
+        if (this.availableLanguages.length > 0) {
+          return;
+        }
+        const uniqueCodes = Array.from(
+          new Set(this.transcript.metadata.availableLangs.map((value) => value.trim()).filter(Boolean))
+        );
+        if (uniqueCodes.length === 0) {
+          return;
+        }
+        this.availableLanguages = uniqueCodes.map((languageCode) => ({
+          languageCode,
+          name: getLanguageName(languageCode),
+          kind: "standard",
+          isTranslatable: true
+        }));
+        this.languagesFetchError = null;
+        if (!this.selectedLanguage && this.transcript.lang) {
+          const matchingTrack = this.availableLanguages.find(
+            (track) => {
+              var _a2, _b2;
+              return areLanguageCodesEquivalent(track.languageCode, (_b2 = (_a2 = this.transcript) == null ? void 0 : _a2.lang) != null ? _b2 : "");
+            }
+          );
+          this.selectedLanguage = (_d = matchingTrack == null ? void 0 : matchingTrack.languageCode) != null ? _d : this.transcript.lang;
+        }
       }
       resetToIdle() {
         this.currentUrl = "";

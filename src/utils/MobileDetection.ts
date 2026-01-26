@@ -246,7 +246,15 @@ export class MobileDetection {
       type = 'desktop';
     }
 
-    const screenSize = `${screen.width}x${screen.height}`;
+    const screenAny = (typeof screen !== 'undefined' ? (screen as any) : undefined) as
+      | { width?: number; height?: number }
+      | undefined;
+    const windowAny = (typeof window !== 'undefined' ? (window as any) : undefined) as
+      | { innerWidth?: number; innerHeight?: number }
+      | undefined;
+    const width = screenAny?.width ?? windowAny?.innerWidth ?? 0;
+    const height = screenAny?.height ?? windowAny?.innerHeight ?? 0;
+    const screenSize = `${width}x${height}`;
 
     return { type, model, vendor, screenSize };
   }
