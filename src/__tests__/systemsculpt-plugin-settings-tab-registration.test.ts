@@ -3,6 +3,7 @@
 import SystemSculptPlugin from "../main";
 import { App } from "obsidian";
 import { DEFAULT_SETTINGS } from "../types";
+import { SystemSculptService } from "../services/SystemSculptService";
 
 jest.mock("../services/SystemSculptService", () => ({
   SystemSculptService: {
@@ -23,5 +24,6 @@ describe("SystemSculptPlugin settings tab registration", () => {
 
     expect(addSpy).toHaveBeenCalledTimes(1);
     expect((plugin as any)._settingTabs).toHaveLength(1);
+    expect(SystemSculptService.getInstance).not.toHaveBeenCalled();
   });
 });

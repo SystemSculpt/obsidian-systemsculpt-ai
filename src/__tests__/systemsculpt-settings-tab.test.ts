@@ -17,12 +17,6 @@ jest.mock("../settings/SettingsTabRegistry", () => ({
   ]),
 }));
 
-jest.mock("../services/SystemSculptService", () => ({
-  SystemSculptService: {
-    getInstance: jest.fn(() => ({})),
-  },
-}));
-
 jest.mock("../core/ui", () => ({
   showPopup: jest.fn(),
 }));

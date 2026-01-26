@@ -4,12 +4,6 @@ import { displaySetupTabContent } from "../settings/SetupTabContent";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App } from "obsidian";
 
-jest.mock("../services/SystemSculptService", () => ({
-  SystemSculptService: {
-    getInstance: jest.fn(() => ({})),
-  },
-}));
-
 jest.mock("../services/providers/LocalLLMScanner", () => ({
   scanLocalLLMProviders: jest.fn().mockResolvedValue([]),
 }));

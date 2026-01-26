@@ -2,7 +2,6 @@ import { App, PluginSettingTab, Setting, Notice, setIcon, ButtonComponent, Platf
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 import { showPopup } from "../core/ui";
 import SystemSculptPlugin from "../main";
-import { SystemSculptService } from "../services/SystemSculptService";
 import { VersionInfo } from "../services/VersionCheckerService";
 import { buildSettingsIndexFromRoot } from "./SettingsSearchIndex";
 import { buildSettingsTabConfigs } from "./SettingsTabRegistry";
@@ -10,7 +9,6 @@ import { decorateRestoreDefaultsButton, RESTORE_DEFAULTS_COPY } from "./uiHelper
 
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
-  systemSculptService: SystemSculptService;
   private debounceTimer: NodeJS.Timeout | null = null;
   private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
   private versionInfoContainer: HTMLElement | null = null;
@@ -34,7 +32,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app, plugin);
     this.plugin = plugin;
-    this.systemSculptService = SystemSculptService.getInstance(plugin);
   }
 
   registerListener(element: HTMLElement, type: string, listener: EventListener) {

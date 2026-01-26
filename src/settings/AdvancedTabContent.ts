@@ -17,7 +17,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "advanced";
     }
-    const { app, plugin, systemSculptService } = tabInstance;
+    const { app, plugin } = tabInstance;
 
     containerEl.createEl("h3", { text: "Advanced Settings" }); // Added header for clarity
 

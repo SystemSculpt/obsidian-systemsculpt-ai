@@ -4,11 +4,6 @@ import { displaySystemPromptSettingsTabContent } from "../settings/SystemPromptS
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App } from "obsidian";
 
-jest.mock("../services/SystemSculptService", () => ({
-  SystemSculptService: {
-    getInstance: jest.fn(() => ({})),
-  },
-}));
 const createPluginStub = () => {
   const settingsManager = {
     updateSettings: jest.fn().mockResolvedValue(undefined),
