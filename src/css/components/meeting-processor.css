@@ -70,6 +70,33 @@
   justify-content: center;
 }
 
+.ss-meeting-processor__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ss-meeting-processor__filter {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--ss-layer-base);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.ss-meeting-processor__filter:hover {
+  border-color: var(--interactive-accent-hover);
+}
+
+.ss-meeting-processor__filter.is-active {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--ss-layer-base));
+  color: var(--text-normal);
+}
+
 .ss-meeting-processor__list {
   max-height: 420px;
   overflow-y: auto;
@@ -115,6 +142,40 @@
   gap: 6px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.ss-meeting-processor__file-badge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.ss-meeting-processor__file-badge--status {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--background-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ss-meeting-processor__file-badge--status.is-processed {
+  background: var(--ss-surface-success);
+  border-color: var(--text-success);
+  color: var(--text-success);
+}
+
+.ss-meeting-processor__file-badge--status.is-stale {
+  background: var(--ss-surface-warning);
+  border-color: var(--text-warning);
+  color: var(--text-warning);
+}
+
+.ss-meeting-processor__file-badge--status.is-unprocessed {
+  background: var(--ss-layer-base);
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
 }
 
 .ss-meeting-processor__file-badge-icon svg {

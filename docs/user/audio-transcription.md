@@ -18,6 +18,12 @@ See: [Commands & hotkeys](commands.md) and [Ribbon icons](ribbon-icons.md).
 - **Open Meeting Processor** — open the meeting processing modal
 - Ribbon: **Process Meeting Audio** — opens the same meeting processor entrypoint
 
+## Meeting Processor
+
+- The vault picker shows whether each audio file is **Processed**, **Unprocessed**, or **Out of date**.
+- Use the **All / Unprocessed / Processed** toggle to quickly narrow the list.
+- **Out of date** means the output note exists but is older than the audio file.
+
 ## Tips
 
 - If transcription fails, first confirm your provider key/endpoint and that the selected model supports audio/transcription on your provider.

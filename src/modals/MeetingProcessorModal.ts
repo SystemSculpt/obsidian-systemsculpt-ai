@@ -22,6 +22,9 @@ const sanitizeFileName = (name: string): string => {
     .trim();
 };
 
+type MeetingProcessorProcessedStatus = "processed" | "stale" | "unprocessed";
+type MeetingProcessorFileFilter = "all" | "unprocessed" | "processed";
+
 export type MeetingProcessorSelection =
   | { kind: "vault"; file: TFile }
   | { kind: "upload"; file: File };
@@ -39,6 +42,12 @@ export class MeetingProcessorModal extends StandardModal {
 
   private audioFiles: TFile[] = [];
   private filteredFiles: TFile[] = [];
+  private processedStatusByAudioPath: Map<string, MeetingProcessorProcessedStatus> =
+    new Map();
+  private searchQuery: string = "";
+  private fileFilter: MeetingProcessorFileFilter = "all";
+  private filterButtons: Partial<Record<MeetingProcessorFileFilter, HTMLButtonElement>> =
+    {};
 
   private listEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
@@ -158,10 +167,39 @@ export class MeetingProcessorModal extends StandardModal {
       placeholder: "Search by name or path",
       cls: "ss-meeting-processor__search-input",
     });
+    this.searchInputEl.value = this.searchQuery;
 
     this.registerDomEvent(this.searchInputEl, "input", () => {
-      this.applyFilter(this.searchInputEl?.value || "");
+      this.searchQuery = this.searchInputEl?.value || "";
+      this.updateFilteredFiles();
     });
+
+    const filters = container.createDiv({
+      cls: "ss-meeting-processor__filters",
+    });
+
+    this.filterButtons = {};
+    const addFilterButton = (
+      filter: MeetingProcessorFileFilter,
+      label: string
+    ): void => {
+      const button = filters.createEl("button", {
+        cls: "ss-meeting-processor__filter",
+        text: label,
+      }) as HTMLButtonElement;
+      button.type = "button";
+      this.registerDomEvent(button, "click", () => {
+        this.fileFilter = filter;
+        this.syncFilterButtons();
+        this.updateFilteredFiles();
+      });
+      this.filterButtons[filter] = button;
+    };
+
+    addFilterButton("all", "All");
+    addFilterButton("unprocessed", "Unprocessed");
+    addFilterButton("processed", "Processed");
+    this.syncFilterButtons();
 
     const list = container.createDiv({
       cls: "ss-meeting-processor__list",
@@ -382,21 +420,70 @@ export class MeetingProcessorModal extends StandardModal {
       (a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0)
     );
 
-    this.filteredFiles = [...this.audioFiles];
-    this.renderFileList();
+    this.processedStatusByAudioPath.clear();
+    this.audioFiles.forEach((file) => {
+      this.processedStatusByAudioPath.set(
+        file.path,
+        this.getAudioFileProcessedStatus(file)
+      );
+    });
+    this.syncFilterCounts();
+    this.updateFilteredFiles();
   }
 
-  private applyFilter(query: string): void {
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
-      this.filteredFiles = [...this.audioFiles];
-    } else {
-      this.filteredFiles = this.audioFiles.filter((file) => {
+  private updateFilteredFiles(): void {
+    const needle = this.searchQuery.trim().toLowerCase();
+
+    let candidates = this.audioFiles;
+    if (this.fileFilter !== "all") {
+      candidates = candidates.filter((file) => {
+        const status =
+          this.processedStatusByAudioPath.get(file.path) || "unprocessed";
+        const isProcessed = status === "processed";
+        return this.fileFilter === "processed" ? isProcessed : !isProcessed;
+      });
+    }
+
+    if (needle) {
+      candidates = candidates.filter((file) => {
         const haystack = `${file.basename} ${file.path}`.toLowerCase();
         return haystack.includes(needle);
       });
     }
+
+    this.filteredFiles = [...candidates];
     this.renderFileList();
+  }
+
+  private syncFilterButtons(): void {
+    (Object.entries(this.filterButtons) as Array<
+      [MeetingProcessorFileFilter, HTMLButtonElement | undefined]
+    >).forEach(([filter, button]) => {
+      if (!button) return;
+      button.classList.toggle("is-active", this.fileFilter === filter);
+    });
+  }
+
+  private syncFilterCounts(): void {
+    const total = this.audioFiles.length;
+    const processed = Array.from(this.processedStatusByAudioPath.values()).filter(
+      (status) => status === "processed"
+    ).length;
+    const unprocessed = Math.max(0, total - processed);
+
+    const updateLabel = (
+      filter: MeetingProcessorFileFilter,
+      label: string,
+      count: number
+    ) => {
+      const button = this.filterButtons[filter];
+      if (!button) return;
+      button.setText(`${label} (${count})`);
+    };
+
+    updateLabel("all", "All", total);
+    updateLabel("unprocessed", "Unprocessed", unprocessed);
+    updateLabel("processed", "Processed", processed);
   }
 
   private renderFileList(): void {
@@ -413,7 +500,10 @@ export class MeetingProcessorModal extends StandardModal {
       );
       empty.createDiv({
         cls: "ss-meeting-processor__empty-text",
-        text: "No audio found. Drop a file on the right to start.",
+        text:
+          this.audioFiles.length === 0
+            ? "No audio found. Drop a file on the right to start."
+            : "No matches. Try a different search or filter.",
       });
       return;
     }
@@ -437,14 +527,44 @@ export class MeetingProcessorModal extends StandardModal {
         text: file.path,
       });
 
-      const badge = item.createDiv({
-        cls: "ss-meeting-processor__file-badge",
+      const badgeStack = item.createDiv({
+        cls: "ss-meeting-processor__file-badge-stack",
       });
-      const badgeIcon = badge.createDiv({
+
+      const status =
+        this.processedStatusByAudioPath.get(file.path) || "unprocessed";
+      const statusBadge = badgeStack.createDiv({
+        cls: `ss-meeting-processor__file-badge ss-meeting-processor__file-badge--status is-${status}`,
+      });
+      const statusIcon = statusBadge.createDiv({
         cls: "ss-meeting-processor__file-badge-icon",
       });
-      setIcon(badgeIcon, "headphones");
-      badge.createSpan({
+      setIcon(
+        statusIcon,
+        status === "processed"
+          ? "check-circle"
+          : status === "stale"
+            ? "alert-triangle"
+            : "circle"
+      );
+      statusBadge.createSpan({
+        text:
+          status === "processed"
+            ? "Processed"
+            : status === "stale"
+              ? "Out of date"
+              : "Unprocessed",
+        cls: "ss-meeting-processor__file-badge-text",
+      });
+
+      const modifiedBadge = badgeStack.createDiv({
+        cls: "ss-meeting-processor__file-badge ss-meeting-processor__file-badge--modified",
+      });
+      const modifiedIcon = modifiedBadge.createDiv({
+        cls: "ss-meeting-processor__file-badge-icon",
+      });
+      setIcon(modifiedIcon, "calendar");
+      modifiedBadge.createSpan({
         text: this.formatModified(file),
         cls: "ss-meeting-processor__file-badge-text",
       });
@@ -481,11 +601,11 @@ export class MeetingProcessorModal extends StandardModal {
     const validSize = await validateBrowserFileSize(file, this.app);
     if (!validSize) return;
 
-      this.selected = { kind: "upload", file };
-      this.syncSelectedState();
-      this.renderSelectionSummary();
-      this.syncProcessButton();
-    }
+    this.selected = { kind: "upload", file };
+    this.syncSelectedState();
+    this.renderSelectionSummary();
+    this.syncProcessButton();
+  }
 
   private syncSelectedState(selectedPath?: string): void {
     if (!this.listEl) return;
@@ -804,22 +924,11 @@ export class MeetingProcessorModal extends StandardModal {
   }
 
   private async writeProcessedNote(file: TFile, content: string): Promise<string> {
-    const dir = normalizePath(
-      this.plugin.settings.meetingProcessorOutputDirectory || "SystemSculpt/Extractions"
-    );
-    const nameTemplate =
-      (this.plugin.settings.meetingProcessorOutputNameTemplate || "{{basename}}-processed.md").trim() ||
-      "{{basename}}-processed.md";
+    const { dir, targetPath } = this.getMeetingOutputDestination(file);
 
     if (!(await this.plugin.app.vault.adapter.exists(dir))) {
       await this.plugin.app.vault.createFolder(dir);
     }
-
-    const baseName = file.basename;
-    const filledName = nameTemplate.replace(/{{\s*basename\s*}}/gi, baseName);
-    const safeName = sanitizeFileName(filledName || `${baseName}-processed.md`);
-    const finalName = safeName.endsWith(".md") ? safeName : `${safeName}.md`;
-    const targetPath = normalizePath(`${dir}/${finalName}`);
 
     const existing = this.plugin.app.vault.getAbstractFileByPath(targetPath);
     if (existing instanceof TFile) {
@@ -836,6 +945,42 @@ export class MeetingProcessorModal extends StandardModal {
     const leaf = this.plugin.app.workspace.getLeaf("tab");
     await this.plugin.app.workspace.openLinkText(abstract.path, "", "tab", { state: { mode: "source" } });
     this.plugin.app.workspace.setActiveLeaf(leaf, { focus: true });
+  }
+
+  private getMeetingOutputDestination(file: TFile): { dir: string; targetPath: string } {
+    const dir = normalizePath(
+      this.plugin.settings.meetingProcessorOutputDirectory ||
+        "SystemSculpt/Extractions"
+    );
+    const nameTemplate =
+      (this.plugin.settings.meetingProcessorOutputNameTemplate ||
+        "{{basename}}-processed.md").trim() || "{{basename}}-processed.md";
+
+    const baseName = file.basename;
+    const filledName = nameTemplate.replace(/{{\s*basename\s*}}/gi, baseName);
+    const safeName = sanitizeFileName(filledName || `${baseName}-processed.md`);
+    const finalName = safeName.endsWith(".md") ? safeName : `${safeName}.md`;
+    const targetPath = normalizePath(`${dir}/${finalName}`);
+
+    return { dir, targetPath };
+  }
+
+  private getAudioFileProcessedStatus(file: TFile): MeetingProcessorProcessedStatus {
+    const { targetPath } = this.getMeetingOutputDestination(file);
+    const outputFile = this.plugin.app.vault.getAbstractFileByPath(targetPath);
+    if (!(outputFile instanceof TFile)) return "unprocessed";
+
+    const audioMtime = file.stat?.mtime;
+    const outputMtime = outputFile.stat?.mtime;
+    if (
+      typeof audioMtime === "number" &&
+      typeof outputMtime === "number" &&
+      outputMtime < audioMtime
+    ) {
+      return "stale";
+    }
+
+    return "processed";
   }
 
 }

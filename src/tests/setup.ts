@@ -215,6 +215,20 @@ const ensureObsidianDomHelpers = () => {
     };
   }
 
+  if (!proto.hide) {
+    proto.hide = function () {
+      this.style.display = "none";
+      return this;
+    };
+  }
+
+  if (!proto.show) {
+    proto.show = function () {
+      this.style.display = "";
+      return this;
+    };
+  }
+
   if (!proto.createEl) {
     proto.createEl = function (tag: string, options?: any) {
       const normalized = typeof options === "string" ? { cls: options } : options ?? {};

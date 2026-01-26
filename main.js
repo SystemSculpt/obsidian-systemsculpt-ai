@@ -3760,6 +3760,12 @@ Bias toward self-service over questioning the USER.
 <obsidian_bases>
 Bases create interactive database views of notes. You can read/write/edit .base files using standard tools.
 
+WORKFLOW:
+1. Discover: find existing .base files by searching for the \`.base\` extension (name search) or by listing directories.
+2. Inspect: read the target .base file before proposing changes. Do not assume keys/structure\u2014use what\u2019s in the file.
+3. Edit: keep YAML valid; make minimal diffs; preserve indentation/quoting; avoid reformatting unrelated sections.
+4. Confirm: if no .base files exist, say so and offer to create one at an appropriate vault path.
+
 STRUCTURE (.base files are YAML):
 \`\`\`yaml
 filters:  # Global filters (optional)
@@ -22623,6 +22629,10 @@ var init_MeetingProcessorModal = __esm({
         super(plugin.app);
         this.audioFiles = [];
         this.filteredFiles = [];
+        this.processedStatusByAudioPath = /* @__PURE__ */ new Map();
+        this.searchQuery = "";
+        this.fileFilter = "all";
+        this.filterButtons = {};
         this.listEl = null;
         this.searchInputEl = null;
         this.dropzoneEl = null;
@@ -22716,10 +22726,33 @@ var init_MeetingProcessorModal = __esm({
           placeholder: "Search by name or path",
           cls: "ss-meeting-processor__search-input"
         });
+        this.searchInputEl.value = this.searchQuery;
         this.registerDomEvent(this.searchInputEl, "input", () => {
           var _a;
-          this.applyFilter(((_a = this.searchInputEl) == null ? void 0 : _a.value) || "");
+          this.searchQuery = ((_a = this.searchInputEl) == null ? void 0 : _a.value) || "";
+          this.updateFilteredFiles();
         });
+        const filters = container.createDiv({
+          cls: "ss-meeting-processor__filters"
+        });
+        this.filterButtons = {};
+        const addFilterButton = (filter, label) => {
+          const button = filters.createEl("button", {
+            cls: "ss-meeting-processor__filter",
+            text: label
+          });
+          button.type = "button";
+          this.registerDomEvent(button, "click", () => {
+            this.fileFilter = filter;
+            this.syncFilterButtons();
+            this.updateFilteredFiles();
+          });
+          this.filterButtons[filter] = button;
+        };
+        addFilterButton("all", "All");
+        addFilterButton("unprocessed", "Unprocessed");
+        addFilterButton("processed", "Processed");
+        this.syncFilterButtons();
         const list = container.createDiv({
           cls: "ss-meeting-processor__list"
         });
@@ -22914,20 +22947,55 @@ var init_MeetingProcessorModal = __esm({
             return (((_a2 = b.stat) == null ? void 0 : _a2.mtime) || 0) - (((_b = a.stat) == null ? void 0 : _b.mtime) || 0);
           }
         );
-        this.filteredFiles = [...this.audioFiles];
-        this.renderFileList();
+        this.processedStatusByAudioPath.clear();
+        this.audioFiles.forEach((file) => {
+          this.processedStatusByAudioPath.set(
+            file.path,
+            this.getAudioFileProcessedStatus(file)
+          );
+        });
+        this.syncFilterCounts();
+        this.updateFilteredFiles();
       }
-      applyFilter(query) {
-        const needle = query.trim().toLowerCase();
-        if (!needle) {
-          this.filteredFiles = [...this.audioFiles];
-        } else {
-          this.filteredFiles = this.audioFiles.filter((file) => {
+      updateFilteredFiles() {
+        const needle = this.searchQuery.trim().toLowerCase();
+        let candidates = this.audioFiles;
+        if (this.fileFilter !== "all") {
+          candidates = candidates.filter((file) => {
+            const status = this.processedStatusByAudioPath.get(file.path) || "unprocessed";
+            const isProcessed = status === "processed";
+            return this.fileFilter === "processed" ? isProcessed : !isProcessed;
+          });
+        }
+        if (needle) {
+          candidates = candidates.filter((file) => {
             const haystack = `${file.basename} ${file.path}`.toLowerCase();
             return haystack.includes(needle);
           });
         }
+        this.filteredFiles = [...candidates];
         this.renderFileList();
+      }
+      syncFilterButtons() {
+        Object.entries(this.filterButtons).forEach(([filter, button]) => {
+          if (!button) return;
+          button.classList.toggle("is-active", this.fileFilter === filter);
+        });
+      }
+      syncFilterCounts() {
+        const total = this.audioFiles.length;
+        const processed = Array.from(this.processedStatusByAudioPath.values()).filter(
+          (status) => status === "processed"
+        ).length;
+        const unprocessed = Math.max(0, total - processed);
+        const updateLabel = (filter, label, count) => {
+          const button = this.filterButtons[filter];
+          if (!button) return;
+          button.setText(`${label} (${count})`);
+        };
+        updateLabel("all", "All", total);
+        updateLabel("unprocessed", "Unprocessed", unprocessed);
+        updateLabel("processed", "Processed", processed);
       }
       renderFileList() {
         if (!this.listEl) return;
@@ -22941,7 +23009,7 @@ var init_MeetingProcessorModal = __esm({
           );
           empty.createDiv({
             cls: "ss-meeting-processor__empty-text",
-            text: "No audio found. Drop a file on the right to start."
+            text: this.audioFiles.length === 0 ? "No audio found. Drop a file on the right to start." : "No matches. Try a different search or filter."
           });
           return;
         }
@@ -22961,14 +23029,32 @@ var init_MeetingProcessorModal = __esm({
             cls: "ss-meeting-processor__file-path",
             text: file.path
           });
-          const badge = item.createDiv({
-            cls: "ss-meeting-processor__file-badge"
+          const badgeStack = item.createDiv({
+            cls: "ss-meeting-processor__file-badge-stack"
           });
-          const badgeIcon = badge.createDiv({
+          const status = this.processedStatusByAudioPath.get(file.path) || "unprocessed";
+          const statusBadge = badgeStack.createDiv({
+            cls: `ss-meeting-processor__file-badge ss-meeting-processor__file-badge--status is-${status}`
+          });
+          const statusIcon = statusBadge.createDiv({
             cls: "ss-meeting-processor__file-badge-icon"
           });
-          (0, import_obsidian112.setIcon)(badgeIcon, "headphones");
-          badge.createSpan({
+          (0, import_obsidian112.setIcon)(
+            statusIcon,
+            status === "processed" ? "check-circle" : status === "stale" ? "alert-triangle" : "circle"
+          );
+          statusBadge.createSpan({
+            text: status === "processed" ? "Processed" : status === "stale" ? "Out of date" : "Unprocessed",
+            cls: "ss-meeting-processor__file-badge-text"
+          });
+          const modifiedBadge = badgeStack.createDiv({
+            cls: "ss-meeting-processor__file-badge ss-meeting-processor__file-badge--modified"
+          });
+          const modifiedIcon = modifiedBadge.createDiv({
+            cls: "ss-meeting-processor__file-badge-icon"
+          });
+          (0, import_obsidian112.setIcon)(modifiedIcon, "calendar");
+          modifiedBadge.createSpan({
             text: this.formatModified(file),
             cls: "ss-meeting-processor__file-badge-text"
           });
@@ -23270,18 +23356,10 @@ ${transcript}`,
         return output;
       }
       async writeProcessedNote(file, content) {
-        const dir = (0, import_obsidian113.normalizePath)(
-          this.plugin.settings.meetingProcessorOutputDirectory || "SystemSculpt/Extractions"
-        );
-        const nameTemplate = (this.plugin.settings.meetingProcessorOutputNameTemplate || "{{basename}}-processed.md").trim() || "{{basename}}-processed.md";
+        const { dir, targetPath } = this.getMeetingOutputDestination(file);
         if (!await this.plugin.app.vault.adapter.exists(dir)) {
           await this.plugin.app.vault.createFolder(dir);
         }
-        const baseName = file.basename;
-        const filledName = nameTemplate.replace(/{{\s*basename\s*}}/gi, baseName);
-        const safeName = sanitizeFileName(filledName || `${baseName}-processed.md`);
-        const finalName = safeName.endsWith(".md") ? safeName : `${safeName}.md`;
-        const targetPath = (0, import_obsidian113.normalizePath)(`${dir}/${finalName}`);
         const existing = this.plugin.app.vault.getAbstractFileByPath(targetPath);
         if (existing instanceof import_obsidian112.TFile) {
           await this.plugin.app.vault.modify(existing, content);
@@ -23296,6 +23374,30 @@ ${transcript}`,
         const leaf = this.plugin.app.workspace.getLeaf("tab");
         await this.plugin.app.workspace.openLinkText(abstract.path, "", "tab", { state: { mode: "source" } });
         this.plugin.app.workspace.setActiveLeaf(leaf, { focus: true });
+      }
+      getMeetingOutputDestination(file) {
+        const dir = (0, import_obsidian113.normalizePath)(
+          this.plugin.settings.meetingProcessorOutputDirectory || "SystemSculpt/Extractions"
+        );
+        const nameTemplate = (this.plugin.settings.meetingProcessorOutputNameTemplate || "{{basename}}-processed.md").trim() || "{{basename}}-processed.md";
+        const baseName = file.basename;
+        const filledName = nameTemplate.replace(/{{\s*basename\s*}}/gi, baseName);
+        const safeName = sanitizeFileName(filledName || `${baseName}-processed.md`);
+        const finalName = safeName.endsWith(".md") ? safeName : `${safeName}.md`;
+        const targetPath = (0, import_obsidian113.normalizePath)(`${dir}/${finalName}`);
+        return { dir, targetPath };
+      }
+      getAudioFileProcessedStatus(file) {
+        var _a, _b;
+        const { targetPath } = this.getMeetingOutputDestination(file);
+        const outputFile = this.plugin.app.vault.getAbstractFileByPath(targetPath);
+        if (!(outputFile instanceof import_obsidian112.TFile)) return "unprocessed";
+        const audioMtime = (_a = file.stat) == null ? void 0 : _a.mtime;
+        const outputMtime = (_b = outputFile.stat) == null ? void 0 : _b.mtime;
+        if (typeof audioMtime === "number" && typeof outputMtime === "number" && outputMtime < audioMtime) {
+          return "stale";
+        }
+        return "processed";
       }
     };
   }
@@ -45373,6 +45475,27 @@ var ChatTurnOrchestrator = class {
   }
 };
 
+// src/utils/obsidianBases.ts
+function mentionsObsidianBases(text) {
+  const normalized = String(text != null ? text : "").toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes(".base")) return true;
+  const hasBasesWord = /\bbases?\b/.test(normalized);
+  if (!hasBasesWord) return false;
+  if (/\bobsidian\b/.test(normalized)) return true;
+  if (normalized.includes("bases prompt")) return true;
+  if (/\bbase\s+files?\b/.test(normalized)) return true;
+  const contextualHints = [
+    "vault",
+    "database view",
+    "table view",
+    "filters",
+    "formulas",
+    "yaml"
+  ];
+  return contextualHints.some((hint) => normalized.includes(hint));
+}
+
 // src/views/chatview/InputHandler.ts
 var import_obsidian98 = require("obsidian");
 init_ui();
@@ -45391,6 +45514,7 @@ var InputHandler = class extends import_obsidian98.Component {
     this.webSearchEnabled = false;
     this.pendingLargeTextContent = null;
     this.liveRegionEl = null;
+    this.hasPromptedAgentModeForBases = false;
     /* ------------------------------------------------------------------
      * Batching of tool-call state-changed events to avoid excessive DOM
      * re-renders when many events fire in rapid succession.
@@ -45712,6 +45836,7 @@ var InputHandler = class extends import_obsidian98.Component {
     if (!await this.ensureProviderReadyForChat()) {
       return;
     }
+    await this.maybePromptEnableAgentModeForBases(messageText);
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
@@ -45737,6 +45862,33 @@ var InputHandler = class extends import_obsidian98.Component {
     } finally {
       this.focus();
       await this.chatView.contextManager.validateAndCleanContextFiles();
+    }
+  }
+  async maybePromptEnableAgentModeForBases(messageText) {
+    var _a, _b;
+    if (!mentionsObsidianBases(messageText)) return;
+    if ((_a = this.chatView) == null ? void 0 : _a.agentMode) return;
+    if (this.hasPromptedAgentModeForBases) return;
+    this.hasPromptedAgentModeForBases = true;
+    const result = await showPopup(
+      this.app,
+      "This looks like an Obsidian Bases request (.base files), but Agent Mode is OFF. Without Agent Mode, the assistant can't search/read your vault to find or edit bases. Enable Agent Mode now?",
+      {
+        title: "Enable Agent Mode for Bases",
+        icon: "wrench",
+        primaryButton: "Enable Agent Mode",
+        secondaryButton: "Send without tools"
+      }
+    );
+    if (result == null ? void 0 : result.confirmed) {
+      try {
+        if (typeof ((_b = this.chatView) == null ? void 0 : _b.setAgentMode) === "function") {
+          await this.chatView.setAgentMode(true);
+        } else {
+          this.chatView.agentMode = true;
+        }
+      } catch (e) {
+      }
     }
   }
   handleMicClick() {
