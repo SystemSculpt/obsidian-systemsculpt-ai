@@ -37,6 +37,7 @@ import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleS
 import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
 import { ChatTurnOrchestrator } from "./controllers/ChatTurnOrchestrator";
 import { errorLogger } from "../../utils/errorLogger";
+import { mentionsObsidianBases } from "../../utils/obsidianBases";
 
 export interface InputHandlerOptions {
   app: App;
@@ -125,6 +126,7 @@ export class InputHandler extends Component {
   private atMentionMenu?: AtMentionMenu;
   private agentSelectionMenu?: AgentSelectionMenu;
   private liveRegionEl: HTMLElement | null = null;
+  private hasPromptedAgentModeForBases = false;
 
   /* ------------------------------------------------------------------
    * Batching of tool-call state-changed events to avoid excessive DOM
@@ -475,6 +477,8 @@ export class InputHandler extends Component {
       return;
     }
 
+    await this.maybePromptEnableAgentModeForBases(messageText);
+
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
@@ -505,6 +509,34 @@ export class InputHandler extends Component {
     } finally {
       this.focus();
       await this.chatView.contextManager.validateAndCleanContextFiles();
+    }
+  }
+
+  private async maybePromptEnableAgentModeForBases(messageText: string): Promise<void> {
+    if (!mentionsObsidianBases(messageText)) return;
+    if (this.chatView?.agentMode) return;
+    if (this.hasPromptedAgentModeForBases) return;
+    this.hasPromptedAgentModeForBases = true;
+
+    const result = await showPopup(
+      this.app,
+      "This looks like an Obsidian Bases request (.base files), but Agent Mode is OFF. Without Agent Mode, the assistant can't search/read your vault to find or edit bases. Enable Agent Mode now?",
+      {
+        title: "Enable Agent Mode for Bases",
+        icon: "wrench",
+        primaryButton: "Enable Agent Mode",
+        secondaryButton: "Send without tools",
+      }
+    );
+
+    if (result?.confirmed) {
+      try {
+        if (typeof this.chatView?.setAgentMode === "function") {
+          await this.chatView.setAgentMode(true);
+        } else {
+          this.chatView.agentMode = true;
+        }
+      } catch {}
     }
   }
 

@@ -76,6 +76,12 @@ Bias toward self-service over questioning the USER.
 <obsidian_bases>
 Bases create interactive database views of notes. You can read/write/edit .base files using standard tools.
 
+WORKFLOW:
+1. Discover: find existing .base files by searching for the \`.base\` extension (name search) or by listing directories.
+2. Inspect: read the target .base file before proposing changes. Do not assume keys/structure—use what’s in the file.
+3. Edit: keep YAML valid; make minimal diffs; preserve indentation/quoting; avoid reformatting unrelated sections.
+4. Confirm: if no .base files exist, say so and offer to create one at an appropriate vault path.
+
 STRUCTURE (.base files are YAML):
 \`\`\`yaml
 filters:  # Global filters (optional)

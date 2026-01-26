@@ -217,6 +217,16 @@ describe("SearchOperations", () => {
       expect(paths.length).toBeGreaterThan(0);
       expect(paths.every((path: string) => path.startsWith("notes"))).toBe(true);
     });
+
+    it("includes .base files in name search results", async () => {
+      const baseFile = new TFile({ path: "bases/Projects.base" });
+      (baseFile.stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 321 };
+      (app.vault.getFiles as jest.Mock).mockReturnValue([...mockFiles, baseFile]);
+
+      const result = await searchOps.findFiles({ patterns: [".base"] });
+
+      expect(result.results.some((r: any) => r.path === "bases/Projects.base")).toBe(true);
+    });
   });
 
   describe("grepVault", () => {
