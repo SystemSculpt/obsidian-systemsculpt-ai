@@ -22,7 +22,23 @@ export function formatBytes(bytes: number): string {
 export function normalizeVaultPath(value: string): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  return raw
+
+  // People (and models) sometimes copy paths from Obsidian URIs (or other URL-encoded sources),
+  // which turns spaces into `%20` and slashes into `%2F`. Decode those so tool calls work with
+  // vault paths like `My Folder/My Note.md` even if the input was encoded.
+  let decoded = raw;
+  for (let i = 0; i < 2; i++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(decoded)) break;
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+
+  return decoded
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/")
     .replace(/^\/+/, "")

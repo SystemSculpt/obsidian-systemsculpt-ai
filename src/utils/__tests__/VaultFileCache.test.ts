@@ -126,6 +126,17 @@ describe("VaultFileCache", () => {
     });
   });
 
+  describe("getMarkdownFilesView", () => {
+    it("returns the same cached array instance", async () => {
+      await cache.initialize();
+
+      const files1 = cache.getMarkdownFilesView();
+      const files2 = cache.getMarkdownFilesView();
+
+      expect(files1).toBe(files2);
+    });
+  });
+
   describe("getAllFiles", () => {
     it("returns all files from vault", async () => {
       await cache.initialize();
@@ -142,6 +153,17 @@ describe("VaultFileCache", () => {
       const files2 = cache.getAllFiles();
 
       expect(files1).not.toBe(files2);
+    });
+  });
+
+  describe("getAllFilesView", () => {
+    it("returns the same cached array instance", async () => {
+      await cache.initialize();
+
+      const files1 = cache.getAllFilesView();
+      const files2 = cache.getAllFilesView();
+
+      expect(files1).toBe(files2);
     });
   });
 

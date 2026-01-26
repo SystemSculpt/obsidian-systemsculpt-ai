@@ -92,6 +92,20 @@ describe("normalizeVaultPath", () => {
     expect(normalizeVaultPath(null as any)).toBe("");
     expect(normalizeVaultPath(undefined as any)).toBe("");
   });
+
+  it("decodes URL-encoded vault paths", () => {
+    expect(normalizeVaultPath("My%20Folder/My%20Note.md")).toBe("My Folder/My Note.md");
+    expect(normalizeVaultPath("My%20Folder%2FSub%20Folder%2FNote.md")).toBe("My Folder/Sub Folder/Note.md");
+  });
+
+  it("decodes double-encoded vault paths", () => {
+    expect(normalizeVaultPath("My%2520Folder%252FNote.md")).toBe("My Folder/Note.md");
+  });
+
+  it("leaves invalid percent-encoding untouched", () => {
+    expect(normalizeVaultPath("100% done")).toBe("100% done");
+    expect(normalizeVaultPath("My%2GFolder/Note.md")).toBe("My%2GFolder/Note.md");
+  });
 });
 
 describe("createSimpleDiff", () => {

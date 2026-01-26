@@ -36,6 +36,10 @@ Tool names below match the MCP tool definitions in:
 | `open` | Open files in the Obsidian workspace |
 | `context` | Add/remove files from the chat’s context set |
 
+## Paths
+
+Filesystem tools take vault-relative paths (for example: `My Folder/My Note.md`). Spaces are supported. If you paste a URL-encoded path (for example from an Obsidian URL), `%20` / `%2F` will be decoded automatically.
+
 ### YouTube
 
 | Tool | What it does |

@@ -87,7 +87,24 @@ export class VaultFileCache {
     this.refreshMarkdownCache();
     return [...(this.markdownFiles || [])];
   }
-  
+
+  /**
+   * Get a read-only view of cached markdown files (no copy).
+   *
+   * This is intended for performance-sensitive callers that treat the returned
+   * array as immutable.
+   */
+  getMarkdownFilesView(): ReadonlyArray<TFile> {
+    if (this.isCacheValid() && this.markdownFiles) {
+      this.cacheHits++;
+      return this.markdownFiles;
+    }
+
+    this.cacheMisses++;
+    this.refreshMarkdownCache();
+    return this.markdownFiles || [];
+  }
+
   /**
    * Get all files (cached)
    */
@@ -100,6 +117,23 @@ export class VaultFileCache {
     this.cacheMisses++;
     this.refreshAllFilesCache();
     return [...(this.allFiles || [])];
+  }
+
+  /**
+   * Get a read-only view of cached files (no copy).
+   *
+   * This is intended for performance-sensitive callers that treat the returned
+   * array as immutable.
+   */
+  getAllFilesView(): ReadonlyArray<TFile> {
+    if (this.isCacheValid() && this.allFiles) {
+      this.cacheHits++;
+      return this.allFiles;
+    }
+
+    this.cacheMisses++;
+    this.refreshAllFilesCache();
+    return this.allFiles || [];
   }
   
   /**

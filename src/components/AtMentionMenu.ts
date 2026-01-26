@@ -18,6 +18,16 @@ type SuggestionItem =
       attached: boolean;
     };
 
+type ScheduledTask =
+  | {
+      kind: "timeout";
+      id: number;
+    }
+  | {
+      kind: "idle";
+      id: number;
+    };
+
 export class AtMentionMenu extends Component {
   private readonly chatView: ChatView;
   private readonly inputElement: HTMLTextAreaElement;
@@ -33,11 +43,18 @@ export class AtMentionMenu extends Component {
   private selectedIndex = 0;
   private suggestions: SuggestionItem[] = [];
 
-  private fileCache: CachedFile[] = [];
-  private recentFiles: CachedFile[] = [];
+  private cachedFilesByPath: Map<string, CachedFile> = new Map();
 
-  private renderScheduled = false;
   private readonly MAX_RESULTS = 12;
+  private readonly SEARCH_CHUNK_BUDGET_MS = 10;
+  private readonly SEARCH_DEBOUNCE_MS = 50;
+  private readonly RENDER_THROTTLE_MS = 50;
+
+  private searchRunId = 0;
+  private searchStartTimeoutId: number | null = null;
+  private scheduledChunk: ScheduledTask | null = null;
+  private isSearching = false;
+  private lastRenderAt = 0;
 
   constructor(chatView: ChatView, inputElement: HTMLTextAreaElement) {
     super();
@@ -80,12 +97,11 @@ export class AtMentionMenu extends Component {
 
     if (!wasVisible || triggerChanged) {
       this.selectedIndex = 0;
-      this.refreshFileCache();
     }
 
-    this.scheduleRender(true);
     this.menuEl.style.display = "block";
     this.positionMenu();
+    this.scheduleSearch({ resetSelection: !wasVisible || triggerChanged, immediate: true });
   }
 
   public updateQuery(atIndex: number, tokenEnd: number, query: string): void {
@@ -97,7 +113,7 @@ export class AtMentionMenu extends Component {
     this.triggerIndex = atIndex;
     this.tokenEndIndex = tokenEnd;
     this.query = query;
-    this.scheduleRender(false);
+    this.scheduleSearch({ resetSelection: false, immediate: false });
   }
 
   public hide(): void {
@@ -109,6 +125,9 @@ export class AtMentionMenu extends Component {
     this.query = "";
     this.suggestions = [];
     this.selectedIndex = 0;
+    this.isSearching = false;
+    this.searchRunId++;
+    this.cancelScheduledWork();
     this.listEl.empty();
   }
 
@@ -139,51 +158,106 @@ export class AtMentionMenu extends Component {
     }
   }
 
-  private scheduleRender(resetSelection: boolean): void {
-    if (resetSelection) {
+  private scheduleSearch(options: { resetSelection: boolean; immediate: boolean }): void {
+    if (options.resetSelection) {
       this.selectedIndex = 0;
     }
 
-    if (this.renderScheduled) return;
-    this.renderScheduled = true;
+    this.isSearching = true;
+    this.searchRunId++;
+    const runId = this.searchRunId;
 
-    window.requestAnimationFrame(() => {
-      this.renderScheduled = false;
-      if (!this.isVisible) return;
-      this.rebuildSuggestions();
+    this.cancelScheduledWork();
+
+    if (this.suggestions.length === 0) {
       this.render();
       this.positionMenu();
-    });
-  }
-
-  private refreshFileCache(): void {
-    const plugin: any = (this.chatView as any).plugin;
-    const files: TFile[] = plugin?.vaultFileCache?.getAllFiles?.() || this.chatView.app.vault.getFiles();
-
-    const next: CachedFile[] = [];
-    for (const file of files) {
-      const pathLower = file.path.toLowerCase();
-      const nameLower = file.basename.toLowerCase();
-      next.push({
-        file,
-        pathLower,
-        nameLower,
-        mtime: typeof file.stat?.mtime === "number" ? file.stat.mtime : 0,
-      });
     }
 
-    this.fileCache = next;
-    this.recentFiles = [...next].sort((a, b) => b.mtime - a.mtime);
+    const delay = options.immediate ? 0 : this.SEARCH_DEBOUNCE_MS;
+    this.searchStartTimeoutId = window.setTimeout(() => {
+      this.searchStartTimeoutId = null;
+      this.startSearch(runId);
+    }, delay);
   }
 
-  private rebuildSuggestions(): void {
+  private cancelScheduledWork(): void {
+    if (this.searchStartTimeoutId !== null) {
+      window.clearTimeout(this.searchStartTimeoutId);
+      this.searchStartTimeoutId = null;
+    }
+
+    if (!this.scheduledChunk) {
+      return;
+    }
+
+    const anyWindow = window as any;
+    if (this.scheduledChunk.kind === "idle" && typeof anyWindow.cancelIdleCallback === "function") {
+      anyWindow.cancelIdleCallback(this.scheduledChunk.id);
+    } else if (this.scheduledChunk.kind === "timeout") {
+      window.clearTimeout(this.scheduledChunk.id);
+    }
+
+    this.scheduledChunk = null;
+  }
+
+  private scheduleNextChunk(fn: (deadline?: any) => void): void {
+    this.cancelScheduledWork();
+
+    const anyWindow = window as any;
+    if (typeof anyWindow.requestIdleCallback === "function") {
+      const id = anyWindow.requestIdleCallback(fn, { timeout: 50 });
+      this.scheduledChunk = { kind: "idle", id };
+      return;
+    }
+
+    const id = window.setTimeout(() => fn(), 0);
+    this.scheduledChunk = { kind: "timeout", id };
+  }
+
+  private now(): number {
+    try {
+      if (typeof performance !== "undefined" && typeof performance.now === "function") {
+        return performance.now();
+      }
+    } catch {}
+    return Date.now();
+  }
+
+  private getCachedFile(file: TFile): CachedFile {
+    const key = file.path;
+    const mtime = typeof file.stat?.mtime === "number" ? file.stat.mtime : 0;
+    const cached = this.cachedFilesByPath.get(key);
+    if (cached && cached.file === file && cached.mtime === mtime) {
+      return cached;
+    }
+
+    const entry: CachedFile = {
+      file,
+      pathLower: file.path.toLowerCase(),
+      nameLower: file.basename.toLowerCase(),
+      mtime,
+    };
+    this.cachedFilesByPath.set(key, entry);
+    return entry;
+  }
+
+  private startSearch(runId: number): void {
+    if (!this.isVisible || runId !== this.searchRunId) {
+      return;
+    }
+
+    const plugin: any = (this.chatView as any).plugin;
+    const vaultFileCache: any = plugin?.vaultFileCache;
+    const files: ReadonlyArray<TFile> =
+      vaultFileCache?.getAllFilesView?.() ||
+      vaultFileCache?.getAllFiles?.() ||
+      this.chatView.app.vault.getFiles();
     const q = this.query.trim().toLowerCase();
     const cm: any = this.chatView.contextManager;
 
-    const items: SuggestionItem[] = [];
-
-    const results: Array<{ entry: CachedFile; score: number; attached: boolean }> = [];
     const limit = this.MAX_RESULTS;
+    const results: Array<{ entry: CachedFile; score: number; attached: boolean }> = [];
 
     const consider = (entry: CachedFile, score: number, attached: boolean) => {
       if (score <= 0) return;
@@ -205,41 +279,98 @@ export class AtMentionMenu extends Component {
       results[minIndex] = { entry, score, attached };
     };
 
-    if (!q) {
-      for (const entry of this.recentFiles) {
-        const attached = !!cm?.hasContextFile?.(`[[${entry.file.path}]]`);
-        if (attached) continue;
-        consider(entry, 1, attached);
-      }
-    } else {
-      for (const entry of this.fileCache) {
-        const attached = !!cm?.hasContextFile?.(`[[${entry.file.path}]]`);
-        const score = this.score(q, entry);
-        consider(entry, score, attached);
-      }
-    }
+    let index = 0;
 
-    results.sort((a, b) => {
-      if (a.attached !== b.attached) return a.attached ? 1 : -1;
-      if (b.score !== a.score) return b.score - a.score;
-      return a.entry.file.basename.localeCompare(b.entry.file.basename);
-    });
+    const shouldYield = (deadline: any, start: number) => {
+      if (deadline && typeof deadline.timeRemaining === "function") {
+        return deadline.timeRemaining() <= 1;
+      }
+      return this.now() - start >= this.SEARCH_CHUNK_BUDGET_MS;
+    };
 
-    for (const r of results) {
-      items.push({
-        kind: "file",
-        file: r.entry.file,
-        title: r.entry.file.basename,
-        description: r.entry.file.path,
-        icon: this.iconForFile(r.entry.file),
-        attached: r.attached,
+    const applyAndMaybeRender = (isFinal: boolean) => {
+      if (!this.isVisible || runId !== this.searchRunId) return;
+
+      const now = this.now();
+      const shouldRender = isFinal || now - this.lastRenderAt >= this.RENDER_THROTTLE_MS;
+      if (!shouldRender) return;
+
+      this.lastRenderAt = now;
+      this.applyResults(results);
+    };
+
+    const runChunk = (deadline?: any) => {
+      if (!this.isVisible || runId !== this.searchRunId) {
+        return;
+      }
+
+      const startedAt = this.now();
+      for (; index < files.length; index++) {
+        const file = files[index];
+        const entry = this.getCachedFile(file);
+        const attached = !!cm?.hasContextFile?.(`[[${file.path}]]`);
+
+        if (!q) {
+          if (attached) continue;
+          consider(entry, entry.mtime + 1, attached);
+        } else {
+          const score = this.score(q, entry);
+          consider(entry, score, attached);
+        }
+
+        if (shouldYield(deadline, startedAt)) {
+          index++;
+          break;
+        }
+      }
+
+      const finished = index >= files.length;
+      applyAndMaybeRender(finished);
+
+      if (!finished) {
+        this.scheduleNextChunk(runChunk);
+        return;
+      }
+
+      this.isSearching = false;
+      this.scheduledChunk = null;
+
+      // Ensure the final render + positioning happens even if throttled.
+      this.applyResults(results);
+    };
+
+    // First chunk: run via idle callback/timeout so we don't block the keypress handler.
+    this.scheduleNextChunk(runChunk);
+  }
+
+  private applyResults(results: Array<{ entry: CachedFile; score: number; attached: boolean }>): void {
+    const items: SuggestionItem[] = [];
+
+    results
+      .slice()
+      .sort((a, b) => {
+        if (a.attached !== b.attached) return a.attached ? 1 : -1;
+        if (b.score !== a.score) return b.score - a.score;
+        return a.entry.file.basename.localeCompare(b.entry.file.basename);
+      })
+      .forEach((r) => {
+        items.push({
+          kind: "file",
+          file: r.entry.file,
+          title: r.entry.file.basename,
+          description: r.entry.file.path,
+          icon: this.iconForFile(r.entry.file),
+          attached: r.attached,
+        });
       });
-    }
 
     this.suggestions = items;
     if (this.selectedIndex >= items.length) {
       this.selectedIndex = Math.max(0, items.length - 1);
     }
+
+    this.render();
+    this.positionMenu();
   }
 
   private score(queryLower: string, entry: CachedFile): number {
@@ -284,14 +415,14 @@ export class AtMentionMenu extends Component {
 
     if (this.suggestions.length === 0) {
       const empty = this.listEl.createDiv({ cls: "suggestion-item is-selected systemsculpt-at-mention-empty" });
-      empty.setText("No files found");
+      empty.setText(this.isSearching ? "Searching…" : "No files found");
       return;
     }
 
-      this.suggestions.forEach((item, index) => {
-        const row = this.listEl.createDiv({
-          cls: `suggestion-item systemsculpt-at-mention-item ${index === this.selectedIndex ? "is-selected" : ""}${item.attached ? " is-attached" : ""}`,
-        });
+    this.suggestions.forEach((item, index) => {
+      const row = this.listEl.createDiv({
+        cls: `suggestion-item systemsculpt-at-mention-item ${index === this.selectedIndex ? "is-selected" : ""}${item.attached ? " is-attached" : ""}`,
+      });
 
       const iconEl = row.createSpan({ cls: "systemsculpt-at-mention-item__icon" });
       setIcon(iconEl, item.icon);
@@ -388,8 +519,6 @@ export class AtMentionMenu extends Component {
     this.removeAtTokenFromInput();
     this.hide();
 
-    const cm: any = this.chatView.contextManager;
-
     try {
       if (item.attached) {
         this.chatView.app.workspace.openLinkText(item.file.path, "", true);
@@ -406,6 +535,7 @@ export class AtMentionMenu extends Component {
   }
 
   public onunload(): void {
+    this.cancelScheduledWork();
     this.menuEl.remove();
     super.onunload();
   }
