@@ -51,12 +51,12 @@ describe("PlatformContext", () => {
     expect(platform.supportsStreaming()).toBe(false);
   });
 
-  it("avoids direct fetch for OpenRouter even on desktop", () => {
+  it("allows direct fetch for OpenRouter on desktop", () => {
     const platform = PlatformContext.get();
     const options: PlatformTransportOptions = {
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
     };
-    expect(platform.preferredTransport(options)).toBe("requestUrl");
-    expect(platform.supportsStreaming(options)).toBe(false);
+    expect(platform.preferredTransport(options)).toBe("fetch");
+    expect(platform.supportsStreaming(options)).toBe(true);
   });
 });

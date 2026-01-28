@@ -2,6 +2,35 @@ import { requestUrl, Platform } from 'obsidian';
 import { errorLogger } from './errorLogger';
 import { MOBILE_STREAM_CONFIG } from '../constants/webSearch';
 
+export function sanitizeFetchHeadersForUrl(
+  url: string,
+  headers: Record<string, string>
+): Record<string, string> {
+  const sanitized: Record<string, string> = { ...headers };
+
+  const deleteHeader = (name: string) => {
+    const target = name.toLowerCase();
+    for (const key of Object.keys(sanitized)) {
+      if (key.toLowerCase() === target) {
+        delete sanitized[key];
+      }
+    }
+  };
+
+  try {
+    const host = new URL(url).host.toLowerCase();
+    if (host.endsWith('openrouter.ai')) {
+      // These custom headers can trigger problematic CORS preflights in some environments,
+      // and are not required for OpenRouter requests to succeed.
+      deleteHeader('HTTP-Referer');
+      deleteHeader('X-Title');
+      deleteHeader('Cache-Control');
+    }
+  } catch {}
+
+  return sanitized;
+}
+
 export async function postJsonStreaming(
   url: string,
   headers: Record<string, string>,
@@ -35,20 +64,7 @@ export async function postJsonStreaming(
   // Desktop: try fetch for true streaming when CORS allows
   if (!isMobile && typeof fetch === 'function' && !url.includes('anthropic.com')) {
     try {
-      // For OpenRouter, strip non-essential custom headers that can cause CORS preflight failures
-      let fetchHeaders: Record<string, string> = { ...headers };
-      try {
-        const host = new URL(url).host;
-        if (host.endsWith('openrouter.ai')) {
-          const toStrip = ['HTTP-Referer', 'X-Title', 'Cache-Control'];
-          for (const h of toStrip) {
-            for (const k of Object.keys(fetchHeaders)) {
-              if (k.toLowerCase() === h.toLowerCase()) delete fetchHeaders[k];
-            }
-          }
-        }
-      } catch {}
-
+      const fetchHeaders = sanitizeFetchHeadersForUrl(url, headers);
       const resp = await fetch(url, { method: 'POST', headers: fetchHeaders, body: json, signal } as RequestInit);
       try {
         console.debug('[SystemSculpt][Streaming] fetch used for streaming', {

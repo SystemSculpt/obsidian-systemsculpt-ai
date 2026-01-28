@@ -8,7 +8,6 @@ import {
   type CaptionTrack,
 } from "../services/YouTubeTranscriptService";
 import { areLanguageCodesEquivalent, getLanguageName } from "../constants/languages";
-import { selectPreferredYouTubeLanguage } from "../utils/youtubeLanguages";
 import type { StreamEvent } from "../streaming/types";
 
 // ============================================================================
@@ -68,7 +67,6 @@ export class YouTubeCanvasModal extends StandardModal {
   private metadata: YouTubeMetadata | null = null;
   private availableLanguages: CaptionTrack[] = [];
   private selectedLanguage: string | null = null;
-  private languagesFetchError: string | null = null;
   private transcript: YouTubeTranscriptResult | null = null;
   private contentToggles: ContentToggleState = { summary: true, keyPoints: false, studyNotes: false };
   private generatedContent: GeneratedContent = {};
@@ -302,43 +300,46 @@ export class YouTubeCanvasModal extends StandardModal {
   private async loadPreviewAndLanguages(url: string): Promise<void> {
     this.setState("loading_preview");
     this.updateStatus("Loading video info...", "info");
-    this.languagesFetchError = null;
 
     try {
-      // Fetch metadata and available languages in parallel
-      const [metadata, languagesResult] = await Promise.all([
-        this.metadataService.getMetadata(url),
-        this.transcriptService.getAvailableLanguages(url).catch((err) => {
-          this.languagesFetchError = err instanceof Error ? err.message : "Failed to fetch captions list";
-          console.warn("[YouTubeCanvasModal] Failed to fetch languages:", err);
-          return null;
-        }),
-      ]);
+      // Reset transcript-specific UI/state when switching videos.
+      if (this.transcriptSection) {
+        this.transcriptSection.style.display = "none";
+        this.transcriptSection.empty();
+      }
+      if (this.folderSection) {
+        this.folderSection.style.display = "none";
+      }
+      if (this.toggleSection) {
+        this.toggleSection.style.display = "none";
+        this.toggleSection.empty();
+      }
+      if (this.tabBar) {
+        this.tabBar.style.display = "none";
+        this.tabBar.empty();
+      }
+      if (this.tabContent) {
+        this.tabContent.style.display = "none";
+        this.tabContent.empty();
+      }
+
+      // Only fetch metadata up front.
+      // Caption languages are sourced from Supadata transcript metadata (returned by our backend)
+      // after "Get Transcript", which avoids fragile YouTube HTML scraping and extra network calls.
+      const metadata = await this.metadataService.getMetadata(url);
 
       this.metadata = metadata;
-      this.availableLanguages = languagesResult?.languages || [];
-      this.selectedLanguage = selectPreferredYouTubeLanguage(
-        languagesResult,
-        this.getPreferredLanguageFallbacks()
-      );
+      this.availableLanguages = [];
+      this.selectedLanguage = null;
+      this.transcript = null;
+      this.generatedContent = {};
+      this.activeTab = null;
+      this.generatingType = null;
 
       this.renderPreview();
       this.renderLanguageSelector();
       this.setState("preview_ready");
-
-      if (this.languagesFetchError) {
-        this.updateStatus(
-          `Video preview loaded (captions list unavailable: ${this.languagesFetchError}). You can still try "Get Transcript".`,
-          "error"
-        );
-      } else if (this.availableLanguages.length === 0) {
-        this.updateStatus(
-          `Video preview loaded (no captions detected). You can still try "Get Transcript".`,
-          "info"
-        );
-      } else {
-        this.updateStatus("Select a language and fetch the transcript", "success");
-      }
+      this.updateStatus("Video preview loaded. Click \"Get Transcript\" to fetch captions.", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load video info";
       this.updateStatus(message, "error");
@@ -428,20 +429,6 @@ export class YouTubeCanvasModal extends StandardModal {
         }
       });
     }
-  }
-
-  private getPreferredLanguageFallbacks(): string[] {
-    const preferred: string[] = [];
-    const locale = typeof navigator !== "undefined" ? navigator.language : "";
-    if (locale) {
-      preferred.push(locale);
-      const base = locale.split("-")[0];
-      if (base && base !== locale) {
-        preferred.push(base);
-      }
-    }
-    preferred.push("en");
-    return Array.from(new Set(preferred.map((value) => value.trim()).filter(Boolean)));
   }
 
   private getTrackDisplayName(track: CaptionTrack): string {
@@ -996,44 +983,44 @@ created: ${timestamp}
     this.transcript = null;
     this.availableLanguages = [];
     this.selectedLanguage = null;
-    this.languagesFetchError = null;
     this.generatedContent = {};
     this.activeTab = null;
     this.loadSettings();
   }
 
   private syncLanguagesFromTranscriptMetadata(): void {
-    if (!this.transcript?.metadata?.availableLangs?.length) {
-      return;
+    if (!this.transcript) return;
+
+    const sanitizeCode = (value: string | null | undefined): string | null => {
+      const trimmed = (value ?? "").trim();
+      if (!trimmed) return null;
+      if (trimmed.toLowerCase() === "unknown") return null;
+      return trimmed;
+    };
+
+    const availableLangs = (this.transcript.metadata?.availableLangs ?? []).map((value) => sanitizeCode(value)).filter(Boolean) as string[];
+    const transcriptLang = sanitizeCode(this.transcript.lang);
+
+    const uniqueCodes = Array.from(new Set<string>([...availableLangs, transcriptLang].filter(Boolean) as string[]));
+
+    if (this.availableLanguages.length === 0 && uniqueCodes.length > 0) {
+      this.availableLanguages = uniqueCodes.map((languageCode) => ({
+        languageCode,
+        name: getLanguageName(languageCode),
+        kind: "standard",
+        isTranslatable: true,
+      }));
     }
 
-    if (this.availableLanguages.length > 0) {
-      return;
-    }
-
-    const uniqueCodes = Array.from(
-      new Set(this.transcript.metadata.availableLangs.map((value) => value.trim()).filter(Boolean))
-    );
-
-    if (uniqueCodes.length === 0) {
-      return;
-    }
-
-    this.availableLanguages = uniqueCodes.map((languageCode) => ({
-      languageCode,
-      name: getLanguageName(languageCode),
-      kind: "standard",
-      isTranslatable: true,
-    }));
-
-    // Captions exist, so clear any earlier languages fetch failure.
-    this.languagesFetchError = null;
-
-    if (!this.selectedLanguage && this.transcript.lang) {
+    // Keep selection aligned with the actual transcript language.
+    if (transcriptLang) {
       const matchingTrack = this.availableLanguages.find((track) =>
-        areLanguageCodesEquivalent(track.languageCode, this.transcript?.lang ?? "")
+        areLanguageCodesEquivalent(track.languageCode, transcriptLang)
       );
-      this.selectedLanguage = matchingTrack?.languageCode ?? this.transcript.lang;
+      const nextLanguage = matchingTrack?.languageCode ?? transcriptLang;
+      if (!this.selectedLanguage || !areLanguageCodesEquivalent(this.selectedLanguage, nextLanguage)) {
+        this.selectedLanguage = nextLanguage;
+      }
     }
   }
 

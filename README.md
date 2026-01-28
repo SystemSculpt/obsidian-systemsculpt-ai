@@ -64,6 +64,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 1) Open Settings → SystemSculpt AI → Overview & Setup
 - Choose a provider (OpenAI, OpenRouter, MiniMax, Anthropic, LM Studio, Ollama, or any OpenAI‑compatible endpoint)
 - Enter your endpoint and API key if required
+- If you have a SystemSculpt license, the default SystemSculpt model is backed by OpenRouter `x-ai/grok-4.1-fast` (vision-capable)
 
 2) Start a chat
 - Command palette → “Open SystemSculpt Chat”, or click the ribbon icon
@@ -171,7 +172,7 @@ Ribbon icons include Chat, Chat History, Janitor, Similar Notes, Search, Meeting
 ## 🪜 Platform Context
 
 - A shared `PlatformContext` singleton now powers every mobile/desktop branch.
-- Desktop defaults to native `fetch` + streaming; mobile and constrained endpoints (e.g., OpenRouter) automatically pivot to Obsidian `requestUrl` with virtual SSE replay.
+- Desktop defaults to native `fetch` + streaming; mobile pivots to Obsidian `requestUrl` with virtual SSE replay, and desktop falls back to `requestUrl` when streaming fails.
 - UI components emit `platform-ui-<variant>` classes so styling and behavioral toggles stay in sync across chat, recorder, and transcription flows.
 - Clear, actionable errors and optional debug tools
 

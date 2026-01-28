@@ -31,7 +31,7 @@ export interface SystemSculptModel {
   context_length: number;
   capabilities: string[];
   supported_parameters?: string[]; // OpenRouter supported parameters (includes "tools", "functions", etc.)
-  upstream_model?: string; // Underlying provider-qualified model id (e.g., "openrouter/openai/gpt-5-codex")
+  upstream_model?: string; // Underlying provider-qualified model id (e.g., "openrouter/x-ai/grok-4.1-fast")
   architecture: {
     modality: string;
     tokenizer?: string;

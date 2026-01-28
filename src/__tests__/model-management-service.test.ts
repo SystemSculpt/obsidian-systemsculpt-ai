@@ -72,7 +72,7 @@ describe("ModelManagementService", () => {
     expect(model.provider).toBe("systemsculpt");
     expect(model.identifier?.modelId).toBe("systemsculpt/ai-agent");
     expect(model.identifier?.displayName).toBe(AGENT_CONFIG.MODEL_DISPLAY_NAME);
-    expect(model.upstream_model).toBe("openrouter/openai/gpt-5-codex");
+    expect(model.upstream_model).toBe("openrouter/x-ai/grok-4.1-fast");
   });
 
   it("falls back to local agent model when license missing", async () => {
@@ -83,7 +83,7 @@ describe("ModelManagementService", () => {
     expect(models).toHaveLength(1);
     expect(models[0].id).toBe(AGENT_CONFIG.MODEL_ID);
     expect(models[0].name).toBe(AGENT_CONFIG.MODEL_DISPLAY_NAME);
-    expect(models[0].upstream_model).toBe("openrouter/openai/gpt-5-codex");
+    expect(models[0].upstream_model).toBe("openrouter/x-ai/grok-4.1-fast");
   });
 
   it("maps SystemSculpt public id to upstream provider model for server requests", async () => {
@@ -100,10 +100,10 @@ describe("ModelManagementService", () => {
         modelId: "systemsculpt/ai-agent",
         displayName: AGENT_CONFIG.MODEL_DISPLAY_NAME,
       },
-      upstream_model: "openrouter/openai/gpt-5-codex",
+      upstream_model: "openrouter/x-ai/grok-4.1-fast",
       context_length: 128000,
-      capabilities: ["tools", "function_calling"],
-      architecture: { modality: "text->text", tokenizer: "unknown", instruct_type: null },
+      capabilities: ["tools", "function_calling", "vision"],
+      architecture: { modality: "text+image->text", tokenizer: "unknown", instruct_type: null },
       pricing: { prompt: "0.000010", completion: "0.000030", image: "0", request: "0" },
     };
 
@@ -112,6 +112,6 @@ describe("ModelManagementService", () => {
     const info = await service.getModelInfo(AGENT_CONFIG.MODEL_ID);
     expect(info.isCustom).toBe(false);
     expect(info.actualModelId).toBe("systemsculpt/ai-agent");
-    expect(info.upstreamModelId).toBe("openrouter/openai/gpt-5-codex");
+    expect(info.upstreamModelId).toBe("openrouter/x-ai/grok-4.1-fast");
   });
 });

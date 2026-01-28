@@ -11,7 +11,10 @@ export class PlatformContext {
   private static instance: PlatformContext | null = null;
   private readonly mobileDetection = MobileDetection.getInstance();
   private readonly fetchAvailable: boolean;
-  private static readonly DEFAULT_FETCH_AVOID_SUFFIXES = ["openrouter.ai", "systemsculpt.com"];
+  // By default, allow direct `fetch` on desktop for all hosts.
+  // Mobile still uses `requestUrl`, and `postJsonStreaming`/transport layers can fall back
+  // to `requestUrl` if `fetch` fails for a given endpoint.
+  private static readonly DEFAULT_FETCH_AVOID_SUFFIXES: string[] = [];
   private static readonly FETCH_AVOID_SUFFIXES = new Set<string>(PlatformContext.DEFAULT_FETCH_AVOID_SUFFIXES);
 
   private constructor() {

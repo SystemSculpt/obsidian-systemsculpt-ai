@@ -23,12 +23,6 @@ export interface CaptionTrack {
   isTranslatable: boolean;
 }
 
-export interface AvailableLanguagesResult {
-  videoId: string;
-  languages: CaptionTrack[];
-  defaultLanguage?: string;
-}
-
 interface TranscriptResponse {
   text?: string;
   lang?: string;
@@ -233,74 +227,5 @@ export class YouTubeTranscriptService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Get available caption languages for a YouTube video (lightweight, no transcript fetch)
-   */
-  async getAvailableLanguages(url: string): Promise<AvailableLanguagesResult> {
-    const videoId = this.extractVideoId(url);
-    if (!videoId) {
-      throw new Error("Invalid YouTube URL format");
-    }
-    const canonicalUrl = `${this.CANONICAL_WATCH_BASE_URL}${videoId}`;
-
-    const licenseKey = this.plugin.settings.licenseKey;
-    if (!licenseKey || !this.plugin.settings.licenseValid) {
-      throw new Error(
-        "A valid SystemSculpt license is required to use the YouTube transcript feature"
-      );
-    }
-
-    const endpoint = `${WEBSITE_API_BASE_URL}/youtube/languages?url=${encodeURIComponent(canonicalUrl)}`;
-    const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
-
-    console.log("[YouTubeTranscriptService] Fetching available languages:", { videoId });
-
-    const transportOptions = { endpoint };
-    const preferredTransport = this.platform.preferredTransport(transportOptions);
-
-    try {
-      let data: AvailableLanguagesResult;
-
-      if (preferredTransport === "requestUrl") {
-        const response = await requestUrl({
-          url: endpoint,
-          method: "GET",
-          headers,
-          throw: false,
-        });
-
-        if (response.status >= 400) {
-          const errorData = response.json || {};
-          throw new Error(errorData.error || `HTTP ${response.status}`);
-        }
-
-        data = response.json as AvailableLanguagesResult;
-      } else {
-        const response = await fetch(endpoint, {
-          method: "GET",
-          headers,
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}`);
-        }
-
-        data = (await response.json()) as AvailableLanguagesResult;
-      }
-
-      console.log("[YouTubeTranscriptService] Available languages:", {
-        videoId,
-        count: data.languages.length,
-        default: data.defaultLanguage,
-      });
-
-      return data;
-    } catch (error) {
-      console.error("[YouTubeTranscriptService] Failed to fetch available languages:", error);
-      throw error;
-    }
   }
 }

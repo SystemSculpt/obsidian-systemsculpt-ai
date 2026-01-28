@@ -8,6 +8,18 @@ export interface ProviderModel {
   contextWindow?: number;
   maxOutput?: number;
   capabilities?: string[];
+  supported_parameters?: string[];
+  pricing?: {
+    prompt: string;
+    completion: string;
+    image?: string;
+    request?: string;
+  };
+  architecture?: {
+    modality: string;
+    tokenizer?: string;
+    instruct_type?: string | null;
+  };
   supportsStreaming?: boolean;
   supportsTools?: boolean;
   aliases?: string[];

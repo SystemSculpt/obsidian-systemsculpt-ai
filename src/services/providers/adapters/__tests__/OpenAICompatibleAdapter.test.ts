@@ -98,6 +98,43 @@ describe("OpenAICompatibleAdapter", () => {
       expect(models[0].contextWindow).toBe(8192);
     });
 
+    it("preserves OpenRouter-style model metadata (vision + supported_parameters)", async () => {
+      mockHttpRequest.mockResolvedValue({
+        status: 200,
+        json: {
+          data: [
+            {
+              id: "x-ai/grok-4.1-fast",
+              name: "Grok 4.1 Fast",
+              context_length: 131072,
+              architecture: {
+                modality: "text+image->text",
+                tokenizer: "Grok",
+                instruct_type: null,
+                input_modalities: ["text", "image"],
+                output_modalities: ["text"],
+              },
+              supported_parameters: ["max_tokens", "tools", "temperature"],
+              pricing: {
+                prompt: "0.000001",
+                completion: "0.000002",
+                image: "0.000003",
+                request: "0",
+              },
+            },
+          ],
+        },
+      });
+
+      const models = await adapter.getModels();
+
+      expect(models).toHaveLength(1);
+      expect(models[0].id).toBe("x-ai/grok-4.1-fast");
+      expect(models[0].architecture?.modality).toBe("text+image->text");
+      expect(models[0].supported_parameters).toContain("tools");
+      expect(models[0].capabilities).toContain("vision");
+    });
+
     it("filters out whisper models", async () => {
       mockHttpRequest.mockResolvedValue({
         status: 200,

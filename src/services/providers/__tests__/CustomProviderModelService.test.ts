@@ -215,6 +215,34 @@ describe("CustomProviderModelService", () => {
       expect(result[0].id).toBe("testprovider/model1");
     });
 
+    it("propagates provider model metadata (vision + tools) into SystemSculptModel", async () => {
+      mockPlugin.settings.customProviders = [
+        { id: "1", name: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", apiKey: "key", isEnabled: true },
+      ];
+      mockPlugin.customProviderService.testConnection.mockResolvedValue({
+        success: true,
+        models: [
+          {
+            id: "x-ai/grok-4.1-fast",
+            name: "Grok 4.1 Fast",
+            contextWindow: 131072,
+            capabilities: ["vision"],
+            supported_parameters: ["tools", "max_tokens"],
+            architecture: { modality: "text+image->text", tokenizer: "Grok", instruct_type: null },
+            pricing: { prompt: "0.000001", completion: "0.000002", image: "0.000003", request: "0" },
+          },
+        ],
+      });
+
+      const service = CustomProviderModelService.getInstance(mockPlugin as any);
+      const result = await service.getModels();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].architecture.modality).toBe("text+image->text");
+      expect(result[0].capabilities).toContain("vision");
+      expect(result[0].supported_parameters).toContain("tools");
+    });
+
     it("forces provider refresh when forceRefresh is true", async () => {
       mockPlugin.settings.customProviders = [
         { id: "1", name: "TestProvider", endpoint: "http://test", apiKey: "key", isEnabled: true },

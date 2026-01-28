@@ -44,13 +44,72 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
       // OpenAI format: { data: [{ id: string, ... }] }
       const models = (result.json.data || [])
         .filter((model: any) => !String(model.id || '').toLowerCase().includes("whisper"))
-        .map((model: any) => ({
-          id: model.id,
-          name: model.name || model.id,
-          contextWindow: model.context_length ?? model.context_window ?? model.contextWindow ?? 0,
-          supportsStreaming: true,
-          supportsTools: !!(model.supported_parameters?.includes('tools') || String(model.id).includes("gpt") || String(model.id).includes("claude")),
-        }));
+        .map((model: any): ProviderModel => {
+          const supportedParameters = Array.isArray(model.supported_parameters)
+            ? (model.supported_parameters as string[])
+            : undefined;
+
+          const architecture =
+            model.architecture && typeof model.architecture === "object" && typeof model.architecture.modality === "string"
+              ? {
+                  modality: model.architecture.modality,
+                  tokenizer: typeof model.architecture.tokenizer === "string" ? model.architecture.tokenizer : undefined,
+                  instruct_type:
+                    typeof model.architecture.instruct_type === "string" || model.architecture.instruct_type === null
+                      ? model.architecture.instruct_type
+                      : undefined,
+                }
+              : undefined;
+
+          const pricing =
+            model.pricing && typeof model.pricing === "object"
+              ? {
+                  prompt: String(model.pricing.prompt ?? "0"),
+                  completion: String(model.pricing.completion ?? "0"),
+                  image: typeof model.pricing.image === "string" ? model.pricing.image : undefined,
+                  request: typeof model.pricing.request === "string" ? model.pricing.request : undefined,
+                }
+              : undefined;
+
+          const capabilities: string[] = Array.isArray(model.capabilities)
+            ? (model.capabilities as any[])
+                .map((c) => (typeof c === "string" ? c : ""))
+                .filter((c) => c.length > 0)
+            : [];
+
+          const hasVisionCapability = capabilities.some((c) => {
+            const lc = c.toLowerCase();
+            return lc === "vision" || lc === "image" || lc === "images";
+          });
+
+          const modality = String(architecture?.modality || "").toLowerCase();
+          const inputModalities = Array.isArray(model.architecture?.input_modalities)
+            ? (model.architecture.input_modalities as any[])
+                .map((m) => (typeof m === "string" ? m.toLowerCase() : ""))
+                .filter((m) => m.length > 0)
+            : [];
+
+          if (!hasVisionCapability && (modality.includes("image") || inputModalities.includes("image"))) {
+            capabilities.push("vision");
+          }
+
+          const supportsTools =
+            supportedParameters
+              ? supportedParameters.includes("tools")
+              : !!(String(model.id).includes("gpt") || String(model.id).includes("claude"));
+
+          return {
+            id: model.id,
+            name: model.name || model.id,
+            contextWindow: model.context_length ?? model.context_window ?? model.contextWindow ?? 0,
+            capabilities: capabilities.length > 0 ? capabilities : undefined,
+            supported_parameters: supportedParameters,
+            pricing,
+            architecture,
+            supportsStreaming: true,
+            supportsTools,
+          };
+        });
 
       return models;
     } catch (error: any) {

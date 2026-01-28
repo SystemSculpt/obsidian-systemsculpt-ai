@@ -11,7 +11,7 @@ import SystemSculptPlugin from "../main";
 export class ModelManagementService {
   private plugin: SystemSculptPlugin;
   private baseUrl: string;
-  private static readonly DEFAULT_UPSTREAM_MODEL = "openrouter/openai/gpt-5-codex";
+  private static readonly DEFAULT_UPSTREAM_MODEL = "openrouter/x-ai/grok-4.1-fast";
   
   constructor(plugin: SystemSculptPlugin, baseUrl: string) {
     this.plugin = plugin;
@@ -202,11 +202,11 @@ export class ModelManagementService {
         displayName: MODEL_DISPLAY_NAME,
       },
       upstream_model: ModelManagementService.DEFAULT_UPSTREAM_MODEL,
-      capabilities: ['tools', 'function_calling'],
+      capabilities: ['tools', 'function_calling', 'vision'],
       supported_parameters: ['top_p', 'max_tokens', 'stream', 'tools'],
       context_length: 128000,
       architecture: {
-        modality: 'text->text',
+        modality: 'text+image->text',
         tokenizer: 'unknown',
         instruct_type: null,
       },
@@ -239,7 +239,7 @@ export class ModelManagementService {
       },
       upstream_model: upstreamFromApi,
       context_length: model.context_length ?? 128000,
-      capabilities: model.capabilities ?? ['tools', 'function_calling'],
+      capabilities: model.capabilities ?? ['tools', 'function_calling', 'vision'],
       supported_parameters: model.supported_parameters ?? ['top_p', 'max_tokens', 'stream', 'tools'],
       pricing: model.pricing ?? {
         prompt: '0.000010',
@@ -248,7 +248,7 @@ export class ModelManagementService {
         request: '0',
       },
       architecture: model.architecture ?? {
-        modality: 'text->text',
+        modality: 'text+image->text',
         tokenizer: 'unknown',
         instruct_type: null,
       },

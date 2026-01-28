@@ -90,6 +90,7 @@ jest.mock("../PlatformContext", () => ({
 
 jest.mock("../../utils/streaming", () => ({
   postJsonStreaming: jest.fn(async () => new Response("{}", { status: 200 })),
+  sanitizeFetchHeadersForUrl: jest.fn((url: string, headers: Record<string, string>) => headers),
 }));
 
 const createPlugin = () => {

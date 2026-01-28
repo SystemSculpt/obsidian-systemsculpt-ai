@@ -346,6 +346,31 @@ export class CustomProviderModelService extends BaseProviderService {
       }
 
       // Default for non-Anthropic or unknown models
+      const providerCapabilities = typeof m === "string" ? [] : (m.capabilities ?? []);
+      const supportedParameters = typeof m === "string" ? undefined : m.supported_parameters;
+      const providerArchitecture = typeof m === "string" ? undefined : m.architecture;
+      const providerPricing = typeof m === "string" ? undefined : m.pricing;
+
+      const capabilities = Array.isArray(providerCapabilities) ? [...providerCapabilities] : [];
+      if (supportedParameters?.includes("tools") && !capabilities.some((c) => c.toLowerCase() === "tools")) {
+        capabilities.push("tools");
+      }
+
+      const modalityFromProvider = typeof providerArchitecture?.modality === "string"
+        ? providerArchitecture.modality
+        : "";
+      const hasVisionCapability = capabilities.some((c) => {
+        const lc = c.toLowerCase();
+        return lc === "vision" || lc === "image" || lc === "images";
+      });
+
+      const resolvedModality =
+        modalityFromProvider.trim().length > 0
+          ? modalityFromProvider
+          : hasVisionCapability
+            ? "text+image->text"
+            : (typeof m === "string" ? "unknown" : "text->text");
+
       return {
         // Use the canonical ID format
         id: canonicalId,
@@ -353,17 +378,18 @@ export class CustomProviderModelService extends BaseProviderService {
         provider: providerId,
         isFavorite: false,
         context_length: contextWindow ?? 0,
-        capabilities: [],
+        capabilities,
+        supported_parameters: supportedParameters,
         pricing: {
-          prompt: "0",
-          completion: "0",
-          image: "0",
-          request: "0",
+          prompt: providerPricing?.prompt ?? "0",
+          completion: providerPricing?.completion ?? "0",
+          image: providerPricing?.image ?? "0",
+          request: providerPricing?.request ?? "0",
         },
         architecture: {
-          modality: "text->text",
-          tokenizer: "",
-          instruct_type: null,
+          modality: resolvedModality,
+          tokenizer: providerArchitecture?.tokenizer ?? "",
+          instruct_type: providerArchitecture?.instruct_type ?? null,
         },
         description: `${provider.name} custom model`,
         identifier: {

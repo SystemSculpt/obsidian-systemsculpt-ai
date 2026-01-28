@@ -296,10 +296,23 @@ export function getImageCompatibilityInfo(model: SystemSculptModel): {
       confidence: 'medium'
     };
   }
+
+  // If the model reports an explicit (non-empty) modality and it doesn't include
+  // vision indicators, treat that as a high-confidence "no".
+  const trimmedModality = modality.trim();
+  if (trimmedModality.length > 0 && trimmedModality !== 'unknown') {
+    return {
+      isCompatible: false,
+      reason: 'Architecture modality indicates no vision support',
+      confidence: 'high'
+    };
+  }
+
+  // No strong signal either way.
   return {
     isCompatible: false,
     reason: 'No vision indicators detected',
-    confidence: 'medium'
+    confidence: 'low'
   };
 }
 

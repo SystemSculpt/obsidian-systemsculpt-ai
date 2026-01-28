@@ -235,19 +235,21 @@ export class ChangeLogService {
         }
 
         const message = error?.message ? String(error.message) : "";
-        if (message.toLowerCase().includes("timed out")) {
-          return buildFallbackEntry("Changelog temporarily unavailable (request timed out).");
-        }
-        return buildFallbackEntry("Changelog temporarily unavailable due to a network error.");
-      } finally {
-        if (inFlightFetch === fetchPromise) {
-          inFlightFetch = null;
-        }
-      }
-    })();
+	        if (message.toLowerCase().includes("timed out")) {
+	          return buildFallbackEntry("Changelog temporarily unavailable (request timed out).");
+	        }
+	        return buildFallbackEntry("Changelog temporarily unavailable due to a network error.");
+	      }
+	    })();
 
     inFlightFetch = fetchPromise;
-    return await fetchPromise;
+    try {
+      return await fetchPromise;
+    } finally {
+      if (inFlightFetch === fetchPromise) {
+        inFlightFetch = null;
+      }
+    }
   }
 
   static findIndexByVersion(entries: ChangeLogEntry[], version: string | undefined): number {

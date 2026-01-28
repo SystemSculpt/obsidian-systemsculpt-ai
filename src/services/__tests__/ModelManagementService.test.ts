@@ -291,7 +291,7 @@ describe("ModelManagementService", () => {
 
       const info = await service.getModelInfo("systemsculpt::ai-agent");
 
-      expect(info.upstreamModelId).toBe("openrouter/openai/gpt-5-codex");
+      expect(info.upstreamModelId).toBe("openrouter/x-ai/grok-4.1-fast");
     });
 
     it("throws error for model not found", async () => {
@@ -457,7 +457,7 @@ describe("ModelManagementService", () => {
 
       expect(model.context_length).toBe(128000);
       expect(model.capabilities).toContain("tools");
-      expect(model.upstream_model).toBe("openrouter/openai/gpt-5-codex");
+      expect(model.upstream_model).toBe("openrouter/x-ai/grok-4.1-fast");
     });
   });
 });

@@ -28,6 +28,8 @@ npm run build
 2. Choose a provider and enter your API key / endpoint (if required)
 3. (Optional) Set defaults in **Models & Prompts** and **Chat & Templates**
 
+If you have a SystemSculpt license, the default SystemSculpt model is backed by OpenRouter `x-ai/grok-4.1-fast` and supports image inputs.
+
 See: [Settings overview](settings.md).
 
 ## Start a chat

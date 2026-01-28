@@ -192,7 +192,7 @@ export class SystemSculptService {
     let imagesEnabledForRequest = true;
     if (imageContextCount > 0 && modelToCheck) {
       const imageCompatibility = getImageCompatibilityInfo(modelToCheck);
-      if (!imageCompatibility.isCompatible) {
+      if (!imageCompatibility.isCompatible && imageCompatibility.confidence === "high") {
         imagesEnabledForRequest = false;
 
         const warnKey = modelToCheck.id || actualModelId || model;
@@ -484,7 +484,7 @@ export class SystemSculptService {
       
       // Prefer native fetch when the platform supports streaming; otherwise fall back
       // to the resilient transport wrapper (requestUrl + virtual SSE) for mobile and
-      // endpoints that are known to dislike direct streaming (e.g., OpenRouter).
+      // environments where direct streaming fails.
       try {
         const hasTools = Array.isArray((requestBody as any).tools) && (requestBody as any).tools.length > 0;
         const hasFunctions = Array.isArray((requestBody as any).functions) && (requestBody as any).functions.length > 0;
@@ -512,14 +512,16 @@ export class SystemSculptService {
           reasoningDetailsItemCount,
           assistantToolCallsMissingReasoningDetails,
           transport: preferredTransport
-        });
+      });
       } catch {}
       let response: Response;
       if (preferredTransport === 'fetch' && typeof fetch === 'function') {
         try {
+          const { sanitizeFetchHeadersForUrl } = await import('../utils/streaming');
+          const fetchHeaders = sanitizeFetchHeadersForUrl(fullEndpoint, headers);
           const fetchOptions: RequestInit = {
             method: 'POST',
-            headers,
+            headers: fetchHeaders,
             body: JSON.stringify(requestBody),
             signal,
             mode: 'cors' as RequestMode,

@@ -78,7 +78,7 @@ Use `docs/chat-request-flow.md` as the detailed map, but the short version is:
 
 - **Never bypass transport selection.** Always route outbound HTTP via `PlatformContext`:
   - `src/services/PlatformContext.ts` decides `fetch` vs Obsidian `requestUrl`.
-  - `supportsStreaming()` is false on mobile and for endpoints on the avoidlist (defaults include `openrouter.ai` and `systemsculpt.com`).
+  - `supportsStreaming()` is false on mobile and for endpoints on the avoidlist (defaults empty).
 - **Single source of truth for chat requests:**
   - `src/services/SystemSculptService.ts` (not ad‑hoc fetch calls inside views).
 - **Error-driven fallbacks:**
@@ -172,4 +172,4 @@ Keep entries specific and actionable: include file paths, invariants, and “how
 
 ### Learnings
 
-- `PlatformContext` avoids direct `fetch` for some hosts (defaults include `openrouter.ai` and `systemsculpt.com`); expect `requestUrl` transport and no streaming in those cases. Verify by checking `PlatformContext.supportsStreaming(...)`.
+- `PlatformContext` avoids direct `fetch` for some hosts (defaults empty); expect `requestUrl` transport and no streaming when suffixes are registered. Verify by checking `PlatformContext.supportsStreaming(...)`.

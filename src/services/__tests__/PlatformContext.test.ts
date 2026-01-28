@@ -95,11 +95,18 @@ describe("PlatformContext", () => {
       expect(context.preferredTransport()).toBe("requestUrl");
     });
 
-    it('returns "requestUrl" for openrouter.ai', () => {
+    it('returns "fetch" for openrouter.ai on desktop by default', () => {
       mockMobileDetection.isMobileDevice.mockReturnValue(false);
       const context = PlatformContext.get();
 
-      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("requestUrl");
+      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("fetch");
+    });
+
+    it('returns "fetch" for systemsculpt.com on desktop', () => {
+      mockMobileDetection.isMobileDevice.mockReturnValue(false);
+      const context = PlatformContext.get();
+
+      expect(context.preferredTransport({ endpoint: "https://systemsculpt.com/api/plugin/youtube/transcripts" })).toBe("fetch");
     });
 
     it('returns "fetch" for non-blocked endpoints on desktop', () => {
@@ -132,11 +139,18 @@ describe("PlatformContext", () => {
       expect(context.supportsStreaming()).toBe(false);
     });
 
-    it("returns false for openrouter.ai", () => {
+    it("returns true for openrouter.ai on desktop by default", () => {
       mockMobileDetection.isMobileDevice.mockReturnValue(false);
       const context = PlatformContext.get();
 
-      expect(context.supportsStreaming({ endpoint: "https://openrouter.ai/v1" })).toBe(false);
+      expect(context.supportsStreaming({ endpoint: "https://openrouter.ai/v1" })).toBe(true);
+    });
+
+    it("returns true for systemsculpt.com on desktop", () => {
+      mockMobileDetection.isMobileDevice.mockReturnValue(false);
+      const context = PlatformContext.get();
+
+      expect(context.supportsStreaming({ endpoint: "https://systemsculpt.com/api/plugin/youtube/transcripts" })).toBe(true);
     });
 
     it("returns true when no endpoint specified on desktop", () => {
@@ -179,8 +193,8 @@ describe("PlatformContext", () => {
 
       // Custom suffix should be removed
       expect(context.preferredTransport({ endpoint: "https://custom.com/api" })).toBe("fetch");
-      // Default suffix should remain
-      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("requestUrl");
+      // No default suffixes
+      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("fetch");
     });
   });
 
@@ -216,7 +230,7 @@ describe("PlatformContext", () => {
       mockMobileDetection.isMobileDevice.mockReturnValue(false);
       const context = PlatformContext.get();
 
-      expect(context.preferredTransport({ endpoint: "https://api.openrouter.ai/v1" })).toBe("requestUrl");
+      expect(context.preferredTransport({ endpoint: "https://api.openrouter.ai/v1" })).toBe("fetch");
     });
   });
 });
