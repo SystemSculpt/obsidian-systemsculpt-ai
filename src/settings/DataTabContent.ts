@@ -1,7 +1,12 @@
 import { Setting, Notice, TextComponent, ButtonComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import type { ReadwiseOrganization, ReadwiseSyncInterval, ReadwiseSyncMode, ReadwiseTweetOrganization } from "../types/readwise";
-import { READWISE_SYNC_INTERVAL_OPTIONS } from "../types/readwise";
+import type { ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "../types/readwise";
+import {
+  clampReadwiseSyncIntervalMinutes,
+  READWISE_SYNC_INTERVAL_DEFAULT_MINUTES,
+  READWISE_SYNC_INTERVAL_MAX_MINUTES,
+  READWISE_SYNC_INTERVAL_MIN_MINUTES,
+} from "../types/readwise";
 
 export function displayDataTabContent(
   containerEl: HTMLElement,
@@ -207,22 +212,28 @@ export function displayDataTabContent(
   // Interval setting (only show if interval mode)
   if (plugin.settings.readwiseSyncMode === "interval") {
     new Setting(containerEl)
-      .setName("Sync interval")
-      .setDesc("How often to sync with Readwise.")
-      .addDropdown((dropdown) => {
-        for (const option of READWISE_SYNC_INTERVAL_OPTIONS) {
-          dropdown.addOption(String(option.value), option.label);
-        }
-        dropdown.setValue(String(plugin.settings.readwiseSyncIntervalMinutes || 1440));
-        dropdown.onChange(async (value) => {
-          const minutes = parseInt(value, 10) as ReadwiseSyncInterval;
-          await plugin.getSettingsManager().updateSettings({
-            readwiseSyncIntervalMinutes: minutes,
+      .setName("Sync interval (minutes)")
+      .setDesc(
+        `How often to sync with Readwise. Default ${READWISE_SYNC_INTERVAL_DEFAULT_MINUTES} minutes.`
+      )
+      .addText((text) => {
+        const currentMinutes = clampReadwiseSyncIntervalMinutes(plugin.settings.readwiseSyncIntervalMinutes);
+        text
+          .setPlaceholder(String(READWISE_SYNC_INTERVAL_DEFAULT_MINUTES))
+          .setValue(String(currentMinutes))
+          .onChange(async (value) => {
+            const minutes = clampReadwiseSyncIntervalMinutes(value);
+            await plugin.getSettingsManager().updateSettings({
+              readwiseSyncIntervalMinutes: minutes,
+            });
+            // Restart scheduled sync with new interval
+            const service = plugin.getReadwiseService();
+            service.startScheduledSync();
           });
-          // Restart scheduled sync with new interval
-          const service = plugin.getReadwiseService();
-          service.startScheduledSync();
-        });
+        text.inputEl.type = "number";
+        text.inputEl.min = String(READWISE_SYNC_INTERVAL_MIN_MINUTES);
+        text.inputEl.max = String(READWISE_SYNC_INTERVAL_MAX_MINUTES);
+        text.inputEl.style.width = "120px";
       });
   }
 
@@ -349,7 +360,8 @@ function renderSyncStatus(
 
   // Next scheduled sync
   if (plugin.settings.readwiseSyncMode === "interval" && lastSync) {
-    const intervalMs = (plugin.settings.readwiseSyncIntervalMinutes || 1440) * 60 * 1000;
+    const intervalMinutes = clampReadwiseSyncIntervalMinutes(plugin.settings.readwiseSyncIntervalMinutes);
+    const intervalMs = intervalMinutes * 60 * 1000;
     const nextSync = new Date(lastSync + intervalMs);
     if (nextSync > new Date()) {
       statusContainer.createDiv({

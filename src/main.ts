@@ -315,6 +315,33 @@ export default class SystemSculptPlugin extends Plugin {
     return this.readwiseService;
   }
 
+  private handleReadwiseSettingsUpdated(oldSettings: SystemSculptSettings, newSettings: SystemSculptSettings): void {
+    const relevantChange =
+      oldSettings.readwiseEnabled !== newSettings.readwiseEnabled ||
+      oldSettings.readwiseSyncMode !== newSettings.readwiseSyncMode ||
+      oldSettings.readwiseSyncIntervalMinutes !== newSettings.readwiseSyncIntervalMinutes ||
+      oldSettings.readwiseApiToken !== newSettings.readwiseApiToken;
+
+    if (!relevantChange) {
+      return;
+    }
+
+    if (!newSettings.readwiseEnabled) {
+      if (this.readwiseService) {
+        this.readwiseService.stopScheduledSync();
+        this.readwiseService.cancelSync();
+      }
+      return;
+    }
+
+    const service = this.getReadwiseService();
+    if (newSettings.readwiseSyncMode === "interval") {
+      service.startScheduledSync();
+    } else {
+      service.stopScheduledSync();
+    }
+  }
+
   private async onDailySettingsUpdated(settings: DailySettings): Promise<void> {
     if (settings.showDailyStatusBar) {
       await this.ensureDailyStatusBar(settings);
@@ -675,12 +702,21 @@ export default class SystemSculptPlugin extends Plugin {
         );
 
         this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings) => {
+          this.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings) => {
             try {
               this.embeddingsManager?.syncFromSettings();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Embeddings manager settings sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            }
+
+            try {
+              this.handleReadwiseSettingsUpdated(oldSettings, newSettings);
+            } catch (error) {
+              const logger = this.getLogger();
+              logger.error("Readwise settings sync failed", error, {
                 source: "SystemSculptPlugin",
               });
             }
@@ -1731,6 +1767,11 @@ export default class SystemSculptPlugin extends Plugin {
       }),
       wrap("recorder", "recorder service", () => {
         this.ensureRecorderService();
+      }),
+      wrap("readwise", "readwise service", () => {
+        if (this.settings.readwiseEnabled) {
+          this.getReadwiseService();
+        }
       }),
       wrap("fileContextMenu", "file context menu service", () => {
         this.setupFileContextMenuService();

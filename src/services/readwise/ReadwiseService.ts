@@ -24,10 +24,13 @@ import {
   READWISE_AUTH_ENDPOINT,
   READWISE_EXPORT_ENDPOINT,
   CATEGORY_FOLDERS,
+  clampReadwiseSyncIntervalMinutes,
 } from "../../types/readwise";
 
 const SYNC_STATE_FILE = "sync-state.json";
 const READWISE_STORAGE_DIR = ".systemsculpt/readwise";
+
+type ReadwiseSyncTrigger = "manual" | "scheduled" | "on-load";
 
 export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
   private plugin: SystemSculptPlugin;
@@ -36,6 +39,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
   private currentlySyncing: boolean = false;
   private scheduledSyncInterval: ReturnType<typeof setInterval> | null = null;
   private syncWidget: ReadwiseSyncWidget | null = null;
+  private syncStateSaveChain: Promise<void> = Promise.resolve();
   private syncState: ReadwiseSyncState = {
     lastSyncTimestamp: 0,
     cursor: "",
@@ -73,7 +77,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
       this.plugin.settings.readwiseApiToken
     ) {
       // Delay slightly to let the plugin fully load
-      setTimeout(() => this.syncIncremental(), 5000);
+      setTimeout(() => this.syncIncremental({ trigger: "on-load" }), 5000);
     }
   }
 
@@ -109,15 +113,15 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
   /**
    * Perform a full sync (ignores cursor, reimports everything)
    */
-  async syncAll(): Promise<ReadwiseSyncResult> {
-    return this.performSync(true);
+  async syncAll(options?: { trigger?: ReadwiseSyncTrigger }): Promise<ReadwiseSyncResult> {
+    return this.performSync(true, options);
   }
 
   /**
    * Perform an incremental sync (uses cursor from last sync)
    */
-  async syncIncremental(): Promise<ReadwiseSyncResult> {
-    return this.performSync(false);
+  async syncIncremental(options?: { trigger?: ReadwiseSyncTrigger }): Promise<ReadwiseSyncResult> {
+    return this.performSync(false, options);
   }
 
   /**
@@ -150,12 +154,12 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
     if (!this.plugin.settings.readwiseEnabled) return;
     if (this.plugin.settings.readwiseSyncMode !== "interval") return;
 
-    const intervalMinutes = this.plugin.settings.readwiseSyncIntervalMinutes || 1440;
+    const intervalMinutes = clampReadwiseSyncIntervalMinutes(this.plugin.settings.readwiseSyncIntervalMinutes);
     const intervalMs = intervalMinutes * 60 * 1000;
 
     this.scheduledSyncInterval = setInterval(() => {
       if (!this.currentlySyncing && this.plugin.settings.readwiseApiToken) {
-        this.syncIncremental().catch((err) => {
+        this.syncIncremental({ trigger: "scheduled" }).catch((err) => {
           console.error("[Readwise] Scheduled sync failed:", err);
         });
       }
@@ -166,7 +170,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
     const timeSinceLastSync = Date.now() - lastSync;
     if (timeSinceLastSync >= intervalMs && this.plugin.settings.readwiseApiToken) {
       // Delay slightly to not block plugin load
-      setTimeout(() => this.syncIncremental(), 3000);
+      setTimeout(() => this.syncIncremental({ trigger: "scheduled" }), 3000);
     }
   }
 
@@ -204,7 +208,11 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
     this.syncWidget.show();
   }
 
-  private async performSync(fullSync: boolean): Promise<ReadwiseSyncResult> {
+  private async performSync(
+    fullSync: boolean,
+    options?: { trigger?: ReadwiseSyncTrigger }
+  ): Promise<ReadwiseSyncResult> {
+    const trigger: ReadwiseSyncTrigger = options?.trigger ?? "manual";
     if (this.currentlySyncing) {
       return {
         success: false,
@@ -230,6 +238,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
 
     this.currentlySyncing = true;
     this.syncCancelled = false;
+    const syncStartedAt = Date.now();
 
     const result: ReadwiseSyncResult = {
       success: true,
@@ -241,24 +250,28 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
     };
 
     try {
-      this.emit("sync:started", { timestamp: Date.now() });
+      this.emit("sync:started", { timestamp: syncStartedAt });
 
       // Check if settings changed and invalidate cache if needed
-      if (fullSync) {
+      let doFullSync = fullSync;
+      if (doFullSync) {
         // Full sync clears cached state
         this.syncState.sources = {};
       }
-      this.invalidateCacheIfSettingsChanged();
+      const settingsChanged = this.invalidateCacheIfSettingsChanged();
+      if (settingsChanged && !doFullSync) {
+        doFullSync = true;
+        this.syncState.sources = {};
+      }
 
-      // Determine cursor for incremental sync
-      const cursor = fullSync ? undefined : this.syncState.cursor || undefined;
-      const updatedAfter = fullSync
+      const lastSyncWatermark = this.plugin.settings.readwiseLastSyncTimestamp || 0;
+      const updatedAfter = doFullSync
         ? undefined
-        : this.syncState.lastSyncTimestamp
-          ? new Date(this.syncState.lastSyncTimestamp).toISOString()
+        : lastSyncWatermark
+          ? new Date(lastSyncWatermark).toISOString()
           : undefined;
 
-      let nextCursor: string | null = cursor || null;
+      let nextCursor: string | null = null;
       let totalProcessed = 0;
       let estimatedTotal = 0;
 
@@ -268,7 +281,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
         }
 
         // Fetch a page of results
-        const response = await this.fetchExport(nextCursor || undefined, updatedAfter);
+        const response = await this.fetchExport(nextCursor ?? undefined, updatedAfter);
         estimatedTotal = response.count;
 
         // Process each book/source
@@ -309,7 +322,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
       } while (nextCursor);
 
       // Update sync state
-      this.syncState.lastSyncTimestamp = Date.now();
+      this.syncState.lastSyncTimestamp = syncStartedAt;
       this.syncState.cursor = "";
       this.syncState.totalImported += result.imported + result.updated;
       this.syncState.lastError = null;
@@ -317,7 +330,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
 
       // Update settings
       await this.plugin.getSettingsManager().updateSettings({
-        readwiseLastSyncTimestamp: this.syncState.lastSyncTimestamp,
+        readwiseLastSyncTimestamp: syncStartedAt,
         readwiseLastSyncCursor: "",
       });
 
@@ -344,7 +357,10 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
         error: error instanceof Error ? error : new Error(errorMessage),
       });
 
-      if (!(error instanceof ReadwiseServiceError && error.code === "SYNC_CANCELLED")) {
+      if (
+        trigger === "manual" &&
+        !(error instanceof ReadwiseServiceError && error.code === "SYNC_CANCELLED")
+      ) {
         new Notice(`Readwise sync failed: ${errorMessage}`);
       }
 
@@ -785,26 +801,36 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
       const stateDir = normalizePath(READWISE_STORAGE_DIR);
       const statePath = normalizePath(`${stateDir}/${SYNC_STATE_FILE}`);
 
-      const file = this.plugin.app.vault.getAbstractFileByPath(statePath);
-      if (file) {
-        const content = await this.plugin.app.vault.read(file as TFile);
-        const parsed = JSON.parse(content);
-        this.syncState = { ...this.syncState, ...parsed };
+      const exists = await this.plugin.app.vault.adapter.exists(statePath);
+      if (!exists) {
+        return;
+      }
 
-        // Migrate from version 1 to version 2 (add sources tracking)
-        if (!this.syncState.version || this.syncState.version < 2) {
-          this.syncState.version = 2;
-          this.syncState.sources = {};
-          this.syncState.settingsHash = undefined;
-          await this.saveSyncState();
-        }
+      const content = await this.plugin.app.vault.adapter.read(statePath);
+      const parsed = JSON.parse(content);
+      this.syncState = { ...this.syncState, ...parsed };
+
+      // Migrate from version 1 to version 2 (add sources tracking)
+      if (!this.syncState.version || this.syncState.version < 2) {
+        this.syncState.version = 2;
+        this.syncState.sources = {};
+        this.syncState.settingsHash = undefined;
+        await this.saveSyncState();
       }
     } catch (error) {
       console.warn("[Readwise] Failed to load sync state:", error);
     }
   }
 
-  private async saveSyncState(): Promise<void> {
+  private saveSyncState(): Promise<void> {
+    const task = async () => {
+      await this.saveSyncStateNow();
+    };
+    this.syncStateSaveChain = this.syncStateSaveChain.then(task, task);
+    return this.syncStateSaveChain;
+  }
+
+  private async saveSyncStateNow(): Promise<void> {
     try {
       const stateDir = normalizePath(READWISE_STORAGE_DIR);
       const statePath = normalizePath(`${stateDir}/${SYNC_STATE_FILE}`);
@@ -812,13 +838,7 @@ export class ReadwiseService extends TypedEventEmitter<ReadwiseServiceEvents> {
       await this.ensureDirectoryExists(stateDir);
 
       const content = JSON.stringify(this.syncState, null, 2);
-      const file = this.plugin.app.vault.getAbstractFileByPath(statePath);
-
-      if (file) {
-        await this.plugin.app.vault.modify(file as TFile, content);
-      } else {
-        await this.plugin.app.vault.create(statePath, content);
-      }
+      await this.plugin.app.vault.adapter.write(statePath, content);
     } catch (error) {
       console.error("[Readwise] Failed to save sync state:", error);
     }

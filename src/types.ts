@@ -19,7 +19,7 @@ import type { ChatExportPreferences } from "./types/chatExport";
 import { createDefaultChatExportOptions } from "./types/chatExport";
 import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomationId, WorkflowSkipEntry } from "./types/workflows";
 import { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
-import type { ReadwiseImportOptions, ReadwiseOrganization, ReadwiseSyncInterval, ReadwiseSyncMode, ReadwiseTweetOrganization } from "./types/readwise";
+import type { ReadwiseImportOptions, ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "./types/readwise";
 import { DEFAULT_READWISE_IMPORT_OPTIONS } from "./types/readwise";
 
 export { LogLevel };
@@ -432,7 +432,7 @@ export interface SystemSculptSettings {
   readwiseOrganization: ReadwiseOrganization;
   readwiseTweetOrganization: ReadwiseTweetOrganization;
   readwiseSyncMode: ReadwiseSyncMode;
-  readwiseSyncIntervalMinutes: ReadwiseSyncInterval;
+  readwiseSyncIntervalMinutes: number;
   readwiseLastSyncTimestamp: number;
   readwiseLastSyncCursor: string;
   readwiseImportOptions: ReadwiseImportOptions;
@@ -671,7 +671,7 @@ Raw transcript:`,
   readwiseOrganization: "by-category",
   readwiseTweetOrganization: "standalone",
   readwiseSyncMode: "interval",
-  readwiseSyncIntervalMinutes: 1440,
+  readwiseSyncIntervalMinutes: 60,
   readwiseLastSyncTimestamp: 0,
   readwiseLastSyncCursor: "",
   readwiseImportOptions: DEFAULT_READWISE_IMPORT_OPTIONS,

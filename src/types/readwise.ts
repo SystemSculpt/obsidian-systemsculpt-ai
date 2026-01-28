@@ -107,17 +107,21 @@ export type ReadwiseOrganization = "by-category" | "flat" | "by-source";
 export type ReadwiseSyncMode = "manual" | "on-load" | "interval";
 export type ReadwiseTweetOrganization = "grouped" | "standalone";
 
-/** Sync interval options in minutes */
-export type ReadwiseSyncInterval = 5 | 10 | 30 | 60 | 120 | 1440;
+export const READWISE_SYNC_INTERVAL_DEFAULT_MINUTES = 60;
+export const READWISE_SYNC_INTERVAL_MIN_MINUTES = 5;
+export const READWISE_SYNC_INTERVAL_MAX_MINUTES = 7 * 24 * 60; // 7 days
 
-export const READWISE_SYNC_INTERVAL_OPTIONS: { value: ReadwiseSyncInterval; label: string }[] = [
-  { value: 5, label: "5 minutes" },
-  { value: 10, label: "10 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
-  { value: 120, label: "2 hours" },
-  { value: 1440, label: "24 hours" },
-];
+export function clampReadwiseSyncIntervalMinutes(value: unknown): number {
+  const raw = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
+  if (!Number.isFinite(raw)) {
+    return READWISE_SYNC_INTERVAL_DEFAULT_MINUTES;
+  }
+  const minutes = Math.floor(raw);
+  return Math.max(
+    READWISE_SYNC_INTERVAL_MIN_MINUTES,
+    Math.min(READWISE_SYNC_INTERVAL_MAX_MINUTES, minutes)
+  );
+}
 
 export interface ReadwiseImportOptions {
   highlights: boolean;

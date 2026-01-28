@@ -81,8 +81,10 @@ See: [Similar Notes](similar-notes.md).
 
 External data integrations and imports:
 
-- Data import settings (e.g., Readwise highlights if enabled)
-- Sync options (where available)
+- Readwise integration (highlights/books/articles/tweets)
+  - Runs scheduled sync in the background when enabled (no need to open Settings)
+  - Default sync interval: 60 minutes (configurable)
+  - Scheduled sync failures are recorded in Readwise “Sync status” (manual sync shows popups)
 
 ### Advanced
 
