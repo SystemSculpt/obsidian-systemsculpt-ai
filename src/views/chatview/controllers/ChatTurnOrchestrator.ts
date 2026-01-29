@@ -155,6 +155,21 @@ export class ChatTurnOrchestrator {
         }
         currentMessageId = result.newMessageId;
       }
+    } catch (err) {
+      if (signal.aborted) {
+        return;
+      }
+      // Prevent streaming errors from bubbling up as unhandled promise rejections.
+      // Lower layers (StreamingController/SystemSculptService) already surface the error to the UI.
+      try {
+        errorLogger.debug('Chat turn failed; swallowed to avoid unhandled rejection', {
+          source: 'ChatTurnOrchestrator',
+          method: 'runTurn',
+          metadata: {
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+      } catch {}
     } finally {
       metricsTracker.stop();
       this.host.hideStreamingStatus(messageEl);

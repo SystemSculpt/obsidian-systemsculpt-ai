@@ -396,6 +396,66 @@ describe("ChatTurnOrchestrator compact assistant handling", () => {
     expect(host.onError).not.toHaveBeenCalled();
   });
 
+  test("swallows streaming errors during runTurn (no unhandled rejection)", async () => {
+    const messages: ChatMessage[] = [];
+    let containerCalls = 0;
+    const chatRoot = document.createElement("div");
+    document.body.appendChild(chatRoot);
+
+    const hostOnError = jest.fn();
+
+    const streamingController = {
+      stream: jest.fn(async (_stream: AsyncGenerator<any>, _messageEl: HTMLElement, messageId: string) => {
+        hostOnError(new SystemSculptError("Internal Server Error", ERROR_CODES.STREAM_ERROR, 500));
+        throw new SystemSculptError("Internal Server Error", ERROR_CODES.STREAM_ERROR, 500);
+      }),
+      finalizeMessage: jest.fn(),
+    } as any;
+
+    const host = {
+      app: {} as App,
+      plugin: createMockPlugin(),
+      aiService: { streamMessage: jest.fn(() => createAsyncStream()) } as any,
+      streamingController,
+      toolCallManager: undefined,
+      messageRenderer: {} as any,
+      getMessages: jest.fn(() => messages),
+      getSelectedModelId: jest.fn(() => "test-model"),
+      getSystemPrompt: jest.fn(() => ({ type: "default", path: "default" })),
+      getContextFiles: jest.fn(() => new Set<string>()),
+      agentMode: jest.fn(() => true),
+      webSearchEnabled: jest.fn(() => false),
+      createAssistantMessageContainer: jest.fn(() => {
+        containerCalls += 1;
+        const messageEl = document.createElement("div");
+        messageEl.dataset.messageId = `assistant-${containerCalls}`;
+        const contentEl = document.createElement("div");
+        messageEl.appendChild(contentEl);
+        chatRoot.appendChild(messageEl);
+        return { messageEl, contentEl };
+      }),
+      generateMessageId: jest.fn(() => "assistant-1"),
+      onAssistantResponse: jest.fn(async () => {}),
+      onError: hostOnError,
+      showStreamingStatus: jest.fn(),
+      hideStreamingStatus: jest.fn(),
+      updateStreamingStatus: jest.fn(),
+      setStreamingFootnote: jest.fn(),
+      clearStreamingFootnote: jest.fn(),
+    } as unknown as ConstructorParameters<typeof ChatTurnOrchestrator>[0];
+
+    const orchestrator = new ChatTurnOrchestrator(host);
+    const controller = new AbortController();
+
+    await expect(orchestrator.runTurn({ includeContextFiles: false, signal: controller.signal })).resolves.toBeUndefined();
+
+    expect(host.onError).toHaveBeenCalledTimes(1);
+    expect(host.hideStreamingStatus).toHaveBeenCalledTimes(1);
+    expect(streamingController.finalizeMessage).toHaveBeenCalledWith("assistant-1");
+
+    document.body.removeChild(chatRoot);
+  });
+
   test("notifies host when tools are disabled after runtime rejection", async () => {
     const messages: ChatMessage[] = [];
     const chatRoot = document.createElement("div");

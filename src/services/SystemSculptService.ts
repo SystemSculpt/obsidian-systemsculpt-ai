@@ -16,7 +16,8 @@ import { MCPService } from "../views/chatview/MCPService";
 import SystemSculptPlugin from "../main";
 import { DebugLogger } from "../utils/debugLogger";
 import { getImageCompatibilityInfo, getToolCompatibilityInfo } from "../utils/modelUtils";
-import { normalizeJsonSchema, normalizeOpenAITools } from "../utils/tooling";
+import { mapAssistantToolCallsForApi, normalizeJsonSchema, normalizeOpenAITools } from "../utils/tooling";
+import { deterministicId } from "../utils/id";
 import { Notice } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
@@ -107,6 +108,114 @@ export class SystemSculptService {
         parameters: normalizeJsonSchema(tool.function.parameters || {}),
       },
     }));
+  }
+
+  private toSystemSculptApiMessages(messages: ChatMessage[]): any[] {
+    const toolNameByOriginalCallId = new Map<string, string>();
+    for (const message of messages || []) {
+      if (message.role !== "assistant") continue;
+      const toolCalls = (message as any).tool_calls;
+      if (!Array.isArray(toolCalls)) continue;
+      for (const toolCall of toolCalls) {
+        if (!toolCall || typeof toolCall.id !== "string") continue;
+        const fnName = toolCall.function?.name;
+        if (typeof fnName !== "string" || fnName.trim().length === 0) continue;
+        toolNameByOriginalCallId.set(toolCall.id, fnName);
+      }
+    }
+
+    const toolCallIdMap = new Map<string, string>();
+    const mapToolCallId = (originalId: string): string => {
+      if (/^call_[A-Za-z0-9_-]{8,128}$/.test(originalId)) return originalId;
+      const existing = toolCallIdMap.get(originalId);
+      if (existing) return existing;
+      const normalized = deterministicId(originalId, "call");
+      toolCallIdMap.set(originalId, normalized);
+      return normalized;
+    };
+
+    const normalizeContent = (content: any): any => {
+      if (content == null) return "";
+      if (!Array.isArray(content)) return content;
+
+      const parts: any[] = [];
+      for (const part of content) {
+        if (part && part.type === "text" && typeof part.text === "string") {
+          parts.push({ type: "text", text: part.text });
+          continue;
+        }
+        if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
+          parts.push({ type: "image_url", image_url: { url: part.image_url.url } });
+        }
+      }
+
+      if (parts.length === 0) return "";
+
+      const hasImage = parts.some((p) => p.type === "image_url");
+      if (!hasImage) {
+        return parts
+          .map((p) => (p.type === "text" && typeof p.text === "string" ? p.text : ""))
+          .filter((s) => s.length > 0)
+          .join("\n");
+      }
+
+      return parts;
+    };
+
+    return (messages || []).map((msg) => {
+      const mapped: any = {
+        role: msg.role,
+      };
+
+      const originalToolCallId = msg.tool_call_id;
+      if (typeof originalToolCallId === "string" && originalToolCallId.length > 0) {
+        mapped.tool_call_id = mapToolCallId(originalToolCallId);
+      }
+      if (msg.name) {
+        mapped.name = msg.name;
+      }
+      if (msg.documentContext) {
+        mapped.documentContext = msg.documentContext;
+      }
+
+      let toolCallsForApi: any[] | undefined;
+      if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
+        toolCallsForApi = mapAssistantToolCallsForApi((msg as any).tool_calls).map((tc) => ({
+          ...tc,
+          id: typeof tc?.id === "string" ? mapToolCallId(tc.id) : tc?.id,
+        }));
+        mapped.tool_calls = toolCallsForApi;
+      }
+
+      const reasoningDetails = (msg as any).reasoning_details;
+      if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
+        mapped.reasoning_details = reasoningDetails;
+      }
+
+      if (msg.content !== undefined) {
+        if (
+          msg.role === "assistant" &&
+          toolCallsForApi &&
+          toolCallsForApi.length > 0 &&
+          typeof msg.content === "string" &&
+          msg.content.trim().length === 0
+        ) {
+          mapped.content = null;
+        } else {
+          mapped.content = normalizeContent(msg.content);
+        }
+      }
+
+      if (msg.role === "tool") {
+        if (mapped.content == null) mapped.content = "";
+        if ((!mapped.name || String(mapped.name).trim().length === 0) && typeof originalToolCallId === "string") {
+          const toolName = toolNameByOriginalCallId.get(originalToolCallId);
+          if (toolName) mapped.name = toolName;
+        }
+      }
+
+      return mapped;
+    });
   }
 
   private async prepareChatRequest(options: {
@@ -799,7 +908,7 @@ export class SystemSculptService {
 
         const requestBody: Record<string, any> = {
           model: serverModelId,
-          messages: messagesForRequest,
+          messages: this.toSystemSculptApiMessages(messagesForRequest),
           stream: canStream,
           include_reasoning: includeReasoning !== false,
         };
@@ -1123,7 +1232,7 @@ export class SystemSculptService {
 
     const requestBody: Record<string, any> = {
       model: prepared.serverModelId,
-      messages: prepared.preparedMessages,
+      messages: this.toSystemSculptApiMessages(prepared.preparedMessages),
       stream: true,
       include_reasoning: true,
       provider: { allow_fallbacks: false },
