@@ -3,6 +3,7 @@ import { PlatformContext } from "./PlatformContext";
 import { SystemSculptService } from "./SystemSculptService";
 import type { SystemSculptSettings } from "../types";
 import { SYSTEMSCULPT_API_HEADERS } from "../constants/api";
+import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 import type SystemSculptPlugin from "../main";
 import { logDebug, logInfo, logWarning, logError, logMobileError } from "../utils/errorHandling";
 import { AudioResampler } from "./AudioResampler";
@@ -10,11 +11,13 @@ import { SerialTaskQueue } from "../utils/SerialTaskQueue";
 
 // Match server-side configuration
 const SUPPORTED_AUDIO_EXTENSIONS = ["wav", "m4a", "webm", "ogg", "mp3"];
+const CUSTOM_AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024; // 25MB
+const CHUNK_OVERLAP_SECONDS = 1;
 const MIME_TYPE_MAP = {
   wav: "audio/wav",
   m4a: "audio/mp4",
   webm: "audio/webm",
-  ogg: "audio/ogg;codecs=opus",
+  ogg: "audio/ogg",
   mp3: "audio/mpeg",
 } as const;
 
@@ -77,7 +80,8 @@ export class TranscriptionService {
       parts.push(encoder.encode(`--${boundary}\r\n`));
 
       if (field.value instanceof Blob) {
-        const contentType = field.value.type || 'application/octet-stream';
+        const rawContentType = field.value.type || "application/octet-stream";
+        const contentType = rawContentType.split(";")[0] || rawContentType;
         const filename = field.filename || 'file';
         parts.push(
           encoder.encode(
@@ -218,6 +222,240 @@ export class TranscriptionService {
     }
   }
 
+  private resolveAudioUploadDescriptor(
+    file: TFile,
+    blob: Blob
+  ): { filename: string; mimeType: string } {
+    const rawType = (blob.type || "").toLowerCase();
+    const normalizedType = rawType.split(";")[0] || rawType;
+    const inferredExtension = normalizedType.includes("audio/wav")
+      ? "wav"
+      : normalizedType.includes("audio/webm")
+      ? "webm"
+      : normalizedType.includes("audio/mp4")
+      ? "m4a"
+      : normalizedType.includes("audio/mpeg")
+      ? "mp3"
+      : normalizedType.includes("audio/ogg")
+      ? "ogg"
+      : "";
+
+    const fallbackExtension = (file.extension || "").toLowerCase();
+    const extension = inferredExtension || fallbackExtension || "wav";
+    const mimeType =
+      (MIME_TYPE_MAP as Record<string, string>)[extension] ||
+      normalizedType ||
+      "application/octet-stream";
+
+    const desiredSuffix = `.${extension}`;
+    const candidateName = (file.name || "").trim();
+    const baseName = (file.basename || "recording").trim() || "recording";
+    const filename =
+      candidateName && candidateName.toLowerCase().endsWith(desiredSuffix)
+        ? candidateName
+        : `${baseName}${desiredSuffix}`;
+
+    return { filename, mimeType };
+  }
+
+  private async transcribeChunkedAudio(
+    file: TFile,
+    sourceArrayBuffer: ArrayBuffer,
+    options: { maxChunkBytes: number; targetSampleRate: number },
+    context?: TranscriptionContext
+  ): Promise<string> {
+    const { maxChunkBytes, targetSampleRate } = options;
+
+    context?.onProgress?.(20, "Splitting audio into chunks…");
+
+    const chunkBlobs = await this.buildWavChunkBlobs(
+      sourceArrayBuffer,
+      targetSampleRate,
+      maxChunkBytes
+    );
+
+    if (chunkBlobs.length === 0) {
+      throw new Error("Chunking produced zero audio chunks.");
+    }
+
+    this.info("Chunking audio for transcription", {
+      filePath: file.path,
+      chunks: chunkBlobs.length,
+      maxChunkBytes,
+      targetSampleRate,
+    });
+
+    const transcriptions: string[] = [];
+    const reservedProgressStart = 20;
+    const reservedProgressEnd = 98;
+    const reservedProgressRange = Math.max(1, reservedProgressEnd - reservedProgressStart);
+
+    for (let i = 0; i < chunkBlobs.length; i++) {
+      const chunkNumber = i + 1;
+      const chunkProgressStart = reservedProgressStart + Math.floor((i / chunkBlobs.length) * reservedProgressRange);
+      const chunkProgressEnd = reservedProgressStart + Math.floor((chunkNumber / chunkBlobs.length) * reservedProgressRange);
+
+      const chunkContext: TranscriptionContext | undefined = context
+        ? {
+            ...context,
+            onProgress: (progress, status) => {
+              const clamped = Math.max(0, Math.min(100, Number(progress) || 0));
+              const mapped =
+                chunkProgressStart +
+                Math.round((clamped / 100) * Math.max(1, chunkProgressEnd - chunkProgressStart));
+              context.onProgress?.(mapped, `Chunk ${chunkNumber}/${chunkBlobs.length}: ${status}`);
+            },
+            suppressNotices: true,
+          }
+        : undefined;
+
+      const text = await this.queueTranscription(file, chunkBlobs[i], chunkContext, true);
+      transcriptions.push(text);
+    }
+
+    return this.mergeTranscriptions(transcriptions);
+  }
+
+  private async buildWavChunkBlobs(
+    sourceArrayBuffer: ArrayBuffer,
+    targetSampleRate: number,
+    maxChunkBytes: number
+  ): Promise<Blob[]> {
+    const audioContext = new AudioContext();
+    try {
+      let decoded: AudioBuffer;
+      try {
+        decoded = await audioContext.decodeAudioData(sourceArrayBuffer.slice(0));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to decode audio for chunking (${message}). This can happen if your platform can't decode the file format. Try converting the audio to MP3 or WAV and retry.`
+        );
+      }
+      let audioBuffer: AudioBuffer = decoded;
+
+      if (audioBuffer.sampleRate !== targetSampleRate) {
+        const offlineContext = new OfflineAudioContext(
+          audioBuffer.numberOfChannels,
+          Math.ceil(audioBuffer.duration * targetSampleRate),
+          targetSampleRate
+        );
+        const source = offlineContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(offlineContext.destination);
+        source.start(0);
+        audioBuffer = await offlineContext.startRendering();
+      }
+
+      if (audioBuffer.numberOfChannels > 1) {
+        const length = audioBuffer.length;
+        const mono = new Float32Array(length);
+        for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+          const data = audioBuffer.getChannelData(channel);
+          for (let i = 0; i < length; i++) {
+            mono[i] += data[i] / audioBuffer.numberOfChannels;
+          }
+        }
+        const monoBuffer = audioContext.createBuffer(1, length, audioBuffer.sampleRate);
+        monoBuffer.copyToChannel(mono, 0);
+        audioBuffer = monoBuffer;
+      }
+
+      const channels = audioBuffer.numberOfChannels;
+      const bytesPerSample = 2;
+      const wavHeaderBytes = 44;
+      const rawMaxSamples = Math.floor((maxChunkBytes - wavHeaderBytes) / (channels * bytesPerSample));
+      const overlapSamples = Math.min(
+        Math.floor(CHUNK_OVERLAP_SECONDS * audioBuffer.sampleRate),
+        Math.floor(rawMaxSamples / 10)
+      );
+      const payloadSamples = rawMaxSamples - overlapSamples;
+
+      if (!Number.isFinite(payloadSamples) || payloadSamples <= 0) {
+        throw new Error("Chunk size too small for WAV encoding.");
+      }
+
+      const chunks: Blob[] = [];
+      for (let start = 0; start < audioBuffer.length; start += payloadSamples) {
+        const end = Math.min(start + payloadSamples + overlapSamples, audioBuffer.length);
+        const chunkLength = end - start;
+        if (chunkLength <= 0) break;
+
+        const chunkBuffer = audioContext.createBuffer(channels, chunkLength, audioBuffer.sampleRate);
+        for (let channel = 0; channel < channels; channel++) {
+          const data = audioBuffer.getChannelData(channel).subarray(start, end);
+          chunkBuffer.copyToChannel(data, channel, 0);
+        }
+
+        const wav = this.audioBufferToWav(chunkBuffer);
+        chunks.push(new Blob([wav], { type: "audio/wav" }));
+      }
+
+      return chunks;
+    } finally {
+      try {
+        if (audioContext.state !== "closed") {
+          await audioContext.close();
+        }
+      } catch {}
+    }
+  }
+
+  private audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+    const length = buffer.length * buffer.numberOfChannels * 2 + 44;
+    const arrayBuffer = new ArrayBuffer(length);
+    const view = new DataView(arrayBuffer);
+    const channels: Float32Array[] = [];
+    let offset = 0;
+    let pos = 0;
+
+    const setUint16 = (data: number) => {
+      view.setUint16(pos, data, true);
+      pos += 2;
+    };
+
+    const setUint32 = (data: number) => {
+      view.setUint32(pos, data, true);
+      pos += 4;
+    };
+
+    // RIFF identifier
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
+
+    // fmt sub-chunk
+    setUint32(0x20746d66); // "fmt "
+    setUint32(16); // subchunk1 size
+    setUint16(1); // audio format (1 = PCM)
+    setUint16(buffer.numberOfChannels);
+    setUint32(buffer.sampleRate);
+    setUint32(buffer.sampleRate * 2 * buffer.numberOfChannels); // byte rate
+    setUint16(buffer.numberOfChannels * 2); // block align
+    setUint16(16); // bits per sample
+
+    // data sub-chunk
+    setUint32(0x61746164); // "data"
+    setUint32(length - pos - 4); // subchunk2 size
+
+    const volume = 0.8;
+    for (let i = 0; i < buffer.numberOfChannels; i++) {
+      channels.push(buffer.getChannelData(i));
+    }
+
+    while (pos < length) {
+      for (let i = 0; i < buffer.numberOfChannels; i++) {
+        const sample = Math.max(-1, Math.min(1, channels[i][offset]));
+        const val = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        view.setInt16(pos, val * volume, true);
+        pos += 2;
+      }
+      offset++;
+    }
+
+    return arrayBuffer;
+  }
+
   /**
    * Transcribe an audio file
    * @param file The audio file to transcribe
@@ -235,34 +473,30 @@ export class TranscriptionService {
 
     // Determine endpoint and compose fields based on provider
     const isCustom = this.plugin.settings.transcriptionProvider === "custom";
-    const customEndpoint = isCustom ? (this.plugin.settings.customTranscriptionEndpoint || '').toLowerCase() : '';
-    const isGroqCustom = isCustom && customEndpoint.includes('groq.com');
-    const GROQ_SIZE_LIMIT_BYTES = 25 * 1024 * 1024; // 25MB
+    const endpoint = isCustom
+      ? this.plugin.settings.customTranscriptionEndpoint
+      : `${this.sculptService.baseUrl}/audio/transcriptions`;
+    const isGroqCustom = isCustom && (endpoint || "").toLowerCase().includes("groq.com");
+    const uploadDescriptor = this.resolveAudioUploadDescriptor(file, blob);
 
-    // If user selected Groq directly but the blob is too large, use our server which chunks for Groq.
-    const mustProxyLargeGroq = isGroqCustom && blob.size > GROQ_SIZE_LIMIT_BYTES;
-
-    let endpoint: string;
     let headers: Record<string, string> = {};
     const formFields: Array<{ name: string; value: string | Blob; filename?: string }> = [];
 
-    if (mustProxyLargeGroq || !isCustom) {
-      // Use SystemSculpt server proxy (supports NDJSON streaming and chunking)
-      endpoint = `${this.sculptService.baseUrl}/audio/transcriptions`;
+    if (!isCustom) {
+      // Use SystemSculpt server proxy
       headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
       if (this.plugin.settings.licenseKey) headers['x-license-key'] = this.plugin.settings.licenseKey;
 
       // Server expects file + optional requestId and timestamped flag
-      formFields.push({ name: 'file', value: blob, filename: file.name });
+      formFields.push({ name: 'file', value: blob, filename: uploadDescriptor.filename });
       formFields.push({ name: 'requestId', value: requestId });
       if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
     } else {
       // Custom endpoint
-      endpoint = this.plugin.settings.customTranscriptionEndpoint;
       // Authorization header if provided
       if (this.plugin.settings.customTranscriptionApiKey) {
         headers['Authorization'] = `Bearer ${this.plugin.settings.customTranscriptionApiKey}`;
-        if (endpoint.toLowerCase().includes('groq.com')) {
+        if ((endpoint || "").toLowerCase().includes('groq.com')) {
           headers['X-Request-ID'] = `obsidian-client-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
           headers['Accept'] = 'application/json';
         }
@@ -270,20 +504,11 @@ export class TranscriptionService {
       headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
 
       if (isGroqCustom) {
-        const fileName = blob.type.includes('webm')
-          ? 'recording.webm'
-          : blob.type.includes('mp4')
-          ? 'recording.m4a'
-          : 'recording.wav';
-        const mimeType = blob.type || (fileName.endsWith('.webm')
-          ? 'audio/webm'
-          : fileName.endsWith('.m4a')
-          ? 'audio/mp4'
-          : fileName.endsWith('.wav')
-          ? 'audio/wav'
-          : 'audio/mpeg');
-        const fileBlob = new Blob([await blob.arrayBuffer()], { type: mimeType });
-        formFields.push({ name: 'file', value: fileBlob, filename: fileName });
+        const fileBlob =
+          blob.type && blob.type.toLowerCase() === uploadDescriptor.mimeType.toLowerCase()
+            ? blob
+            : new Blob([await blob.arrayBuffer()], { type: uploadDescriptor.mimeType });
+        formFields.push({ name: 'file', value: fileBlob, filename: uploadDescriptor.filename });
         formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-large-v3' });
         if (context?.timestamped) {
           formFields.push({ name: 'response_format', value: 'verbose_json' });
@@ -294,7 +519,7 @@ export class TranscriptionService {
         formFields.push({ name: 'language', value: 'en' });
       } else {
         // OpenAI or other compatible custom endpoints
-        formFields.push({ name: 'file', value: blob, filename: file.name });
+        formFields.push({ name: 'file', value: blob, filename: uploadDescriptor.filename });
         formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-1' });
         formFields.push({ name: 'requestId', value: requestId });
         if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
@@ -335,7 +560,7 @@ export class TranscriptionService {
         context?.onProgress?.(30, `${retryText}Transcribing audio...`);
 
 
-        const transportOptions = { endpoint };
+    const transportOptions = { endpoint };
         const preferredTransport = this.platform.preferredTransport(transportOptions);
         const canStream = this.platform.supportsStreaming(transportOptions);
         let response: Response;
@@ -1291,10 +1516,22 @@ export class TranscriptionService {
       let mimeType = MIME_TYPE_MAP[extension as keyof typeof MIME_TYPE_MAP];
       let wasResampled = false;
 
+      const provider = this.plugin.settings.transcriptionProvider;
+      if (provider === "custom" && !this.plugin.settings.customTranscriptionEndpoint?.trim()) {
+        throw new Error(
+          "Custom transcription endpoint is required when using a custom transcription provider. Configure it in Settings → SystemSculpt AI → Audio & Transcription."
+        );
+      }
+
+      const directUploadLimitBytes =
+        provider === "custom" ? CUSTOM_AUDIO_UPLOAD_MAX_BYTES : AUDIO_UPLOAD_MAX_BYTES;
+      const chunkTargetSampleRate =
+        provider === "custom" ? 16000 : EXPECTED_SAMPLE_RATES[extension] || 16000;
+
       const isMobile = this.platform.isMobile();
       const resamplingEnabled = this.plugin.settings.enableAutoAudioResampling ?? true;
 
-      if (this.plugin.settings.transcriptionProvider === "systemsculpt" && !isMobile && resamplingEnabled) {
+      if (provider === "systemsculpt" && !isMobile && resamplingEnabled && file.stat.size <= AUDIO_UPLOAD_MAX_BYTES) {
         const targetSampleRate = EXPECTED_SAMPLE_RATES[extension] || 16000;
 
         try {
@@ -1336,11 +1573,11 @@ export class TranscriptionService {
           if (!context?.suppressNotices) {
             new Notice("Audio format conversion failed. Attempting with original file...", 3000);
           }
-          this.warn("Audio resampling failed", {
-            error: resampleError instanceof Error ? resampleError.message : String(resampleError)
-          });
-        }
-      } else if (this.plugin.settings.transcriptionProvider === "systemsculpt" && isMobile) {
+            this.warn("Audio resampling failed", {
+              error: resampleError instanceof Error ? resampleError.message : String(resampleError)
+            });
+          }
+      } else if (provider === "systemsculpt" && isMobile) {
         try {
           const { needsResampling, currentSampleRate } = await this.audioResampler.checkNeedsResampling(
             arrayBuffer,
@@ -1361,17 +1598,23 @@ export class TranscriptionService {
         }
       }
 
-      const blob = new Blob([processedArrayBuffer], {
-        type: mimeType
-      });
-
-      context?.onProgress?.(20, "Uploading audio file...");
-      this.debug("Queueing transcription upload", {
-        wasResampled,
-        mimeType
-      });
-
-      const transcriptionText = await this.queueTranscription(file, blob, context, wasResampled);
+      const shouldChunk = processedArrayBuffer.byteLength > directUploadLimitBytes;
+      const transcriptionText = shouldChunk
+        ? await this.transcribeChunkedAudio(
+            file,
+            processedArrayBuffer,
+            {
+              maxChunkBytes: directUploadLimitBytes,
+              targetSampleRate: chunkTargetSampleRate,
+            },
+            context
+          )
+        : await this.queueTranscription(
+            file,
+            new Blob([processedArrayBuffer], { type: mimeType }),
+            context,
+            wasResampled
+          );
 
       context?.onProgress?.(100, "Transcription complete!");
       this.info("Transcription pipeline finished", {

@@ -47,6 +47,7 @@ export interface InputHandlerOptions {
   getSelectedModelId: () => string;
   getContextFiles: () => Set<string>;
   getSystemPrompt: () => SystemPromptInfo;
+  isChatReady: () => boolean;
   chatContainer: HTMLElement;
   scrollManager: ScrollManagerService;
   messageRenderer: MessageRenderer;
@@ -75,6 +76,7 @@ export class InputHandler extends Component {
   private getSelectedModelId: () => string;
   private getContextFiles: () => Set<string>;
   private getSystemPrompt: () => SystemPromptInfo;
+  private isChatReady: () => boolean;
   private chatContainer: HTMLElement;
   private scrollManager: ScrollManagerService;
   private messageRenderer: MessageRenderer;
@@ -156,6 +158,7 @@ export class InputHandler extends Component {
     this.getSelectedModelId = options.getSelectedModelId;
     this.getContextFiles = options.getContextFiles;
     this.getSystemPrompt = options.getSystemPrompt;
+    this.isChatReady = options.isChatReady;
     this.chatContainer = options.chatContainer;
     this.scrollManager = options.scrollManager;
     this.messageRenderer = options.messageRenderer;
@@ -473,6 +476,11 @@ export class InputHandler extends Component {
       this.pendingLargeTextContent = null;
     }
 
+    if (!this.isChatReady()) {
+      new Notice("Chat is still loading—please wait a moment.");
+      return;
+    }
+
     if (!(await this.ensureProviderReadyForChat())) {
       return;
     }
@@ -595,6 +603,7 @@ export class InputHandler extends Component {
 
   private async handleKeyDown(event: KeyboardEvent): Promise<void> {
     return handleKeyDownExternal({
+      isChatReady: () => this.isChatReady(),
       isGenerating: () => this.isGenerating,
       handleSendMessage: () => this.handleSendMessage(),
       handleStopGeneration: () => this.handleStopGeneration(),
@@ -632,7 +641,11 @@ export class InputHandler extends Component {
 
   private updateSendButtonState(): void {
     const hasText = this.input.value.trim().length > 0;
-    this.sendButton.setDisabled(this.isGenerating || !hasText);
+    this.sendButton.setDisabled(this.isGenerating || !hasText || !this.isChatReady());
+  }
+
+  public notifyChatReadyChanged(): void {
+    this.updateSendButtonState();
   }
 
   public refreshContextAttachments(): void {

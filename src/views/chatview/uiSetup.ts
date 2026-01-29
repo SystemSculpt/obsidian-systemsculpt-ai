@@ -173,6 +173,7 @@ export const uiSetup = {
       getSelectedModelId: () => chatView.selectedModelId,
       getContextFiles: () => chatView.contextManager.getContextFiles(),
       getSystemPrompt: () => ({ type: chatView.systemPromptType, path: chatView.systemPromptPath }),
+      isChatReady: () => !chatView.chatId || chatView.isFullyLoaded,
       chatContainer: chatView.chatContainer,
       scrollManager: chatView.scrollManager,
       messageRenderer: chatView.messageRenderer,
@@ -264,6 +265,12 @@ export const uiSetup = {
         try { (window as any).FreezeMonitor?.mark?.('chatview:active-leaf-change'); } catch {}
         if (leaf === chatView.leaf && chatView.inputHandler) {
           chatView.inputHandler.focus();
+        }
+        if (leaf === chatView.leaf && chatView.chatId && !chatView.isFullyLoaded) {
+          const viewState = chatView.leaf.getViewState();
+          if (viewState?.state?.chatId) {
+            void chatView.setState(viewState.state);
+          }
         }
       })
     );

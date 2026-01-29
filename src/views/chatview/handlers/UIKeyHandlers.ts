@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import { LargeTextHelpers } from "../../../constants/largeText";
 
 export interface KeyHandlersContext {
+  isChatReady: () => boolean;
   isGenerating: () => boolean;
   handleSendMessage: () => Promise<void>;
   handleStopGeneration: () => Promise<void> | void;
@@ -29,6 +30,10 @@ export async function handleKeyDown(ctx: KeyHandlersContext, event: KeyboardEven
 
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
+    if (!ctx.isChatReady()) {
+      new Notice("Chat is still loading—please wait a moment.");
+      return;
+    }
     if (ctx.isGenerating()) {
       new Notice("Please wait for the current response to complete before sending another message");
       return;
@@ -129,4 +134,3 @@ export function handleAtMentionDetection(ctx: { input: HTMLTextAreaElement; atMe
     ctx.atMentionMenu.hide();
   }
 }
-

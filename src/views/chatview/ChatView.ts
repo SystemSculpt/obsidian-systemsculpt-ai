@@ -83,8 +83,9 @@ export class ChatView extends ItemView {
    * sits at the top of the list.
    */
   private virtualStartIndex: number = 0;          // Index of the first message currently rendered
-  private readonly VIRTUAL_BATCH_SIZE: number = 40; // How many messages to load at a time
+  private readonly VIRTUAL_BATCH_SIZE: number = 20; // How many messages to load at a time
   private hasAdjustedInitialWindow: boolean = false;
+  private renderEpoch: number = 0;
 
   // Explicitly re-declare core ItemView fields for clarity / type checking
   declare app: App;
@@ -942,6 +943,7 @@ export class ChatView extends ItemView {
         }, 0);
       }
       this.virtualStartIndex = 0;
+      this.hasAdjustedInitialWindow = false;
       this.messages = [];
       this.contextManager?.clearContext();
       this.updateModelIndicator();
@@ -966,6 +968,8 @@ export class ChatView extends ItemView {
     if (!state.chatId || state.chatId === "") {
       // For empty/new chats, just update the state but don't load
       this.chatId = "";
+      this.virtualStartIndex = 0;
+      this.hasAdjustedInitialWindow = false;
       this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       this.initializeChatTitle(state.chatTitle);
@@ -996,6 +1000,8 @@ export class ChatView extends ItemView {
     if (previousChatId !== this.chatId) {
       this.debugLogService?.resetStreamBuffer();
     }
+    this.virtualStartIndex = 0;
+    this.hasAdjustedInitialWindow = false;
     // When loading an existing chat, use the stored model selection as-is
     this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
     this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
@@ -1029,6 +1035,7 @@ export class ChatView extends ItemView {
       this.chatId = "";
       this.initializeChatTitle();
       this.virtualStartIndex = 0;
+      this.hasAdjustedInitialWindow = false;
       this.messages = [];
       this.contextManager?.clearContext();
       this.systemPromptType = 'general-use';
@@ -1038,6 +1045,7 @@ export class ChatView extends ItemView {
         this.renderMessagesInChunks();
       }
       this.isFullyLoaded = true; // Even failed loads are "loaded"
+      this.inputHandler?.notifyChatReadyChanged?.();
     }
   }
 
@@ -1046,6 +1054,14 @@ export class ChatView extends ItemView {
     this.chatId = chatId;
     this.isFullyLoaded = false; // Mark as not loaded while loading
     this.trustedToolNames.clear(); // Clear session trust on chat load
+    this.virtualStartIndex = 0;
+    this.hasAdjustedInitialWindow = false;
+
+    if (this.chatContainer) {
+      this.chatContainer.empty();
+      this.showChatLoadingBanner("Loading chat…");
+    }
+    this.inputHandler?.notifyChatReadyChanged?.();
 
     try {
       
@@ -1061,6 +1077,7 @@ export class ChatView extends ItemView {
         this.updateAgentModeIndicator();
         this.contextManager?.clearContext();
         this.isFullyLoaded = true; // Mark as loaded even when chat not found
+        this.inputHandler?.notifyChatReadyChanged?.();
         return;
       }
 
@@ -1100,13 +1117,10 @@ export class ChatView extends ItemView {
         await this.contextManager.clearContext();
       }
 
-      // Clear chat container and render messages
-      this.chatContainer.empty();
-      if (this.messages.length > 0) {
-        await this.renderMessagesInChunks();
-      }
+      await this.renderMessagesInChunks();
 
       this.isFullyLoaded = true; // Mark as loaded after messages are rendered
+      this.inputHandler?.notifyChatReadyChanged?.();
       
       // Update UI indicators
       await this.updateModelIndicator();
@@ -1129,6 +1143,8 @@ export class ChatView extends ItemView {
     } catch (error) {
       this.handleError(`Failed to load chat: ${error.message}`);
       this.isFullyLoaded = true; // Mark as loaded even on error to prevent stuck state
+      this.removeChatLoadingBanner();
+      this.inputHandler?.notifyChatReadyChanged?.();
     }
   }
 
@@ -1161,10 +1177,39 @@ export class ChatView extends ItemView {
     }
   }
 
+  private showChatLoadingBanner(label: string = "Loading chat…"): void {
+    if (!this.chatContainer) return;
+
+    let banner = this.chatContainer.querySelector(
+      ':scope > .systemsculpt-chat-loading-banner'
+    ) as HTMLElement | null;
+
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "systemsculpt-chat-loading-banner";
+      banner.setAttribute("role", "status");
+      banner.setAttribute("aria-live", "polite");
+      this.chatContainer.insertBefore(banner, this.chatContainer.firstChild);
+    } else {
+      banner.empty();
+    }
+
+    banner.createDiv({ cls: "systemsculpt-chat-loading-spinner", attr: { "aria-hidden": "true" } });
+    banner.createDiv({ cls: "systemsculpt-chat-loading-text", text: label });
+  }
+
+  private removeChatLoadingBanner(): void {
+    if (!this.chatContainer) return;
+    const banner = this.chatContainer.querySelector(
+      ':scope > .systemsculpt-chat-loading-banner'
+    ) as HTMLElement | null;
+    banner?.remove();
+  }
+
   public async renderMessagesInChunks(): Promise<void> {
     if (!this.chatContainer) return;
 
-    const renderStart = performance.now();
+    const renderEpoch = ++this.renderEpoch;
 
     // Determine the slice of history we want to render.  If this is the first
     // render of the view (virtualStartIndex === 0) we default to showing only
@@ -1172,6 +1217,7 @@ export class ChatView extends ItemView {
     const total = this.messages.length;
     if (total === 0) {
       this.chatContainer.empty();
+      this.removeChatLoadingBanner();
       // Display status message for empty chat
       this.displayChatStatus();
       return;
@@ -1195,6 +1241,11 @@ export class ChatView extends ItemView {
     // Clear any existing elements before we repopulate the container.
     this.chatContainer.empty();
 
+    const shouldShowLoadingBanner = !!this.chatId && !this.isFullyLoaded;
+    if (shouldShowLoadingBanner) {
+      this.showChatLoadingBanner("Loading chat…");
+    }
+
     // If we are not rendering from the very first message, insert a
     // _Load earlier messages_ placeholder at the top so the user can fetch
     // older history on-demand.
@@ -1203,13 +1254,34 @@ export class ChatView extends ItemView {
       this.chatContainer.appendChild(placeholder);
     }
 
-    // Render the slice [virtualStartIndex, total) using a DocumentFragment to reduce reflow
-    const frag = document.createDocumentFragment();
-    for (let i = this.virtualStartIndex; i < total; i++) {
-      const msg = this.messages[i];
-      await messageHandling.addMessage(this, msg.role, msg.content, msg.message_id, msg, frag);
+    const yieldToPaint = () => new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame !== "undefined") {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(() => resolve(), 0);
+      }
+    });
+
+    // Render the slice [virtualStartIndex, total) in small chunks so the view
+    // never appears blank for long, even with large histories.
+    const chunkSize = 6;
+    for (let start = this.virtualStartIndex; start < total; start += chunkSize) {
+      if (renderEpoch !== this.renderEpoch) return;
+
+      const frag = document.createDocumentFragment();
+      const end = Math.min(total, start + chunkSize);
+      for (let i = start; i < end; i++) {
+        if (renderEpoch !== this.renderEpoch) return;
+        const msg = this.messages[i];
+        await messageHandling.addMessage(this, msg.role, msg.content, msg.message_id, msg, frag);
+      }
+
+      if (renderEpoch !== this.renderEpoch) return;
+      this.chatContainer.appendChild(frag);
+
+      await yieldToPaint();
     }
-    this.chatContainer.appendChild(frag);
+
     // After batch append, enforce DOM window size once
     this.manageDomSize();
 
@@ -1222,8 +1294,9 @@ export class ChatView extends ItemView {
       }, 0);
     }
 
-    const duration = performance.now() - renderStart;
-    const renderedCount = total - this.virtualStartIndex;
+    if (shouldShowLoadingBanner) {
+      this.removeChatLoadingBanner();
+    }
   }
 
   /**

@@ -39,6 +39,7 @@ describe("UIKeyHandlers", () => {
 
     await handleKeyDown(
       {
+        isChatReady: () => true,
         isGenerating: () => false,
         handleSendMessage,
         handleStopGeneration,
@@ -65,6 +66,7 @@ describe("UIKeyHandlers", () => {
 
     await handleKeyDown(
       {
+        isChatReady: () => true,
         isGenerating: () => true,
         handleSendMessage,
         handleStopGeneration: jest.fn(),
@@ -89,6 +91,7 @@ describe("UIKeyHandlers", () => {
 
     await handleKeyDown(
       {
+        isChatReady: () => true,
         isGenerating: () => true,
         handleSendMessage: jest.fn(async () => {}),
         handleStopGeneration,
@@ -113,6 +116,7 @@ describe("UIKeyHandlers", () => {
 
     await handleKeyDown(
       {
+        isChatReady: () => true,
         isGenerating: () => true,
         handleSendMessage: jest.fn(async () => {}),
         handleStopGeneration,
@@ -143,6 +147,7 @@ describe("UIKeyHandlers", () => {
 
     await handleKeyDown(
       {
+        isChatReady: () => true,
         isGenerating: () => false,
         handleSendMessage,
         handleStopGeneration: jest.fn(),

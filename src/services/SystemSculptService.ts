@@ -623,7 +623,7 @@ export class SystemSculptService {
           transport: preferredTransport
       });
       } catch {}
-      let response: Response;
+      let response: Response | null = null;
       const isOpenRouter = fullEndpoint.includes("openrouter.ai");
 
       const sendRequest = async (body: Record<string, any>): Promise<Response> => {
@@ -801,6 +801,14 @@ export class SystemSculptService {
 
         // Rebuild response for potential final error handling if subsequent retries also fail
         response = new Response(text, { status, statusText, headers: responseHeaders });
+      }
+
+      if (!response) {
+        throw new SystemSculptError(
+          "No response returned from the provider transport",
+          ERROR_CODES.STREAM_ERROR,
+          0
+        );
       }
 
       if (!response.ok) {
@@ -1006,7 +1014,7 @@ export class SystemSculptService {
 
       let messagesForRequest = preparedMessages;
 
-      let response: Response;
+      let response: Response | null = null;
 
       if (isCustom && provider) {
         response = await this.handleCustomProviderCompletion(
@@ -1188,6 +1196,14 @@ export class SystemSculptService {
             throw fetchError;
           }
         }
+      }
+
+      if (!response) {
+        throw new SystemSculptError(
+          "No response returned from the streaming API transport",
+          ERROR_CODES.STREAM_ERROR,
+          0
+        );
       }
 
       // Log API response status
