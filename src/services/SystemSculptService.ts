@@ -594,9 +594,9 @@ export class SystemSculptService {
       // Prefer native fetch when the platform supports streaming; otherwise fall back
       // to the resilient transport wrapper (requestUrl + virtual SSE) for mobile and
       // environments where direct streaming fails.
+      const hasTools = Array.isArray((requestBody as any).tools) && (requestBody as any).tools.length > 0;
+      const hasFunctions = Array.isArray((requestBody as any).functions) && (requestBody as any).functions.length > 0;
       try {
-        const hasTools = Array.isArray((requestBody as any).tools) && (requestBody as any).tools.length > 0;
-        const hasFunctions = Array.isArray((requestBody as any).functions) && (requestBody as any).functions.length > 0;
         const toolMode = hasTools ? "tools" : hasFunctions ? "functions" : "none";
         const messageList: any[] = Array.isArray((requestBody as any).messages) ? (requestBody as any).messages : [];
         const messagesWithReasoningDetails = messageList.filter((m) => Array.isArray(m?.reasoning_details)).length;
@@ -624,61 +624,183 @@ export class SystemSculptService {
       });
       } catch {}
       let response: Response;
-      if (preferredTransport === 'fetch' && typeof fetch === 'function') {
-        try {
-          const { sanitizeFetchHeadersForUrl } = await import('../utils/streaming');
-          const fetchHeaders = sanitizeFetchHeadersForUrl(fullEndpoint, headers);
-          const fetchOptions: RequestInit = {
-            method: 'POST',
-            headers: fetchHeaders,
-            body: JSON.stringify(requestBody),
-            signal,
-            mode: 'cors' as RequestMode,
-            credentials: 'omit' as RequestCredentials,
-            cache: 'no-store',
-          };
-          response = await fetch(fullEndpoint, fetchOptions);
-        } catch (e) {
-          const isAbortError =
-            (e instanceof DOMException && e.name === "AbortError") ||
-            (e instanceof Error && e.name === "AbortError") ||
-            (typeof (e as any)?.message === "string" && String((e as any).message).toLowerCase().includes("abort"));
-          if (signal?.aborted || isAbortError) {
-            throw e;
-          }
+      const isOpenRouter = fullEndpoint.includes("openrouter.ai");
+
+      const sendRequest = async (body: Record<string, any>): Promise<Response> => {
+        if (preferredTransport === "fetch" && typeof fetch === "function") {
           try {
-            console.debug('[SystemSculpt][Transport] fetch failed, falling back to requestUrl', {
-              endpoint: fullEndpoint,
-              error: (e as Error)?.message ?? String(e)
-            });
-          } catch {}
-          // Fallback to resilient transport wrapper if fetch fails
-          const { postJsonStreaming } = await import('../utils/streaming');
-          response = await postJsonStreaming(
-            fullEndpoint,
-            headers,
-            requestBody,
-            isMobile,
-            signal
-          );
+            const { sanitizeFetchHeadersForUrl } = await import("../utils/streaming");
+            const fetchHeaders = sanitizeFetchHeadersForUrl(fullEndpoint, headers);
+            const fetchOptions: RequestInit = {
+              method: "POST",
+              headers: fetchHeaders,
+              body: JSON.stringify(body),
+              signal,
+              mode: "cors" as RequestMode,
+              credentials: "omit" as RequestCredentials,
+              cache: "no-store",
+            };
+            return await fetch(fullEndpoint, fetchOptions);
+          } catch (e) {
+            const isAbortError =
+              (e instanceof DOMException && e.name === "AbortError") ||
+              (e instanceof Error && e.name === "AbortError") ||
+              (typeof (e as any)?.message === "string" &&
+                String((e as any).message).toLowerCase().includes("abort"));
+            if (signal?.aborted || isAbortError) {
+              throw e;
+            }
+            try {
+              console.debug("[SystemSculpt][Transport] fetch failed, falling back to requestUrl", {
+                endpoint: fullEndpoint,
+                error: (e as Error)?.message ?? String(e),
+              });
+            } catch {}
+            const { postJsonStreaming } = await import("../utils/streaming");
+            return await postJsonStreaming(fullEndpoint, headers, body, isMobile, signal);
+          }
         }
-      } else {
+
         try {
-          console.debug('[SystemSculpt][Transport] using resilient postJsonStreaming fallback', {
+          console.debug("[SystemSculpt][Transport] using resilient postJsonStreaming fallback", {
             endpoint: fullEndpoint,
             preferredTransport,
             canStream,
-            isMobile
+            isMobile,
           });
         } catch {}
-        const { postJsonStreaming } = await import('../utils/streaming');
-        response = await postJsonStreaming(
-          fullEndpoint,
-          headers,
-          requestBody,
-          isMobile,
-          signal
-        );
+        const { postJsonStreaming } = await import("../utils/streaming");
+        return await postJsonStreaming(fullEndpoint, headers, body, isMobile, signal);
+      };
+
+      let lastRequestBody: Record<string, any> = requestBody;
+      let openRouterFallback:
+        | {
+            order: string[];
+            endpoints: Array<{ tag: string; provider_name?: string }>;
+          }
+        | null = null;
+      let openRouterAvoidTag: string | undefined;
+
+      const ensureOpenRouterFallback = async (): Promise<
+        | {
+            order: string[];
+            endpoints: Array<{ tag: string; provider_name?: string }>;
+          }
+        | null
+      > => {
+        if (openRouterFallback) return openRouterFallback;
+        const apiKey = typeof provider.apiKey === "string" ? provider.apiKey.trim() : "";
+        if (!apiKey) return null;
+
+        const apiBase =
+          typeof provider.endpoint === "string" && provider.endpoint.trim().length > 0
+            ? provider.endpoint.trim()
+            : fullEndpoint;
+
+        const { getOpenRouterProviderOrderForModel } = await import("../utils/openrouterRouting");
+        openRouterFallback = await getOpenRouterProviderOrderForModel({
+          apiBase,
+          apiKey,
+          modelId,
+          hasTools,
+          signal,
+        });
+        return openRouterFallback;
+      };
+
+      const maxAttempts = isOpenRouter ? 3 : 1;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        let bodyForAttempt: Record<string, any> = requestBody;
+
+        if (isOpenRouter && attempt > 0) {
+          const fallback = await ensureOpenRouterFallback();
+          if (!fallback || fallback.order.length <= 1) {
+            break;
+          }
+
+          let order = fallback.order;
+          if (openRouterAvoidTag) {
+            order = order.filter((t) => t !== openRouterAvoidTag);
+          }
+
+          const shift = attempt - 1;
+          if (order.length <= shift) {
+            break;
+          }
+
+          bodyForAttempt = {
+            ...requestBody,
+            provider: {
+              ...(typeof (requestBody as any).provider === "object" && (requestBody as any).provider
+                ? (requestBody as any).provider
+                : {}),
+              order: order.slice(shift),
+              allow_fallbacks: true,
+            },
+          };
+        }
+
+        lastRequestBody = bodyForAttempt;
+
+        // Capture retries in debug logs (max 2 extra attempts)
+        try {
+          if (attempt > 0) {
+            debug?.onRequest?.({
+              provider: provider.name || provider.id || "custom",
+              endpoint: fullEndpoint,
+              headers,
+              body: bodyForAttempt,
+              transport: preferredTransport,
+              canStream,
+              isCustomProvider: true,
+            });
+          }
+        } catch {}
+
+        response = await sendRequest(bodyForAttempt);
+        if (response.ok) break;
+
+        if (!isOpenRouter || attempt + 1 >= maxAttempts) {
+          break;
+        }
+
+        const status = response.status;
+        const statusText = response.statusText;
+        const responseHeaders = new Headers(response.headers);
+        const text = await response.text().catch(() => "");
+
+        let data: unknown = undefined;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = undefined;
+        }
+
+        const { isRetryableOpenRouterProviderError, findOpenRouterEndpointTagForProviderName } =
+          await import("../utils/openrouterRouting");
+
+        const retryable = isRetryableOpenRouterProviderError(status, data);
+        if (!retryable) {
+          response = new Response(text, { status, statusText, headers: responseHeaders });
+          break;
+        }
+
+        const providerName =
+          typeof (data as any)?.error?.metadata?.provider_name === "string"
+            ? (data as any).error.metadata.provider_name
+            : undefined;
+
+        const fallback = await ensureOpenRouterFallback();
+        if (fallback && providerName) {
+          openRouterAvoidTag = findOpenRouterEndpointTagForProviderName(
+            fallback.endpoints as any,
+            providerName
+          );
+        }
+
+        // Rebuild response for potential final error handling if subsequent retries also fail
+        response = new Response(text, { status, statusText, headers: responseHeaders });
       }
 
       if (!response.ok) {
@@ -692,8 +814,8 @@ export class SystemSculptService {
           const isOpenRouter = endpoint.includes("openrouter.ai");
           const isGemini = modelLower.includes("gemini");
           if (isOpenRouter && isGemini) {
-            const messageList: any[] = Array.isArray((requestBody as any)?.messages)
-              ? ((requestBody as any).messages as any[])
+            const messageList: any[] = Array.isArray((lastRequestBody as any)?.messages)
+              ? ((lastRequestBody as any).messages as any[])
               : [];
             const roleSequence = messageList.map((m) => String(m?.role || "unknown"));
 
@@ -730,9 +852,11 @@ export class SystemSculptService {
             const summary = {
               endpoint,
               model: modelId,
-              stream: (requestBody as any)?.stream,
-              include_reasoning: (requestBody as any)?.include_reasoning,
-              toolCount: Array.isArray((requestBody as any)?.tools) ? (requestBody as any).tools.length : 0,
+              stream: (lastRequestBody as any)?.stream,
+              include_reasoning: (lastRequestBody as any)?.include_reasoning,
+              toolCount: Array.isArray((lastRequestBody as any)?.tools)
+                ? (lastRequestBody as any).tools.length
+                : 0,
               messageCount: messageList.length,
               roleSequence,
               assistantToolCallSummaries,
