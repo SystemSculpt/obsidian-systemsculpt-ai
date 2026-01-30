@@ -559,16 +559,14 @@ export class TranscriptionService {
         // Update progress (after endpoint/header determination)
         context?.onProgress?.(30, `${retryText}Transcribing audio...`);
 
-
-    const transportOptions = { endpoint };
+        const transportOptions = { endpoint };
         const preferredTransport = this.platform.preferredTransport(transportOptions);
         const canStream = this.platform.supportsStreaming(transportOptions);
-        let response: Response;
 
-        if (preferredTransport === 'requestUrl') {
+        const requestViaRequestUrl = async (): Promise<Response> => {
           const transportResponse = await requestUrl({
             url: endpoint,
-            method: 'POST',
+            method: "POST",
             headers: { ...headers },
             body: requestBodyBuffer,
             throw: false,
@@ -577,40 +575,54 @@ export class TranscriptionService {
           let responseBody: string;
           const responseHeaders = new Headers();
 
-          if (transportResponse.headers && transportResponse.headers['content-type']) {
-            responseHeaders.set('content-type', transportResponse.headers['content-type']);
+          if (transportResponse.headers && transportResponse.headers["content-type"]) {
+            responseHeaders.set("content-type", transportResponse.headers["content-type"]);
           }
 
           if (transportResponse.text) {
             responseBody = transportResponse.text;
           } else if (transportResponse.json) {
             responseBody = JSON.stringify(transportResponse.json);
-            responseHeaders.set('content-type', 'application/json');
+            responseHeaders.set("content-type", "application/json");
           } else if (transportResponse.arrayBuffer) {
-            const decoder = new TextDecoder();
-            responseBody = decoder.decode(new Uint8Array(transportResponse.arrayBuffer));
+            const localDecoder = new TextDecoder();
+            responseBody = localDecoder.decode(new Uint8Array(transportResponse.arrayBuffer));
           } else {
-            responseBody = '';
+            responseBody = "";
           }
 
-          const fallbackContentType = transportResponse.headers?.['content-type'] || '';
-          if (fallbackContentType.includes('application/x-ndjson') || responseBody.includes('\n{')) {
+          const fallbackContentType = transportResponse.headers?.["content-type"] || "";
+          if (fallbackContentType.includes("application/x-ndjson") || responseBody.includes("\n{")) {
             const finalResponse = this.parseNdjsonText(responseBody, context?.onProgress);
             responseBody = JSON.stringify(finalResponse || {});
-            responseHeaders.set('content-type', 'application/json');
+            responseHeaders.set("content-type", "application/json");
           }
 
-          response = new Response(responseBody, {
+          return new Response(responseBody, {
             status: transportResponse.status || 500,
-            statusText: transportResponse.status >= 200 && transportResponse.status < 300 ? 'OK' : 'Error',
-            headers: responseHeaders
+            statusText: transportResponse.status >= 200 && transportResponse.status < 300 ? "OK" : "Error",
+            headers: responseHeaders,
           });
+        };
+
+        let response: Response;
+        if (preferredTransport === "requestUrl") {
+          response = await requestViaRequestUrl();
         } else {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: requestBodyBuffer,
-          });
+          try {
+            response = await fetch(endpoint, {
+              method: "POST",
+              headers,
+              body: requestBodyBuffer,
+            });
+          } catch (fetchError) {
+            // Multipart uploads can fail via direct fetch (e.g. CORS/preflight). requestUrl is more reliable.
+            this.warn("Fetch upload failed; falling back to requestUrl", {
+              endpoint,
+              error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+            });
+            response = await requestViaRequestUrl();
+          }
         }
 
         
@@ -796,7 +808,8 @@ export class TranscriptionService {
                            messageForRetryCheck.includes("server error") ||
                            messageForRetryCheck.includes("failed to parse server error response as json");
 
-        const isNetworkError = messageForRetryCheck.includes("network error") ||
+        const isNetworkError = messageForRetryCheck.includes("failed to fetch") ||
+                               messageForRetryCheck.includes("network error") ||
                                messageForRetryCheck.includes("connectivity") ||
                                messageForRetryCheck.includes("offline") ||
                                messageForRetryCheck.includes("request failed") ||

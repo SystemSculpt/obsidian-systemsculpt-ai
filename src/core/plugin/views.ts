@@ -7,6 +7,7 @@ import { ChatState } from "../../types/index";
 import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../../views/EmbeddingsView";
 import { BenchView, BENCH_VIEW_TYPE } from "../../views/benchview/BenchView";
 import { BenchResultsView, BENCH_RESULTS_VIEW_TYPE } from "../../views/benchresults/BenchResultsView";
+import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 
 interface ChatViewState {
   state: ChatState;
@@ -21,6 +22,10 @@ export class ViewManager {
   private initPromise: Promise<void> | null = null;
   private deferredViews: Map<string, () => void> = new Map();
   private initializationTimeout: number = 10000; // Increased from 2000ms to 10000ms for network operations
+  private restoreQueueHigh: WorkspaceLeaf[] = [];
+  private restoreQueueLow: WorkspaceLeaf[] = [];
+  private restoreQueuedLeaves: Set<WorkspaceLeaf> = new Set();
+  private restorePromise: Promise<void> | null = null;
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
@@ -43,6 +48,60 @@ export class ViewManager {
     });
   }
 
+  private scheduleChatRestore(leaf: WorkspaceLeaf, priority: "high" | "low"): void {
+    if (this.restoreQueuedLeaves.has(leaf)) {
+      return;
+    }
+
+    this.restoreQueuedLeaves.add(leaf);
+    if (priority === "high") {
+      this.restoreQueueHigh.push(leaf);
+    } else {
+      this.restoreQueueLow.push(leaf);
+    }
+
+    void this.processRestoreQueue();
+  }
+
+  private processRestoreQueue(): Promise<void> {
+    if (this.restorePromise) {
+      return this.restorePromise;
+    }
+
+    const promise = (async () => {
+      while (this.restoreQueueHigh.length > 0 || this.restoreQueueLow.length > 0) {
+        const leaf = this.restoreQueueHigh.shift() ?? this.restoreQueueLow.shift();
+        if (!leaf) continue;
+        this.restoreQueuedLeaves.delete(leaf);
+
+        if ((leaf.view as any)?.getViewType?.() !== CHAT_VIEW_TYPE) {
+          continue;
+        }
+
+        const view = leaf.view as ChatView;
+        if (view.isFullyLoaded) {
+          continue;
+        }
+
+        const state = leaf.getViewState();
+        if (!this.isValidChatState(state)) {
+          continue;
+        }
+
+        await this.restoreView(view, state.state);
+        await yieldToEventLoop(0);
+      }
+    })();
+
+    this.restorePromise = promise.finally(() => {
+      if (this.restorePromise === promise) {
+        this.restorePromise = null;
+      }
+    });
+
+    return this.restorePromise;
+  }
+
   private async initializeInBackground() {
     if (this.isInitializing || this.isInitialized) return;
     this.isInitializing = true;
@@ -52,14 +111,14 @@ export class ViewManager {
       // Only initialize what's needed for visible views
       const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
       const visibleLeaves = leaves.filter(leaf => !leaf.view.containerEl.hidden);
+      const hiddenLeaves = leaves.filter(leaf => leaf.view.containerEl.hidden);
 
       for (const leaf of visibleLeaves) {
-        const view = leaf.view as ChatView;
-        const state = leaf.getViewState();
-        if (this.isValidChatState(state)) {
-          await this.restoreView(view, state.state);
-        }
+        this.scheduleChatRestore(leaf, "high");
       }
+
+      // Restore the currently-visible chats first so the UI is ready quickly.
+      await this.processRestoreQueue();
 
       // Lazy-load change: do not fetch models here. We will fetch
       // on-demand when user opens the model selection or triggers a run.
@@ -75,21 +134,24 @@ export class ViewManager {
       }
       this.deferredViews.clear();
 
-      // Restore remaining chat views in the background
-      const hiddenLeaves = leaves.filter(leaf => leaf.view.containerEl.hidden);
       if (hiddenLeaves.length > 0) {
         setTimeout(() => {
           for (const leaf of hiddenLeaves) {
-            const view = leaf.view as ChatView;
-            const state = leaf.getViewState();
-            if (this.isValidChatState(state)) {
-              this.restoreView(view, state.state).catch(error => {
-              });
-            }
+            this.scheduleChatRestore(leaf, "low");
           }
         }, 0);
       }
 
+      // Priority restore when the user activates a chat leaf.
+      this.plugin.registerEvent(
+        this.app.workspace.on("active-leaf-change", (leaf) => {
+          if (!leaf) return;
+          if ((leaf.view as any)?.getViewType?.() !== CHAT_VIEW_TYPE) return;
+          const view = leaf.view as ChatView;
+          if (view.isFullyLoaded) return;
+          this.scheduleChatRestore(leaf, "high");
+        })
+      );
     } catch (error) {
     } finally {
       this.isInitializing = false;

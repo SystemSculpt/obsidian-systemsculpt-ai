@@ -23,7 +23,7 @@ export const uiSetup = {
       const plugins = (chatView.app as any).plugins;
       if (plugins && !plugins.enabledPlugins.has("mermaid")) {
         // @ts-ignore
-        await plugins.enablePlugin("mermaid");
+        void plugins.enablePlugin("mermaid");
       }
     } catch (e) {
     }
@@ -266,12 +266,6 @@ export const uiSetup = {
         if (leaf === chatView.leaf && chatView.inputHandler) {
           chatView.inputHandler.focus();
         }
-        if (leaf === chatView.leaf && chatView.chatId && !chatView.isFullyLoaded) {
-          const viewState = chatView.leaf.getViewState();
-          if (viewState?.state?.chatId) {
-            void chatView.setState(viewState.state);
-          }
-        }
       })
     );
 
@@ -280,11 +274,11 @@ export const uiSetup = {
     // Initialize model indicator without forcing model fetch. The indicator
     // will render a lightweight state and fetch only when user opens modal
     // or when generation begins.
-    await chatView.updateModelIndicator();
+    void chatView.updateModelIndicator();
     
     // Initialize system prompt indicator
-    await chatView.updateSystemPromptIndicator();
-    await chatView.updateAgentModeIndicator();
+    void chatView.updateSystemPromptIndicator();
+    void chatView.updateAgentModeIndicator();
 
     // Check if we need to prompt for initial model selection
     if (!chatView.plugin.settings.selectedModelId && !chatView.plugin.hasPromptedForDefaultModel) {
@@ -328,35 +322,6 @@ export const uiSetup = {
         if (useLatestEverywhere || isStandardMode) {
           chatView.selectedModelId = chatView.plugin.settings.selectedModelId;
         }
-      }
-      
-      // Sync the active provider based on the current model
-      try {
-        const models = await chatView.plugin.modelService.getModels();
-        const currentModel = models.find((model) => model.id === chatView.selectedModelId);
-        if (currentModel) {
-          const customProvider = chatView.plugin.settings.customProviders.find(
-            (p) => p.name.toLowerCase() === currentModel.provider.toLowerCase()
-          );
-          if (customProvider) {
-            await chatView.plugin.getSettingsManager().updateSettings({
-              activeProvider: {
-                id: customProvider.id,
-                name: customProvider.name,
-                type: "custom",
-              }
-            });
-          } else {
-            await chatView.plugin.getSettingsManager().updateSettings({
-              activeProvider: {
-                id: "systemsculpt",
-                name: "SystemSculpt",
-                type: "native",
-              }
-            });
-          }
-        }
-      } catch (error) {
       }
     }
 
@@ -432,7 +397,7 @@ export const uiSetup = {
       chatView.displayChatStatus();
     } else {
       // For existing chats, render the messages
-      await chatView.renderMessagesInChunks();
+      void chatView.renderMessagesInChunks();
     }
   },
 

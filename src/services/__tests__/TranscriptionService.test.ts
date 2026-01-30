@@ -1012,6 +1012,57 @@ First`;
   });
 
   describe("transcribeFile chunking", () => {
+    it("does not chunk custom Groq uploads under the 25MB limit", async () => {
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn(() => false),
+        preferredTransport: jest.fn(() => "requestUrl"),
+        supportsStreaming: jest.fn(() => true),
+      });
+
+      mockPlugin.settings.transcriptionProvider = "custom";
+      mockPlugin.settings.customTranscriptionEndpoint =
+        "https://api.groq.com/openai/v1/audio/transcriptions";
+      mockPlugin.settings.customTranscriptionApiKey = "test";
+      (TranscriptionService as any).instance = undefined;
+      service = TranscriptionService.getInstance(mockPlugin);
+
+      const buildChunksSpy = jest.spyOn(service as any, "buildWavChunkBlobs");
+
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        headers: { "content-type": "application/json" },
+        json: { text: "ok" },
+      });
+
+      const file = new TFile();
+      (file as any).path = "big.ogg";
+      (file as any).name = "big.ogg";
+      (file as any).basename = "big";
+      (file as any).extension = "ogg";
+      (file as any).stat = { size: AUDIO_UPLOAD_MAX_BYTES + 1 };
+
+      mockPlugin.app.vault.readBinary = jest
+        .fn()
+        .mockResolvedValue(new ArrayBuffer(AUDIO_UPLOAD_MAX_BYTES + 1));
+
+      const result = await service.transcribeFile(file, {
+        type: "note",
+        timestamped: false,
+        onProgress: jest.fn(),
+        suppressNotices: true,
+      });
+
+      expect(result).toBe("ok");
+      expect(buildChunksSpy).not.toHaveBeenCalled();
+      expect(requestUrl).toHaveBeenCalledTimes(1);
+
+      const requestArgs = (requestUrl as jest.Mock).mock.calls[0][0];
+      const body = requestArgs.body as ArrayBuffer;
+      const text = new TextDecoder().decode(new Uint8Array(body).slice(0, 800));
+      expect(text).toContain('filename="big.ogg"');
+      expect(text).toContain("Content-Type: audio/ogg");
+    });
+
     it("chunks files larger than the SystemSculpt serverless limit", async () => {
       (PlatformContext.get as jest.Mock).mockReturnValue({
         isMobile: jest.fn(() => false),

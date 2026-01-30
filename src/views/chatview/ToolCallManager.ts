@@ -881,6 +881,11 @@ export class ToolCallManager {
     if (toolName.includes('list') || toolName.includes('directory')) {
       return this.truncateListResult(data);
     }
+
+    // For common text-heavy tool responses, truncate `text` but preserve structure/metadata.
+    if (typeof data === 'object' && data && typeof data.text === 'string') {
+      return this.truncateTextResult(data);
+    }
     
     // Generic truncation for other JSON data
     const maxLength = this.MAX_TOOL_RESULT_SIZE - this.TRUNCATION_INDICATOR.length;
@@ -940,6 +945,24 @@ export class ToolCallManager {
           : data.content,
         truncated: data.content.length > maxContentLength,
         originalLength: data.content.length
+      };
+    }
+    return data;
+  }
+
+  /**
+   * Truncate text-heavy results while preserving structure (e.g. transcripts, extracted text).
+   */
+  private truncateTextResult(data: any): any {
+    if (typeof data === 'object' && data && typeof data.text === 'string') {
+      const maxTextLength = this.MAX_TOOL_RESULT_SIZE - 500; // Reserve space for metadata
+      return {
+        ...data,
+        text: data.text.length > maxTextLength
+          ? data.text.substring(0, maxTextLength) + this.TRUNCATION_INDICATOR
+          : data.text,
+        truncated: data.text.length > maxTextLength,
+        originalLength: data.text.length
       };
     }
     return data;

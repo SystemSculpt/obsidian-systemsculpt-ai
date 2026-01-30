@@ -86,6 +86,8 @@ export class ChatView extends ItemView {
   private readonly VIRTUAL_BATCH_SIZE: number = 20; // How many messages to load at a time
   private hasAdjustedInitialWindow: boolean = false;
   private renderEpoch: number = 0;
+  private loadEpoch: number = 0;
+  private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
 
   // Explicitly re-declare core ItemView fields for clarity / type checking
   declare app: App;
@@ -1051,100 +1053,133 @@ export class ChatView extends ItemView {
 
   async loadChatById(chatId: string): Promise<void> {
     this.ensureCoreServicesReady();
-    this.chatId = chatId;
-    this.isFullyLoaded = false; // Mark as not loaded while loading
-    this.trustedToolNames.clear(); // Clear session trust on chat load
-    this.virtualStartIndex = 0;
-    this.hasAdjustedInitialWindow = false;
 
-    if (this.chatContainer) {
-      this.chatContainer.empty();
-      this.showChatLoadingBanner("Loading chat…");
+    // De-dupe redundant concurrent loads for the same chatId.
+    if (this.activeLoad && this.activeLoad.chatId === chatId) {
+      await this.activeLoad.promise;
+      return;
     }
-    this.inputHandler?.notifyChatReadyChanged?.();
 
-    try {
-      
-      const chatData = await this.chatStorage.loadChat(chatId);
-      if (!chatData) {
-        this.messages = [];
+    const loadEpoch = ++this.loadEpoch;
+    const promise = (async () => {
+      this.chatId = chatId;
+      this.isFullyLoaded = false; // Mark as not loaded while loading
+      this.trustedToolNames.clear(); // Clear session trust on chat load
+      this.virtualStartIndex = 0;
+      this.hasAdjustedInitialWindow = false;
+
+      if (this.chatContainer) {
         this.chatContainer.empty();
-        this.setTitle("Chat not found");
-        this.systemPromptType = 'general-use';
-        this.systemPromptPath = undefined;
-        this.updateModelIndicator();
-        this.updateSystemPromptIndicator();
-        this.updateAgentModeIndicator();
-        this.contextManager?.clearContext();
-        this.isFullyLoaded = true; // Mark as loaded even when chat not found
-        this.inputHandler?.notifyChatReadyChanged?.();
-        return;
+        this.showChatLoadingBanner("Loading chat…");
       }
+      this.inputHandler?.notifyChatReadyChanged?.();
 
-      // Restore all chat properties
-      this.selectedModelId = chatData.selectedModelId || this.plugin.settings.selectedModelId;
-      this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
-      this.setTitle(chatData.title || generateDefaultChatTitle(), false);
-      this.messages = chatData.messages || [];
-      this.chatVersion = chatData.version || 0;
-      
-      // Simplified system prompt handling
-      this.systemPromptType = chatData.systemPromptType || 'general-use';
-      this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
-
-      // Load agentMode from chat data, default to true for backward compatibility
-      this.agentMode = chatData.agentMode !== undefined ? chatData.agentMode : true;
-
-      // Load chat font size from chat data
-      this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
-      // Apply it after UI is ready (don't save again, just apply visually)
-      setTimeout(() => {
-        if (this.chatContainer) {
-          this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
-          this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
-        }
-      }, 100);
-      
-      // Handle context files if any
-      if (chatData.context_files && this.contextManager) {
-        const contextFiles = chatData.context_files.filter(Boolean);
-        if (contextFiles.length > 0) {
-          await this.contextManager.setContextFiles(contextFiles);
+      const yieldToPaint = () => new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame !== "undefined") {
+          requestAnimationFrame(() => resolve());
         } else {
-          await this.contextManager.clearContext();
+          setTimeout(() => resolve(), 0);
         }
-      } else if (this.contextManager) {
-        await this.contextManager.clearContext();
+      });
+
+      // Give the browser a chance to paint the loading banner before we do any
+      // potentially-heavy parsing work.
+      await yieldToPaint();
+
+      try {
+        const chatData = await this.chatStorage.loadChat(chatId);
+        if (loadEpoch !== this.loadEpoch) return;
+
+        if (!chatData) {
+          this.messages = [];
+          this.chatContainer?.empty();
+          this.setTitle("Chat not found");
+          this.systemPromptType = 'general-use';
+          this.systemPromptPath = undefined;
+          this.contextManager?.clearContext();
+          this.isFullyLoaded = true; // Mark as loaded even when chat not found
+          this.inputHandler?.notifyChatReadyChanged?.();
+          // UI indicators can update asynchronously
+          void this.updateModelIndicator();
+          void this.updateSystemPromptIndicator();
+          void this.updateAgentModeIndicator();
+          return;
+        }
+
+        // Restore all chat properties
+        this.selectedModelId = chatData.selectedModelId || this.plugin.settings.selectedModelId;
+        this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
+        this.setTitle(chatData.title || generateDefaultChatTitle(), false);
+        this.messages = chatData.messages || [];
+        this.chatVersion = chatData.version || 0;
+
+        // Simplified system prompt handling
+        this.systemPromptType = chatData.systemPromptType || 'general-use';
+        this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
+
+        // Load agentMode from chat data, default to true for backward compatibility
+        this.agentMode = chatData.agentMode !== undefined ? chatData.agentMode : true;
+
+        // Load chat font size from chat data
+        this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
+        // Apply it after UI is ready (don't save again, just apply visually)
+        setTimeout(() => {
+          if (this.chatContainer) {
+            this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
+            this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
+          }
+        }, 100);
+
+        // Restore context files without blocking first render.
+        if (this.contextManager) {
+          const contextFiles = (chatData.context_files || []).filter(Boolean);
+          if (contextFiles.length > 0) {
+            void this.contextManager.setContextFiles(contextFiles);
+          } else {
+            this.contextManager.clearContext();
+          }
+        }
+
+        await this.renderMessagesInChunks();
+        if (loadEpoch !== this.loadEpoch) return;
+
+        this.isFullyLoaded = true; // Mark as loaded after messages are rendered
+        this.inputHandler?.notifyChatReadyChanged?.();
+
+        // Update UI indicators (async; do not block chat readiness)
+        void this.updateModelIndicator();
+        void this.updateSystemPromptIndicator();
+        void this.updateAgentModeIndicator();
+        void this.refreshModelMetadata();
+
+        if (this.inputHandler) {
+          this.inputHandler.onModelChange();
+        }
+
+        // Validate context files in the background
+        void this.contextManager?.validateAndCleanContextFiles();
+
+        // Update the tab title
+        this.updateViewState();
+
+        // Notify listeners that a chat has been loaded
+        this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
+      } catch (error) {
+        if (loadEpoch !== this.loadEpoch) return;
+        this.handleError(`Failed to load chat: ${(error as any)?.message ?? String(error)}`);
+        this.isFullyLoaded = true; // Mark as loaded even on error to prevent stuck state
+        this.removeChatLoadingBanner();
+        this.inputHandler?.notifyChatReadyChanged?.();
       }
+    })();
 
-      await this.renderMessagesInChunks();
-
-      this.isFullyLoaded = true; // Mark as loaded after messages are rendered
-      this.inputHandler?.notifyChatReadyChanged?.();
-      
-      // Update UI indicators
-      await this.updateModelIndicator();
-      await this.updateSystemPromptIndicator();
-      await this.updateAgentModeIndicator();
-      
-      if (this.inputHandler) {
-        this.inputHandler.onModelChange();
+    this.activeLoad = { chatId, promise };
+    try {
+      await promise;
+    } finally {
+      if (this.activeLoad?.promise === promise) {
+        this.activeLoad = null;
       }
-      
-      // Validate context files
-      await this.contextManager.validateAndCleanContextFiles();
-
-      // Update the tab title
-      this.updateViewState();
-      
-      // Notify listeners that a chat has been loaded
-      this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
-
-    } catch (error) {
-      this.handleError(`Failed to load chat: ${error.message}`);
-      this.isFullyLoaded = true; // Mark as loaded even on error to prevent stuck state
-      this.removeChatLoadingBanner();
-      this.inputHandler?.notifyChatReadyChanged?.();
     }
   }
 
