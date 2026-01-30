@@ -4,7 +4,7 @@ Turn your vault into an AI‑powered thinking partner. SystemSculpt brings fast,
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-4.5.0-blue.svg)](https://github.com/systemsculpt/obsidian-systemsculpt-ai)
+[![Version](https://img.shields.io/badge/version-4.6.0-blue.svg)](https://github.com/systemsculpt/obsidian-systemsculpt-ai)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-license)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0+-purple.svg)](https://obsidian.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA)](https://discord.gg/3gNUZJWxnJ)
