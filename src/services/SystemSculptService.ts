@@ -929,6 +929,7 @@ export class SystemSculptService {
     maxTokens,
     includeReasoning,
     debug,
+    sessionId,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -946,6 +947,7 @@ export class SystemSculptService {
     maxTokens?: number;
     includeReasoning?: boolean;
     debug?: StreamDebugCallbacks;
+    sessionId?: string;
   }): AsyncGenerator<StreamEvent, void, unknown> {
     // DEVELOPMENT MODE LOGGING: Log development mode status and server configuration
     const { DEVELOPMENT_MODE } = await import('../constants/api');
@@ -1038,6 +1040,8 @@ export class SystemSculptService {
         const canStream = platform.supportsStreaming(transportOptions);
         const preferredTransport = platform.preferredTransport(transportOptions);
 
+        const sessionIdHash = sessionId ? deterministicId(sessionId, "sess") : undefined;
+
         const requestBody: Record<string, any> = {
           model: serverModelId,
           messages: this.toSystemSculptApiMessages(messagesForRequest),
@@ -1047,6 +1051,10 @@ export class SystemSculptService {
 
         if (Number.isFinite(maxTokens) && (maxTokens as number) > 0) {
           requestBody.max_tokens = Math.max(1, Math.floor(maxTokens as number));
+        }
+
+        if (sessionIdHash) {
+          requestBody.session_id = sessionIdHash;
         }
         
         // Add plugins if provided (e.g., web search)
@@ -1346,6 +1354,7 @@ export class SystemSculptService {
     toolCallManager,
     plugins,
     web_search_options,
+    sessionId,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -1356,6 +1365,7 @@ export class SystemSculptService {
     toolCallManager?: any;
     plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
     web_search_options?: { search_context_size?: "low" | "medium" | "high" };
+    sessionId?: string;
   }): Promise<{ requestBody: Record<string, any>; preparedMessages: ChatMessage[]; actualModelId: string }> {
     const prepared = await this.prepareChatRequest({
       messages,
@@ -1377,6 +1387,10 @@ export class SystemSculptService {
       include_reasoning: true,
       provider: { allow_fallbacks: false },
     };
+
+    if (sessionId) {
+      requestBody.session_id = deterministicId(sessionId, "sess");
+    }
 
     if (plugins && plugins.length > 0) {
       requestBody.plugins = plugins;

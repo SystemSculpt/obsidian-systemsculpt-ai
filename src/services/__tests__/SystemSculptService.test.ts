@@ -4,6 +4,7 @@ import { PlatformContext } from "../PlatformContext";
 import { SystemSculptEnvironment } from "../api/SystemSculptEnvironment";
 import { DebugLogger } from "../../utils/debugLogger";
 import { StreamingErrorHandler } from "../StreamingErrorHandler";
+import { deterministicId } from "../../utils/id";
 
 const licenseService = {
   validateLicense: jest.fn().mockResolvedValue(true),
@@ -228,6 +229,19 @@ describe("SystemSculptService", () => {
     expect(requestBody.tools[0].function.parameters.type).toBe("object");
     expect(required).toEqual(expect.arrayContaining(["paths", "offset", "length"]));
     expect(requestBody.tools[0].function.strict).toBeUndefined();
+  });
+
+  it("includes session_id in request preview when provided", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const { requestBody } = await service.buildRequestPreview({
+      messages: [],
+      model: "systemsculpt/ai-agent",
+      sessionId: "chat-123",
+    });
+
+    expect(requestBody.session_id).toBe(deterministicId("chat-123", "sess"));
   });
 
   it("handles custom provider completion", async () => {

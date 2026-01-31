@@ -246,6 +246,7 @@ export class ChatTurnOrchestrator {
           ? { search_context_size: WEB_SEARCH_CONFIG.DEFAULT_CONTEXT_SIZE }
           : undefined,
         debug: debugCallbacks || undefined,
+        sessionId: this.host.getChatId?.(),
       });
       errorLogger.debug('Started assistant stream', {
         source: 'ChatTurnOrchestrator',
