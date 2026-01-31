@@ -6,7 +6,6 @@ import { ProviderErrorManager } from "./ProviderErrorManager";
 import SystemSculptPlugin from "../../main";
 import { isAnthropicEndpoint, ANTHROPIC_MODELS } from "../../constants/anthropic";
 import { ProviderModel } from "./adapters/BaseProviderAdapter";
-import { getFunctionProfiler } from "../FunctionProfiler";
 import { isAuthFailureMessage } from "../../utils/errors";
 
 /**
@@ -22,7 +21,6 @@ export class CustomProviderModelService extends BaseProviderService {
     timestamp: number;
   }>();
   private modelDetailsCache = new Map<string, SystemSculptModel>();
-	private readonly profiler = getFunctionProfiler();
 	private deferredPrefetchStarted = false;
 	private activeFetches: Map<string, Promise<SystemSculptModel[]>> = new Map();
 	private concurrencyLimit = 2;
@@ -150,17 +148,10 @@ export class CustomProviderModelService extends BaseProviderService {
     }
 
     try {
-      const profiledTest = this.profiler.profileFunction(
-        () =>
-          this.customProviderService.testConnection(
-            provider,
-            forceRefresh ? { force: true } : undefined
-          ),
-        "performConnectionTest",
-        `CustomProviderService[${provider.id}]`
+      const result = await this.customProviderService.testConnection(
+        provider,
+        forceRefresh ? { force: true } : undefined
       );
-
-      const result = await profiledTest();
       if (result.success && result.models) {
         // Reset failure count on successful connection
         await this.resetProviderFailureCount(provider.id);

@@ -48,7 +48,6 @@ import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { FreezeMonitor } from "./services/FreezeMonitor";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
-import { PerformanceDiagnosticsService, InstrumentOptions } from "./services/PerformanceDiagnosticsService";
 import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
@@ -109,12 +108,10 @@ export default class SystemSculptPlugin extends Plugin {
   public vaultFileCache: VaultFileCache;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
-  private performanceDiagnostics: PerformanceDiagnosticsService | null = null;
   private lifecycleCoordinator: LifecycleCoordinator | null = null;
   private diagnosticsSessionId: string | null = null;
   private diagnosticsLogFileName = "systemsculpt-latest.log";
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
-  private diagnosticsOperationsFileName = "operations-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   // Removed complex settings callback system - embeddings are now completely on-demand
@@ -144,7 +141,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.customProviderService = new CustomProviderService(this, this.app);
       }
       this._aiService = SystemSculptService.getInstance(this);
-      this.instrumentServiceInstance(this._aiService, "SystemSculptService");
     }
     return this._aiService;
   }
@@ -152,7 +148,6 @@ export default class SystemSculptPlugin extends Plugin {
   public get modelService(): UnifiedModelService {
     if (!this._modelService) {
       this._modelService = UnifiedModelService.getInstance(this);
-      this.instrumentServiceInstance(this._modelService, "UnifiedModelService");
     }
     return this._modelService;
   }
@@ -187,7 +182,6 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       this.embeddingsManager = new EmbeddingsManager(this.app, this);
-      this.instrumentServiceInstance(this.embeddingsManager, "EmbeddingsManager");
 
       // Initialize in background if not already done
       if (!this.embeddingsInitialized) {
@@ -224,7 +218,6 @@ export default class SystemSculptPlugin extends Plugin {
   public getDailySettingsService(): DailySettingsService {
     if (!this.dailySettingsService) {
       this.dailySettingsService = new DailySettingsService(this.app);
-      this.instrumentServiceInstance(this.dailySettingsService, "DailySettingsService");
       this.dailySettingsService.initialize().then(async () => {
         const settings = await this.dailySettingsService!.getSettings();
         await this.onDailySettingsUpdated(settings);
@@ -249,7 +242,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.getDailySettingsService(),
         eventBus
       );
-      this.instrumentServiceInstance(this.dailyNoteService, "DailyNoteService");
     }
     return this.dailyNoteService;
   }
@@ -261,7 +253,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.getDailyNoteService(),
         this.getDailySettingsService()
       );
-      this.instrumentServiceInstance(this.dailyWorkflowService, "DailyWorkflowService");
       this.dailyWorkflowService.initialize().catch((error) => {
         logger.warn("Daily workflow service failed to initialize", {
           source: "SystemSculptPlugin",
@@ -277,7 +268,6 @@ export default class SystemSculptPlugin extends Plugin {
   public getDailyAnalyticsService(): DailyAnalyticsService {
     if (!this.dailyAnalyticsService) {
       this.dailyAnalyticsService = new DailyAnalyticsService(this.getDailyNoteService());
-      this.instrumentServiceInstance(this.dailyAnalyticsService, "DailyAnalyticsService");
     }
     return this.dailyAnalyticsService;
   }
@@ -289,7 +279,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.getDailyNoteService(),
         this.getDailySettingsService()
       );
-      this.instrumentServiceInstance(this.dailyReviewService, "DailyReviewService");
     }
     return this.dailyReviewService;
   }
@@ -300,7 +289,6 @@ export default class SystemSculptPlugin extends Plugin {
   public getReadwiseService(): ReadwiseService {
     if (!this.readwiseService) {
       this.readwiseService = new ReadwiseService(this);
-      this.instrumentServiceInstance(this.readwiseService, "ReadwiseService");
       // Initialize the service (loads sync state, starts scheduled sync if configured)
       this.readwiseService.initialize().catch((error) => {
         const logger = this.getLogger();
@@ -369,9 +357,6 @@ export default class SystemSculptPlugin extends Plugin {
 				this.getDailyNoteService(),
 				this.getDailySettingsService()
 			);
-	      this.instrumentServiceInstance(this.dailyStatusBar, "DailyStatusBar", {
-	        includePrefixes: ["render", "refresh", "request", "open"],
-	      });
       await this.dailyStatusBar.initialize(this.dailyStatusBarItem);
     } else {
       this.dailyStatusBar.requestRefresh(true);
@@ -456,7 +441,6 @@ export default class SystemSculptPlugin extends Plugin {
     const header = `SystemSculpt diagnostics session ${timestamp} (plugin v${this.manifest.version})\n`;
     await this.rotateDiagnosticsFile(this.diagnosticsLogFileName, `systemsculpt-${timestamp}.log`, header);
     await this.rotateDiagnosticsFile(this.diagnosticsMetricsFileName, `resource-metrics-${timestamp}.ndjson`);
-    await this.rotateDiagnosticsFile(this.diagnosticsOperationsFileName, `operations-${timestamp}.ndjson`);
 
     const metadata = {
       sessionId: timestamp,
@@ -530,16 +514,8 @@ export default class SystemSculptPlugin extends Plugin {
     return [];
   }
 
-  private instrumentServiceInstance(instance: unknown, moduleName: string, options?: InstrumentOptions) {
-    if (!instance) return;
-    this.performanceDiagnostics?.instrumentObject(instance, moduleName, options);
-  }
-
   private wrapCommandCallback<T extends (...args: any[]) => any>(name: string, fn: T): T {
-    if (!this.performanceDiagnostics) {
-      return fn;
-    }
-    return this.performanceDiagnostics.profileFunction(fn, "Command", name);
+    return fn;
   }
 
 
@@ -749,9 +725,6 @@ export default class SystemSculptPlugin extends Plugin {
       run: () => {
         const version = this.manifest.version;
         this.versionCheckerService = VersionCheckerService.getInstance(version, this.app, this);
-        this.instrumentServiceInstance(this.versionCheckerService, "VersionCheckerService", {
-          includePrefixes: ["check", "start", "show"],
-        });
       },
     });
 
@@ -779,20 +752,6 @@ export default class SystemSculptPlugin extends Plugin {
           sessionId: this.diagnosticsSessionId ?? undefined,
         });
         this.resourceMonitor.start();
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
-      id: "monitor.performance",
-      label: "performance diagnostics",
-      optional: true,
-      run: () => {
-        this.performanceDiagnostics = new PerformanceDiagnosticsService(this, {
-          operationsFileName: this.diagnosticsOperationsFileName,
-          sessionId: this.diagnosticsSessionId ?? undefined,
-          blockedModules: ["StorageManager"],
-        });
-        this.performanceDiagnostics.instrumentPluginLifecycle(this);
       },
     });
 
@@ -895,15 +854,7 @@ export default class SystemSculptPlugin extends Plugin {
               return;
             }
 
-            const profiledRunner = this.performanceDiagnostics
-              ? this.performanceDiagnostics.profileFunction(
-                  service.checkForUpdatesOnStartup.bind(service),
-                  "VersionCheckerService",
-                  "checkForUpdatesOnStartup"
-                )
-              : service.checkForUpdatesOnStartup.bind(service);
-
-            this.runAfterIdleAsync(() => profiledRunner(0), 750)
+            this.runAfterIdleAsync(() => service.checkForUpdatesOnStartup(0), 750)
               .then(() => {
                 executePhase.complete();
                 resolve();
@@ -1192,24 +1143,6 @@ export default class SystemSculptPlugin extends Plugin {
     } else {
       lines.push("Resource monitor not running.");
     }
-    if (this.performanceDiagnostics) {
-      lines.push("");
-      const hotspots = this.performanceDiagnostics.getHotspots(Math.max(3, Math.min(5, resourceLines)));
-      lines.push("Top plugin hotspots:");
-      if (hotspots.length === 0) {
-        lines.push("No profiled hotspots yet. Interact with the plugin to gather traces.");
-      } else {
-        hotspots.forEach((stat, index) => {
-          const avg = stat.count > 0 ? stat.totalDuration / stat.count : 0;
-          const avgMem = stat.count > 0 ? stat.totalMemoryDelta / stat.count : 0;
-          lines.push(
-            `${index + 1}. ${stat.module}.${stat.name} — avg ${avg.toFixed(2)}ms, avg Δ ${(avgMem / 1024 / 1024).toFixed(
-              3
-            )} MB`
-          );
-        });
-      }
-    }
     lines.push("");
     const logs = this.getAllSystemSculptLogs();
     lines.push(`Recent logs (latest ${Math.min(logLines, logs.length)} entries):`);
@@ -1235,13 +1168,6 @@ export default class SystemSculptPlugin extends Plugin {
       text: snapshot,
       path: result.success ? result.path : undefined,
     };
-  }
-
-  public async exportPerformanceHotspots(limit: number = 10): Promise<{ text: string; path?: string }> {
-    if (!this.performanceDiagnostics) {
-      return { text: "Performance diagnostics service is not running yet." };
-    }
-    return this.performanceDiagnostics.exportHotspotReport(limit);
   }
 
   private formatDiagnosticsFileTimestamp(date: Date): string {
@@ -1308,7 +1234,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.directoryManager = new DirectoryManager(this.app, this);
-      this.instrumentServiceInstance(this.directoryManager, "DirectoryManager");
       await this.directoryManager.initialize();
 
       logger.info("Directory manager initialized", {
@@ -1336,7 +1261,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.vaultFileCache = new VaultFileCache(this.app);
-      this.instrumentServiceInstance(this.vaultFileCache, "VaultFileCache");
       await this.vaultFileCache.initialize();
 
       logger.info("Vault file cache primed", {
@@ -1450,9 +1374,6 @@ export default class SystemSculptPlugin extends Plugin {
   private ensureSettingsManagerInstance(): SettingsManager {
     if (!this.settingsManager) {
       this.settingsManager = new SettingsManager(this);
-      this.instrumentServiceInstance(this.settingsManager, "SettingsManager", {
-        includePrefixes: ["load", "save", "update", "ensure"],
-      });
     }
 
     return this.settingsManager;
@@ -1541,15 +1462,11 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.customProviderService = new CustomProviderService(this, this.app);
-      this.instrumentServiceInstance(this.customProviderService, "CustomProviderService");
       this._aiService = SystemSculptService.getInstance(this);
-      this.instrumentServiceInstance(this._aiService, "SystemSculptService");
       this.favoritesService = FavoritesService.getInstance(this);
-      this.instrumentServiceInstance(this.favoritesService, "FavoritesService");
       // Initialize runtime incompatibility tracking (persists model tool/image rejections)
       RuntimeIncompatibilityService.getInstance(this);
       this._modelService = UnifiedModelService.getInstance(this);
-      this.instrumentServiceInstance(this._modelService, "UnifiedModelService");
 
       const metadata = {
         services: [
@@ -1602,7 +1519,6 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       this.templateManager = new TemplateManager(this, this.app);
-      this.instrumentServiceInstance(this.templateManager, "TemplateManager");
 
       if (!this.embeddingsStatusBar) {
         this.embeddingsStatusBar = new EmbeddingsStatusBar(this);
@@ -1817,14 +1733,10 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.licenseManager = new LicenseManager(this, this.app);
-      this.instrumentServiceInstance(this.licenseManager, "LicenseManager");
       this.resumeChatService = new ResumeChatService(this);
-      this.instrumentServiceInstance(this.resumeChatService, "ResumeChatService");
       this.viewManager = new ViewManager(this, this.app);
-      this.instrumentServiceInstance(this.viewManager, "ViewManager");
       this.viewManager.initialize();
       this.commandManager = new CommandManager(this, this.app);
-      this.instrumentServiceInstance(this.commandManager, "CommandManager");
       this.commandManager.registerCommands();
 
       const metadata = {
@@ -1913,7 +1825,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
       }
-      this.performanceDiagnostics = null;
 
       // Clean up settings manager (stop automatic backups)
       if (this.settingsManager) {
@@ -2176,9 +2087,6 @@ export default class SystemSculptPlugin extends Plugin {
   private ensureWorkflowEngineService(): WorkflowEngineService {
     if (!this.workflowEngineService) {
       this.workflowEngineService = new WorkflowEngineService(this);
-      this.instrumentServiceInstance(this.workflowEngineService, "WorkflowEngineService", {
-        includePrefixes: ["initialize", "handle", "maybe", "persist"],
-      });
       this.workflowEngineService.initialize();
     }
 
@@ -2291,22 +2199,6 @@ export default class SystemSculptPlugin extends Plugin {
           new Notice(`Resource report saved to ${path}.`, 5000);
         } else {
           new Notice("Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
-        }
-      }),
-    });
-
-    this.addCommand({
-      id: "systemsculpt-copy-performance-hotspots",
-      name: "Copy Performance Hotspots",
-      callback: this.wrapCommandCallback("copy-performance-hotspots", async () => {
-        const { text, path } = await this.exportPerformanceHotspots();
-        const copied = await tryCopyToClipboard(text);
-        if (copied) {
-          new Notice("Performance hotspots copied to clipboard.", 4000);
-        } else if (path) {
-          new Notice(`Performance hotspots saved to ${path}.`, 5000);
-        } else {
-          new Notice("Unable to copy performance report. See .systemsculpt/diagnostics.", 5000);
         }
       }),
     });

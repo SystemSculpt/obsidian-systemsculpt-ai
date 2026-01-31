@@ -2,7 +2,6 @@ import { App, TFile, normalizePath, moment, TFolder, EventRef, TAbstractFile } f
 import momentLib from 'moment';
 import { DailySettings, DailySettingsService, DEFAULT_DAILY_DIRECTORY_PATH } from './DailySettingsService';
 import { EventEmitter } from '../../core/EventEmitter';
-import { getFunctionProfiler } from '../FunctionProfiler';
 
 export interface DailyNotesQueryOptions {
 	cacheResult?: boolean;
@@ -32,8 +31,6 @@ export class DailyNoteService {
 	private vaultEventRefs: EventRef[] = [];
 	private cacheInvalidationTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastKnownDailyDirectory: string | null = null;
-	private readonly profiledLoadStreakData: () => Promise<StreakData>;
-	private readonly profiledEnsureDirectory: (path: string) => Promise<void>;
 	private directoryVerificationCache: Map<string, Promise<void>> = new Map();
 	private verifiedDailyDirectories: Set<string> = new Set();
 	private initialReadyPromise: Promise<void> | null = null;
@@ -42,17 +39,6 @@ export class DailyNoteService {
 		this.app = app;
 		this.settingsService = settingsService;
 		this.eventBus = eventBus;
-		const profiler = getFunctionProfiler();
-		this.profiledLoadStreakData = profiler.profileFunction(
-			this.loadStreakDataInternal.bind(this),
-			'loadStreakData',
-			'DailyNoteService'
-		);
-		this.profiledEnsureDirectory = profiler.profileFunction(
-			this.ensureDirectoryExistsInternal.bind(this),
-			'ensureDirectoryExists',
-			'DailyNoteService'
-		);
 		this.registerVaultListeners();
 		this.initialReadyPromise = this.refreshDailyDirectoryPath();
 	}
@@ -336,7 +322,7 @@ export class DailyNoteService {
 	 */
 	async getStreak(): Promise<number> {
 		try {
-			const streakData = await this.profiledLoadStreakData();
+			const streakData = await this.loadStreakDataInternal();
 			return streakData.currentStreak;
 		} catch (error) {
 			console.error('Failed to get streak:', error);
@@ -571,7 +557,7 @@ export class DailyNoteService {
 	 * Ensure directory exists in vault
 	 */
 	private async ensureDirectoryExists(path: string): Promise<void> {
-		await this.profiledEnsureDirectory(path);
+		await this.ensureDirectoryExistsInternal(path);
 	}
 
 	private async ensureDirectoryExistsInternal(path: string): Promise<void> {
@@ -648,7 +634,7 @@ export class DailyNoteService {
 	 * Expose current streak data for analytics consumers
 	 */
 	public async getStreakData(): Promise<StreakData> {
-		return await this.profiledLoadStreakData();
+		return await this.loadStreakDataInternal();
 	}
 
 	private runDirectoryTask<T>(task: () => Promise<T>): Promise<T> {

@@ -3,7 +3,6 @@ import moment from "moment";
 import { DailyNoteService } from "../../services/daily/DailyNoteService";
 import { DailySettingsService } from "../../services/daily/DailySettingsService";
 import { DailyNoteNavigatorModal } from "../../modals/DailyNoteNavigatorModal";
-import { getFunctionProfiler } from "../../services/FunctionProfiler";
 
 export class DailyStatusBar {
   private app: App;
@@ -17,7 +16,6 @@ export class DailyStatusBar {
   private readonly REFRESH_TTL = 60 * 1000;
   private readonly REFRESH_FORCE_COOLDOWN = 2000;
   private refreshCooldownHandle: ReturnType<typeof setTimeout> | null = null;
-  private readonly profiledRenderStatus: (force: boolean) => Promise<void>;
   private interactionsBound = false;
 
   constructor(
@@ -28,13 +26,6 @@ export class DailyStatusBar {
     this.app = app;
     this.dailyNoteService = dailyNoteService;
     this.dailySettingsService = dailySettingsService;
-
-    const profiler = getFunctionProfiler();
-    this.profiledRenderStatus = profiler.profileFunction(
-      this.renderStatusContent.bind(this),
-      "renderStatus",
-      "DailyStatusBar"
-    );
   }
 
   async initialize(containerEl: HTMLElement): Promise<void> {
@@ -99,7 +90,7 @@ export class DailyStatusBar {
       return;
     }
 
-    const refreshTask = this.profiledRenderStatus(force)
+    const refreshTask = this.renderStatusContent(force)
       .then(() => {
         this.lastRefreshAt = Date.now();
       })

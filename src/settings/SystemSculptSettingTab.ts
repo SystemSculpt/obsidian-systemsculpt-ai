@@ -134,8 +134,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       environmentInfo.push(`- Custom providers enabled: ${enabledCustomProviders.join(', ')}`);
     }
     
-    // Exclude performance memory details by request
-
     const title = encodeURIComponent('SystemSculpt Feedback: ');
     const body = encodeURIComponent(
       `Please describe your feedback:\n\n` +

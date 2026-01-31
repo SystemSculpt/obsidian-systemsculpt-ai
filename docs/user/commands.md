@@ -85,6 +85,5 @@ Notes:
 | Command | Default hotkey | Notes |
 | --- | --- | --- |
 | Copy Resource Usage Report |  | Copies a summary (or saves it) under `.systemsculpt/diagnostics` |
-| Copy Performance Hotspots |  | Copies hotspots (or saves it) under `.systemsculpt/diagnostics` |
 | Run Audio Chunking Analysis |  | Developer-oriented analysis tool |
 | Toggle Mobile Emulation Mode |  | Developer tool (only works in compatible Obsidian builds) |

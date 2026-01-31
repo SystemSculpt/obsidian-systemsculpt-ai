@@ -36,6 +36,5 @@ See: [Similar Notes](similar-notes.md).
 These commands can help you capture lightweight diagnostics:
 
 - **Copy Resource Usage Report**
-- **Copy Performance Hotspots**
 
 They may save reports under `.systemsculpt/diagnostics` if clipboard copy fails.

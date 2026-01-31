@@ -11,13 +11,6 @@ jest.mock("obsidian", () => ({
   Notice: jest.fn(),
 }));
 
-// Mock getFunctionProfiler
-jest.mock("../../FunctionProfiler", () => ({
-  getFunctionProfiler: () => ({
-    profileFunction: (fn: Function) => fn,
-  }),
-}));
-
 describe("DailyWorkflowService", () => {
   let service: DailyWorkflowService;
   let mockDailyNoteService: jest.Mocked<DailyNoteService>;
@@ -60,12 +53,6 @@ describe("DailyWorkflowService", () => {
   describe("constructor", () => {
     it("creates service instance", () => {
       expect(service).toBeInstanceOf(DailyWorkflowService);
-    });
-
-    it("initializes profiled functions", () => {
-      expect((service as any).profiledRunTick).toBeDefined();
-      expect((service as any).profiledDailyReminder).toBeDefined();
-      expect((service as any).profiledWeeklyReminder).toBeDefined();
     });
 
     it("sets up idle scheduler", () => {
@@ -303,8 +290,8 @@ describe("DailyWorkflowService", () => {
 
   describe("runTick", () => {
     it("calls both daily and weekly reminders", async () => {
-      const dailySpy = jest.spyOn(service as any, "profiledDailyReminder");
-      const weeklySpy = jest.spyOn(service as any, "profiledWeeklyReminder");
+      const dailySpy = jest.spyOn(service as any, "handleDailyReminder");
+      const weeklySpy = jest.spyOn(service as any, "handleWeeklyReviewReminder");
 
       await (service as any).runTick();
 
@@ -314,7 +301,7 @@ describe("DailyWorkflowService", () => {
 
     it("handles errors gracefully", async () => {
       const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-      (service as any).profiledDailyReminder = jest.fn().mockRejectedValue(new Error("Test error"));
+      (service as any).handleDailyReminder = jest.fn().mockRejectedValue(new Error("Test error"));
 
       await (service as any).runTick();
 

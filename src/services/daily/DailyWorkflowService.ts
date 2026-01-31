@@ -2,7 +2,6 @@ import { Notice } from 'obsidian';
 import moment from 'moment';
 import { DailyNoteService } from './DailyNoteService';
 import { DailySettingsService } from './DailySettingsService';
-import { getFunctionProfiler } from '../FunctionProfiler';
 
 /**
  * Handles time-based automation for the Daily Vault (auto-create, reminders, weekly review prompts)
@@ -13,32 +12,12 @@ export class DailyWorkflowService {
 	private reminderInterval: number | null = null;
 	private lastReminderDate: string | null = null;
 	private lastWeeklyReviewDate: string | null = null;
-	private readonly profiledRunTick: () => Promise<void>;
-	private readonly profiledDailyReminder: () => Promise<void>;
-	private readonly profiledWeeklyReminder: () => Promise<void>;
 	private readonly idleScheduler: (callback: () => void) => void;
 	private pendingTickWatchdog: number | null = null;
 
 	constructor(dailyNoteService: DailyNoteService, settingsService: DailySettingsService) {
 		this.dailyNoteService = dailyNoteService;
 		this.settingsService = settingsService;
-
-		const profiler = getFunctionProfiler();
-		this.profiledRunTick = profiler.profileFunction(
-			this.runTick.bind(this),
-			'runTick',
-			'DailyWorkflowService'
-		);
-		this.profiledDailyReminder = profiler.profileFunction(
-			this.handleDailyReminder.bind(this),
-			'handleDailyReminder',
-			'DailyWorkflowService'
-		);
-		this.profiledWeeklyReminder = profiler.profileFunction(
-			this.handleWeeklyReviewReminder.bind(this),
-			'handleWeeklyReviewReminder',
-			'DailyWorkflowService'
-		);
 
 		this.idleScheduler = typeof window !== 'undefined' && typeof (window as any).requestIdleCallback === 'function'
 			? (callback: () => void) => (window as any).requestIdleCallback(() => callback())
@@ -80,8 +59,8 @@ export class DailyWorkflowService {
 
 	private async runTick(): Promise<void> {
 		try {
-			await this.profiledDailyReminder();
-			await this.profiledWeeklyReminder();
+			await this.handleDailyReminder();
+			await this.handleWeeklyReviewReminder();
 		} catch (error) {
 			console.warn('Daily workflow tick failed', error);
 		}
@@ -93,7 +72,7 @@ export class DailyWorkflowService {
 				window.clearTimeout(this.pendingTickWatchdog);
 				this.pendingTickWatchdog = null;
 			}
-			void this.profiledRunTick();
+			void this.runTick();
 		};
 
 		this.idleScheduler(execute);

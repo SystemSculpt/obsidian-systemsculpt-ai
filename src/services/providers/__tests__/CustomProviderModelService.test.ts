@@ -18,12 +18,6 @@ jest.mock("../ProviderErrorManager", () => ({
   })),
 }));
 
-jest.mock("../../FunctionProfiler", () => ({
-  getFunctionProfiler: jest.fn().mockReturnValue({
-    profileFunction: jest.fn((fn) => fn),
-  }),
-}));
-
 jest.mock("../../../utils/modelUtils", () => ({
   createCanonicalId: jest.fn((provider, model) => `${provider}/${model}`),
   getCanonicalId: jest.fn((id) => id),

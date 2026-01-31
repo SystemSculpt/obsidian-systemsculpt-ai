@@ -148,23 +148,6 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
         });
 
     new Setting(containerEl)
-        .setName("Copy performance hotspots")
-        .setDesc("Captures the slowest plugin functions observed this session.")
-        .addButton((button) => {
-            button.setButtonText("Copy Hotspots").onClick(async () => {
-                const { text, path } = await plugin.exportPerformanceHotspots();
-                const copied = await tryCopyToClipboard(text);
-                if (copied) {
-                    new Notice("Performance hotspots copied to clipboard.", 4000);
-                } else if (path) {
-                    new Notice(`Performance hotspots saved to ${path}.`, 5000);
-                } else {
-                    new Notice("Unable to copy performance hotspots.", 5000);
-                }
-            });
-        });
-
-    new Setting(containerEl)
         .setName("Open diagnostics folder")
         .setDesc("Opens the .systemsculpt/diagnostics folder inside your vault.")
         .addButton((button) => {

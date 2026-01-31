@@ -6,13 +6,6 @@ import { TFile } from "obsidian";
 import { DailyAnalyticsService, DailyAnalyticsSummary } from "../DailyAnalyticsService";
 import { DailyNoteService } from "../DailyNoteService";
 
-// Mock FunctionProfiler
-jest.mock("../../FunctionProfiler", () => ({
-  getFunctionProfiler: jest.fn().mockReturnValue({
-    profileFunction: jest.fn((fn) => fn),
-  }),
-}));
-
 describe("DailyAnalyticsService", () => {
   let service: DailyAnalyticsService;
   let mockDailyNoteService: jest.Mocked<DailyNoteService>;

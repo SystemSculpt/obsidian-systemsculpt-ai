@@ -16,13 +16,6 @@ jest.mock("obsidian", () => {
   };
 });
 
-// Mock FunctionProfiler
-jest.mock("../../../services/FunctionProfiler", () => ({
-  getFunctionProfiler: jest.fn().mockReturnValue({
-    profileFunction: jest.fn((fn) => fn),
-  }),
-}));
-
 // Mock DailyNoteNavigatorModal
 jest.mock("../../../modals/DailyNoteNavigatorModal", () => ({
   DailyNoteNavigatorModal: jest.fn().mockImplementation(() => ({

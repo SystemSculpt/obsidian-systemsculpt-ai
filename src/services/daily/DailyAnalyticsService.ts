@@ -1,7 +1,6 @@
 import moment from 'moment';
 import type { TFile } from 'obsidian';
 import { DailyNoteService, StreakData } from './DailyNoteService';
-import { getFunctionProfiler } from '../FunctionProfiler';
 
 export interface DailyAnalyticsSummary {
 	totalDailyNotes: number;
@@ -21,22 +20,9 @@ export class DailyAnalyticsService {
 	private readonly SUMMARY_STORAGE_KEY = "systemsculpt:daily-analytics-summary";
 	private persistedSummary: DailyAnalyticsSummary | null = null;
 	private persistedSummaryTimestamp = 0;
-	private readonly profiledComputeSummary: () => Promise<DailyAnalyticsSummary>;
-	private readonly profiledCountNotes: (allNotes: TFile[], dateFormat: string, weekStart: moment.Moment, monthStart: moment.Moment) => Promise<{ weeklyCount: number; monthlyCount: number }>;
 
 	constructor(dailyNoteService: DailyNoteService) {
 		this.dailyNoteService = dailyNoteService;
-		const profiler = getFunctionProfiler();
-		this.profiledComputeSummary = profiler.profileFunction(
-			this.computeAnalyticsSummaryInternal.bind(this),
-			'computeAnalyticsSummary',
-			'DailyAnalyticsService'
-		);
-		this.profiledCountNotes = profiler.profileFunction(
-			this.countNotesInRecentRangeInternal.bind(this),
-			'countNotesInRecentRange',
-			'DailyAnalyticsService'
-		);
 		this.loadPersistedSummary();
 	}
 
@@ -67,7 +53,7 @@ export class DailyAnalyticsService {
 	}
 
 	private computeAndCacheSummary(): Promise<DailyAnalyticsSummary> {
-		const task = this.profiledComputeSummary()
+		const task = this.computeAnalyticsSummaryInternal()
 			.then((summary) => {
 				this.summaryCache = { timestamp: Date.now(), data: summary };
 				this.persistSummary(summary);
@@ -90,7 +76,7 @@ export class DailyAnalyticsService {
 		const weekStart = now.clone().startOf('week');
 		const monthStart = now.clone().startOf('month');
 
-		const { weeklyCount, monthlyCount } = await this.profiledCountNotes(
+		const { weeklyCount, monthlyCount } = await this.countNotesInRecentRangeInternal(
 			allNotes,
 			dateFormat,
 			weekStart,
