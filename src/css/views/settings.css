@@ -219,6 +219,14 @@
    Readwise Integration Styles
    ============================================================================ */
 
+.readwise-affiliate-note {
+  margin-bottom: var(--size-4-2);
+}
+
+.readwise-affiliate-note .readwise-affiliate-link {
+  font-weight: 600;
+}
+
 .readwise-status {
   margin-left: var(--size-4-2);
   font-size: 0.85em;

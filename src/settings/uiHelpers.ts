@@ -8,6 +8,17 @@ export interface ExternalHelpLinkOptions {
   datasetTestId?: string;
 }
 
+export interface InlineExternalLinkNoteOptions {
+  prefixText?: string;
+  linkText: string;
+  href: string;
+  suffixText?: string;
+  className?: string;
+  linkClassName?: string;
+  ariaLabel?: string;
+  datasetTestId?: string;
+}
+
 const RESTORE_DEFAULTS_DESCRIPTION = "Restore the recommended defaults";
 const RESTORE_DEFAULTS_LABEL = "Restore Recommended Defaults";
 
@@ -37,6 +48,33 @@ export function createExternalHelpLink(container: HTMLElement, options: External
 
   container.appendChild(link);
   return link;
+}
+
+export function createInlineExternalLinkNote(container: HTMLElement, options: InlineExternalLinkNoteOptions): HTMLDivElement {
+  const note = document.createElement("div");
+  note.classList.add("ss-inline-note");
+  if (options.className) {
+    note.classList.add(options.className);
+  }
+
+  if (options.prefixText) {
+    note.appendChild(document.createTextNode(options.prefixText));
+  }
+
+  createExternalHelpLink(note, {
+    text: options.linkText,
+    href: options.href,
+    className: options.linkClassName,
+    ariaLabel: options.ariaLabel,
+    datasetTestId: options.datasetTestId,
+  });
+
+  if (options.suffixText) {
+    note.appendChild(document.createTextNode(options.suffixText));
+  }
+
+  container.appendChild(note);
+  return note;
 }
 
 export function decorateRestoreDefaultsButton(button: HTMLButtonElement): HTMLButtonElement {

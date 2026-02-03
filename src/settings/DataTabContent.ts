@@ -1,5 +1,7 @@
 import { Setting, Notice, TextComponent, ButtonComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
+import { createInlineExternalLinkNote } from "./uiHelpers";
+import { READWISE } from "../constants/externalServices";
 import type { ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "../types/readwise";
 import {
   clampReadwiseSyncIntervalMinutes,
@@ -30,6 +32,7 @@ export function displayDataTabContent(
   // ============================================================================
 
   containerEl.createEl("h4", { text: "Readwise" });
+  renderReadwiseAffiliateNote(containerEl);
 
   // Enable toggle
   new Setting(containerEl)
@@ -244,6 +247,19 @@ export function displayDataTabContent(
   renderSyncActions(containerEl, tabInstance);
 }
 
+function renderReadwiseAffiliateNote(containerEl: HTMLElement): void {
+  createInlineExternalLinkNote(containerEl, {
+    prefixText: "New to Readwise? ",
+    linkText: "Sign up with our referral link",
+    href: READWISE.REFERRAL,
+    suffixText: " (supports SystemSculpt).",
+    className: "readwise-affiliate-note",
+    linkClassName: "readwise-affiliate-link",
+    ariaLabel: "Open Readwise signup (referral link; opens in new tab)",
+    datasetTestId: "readwise-referral-link",
+  });
+}
+
 function renderApiTokenSetting(
   containerEl: HTMLElement,
   tabInstance: SystemSculptSettingTab
@@ -316,9 +332,10 @@ function renderApiTokenSetting(
   // Add help link
   const helpLink = tokenSetting.descEl.createEl("a", {
     text: "Get your token",
-    href: "https://readwise.io/access_token",
+    href: READWISE.ACCESS_TOKEN,
   });
   helpLink.setAttr("target", "_blank");
+  helpLink.setAttr("rel", "noopener");
   tokenSetting.descEl.createSpan({ text: " from Readwise." });
 }
 

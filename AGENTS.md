@@ -10,6 +10,8 @@ Assume multiple agents (and humans) may be working in parallel in this repo. Tre
 
 This file is the repo-local “how to work here” guide. It is meant to stay current as the codebase evolves.
 
+This repo uses `AGENTS.md` only for agent instructions and durable memory.
+
 ## Quick commands
 
 ```bash
@@ -155,21 +157,22 @@ If a doc becomes long or architecture-heavy, move deep dives into `docs/` (devel
 - Never commit API keys. Use local `.env` files for development only.
 - `SYSTEMSCULPT_AUTO_SYNC_PATH` should point to a disposable test vault before running `npm run dev`.
 
-## Self-evolving knowledge (how this file stays “alive”)
+## Self-evolving knowledge
 
 When you learn something that will help future work:
 
-1. **If it’s a stable invariant** (should stay true for months), add it under **Learnings**.
-2. **If it’s an explicit architectural choice** (and alternatives were considered), add a record under **Decisions**.
-3. **If it’s a deep-dive explanation**, write a short doc in `docs/` and link it from here.
+1. **If it’s a stable invariant** (should stay true for months), add it to this `AGENTS.md` (prefer linking to a doc over adding a long explanation).
+2. **If it’s an explicit architectural choice** (and alternatives were considered), add it under **Decisions** in this file.
+3. **If it’s a non-obvious gotcha/debugging note**, add it under **Gotchas** in this file.
+4. **If it’s a deep dive**, write it in `docs/` and link it from this file.
 
 Keep entries specific and actionable: include file paths, invariants, and “how to verify”.
 
-### Decisions
+## Decisions
 
 - 2026-01-21: Added in-repo end-user docs (`docs/user/*`) and a docs hub (`docs/README.md`). Source-of-truth pages now include commands/ribbons/tools and should be kept in sync with the canonical code files listed above.
 - 2025-11-30: Added `docs/prd-on-device-embeddings.md` for the on-device transformers embeddings provider (local model cache, provider switching, mobile support).
 
-### Learnings
+## Gotchas
 
 - `PlatformContext` avoids direct `fetch` for some hosts (defaults empty); expect `requestUrl` transport and no streaming when suffixes are registered. Verify by checking `PlatformContext.supportsStreaming(...)`.

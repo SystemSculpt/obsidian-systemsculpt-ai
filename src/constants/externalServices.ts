@@ -50,6 +50,13 @@ export const AI_PROVIDERS = {
   }
 } as const;
 
+// Readwise URLs
+export const READWISE = {
+  BASE_URL: getExternalUrl("https://readwise.io"),
+  ACCESS_TOKEN: getExternalUrl("https://readwise.io/access_token"),
+  REFERRAL: getExternalUrl("https://readwise.io/systemsculpt"),
+} as const;
+
 // Local Development Services
 export const LOCAL_SERVICES = {
   OLLAMA: {

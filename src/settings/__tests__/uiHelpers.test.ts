@@ -10,6 +10,7 @@ jest.mock("obsidian", () => ({
 
 import {
   createExternalHelpLink,
+  createInlineExternalLinkNote,
   decorateRestoreDefaultsButton,
   RESTORE_DEFAULTS_COPY,
 } from "../uiHelpers";
@@ -152,6 +153,43 @@ describe("uiHelpers", () => {
       });
 
       expect(link).toBeInstanceOf(HTMLAnchorElement);
+    });
+  });
+
+  describe("createInlineExternalLinkNote", () => {
+    it("creates an inline note with prefix, external link, and suffix", () => {
+      const container = document.createElement("div");
+      const note = createInlineExternalLinkNote(container, {
+        prefixText: "New to Readwise? ",
+        linkText: "Sign up with our referral link",
+        href: "https://readwise.io/systemsculpt",
+        suffixText: " (supports SystemSculpt).",
+        className: "readwise-affiliate-note",
+        linkClassName: "readwise-affiliate-link",
+        datasetTestId: "readwise-referral-link",
+      });
+
+      expect(container.contains(note)).toBe(true);
+      expect(note.tagName).toBe("DIV");
+      expect(note.classList.contains("ss-inline-note")).toBe(true);
+      expect(note.classList.contains("readwise-affiliate-note")).toBe(true);
+      expect(note.textContent).toContain("New to Readwise?");
+      expect(note.textContent).toContain("Sign up with our referral link");
+      expect(note.textContent).toContain("supports SystemSculpt");
+
+      const link = note.querySelector("a") as HTMLAnchorElement | null;
+      expect(link).not.toBeNull();
+      expect(link?.href).toBe("https://readwise.io/systemsculpt");
+      expect(link?.target).toBe("_blank");
+      expect(link?.rel).toBe("noopener");
+      expect(link?.dataset.testId).toBe("readwise-referral-link");
+      expect(link?.classList.contains("ss-help-link")).toBe(true);
+      expect(link?.classList.contains("readwise-affiliate-link")).toBe(true);
+
+      expect(setIcon).toHaveBeenCalledWith(
+        expect.any(HTMLSpanElement),
+        "external-link"
+      );
     });
   });
 
