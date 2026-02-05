@@ -194,6 +194,10 @@ export class SettingsManager {
     if (typeof migratedSettings.respectReducedMotion !== "boolean") {
       migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
     }
+
+    if (typeof migratedSettings.defaultChatTag !== "string") {
+      migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
+    }
     
     return migratedSettings as SystemSculptSettings;
   }
@@ -508,6 +512,10 @@ export class SettingsManager {
     // Users can still use OpenAI through custom providers
     if (!validatedSettings.openAiApiKey) {
       validatedSettings.openAiApiKey = '';
+    }
+
+    if (typeof validatedSettings.defaultChatTag !== "string") {
+      validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
     }
 
     if (typeof validatedSettings.systemPromptType !== 'string') {

@@ -336,6 +336,11 @@ export interface SystemSculptSettings {
   toolingToolCallTimeoutMs: number;
   toolingMaxToolResultsInContext: number;
 
+  /**
+   * Optional tag applied to new chat history notes.
+   */
+  defaultChatTag: string;
+
   chatFontSize: "small" | "medium" | "large";
 
   /**
@@ -598,6 +603,7 @@ Raw transcript:`,
   toolingToolCallTimeoutMs: 30000,
   toolingMaxToolResultsInContext: 15,
 
+  defaultChatTag: "",
   chatFontSize: "medium",
   respectReducedMotion: true,
   openAiApiKey: "",

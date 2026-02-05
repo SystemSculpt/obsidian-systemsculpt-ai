@@ -156,6 +156,21 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
             });
     }
 
+    const normalizeDefaultChatTag = (value: string): string => value.trim().replace(/^#+/, "");
+
+    new Setting(containerEl)
+        .setName("Default chat tag")
+        .setDesc("Optional. Adds this tag to new chat history notes (frontmatter `tags`).")
+        .addText((text) => {
+            text
+                .setPlaceholder("ai-chat")
+                .setValue(plugin.settings.defaultChatTag || "")
+                .onChange(async (value) => {
+                    const normalized = normalizeDefaultChatTag(value);
+                    await plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
+                });
+        });
+
 // --- Default Chat Font Size ---
 new Setting(containerEl)
     .setName("Default Chat Font Size")

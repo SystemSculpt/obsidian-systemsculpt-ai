@@ -157,6 +157,42 @@ describe("ChatStorageService", () => {
       expect(mockVault.create).toHaveBeenCalled();
     });
 
+    it("adds default chat tag to new history files", async () => {
+      (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
+        settings: { defaultChatTag: "#project" },
+      };
+
+      await service.saveChat("tagged-chat", testMessages, "gpt-4");
+
+      const createdContent = mockVault.create.mock.calls[0][1] as string;
+      expect(createdContent).toContain('tags: ["project"]');
+    });
+
+    it("merges existing tags when saving", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/test-chat.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: test-chat
+model: gpt-4
+title: Test Chat
+created: 2024-01-01T00:00:00.000Z
+lastModified: 2024-01-02T00:00:00.000Z
+version: 1
+tags: ["existing", "#keep"]
+---
+
+Content here`);
+
+      (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
+        settings: { defaultChatTag: "new" },
+      };
+
+      await service.saveChat("test-chat", testMessages, "gpt-4");
+
+      const modifiedContent = mockVault.modify.mock.calls[0][1] as string;
+      expect(modifiedContent).toContain('tags: ["existing","keep","new"]');
+    });
+
     it("throws error on save failure", async () => {
       mockVault.create.mockRejectedValue(new Error("Write failed"));
 
@@ -205,6 +241,7 @@ title: Test Title
 created: 2024-01-01T00:00:00.000Z
 lastModified: 2024-01-02T00:00:00.000Z
 version: 3
+tags: ["project"]
 ---
 
 Content here`;
@@ -213,6 +250,7 @@ Content here`;
 
       expect(metadata).not.toBeNull();
       expect(metadata.id).toBeDefined();
+      expect(metadata.tags).toEqual(["project"]);
     });
 
     it("returns null for invalid frontmatter", () => {

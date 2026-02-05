@@ -65,6 +65,7 @@ interface ChatMetadata {
   lastModified: string;
   title: string;
   version?: number;
+  tags?: string[];
   context_files?: ContextFile[];
   systemMessage?: {
     type: "general-use" | "concise" | "agent" | "custom";
@@ -83,6 +84,63 @@ export class ChatStorageService {
     this.app = app;
     this.chatDirectory = chatDirectory;
     this.toolCallManager = toolCallManager;
+  }
+
+  private normalizeTag(tag: string): string {
+    return tag.trim().replace(/^#+/, "");
+  }
+
+  private normalizeTags(raw: unknown): string[] {
+    const tags: string[] = [];
+    const addTag = (value: string) => {
+      const normalized = this.normalizeTag(value);
+      if (normalized) tags.push(normalized);
+    };
+
+    if (Array.isArray(raw)) {
+      raw.forEach((entry) => {
+        if (typeof entry === "string") addTag(entry);
+      });
+      return tags;
+    }
+
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) return tags;
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((entry) => {
+              if (typeof entry === "string") addTag(entry);
+            });
+            return tags;
+          }
+          if (typeof parsed === "string") {
+            addTag(parsed);
+            return tags;
+          }
+        } catch {
+          // Fall through to treat as a single tag
+        }
+      }
+      addTag(trimmed);
+    }
+
+    return tags;
+  }
+
+  private resolveDefaultChatTag(): string {
+    const systemSculptPlugin = (this.app as any)?.plugins?.plugins?.["systemsculpt-ai"];
+    const rawTag = systemSculptPlugin?.settings?.defaultChatTag;
+    if (typeof rawTag !== "string") return "";
+    return this.normalizeTag(rawTag);
+  }
+
+  private mergeTags(existingTags: string[], defaultTag: string): string[] {
+    const merged = [...existingTags];
+    if (defaultTag) merged.push(defaultTag);
+    return Array.from(new Set(merged));
   }
 
   // Master save method - always saves in the new, simple format
@@ -145,6 +203,9 @@ export class ChatStorageService {
       }
 
       const creationDate = existingMetadata?.created || now;
+      const existingTags = existingMetadata?.tags ?? [];
+      const defaultChatTag = this.resolveDefaultChatTag();
+      const mergedTags = this.mergeTags(existingTags, defaultChatTag);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
       const currentVersion = Number(existingMetadata?.version) || 0;
@@ -173,6 +234,10 @@ export class ChatStorageService {
         chatFontSize: chatFontSize || "medium",
         agentMode: agentMode !== undefined ? agentMode : true
       };
+
+      if (mergedTags.length > 0) {
+        metadata.tags = mergedTags;
+      }
 
       if (contextFiles && contextFiles.size > 0) {
         metadata.context_files = Array.from(contextFiles).map((path) => ({
@@ -371,6 +436,7 @@ export class ChatStorageService {
         context_files = [],
         version: versionRaw = 0,
       } = parsed;
+      const tags = this.normalizeTags((parsed as any).tags);
 
       if (!id) {
         return null; // ID is the only absolutely required field
@@ -424,6 +490,7 @@ export class ChatStorageService {
         lastModified,
         title: title || id, // Use ID if title is missing
         version: Number(versionRaw) || 0,
+        tags: tags.length > 0 ? tags : undefined,
         context_files: processedContextFiles,
         systemMessage: {
           type: systemMessageType,
