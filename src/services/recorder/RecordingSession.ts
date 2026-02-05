@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
 import type { RecorderFormat } from "./RecorderFormats";
-import { MicrophoneRecorder } from "./MicrophoneRecorder";
+import { MicrophoneRecorder, type RecorderStopReason } from "./MicrophoneRecorder";
 import { logDebug, logError } from "../../utils/errorHandling";
 
 export interface RecordingResult {
@@ -8,6 +8,7 @@ export interface RecordingResult {
   blob: Blob;
   startedAt: number;
   durationMs: number;
+  stopReason: RecorderStopReason;
 }
 
 export interface RecordingSessionOptions {
@@ -109,7 +110,11 @@ export class RecordingSession {
     }
   }
 
-  private handleRecorderComplete = (filePath: string, blob: Blob): void => {
+  private handleRecorderComplete = (
+    filePath: string,
+    blob: Blob,
+    stopReason: RecorderStopReason = "manual"
+  ): void => {
     this.debug("recorder onComplete received", {
       filePath,
       durationMs: Date.now() - this.startedAt
@@ -119,7 +124,8 @@ export class RecordingSession {
       filePath,
       blob,
       startedAt: this.startedAt,
-      durationMs: Date.now() - this.startedAt
+      durationMs: Date.now() - this.startedAt,
+      stopReason
     };
 
     this.options.onComplete(result);

@@ -13,9 +13,9 @@ describe("Recorder (mobile emulation)", () => {
     const vaultPath = await ensureE2EVault();
     await browser.executeObsidian(async ({ app }) => {
       // Force Obsidian into mobile emulation so UI variant toggles correctly.
-      // @ts-ignore - Obsidian internal method
-      if (typeof app.emulateMobile === "function") {
-        app.emulateMobile(true);
+      const anyApp = app as any;
+      if (typeof anyApp.emulateMobile === "function") {
+        anyApp.emulateMobile(true);
       }
     });
     await ensurePluginEnabled(PLUGIN_ID, vaultPath);
@@ -39,5 +39,42 @@ describe("Recorder (mobile emulation)", () => {
       async () => (await widget.getAttribute("data-state")) === "idle",
       { timeout: 8000, timeoutMsg: "Recorder did not return to idle state" }
     );
+  });
+
+  it("auto-stops when app visibility becomes hidden (lock/background simulation)", async () => {
+    await runCommand(RECORDER_COMMAND);
+
+    const widget = await $(".ss-recorder-mini");
+    await widget.waitForExist({ timeout: 10000 });
+    await browser.waitUntil(
+      async () => (await widget.getAttribute("data-state")) === "recording",
+      { timeout: 8000, timeoutMsg: "Recorder did not enter recording state" }
+    );
+
+    await browser.executeObsidian(async () => {
+      try {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => true,
+        });
+      } catch (_) {
+        // best-effort for environments where hidden is not re-definable
+      }
+      document.dispatchEvent(new Event("visibilitychange"));
+      // pagehide is a deterministic fallback in emulated environments where
+      // document.hidden cannot be overridden.
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    await browser.waitUntil(
+      async () => (await widget.getAttribute("data-state")) === "idle",
+      { timeout: 12000, timeoutMsg: "Recorder did not auto-stop on hidden visibility" }
+    );
+
+    const status = await $(".ss-recorder-mini__status");
+    const statusText = (await status.getText()).toLowerCase();
+    const hasExpectedLifecycleStatus =
+      statusText.includes("background") || statusText.includes("transcrib") || statusText.includes("saving");
+    await expect(hasExpectedLifecycleStatus).toBe(true);
   });
 });

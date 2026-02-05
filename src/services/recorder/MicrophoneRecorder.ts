@@ -1,4 +1,6 @@
-import { App, Notice } from "obsidian";
+import { App } from "obsidian";
+
+export type RecorderStopReason = "manual" | "background-hidden" | "background-pagehide";
 
 export interface MicrophoneRecorderOptions {
   mimeType: string;
@@ -6,7 +8,7 @@ export interface MicrophoneRecorderOptions {
   preferredMicrophoneId?: string | null;
   onError: (error: Error) => void;
   onStatus: (status: string) => void;
-  onComplete: (filePath: string, audioBlob: Blob) => void;
+  onComplete: (filePath: string, audioBlob: Blob, stopReason?: RecorderStopReason) => void;
   onStreamChanged?: (stream: MediaStream) => void;
 }
 
@@ -23,7 +25,7 @@ export class MicrophoneRecorder {
   private readonly extension: string;
   private readonly onError: (error: Error) => void;
   private readonly onStatus: (status: string) => void;
-  private readonly onComplete: (filePath: string, audioBlob: Blob) => void;
+  private readonly onComplete: (filePath: string, audioBlob: Blob, stopReason?: RecorderStopReason) => void;
   private readonly onStreamChanged: ((stream: MediaStream) => void) | null;
   private readonly preferredMicrophoneId: string | null;
 
@@ -34,7 +36,12 @@ export class MicrophoneRecorder {
 
   private deviceChangeListener: ((this: MediaDevices, ev: Event) => any) | null = null;
   private micTrackEndListener: (() => void) | null = null;
+  private visibilityChangeListener: (() => void) | null = null;
+  private pageHideListener: ((event: Event) => void) | null = null;
   private refreshingMic = false;
+  private stopReason: RecorderStopReason = "manual";
+  private wakeLockSentinel: any = null;
+  private wakeLockHintShown = false;
 
   constructor(app: App, options: MicrophoneRecorderOptions) {
     this.app = app;
@@ -55,6 +62,8 @@ export class MicrophoneRecorder {
 
     this.state = "starting";
     this.chunks = [];
+    this.stopReason = "manual";
+    this.wakeLockHintShown = false;
 
     try {
       this.micStream = await this.acquireMicrophoneStream();
@@ -71,9 +80,11 @@ export class MicrophoneRecorder {
 
       this.mediaRecorder.start(800);
       this.state = "recording";
+      this.attachLifecycleListeners();
 
       const micLabel = this.micStream.getAudioTracks()[0]?.label || "Default microphone";
       this.onStatus(`Recording with: ${micLabel}`);
+      void this.ensureWakeLock();
 
       if (this.onStreamChanged) {
         try {
@@ -87,15 +98,25 @@ export class MicrophoneRecorder {
     }
   }
 
-  public stop(): void {
+  public stop(reason: RecorderStopReason = "manual"): void {
     if (this.state !== "recording") {
       return;
     }
     this.state = "stopping";
-    this.onStatus("Processing recording...");
+    this.stopReason = reason;
+    if (reason === "manual") {
+      this.onStatus("Processing recording...");
+    } else {
+      this.onStatus("App moved to background. Saving captured audio...");
+    }
 
     try {
       if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+        try {
+          if (typeof this.mediaRecorder.requestData === "function") {
+            this.mediaRecorder.requestData();
+          }
+        } catch (_) {}
         this.mediaRecorder.stop();
       } else {
         void this.finalizeRecording();
@@ -220,10 +241,97 @@ export class MicrophoneRecorder {
       this.onStatus("Microphone reconnected");
     } catch (error) {
       this.onError(new Error(`Microphone lost: ${error instanceof Error ? error.message : String(error)}`));
-      this.stop();
+      this.stop("manual");
     } finally {
       this.refreshingMic = false;
     }
+  }
+
+  private attachLifecycleListeners(): void {
+    if (typeof document !== "undefined" && !this.visibilityChangeListener) {
+      this.visibilityChangeListener = () => {
+        if (this.state !== "recording") return;
+        if (document.hidden) {
+          this.stop("background-hidden");
+          return;
+        }
+        void this.ensureWakeLock();
+      };
+      document.addEventListener("visibilitychange", this.visibilityChangeListener);
+    }
+
+    if (typeof window !== "undefined" && !this.pageHideListener) {
+      this.pageHideListener = () => {
+        if (this.state !== "recording") return;
+        this.stop("background-pagehide");
+      };
+      window.addEventListener("pagehide", this.pageHideListener);
+    }
+  }
+
+  private detachLifecycleListeners(): void {
+    if (typeof document !== "undefined" && this.visibilityChangeListener) {
+      document.removeEventListener("visibilitychange", this.visibilityChangeListener);
+      this.visibilityChangeListener = null;
+    }
+
+    if (typeof window !== "undefined" && this.pageHideListener) {
+      window.removeEventListener("pagehide", this.pageHideListener);
+      this.pageHideListener = null;
+    }
+  }
+
+  private async ensureWakeLock(): Promise<void> {
+    if (this.state !== "recording") return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    if (this.wakeLockSentinel) return;
+
+    const wakeLockApi = (navigator as any)?.wakeLock;
+    if (!wakeLockApi || typeof wakeLockApi.request !== "function") {
+      this.notifyWakeLockHint();
+      return;
+    }
+
+    try {
+      const sentinel = await wakeLockApi.request("screen");
+      this.wakeLockSentinel = sentinel;
+      if (this.wakeLockSentinel && typeof this.wakeLockSentinel.addEventListener === "function") {
+        this.wakeLockSentinel.addEventListener("release", this.handleWakeLockReleased);
+      }
+    } catch (_) {
+      this.notifyWakeLockHint();
+    }
+  }
+
+  private handleWakeLockReleased = (): void => {
+    this.wakeLockSentinel = null;
+    if (this.state === "recording") {
+      void this.ensureWakeLock();
+    }
+  };
+
+  private notifyWakeLockHint(): void {
+    if (this.wakeLockHintShown) return;
+    this.wakeLockHintShown = true;
+    this.onStatus("Recording started. Keep your screen awake for uninterrupted iOS capture.");
+  }
+
+  private async releaseWakeLock(): Promise<void> {
+    const sentinel = this.wakeLockSentinel;
+    this.wakeLockSentinel = null;
+    if (!sentinel) return;
+
+    try {
+      if (typeof sentinel.removeEventListener === "function") {
+        sentinel.removeEventListener("release", this.handleWakeLockReleased);
+      }
+    } catch (_) {}
+
+    try {
+      if (typeof sentinel.release === "function") {
+        await sentinel.release();
+      }
+    } catch (_) {}
   }
 
   private swapMicStream(next: MediaStream): void {
@@ -254,6 +362,9 @@ export class MicrophoneRecorder {
   private async finalizeRecording(outputPath?: string): Promise<void> {
     try {
       if (this.chunks.length === 0) {
+        if (this.stopReason !== "manual") {
+          throw new Error("No audio data captured before app lock/background transition");
+        }
         throw new Error("No audio data recorded");
       }
 
@@ -261,8 +372,12 @@ export class MicrophoneRecorder {
       if (outputPath) {
         const arrayBuffer = await blob.arrayBuffer();
         await this.app.vault.adapter.writeBinary(outputPath, arrayBuffer);
-        this.onStatus("Recording saved");
-        this.onComplete(outputPath, blob);
+        if (this.stopReason === "manual") {
+          this.onStatus("Recording saved");
+        } else {
+          this.onStatus("Recording saved after app lock/background");
+        }
+        this.onComplete(outputPath, blob, this.stopReason);
       }
     } catch (error) {
       this.onError(new Error(`Save failed: ${error instanceof Error ? error.message : String(error)}`));
@@ -294,6 +409,7 @@ export class MicrophoneRecorder {
   private releaseStreams(): void {
     this.stopStream(this.micStream);
     this.detachMicListeners();
+    this.detachLifecycleListeners();
     this.micStream = null;
   }
 
@@ -308,7 +424,10 @@ export class MicrophoneRecorder {
     }
 
     this.releaseStreams();
+    void this.releaseWakeLock();
     this.chunks = [];
+    this.stopReason = "manual";
+    this.wakeLockHintShown = false;
     this.state = "idle";
   }
 }

@@ -231,20 +231,37 @@ export class RecorderService {
       filePath: result.filePath,
       durationMs: result.durationMs
     });
+    this.isRecording = false;
+    this.ui.setRecordingState(false);
+    this.ui.stopTimer();
+    this.notifyListeners();
     this.lastRecordingPath = result.filePath;
     this.session = null;
     this.lifecycleState = "idle";
     this.resolveSessionLifecycle();
     this.storeRecordingInMemory(result);
+    const stoppedFromBackground =
+      result.stopReason === "background-hidden" || result.stopReason === "background-pagehide";
 
     const fileName = result.filePath.split("/").pop();
     const autoTranscribe = this.plugin.settings.autoTranscribeRecordings;
     if (autoTranscribe) {
-      this.ui.setStatus("Saved. Transcribing…");
+      if (stoppedFromBackground) {
+        this.ui.setStatus("Saved after lock/background interruption. Transcribing captured audio…");
+      } else {
+        this.ui.setStatus("Saved. Transcribing…");
+      }
       await this.transcribeRecording(result.filePath);
     } else {
       const savedMessage = fileName ? `Saved to ${fileName}` : "Recording saved.";
-      this.ui.linger(savedMessage, 2400);
+      if (stoppedFromBackground) {
+        this.ui.linger(
+          `${savedMessage} iOS stopped recording when the app locked/backgrounded; keep the app unlocked for continuous recording.`,
+          4200
+        );
+      } else {
+        this.ui.linger(savedMessage, 2400);
+      }
     }
   }
 

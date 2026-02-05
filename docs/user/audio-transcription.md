@@ -27,6 +27,7 @@ See: [Commands & hotkeys](commands.md) and [Ribbon icons](ribbon-icons.md).
 ## Tips
 
 - Supported audio file types: `mp3`, `wav`, `m4a`, `webm`, `ogg`.
+- On iOS, if the app is locked/backgrounded during recording, SystemSculpt now saves the captured portion and stops gracefully; keep the app unlocked for uninterrupted continuous capture.
 - If transcription fails, first confirm your provider key/endpoint and that the selected model supports audio/transcription on your provider.
 - If you’re using a local transcription server, confirm it’s reachable from Obsidian and not blocked by OS/network restrictions.
 - Large recordings are automatically chunked during transcription to stay under request size limits (for example, the SystemSculpt API upload limit is ~4MB per request; some custom providers allow ~25MB per request). Chunked transcriptions may take longer to complete.

@@ -462,6 +462,52 @@ describe("RecorderService", () => {
     });
   });
 
+  describe("handleRecordingComplete (private)", () => {
+    it("shows explicit lock/background guidance when stop reason is background", async () => {
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+      mockPlugin.settings.autoTranscribeRecordings = false;
+      (service as any).isRecording = true;
+
+      await (service as any).handleRecordingComplete({
+        filePath: "SystemSculpt/Recordings/test-audio.webm",
+        blob: new Blob(["audio"], { type: "audio/webm" }),
+        startedAt: Date.now() - 1500,
+        durationMs: 1500,
+        stopReason: "background-hidden",
+      });
+
+      expect((service as any).isRecording).toBe(false);
+      expect((service as any).ui.setRecordingState).toHaveBeenCalledWith(false);
+      expect((service as any).ui.stopTimer).toHaveBeenCalled();
+      expect((service as any).ui.linger).toHaveBeenCalledWith(
+        expect.stringContaining("iOS stopped recording when the app locked/backgrounded"),
+        4200
+      );
+    });
+
+    it("uses normal saved message for manual stop reason", async () => {
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+      mockPlugin.settings.autoTranscribeRecordings = false;
+      (service as any).isRecording = true;
+
+      await (service as any).handleRecordingComplete({
+        filePath: "SystemSculpt/Recordings/test-audio.webm",
+        blob: new Blob(["audio"], { type: "audio/webm" }),
+        startedAt: Date.now() - 900,
+        durationMs: 900,
+        stopReason: "manual",
+      });
+
+      expect((service as any).isRecording).toBe(false);
+      expect((service as any).ui.setRecordingState).toHaveBeenCalledWith(false);
+      expect((service as any).ui.stopTimer).toHaveBeenCalled();
+      expect((service as any).ui.linger).toHaveBeenCalledWith(
+        expect.stringContaining("Saved to test-audio.webm"),
+        2400
+      );
+    });
+  });
+
   describe("handleStreamChanged (private)", () => {
     it("attaches stream to UI", () => {
       const service = RecorderService.getInstance(mockApp, mockPlugin);

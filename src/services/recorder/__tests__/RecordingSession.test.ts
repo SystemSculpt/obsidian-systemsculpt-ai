@@ -256,6 +256,37 @@ describe("RecordingSession", () => {
 
       expect(session.isActive()).toBe(false);
     });
+
+    it("propagates recorder stop reason to onComplete result", async () => {
+      let completeCallback:
+        | ((path: string, blob: Blob, stopReason?: "manual" | "background-hidden" | "background-pagehide") => void)
+        | null = null;
+
+      (MicrophoneRecorder as jest.Mock).mockImplementationOnce(
+        (_app: any, opts: any) => {
+          completeCallback = opts.onComplete;
+          return {
+            start: jest.fn().mockResolvedValue(undefined),
+            stop: jest.fn(),
+            cleanup: jest.fn(),
+            getMediaStream: jest.fn().mockReturnValue(null),
+          };
+        }
+      );
+
+      session = new RecordingSession(mockOptions);
+      await session.start();
+
+      const mockBlob = new Blob(["test"], { type: "audio/webm" });
+      completeCallback!("test/path.webm", mockBlob, "background-hidden");
+
+      expect(mockOptions.onComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath: "test/path.webm",
+          stopReason: "background-hidden",
+        })
+      );
+    });
   });
 
   describe("onError callback", () => {
