@@ -1,4 +1,9 @@
-import { parseCanvasFlowPromptNote, parseMarkdownFrontmatter, replaceMarkdownBodyPreservingFrontmatter } from "../PromptNote";
+import {
+  parseCanvasFlowPromptNote,
+  parseMarkdownFrontmatter,
+  replaceMarkdownBodyPreservingFrontmatter,
+  replaceMarkdownFrontmatterAndBody,
+} from "../PromptNote";
 
 describe("PromptNote", () => {
   describe("parseMarkdownFrontmatter", () => {
@@ -84,5 +89,34 @@ describe("PromptNote", () => {
       expect(updated).toBe("New\n");
     });
   });
-});
 
+  describe("replaceMarkdownFrontmatterAndBody", () => {
+    it("replaces both frontmatter and body", () => {
+      const original = [
+        "---",
+        "ss_flow_kind: prompt",
+        "ss_flow_backend: replicate",
+        "---",
+        "",
+        "Old prompt",
+        "",
+      ].join("\n");
+
+      const updated = replaceMarkdownFrontmatterAndBody(
+        original,
+        {
+          ss_flow_kind: "prompt",
+          ss_flow_backend: "replicate",
+          ss_replicate_model: "acme/model",
+          ss_replicate_input: { width: 512 },
+        },
+        "New prompt"
+      );
+
+      expect(updated).toContain("ss_replicate_model: acme/model");
+      expect(updated).toContain("width: 512");
+      expect(updated).toContain("New prompt");
+      expect(updated).not.toContain("Old prompt");
+    });
+  });
+});

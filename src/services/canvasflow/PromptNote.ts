@@ -149,3 +149,18 @@ export function replaceMarkdownBodyPreservingFrontmatter(markdown: string, nextB
   return out.endsWith("\n") ? out : `${out}\n`;
 }
 
+export function replaceMarkdownFrontmatterAndBody(
+  markdown: string,
+  nextFrontmatter: Record<string, unknown>,
+  nextBody: string
+): string {
+  const src = String(markdown ?? "");
+  const body = String(nextBody ?? "");
+
+  const yamlText = String(YAML.stringify(nextFrontmatter) || "").trimEnd();
+  const fmBlock = yamlText.trim().length ? `---\n${yamlText}\n---\n` : `---\n---\n`;
+
+  const trimmedBody = body.replace(/^\n+/, "");
+  const out = `${fmBlock}${trimmedBody}`;
+  return out.endsWith("\n") ? out : `${out}\n`;
+}

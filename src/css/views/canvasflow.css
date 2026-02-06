@@ -8,26 +8,181 @@
   padding: 8px;
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
-  border-radius: 8px;
+  border-radius: 10px;
+}
+
+/* CanvasFlow prompt nodes: hide the default file preview/editor and make the node look like a "node editor"
+   panel (ComfyUI vibes) rather than a normal Canvas note card. */
+.canvas-node.ss-canvasflow-prompt-node {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+}
+
+.canvas-node.ss-canvasflow-prompt-node.is-selected {
+  border-color: var(--interactive-accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--interactive-accent) 85%, transparent),
+    0 22px 65px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) {
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+/* Some builds/themes render a title/header inside the node; hide it and use our custom header. */
+.canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-titlebar, .canvas-node-header, .canvas-node-label, .canvas-node-title) {
+  display: none !important;
+}
+
+/* Hide everything in the content host except our injected UI. (Canvas DOM varies across builds.) */
+.canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) > :not(.ss-canvasflow-controls) {
+  display: none !important;
+}
+
+.canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-controls {
+  margin-top: 0;
+  border-top: none;
+  padding: 12px 12px 10px 18px;
+  border-radius: 0;
+  height: 100%;
+  position: relative;
+  background:
+    radial-gradient(900px 360px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 22%, transparent), transparent 60%),
+    radial-gradient(700px 320px at 100% 10%, color-mix(in srgb, var(--text-accent) 14%, transparent), transparent 65%),
+    linear-gradient(180deg, var(--background-secondary), var(--background-primary));
+}
+
+.canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-controls::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(180deg, var(--interactive-accent), color-mix(in srgb, var(--interactive-accent) 55%, transparent));
+  opacity: 0.95;
+}
+
+.ss-canvasflow-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--background-primary) 70%, black);
+  cursor: grab;
+  user-select: none;
+}
+
+.ss-canvasflow-node-header:active {
+  cursor: grabbing;
+}
+
+.ss-canvasflow-node-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+}
+
+.ss-canvasflow-node-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ss-canvasflow-node-badge {
+  font-size: 11px;
+  opacity: 0.92;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 55%, transparent);
+}
+
+.ss-canvasflow-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ss-canvasflow-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-canvasflow-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-canvasflow-field-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 78%, black);
+  color: var(--text-normal);
+  padding: 6px 8px;
+}
+
+.ss-canvasflow-controls select {
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 78%, black);
+  color: var(--text-normal);
+  padding: 6px 8px;
+}
+
+.ss-canvasflow-controls :is(input, textarea, select):focus {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.ss-canvasflow-prompt-label {
+  margin-top: 10px;
 }
 
 .ss-canvasflow-controls textarea.ss-canvasflow-prompt {
   width: 100%;
-  min-height: 72px;
+  min-height: 96px;
   resize: vertical;
   font-size: 12px;
   line-height: 1.35;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
   border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
+  background: color-mix(in srgb, var(--background-primary) 78%, black);
   color: var(--text-normal);
+}
+
+.ss-canvasflow-section-title {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-canvasflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .ss-canvasflow-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  justify-content: flex-end;
 }
 
 .ss-canvasflow-btn {
@@ -60,6 +215,25 @@
   filter: brightness(1.05);
 }
 
+.ss-canvasflow-btn-primary.ss-canvasflow-is-loading {
+  position: relative;
+  padding-left: 28px;
+}
+
+.ss-canvasflow-btn-primary.ss-canvasflow-is-loading::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--text-on-accent) 38%, transparent);
+  border-top-color: var(--text-on-accent);
+  animation: ss-canvasflow-spin 1s linear infinite;
+}
+
 .ss-canvasflow-status {
   margin-top: 6px;
   font-size: 11px;
@@ -69,3 +243,25 @@
   text-overflow: ellipsis;
 }
 
+.ss-canvasflow-status.ss-is-success {
+  color: var(--text-success, var(--color-green, #4ade80));
+}
+
+.ss-canvasflow-status.ss-is-error {
+  color: var(--text-error, var(--color-red, #f87171));
+}
+
+/* Canvas selection toolbar buttons */
+.ss-canvasflow-menu-run.ss-canvasflow-is-loading svg,
+.ss-canvasflow-menu-new-prompt.ss-canvasflow-is-loading svg {
+  animation: ss-canvasflow-spin 1s linear infinite;
+}
+
+@keyframes ss-canvasflow-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
