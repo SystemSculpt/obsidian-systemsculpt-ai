@@ -188,6 +188,14 @@ export class CanvasFlowRunner {
     const input: Record<string, unknown> = { ...(promptParsed.config.replicateInput || {}) };
     input[promptParsed.config.replicatePromptKey] = promptText;
 
+    // Some models use non-standard image input keys. Keep this mapping minimal and explicit
+    // (CanvasFlow prompt notes can always override via `ss_replicate_image_key`).
+    let imageKey = promptParsed.config.replicateImageKey;
+    if (modelSlug === "google/nano-banana-pro" && imageKey === "image") {
+      // `google/nano-banana-pro` expects `image_input` (array of URIs), not `image`.
+      imageKey = "image_input";
+    }
+
     const incomingImage = findIncomingImageFileForNode(doc, options.promptNodeId);
     if (incomingImage) {
       const imgAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
@@ -198,7 +206,16 @@ export class CanvasFlowRunner {
         const mime = mimeFromExtension(ext);
         const b64 = base64FromArrayBuffer(imgBytes);
         const dataUrl = `data:${mime};base64,${b64}`;
-        input[promptParsed.config.replicateImageKey] = dataUrl;
+
+        const existing = input[imageKey];
+        if (Array.isArray(existing)) {
+          input[imageKey] = [...existing, dataUrl];
+        } else if (imageKey === "image_input") {
+          // `google/nano-banana-pro` schema expects an array.
+          input[imageKey] = [dataUrl];
+        } else {
+          input[imageKey] = dataUrl;
+        }
       } else {
         setStatus("Input image missing; running prompt without image.");
       }

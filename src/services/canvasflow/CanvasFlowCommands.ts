@@ -75,12 +75,14 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
 
   const modelSlug = String(plugin.settings.replicateDefaultModelSlug || "").trim();
   const modelLine = modelSlug ? `ss_replicate_model: ${modelSlug}\n` : "";
+  const imageKeyLine = modelSlug === "google/nano-banana-pro" ? "ss_replicate_image_key: image_input\n" : "";
 
   const template = [
     "---",
     "ss_flow_kind: prompt",
     "ss_flow_backend: replicate",
     modelLine.trimEnd(),
+    imageKeyLine.trimEnd(),
     "ss_replicate_input: {}",
     "---",
     "",
@@ -101,4 +103,3 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
 
   new Notice("CanvasFlow prompt node created.");
 }
-
