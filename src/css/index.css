@@ -88,6 +88,7 @@
 @import 'views/embeddings-view.css';  /* Embeddings view - automatic similar notes panel */
 @import 'views/benchview.css';  /* Benchmark view */
 @import 'views/benchresults.css';  /* Benchmark results leaderboard */
+@import 'views/canvasflow.css';  /* CanvasFlow (experimental) - Canvas node controls */
 
 /* Miscellaneous styles */
 @import 'misc.css';

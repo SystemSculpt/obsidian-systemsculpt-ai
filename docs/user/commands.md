@@ -80,6 +80,13 @@ Notes:
 | Open SystemSculpt Benchmark Results |  | Opens the benchmark results viewer |
 | YouTube Canvas - Extract transcript and create note |  | Creates a note from a YouTube transcript (language selectable in the modal; generation can be cancelled) |
 
+## CanvasFlow (experimental)
+
+| Command | Default hotkey | Notes |
+| --- | --- | --- |
+| CanvasFlow - Create Prompt Node (Active Canvas) |  | Only appears when the active view is an Obsidian Canvas |
+| CanvasFlow - Toggle Enhancements |  | Enables/disables the CanvasFlow Run button in the Canvas selection toolbar (and injected prompt controls on prompt nodes) |
+
 ## Diagnostics (advanced)
 
 | Command | Default hotkey | Notes |

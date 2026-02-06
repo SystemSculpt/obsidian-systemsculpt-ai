@@ -114,6 +114,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
+  private canvasFlowEnhancer: { start: () => void; stop: () => void } | null = null;
   // Removed complex settings callback system - embeddings are now completely on-demand
 
   // Daily vault system services
@@ -328,6 +329,51 @@ export default class SystemSculptPlugin extends Plugin {
     } else {
       service.stopScheduledSync();
     }
+  }
+
+  private async handleCanvasFlowSettingsUpdated(
+    oldSettings: SystemSculptSettings,
+    newSettings: SystemSculptSettings
+  ): Promise<void> {
+    const oldEnabled = oldSettings.canvasFlowEnabled === true;
+    const newEnabled = newSettings.canvasFlowEnabled === true;
+    if (oldEnabled === newEnabled) {
+      return;
+    }
+    await this.syncCanvasFlowEnhancerFromSettings();
+  }
+
+  private async syncCanvasFlowEnhancerFromSettings(): Promise<void> {
+    const enabled = this.settings.canvasFlowEnabled === true;
+
+    if (!enabled) {
+      if (this.canvasFlowEnhancer) {
+        try {
+          this.canvasFlowEnhancer.stop();
+        } catch {}
+        this.canvasFlowEnhancer = null;
+      }
+      return;
+    }
+
+    if (this.canvasFlowEnhancer) {
+      return;
+    }
+
+    // Lazy-load because CanvasFlow depends on Canvas DOM selectors and is experimental.
+    const { CanvasFlowEnhancer } = await import("./services/canvasflow/CanvasFlowEnhancer");
+    const enhancer = new CanvasFlowEnhancer(this.app, this);
+    enhancer.start();
+    this.canvasFlowEnhancer = enhancer;
+
+    this.register(() => {
+      try {
+        enhancer.stop();
+      } catch {}
+      if (this.canvasFlowEnhancer === enhancer) {
+        this.canvasFlowEnhancer = null;
+      }
+    });
   }
 
   private async onDailySettingsUpdated(settings: DailySettings): Promise<void> {
@@ -693,6 +739,15 @@ export default class SystemSculptPlugin extends Plugin {
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Readwise settings sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            }
+
+            try {
+              void this.handleCanvasFlowSettingsUpdated(oldSettings, newSettings);
+            } catch (error) {
+              const logger = this.getLogger();
+              logger.error("CanvasFlow settings sync failed", error, {
                 source: "SystemSculptPlugin",
               });
             }
@@ -1691,6 +1746,9 @@ export default class SystemSculptPlugin extends Plugin {
       }),
       wrap("fileContextMenu", "file context menu service", () => {
         this.setupFileContextMenuService();
+      }),
+      wrap("canvasFlow", "canvas flow enhancer", async () => {
+        await this.syncCanvasFlowEnhancerFromSettings();
       }),
       wrap("workflowEngine", "workflow engine service", () => {
         this.ensureWorkflowEngineService();

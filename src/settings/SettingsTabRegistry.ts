@@ -8,6 +8,7 @@ import { displayRecorderTabContent } from "./RecorderTabContent";
 import { displayDirectoriesTabContent } from "./DirectoriesTabContent";
 import { displayBackupTabContent } from "./BackupTabContent";
 import { displayEmbeddingsTabContent } from "./EmbeddingsTabContent";
+import { displayImageGenerationTabContent } from "./ImageGenerationTabContent";
 import { displayDataTabContent } from "./DataTabContent";
 import { displayAdvancedTabContent } from "./AdvancedTabContent";
 import { displayChangeLogTabContent } from "./ChangeLogTabContent";
@@ -125,6 +126,19 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       anchor: {
         title: "Audio Recording, Microphone, Transcription, Whisper, Groq, OpenAI, Resampling",
         desc: "Preferred microphone, auto-transcribe, clean output, auto-submit, post-processing, custom transcription endpoint and API key, model selection, presets.",
+      },
+    },
+    {
+      id: "image-generation",
+      label: "Image Generation",
+      sections: [
+        (parent) => {
+          displayImageGenerationTabContent(parent, tab);
+        },
+      ],
+      anchor: {
+        title: "CanvasFlow, Replicate, Images",
+        desc: "Configure Replicate API key and model selection for CanvasFlow image generation inside Obsidian Canvas.",
       },
     },
     {

@@ -361,6 +361,26 @@ export interface SystemSculptSettings {
   openAiApiKey: string;
 
   /**
+   * CanvasFlow (experimental): ComfyUI-like prompt + run controls inside Obsidian Canvas.
+   * Desktop-only.
+   */
+  canvasFlowEnabled: boolean;
+
+  /**
+   * Replicate (image generation). Used by CanvasFlow.
+   */
+  replicateApiKey: string;
+  /** Default Replicate model slug, like "owner/name". */
+  replicateDefaultModelSlug: string;
+  /** Resolved Replicate version id for the default model slug. */
+  replicateResolvedVersion: string;
+  replicatePollIntervalMs: number;
+  /** Folder path inside the vault where generated images are saved. */
+  replicateOutputDir: string;
+  /** When enabled, write a JSON sidecar next to each generated image. */
+  replicateSaveMetadataSidecar: boolean;
+
+  /**
    * Embeddings settings for the new embeddings system
    */
   embeddingsEnabled: boolean;
@@ -607,6 +627,15 @@ Raw transcript:`,
   chatFontSize: "medium",
   respectReducedMotion: true,
   openAiApiKey: "",
+
+  canvasFlowEnabled: false,
+
+  replicateApiKey: "",
+  replicateDefaultModelSlug: "",
+  replicateResolvedVersion: "",
+  replicatePollIntervalMs: 1000,
+  replicateOutputDir: "SystemSculpt/Attachments/Generations",
+  replicateSaveMetadataSidecar: true,
 
   /**
    * Embeddings defaults

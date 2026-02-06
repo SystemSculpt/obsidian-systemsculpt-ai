@@ -1,0 +1,71 @@
+/* CanvasFlow (experimental)
+   ------------------------
+   Injected UI inside native Obsidian Canvas nodes.
+   Keep selectors scoped and avoid layout assumptions. */
+
+.ss-canvasflow-controls {
+  margin-top: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-radius: 8px;
+}
+
+.ss-canvasflow-controls textarea.ss-canvasflow-prompt {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ss-canvasflow-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ss-canvasflow-btn {
+  appearance: none;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ss-canvasflow-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-canvasflow-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ss-canvasflow-btn-primary {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ss-canvasflow-btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.ss-canvasflow-status {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

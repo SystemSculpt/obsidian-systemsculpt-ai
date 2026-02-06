@@ -48,6 +48,7 @@ export class CommandManager {
     this.registerRunAutomationCommand();
     this.registerAutomationBacklogCommand();
     this.registerYouTubeCanvas();
+    this.registerCanvasFlowCommands();
   }
 
 
@@ -729,6 +730,39 @@ export class CommandManager {
       callback: async () => {
         const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
         new YouTubeCanvasModal(this.app, this.plugin).open();
+      },
+    });
+  }
+
+  private registerCanvasFlowCommands() {
+    this.plugin.addCommand({
+      id: "canvasflow-create-prompt-node",
+      name: "CanvasFlow - Create Prompt Node (Active Canvas)",
+      checkCallback: (checking: boolean) => {
+        const leaf = this.app.workspace.activeLeaf;
+        const viewType = (leaf?.view as any)?.getViewType?.();
+        if (viewType !== "canvas") return false;
+        if (!checking) {
+          (async () => {
+            try {
+              const { createCanvasFlowPromptNodeInActiveCanvas } = await import("../../services/canvasflow/CanvasFlowCommands");
+              await createCanvasFlowPromptNodeInActiveCanvas(this.app, this.plugin);
+            } catch (error: any) {
+              new Notice(`CanvasFlow failed: ${error?.message || error}`);
+            }
+          })();
+        }
+        return true;
+      },
+    });
+
+    this.plugin.addCommand({
+      id: "canvasflow-toggle-enhancements",
+      name: "CanvasFlow - Toggle Enhancements",
+      callback: async () => {
+        const next = !(this.plugin.settings.canvasFlowEnabled === true);
+        await this.plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: next });
+        new Notice(next ? "CanvasFlow enabled." : "CanvasFlow disabled.");
       },
     });
   }

@@ -61,6 +61,16 @@ Audio recording and transcription pipeline:
 
 See: [Audio & transcription](audio-transcription.md).
 
+### Image Generation
+
+CanvasFlow (experimental) + Replicate settings:
+
+- Enable/disable **CanvasFlow** enhancements (adds a Run button to the Canvas selection toolbar; also injects prompt controls into CanvasFlow prompt nodes)
+- Replicate API key
+- Browse/search Replicate models and pick a default model
+- Resolve/pin the latest Replicate version id for the default model
+- Output folder + optional JSON sidecar metadata
+
 ### Files & Backup
 
 Filesystem paths and data safety:
