@@ -21,8 +21,8 @@ const MIME_TYPE_MAP = {
   mp3: "audio/mpeg",
 } as const;
 
-// Maximum file size for upload (2GB)
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
+// Maximum file size for transcription (500MB, aligned with the SystemSculpt jobs pipeline).
+const MAX_FILE_SIZE = 500 * 1024 * 1024;
 
 // SystemSculpt server-side jobs pipeline limits (match systemsculpt-website).
 const SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES = 500 * 1024 * 1024;
@@ -575,8 +575,41 @@ export class TranscriptionService {
       }
 
       const progress = status.json?.progress;
-      if (progress?.stage && typeof progress.stage === "string") {
-        context?.onProgress?.(80, `Processing (${progress.stage})...`);
+      const stageRaw =
+        progress && typeof progress.stage === "string"
+          ? progress.stage
+          : typeof status.json?.job?.processingStage === "string"
+          ? status.json.job.processingStage
+          : jobStatus;
+      const stage = String(stageRaw || "").trim().toLowerCase();
+
+      const jobChunkCountRaw = Number(status.json?.job?.chunkCount);
+      const jobChunkCount =
+        Number.isFinite(jobChunkCountRaw) && jobChunkCountRaw > 0 ? Math.floor(jobChunkCountRaw) : null;
+
+      const chunksTotalRaw = Number(progress?.chunksTotal);
+      const chunksTotal =
+        Number.isFinite(chunksTotalRaw) && chunksTotalRaw > 0 ? Math.floor(chunksTotalRaw) : null;
+
+      const chunksSucceededRaw = Number(progress?.chunksSucceeded);
+      const chunksSucceeded =
+        Number.isFinite(chunksSucceededRaw) && chunksSucceededRaw >= 0 ? Math.floor(chunksSucceededRaw) : null;
+
+      const total = jobChunkCount ?? chunksTotal;
+
+      // Provide meaningful progress updates for large/chunked jobs when possible.
+      if (stage === "chunking" && total && chunksTotal !== null) {
+        const created = Math.min(chunksTotal, total);
+        const pct = 80 + Math.floor((created / total) * 5); // 80..85
+        context?.onProgress?.(pct, `Chunking audio (${created}/${total})...`);
+      } else if (stage === "transcribing" && total && chunksSucceeded !== null) {
+        const done = Math.min(chunksSucceeded, total);
+        const pct = 85 + Math.floor((done / total) * 12); // 85..97
+        context?.onProgress?.(pct, `Transcribing audio (${done}/${total})...`);
+      } else if (stage === "assembling") {
+        context?.onProgress?.(98, "Finalizing transcript...");
+      } else if (stage) {
+        context?.onProgress?.(80, `Processing (${stage})...`);
       } else if (jobStatus) {
         context?.onProgress?.(80, `Processing (${jobStatus})...`);
       }
