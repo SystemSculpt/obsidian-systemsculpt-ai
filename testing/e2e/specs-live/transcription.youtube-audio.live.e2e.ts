@@ -215,7 +215,7 @@ describe("Transcription + YouTube transcript (live)", function () {
     expect(String(result?.data?.text ?? "").length).toBeGreaterThan(1000);
   });
 
-  it("transcribes large MP3 + OGG via the live API (chunking + merge)", async function () {
+  it("transcribes large MP3 + OGG via the live API (jobs pipeline multipart upload)", async function () {
     this.timeout(480000);
 
     const run = async (filePath: string) =>
@@ -241,14 +241,12 @@ describe("Transcription + YouTube transcript (live)", function () {
 
     const mp3 = await run(mp3Path);
     expect(mp3.text.length).toBeGreaterThan(10);
-    expect(mp3.statuses.some((s) => s.toLowerCase().includes("chunk") || s.toLowerCase().includes("splitting"))).toBe(
-      true
-    );
+    expect(mp3.statuses.some((s) => s.toLowerCase().includes("upload"))).toBe(true);
+    expect(mp3.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
 
     const ogg = await run(oggPath);
     expect(ogg.text.length).toBeGreaterThan(10);
-    expect(ogg.statuses.some((s) => s.toLowerCase().includes("chunk") || s.toLowerCase().includes("splitting"))).toBe(
-      true
-    );
+    expect(ogg.statuses.some((s) => s.toLowerCase().includes("upload"))).toBe(true);
+    expect(ogg.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
   });
 });
