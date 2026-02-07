@@ -131,10 +131,13 @@ describe("SystemSculptProviderService", () => {
     });
 
     it("returns false when getModels throws", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockRejectedValue(new Error("Network error"));
       const service = SystemSculptProviderService.getInstance(mockPlugin);
 
-      const result = await service.testConnection();
+      const resultPromise = service.testConnection();
+      await jest.advanceTimersByTimeAsync(2000);
+      const result = await resultPromise;
 
       expect(result).toBe(false);
     });
@@ -150,6 +153,17 @@ describe("SystemSculptProviderService", () => {
   });
 
   describe("getModels", () => {
+    it("does not leak timeout timers after a successful request", async () => {
+      jest.useFakeTimers();
+      const service = SystemSculptProviderService.getInstance(mockPlugin);
+
+      const modelsPromise = service.getModels();
+      const models = await modelsPromise;
+
+      expect(models).toEqual(mockModels);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
     it("returns empty array when provider is disabled", async () => {
       mockPlugin.settings.enableSystemSculptProvider = false;
       const service = SystemSculptProviderService.getInstance(mockPlugin);
@@ -192,17 +206,21 @@ describe("SystemSculptProviderService", () => {
     });
 
     it("returns empty array on fetch error", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockRejectedValue(
         new Error("API error")
       );
       const service = SystemSculptProviderService.getInstance(mockPlugin);
 
-      const models = await service.getModels();
+      const modelsPromise = service.getModels();
+      await jest.advanceTimersByTimeAsync(2000);
+      const models = await modelsPromise;
 
       expect(models).toEqual([]);
     });
 
     it("does not make duplicate requests when one is in progress", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockImplementation(
         () =>
           new Promise((resolve) =>
@@ -215,6 +233,7 @@ describe("SystemSculptProviderService", () => {
       const promise1 = service.getModels();
       const promise2 = service.getModels();
 
+      await jest.advanceTimersByTimeAsync(100);
       const [result1, result2] = await Promise.all([promise1, promise2]);
 
       expect(result1).toBe(result2);
@@ -322,6 +341,7 @@ describe("SystemSculptProviderService", () => {
 
   describe("loadWithRetry (private)", () => {
     it("retries on failure", async () => {
+      jest.useFakeTimers();
       let callCount = 0;
       mockPlugin.aiService.getModels.mockImplementation(() => {
         callCount++;
@@ -332,19 +352,24 @@ describe("SystemSculptProviderService", () => {
       });
 
       const service = SystemSculptProviderService.getInstance(mockPlugin);
-      const models = await service.getModels();
+      const modelsPromise = service.getModels();
+      await jest.advanceTimersByTimeAsync(1000);
+      const models = await modelsPromise;
 
       expect(models).toEqual(mockModels);
       expect(callCount).toBe(2);
     });
 
     it("throws after max retries", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockRejectedValue(
         new Error("Persistent error")
       );
 
       const service = SystemSculptProviderService.getInstance(mockPlugin);
-      const models = await service.getModels();
+      const modelsPromise = service.getModels();
+      await jest.advanceTimersByTimeAsync(2000);
+      const models = await modelsPromise;
 
       // Should return empty array after retry exhaustion
       expect(models).toEqual([]);
@@ -355,12 +380,15 @@ describe("SystemSculptProviderService", () => {
 
   describe("error handling", () => {
     it("reports license-related errors", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockRejectedValue(
         new Error("Invalid license key")
       );
       const service = SystemSculptProviderService.getInstance(mockPlugin);
 
-      await service.getModels();
+      const modelsPromise = service.getModels();
+      await jest.advanceTimersByTimeAsync(2000);
+      await modelsPromise;
 
       // The error manager should be called with license-related info
       const { ProviderErrorManager } = require("../ProviderErrorManager");
@@ -373,12 +401,15 @@ describe("SystemSculptProviderService", () => {
     });
 
     it("reports non-license errors", async () => {
+      jest.useFakeTimers();
       mockPlugin.aiService.getModels.mockRejectedValue(
         new Error("Network timeout")
       );
       const service = SystemSculptProviderService.getInstance(mockPlugin);
 
-      await service.getModels();
+      const modelsPromise = service.getModels();
+      await jest.advanceTimersByTimeAsync(2000);
+      await modelsPromise;
 
       const { ProviderErrorManager } = require("../ProviderErrorManager");
       const mockErrorManager = ProviderErrorManager.mock.results[0].value;

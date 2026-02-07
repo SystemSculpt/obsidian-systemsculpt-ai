@@ -9,17 +9,25 @@ jest.mock("obsidian", () => ({
 }));
 
 // Mock errorLogger
-const mockErrorLogger = {
-  error: jest.fn(),
-  warn: jest.fn(),
-  info: jest.fn(),
-  debug: jest.fn(),
-  setMinimumLevel: jest.fn(),
-};
-
 jest.mock("../errorLogger", () => ({
-  errorLogger: mockErrorLogger,
+  errorLogger: {
+    error: jest.fn(),
+    warn: jest.fn(),
+    info: jest.fn(),
+    debug: jest.fn(),
+    setMinimumLevel: jest.fn(),
+  },
 }));
+
+import { errorLogger } from "../errorLogger";
+
+const mockErrorLogger = errorLogger as unknown as {
+  error: jest.Mock;
+  warn: jest.Mock;
+  info: jest.Mock;
+  debug: jest.Mock;
+  setMinimumLevel: jest.Mock;
+};
 
 import {
   LogLevel,

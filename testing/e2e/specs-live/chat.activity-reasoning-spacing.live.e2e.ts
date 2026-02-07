@@ -73,7 +73,13 @@ describe("ChatView (live) reasoning spacing", () => {
     const nonce = crypto.randomUUID().slice(0, 8);
 
     await browser.executeObsidian(({ app }, { nonce }) => {
-      const view: any = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0]?.view;
+      const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+      const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+      const activeLeaf: any = app.workspace.activeLeaf as any;
+      const leaf =
+        markedLeaf ||
+        (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+      const view: any = (leaf as any)?.view;
       if (!view) throw new Error("Chat view missing");
 
       const messageId = `e2e-spacing-${Date.now()}-${nonce}`;
@@ -130,7 +136,7 @@ describe("ChatView (live) reasoning spacing", () => {
       { timeout: 20000, timeoutMsg: "Expected reasoning/tool elements not found in activity drawer." }
     );
 
-    const metrics = await browser.execute<SpacingMetrics>(() => {
+    const metrics = (await browser.execute(() => {
       const toRect = (rect: DOMRect): RectMetrics => ({
         left: rect.left,
         top: rect.top,
@@ -205,7 +211,7 @@ describe("ChatView (live) reasoning spacing", () => {
           },
         },
       };
-    });
+    })) as SpacingMetrics;
 
     const output = {
       generatedAt: new Date().toISOString(),

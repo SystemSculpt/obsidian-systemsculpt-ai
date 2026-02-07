@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Check (fast)
+        run: npm run check:plugin:fast
+
+      - name: Check (e2e types)
+        run: npm run check:e2e
+
+      - name: Unit Tests
+        run: npm test
+
+  e2e-mock:
+    name: E2E (mock) ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    needs: unit
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: chat-core
+            spec: testing/e2e/specs-mock/chat.core.mock.e2e.ts
+          - id: tooling-auto-approve
+            spec: testing/e2e/specs-mock/tooling.auto-approve.mock.e2e.ts
+          - id: commands-open-chat
+            spec: testing/e2e/specs-mock/commands.open-chat.mock.e2e.ts
+    env:
+      SYSTEMSCULPT_E2E_APP_VERSION: "1.11.7"
+      SYSTEMSCULPT_E2E_FOCUS_GUARD: "0"
+      SYSTEMSCULPT_E2E_INSTANCES: "1"
+      SYSTEMSCULPT_E2E_SKIP_BUILD: "1"
+      SYSTEMSCULPT_E2E_LICENSE_KEY: "mock-license"
+      SYSTEMSCULPT_E2E_SPEC: ${{ matrix.spec }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Cache Obsidian Binaries
+        uses: actions/cache@v4
+        with:
+          path: testing/e2e/.obsidian-cache
+          key: ${{ runner.os }}-obsidian-${{ env.SYSTEMSCULPT_E2E_APP_VERSION }}
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E (mock)
+        run: xvfb-run -a npm run e2e:mock
+
+      - name: Upload E2E artifacts (mock)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mock-${{ matrix.id }}
+          if-no-files-found: ignore
+          path: |
+            testing/e2e/logs
+            testing/e2e/reports
+            testing/e2e/screenshots
+            testing/e2e/video

@@ -1,6 +1,7 @@
 import { expect } from "@wdio/globals";
 import { ensurePluginEnabled } from "../utils/obsidian";
 import { ensureE2EVault, PLUGIN_ID, upsertVaultFile } from "../utils/systemsculptChat";
+import { CANVASFLOW_PROMPT_NODE_HEIGHT_PX, CANVASFLOW_PROMPT_NODE_WIDTH_PX } from "../../../src/services/canvasflow/CanvasFlowUiConstants";
 
 async function ensureCorePluginEnabled(pluginId: string): Promise<void> {
   await browser.executeObsidian(async ({ app }, { pluginId }) => {
@@ -178,10 +179,33 @@ async function getPromptNodeUiState(nodeId: string): Promise<{
 async function getPromptNodeRect(nodeId: string): Promise<{ left: number; top: number; width: number; height: number } | null> {
   return await browser.execute((nodeId) => {
     const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
-    const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+    let nodeEl = (controls?.closest?.(".canvas-node") as HTMLElement | null) || null;
+    if (!nodeEl) {
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node.ss-canvasflow-prompt-node"));
+      if (candidates.length === 1) {
+        nodeEl = candidates[0];
+      }
+    }
     if (!nodeEl) return null;
     const rect = nodeEl.getBoundingClientRect();
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  }, nodeId);
+}
+
+async function getPromptNodeComputedSize(nodeId: string): Promise<{ width: number; height: number } | null> {
+  return await browser.execute((nodeId) => {
+    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
+    let nodeEl = (controls?.closest?.(".canvas-node") as HTMLElement | null) || null;
+    if (!nodeEl) {
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node.ss-canvasflow-prompt-node"));
+      if (candidates.length === 1) nodeEl = candidates[0];
+    }
+    if (!nodeEl) return null;
+    const style = (nodeEl.ownerDocument?.defaultView || window).getComputedStyle(nodeEl);
+    const width = Number.parseFloat(style.width || "");
+    const height = Number.parseFloat(style.height || "");
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+    return { width, height };
   }, nodeId);
 }
 
@@ -200,6 +224,27 @@ async function dispatchWheelOnPromptControls(nodeId: string, deltaY: number): Pr
     });
     controls.dispatchEvent(event);
   }, { nodeId, deltaY });
+}
+
+async function getCanvasNodeSizeFromVault(canvasPath: string, nodeId: string): Promise<{ width: number | null; height: number | null } | null> {
+  return await browser.executeObsidian(async ({ app }, { canvasPath, nodeId }) => {
+    const file = app.vault.getAbstractFileByPath(String(canvasPath).replace(/\\/g, "/"));
+    if (!file) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await app.vault.read(file as any);
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+    const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
+    const node = nodes.find((n: any) => n && typeof n === "object" && n.id === nodeId) || null;
+    if (!node) return null;
+    const width = typeof node.width === "number" && Number.isFinite(node.width) ? node.width : null;
+    const height = typeof node.height === "number" && Number.isFinite(node.height) ? node.height : null;
+    return { width, height };
+  }, { canvasPath, nodeId });
 }
 
 describe("CanvasFlow (live) prompt node UI", () => {
@@ -243,8 +288,9 @@ describe("CanvasFlow (live) prompt node UI", () => {
               file: promptPath,
               x: 0,
               y: 0,
-              width: 520,
-              height: 700,
+              // Intentionally non-canonical: plugin should normalize the Canvas doc to the fixed size.
+              width: 900,
+              height: 900,
             },
           ],
           edges: [],
@@ -276,13 +322,30 @@ describe("CanvasFlow (live) prompt node UI", () => {
       throw new Error(`Prompt node controls were not injected or not visible. state=${JSON.stringify(lastState)}`);
     }
 
+    // Fixed sizing: prompt nodes should clamp to the canonical dimensions.
+    const computed = await getPromptNodeComputedSize(nodeId);
+    if (!computed) {
+      throw new Error("Failed to read prompt node computed size for sizing assertion.");
+    }
+    expect(Math.round(computed.width)).toBe(CANVASFLOW_PROMPT_NODE_WIDTH_PX);
+    expect(Math.round(computed.height)).toBe(CANVASFLOW_PROMPT_NODE_HEIGHT_PX);
+
+    // Underlying Canvas doc should also be normalized (important for edge/port positioning).
+    await browser.waitUntil(
+      async () => {
+        const size = await getCanvasNodeSizeFromVault(canvasPath, nodeId);
+        return size?.width === CANVASFLOW_PROMPT_NODE_WIDTH_PX && size?.height === CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
+      },
+      { timeout: 15000, timeoutMsg: "Canvas doc node width/height was not normalized to canonical size." }
+    );
+
     // Regression test: panning via trackpad scroll should still work when the cursor is over our injected UI.
     // (Previously we stopped wheel propagation and Canvas could not pan while hovering our prompt node.)
     const beforePan = await getPromptNodeRect(nodeId);
     if (!beforePan) {
       throw new Error("Failed to read prompt node rect before pan.");
     }
-    await dispatchWheelOnPromptControls(nodeId, 700);
+    await dispatchWheelOnPromptControls(nodeId, 220);
     await browser.pause(350);
     const afterPan = await getPromptNodeRect(nodeId);
     if (!afterPan) {

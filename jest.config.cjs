@@ -3,7 +3,6 @@
  */
 
 module.exports = {
-	preset: 'ts-jest',
 	testEnvironment: 'node',
 	roots: ['<rootDir>/src'],
 	testMatch: ['**/__tests__/**/*.test.ts'],
@@ -19,7 +18,17 @@ module.exports = {
 	setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
 	moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
 	transform: {
-		'^.+\\.(ts|tsx)$': ['ts-jest', { isolatedModules: true }]
+		'^.+\\.(t|j)sx?$': [
+			'@swc/jest',
+			{
+				jsc: {
+					parser: { syntax: 'typescript', tsx: true, decorators: true },
+					target: 'es2018'
+				},
+				module: { type: 'commonjs' },
+				sourceMaps: 'inline'
+			}
+		]
 	},
 	collectCoverageFrom: [
 		'src/**/*.ts',

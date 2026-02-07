@@ -11,6 +11,7 @@ import {
   serializeCanvasDocument,
 } from "./CanvasFlowGraph";
 import { parseCanvasFlowPromptNote } from "./PromptNote";
+import { getCuratedReplicateModel, getEffectiveReplicateImageInputSpec } from "./ReplicateModelCatalog";
 import { ReplicateImageService, type ReplicatePrediction } from "./ReplicateImageService";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 
@@ -80,6 +81,20 @@ function nowStamp(): { iso: string; compact: string } {
   const pad = (n: number) => String(n).padStart(2, "0");
   const compact = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   return { iso: d.toISOString(), compact };
+}
+
+function formatReplicateModelDisplayName(modelSlug: string): string {
+  const slug = String(modelSlug || "").trim();
+  const entry = getCuratedReplicateModel(slug);
+  return entry?.label || slug || "Replicate";
+}
+
+function formatReplicateModelFileBase(modelSlug: string): string {
+  const slug = String(modelSlug || "").trim();
+  const entry = getCuratedReplicateModel(slug);
+  if (entry?.label) return entry.label;
+  // Replace path separators so `sanitizeChatTitle` doesn't collapse owner/name.
+  return slug.replace(/[\\/]+/g, "-") || "generation";
 }
 
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
@@ -177,6 +192,9 @@ export class CanvasFlowRunner {
       throw new Error("No Replicate model set. Choose a default model in Settings -> Image Generation, or set ss_replicate_model in the prompt note.");
     }
 
+    const modelDisplayName = formatReplicateModelDisplayName(modelSlug);
+    const imageCount = Math.max(1, Math.min(4, Math.floor(promptParsed.config.imageCount || 1)));
+
     const replicate = new ReplicateImageService(apiKey);
 
     const versionId = await this.resolveVersionId({
@@ -188,109 +206,132 @@ export class CanvasFlowRunner {
     const input: Record<string, unknown> = { ...(promptParsed.config.replicateInput || {}) };
     input[promptParsed.config.replicatePromptKey] = promptText;
 
-    // Some models use non-standard image input keys. Keep this mapping minimal and explicit
-    // (CanvasFlow prompt notes can always override via `ss_replicate_image_key`).
-    let imageKey = promptParsed.config.replicateImageKey;
-    if (modelSlug === "google/nano-banana-pro" && imageKey === "image") {
-      // `google/nano-banana-pro` expects `image_input` (array of URIs), not `image`.
-      imageKey = "image_input";
-    }
+    const hasExplicitImageKey = "ss_replicate_image_key" in (promptParsed.frontmatter || {});
+    const imageSpec = getEffectiveReplicateImageInputSpec({
+      modelSlug,
+      replicateImageKey: promptParsed.config.replicateImageKey,
+      hasExplicitImageKey,
+      replicateInput: input,
+    });
 
     const incomingImage = findIncomingImageFileForNode(doc, options.promptNodeId);
     if (incomingImage) {
-      const imgAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
-      if (imgAbs instanceof TFile) {
-        setStatus("Reading input image...");
-        const imgBytes = await this.app.vault.readBinary(imgAbs);
-        const ext = String(imgAbs.extension || "").toLowerCase();
-        const mime = mimeFromExtension(ext);
-        const b64 = base64FromArrayBuffer(imgBytes);
-        const dataUrl = `data:${mime};base64,${b64}`;
-
-        const existing = input[imageKey];
-        if (Array.isArray(existing)) {
-          input[imageKey] = [...existing, dataUrl];
-        } else if (imageKey === "image_input") {
-          // `google/nano-banana-pro` schema expects an array.
-          input[imageKey] = [dataUrl];
-        } else {
-          input[imageKey] = dataUrl;
-        }
+      if (imageSpec.kind === "none") {
+        setStatus("Model doesn't accept image input; running prompt without image.");
       } else {
-        setStatus("Input image missing; running prompt without image.");
+        const imgAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
+        if (imgAbs instanceof TFile) {
+          setStatus("Reading input image...");
+          const imgBytes = await this.app.vault.readBinary(imgAbs);
+          const ext = String(imgAbs.extension || "").toLowerCase();
+          const mime = mimeFromExtension(ext);
+          const b64 = base64FromArrayBuffer(imgBytes);
+          const dataUrl = `data:${mime};base64,${b64}`;
+
+          const imageKey = imageSpec.key;
+          if (imageSpec.kind === "array") {
+            const existing = input[imageKey];
+            if (Array.isArray(existing)) {
+              input[imageKey] = [...existing, dataUrl];
+            } else if (typeof existing === "string" && existing.trim()) {
+              input[imageKey] = [existing, dataUrl];
+            } else {
+              input[imageKey] = [dataUrl];
+            }
+          } else {
+            input[imageKey] = dataUrl;
+          }
+        } else {
+          setStatus("Input image missing; running prompt without image.");
+        }
       }
     }
-
-    setStatus("Creating Replicate prediction...");
-    const prediction = await replicate.createPrediction({ version: versionId, input });
-    const predictionId = String(prediction?.id || "").trim();
-    if (!predictionId) {
-      throw new Error("Replicate did not return a prediction id.");
-    }
-
-    setStatus("Waiting for Replicate...");
-    const finalPrediction = await replicate.waitForPrediction(predictionId, {
-      pollIntervalMs: this.plugin.settings.replicatePollIntervalMs ?? 1000,
-      signal: options.signal,
-      onUpdate: (p) => {
-        if (p.status === "processing" || p.status === "starting") {
-          setStatus(`Replicate: ${p.status}...`);
-        }
-      },
-    });
-
-    const outputUrl = findFirstUrl(finalPrediction.output);
-    if (!outputUrl) {
-      throw new Error("Replicate prediction completed, but no output URL was found.");
-    }
-
-    setStatus("Downloading generated image...");
-    const download = await replicate.downloadOutput(outputUrl);
-    const ext =
-      extensionFromContentType(download.contentType) ||
-      extensionFromUrl(outputUrl) ||
-      "png";
 
     const outputDir = String(this.plugin.settings.replicateOutputDir || "").trim() || "SystemSculpt/Attachments/Generations";
     await ensureFolder(this.app, outputDir);
 
     const stamp = nowStamp();
-    const baseName = sanitizeChatTitle(promptAbstract.basename || "generation");
-    const imagePath = await getAvailableFilePath(this.app, outputDir, `${baseName}-${stamp.compact}`, ext);
+    const generatorBaseName = formatReplicateModelFileBase(modelSlug);
+    const generatedImagePaths: string[] = [];
 
-    await this.app.vault.createBinary(imagePath, download.arrayBuffer);
+    for (let i = 1; i <= imageCount; i++) {
+      if (options.signal?.aborted) {
+        throw new Error("Aborted");
+      }
 
-    if (this.plugin.settings.replicateSaveMetadataSidecar !== false) {
-      await this.writeSidecar({
-        imagePath,
-        stampIso: stamp.iso,
-        promptFilePath: promptAbstract.path,
-        promptText,
-        modelSlug,
-        versionId,
-        prediction: finalPrediction,
-        outputUrl,
-        inputImagePath: incomingImage?.imagePath || null,
+      setStatus(imageCount > 1 ? `Creating Replicate prediction (${i}/${imageCount})...` : "Creating Replicate prediction...");
+      const prediction = await replicate.createPrediction({ version: versionId, input });
+      const predictionId = String(prediction?.id || "").trim();
+      if (!predictionId) {
+        throw new Error("Replicate did not return a prediction id.");
+      }
+
+      setStatus(imageCount > 1 ? `Waiting for Replicate (${i}/${imageCount})...` : "Waiting for Replicate...");
+      const finalPrediction = await replicate.waitForPrediction(predictionId, {
+        pollIntervalMs: this.plugin.settings.replicatePollIntervalMs ?? 1000,
+        signal: options.signal,
+        onUpdate: (p) => {
+          if (p.status === "processing" || p.status === "starting") {
+            setStatus(imageCount > 1 ? `Replicate (${i}/${imageCount}): ${p.status}...` : `Replicate: ${p.status}...`);
+          }
+        },
       });
+
+      const outputUrl = findFirstUrl(finalPrediction.output);
+      if (!outputUrl) {
+        throw new Error("Replicate prediction completed, but no output URL was found.");
+      }
+
+      setStatus(imageCount > 1 ? `Downloading generated image (${i}/${imageCount})...` : "Downloading generated image...");
+      const download = await replicate.downloadOutput(outputUrl);
+      const ext = extensionFromContentType(download.contentType) || extensionFromUrl(outputUrl) || "png";
+
+      const indexSuffix = imageCount > 1 ? `-${String(i).padStart(2, "0")}` : "";
+      const imagePath = await getAvailableFilePath(this.app, outputDir, `${generatorBaseName}-${stamp.compact}${indexSuffix}`, ext);
+      await this.app.vault.createBinary(imagePath, download.arrayBuffer);
+      generatedImagePaths.push(imagePath);
+
+      if (this.plugin.settings.replicateSaveMetadataSidecar !== false) {
+        await this.writeSidecar({
+          imagePath,
+          stampIso: stamp.iso,
+          promptFilePath: promptAbstract.path,
+          promptText,
+          modelSlug,
+          versionId,
+          prediction: finalPrediction,
+          outputUrl,
+          inputImagePath: incomingImage?.imagePath || null,
+        });
+      }
     }
 
     setStatus("Updating canvas...");
-    const placed = computeNextNodePosition(promptNode, { defaultWidth: 320, defaultHeight: 320 });
+    const placed = computeNextNodePosition(promptNode, { dx: 80, defaultWidth: 320, defaultHeight: 320 });
     let updatedDoc = doc;
-    const added = addFileNode(updatedDoc, {
-      filePath: imagePath,
-      x: placed.x,
-      y: placed.y,
-      width: placed.width,
-      height: placed.height,
-    });
-    updatedDoc = added.doc;
-    updatedDoc = addEdge(updatedDoc, { fromNode: options.promptNodeId, toNode: added.nodeId }).doc;
+    const gapX = 80;
+    for (const [idx, imagePath] of generatedImagePaths.entries()) {
+      const x = placed.x + idx * (placed.width + gapX);
+      const y = placed.y;
+      const added = addFileNode(updatedDoc, {
+        filePath: imagePath,
+        x,
+        y,
+        width: placed.width,
+        height: placed.height,
+      });
+      updatedDoc = added.doc;
+      updatedDoc = addEdge(updatedDoc, { fromNode: options.promptNodeId, toNode: added.nodeId }).doc;
+    }
 
     await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(updatedDoc));
 
     setStatus("Done.");
-    new Notice(`CanvasFlow: generated ${imagePath}`);
+    if (generatedImagePaths.length === 1) {
+      new Notice(`CanvasFlow: generated ${generatedImagePaths[0]} (${modelDisplayName})`);
+    } else {
+      new Notice(`CanvasFlow: generated ${generatedImagePaths.length} images (${modelDisplayName})`);
+    }
   }
 
   private async resolveVersionId(options: {
@@ -330,6 +371,7 @@ export class CanvasFlowRunner {
   }): Promise<void> {
     try {
       const sidecarPath = normalizePath(`${options.imagePath}.systemsculpt.json`);
+      const curated = getCuratedReplicateModel(options.modelSlug);
       const payload = {
         kind: "canvasflow_generation",
         created_at: options.stampIso,
@@ -337,6 +379,8 @@ export class CanvasFlowRunner {
         prompt: options.promptText,
         replicate: {
           model: options.modelSlug,
+          model_label: curated?.label ?? null,
+          model_provider: curated?.provider ?? null,
           version: options.versionId,
           prediction_id: options.prediction?.id,
           output_url: options.outputUrl,

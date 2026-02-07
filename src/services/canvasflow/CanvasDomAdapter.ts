@@ -179,3 +179,98 @@ export function findCanvasNodeElementsFromInternalCanvas(canvas: any, root?: HTM
   }
   return Array.from(deduped.values());
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function tryCall(obj: any, methodName: string, ...args: any[]): boolean {
+  try {
+    const fn = obj?.[methodName];
+    if (typeof fn !== "function") return false;
+    fn.apply(obj, args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function trySetInternalCanvasNodeSize(canvas: any, nodeId: string, width: number, height: number): boolean {
+  const id = String(nodeId || "").trim();
+  if (!id) return false;
+  const w = Number(width);
+  const h = Number(height);
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return false;
+
+  const nodes = extractCanvasNodes(canvas);
+  const internal = nodes.find((n) => guessInternalNodeId(n) === id) || null;
+  if (!internal) return false;
+
+  const targets: any[] = [internal];
+  const nestedKeys = ["node", "data", "model", "view", "store", "graphNode", "inner", "state", "props"];
+  for (const key of nestedKeys) {
+    const v = (internal as any)?.[key];
+    if (isRecord(v)) targets.push(v);
+  }
+
+  let didSomething = false;
+  for (const t of targets) {
+    // Common method shapes for internal Canvas node objects.
+    didSomething = tryCall(t, "setSize", w, h) || didSomething;
+    didSomething = tryCall(t, "setDimensions", w, h) || didSomething;
+    didSomething = tryCall(t, "resize", w, h) || didSomething;
+    didSomething = tryCall(t, "setRect", w, h) || didSomething;
+    didSomething = tryCall(t, "setBounds", w, h) || didSomething;
+
+    didSomething = tryCall(t, "setSize", { width: w, height: h }) || didSomething;
+    didSomething = tryCall(t, "setDimensions", { width: w, height: h }) || didSomething;
+    didSomething = tryCall(t, "resize", { width: w, height: h }) || didSomething;
+
+    // Property assignment fallbacks.
+    try {
+      if (typeof t?.width === "number") {
+        t.width = w;
+        didSomething = true;
+      }
+    } catch {}
+    try {
+      if (typeof t?.height === "number") {
+        t.height = h;
+        didSomething = true;
+      }
+    } catch {}
+    try {
+      if (typeof t?.w === "number") {
+        t.w = w;
+        didSomething = true;
+      }
+    } catch {}
+    try {
+      if (typeof t?.h === "number") {
+        t.h = h;
+        didSomething = true;
+      }
+    } catch {}
+    try {
+      if (isRecord(t?.size)) {
+        (t.size as any).width = w;
+        (t.size as any).height = h;
+        didSomething = true;
+      }
+    } catch {}
+  }
+
+  // Nudge a re-render/save if the internal Canvas implementation exposes hooks.
+  const canvasTargets: any[] = [canvas, canvas?.renderer, canvas?.view, canvas?.store, canvas?.graph];
+  for (const ct of canvasTargets) {
+    if (!ct) continue;
+    tryCall(ct, "requestRender");
+    tryCall(ct, "requestFrame");
+    tryCall(ct, "render");
+    tryCall(ct, "requestSave");
+    tryCall(ct, "save");
+    tryCall(ct, "scheduleSave");
+  }
+
+  return didSomething;
+}

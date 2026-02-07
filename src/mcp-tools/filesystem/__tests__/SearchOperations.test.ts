@@ -6,6 +6,16 @@ import { SearchOperations } from "../tools/SearchOperations";
 import { FILESYSTEM_LIMITS } from "../constants";
 import * as utils from "../utils";
 
+jest.mock("../utils", () => {
+  const actual = jest.requireActual("../utils");
+  return {
+    ...actual,
+    listAdapterFiles: jest.fn(),
+    statAdapterPath: jest.fn(),
+    readAdapterText: jest.fn(),
+  };
+});
+
 // Mock searchScoring module
 jest.mock("../searchScoring", () => ({
   extractSearchTerms: jest.fn((query: string) => query.split(/\s+/).filter(Boolean)),
@@ -160,8 +170,8 @@ describe("SearchOperations", () => {
       const hiddenPath = `${hiddenRoot}/Inbox/Note.md`;
       const hiddenSearch = new SearchOperations(app, [hiddenRoot], plugin);
 
-      jest.spyOn(utils, "listAdapterFiles").mockResolvedValue([hiddenPath]);
-      jest.spyOn(utils, "statAdapterPath").mockResolvedValue({
+      (utils.listAdapterFiles as jest.Mock).mockResolvedValue([hiddenPath]);
+      (utils.statAdapterPath as jest.Mock).mockResolvedValue({
         size: 42,
         ctime: Date.now(),
         mtime: Date.now(),
@@ -256,13 +266,13 @@ describe("SearchOperations", () => {
       const hiddenPath = `${hiddenRoot}/Inbox/Note.md`;
       const hiddenSearch = new SearchOperations(app, [hiddenRoot], plugin);
 
-      jest.spyOn(utils, "listAdapterFiles").mockResolvedValue([hiddenPath]);
-      jest.spyOn(utils, "statAdapterPath").mockResolvedValue({
+      (utils.listAdapterFiles as jest.Mock).mockResolvedValue([hiddenPath]);
+      (utils.statAdapterPath as jest.Mock).mockResolvedValue({
         size: 24,
         ctime: Date.now(),
         mtime: Date.now(),
       });
-      jest.spyOn(utils, "readAdapterText").mockResolvedValue("adapter test content");
+      (utils.readAdapterText as jest.Mock).mockResolvedValue("adapter test content");
       (app.vault.getFiles as jest.Mock).mockReturnValue([]);
 
       const result = await hiddenSearch.grepVault({ patterns: ["test"] });

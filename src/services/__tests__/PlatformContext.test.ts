@@ -3,16 +3,25 @@
  */
 
 // Mock MobileDetection
-const mockMobileDetection = {
-  isMobileDevice: jest.fn().mockReturnValue(false),
-  getDeviceInfo: jest.fn().mockReturnValue({ platform: "desktop" }),
+// `jest.mock(...)` is hoisted, so avoid TDZ issues by using `var` and assigning
+// inside the mock factory.
+var mockMobileDetection: {
+  isMobileDevice: jest.Mock;
+  getDeviceInfo: jest.Mock;
 };
 
-jest.mock("../../utils/MobileDetection", () => ({
-  MobileDetection: {
-    getInstance: jest.fn().mockReturnValue(mockMobileDetection),
-  },
-}));
+jest.mock("../../utils/MobileDetection", () => {
+  mockMobileDetection = {
+    isMobileDevice: jest.fn().mockReturnValue(false),
+    getDeviceInfo: jest.fn().mockReturnValue({ platform: "desktop" }),
+  };
+
+  return {
+    MobileDetection: {
+      getInstance: jest.fn().mockReturnValue(mockMobileDetection),
+    },
+  };
+});
 
 import { PlatformContext } from "../PlatformContext";
 

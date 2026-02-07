@@ -70,6 +70,7 @@ CanvasFlow (experimental) + Replicate settings:
 - Browse/search Replicate models and pick a default model
 - Resolve/pin the latest Replicate version id for the default model
 - Output folder + optional JSON sidecar metadata
+- CanvasFlow prompt node controls (when enabled): curated model-name badge (slug in tooltip), model + version selectors, images count (1-4, writes `ss_image_count`), aspect ratio presets + width/height (writes `ss_image_width` / `ss_image_height`), and generated images are saved using the model name in the filename (instead of the prompt note name)
 
 ### Files & Backup
 

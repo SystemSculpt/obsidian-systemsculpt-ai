@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Element as WebdriverElement } from "webdriverio";
+import type { ChainablePromiseElement } from "webdriverio";
+
+type WebdriverElement = ChainablePromiseElement;
 
 export const PLUGIN_ID = "systemsculpt-ai";
 
@@ -314,6 +316,14 @@ export async function openFreshChatView(): Promise<void> {
     const plugin = (app as any)?.plugins?.getPlugin?.(pluginId);
     const selectedModelId = plugin?.settings?.selectedModelId || "";
     const leaf = app.workspace.getLeaf("tab");
+
+    const existingLeaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+    for (const existing of existingLeaves) {
+      if (existing?.view) {
+        (existing.view as any).__systemsculptE2EActive = false;
+      }
+    }
+
     await leaf.setViewState({
       type: "systemsculpt-chat-view",
       state: {
@@ -322,6 +332,9 @@ export async function openFreshChatView(): Promise<void> {
       }
     });
     app.workspace.setActiveLeaf(leaf, { focus: true });
+    if ((leaf as any)?.view) {
+      ((leaf as any).view as any).__systemsculptE2EActive = true;
+    }
   }, { pluginId: PLUGIN_ID });
 }
 
@@ -427,10 +440,12 @@ export async function upsertVaultFile(filePath: string, content: string): Promis
 export async function openMarkdownFile(filePath: string): Promise<void> {
   await browser.executeObsidian(async ({ app }, filePath) => {
     const normalized = String(filePath).replace(/\\/g, "/");
-    const file = app.vault.getAbstractFileByPath(normalized);
-    if (!file) throw new Error(`File not found: ${normalized}`);
+    const abstractFile = app.vault.getAbstractFileByPath(normalized);
+    if (!abstractFile || typeof (abstractFile as any).extension !== "string") {
+      throw new Error(`File not found: ${normalized}`);
+    }
     const leaf = app.workspace.getLeaf(true);
-    await leaf.openFile(file);
+    await leaf.openFile(abstractFile as any);
   }, filePath);
 }
 
@@ -506,7 +521,12 @@ export async function getActiveChatViewState(): Promise<{
   messages: Array<{ role: string; content: unknown }>;
 }> {
   return await browser.executeObsidian(async ({ app }) => {
-    const leaf = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0];
+    const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+    const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+    const activeLeaf: any = app.workspace.activeLeaf as any;
+    const leaf =
+      markedLeaf ||
+      (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
     const view: any = leaf?.view;
     if (!view) throw new Error("No active SystemSculpt chat view found");
     const toolCalls = Array.from(view.toolCallManager?.["toolCalls"]?.values?.() ?? []).map((tc: any) => ({
@@ -525,9 +545,41 @@ export async function getActiveChatViewState(): Promise<{
   });
 }
 
+export function coerceMessageContentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (content == null) return "";
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (!part || typeof part !== "object") return "";
+        const p: any = part;
+        if (typeof p.text === "string") return p.text;
+        if (typeof p.content === "string") return p.content;
+        if (typeof p.value === "string") return p.value;
+        return "";
+      })
+      .join("");
+  }
+
+  if (typeof content === "object") {
+    const obj: any = content;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.content === "string") return obj.content;
+    try {
+      return JSON.stringify(content);
+    } catch (_) {
+      return "";
+    }
+  }
+
+  return String(content);
+}
+
 export function summarizeChatViewState(state: Awaited<ReturnType<typeof getActiveChatViewState>>) {
   const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
-  const lastAssistantText = typeof lastAssistant?.content === "string" ? lastAssistant.content.trim() : "";
+  const lastAssistantText = coerceMessageContentToText(lastAssistant?.content).trim();
   const lastAssistantPreview = lastAssistantText.slice(0, 500);
   return {
     isGenerating: state.isGenerating,
@@ -541,18 +593,18 @@ export function summarizeChatViewState(state: Awaited<ReturnType<typeof getActiv
 export async function waitForChatComposer(params?: {
   inputTimeoutMs?: number;
 }): Promise<{ input: WebdriverElement; sendButton: WebdriverElement; stopButton: WebdriverElement }> {
-  const input = await $("textarea.systemsculpt-chat-input");
+  const input = $("textarea.systemsculpt-chat-input");
   await input.waitForExist({ timeout: params?.inputTimeoutMs ?? 20000 });
 
-  const sendButton = await $("button.mod-send");
+  const sendButton = $("button.mod-send");
   await sendButton.waitForExist({ timeout: params?.inputTimeoutMs ?? 20000 });
 
-  const stopButton = await $("button.mod-stop");
+  const stopButton = $("button.mod-stop");
   return { input, sendButton, stopButton };
 }
 
 export async function setTextareaValue(el: WebdriverElement, value: string): Promise<void> {
-  await browser.execute(
+  await (browser as any).execute(
     (input: HTMLTextAreaElement, nextValue: string) => {
       input.value = nextValue;
       // Ensure cursor position reflects the new value so menu detection works.
@@ -562,7 +614,7 @@ export async function setTextareaValue(el: WebdriverElement, value: string): Pro
       input.selectionEnd = end;
       input.dispatchEvent(new Event("input", { bubbles: true }));
     },
-    el,
+    el as any,
     value
   );
 }
@@ -578,22 +630,47 @@ export async function sendChatPrompt(params: {
 
 export async function sendChatPromptDirect(prompt: string): Promise<void> {
   await browser.executeObsidian(async ({ app }, { prompt }) => {
-    const view: any = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0]?.view;
+    const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+    const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+    const activeLeaf: any = app.workspace.activeLeaf as any;
+    const leaf =
+      markedLeaf ||
+      (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+    const view: any = leaf?.view;
     if (!view) throw new Error("No active SystemSculpt chat view found");
     const handler: any = view.inputHandler;
     if (!handler) throw new Error("Chat input handler unavailable");
     const input: HTMLTextAreaElement | undefined = handler.input || handler.inputElement || handler.textarea;
     if (!input) throw new Error("Chat input element unavailable");
     input.value = String(prompt);
-    if (typeof handler.handleSendMessage === "function") {
-      void handler.handleSendMessage();
-      return;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const isReady = () => {
+      try {
+        const fn = handler.isChatReady ?? handler["isChatReady"];
+        return typeof fn === "function" ? Boolean(fn.call(handler)) : true;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    if (!isReady()) {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (isReady()) break;
+      }
     }
-    if (typeof handler["handleSendMessage"] === "function") {
-      void handler["handleSendMessage"]();
-      return;
+
+    if (!isReady()) {
+      throw new Error("Chat did not become ready for sending within timeout.");
     }
-    throw new Error("Chat send handler not available");
+
+    const sendFn = handler.handleSendMessage ?? handler["handleSendMessage"];
+    if (typeof sendFn !== "function") {
+      throw new Error("Chat send handler not available");
+    }
+    await sendFn.call(handler);
   }, { prompt });
 }
 
@@ -616,7 +693,13 @@ export async function approveAllToolCallsDirect(params?: { timeoutMs?: number })
   const deadline = Date.now() + (params?.timeoutMs ?? 140000);
   while (Date.now() < deadline) {
     const result = await browser.executeObsidian(({ app }) => {
-      const view: any = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0]?.view;
+      const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+      const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+      const activeLeaf: any = app.workspace.activeLeaf as any;
+      const leaf =
+        markedLeaf ||
+        (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+      const view: any = leaf?.view;
       const manager: any = view?.toolCallManager;
       if (!view || !manager) {
         return { pending: 0, total: 0, generating: false };

@@ -1,8 +1,38 @@
 # E2E tests (Obsidian + WDIO)
 
-This repo uses WebdriverIO + the `wdio-obsidian-service` to run end-to-end tests against a real Obsidian instance and a real SystemSculpt chat backend.
+This repo uses WebdriverIO + the `wdio-obsidian-service` to run end-to-end tests against a real Obsidian instance.
+
+It supports two backend modes:
+- **Mock backend** (fast, deterministic, CI-friendly)
+- **Live backend** (real license + real endpoint; best for “does it work in prod?” validation)
 
 ## Quick start
+
+Typecheck the E2E harness/specs (fast sanity gate):
+
+```bash
+npm run check:e2e
+```
+
+### Mock chat specs (deterministic, no secrets)
+
+Runs the E2E suite against a local mock SystemSculpt API server (started automatically).
+
+```bash
+npm run e2e:mock
+```
+
+Optional:
+- `SYSTEMSCULPT_E2E_MOCK_PORT` (default: `43111`)
+- `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
+- `SYSTEMSCULPT_E2E_SPEC` (run a single spec file, useful for CI sharding and local debugging)
+- `SYSTEMSCULPT_E2E_MOCK_DEBUG` (`1` enables mock server request logging)
+
+Example (single spec):
+
+```bash
+SYSTEMSCULPT_E2E_SPEC="testing/e2e/specs-mock/chat.core.mock.e2e.ts" npm run e2e:mock
+```
 
 ### Live chat specs (real endpoint + real license key)
 
@@ -23,6 +53,9 @@ Optional:
 - `SYSTEMSCULPT_E2E_SERVER_URL` (defaults to the plugin’s configured server URL)
 - `SYSTEMSCULPT_E2E_MODEL_ID` (defaults to `systemsculpt@@systemsculpt/ai-agent` in the specs)
 - `SYSTEMSCULPT_E2E_SETTINGS_JSON` (override the settings file used to seed live settings)
+ - `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
+ - `SYSTEMSCULPT_E2E_FOCUS_GUARD` (`1` enables the macOS focus guard; default: enabled on macOS, disabled elsewhere)
+ - `SYSTEMSCULPT_E2E_SKIP_BUILD` (`1` skips `npm run build` inside the runner)
 
 ### Mobile emulation specs
 
@@ -78,11 +111,13 @@ The runner exports these env vars from the vault settings:
 ## Where things live
 
 - Live specs: `testing/e2e/specs-live/*.live.e2e.ts`
+- Mock specs: `testing/e2e/specs-mock/*.mock.e2e.ts`
 - Mobile emulation specs: `testing/e2e/specs/*.e2e.ts`
-- WDIO configs: `testing/e2e/wdio.live.conf.mjs`, `testing/e2e/wdio.emu.conf.mjs`
+- WDIO configs: `testing/e2e/wdio.live.conf.mjs`, `testing/e2e/wdio.emu.conf.mjs`, `testing/e2e/wdio.mock.conf.mjs`
 - Fixture vault: `testing/e2e/fixtures/vault`
 - Per-worker temp vaults: `testing/e2e/fixtures/.tmp-vaults` (auto-created; safe to delete)
 - Logs/screenshots: `testing/e2e/logs`
+- Mock server: `testing/e2e/mock-server.mjs`
 
 ## Adding new ChatView live specs
 

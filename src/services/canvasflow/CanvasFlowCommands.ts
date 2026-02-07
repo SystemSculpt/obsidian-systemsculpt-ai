@@ -2,6 +2,7 @@ import { App, Notice, Platform, TFile, WorkspaceLeaf, normalizePath } from "obsi
 import type SystemSculptPlugin from "../../main";
 import { addFileNode, computeNewNodePositionNearRightEdge, parseCanvasDocument, serializeCanvasDocument } from "./CanvasFlowGraph";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
+import { CANVASFLOW_PROMPT_NODE_HEIGHT_PX, CANVASFLOW_PROMPT_NODE_WIDTH_PX } from "./CanvasFlowUiConstants";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -97,7 +98,13 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
   const promptFile = await app.vault.create(notePath, template.endsWith("\n") ? template : `${template}\n`);
 
   const pos = computeNewNodePositionNearRightEdge(doc);
-  const added = addFileNode(doc, { filePath: promptFile.path, x: pos.x, y: pos.y, width: 420, height: 260 });
+  const added = addFileNode(doc, {
+    filePath: promptFile.path,
+    x: pos.x,
+    y: pos.y,
+    width: CANVASFLOW_PROMPT_NODE_WIDTH_PX,
+    height: CANVASFLOW_PROMPT_NODE_HEIGHT_PX,
+  });
   const updatedDoc = added.doc;
   await app.vault.modify(canvasFile, serializeCanvasDocument(updatedDoc));
 

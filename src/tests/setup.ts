@@ -1,4 +1,4 @@
-// Common Jest setup for non-embeddings tests
+// Common Jest setup for plugin tests
 
 // Provide a minimal window with timer APIs that delegate to global timers
 // so Jest's fake timers control both global and window timers consistently.
@@ -103,10 +103,133 @@ g.window.clearInterval = realClearInterval;
 // Default to real timers; tests opt-in to fake timers when needed
 jest.useRealTimers();
 
-if (!process.env.SYSTEMSCULPT_TEST_DEBUG) {
-  jest.spyOn(global.console, 'log').mockImplementation(() => {});
-  jest.spyOn(global.console, 'debug').mockImplementation(() => {});
-}
+type StorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+  clear(): void;
+  key(index: number): string | null;
+  readonly length: number;
+};
+
+const createMemoryStorage = (): StorageLike => {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    key(index: number) {
+      const keys = Array.from(store.keys());
+      return keys[index] ?? null;
+    },
+    getItem(key: string) {
+      return store.get(String(key)) ?? null;
+    },
+    setItem(key: string, value: string) {
+      store.set(String(key), String(value));
+    },
+    removeItem(key: string) {
+      store.delete(String(key));
+    },
+    clear() {
+      store.clear();
+    },
+  };
+};
+
+const installWebStorageShim = () => {
+  // Node 25+ exposes `localStorage` on the Node global. Without `--localstorage-file`,
+  // Node returns a warning-emitting Proxy. Jest's teardown touches it (via Reflect.get),
+  // which creates noisy warnings that hide real test failures.
+  //
+  // Provide a stable in-memory storage during Jest runs. Skip in JSDOM where
+  // the browser-like implementation is expected/available.
+  const isJSDOM = typeof (globalThis as any).document !== "undefined";
+  if (isJSDOM) return;
+
+  try {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: createMemoryStorage(),
+    });
+  } catch (_) {}
+  try {
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: createMemoryStorage(),
+    });
+  } catch (_) {}
+
+  try {
+    if (typeof g.window !== "undefined") {
+      (g.window as any).localStorage = (globalThis as any).localStorage;
+      (g.window as any).sessionStorage = (globalThis as any).sessionStorage;
+    }
+  } catch (_) {}
+};
+
+installWebStorageShim();
+
+const isEnvEnabled = (value: string | undefined): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const strictConsole = isEnvEnabled(process.env.SYSTEMSCULPT_TEST_STRICT_CONSOLE);
+const debugConsole = isEnvEnabled(process.env.SYSTEMSCULPT_TEST_DEBUG);
+const consoleOriginals = {
+  log: global.console.log.bind(global.console),
+  debug: global.console.debug.bind(global.console),
+  info: global.console.info.bind(global.console),
+  warn: global.console.warn.bind(global.console),
+  error: global.console.error.bind(global.console),
+};
+type ConsoleMethod = keyof typeof consoleOriginals;
+const { format } = require("util");
+const consoleMethods: ConsoleMethod[] = ["log", "debug", "info", "warn", "error"];
+
+const applyConsolePolicy = () => {
+  for (const method of consoleMethods) {
+    const impl = (...args: any[]) => {
+      if (strictConsole) {
+        const message = args.length ? format(...args) : "";
+        throw new Error(
+          [
+            `[tests] Unexpected console.${method} call.`,
+            message ? `Message: ${message}` : "",
+            "If this is expected, mock/spyon console in the test.",
+            "To see console output while keeping spies, run with SYSTEMSCULPT_TEST_DEBUG=1.",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+      }
+
+      if (debugConsole) {
+        consoleOriginals[method](...args);
+      }
+    };
+
+    jest.spyOn(global.console, method).mockImplementation(impl);
+  }
+};
+
+applyConsolePolicy();
+
+beforeEach(() => {
+  // Guardrails so the suite can safely run in parallel and keep tests isolated.
+  // Note: this must run in `beforeEach` (not `afterEach`) so it doesn't interfere
+  // with test-file `afterEach` hooks that intentionally run under fake timers.
+  jest.useRealTimers();
+  jest.clearAllMocks();
+  jest.restoreAllMocks();
+  applyConsolePolicy();
+});
 
 
 // Obsidian DOM helper polyfills for JSDOM

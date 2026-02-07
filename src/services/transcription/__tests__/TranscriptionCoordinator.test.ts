@@ -2,17 +2,9 @@
  * @jest-environment jsdom
  */
 
-// Create MockTFile class to use for instanceof checks
-class MockTFile {
-  path: string;
-  basename: string;
-  stat: { mtime: number };
-  constructor(path: string) {
-    this.path = path;
-    this.basename = path.split("/").pop()?.replace(/\.[^.]+$/, "") || path;
-    this.stat = { mtime: Date.now() };
-  }
-}
+// Assigned inside the Jest mock factory (jest.mock calls are hoisted).
+// eslint-disable-next-line no-var
+var MockTFile: any;
 
 // Mock navigator.clipboard
 Object.defineProperty(navigator, "clipboard", {
@@ -23,12 +15,26 @@ Object.defineProperty(navigator, "clipboard", {
 });
 
 // Mock obsidian
-jest.mock("obsidian", () => ({
-  App: jest.fn(),
-  Notice: jest.fn(),
-  TFile: MockTFile,
-  MarkdownView: jest.fn(),
-}));
+jest.mock("obsidian", () => {
+  MockTFile = class MockTFile {
+    path: string;
+    basename: string;
+    stat: { mtime: number };
+
+    constructor(path: string) {
+      this.path = path;
+      this.basename = path.split("/").pop()?.replace(/\.[^.]+$/, "") || path;
+      this.stat = { mtime: Date.now() };
+    }
+  };
+
+  return {
+    App: jest.fn(),
+    Notice: jest.fn(),
+    TFile: MockTFile,
+    MarkdownView: jest.fn(),
+  };
+});
 
 // Mock AudioTranscriptionModal
 jest.mock("../../../modals/AudioTranscriptionModal", () => ({
@@ -57,38 +63,54 @@ jest.mock("../../../views/chatview/ChatView", () => ({
 }));
 
 // Mock TranscriptionService
-const mockTranscribeFile = jest.fn();
-jest.mock("../../TranscriptionService", () => ({
-  TranscriptionService: {
-    getInstance: jest.fn(() => ({
-      transcribeFile: mockTranscribeFile,
-    })),
-  },
-}));
+// eslint-disable-next-line no-var
+var mockTranscribeFile: jest.Mock;
+jest.mock("../../TranscriptionService", () => {
+  mockTranscribeFile = jest.fn();
+  return {
+    TranscriptionService: {
+      getInstance: jest.fn(() => ({
+        transcribeFile: mockTranscribeFile,
+      })),
+    },
+  };
+});
 
 // Mock PostProcessingService
-const mockProcessTranscription = jest.fn();
-jest.mock("../../PostProcessingService", () => ({
-  PostProcessingService: {
-    getInstance: jest.fn(() => ({
-      processTranscription: mockProcessTranscription,
-    })),
-  },
-}));
+// eslint-disable-next-line no-var
+var mockProcessTranscription: jest.Mock;
+jest.mock("../../PostProcessingService", () => {
+  mockProcessTranscription = jest.fn();
+  return {
+    PostProcessingService: {
+      getInstance: jest.fn(() => ({
+        processTranscription: mockProcessTranscription,
+      })),
+    },
+  };
+});
 
 // Mock TranscriptionProgressManager
-const mockCreateProgressHandler = jest.fn();
-const mockHandleCompletion = jest.fn();
-const mockClearProgress = jest.fn();
-jest.mock("../../TranscriptionProgressManager", () => ({
-  TranscriptionProgressManager: {
-    getInstance: jest.fn(() => ({
-      createProgressHandler: mockCreateProgressHandler,
-      handleCompletion: mockHandleCompletion,
-      clearProgress: mockClearProgress,
-    })),
-  },
-}));
+// eslint-disable-next-line no-var
+var mockCreateProgressHandler: jest.Mock;
+// eslint-disable-next-line no-var
+var mockHandleCompletion: jest.Mock;
+// eslint-disable-next-line no-var
+var mockClearProgress: jest.Mock;
+jest.mock("../../TranscriptionProgressManager", () => {
+  mockCreateProgressHandler = jest.fn();
+  mockHandleCompletion = jest.fn();
+  mockClearProgress = jest.fn();
+  return {
+    TranscriptionProgressManager: {
+      getInstance: jest.fn(() => ({
+        createProgressHandler: mockCreateProgressHandler,
+        handleCompletion: mockHandleCompletion,
+        clearProgress: mockClearProgress,
+      })),
+    },
+  };
+});
 
 import { TranscriptionCoordinator } from "../TranscriptionCoordinator";
 import { TranscriptionTitleService } from "../TranscriptionTitleService";
@@ -97,7 +119,7 @@ describe("TranscriptionCoordinator", () => {
   let coordinator: TranscriptionCoordinator;
   let mockApp: any;
   let mockPlugin: any;
-  let mockTFile: MockTFile;
+  let mockTFile: any;
 
   beforeEach(() => {
     jest.clearAllMocks();

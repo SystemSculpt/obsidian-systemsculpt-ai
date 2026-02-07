@@ -10,7 +10,8 @@ jest.mock("../../constants/uploadLimits", () => ({
 jest.mock("../PlatformContext", () => ({
   PlatformContext: {
     get: jest.fn(() => ({
-      isMobile: jest.fn(() => false),
+      // Mobile path should continue using client-side chunking (legacy endpoint per chunk).
+      isMobile: jest.fn(() => true),
       preferredTransport: jest.fn(() => "requestUrl"),
       supportsStreaming: jest.fn(() => true),
     })),

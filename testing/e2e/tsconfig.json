@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "target": "ES2020",
+    "lib": ["DOM", "ES2021"],
     "module": "CommonJS",
     "moduleResolution": "Node",
     "types": ["node", "mocha", "@wdio/globals/types", "webdriverio", "wdio-obsidian-service"],
@@ -12,5 +13,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["./specs/**/*.ts", "./specs-live/**/*.ts", "./utils/**/*.ts", "./types/**/*.d.ts"]
+  "include": ["./specs/**/*.ts", "./specs-live/**/*.ts", "./specs-mock/**/*.ts", "./utils/**/*.ts", "./types/**/*.d.ts"]
 }

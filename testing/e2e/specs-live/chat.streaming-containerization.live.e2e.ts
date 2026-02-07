@@ -28,7 +28,12 @@ describe("ChatView (live) streaming containerization", () => {
     const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
 
     await browser.executeObsidian(({ app }, { nonce }) => {
-      const leaf = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0];
+      const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+      const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+      const activeLeaf: any = app.workspace.activeLeaf as any;
+      const leaf =
+        markedLeaf ||
+        (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
       const view: any = leaf?.view;
       if (!view) throw new Error("Chat view missing");
 
@@ -111,7 +116,13 @@ describe("ChatView (live) streaming containerization", () => {
         samples.push({ t: Date.now() - start, dom });
 
         const isGenerating = await browser.executeObsidian(({ app }) => {
-          const view: any = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0]?.view;
+          const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+          const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+          const activeLeaf: any = app.workspace.activeLeaf as any;
+          const leaf =
+            markedLeaf ||
+            (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+          const view: any = (leaf as any)?.view;
           return !!view?.isGenerating;
         });
         return !isGenerating;
@@ -124,7 +135,13 @@ describe("ChatView (live) streaming containerization", () => {
 
     // Best-effort restore (keep test isolation even on failure).
     await browser.executeObsidian(({ app }) => {
-      const view: any = app.workspace.getLeavesOfType("systemsculpt-chat-view")[0]?.view;
+      const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+      const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+      const activeLeaf: any = app.workspace.activeLeaf as any;
+      const leaf =
+        markedLeaf ||
+        (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+      const view: any = (leaf as any)?.view;
       const aiService: any = view?.aiService;
       const w = window as any;
       if (aiService && w.__ssE2EOriginalStreamMessage) {

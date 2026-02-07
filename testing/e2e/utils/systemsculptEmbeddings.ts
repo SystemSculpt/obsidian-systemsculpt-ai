@@ -154,10 +154,12 @@ export async function searchSimilarByText(query: string, limit: number = 20): Pr
 export async function openMarkdownFile(filePath: string): Promise<void> {
   await browser.executeObsidian(async ({ app }, filePath) => {
     const normalized = String(filePath).replace(/\\/g, "/");
-    const file = app.vault.getAbstractFileByPath(normalized);
-    if (!file) throw new Error(`File not found: ${normalized}`);
+    const abstractFile = app.vault.getAbstractFileByPath(normalized);
+    if (!abstractFile || typeof (abstractFile as any).extension !== "string") {
+      throw new Error(`File not found: ${normalized}`);
+    }
     const leaf = app.workspace.getLeaf(true);
-    await leaf.openFile(file);
+    await leaf.openFile(abstractFile as any);
   }, filePath);
 }
 

@@ -17,6 +17,7 @@ export type CanvasFlowPromptConfig = {
   replicatePromptKey: string;
   replicateImageKey: string;
   replicateInput: Record<string, unknown>;
+  imageCount: number;
 };
 
 export type CanvasFlowPromptParseResult =
@@ -101,6 +102,9 @@ export function parseCanvasFlowPromptNote(markdown: string): CanvasFlowPromptPar
   const replicatePromptKey = readString(parsed.frontmatter["ss_replicate_prompt_key"])?.trim() || "prompt";
   const replicateImageKey = readString(parsed.frontmatter["ss_replicate_image_key"])?.trim() || "image";
 
+  const imageCountRaw = readNumber(parsed.frontmatter["ss_image_count"]);
+  const imageCount = imageCountRaw === null ? 1 : Math.max(1, Math.min(4, Math.floor(imageCountRaw)));
+
   const inputFromYaml = parsed.frontmatter["ss_replicate_input"];
   const replicateInput: Record<string, unknown> = isRecord(inputFromYaml) ? { ...inputFromYaml } : {};
 
@@ -127,6 +131,7 @@ export function parseCanvasFlowPromptNote(markdown: string): CanvasFlowPromptPar
       replicatePromptKey,
       replicateImageKey,
       replicateInput,
+      imageCount,
     },
     frontmatter: parsed.frontmatter,
     frontmatterText: parsed.frontmatterText,

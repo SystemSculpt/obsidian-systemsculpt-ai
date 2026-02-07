@@ -137,14 +137,30 @@ export class SystemSculptProviderService extends BaseProviderService {
     maxRetries: number,
     delay: number
   ): Promise<T> {
+    const withTimeout = async (promiseFactory: () => Promise<T>, timeoutMs: number): Promise<T> => {
+      return await new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Operation timeout")), timeoutMs);
+
+        // Ensure the timeout timer is cleared regardless of outcome. Not doing so leaks
+        // pending timers, which slows down shutdown and can make Jest hang/force-exit.
+        Promise.resolve()
+          .then(promiseFactory)
+          .then(
+            (value) => {
+              clearTimeout(timer);
+              resolve(value);
+            },
+            (error) => {
+              clearTimeout(timer);
+              reject(error);
+            }
+          );
+      });
+    };
+
     for (let i = 0; i < maxRetries; i++) {
       try {
-        return await Promise.race([
-          fn(),
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error("Operation timeout")), 5000)
-          )
-        ]);
+        return await withTimeout(fn, 5000);
       } catch (error) {
         if (i === maxRetries - 1) throw error;
         await new Promise(resolve => setTimeout(resolve, delay));

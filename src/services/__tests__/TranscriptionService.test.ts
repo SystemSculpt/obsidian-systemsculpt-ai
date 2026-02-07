@@ -64,6 +64,9 @@ jest.mock("../../utils/errorHandling", () => ({
 }));
 
 import { requestUrl, TFile } from "obsidian";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { PlatformContext } from "../PlatformContext";
 import { TranscriptionService } from "../TranscriptionService";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../../constants/uploadLimits";
@@ -943,32 +946,6 @@ First`;
   });
 
   describe("transcribeAudio", () => {
-    it("transcribes via requestUrl for systemsculpt provider", async () => {
-      (PlatformContext.get as jest.Mock).mockReturnValue({
-        isMobile: jest.fn(() => false),
-        preferredTransport: jest.fn(() => "requestUrl"),
-        supportsStreaming: jest.fn(() => true),
-      });
-      (TranscriptionService as any).instance = undefined;
-      service = TranscriptionService.getInstance(mockPlugin);
-
-      (requestUrl as jest.Mock).mockResolvedValue({
-        status: 200,
-        headers: { "content-type": "application/json" },
-        json: { text: "hello world" },
-      });
-
-      const file = new TFile({ path: "audio.mp3", name: "audio.mp3", extension: "mp3" });
-      const blob = new Blob(["audio"], { type: "audio/mpeg" });
-
-      const result = await (service as any).transcribeAudio(file, blob, {
-        onProgress: jest.fn(),
-      });
-
-      expect(result).toBe("hello world");
-      expect(requestUrl).toHaveBeenCalled();
-    });
-
     it("sends OGG with correct filename + mime type for Groq custom", async () => {
       (PlatformContext.get as jest.Mock).mockReturnValue({
         isMobile: jest.fn(() => false),
@@ -1063,7 +1040,7 @@ First`;
       expect(text).toContain("Content-Type: audio/ogg");
     });
 
-    it("chunks files larger than the SystemSculpt serverless limit", async () => {
+    it("uses SystemSculpt jobs on desktop (no client-side chunking)", async () => {
       (PlatformContext.get as jest.Mock).mockReturnValue({
         isMobile: jest.fn(() => false),
         preferredTransport: jest.fn(() => "requestUrl"),
@@ -1072,34 +1049,116 @@ First`;
       (TranscriptionService as any).instance = undefined;
       service = TranscriptionService.getInstance(mockPlugin);
 
-      const blob1 = new Blob(["a"], { type: "audio/wav" });
-      const blob2 = new Blob(["b"], { type: "audio/wav" });
-      jest
-        .spyOn(service as any, "buildWavChunkBlobs")
-        .mockResolvedValue([blob1, blob2]);
-
-      (requestUrl as jest.Mock)
-        .mockResolvedValueOnce({
-          status: 200,
-          headers: { "content-type": "application/json" },
-          json: { text: "chunk1" },
-        })
-        .mockResolvedValueOnce({
-          status: 200,
-          headers: { "content-type": "application/json" },
-          json: { text: "chunk2" },
-        });
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ss-transcribe-jobs-test-"));
+      mockPlugin.app.vault.adapter.basePath = tmpDir;
 
       const file = new TFile();
       (file as any).path = "big.ogg";
       (file as any).name = "big.ogg";
       (file as any).basename = "big";
       (file as any).extension = "ogg";
-      (file as any).stat = { size: AUDIO_UPLOAD_MAX_BYTES + 1 };
 
-      mockPlugin.app.vault.readBinary = jest
-        .fn()
-        .mockResolvedValue(new ArrayBuffer(AUDIO_UPLOAD_MAX_BYTES + 1));
+      const payload = Buffer.from("hello world");
+      await fs.writeFile(path.join(tmpDir, (file as any).path), payload);
+      (file as any).stat = { size: payload.byteLength };
+
+      // Desktop jobs flow should avoid vault.readBinary for large file support.
+      mockPlugin.app.vault.readBinary = jest.fn();
+
+      const buildChunksSpy = jest.spyOn(service as any, "buildWavChunkBlobs");
+
+      const partsReceived: Array<{ url: string; bytes: number }> = [];
+
+      (requestUrl as jest.Mock).mockImplementation(async (options: any) => {
+        const url = String(options?.url || "");
+        const method = String(options?.method || "GET").toUpperCase();
+
+        if (url.endsWith("/audio/transcriptions/jobs") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              job: {
+                id: "job-1",
+                status: "uploading",
+                filename: "big.ogg",
+                contentType: "audio/ogg",
+                contentLengthBytes: payload.byteLength,
+                timestamped: false,
+                language: null,
+                model: "whisper-large-v3",
+                processingStrategy: "direct",
+                processingStage: null,
+                audioExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+              },
+              upload: {
+                key: "uploads/audio-transcriptions/job-1/big.ogg",
+                uploadId: "upload-1",
+                partSizeBytes: 6,
+                totalParts: 2,
+                partUrlExpiresInSeconds: 900,
+              },
+            },
+          };
+        }
+
+        if (url.includes("/audio/transcriptions/jobs/job-1/upload/part-url") && method === "GET") {
+          const parsed = new URL(url);
+          const partNumber = parsed.searchParams.get("partNumber");
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              part: {
+                partNumber: Number(partNumber),
+                method: "PUT",
+                url: `https://r2.example.test/part-${partNumber}`,
+                urlExpiresInSeconds: 900,
+              },
+            },
+          };
+        }
+
+        if (url === "https://r2.example.test/part-1" && method === "PUT") {
+          partsReceived.push({ url, bytes: options.body?.byteLength ?? 0 });
+          return { status: 200, headers: { etag: "\"etag-1\"" }, text: "" };
+        }
+
+        if (url === "https://r2.example.test/part-2" && method === "PUT") {
+          partsReceived.push({ url, bytes: options.body?.byteLength ?? 0 });
+          return { status: 200, headers: { etag: "\"etag-2\"" }, text: "" };
+        }
+
+        if (url.endsWith("/audio/transcriptions/jobs/job-1/upload/complete") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: { success: true, job: { id: "job-1", status: "queued" } },
+          };
+        }
+
+        if (url.endsWith("/audio/transcriptions/jobs/job-1/start") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              job: { id: "job-1", status: "succeeded" },
+              text: "hello world",
+              transcript_urls: {
+                text: "https://r2.example.test/transcript.txt",
+                json: "https://r2.example.test/transcript.json",
+                expiresInSeconds: 1800,
+              },
+              usage_summary: { audio_duration_seconds: 1, file_size_bytes: payload.byteLength },
+            },
+          };
+        }
+
+        throw new Error(`Unexpected requestUrl call: ${method} ${url}`);
+      });
 
       const result = await service.transcribeFile(file, {
         type: "note",
@@ -1108,8 +1167,13 @@ First`;
         suppressNotices: true,
       });
 
-      expect(result).toBe("chunk1 chunk2");
-      expect(requestUrl).toHaveBeenCalledTimes(2);
+      expect(result).toBe("hello world");
+      expect(mockPlugin.app.vault.readBinary).not.toHaveBeenCalled();
+      expect(buildChunksSpy).not.toHaveBeenCalled();
+      expect(partsReceived).toEqual([
+        { url: "https://r2.example.test/part-1", bytes: 6 },
+        { url: "https://r2.example.test/part-2", bytes: payload.byteLength - 6 },
+      ]);
     });
   });
 });

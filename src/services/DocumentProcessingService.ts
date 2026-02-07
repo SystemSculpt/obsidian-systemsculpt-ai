@@ -347,14 +347,19 @@ export class DocumentProcessingService {
 
       try {
         const downloadPromise = this.downloadExtraction(documentId);
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Download timed out")), 30000)
-        );
-
-        let extractionData = await Promise.race([
-          downloadPromise,
-          timeoutPromise,
-        ]);
+        let extractionData = await new Promise<any>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("Download timed out")), 30000);
+          downloadPromise.then(
+            (value) => {
+              clearTimeout(timer);
+              resolve(value);
+            },
+            (error) => {
+              clearTimeout(timer);
+              reject(error);
+            }
+          );
+        });
 
         if (
           !extractionData ||

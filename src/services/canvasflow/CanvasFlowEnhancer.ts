@@ -6,6 +6,7 @@ import {
   findCanvasNodeElements,
   findCanvasNodeElementsFromInternalCanvas,
   getCanvasNodeId,
+  trySetInternalCanvasNodeSize,
 } from "./CanvasDomAdapter";
 import {
   addEdge,
@@ -25,6 +26,17 @@ import {
 } from "./PromptNote";
 import { CanvasFlowRunner } from "./CanvasFlowRunner";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
+import {
+  CANVASFLOW_PROMPT_NODE_CSS_VAR_HEIGHT,
+  CANVASFLOW_PROMPT_NODE_CSS_VAR_WIDTH,
+  CANVASFLOW_PROMPT_NODE_HEIGHT_PX,
+  CANVASFLOW_PROMPT_NODE_WIDTH_PX,
+} from "./CanvasFlowUiConstants";
+import {
+  formatCuratedModelOptionText,
+  getCuratedReplicateModel,
+  getCuratedReplicateModelGroups,
+} from "./ReplicateModelCatalog";
 
 type PromptCacheEntry = {
   mtime: number;
@@ -42,9 +54,12 @@ type LeafController = {
   canvasFileMtime: number;
   cachedCanvasDoc: ReturnType<typeof parseCanvasDocument> | null;
   promptFileCache: Map<string, PromptCacheEntry>;
+  normalizedInternalNodeSizes: Set<string>;
   pendingFocusNodeId: string | null;
   pendingFocusAttempts: number;
 };
+
+const CANVASFLOW_PROMPT_UI_VERSION = "3";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -59,6 +74,20 @@ function stopEvent(e: Event): void {
 
 function stopPropagationOnly(e: Event): void {
   e.stopPropagation();
+}
+
+function formatReplicateModelBadge(modelSlug: string): { text: string; title: string } {
+  const slug = String(modelSlug || "").trim();
+  if (!slug) {
+    return { text: "(no model)", title: "" };
+  }
+
+  const curated = getCuratedReplicateModel(slug);
+  if (!curated) {
+    return { text: slug, title: slug };
+  }
+
+  return { text: curated.label, title: curated.slug };
 }
 
 export class CanvasFlowEnhancer {
@@ -147,6 +176,7 @@ export class CanvasFlowEnhancer {
       canvasFileMtime: 0,
       cachedCanvasDoc: null,
       promptFileCache: new Map(),
+      normalizedInternalNodeSizes: new Set(),
       pendingFocusNodeId: null,
       pendingFocusAttempts: 0,
     };
@@ -213,7 +243,11 @@ export class CanvasFlowEnhancer {
     }
 
     const canvasMtime = canvasFile.stat?.mtime ?? 0;
-    if (controller.canvasFilePath !== canvasFile.path || controller.canvasFileMtime !== canvasMtime) {
+    const pathChanged = controller.canvasFilePath !== canvasFile.path;
+    if (pathChanged || controller.canvasFileMtime !== canvasMtime) {
+      if (pathChanged) {
+        controller.normalizedInternalNodeSizes.clear();
+      }
       controller.canvasFilePath = canvasFile.path;
       controller.canvasFileMtime = canvasMtime;
       const raw = await this.app.vault.read(canvasFile);
@@ -223,6 +257,8 @@ export class CanvasFlowEnhancer {
     const doc = controller.cachedCanvasDoc;
     if (!doc) return;
     const { nodesById } = indexCanvas(doc);
+
+    let canvasDocDirty = false;
 
     const internalCanvas = (leaf.view as any)?.canvas ?? null;
     const nodeEls: Array<{ el: HTMLElement; nodeId: string }> = [];
@@ -251,6 +287,30 @@ export class CanvasFlowEnhancer {
         continue;
       }
 
+      // Keep the Canvas doc's notion of width/height aligned with our fixed-size UI.
+      // Otherwise, edges/ports can render offset from the visual node (Canvas uses doc dims for layout).
+      const desiredWidth = CANVASFLOW_PROMPT_NODE_WIDTH_PX;
+      const desiredHeight = CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
+
+      // Best-effort: normalize internal Canvas sizing at least once per node, so connection handles/edges
+      // don't render offset when we clamp the DOM.
+      try {
+        if (internalCanvas && !controller.normalizedInternalNodeSizes.has(nodeId)) {
+          const did = trySetInternalCanvasNodeSize(internalCanvas, nodeId, desiredWidth, desiredHeight);
+          if (did) {
+            controller.normalizedInternalNodeSizes.add(nodeId);
+          }
+        }
+      } catch {}
+
+      const currentWidth = typeof node.width === "number" && Number.isFinite(node.width) ? (node.width as number) : null;
+      const currentHeight = typeof node.height === "number" && Number.isFinite(node.height) ? (node.height as number) : null;
+      if (currentWidth !== desiredWidth || currentHeight !== desiredHeight) {
+        (node as any).width = desiredWidth;
+        (node as any).height = desiredHeight;
+        canvasDocDirty = true;
+      }
+
       this.ensureControls({
         leaf,
         canvasFile,
@@ -261,6 +321,16 @@ export class CanvasFlowEnhancer {
         promptFrontmatter: promptInfo.frontmatter,
         promptConfig: promptInfo.config,
       });
+    }
+
+    if (canvasDocDirty) {
+      try {
+        await this.app.vault.modify(canvasFile, serializeCanvasDocument(doc));
+        controller.cachedCanvasDoc = doc;
+        controller.canvasFileMtime = canvasFile.stat?.mtime ?? controller.canvasFileMtime;
+      } catch {
+        // Ignore; best-effort.
+      }
     }
 
     await this.ensureSelectionMenuButtons({
@@ -295,6 +365,76 @@ export class CanvasFlowEnhancer {
     return { body, frontmatter: parsed.frontmatter, config: parsed.config };
   }
 
+  private renderModelSelect(
+    select: HTMLSelectElement,
+    options: {
+      settingsModelSlug: string;
+      modelFromNote: string;
+      selectedValue?: string;
+    }
+  ): void {
+    const settingsModelSlug = String(options.settingsModelSlug || "").trim();
+    const modelFromNote = String(options.modelFromNote || "").trim();
+    const selectedValue = String(options.selectedValue ?? "").trim();
+
+    const keepSelected = selectedValue || modelFromNote;
+    const extras = new Set<string>();
+    if (keepSelected) extras.add(keepSelected);
+    if (modelFromNote) extras.add(modelFromNote);
+
+    const groups = getCuratedReplicateModelGroups();
+    const curatedSlugs = new Set<string>();
+    for (const group of groups) {
+      for (const model of group.models) {
+        curatedSlugs.add(model.slug);
+      }
+    }
+
+    const extraSlugs = Array.from(extras.values())
+      .map((s) => String(s || "").trim())
+      .filter((s) => s && !curatedSlugs.has(s))
+      .sort((a, b) => a.localeCompare(b));
+
+    select.empty();
+    const defaultEntry = settingsModelSlug ? getCuratedReplicateModel(settingsModelSlug) : null;
+    const defaultLabel = defaultEntry
+      ? `(Default: ${defaultEntry.label} (${defaultEntry.slug})  ${defaultEntry.pricing.summary})`
+      : settingsModelSlug
+        ? `(Default: ${settingsModelSlug})`
+        : "(Default model)";
+    select.createEl("option", { value: "", text: defaultLabel });
+
+    for (const group of groups) {
+      const optgroup = select.createEl("optgroup");
+      optgroup.label = group.provider;
+      for (const model of group.models) {
+        optgroup.createEl("option", { value: model.slug, text: formatCuratedModelOptionText(model) });
+      }
+    }
+
+    if (extraSlugs.length) {
+      const optgroup = select.createEl("optgroup");
+      optgroup.label = "Custom";
+      for (const slug of extraSlugs) {
+        optgroup.createEl("option", { value: slug, text: slug });
+      }
+    }
+
+    // Ensure selection sticks even if the chosen model isn't in the latest list.
+    select.value = keepSelected || "";
+  }
+
+  private populateModelSelect(select: HTMLSelectElement, options: { settingsModelSlug: string; modelFromNote: string }): void {
+    select.dataset.ssCanvasflowSettingsModelSlug = String(options.settingsModelSlug || "").trim();
+    select.dataset.ssCanvasflowNoteModelSlug = String(options.modelFromNote || "").trim();
+
+    this.renderModelSelect(select, {
+      settingsModelSlug: options.settingsModelSlug,
+      modelFromNote: options.modelFromNote,
+      selectedValue: select.value,
+    });
+  }
+
   private ensureControls(options: {
     leaf: WorkspaceLeaf;
     canvasFile: TFile;
@@ -305,6 +445,8 @@ export class CanvasFlowEnhancer {
     promptFrontmatter: Record<string, unknown>;
     promptConfig: CanvasFlowPromptConfig;
   }): void {
+    this.enforcePromptNodeSizing(options.nodeEl);
+
     const host = findCanvasNodeContentHost(options.nodeEl);
     const settingsModelSlug = String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
     const modelFromNote = String(options.promptConfig.replicateModelSlug || "").trim();
@@ -312,6 +454,13 @@ export class CanvasFlowEnhancer {
     const effectiveModelSlug = modelFromNote || settingsModelSlug;
 
     const replicateInputRaw = readRecord(options.promptFrontmatter["ss_replicate_input"]);
+    const imageCount = Math.max(1, Math.min(4, Math.floor(options.promptConfig.imageCount || 1)));
+    const widthFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_width"]);
+    const heightFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_height"]);
+    const width =
+      widthFromFrontmatter ?? readNumber(replicateInputRaw["width"]) ?? readNumber(options.promptConfig.replicateInput["width"]);
+    const height =
+      heightFromFrontmatter ?? readNumber(replicateInputRaw["height"]) ?? readNumber(options.promptConfig.replicateInput["height"]);
     const nanoDefaults = {
       aspect_ratio: readString(replicateInputRaw["aspect_ratio"]) || "match_input_image",
       resolution: readString(replicateInputRaw["resolution"]) || "4K",
@@ -319,18 +468,37 @@ export class CanvasFlowEnhancer {
       safety_filter_level: readString(replicateInputRaw["safety_filter_level"]) || "block_only_high",
     };
 
-    const existing = host.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${CSS.escape(options.nodeId)}"]`);
+    let existing = host.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${CSS.escape(options.nodeId)}"]`);
+    if (existing && existing.dataset.ssCanvasflowUiVersion !== CANVASFLOW_PROMPT_UI_VERSION) {
+      try {
+        existing.remove();
+      } catch {}
+      existing = null;
+    }
     if (existing) {
       options.nodeEl.classList.add("ss-canvasflow-prompt-node");
+      this.enforcePromptNodeSizing(options.nodeEl);
 
       const textarea = existing.querySelector<HTMLTextAreaElement>("textarea.ss-canvasflow-prompt");
       if (textarea && textarea.value !== options.promptBody && textarea !== document.activeElement) {
         textarea.value = options.promptBody;
       }
 
-      const modelInput = existing.querySelector<HTMLInputElement>("input.ss-canvasflow-model");
-      if (modelInput && modelInput.value !== modelFromNote && modelInput !== document.activeElement) {
-        modelInput.value = modelFromNote;
+      const modelSelect = existing.querySelector<HTMLSelectElement>("select.ss-canvasflow-model");
+      if (modelSelect) {
+        const anySelect = modelSelect as any;
+        if (anySelect.__ssCanvasflowModelInit !== true) {
+          anySelect.__ssCanvasflowModelInit = true;
+          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+        } else if ((modelSelect.dataset.ssCanvasflowSettingsModelSlug || "") !== settingsModelSlug) {
+          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+        } else if ((modelSelect.dataset.ssCanvasflowNoteModelSlug || "") !== modelFromNote) {
+          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+        }
+
+        if (modelSelect.value !== modelFromNote && modelSelect !== document.activeElement) {
+          modelSelect.value = modelFromNote;
+        }
       }
 
       const versionInput = existing.querySelector<HTMLInputElement>("input.ss-canvasflow-version");
@@ -340,7 +508,29 @@ export class CanvasFlowEnhancer {
 
       const modelBadge = existing.querySelector<HTMLElement>("[data-ss-canvasflow-model-badge]");
       if (modelBadge) {
-        modelBadge.setText(effectiveModelSlug || "(no model)");
+        const badge = formatReplicateModelBadge(effectiveModelSlug);
+        modelBadge.setText(badge.text);
+        modelBadge.title = badge.title;
+      }
+
+      const imageCountSelect = existing.querySelector<HTMLSelectElement>("select.ss-canvasflow-image-count");
+      if (imageCountSelect && imageCountSelect.value !== String(imageCount) && imageCountSelect !== document.activeElement) {
+        imageCountSelect.value = String(imageCount);
+        imageCountSelect.dataset.ssCanvasflowInitial = imageCountSelect.value;
+      }
+
+      const widthInput = existing.querySelector<HTMLInputElement>("input.ss-canvasflow-width");
+      const nextWidth = width !== null ? String(Math.max(1, Math.floor(width))) : "";
+      if (widthInput && widthInput.value !== nextWidth && widthInput !== document.activeElement) {
+        widthInput.value = nextWidth;
+        widthInput.dataset.ssCanvasflowInitial = widthInput.value;
+      }
+
+      const heightInput = existing.querySelector<HTMLInputElement>("input.ss-canvasflow-height");
+      const nextHeight = height !== null ? String(Math.max(1, Math.floor(height))) : "";
+      if (heightInput && heightInput.value !== nextHeight && heightInput !== document.activeElement) {
+        heightInput.value = nextHeight;
+        heightInput.dataset.ssCanvasflowInitial = heightInput.value;
       }
 
       const isNano = effectiveModelSlug === "google/nano-banana-pro";
@@ -363,9 +553,11 @@ export class CanvasFlowEnhancer {
     }
 
     options.nodeEl.classList.add("ss-canvasflow-prompt-node");
+    this.enforcePromptNodeSizing(options.nodeEl);
 
     const controls = host.createDiv({ cls: "ss-canvasflow-controls" });
     controls.dataset.ssNodeId = options.nodeId;
+    controls.dataset.ssCanvasflowUiVersion = CANVASFLOW_PROMPT_UI_VERSION;
 
     // Keep Canvas interactions sane.
     // Important: avoid `preventDefault()` here (it can break textarea focus/selection).
@@ -421,17 +613,47 @@ export class CanvasFlowEnhancer {
     header.createDiv({ text: "CanvasFlow Prompt", cls: "ss-canvasflow-node-title" });
     const badges = header.createDiv({ cls: "ss-canvasflow-node-badges" });
     badges.createEl("code", { text: options.promptFile.basename, cls: "ss-canvasflow-node-badge" });
-    const modelBadge = badges.createEl("code", { text: effectiveModelSlug || "(no model)", cls: "ss-canvasflow-node-badge" });
+    const modelBadgeData = formatReplicateModelBadge(effectiveModelSlug);
+    const modelBadge = badges.createEl("code", { text: modelBadgeData.text, cls: "ss-canvasflow-node-badge" });
+    modelBadge.title = modelBadgeData.title;
     modelBadge.dataset.ssCanvasflowModelBadge = "true";
 
     const fields = controls.createDiv({ cls: "ss-canvasflow-fields" });
 
+    const inferAspectRatioPreset = (w: number | null, h: number | null): string => {
+      if (w === null || h === null) return "";
+      if (w <= 0 || h <= 0) return "";
+
+      const ratio = w / h;
+      const closeTo = (target: number) => Math.abs(ratio - target) <= 0.01;
+      if (closeTo(1)) return "1:1";
+      if (closeTo(4 / 3)) return "4:3";
+      if (closeTo(3 / 4)) return "3:4";
+      if (closeTo(16 / 9)) return "16:9";
+      if (closeTo(9 / 16)) return "9:16";
+      return "";
+    };
+
+    const readPositiveInt = (value: string): number | null => {
+      const raw = String(value || "").trim();
+      if (!raw) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      const out = Math.floor(n);
+      return out >= 1 ? out : null;
+    };
+
+    const roundDownToMultiple = (value: number, multiple: number): number => {
+      if (!Number.isFinite(value) || value <= 0) return multiple;
+      const m = Math.max(1, Math.floor(multiple));
+      return Math.max(m, Math.floor(value / m) * m);
+    };
+
     const modelField = fields.createDiv({ cls: "ss-canvasflow-field" });
     modelField.createDiv({ text: "Model (optional)", cls: "ss-canvasflow-field-label" });
-    const modelInput = modelField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-model" });
-    modelInput.type = "text";
-    modelInput.value = modelFromNote;
-    modelInput.placeholder = settingsModelSlug ? `Default: ${settingsModelSlug}` : "owner/model";
+    const modelSelect = modelField.createEl("select", { cls: "ss-canvasflow-model" });
+    (modelSelect as any).__ssCanvasflowModelInit = true;
+    this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
 
     const versionField = fields.createDiv({ cls: "ss-canvasflow-field" });
     versionField.createDiv({ text: "Version (optional)", cls: "ss-canvasflow-field-label" });
@@ -439,6 +661,42 @@ export class CanvasFlowEnhancer {
     versionInput.type = "text";
     versionInput.value = versionFromNote;
     versionInput.placeholder = "Pinned Replicate version id";
+
+    const imageCountField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    imageCountField.createDiv({ text: "Images", cls: "ss-canvasflow-field-label" });
+    const imageCountSelect = imageCountField.createEl("select", { cls: "ss-canvasflow-image-count" });
+    for (const n of [1, 2, 3, 4]) {
+      imageCountSelect.createEl("option", { value: String(n), text: String(n) });
+    }
+    imageCountSelect.value = String(imageCount);
+    imageCountSelect.dataset.ssCanvasflowInitial = imageCountSelect.value;
+
+    const aspectRatioField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    aspectRatioField.createDiv({ text: "Aspect ratio preset", cls: "ss-canvasflow-field-label" });
+    const aspectRatioPresetSelect = aspectRatioField.createEl("select", { cls: "ss-canvasflow-aspect-ratio-preset" });
+    aspectRatioPresetSelect.createEl("option", { value: "", text: "(custom)" });
+    for (const ratio of ["1:1", "4:3", "3:4", "16:9", "9:16"]) {
+      aspectRatioPresetSelect.createEl("option", { value: ratio, text: ratio });
+    }
+    aspectRatioPresetSelect.value = inferAspectRatioPreset(width, height);
+
+    const widthField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    widthField.createDiv({ text: "Width", cls: "ss-canvasflow-field-label" });
+    const widthInput = widthField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-width" });
+    widthInput.type = "number";
+    widthInput.min = "1";
+    widthInput.placeholder = "Default";
+    widthInput.value = width !== null ? String(Math.max(1, Math.floor(width))) : "";
+    widthInput.dataset.ssCanvasflowInitial = widthInput.value;
+
+    const heightField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    heightField.createDiv({ text: "Height", cls: "ss-canvasflow-field-label" });
+    const heightInput = heightField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-height" });
+    heightInput.type = "number";
+    heightInput.min = "1";
+    heightInput.placeholder = "Default";
+    heightInput.value = height !== null ? String(Math.max(1, Math.floor(height))) : "";
+    heightInput.dataset.ssCanvasflowInitial = heightInput.value;
 
     controls.createDiv({ text: "Prompt", cls: "ss-canvasflow-field-label ss-canvasflow-prompt-label" });
     const textarea = controls.createEl("textarea", { cls: "ss-canvasflow-prompt" });
@@ -517,13 +775,15 @@ export class CanvasFlowEnhancer {
     let saveChain: Promise<void> = Promise.resolve();
 
     const getEffectiveModel = (): string => {
-      const explicit = String(modelInput.value || "").trim();
+      const explicit = String(modelSelect.value || "").trim();
       return explicit || settingsModelSlug;
     };
 
     const updateModelBadgeAndVisibility = () => {
       const effective = getEffectiveModel();
-      modelBadge.setText(effective || "(no model)");
+      const badge = formatReplicateModelBadge(effective);
+      modelBadge.setText(badge.text);
+      modelBadge.title = badge.title;
       nanoWrap.style.display = effective === "google/nano-banana-pro" ? "" : "none";
     };
 
@@ -539,7 +799,7 @@ export class CanvasFlowEnhancer {
         nextFrontmatter["ss_flow_kind"] = "prompt";
         nextFrontmatter["ss_flow_backend"] = "replicate";
 
-        const explicitModel = String(modelInput.value || "").trim();
+        const explicitModel = String(modelSelect.value || "").trim();
         const explicitVersion = String(versionInput.value || "").trim();
         if (explicitModel) {
           nextFrontmatter["ss_replicate_model"] = explicitModel;
@@ -552,6 +812,43 @@ export class CanvasFlowEnhancer {
           delete nextFrontmatter["ss_replicate_version"];
         }
 
+        const countRaw = Number(imageCountSelect.value);
+        const count = Number.isFinite(countRaw) ? Math.max(1, Math.min(4, Math.floor(countRaw))) : 1;
+        if (count > 1) {
+          nextFrontmatter["ss_image_count"] = count;
+        } else {
+          delete nextFrontmatter["ss_image_count"];
+        }
+
+        let applySizeToReplicateInput = false;
+        let nextWidth: number | null = null;
+        let nextHeight: number | null = null;
+
+        const hadSizeFrontmatter =
+          Object.prototype.hasOwnProperty.call(parsed.frontmatter || {}, "ss_image_width") ||
+          Object.prototype.hasOwnProperty.call(parsed.frontmatter || {}, "ss_image_height");
+        const initialWidthText = String(widthInput.dataset.ssCanvasflowInitial || "");
+        const initialHeightText = String(heightInput.dataset.ssCanvasflowInitial || "");
+        const didSizeChange = String(widthInput.value || "") !== initialWidthText || String(heightInput.value || "") !== initialHeightText;
+        if (hadSizeFrontmatter || didSizeChange) {
+          applySizeToReplicateInput = true;
+          const widthValue = readPositiveInt(widthInput.value);
+          const heightValue = readPositiveInt(heightInput.value);
+          const normalizedWidth = widthValue ?? heightValue;
+          const normalizedHeight = heightValue ?? widthValue;
+          if (normalizedWidth !== null && normalizedHeight !== null) {
+            nextWidth = normalizedWidth;
+            nextHeight = normalizedHeight;
+            nextFrontmatter["ss_image_width"] = normalizedWidth;
+            nextFrontmatter["ss_image_height"] = normalizedHeight;
+          } else {
+            delete nextFrontmatter["ss_image_width"];
+            delete nextFrontmatter["ss_image_height"];
+          }
+        }
+
+        const previousExplicitModel = String(parsed.frontmatter?.["ss_replicate_model"] || "").trim();
+        const previousEffectiveModel = previousExplicitModel || settingsModelSlug;
         const effectiveModel = explicitModel || settingsModelSlug;
         const existingInput = readRecord(nextFrontmatter["ss_replicate_input"]);
         const nextInput: Record<string, unknown> = { ...existingInput };
@@ -561,24 +858,41 @@ export class CanvasFlowEnhancer {
           nextInput.resolution = resolutionSelect.value;
           nextInput.output_format = outputFormatSelect.value;
           nextInput.safety_filter_level = safetySelect.value;
+        } else {
+          // Avoid leaking Nano-only keys into other models (Replicate schemas often reject unknown inputs).
+          delete (nextInput as any).aspect_ratio;
+          delete (nextInput as any).resolution;
+          delete (nextInput as any).output_format;
+          delete (nextInput as any).safety_filter_level;
+        }
+
+        if (applySizeToReplicateInput) {
+          if (nextWidth !== null && nextHeight !== null) {
+            nextInput.width = nextWidth;
+            nextInput.height = nextHeight;
+          } else {
+            delete (nextInput as any).width;
+            delete (nextInput as any).height;
+          }
         }
 
         nextFrontmatter["ss_replicate_input"] = nextInput;
 
         // Make Nano Banana work out of the box when a model is explicitly chosen.
         const currentImageKey = String(nextFrontmatter["ss_replicate_image_key"] || "").trim();
-        if (explicitModel) {
-          if (explicitModel === "google/nano-banana-pro") {
-            nextFrontmatter["ss_replicate_image_key"] = "image_input";
-          } else if (currentImageKey === "image_input") {
-            delete nextFrontmatter["ss_replicate_image_key"];
-          }
+        if (effectiveModel === "google/nano-banana-pro") {
+          nextFrontmatter["ss_replicate_image_key"] = "image_input";
+        } else if (previousEffectiveModel === "google/nano-banana-pro" && currentImageKey === "image_input") {
+          delete nextFrontmatter["ss_replicate_image_key"];
         }
 
         const updated = replaceMarkdownFrontmatterAndBody(raw, nextFrontmatter, textarea.value);
         if (updated !== raw) {
           await this.app.vault.modify(options.promptFile, updated);
           controllerSafeUpdateCache(this.controllers.get(options.leaf), options.promptFile.path);
+          imageCountSelect.dataset.ssCanvasflowInitial = imageCountSelect.value;
+          widthInput.dataset.ssCanvasflowInitial = widthInput.value;
+          heightInput.dataset.ssCanvasflowInitial = heightInput.value;
         }
 
         if (reason === "run") {
@@ -605,6 +919,38 @@ export class CanvasFlowEnhancer {
       }, 650);
     };
 
+    const applyAspectRatioPreset = (preset: string) => {
+      const ratioText = String(preset || "").trim();
+      if (!ratioText) return;
+
+      const [wStr, hStr] = ratioText.split(":");
+      const wRatio = Number(wStr);
+      const hRatio = Number(hStr);
+      if (!Number.isFinite(wRatio) || !Number.isFinite(hRatio) || wRatio <= 0 || hRatio <= 0) {
+        return;
+      }
+
+      const currentW = readPositiveInt(widthInput.value) ?? 0;
+      const currentH = readPositiveInt(heightInput.value) ?? 0;
+      const baseRaw = Math.max(currentW, currentH, 1024);
+      const base = roundDownToMultiple(baseRaw, 8);
+
+      let nextW: number;
+      let nextH: number;
+      if (wRatio >= hRatio) {
+        nextW = base;
+        nextH = roundDownToMultiple((base * hRatio) / wRatio, 8);
+      } else {
+        nextH = base;
+        nextW = roundDownToMultiple((base * wRatio) / hRatio, 8);
+      }
+
+      nextW = Math.max(64, nextW);
+      nextH = Math.max(64, nextH);
+      widthInput.value = String(nextW);
+      heightInput.value = String(nextH);
+    };
+
     textarea.addEventListener("input", () => {
       scheduleSave("auto");
     });
@@ -613,7 +959,7 @@ export class CanvasFlowEnhancer {
       scheduleSave("blur");
     });
 
-    modelInput.addEventListener("input", () => {
+    modelSelect.addEventListener("change", () => {
       updateModelBadgeAndVisibility();
       scheduleSave("model");
     });
@@ -621,6 +967,18 @@ export class CanvasFlowEnhancer {
     versionInput.addEventListener("input", () => {
       scheduleSave("version");
     });
+
+    imageCountSelect.addEventListener("change", () => {
+      scheduleSave("count");
+    });
+
+    aspectRatioPresetSelect.addEventListener("change", () => {
+      applyAspectRatioPreset(aspectRatioPresetSelect.value);
+      scheduleSave("size");
+    });
+
+    widthInput.addEventListener("input", () => scheduleSave("size"));
+    heightInput.addEventListener("input", () => scheduleSave("size"));
 
     aspectRatioSelect.addEventListener("change", () => scheduleSave("config"));
     resolutionSelect.addEventListener("change", () => scheduleSave("config"));
@@ -671,6 +1029,90 @@ export class CanvasFlowEnhancer {
       stopEvent(e);
       void run();
     });
+  }
+
+  private enforcePromptNodeSizing(nodeEl: HTMLElement): void {
+    const widthPx = CANVASFLOW_PROMPT_NODE_WIDTH_PX;
+    const heightPx = CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
+    const width = `${widthPx}px`;
+    const height = `${heightPx}px`;
+
+    try {
+      nodeEl.style.setProperty(CANVASFLOW_PROMPT_NODE_CSS_VAR_WIDTH, width);
+      nodeEl.style.setProperty(CANVASFLOW_PROMPT_NODE_CSS_VAR_HEIGHT, height);
+
+      // Keep Obsidian Canvas rendering consistent even if internal state changes.
+      nodeEl.style.width = width;
+      nodeEl.style.height = height;
+      nodeEl.style.minWidth = width;
+      nodeEl.style.maxWidth = width;
+      nodeEl.style.minHeight = height;
+      nodeEl.style.maxHeight = height;
+      nodeEl.style.setProperty("--canvas-node-width", width);
+      nodeEl.style.setProperty("--canvas-node-height", height);
+    } catch {}
+
+    this.disablePromptNodeResizing(nodeEl);
+  }
+
+  private disablePromptNodeResizing(nodeEl: HTMLElement): void {
+    const anyEl = nodeEl as any;
+    if (anyEl.__ssCanvasflowResizeGuard === true) {
+      return;
+    }
+    anyEl.__ssCanvasflowResizeGuard = true;
+
+    const win = nodeEl.ownerDocument?.defaultView || window;
+    const isResizeHandle = (el: HTMLElement): boolean => {
+      const cls = String((el as any)?.className || "").toLowerCase();
+      if (cls.includes("resize") || cls.includes("resizer")) return true;
+      try {
+        const cursor = win.getComputedStyle(el).cursor || "";
+        return cursor.includes("resize");
+      } catch {
+        return false;
+      }
+    };
+
+    const blockIfResize = (e: Event) => {
+      const target = (e.target as HTMLElement | null) || null;
+      if (!target) return;
+      if (!nodeEl.contains(target)) return;
+
+      let el: HTMLElement | null = target;
+      while (el && el !== nodeEl) {
+        if (isResizeHandle(el)) {
+          try {
+            (e as any).preventDefault?.();
+          } catch {}
+          try {
+            e.stopPropagation();
+          } catch {}
+          return;
+        }
+        el = el.parentElement;
+      }
+    };
+
+    // Capture phase so we beat Canvas' own handlers.
+    nodeEl.addEventListener("pointerdown", blockIfResize, true);
+    nodeEl.addEventListener("mousedown", blockIfResize, true);
+
+    const hideHandles = () => {
+      try {
+        const all = Array.from(nodeEl.querySelectorAll<HTMLElement>("*"));
+        for (const el of all) {
+          if (!isResizeHandle(el)) continue;
+          el.style.pointerEvents = "none";
+          el.style.display = "none";
+        }
+      } catch {}
+    };
+
+    // Some Obsidian builds only add resize handles on selection/hover; try now and soon after.
+    hideHandles();
+    window.setTimeout(hideHandles, 0);
+    window.setTimeout(hideHandles, 250);
   }
 
   private removeControlsForNode(nodeEl: HTMLElement, nodeId: string): void {
@@ -1154,7 +1596,11 @@ export class CanvasFlowEnhancer {
     const notePath = await this.getAvailableNotePath(promptsDir, `CanvasFlow Prompt ${this.nowStamp()}`);
     const promptFile = await this.app.vault.create(notePath, template.endsWith("\n") ? template : `${template}\n`);
 
-    const placed = computeNextNodePosition(options.imageNode, { dx: 80, defaultWidth: 420, defaultHeight: 260 });
+    const placed = computeNextNodePosition(options.imageNode, {
+      dx: 80,
+      defaultWidth: CANVASFLOW_PROMPT_NODE_WIDTH_PX,
+      defaultHeight: CANVASFLOW_PROMPT_NODE_HEIGHT_PX,
+    });
     let updatedDoc = options.doc;
     const added = addFileNode(updatedDoc, {
       filePath: promptFile.path,
@@ -1239,6 +1685,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

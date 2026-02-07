@@ -37,6 +37,7 @@ export class RecorderService {
   private sessionCompletionResolver: (() => void) | null = null;
   private toggleQueue: Promise<void> = Promise.resolve();
   private stopRequestedDuringStart = false;
+  private errorCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(app: App, plugin: SystemSculptPlugin, options: RecorderOptions) {
     this.app = app;
@@ -337,9 +338,21 @@ export class RecorderService {
     this.session = null;
     this.resolveSessionLifecycle();
 
-    setTimeout(() => {
+    if (this.errorCleanupTimer) {
+      clearTimeout(this.errorCleanupTimer);
+      this.errorCleanupTimer = null;
+    }
+
+    const timer = setTimeout(() => {
+      this.errorCleanupTimer = null;
       this.cleanup(true);
     }, hasBackup ? 3000 : 2000);
+
+    // Prevent this delayed cleanup from keeping Node/Jest processes alive.
+    if (typeof (timer as any)?.unref === "function") {
+      (timer as any).unref();
+    }
+    this.errorCleanupTimer = timer;
   }
 
   private notifyListeners(): void {
@@ -355,6 +368,10 @@ export class RecorderService {
 
   private cleanup(hideUI: boolean = false): void {
     this.debug("cleanup invoked", { hideUI });
+    if (this.errorCleanupTimer) {
+      clearTimeout(this.errorCleanupTimer);
+      this.errorCleanupTimer = null;
+    }
     if (this.session) {
       this.session.dispose();
       this.session = null;

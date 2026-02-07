@@ -19,7 +19,14 @@ npm run dev               # esbuild watch; rebuilds main.js + styles.css, syncs 
 npm run build             # production bundle; writes main.js + styles.css
 npm run check:plugin      # tsc --noEmit + bundle resolution
 npm run check:plugin:fast # faster local sanity pass
+npm run check:e2e         # tsc --noEmit for WDIO e2e harness + specs
 npm test                  # Jest (passWithNoTests)
+npm run test:debug        # Jest with console output enabled (still spied for assertions)
+npm run test:strict       # Jest strict mode: fail on console.* usage
+npm run test:embeddings   # Jest embeddings-only suite
+npm run test:leaks        # Jest open-handle leak detector (slower; diagnostic)
+npm run e2e:mock          # WDIO e2e against mock backend (deterministic; no secrets)
+npm run e2e:live          # WDIO e2e against live backend (real license + endpoint)
 ```
 
 ## Repo map (where things live)
@@ -177,3 +184,8 @@ Keep entries specific and actionable: include file paths, invariants, and “how
 
 - `PlatformContext` avoids direct `fetch` for some hosts (defaults empty); expect `requestUrl` transport and no streaming when suffixes are registered. Verify by checking `PlatformContext.supportsStreaming(...)`.
 - Obsidian v1.11+ Canvas no longer exposes stable node ids on `.canvas-node` DOM elements (`data-node-id`, `data-id`, etc.). If you need to map DOM nodes to Canvas doc nodes, use internal Canvas APIs (see `src/services/canvasflow/CanvasDomAdapter.ts` `findCanvasNodeElementsFromInternalCanvas(...)`).
+- Jest runs TS via `@swc/jest` (see `jest.config.cjs`): `jest.mock(...)` calls are hoisted, so mock factories must not reference outer-scope `const`/`let` (use `var` assigned inside the factory, or use `jest.requireMock(...)`). Also avoid `jest.spyOn(...)` for functions imported via named import (they're destructured at import time); prefer module mocks (`jest.mock(...)`) with `jest.fn()` overrides.
+- Jest console is spied by default (and silenced) to keep test output clean. Use `npm run test:debug` to print console output (still spied so tests can assert calls), or `npm run test:strict` to fail fast on `console.*` calls.
+- Node 25+ can emit a noisy localStorage warning during Jest teardown. All repo Jest scripts run through `scripts/jest.mjs` which preloads `scripts/jest-preload.cjs` to shim webstorage and avoid the warning. (If you run `npx jest` directly on Node 25+, you may still see it.)
+- CI uses `npm ci` and depends on a committed `package-lock.json` (don’t ignore lockfiles in `.gitignore`).
+- Avoid `Promise.race([... , timeoutPromise])` patterns that leave dangling timers; always `clearTimeout(...)` when the primary promise settles (otherwise Jest workers can hang/force-exit). Examples: `src/services/providers/SystemSculptProviderService.ts`, `src/services/DocumentProcessingService.ts`, `src/services/search/SystemSculptSearchEngine.ts`.

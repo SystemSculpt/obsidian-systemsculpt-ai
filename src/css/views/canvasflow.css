@@ -14,6 +14,13 @@
 /* CanvasFlow prompt nodes: hide the default file preview/editor and make the node look like a "node editor"
    panel (ComfyUI vibes) rather than a normal Canvas note card. */
 .canvas-node.ss-canvasflow-prompt-node {
+  /* Fixed sizing for a consistent node editor feel.
+     Width/height are set from JS via CSS vars so we can keep a single source of truth. */
+  min-width: var(--ss-canvasflow-prompt-width, 520px) !important;
+  max-width: var(--ss-canvasflow-prompt-width, 520px) !important;
+  min-height: var(--ss-canvasflow-prompt-height, 560px) !important;
+  max-height: var(--ss-canvasflow-prompt-height, 560px) !important;
+
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
@@ -25,6 +32,19 @@
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--interactive-accent) 85%, transparent),
     0 22px 65px rgba(0, 0, 0, 0.45);
+}
+
+/* Best-effort: hide Canvas resize handles on prompt nodes (we also add a JS guard). */
+.canvas-node.ss-canvasflow-prompt-node :is(
+    .canvas-node-resizer,
+    .canvas-node-resize-handle,
+    .canvas-node-resize,
+    .canvas-node-resize-corner,
+    .canvas-node-resize-edge,
+    .canvas-node-handle
+  ) {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 .canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) {
@@ -43,6 +63,8 @@
 }
 
 .canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-controls {
+  display: flex;
+  flex-direction: column;
   margin-top: 0;
   border-top: none;
   padding: 12px 12px 10px 18px;
@@ -154,7 +176,8 @@
 .ss-canvasflow-controls textarea.ss-canvasflow-prompt {
   width: 100%;
   min-height: 96px;
-  resize: vertical;
+  flex: 1 1 auto;
+  resize: none;
   font-size: 12px;
   line-height: 1.35;
   padding: 8px 10px;

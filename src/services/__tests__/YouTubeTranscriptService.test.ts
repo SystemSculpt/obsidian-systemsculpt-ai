@@ -16,14 +16,11 @@ describe("YouTubeTranscriptService", () => {
       },
     }) as any;
 
-  beforeAll(() => {
-    platformGetSpy = jest.spyOn(PlatformContext, "get");
-  });
-
   beforeEach(() => {
     (YouTubeTranscriptService as any).instance = undefined;
     (requestUrl as jest.Mock).mockReset();
     (globalThis as any).fetch = jest.fn();
+    platformGetSpy = jest.spyOn(PlatformContext, "get");
     platformGetSpy.mockReturnValue({
       preferredTransport: jest.fn(() => "fetch"),
     } as any);
@@ -31,7 +28,6 @@ describe("YouTubeTranscriptService", () => {
 
   afterAll(() => {
     (globalThis as any).fetch = originalFetch;
-    platformGetSpy.mockRestore();
   });
 
   it("canonicalizes the URL for transcript requests", async () => {

@@ -100,6 +100,8 @@ async function checkBundle() {
 async function main() {
   const results = [];
   const checks = ['tsc', 'bundle'];
+  const jestRunner = path.join(root, 'scripts', 'jest.mjs');
+  const jestCmdPrefix = fs.existsSync(jestRunner) ? `node ${JSON.stringify(jestRunner)}` : 'npx jest';
 
   const tsc = run('npx tsc --noEmit --skipLibCheck');
   results.push({ name: 'tsc', ...tsc });
@@ -116,11 +118,11 @@ async function main() {
         tests = { ok: true, ms: 0, stdout: '' };
       } else {
         const quotedFiles = changedFiles.map(file => JSON.stringify(file)).join(' ');
-        const testCmd = `npx jest --config jest.config.cjs --findRelatedTests ${quotedFiles} --passWithNoTests`;
+        const testCmd = `${jestCmdPrefix} --config jest.config.cjs --findRelatedTests ${quotedFiles} --passWithNoTests`;
         tests = run(testCmd);
       }
     } else {
-      tests = run('npx jest --config jest.config.cjs --runInBand --passWithNoTests');
+      tests = run(`${jestCmdPrefix} --config jest.config.cjs --passWithNoTests`);
     }
     results.push({ name: 'tests', ...tests });
   }

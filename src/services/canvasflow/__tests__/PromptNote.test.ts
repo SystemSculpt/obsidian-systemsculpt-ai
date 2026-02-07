@@ -27,6 +27,7 @@ describe("PromptNote", () => {
         "ss_replicate_version: ver123",
         "ss_replicate_prompt_key: prompt",
         "ss_replicate_image_key: image",
+        "ss_image_count: 3",
         "ss_replicate_input:",
         "  width: 512",
         "  height: 768",
@@ -44,6 +45,7 @@ describe("PromptNote", () => {
       expect(res.config.replicateVersionId).toBe("ver123");
       expect(res.config.replicatePromptKey).toBe("prompt");
       expect(res.config.replicateImageKey).toBe("image");
+      expect(res.config.imageCount).toBe(3);
       expect(res.config.replicateInput.width).toBe(512);
       expect(res.config.replicateInput.height).toBe(768);
       expect(res.body).toContain("A cute cat astronaut");

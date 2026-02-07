@@ -14,10 +14,9 @@ import {
   requireEnv,
   sendChatPromptDirect,
   upsertVaultFile,
-  waitForChatIdle,
 } from "../utils/systemsculptChat";
 
-describe("ChatView (live) core flows", () => {
+describe("ChatView (mock) core flows", () => {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
   const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
@@ -56,7 +55,7 @@ describe("ChatView (live) core flows", () => {
   });
 
   it("streams a basic completion and executes a tool call via approval pipeline", async function () {
-    this.timeout(180000);
+    this.timeout(120000);
 
     await openFreshChatView();
 
@@ -74,7 +73,7 @@ describe("ChatView (live) core flows", () => {
         const assistantText = coerceMessageContentToText(assistant?.content).trim();
         return assistantText.includes(okToken);
       },
-      { timeout: 120000, timeoutMsg: "Assistant did not return the expected completion token." }
+      { timeout: 60000, timeoutMsg: "Assistant did not return the expected completion token." }
     );
 
     const toolCallId = await browser.executeObsidian(({ app }, { outputPath, alphaToken, betaToken }) => {
@@ -84,8 +83,8 @@ describe("ChatView (live) core flows", () => {
       const leaf =
         markedLeaf ||
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-      const view: any = (leaf as any)?.view;
-      const manager: any = view?.toolCallManager;
+      const view = (leaf as any)?.view;
+      const manager = view?.toolCallManager as any;
       if (!manager) throw new Error("ToolCallManager missing");
       const request = {
         id: `e2e-tool-${Date.now()}`,
@@ -113,18 +112,22 @@ describe("ChatView (live) core flows", () => {
           const leaf =
             markedLeaf ||
             (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-          const view: any = (leaf as any)?.view;
-          const manager: any = view?.toolCallManager;
+          const view = (leaf as any)?.view;
+          const manager = view?.toolCallManager as any;
           const call = manager?.getToolCall?.(toolCallId);
           return call?.state === "completed";
         }, { toolCallId }),
       { timeout: 60000, timeoutMsg: "Tool call did not complete." }
     );
 
-    await browser.waitUntil(async () => await browser.executeObsidian(({ app }, { outputPath }) => {
-      const file = app.vault.getAbstractFileByPath(outputPath);
-      return !!file;
-    }, { outputPath }), { timeout: 60000, timeoutMsg: "Output file was not created." });
+    await browser.waitUntil(
+      async () =>
+        await browser.executeObsidian(({ app }, { outputPath }) => {
+          const file = app.vault.getAbstractFileByPath(outputPath);
+          return !!file;
+        }, { outputPath }),
+      { timeout: 60000, timeoutMsg: "Output file was not created." }
+    );
 
     const output = await readVaultFile(outputPath);
     expect(output).toContain(alphaToken);
@@ -144,9 +147,9 @@ describe("ChatView (live) core flows", () => {
       const leaf =
         markedLeaf ||
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-      const view: any = (leaf as any)?.view;
-      const input: HTMLTextAreaElement | undefined = view?.inputHandler?.input;
-      const menu: any = view?.inputHandler?.atMentionMenu;
+      const view = (leaf as any)?.view;
+      const input = view?.inputHandler?.input as HTMLTextAreaElement | undefined;
+      const menu = view?.inputHandler?.atMentionMenu as any;
       if (!view || !input || !menu) throw new Error("Chat view/menu not ready");
       const query = mentionPath.split("/").pop()?.replace(/\\.md$/, "") ?? "mention";
       input.value = `@${query}`;
@@ -163,8 +166,8 @@ describe("ChatView (live) core flows", () => {
           const leaf =
             markedLeaf ||
             (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-          const view: any = (leaf as any)?.view;
-          const menu: any = view?.inputHandler?.atMentionMenu;
+          const view = (leaf as any)?.view;
+          const menu = view?.inputHandler?.atMentionMenu as any;
           return (menu?.suggestions?.length ?? 0) > 0;
         }),
       { timeout: 15000, timeoutMsg: "At-mention suggestions did not populate." }
@@ -177,10 +180,10 @@ describe("ChatView (live) core flows", () => {
       const leaf =
         markedLeaf ||
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-      const view: any = (leaf as any)?.view;
-      const menu: any = view?.inputHandler?.atMentionMenu;
+      const view = (leaf as any)?.view;
+      const menu = view?.inputHandler?.atMentionMenu as any;
       if (!menu) throw new Error("At-mention menu missing");
-      const suggestions: any[] = menu?.suggestions ?? [];
+      const suggestions = (menu?.suggestions ?? []) as any[];
       if (suggestions.length === 0) throw new Error("At-mention suggestions empty");
       const pickIndex = suggestions.findIndex((s: any) => String(s?.description ?? "").includes(mentionPath));
       menu.selectedIndex = pickIndex >= 0 ? pickIndex : 0;
@@ -196,7 +199,7 @@ describe("ChatView (live) core flows", () => {
           const leaf =
             markedLeaf ||
             (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-          const view: any = (leaf as any)?.view;
+          const view = (leaf as any)?.view;
           const files = Array.from(view?.contextManager?.getContextFiles?.() || []);
           return files.includes(`[[${mentionPath}]]`);
         }, { mentionPath }),
@@ -244,7 +247,7 @@ describe("ChatView (live) core flows", () => {
           const leaf =
             markedLeaf ||
             (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-          const view: any = (leaf as any)?.view;
+          const view = (leaf as any)?.view;
           const files = Array.from(view?.contextManager?.getContextFiles?.() || []);
           return files.includes(`[[${dragPath}]]`);
         }, { dragPath }),
@@ -259,9 +262,9 @@ describe("ChatView (live) core flows", () => {
       const leaf =
         markedLeaf ||
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-      const view: any = (leaf as any)?.view;
-      const menu: any = view?.inputHandler?.slashCommandMenu;
-      const commands: any[] = menu?.commands ?? [];
+      const view = (leaf as any)?.view;
+      const menu = view?.inputHandler?.slashCommandMenu as any;
+      const commands = (menu?.commands ?? []) as any[];
       const exportCmd = commands.find((c) => c?.id === "export");
       if (!exportCmd) throw new Error("Export slash command missing");
       await exportCmd.execute(view);
@@ -278,7 +281,7 @@ describe("ChatView (live) core flows", () => {
       const leaf =
         markedLeaf ||
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-      const view: any = (leaf as any)?.view;
+      const view = (leaf as any)?.view;
       return !!view?.supportsWebSearch?.();
     });
     if (supportsWebSearch) {
@@ -289,7 +292,7 @@ describe("ChatView (live) core flows", () => {
         const leaf =
           markedLeaf ||
           (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-        const view: any = (leaf as any)?.view;
+        const view = (leaf as any)?.view;
         view?.inputHandler?.toggleWebSearchEnabled?.();
       });
       const state = await getActiveChatViewState();

@@ -5,7 +5,13 @@ import ObsidianReporter from "wdio-obsidian-reporter";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const isMac = process.platform === "darwin";
 const maxInstances = Number(process.env.SYSTEMSCULPT_E2E_INSTANCES || 2);
+const appVersion = process.env.SYSTEMSCULPT_E2E_APP_VERSION || "1.11.7";
+const focusGuardEnabled = process.env.SYSTEMSCULPT_E2E_FOCUS_GUARD
+  ? process.env.SYSTEMSCULPT_E2E_FOCUS_GUARD === "1"
+  : isMac;
 const OSASCRIPT_TIMEOUT_MS = 5_000;
 
 export const config = {
@@ -28,7 +34,7 @@ export const config = {
           plugins: [path.resolve(__dirname, "..", "..")],
           vault: path.join(__dirname, "fixtures", "vault"),
           emulateMobile: true,
-          appVersion: "latest",
+          appVersion,
           cleanPlugins: true
         }
       }
@@ -49,7 +55,7 @@ export const config = {
     captureFrontmostApp();
     await backgroundObsidianWindow();
     restoreFrontmostApp();
-    startFocusGuard();
+    if (focusGuardEnabled) startFocusGuard();
   },
   beforeTest: async () => {
     captureFrontmostApp();
@@ -62,7 +68,7 @@ export const config = {
     restoreFrontmostApp();
   },
   after: async () => {
-    stopFocusGuard();
+    if (focusGuardEnabled) stopFocusGuard();
   },
 
   framework: "mocha",
@@ -88,7 +94,6 @@ export const config = {
   ]
 };
 
-const isMac = process.platform === "darwin";
 let lastFrontmostApp = null;
 let focusGuardTimer = null;
 

@@ -452,11 +452,6 @@ export class SystemSculptSearchEngine {
   private async runSemanticSearch(query: string, limit: number): Promise<SearchHit[]> {
     try {
       const manager = this.plugin.getOrCreateEmbeddingsManager();
-      // Avoid long stalls; race with timeout
-      const timeout = new Promise<SearchHit[]>((resolve) => {
-        window.setTimeout(() => resolve([]), this.SEMANTIC_TIMEOUT_MS);
-      });
-
       const semanticPromise = (async () => {
         // @ts-ignore awaitReady is public but not in types
         if (typeof (manager as any).awaitReady === "function") {
@@ -474,7 +469,20 @@ export class SystemSculptSearchEngine {
         } as SearchHit));
       })();
 
-      return await Promise.race([semanticPromise, timeout]);
+      // Avoid long stalls; apply a timeout without leaking a dangling timer.
+      return await new Promise<SearchHit[]>((resolve, reject) => {
+        const timer = window.setTimeout(() => resolve([]), this.SEMANTIC_TIMEOUT_MS);
+        semanticPromise.then(
+          (results) => {
+            window.clearTimeout(timer);
+            resolve(results);
+          },
+          (error) => {
+            window.clearTimeout(timer);
+            reject(error);
+          }
+        );
+      });
     } catch {
       return [];
     }

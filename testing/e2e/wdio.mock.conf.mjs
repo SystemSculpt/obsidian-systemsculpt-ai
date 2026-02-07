@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isMac = process.platform === "darwin";
-const maxInstances = Number(process.env.SYSTEMSCULPT_E2E_INSTANCES || 3);
+const maxInstances = Number(process.env.SYSTEMSCULPT_E2E_INSTANCES || 2);
 const appVersion = process.env.SYSTEMSCULPT_E2E_APP_VERSION || "1.11.7";
 const focusGuardEnabled = process.env.SYSTEMSCULPT_E2E_FOCUS_GUARD
   ? process.env.SYSTEMSCULPT_E2E_FOCUS_GUARD === "1"
@@ -16,11 +16,9 @@ const OSASCRIPT_TIMEOUT_MS = 5_000;
 
 export const config = {
   runner: "local",
-  // Run live specs in parallel (separate Obsidian instances per worker).
-  specs: [path.join(__dirname, "specs-live/*.live.e2e.ts")],
+  specs: [path.join(__dirname, "specs-mock/*.mock.e2e.ts")],
   exclude: [],
-  maxInstances: Number.isFinite(maxInstances) && maxInstances > 0 ? Math.floor(maxInstances) : 3,
-  // Keep this at warn+ to avoid leaking secrets in WebDriver payload logs.
+  maxInstances: Number.isFinite(maxInstances) && maxInstances > 0 ? Math.floor(maxInstances) : 2,
   logLevel: "warn",
   bail: 0,
   baseUrl: "",
@@ -76,7 +74,7 @@ export const config = {
   framework: "mocha",
   mochaOpts: {
     ui: "bdd",
-    timeout: 180000,
+    timeout: 120000,
   },
 
   autoCompileOpts: {
@@ -188,3 +186,4 @@ async function backgroundObsidianWindow() {
     });
   } catch (_) {}
 }
+
