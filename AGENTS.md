@@ -176,3 +176,4 @@ Keep entries specific and actionable: include file paths, invariants, and “how
 ## Gotchas
 
 - `PlatformContext` avoids direct `fetch` for some hosts (defaults empty); expect `requestUrl` transport and no streaming when suffixes are registered. Verify by checking `PlatformContext.supportsStreaming(...)`.
+- Obsidian v1.11+ Canvas no longer exposes stable node ids on `.canvas-node` DOM elements (`data-node-id`, `data-id`, etc.). If you need to map DOM nodes to Canvas doc nodes, use internal Canvas APIs (see `src/services/canvasflow/CanvasDomAdapter.ts` `findCanvasNodeElementsFromInternalCanvas(...)`).

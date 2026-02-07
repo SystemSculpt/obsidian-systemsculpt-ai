@@ -1,0 +1,326 @@
+import { expect } from "@wdio/globals";
+import { ensurePluginEnabled } from "../utils/obsidian";
+import { ensureE2EVault, PLUGIN_ID, upsertVaultFile } from "../utils/systemsculptChat";
+
+async function ensureCorePluginEnabled(pluginId: string): Promise<void> {
+  await browser.executeObsidian(async ({ app }, { pluginId }) => {
+    const internal: any = (app as any)?.internalPlugins;
+    if (!internal) return;
+    if (typeof internal.enablePluginAndSave === "function") {
+      await internal.enablePluginAndSave(pluginId);
+      return;
+    }
+    if (typeof internal.enablePlugin === "function") {
+      await internal.enablePlugin(pluginId);
+      return;
+    }
+  }, { pluginId });
+
+  await browser.waitUntil(
+    async () =>
+      await browser.executeObsidian(({ app }, { pluginId }) => {
+        const internal: any = (app as any)?.internalPlugins;
+        const enabled = internal?.enabledPlugins ?? internal?.enabled ?? null;
+        if (enabled && typeof enabled.has === "function") {
+          return enabled.has(pluginId);
+        }
+        if (Array.isArray(enabled)) {
+          return enabled.includes(pluginId);
+        }
+        const plugin = internal?.getPluginById?.(pluginId);
+        return plugin?.enabled === true;
+      }, { pluginId }),
+    { timeout: 20000, timeoutMsg: `Core plugin not enabled: ${pluginId}` }
+  );
+}
+
+async function enableCanvasFlowEnhancements(): Promise<void> {
+  await browser.executeObsidian(async ({ app }, { pluginId }) => {
+    const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
+    if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
+    await plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: true });
+
+    // E2E runs can race plugin deferred init; force-start the enhancer if possible.
+    try {
+      if (typeof plugin.syncCanvasFlowEnhancerFromSettings === "function") {
+        await plugin.syncCanvasFlowEnhancerFromSettings();
+      } else if (typeof plugin["syncCanvasFlowEnhancerFromSettings"] === "function") {
+        await plugin["syncCanvasFlowEnhancerFromSettings"]();
+      }
+    } catch (_) {}
+  }, { pluginId: PLUGIN_ID });
+
+  await browser.waitUntil(
+    async () =>
+      await browser.executeObsidian(({ app }, { pluginId }) => {
+        const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
+        return plugin?.settings?.canvasFlowEnabled === true && !!plugin?.canvasFlowEnhancer;
+      }, { pluginId: PLUGIN_ID }),
+    { timeout: 30000, timeoutMsg: "CanvasFlow enhancer did not start after enabling setting." }
+  );
+}
+
+async function openCanvasFile(path: string): Promise<void> {
+  await browser.executeObsidian(async ({ app }, filePath) => {
+    const normalized = String(filePath).replace(/\\/g, "/");
+    const file = app.vault.getAbstractFileByPath(normalized);
+    if (!file) throw new Error(`File not found: ${normalized}`);
+    const leaf = app.workspace.getLeaf("tab");
+    await leaf.openFile(file as any);
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+  }, path);
+
+  await browser.waitUntil(
+    async () =>
+      await browser.executeObsidian(({ app }) => {
+        return (app.workspace as any)?.activeLeaf?.view?.getViewType?.() === "canvas";
+      }),
+    { timeout: 20000, timeoutMsg: "Active leaf did not switch to Canvas view after opening .canvas file." }
+  );
+}
+
+async function getPromptNodeUiState(nodeId: string): Promise<{
+  found: boolean;
+  hasPromptClass: boolean;
+  hasControls: boolean;
+  controlsVisible: boolean;
+  contentHostCount: number;
+  debug: Record<string, any>;
+}> {
+  return await browser.executeObsidian(({ app }, { nodeId }) => {
+    const plugin: any = (app as any)?.plugins?.getPlugin?.("systemsculpt-ai");
+    const enhancer: any = plugin?.canvasFlowEnhancer ?? null;
+    const canvasLeaves = app.workspace.getLeavesOfType?.("canvas") ?? [];
+
+    const esc = (value: string): string => {
+      try {
+        const css: any = (globalThis as any)?.CSS;
+        if (css && typeof css.escape === "function") return css.escape(value);
+      } catch (_) {}
+      return value.replaceAll('"', '\\"');
+    };
+
+    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${esc(nodeId)}"]`);
+    const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node"));
+    if (!controls || !nodeEl) {
+      const sample = nodes[0] || null;
+      const sampleAttrs: Record<string, string> = {};
+      const sampleContentAttrs: Record<string, string> = {};
+      const sampleContentDatasetKeys: string[] = [];
+      if (sample) {
+        for (const attr of Array.from(sample.attributes)) {
+          sampleAttrs[attr.name] = attr.value;
+        }
+        const contentEl =
+          sample.querySelector<HTMLElement>(".canvas-node-content") ||
+          sample.querySelector<HTMLElement>(".canvas-node-container") ||
+          null;
+        if (contentEl) {
+          for (const attr of Array.from(contentEl.attributes)) {
+            sampleContentAttrs[attr.name] = attr.value;
+          }
+          sampleContentDatasetKeys.push(...Object.keys((contentEl as any).dataset || {}));
+        }
+      }
+      return {
+        found: false,
+        hasPromptClass: false,
+        hasControls: false,
+        controlsVisible: false,
+        contentHostCount: 0,
+        debug: {
+          nodeCount: nodes.length,
+          controlsSelector: `.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`,
+          controlsFound: !!controls,
+          nodeElFound: !!nodeEl,
+          activeLeafType: (app.workspace as any)?.activeLeaf?.view?.getViewType?.() ?? "unknown",
+          canvasLeafCount: Array.isArray(canvasLeaves) ? canvasLeaves.length : 0,
+          pluginCanvasFlowEnabled: plugin?.settings?.canvasFlowEnabled === true,
+          enhancerExists: !!enhancer,
+          enhancerControllerCount: enhancer?.controllers?.size ?? null,
+          sampleNodeAttrs: sampleAttrs,
+          sampleNodeDatasetKeys: sample ? Object.keys((sample as any).dataset || {}) : [],
+          sampleContentAttrs,
+          sampleContentDatasetKeys,
+          sampleNodeHtml: sample ? sample.outerHTML.slice(0, 2000) : null,
+        },
+      };
+    }
+
+    const hasControls = !!controls;
+    const win = nodeEl.ownerDocument?.defaultView || window;
+    const controlsVisible =
+      !!controls &&
+      win.getComputedStyle(controls).display !== "none" &&
+      controls.getBoundingClientRect().width > 0 &&
+      controls.getBoundingClientRect().height > 0;
+    const contentHostCount = nodeEl.querySelectorAll(".canvas-node-content, .canvas-node-container").length;
+    return {
+      found: true,
+      hasPromptClass: nodeEl.classList.contains("ss-canvasflow-prompt-node"),
+      hasControls,
+      controlsVisible,
+      contentHostCount,
+      debug: {
+        className: nodeEl.className,
+        html: nodeEl.innerHTML.slice(0, 2000),
+        canvasLeafCount: Array.isArray(canvasLeaves) ? canvasLeaves.length : 0,
+        pluginCanvasFlowEnabled: plugin?.settings?.canvasFlowEnabled === true,
+        enhancerExists: !!enhancer,
+        enhancerControllerCount: enhancer?.controllers?.size ?? null,
+      },
+    };
+  }, { nodeId });
+}
+
+async function getPromptNodeRect(nodeId: string): Promise<{ left: number; top: number; width: number; height: number } | null> {
+  return await browser.execute((nodeId) => {
+    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
+    const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+    if (!nodeEl) return null;
+    const rect = nodeEl.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  }, nodeId);
+}
+
+async function dispatchWheelOnPromptControls(nodeId: string, deltaY: number): Promise<void> {
+  await browser.execute((args) => {
+    const { nodeId, deltaY } = args as { nodeId: string; deltaY: number };
+    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
+    if (!controls) return;
+    const rect = controls.getBoundingClientRect();
+    const event = new WheelEvent("wheel", {
+      deltaY,
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    controls.dispatchEvent(event);
+  }, { nodeId, deltaY });
+}
+
+describe("CanvasFlow (live) prompt node UI", () => {
+  const promptPath = "E2E/canvasflow-prompt.md";
+  const canvasPath = "E2E/canvasflow.canvas";
+  const nodeId = "e2e-prompt-node";
+
+  before(async () => {
+    const vaultPath = await ensureE2EVault();
+    await ensurePluginEnabled(PLUGIN_ID, vaultPath);
+    await ensureCorePluginEnabled("canvas");
+    await enableCanvasFlowEnhancements();
+
+    await upsertVaultFile(
+      promptPath,
+      [
+        "---",
+        "ss_flow_kind: prompt",
+        "ss_flow_backend: replicate",
+        "ss_replicate_model: google/nano-banana-pro",
+        "ss_replicate_image_key: image_input",
+        "ss_replicate_input:",
+        '  aspect_ratio: "9:16"',
+        '  resolution: "4K"',
+        '  output_format: "jpg"',
+        '  safety_filter_level: "block_only_high"',
+        "---",
+        "Photorealistic test prompt.",
+        "",
+      ].join("\n")
+    );
+
+    await upsertVaultFile(
+      canvasPath,
+      JSON.stringify(
+        {
+          nodes: [
+            {
+              id: nodeId,
+              type: "file",
+              file: promptPath,
+              x: 0,
+              y: 0,
+              width: 520,
+              height: 700,
+            },
+          ],
+          edges: [],
+        },
+        null,
+        2
+      )
+    );
+  });
+
+  it("injects custom prompt controls and keeps them stable after selection changes", async function () {
+    this.timeout(180000);
+
+    await openCanvasFile(canvasPath);
+
+    let lastState: Awaited<ReturnType<typeof getPromptNodeUiState>> | null = null;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
+      lastState = await getPromptNodeUiState(nodeId);
+      if (lastState.found && lastState.hasPromptClass && lastState.hasControls && lastState.controlsVisible) {
+        break;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await browser.pause(250);
+    }
+
+    if (!lastState || !lastState.found || !lastState.hasPromptClass || !lastState.hasControls || !lastState.controlsVisible) {
+      throw new Error(`Prompt node controls were not injected or not visible. state=${JSON.stringify(lastState)}`);
+    }
+
+    // Regression test: panning via trackpad scroll should still work when the cursor is over our injected UI.
+    // (Previously we stopped wheel propagation and Canvas could not pan while hovering our prompt node.)
+    const beforePan = await getPromptNodeRect(nodeId);
+    if (!beforePan) {
+      throw new Error("Failed to read prompt node rect before pan.");
+    }
+    await dispatchWheelOnPromptControls(nodeId, 700);
+    await browser.pause(350);
+    const afterPan = await getPromptNodeRect(nodeId);
+    if (!afterPan) {
+      throw new Error("Failed to read prompt node rect after pan.");
+    }
+    const panDelta = Math.abs(afterPan.top - beforePan.top) + Math.abs(afterPan.left - beforePan.left);
+    if (panDelta < 2) {
+      throw new Error(`Expected Canvas to pan from wheel over prompt UI, but node position didn't move. delta=${panDelta}`);
+    }
+
+    // Click the node (selection changes can trigger Canvas re-rendering).
+    await browser.execute(() => {
+      const controls = document.querySelector<HTMLElement>('.ss-canvasflow-controls[data-ss-node-id="e2e-prompt-node"]');
+      const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+      nodeEl?.click?.();
+    });
+
+    // Sample for a short window to catch the "flash then disappear" bug.
+    const samples: Array<{ hasControls: boolean; hasPromptClass: boolean; controlsVisible: boolean }> = [];
+    for (let i = 0; i < 12; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await browser.pause(250);
+      // eslint-disable-next-line no-await-in-loop
+      const state = await getPromptNodeUiState(nodeId);
+      samples.push({
+        hasControls: state.hasControls,
+        hasPromptClass: state.hasPromptClass,
+        controlsVisible: state.controlsVisible,
+      });
+    }
+
+    const last = samples.slice(-4);
+    const stable = last.every((s) => s.hasControls && s.hasPromptClass && s.controlsVisible);
+    if (!stable) {
+      const debugState = await getPromptNodeUiState(nodeId);
+      throw new Error(`CanvasFlow prompt UI not stable after selection changes. samples=${JSON.stringify(samples)} debug=${JSON.stringify(debugState.debug)}`);
+    }
+
+    expect(stable).toBe(true);
+  });
+});

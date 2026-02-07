@@ -1,7 +1,12 @@
 import { App, Notice, Platform, setIcon, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
 import YAML from "yaml";
 import type SystemSculptPlugin from "../../main";
-import { findCanvasNodeContentHost, findCanvasNodeElements, getCanvasNodeId } from "./CanvasDomAdapter";
+import {
+  findCanvasNodeContentHost,
+  findCanvasNodeElements,
+  findCanvasNodeElementsFromInternalCanvas,
+  getCanvasNodeId,
+} from "./CanvasDomAdapter";
 import {
   addEdge,
   addFileNode,
@@ -219,8 +224,18 @@ export class CanvasFlowEnhancer {
     if (!doc) return;
     const { nodesById } = indexCanvas(doc);
 
-    const nodeEls = findCanvasNodeElements(root);
+    const internalCanvas = (leaf.view as any)?.canvas ?? null;
+    const nodeEls: Array<{ el: HTMLElement; nodeId: string }> = [];
+    if (internalCanvas) {
+      nodeEls.push(...findCanvasNodeElementsFromInternalCanvas(internalCanvas, root));
+    }
+    nodeEls.push(...findCanvasNodeElements(root));
+
+    const seenNodeIds = new Set<string>();
     for (const { el: nodeEl, nodeId } of nodeEls) {
+      if (seenNodeIds.has(nodeId)) continue;
+      seenNodeIds.add(nodeId);
+
       const node = nodesById.get(nodeId);
       if (!node || !isCanvasFileNode(node)) continue;
 
@@ -365,7 +380,42 @@ export class CanvasFlowEnhancer {
     };
     controls.addEventListener("pointerdown", stopUnlessHeader);
     controls.addEventListener("mousedown", stopUnlessHeader);
-    controls.addEventListener("wheel", stopPropagationOnly, { passive: true });
+    controls.addEventListener(
+      "wheel",
+      (e: WheelEvent) => {
+        try {
+          // Canvas uses wheel/trackpad scroll to pan. Only stop propagation when the user is
+          // actually scrolling inside a scrollable control (e.g. a long textarea).
+          // Always allow modifier-wheel (pinch/zoom) through.
+          if (e.ctrlKey || e.metaKey) return;
+
+          const target = (e.target as HTMLElement | null) || null;
+          if (!target) return;
+
+          const textarea = target.closest?.("textarea") as HTMLTextAreaElement | null;
+          if (!textarea) return;
+
+          const maxScrollTop = textarea.scrollHeight - textarea.clientHeight;
+          if (maxScrollTop <= 0) return;
+
+          const deltaY = e.deltaY || 0;
+          if (!deltaY) return;
+
+          const canScrollUp = textarea.scrollTop > 0;
+          const canScrollDown = textarea.scrollTop < maxScrollTop;
+          const wantsUp = deltaY < 0;
+          const wantsDown = deltaY > 0;
+
+          if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
+            e.stopPropagation();
+          }
+        } catch {
+          // If our handler breaks for any reason, prefer letting Canvas handle wheel.
+          return;
+        }
+      },
+      { passive: true }
+    );
 
     const header = controls.createDiv({ cls: "ss-canvasflow-node-header" });
     header.createDiv({ text: "CanvasFlow Prompt", cls: "ss-canvasflow-node-title" });
