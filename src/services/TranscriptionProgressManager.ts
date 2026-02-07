@@ -47,7 +47,7 @@ export class TranscriptionProgressManager {
     this.activeTranscriptions.set(filePath, {
       startTime: Date.now(),
       lastProgress: 0,
-      lastStatus: "Starting transcription...",
+      lastStatus: "Transcribing audio...",
       detailedInfo: null,
       cleanupTimeout: null
     });

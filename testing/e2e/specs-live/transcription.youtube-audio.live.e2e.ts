@@ -42,12 +42,55 @@ describe("Transcription + YouTube transcript (live)", function () {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
   const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
+  const sourceAudioPath = getEnv("SYSTEMSCULPT_E2E_SOURCE_AUDIO_PATH");
 
   const youtubeUrl =
     "https://www.youtube.com/watch?v=nDLb8_wgX50&pp=ygUZZHIgaHViZXJtYW4gZGF2aWQgZ29nZ2lucw%3D%3D";
 
   let vaultPath: string;
   const nonce = crypto.randomUUID().slice(0, 8);
+  const TOKEN_PHRASE_WORDS = [
+    "alpha",
+    "bravo",
+    "charlie",
+    "delta",
+    "echo",
+    "foxtrot",
+    "golf",
+    "hotel",
+    "india",
+    "juliet",
+    "kilo",
+    "lima",
+    "mike",
+    "november",
+    "oscar",
+    "papa",
+    "quebec",
+    "romeo",
+    "sierra",
+    "tango",
+    "uniform",
+    "victor",
+    "whiskey",
+    "yankee",
+    "zulu",
+  ] as const;
+
+  const tokenWords = (() => {
+    const cleaned = nonce.toLowerCase().replace(/[^a-f0-9]/g, "");
+    const words: string[] = [];
+    for (let i = 0; i < cleaned.length && words.length < 5; i += 1) {
+      const n = Number.parseInt(cleaned[i], 16);
+      if (Number.isNaN(n)) continue;
+      const idx = (n + i * 7) % TOKEN_PHRASE_WORDS.length;
+      words.push(TOKEN_PHRASE_WORDS[idx]);
+    }
+    while (words.length < 5) {
+      words.push(TOKEN_PHRASE_WORDS[words.length % TOKEN_PHRASE_WORDS.length]);
+    }
+    return words;
+  })();
   const audioFolder = "E2E/audio";
   const shortAiffPath = path.join(audioFolder, `tts-short-${nonce}.aiff`);
   const mp3Path = path.join(audioFolder, `tts-long-${nonce}.mp3`);
@@ -85,7 +128,9 @@ describe("Transcription + YouTube transcript (live)", function () {
           shortAbs,
           "-r",
           "160",
-          `System Sculpt audio transcription test. This is an automated integration check. Token ${nonce}.`,
+          `System Sculpt audio transcription test. This is an automated integration check. Token phrase: ${tokenWords.join(
+            " "
+          )}.`,
         ],
         30_000
       );
@@ -164,9 +209,9 @@ describe("Transcription + YouTube transcript (live)", function () {
         90_000
       );
 
-      const meetingMp3Abs = path.join(
-        os.homedir(),
-        "gits/private-vault/90 - system/systemsculpt/Recordings/test_meeting.mp3"
+      const meetingMp3Abs = path.resolve(
+        sourceAudioPath ??
+          path.join(os.homedir(), "gits/private-vault/90 - system/systemsculpt/Recordings/test_meeting.mp3")
       );
       try {
         await fs.access(meetingMp3Abs);
@@ -175,7 +220,31 @@ describe("Transcription + YouTube transcript (live)", function () {
       }
 
       // Exercise the server-side chunking path by transcoding 10 minutes of a real recording
-      // to a high-bitrate PCM WAV (>95MB).
+      // to a high-bitrate PCM WAV (>95MB), with a short TTS intro so the transcript contains
+      // a deterministic token phrase we can assert on.
+      const introWavAbs = path.join(tmpDir, `intro-${nonce}.wav`);
+      const mainWavAbs = path.join(tmpDir, `meeting-main-${nonce}.wav`);
+      const concatListAbs = path.join(tmpDir, `concat-${nonce}.txt`);
+
+      await execFileWithTimeout(
+        ffmpegBin,
+        [
+          "-y",
+          "-v",
+          "error",
+          "-i",
+          shortAbs,
+          "-ar",
+          "48000",
+          "-ac",
+          "2",
+          "-c:a",
+          "pcm_s16le",
+          introWavAbs,
+        ],
+        90_000
+      );
+
       await execFileWithTimeout(
         ffmpegBin,
         [
@@ -194,9 +263,17 @@ describe("Transcription + YouTube transcript (live)", function () {
           "2",
           "-c:a",
           "pcm_s16le",
-          meetingWavAbs,
+          mainWavAbs,
         ],
         180_000
+      );
+
+      await fs.writeFile(concatListAbs, `file '${introWavAbs}'\nfile '${mainWavAbs}'\n`, "utf8");
+
+      await execFileWithTimeout(
+        ffmpegBin,
+        ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", concatListAbs, "-c", "copy", meetingWavAbs],
+        60_000
       );
 
       const [mp3Stat, oggStat] = await Promise.all([fs.stat(mp3Abs), fs.stat(oggAbs)]);
@@ -251,6 +328,78 @@ describe("Transcription + YouTube transcript (live)", function () {
     await waitForTFile(oggPath, 30_000);
     await waitForTFile(meetingWavPath, 120_000);
   });
+
+  const start = async (filePath: string): Promise<string> =>
+    await browser.executeObsidian(async ({ app }, { pluginId, filePath }) => {
+      const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
+      if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
+
+      const file = app.vault.getAbstractFileByPath(filePath);
+      if (!file) throw new Error(`File not found: ${filePath}`);
+
+      const runId = `e2e-transcribe-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const root: any = (window as any).__systemsculptE2E ?? ((window as any).__systemsculptE2E = {});
+      const transcriptions: any = root.transcriptions ?? (root.transcriptions = {});
+      const state = {
+        done: false,
+        text: null as string | null,
+        error: null as string | null,
+        statuses: [] as string[],
+      };
+      transcriptions[runId] = state;
+
+      void plugin
+        .getTranscriptionService()
+        .transcribeFile(file, {
+          type: "note",
+          timestamped: false,
+          suppressNotices: true,
+          onProgress: (_p: number, status: string) => {
+            if (typeof status === "string" && status.trim().length > 0) state.statuses.push(status);
+          },
+        })
+        .then((text: string) => {
+          state.done = true;
+          state.text = text;
+        })
+        .catch((error: any) => {
+          state.done = true;
+          state.error = String(error?.message || error);
+        });
+
+      return runId;
+    }, { pluginId: PLUGIN_ID, filePath });
+
+  const waitForResult = async (
+    runId: string,
+    timeoutMs: number
+  ): Promise<{ text: string; statuses: string[] }> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = await browser.executeObsidian(({ }, { runId }) => {
+        const root: any = (window as any).__systemsculptE2E;
+        const entry = root?.transcriptions?.[runId];
+        if (!entry) return null;
+        return {
+          done: !!entry.done,
+          text: typeof entry.text === "string" ? entry.text : null,
+          error: typeof entry.error === "string" ? entry.error : null,
+          statuses: Array.isArray(entry.statuses) ? entry.statuses.slice(-200) : [],
+        };
+      }, { runId });
+
+      if (state?.done) {
+        if (state.error) {
+          throw new Error(state.error);
+        }
+        return { text: state.text || "", statuses: state.statuses || [] };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    throw new Error("Timed out waiting for transcription to complete.");
+  };
 
   it("runs the YouTube transcript MCP tool against the live API", async function () {
     this.timeout(300000);
@@ -319,66 +468,42 @@ describe("Transcription + YouTube transcript (live)", function () {
   it("transcribes large MP3 + OGG via the live API (jobs flow)", async function () {
     this.timeout(480000);
 
-    const run = async (filePath: string) =>
-      await browser.executeObsidian(async ({ app }, { pluginId, filePath }) => {
-        const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
-        if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
-
-        const file = app.vault.getAbstractFileByPath(filePath);
-        if (!file) throw new Error(`File not found: ${filePath}`);
-
-        const statuses: string[] = [];
-        const text = await plugin.getTranscriptionService().transcribeFile(file, {
-          type: "note",
-          timestamped: false,
-          suppressNotices: true,
-          onProgress: (_p: number, status: string) => {
-            if (typeof status === "string" && status.trim().length > 0) statuses.push(status);
-          },
-        });
-
-        return { text, statuses };
-      }, { pluginId: PLUGIN_ID, filePath });
-
-    const mp3 = await run(mp3Path);
+    const mp3 = await waitForResult(await start(mp3Path), 420_000);
     expect(mp3.text.length).toBeGreaterThan(10);
     expect(mp3.text.toLowerCase()).toContain("audio transcription test");
-    expect(mp3.statuses.some((s) => s.toLowerCase().includes("uploading audio"))).toBe(true);
+    {
+      const normalized = mp3.text.toLowerCase();
+      const matches = tokenWords.filter((word) => normalized.includes(word));
+      expect(matches.length).toBeGreaterThanOrEqual(3);
+    }
+    expect(mp3.statuses.some((s) => s.toLowerCase().includes("upload"))).toBe(true);
+    expect(mp3.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
 
-    const ogg = await run(oggPath);
+    const ogg = await waitForResult(await start(oggPath), 420_000);
     expect(ogg.text.length).toBeGreaterThan(10);
     expect(ogg.text.toLowerCase()).toContain("audio transcription test");
-    expect(ogg.statuses.some((s) => s.toLowerCase().includes("uploading audio"))).toBe(true);
+    {
+      const normalized = ogg.text.toLowerCase();
+      const matches = tokenWords.filter((word) => normalized.includes(word));
+      expect(matches.length).toBeGreaterThanOrEqual(3);
+    }
+    expect(ogg.statuses.some((s) => s.toLowerCase().includes("upload"))).toBe(true);
+    expect(ogg.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
   });
 
   it("transcribes a >95MB WAV via the live API (server-side chunking)", async function () {
     this.timeout(900000);
 
-    // The server-side chunking path can take minutes; increase WebDriver script timeout
-    // so `browser.executeObsidian` can await the full transcription.
-    await browser.setTimeout({ script: 900_000 });
-
-    const result = await browser.executeObsidian(async ({ app }, { pluginId, filePath }) => {
-      const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
-      if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
-
-      const file = app.vault.getAbstractFileByPath(filePath);
-      if (!file) throw new Error(`File not found: ${filePath}`);
-
-      const statuses: string[] = [];
-      const text = await plugin.getTranscriptionService().transcribeFile(file, {
-        type: "note",
-        timestamped: false,
-        suppressNotices: true,
-        onProgress: (_p: number, status: string) => {
-          if (typeof status === "string" && status.trim().length > 0) statuses.push(status);
-        },
-      });
-
-      return { text, statuses };
-    }, { pluginId: PLUGIN_ID, filePath: meetingWavPath });
+    const result = await waitForResult(await start(meetingWavPath), 840_000);
 
     expect(result.text.length).toBeGreaterThan(200);
-    expect(result.statuses.some((s) => s.toLowerCase().includes("processing"))).toBe(true);
+    {
+      const normalized = result.text.toLowerCase();
+      const matches = tokenWords.filter((word) => normalized.includes(word));
+      expect(matches.length).toBeGreaterThanOrEqual(3);
+    }
+    expect(result.statuses.some((s) => s.toLowerCase().includes("upload"))).toBe(true);
+    expect(result.statuses.some((s) => s.toLowerCase().includes("chunk"))).toBe(true);
+    expect(result.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
   });
 });

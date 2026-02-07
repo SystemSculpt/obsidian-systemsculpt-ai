@@ -393,6 +393,14 @@ export class TranscriptionService {
     }
 
     const jobId = String(create.json.job.id);
+    const processingStrategyRaw =
+      typeof create.json?.job?.processingStrategy === "string"
+        ? create.json.job.processingStrategy
+        : typeof create.json?.job?.processing_strategy === "string"
+        ? create.json.job.processing_strategy
+        : "";
+    const processingStrategy = String(processingStrategyRaw || "").trim().toLowerCase();
+    const isChunkedJob = processingStrategy === "chunked";
     const partSizeBytes = Number(create.json?.upload?.partSizeBytes);
     const totalParts = Number(create.json?.upload?.totalParts);
 
@@ -479,7 +487,9 @@ export class TranscriptionService {
       throw new Error(this.extractRequestUrlErrorMessage(complete));
     }
 
-    context?.onProgress?.(75, "Starting transcription...");
+    // For very large uploads, the server will chunk the audio before transcribing.
+    // Surface that immediately so users understand why "transcription" may take longer.
+    context?.onProgress?.(75, isChunkedJob ? "Chunking audio..." : "Transcribing audio...");
 
     const startUrl = `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/start`;
     const statusUrl = `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}`;
@@ -2063,7 +2073,7 @@ export class TranscriptionService {
       waitNotice?.hide();
       
       // Show that we're starting now
-      context?.onProgress?.(25, "Starting transcription...");
+      context?.onProgress?.(25, "Transcribing audio...");
     }
 
     this.activeUploads++;
