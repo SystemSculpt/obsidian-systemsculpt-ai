@@ -30,6 +30,21 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
     },
     pluginId
   );
+
+  // Enabling is async inside Obsidian; wait until the plugin instance is actually loaded.
+  await browser.waitUntil(
+    async () =>
+      await browser.executeObsidian(({ app }, id) => {
+        const pluginsApi: any = (app as any).plugins;
+        return !!pluginsApi?.getPlugin?.(id);
+      }, pluginId),
+    {
+      timeout: 60000,
+      interval: 500,
+      timeoutMsg: `Timed out waiting for plugin to load after enabling: ${pluginId}`,
+    }
+  );
+
   enabledVaults.add(vaultPath);
 }
 
