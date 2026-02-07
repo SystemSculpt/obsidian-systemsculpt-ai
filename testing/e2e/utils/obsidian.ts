@@ -6,9 +6,12 @@ const enabledVaults = new Set<string>();
 
 function getRepoRoot(): string {
   // This file lives at `testing/e2e/utils/obsidian.ts`.
+  if (typeof __dirname !== "undefined") {
+    return path.resolve(__dirname, "..", "..", "..");
+  }
   const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  return path.resolve(__dirname, "..", "..", "..");
+  const __dir = path.dirname(__filename);
+  return path.resolve(__dir, "..", "..", "..");
 }
 
 async function getActiveVaultBasePath(): Promise<string> {
@@ -133,4 +136,3 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
 export async function runCommand(command: string) {
   await browser.executeObsidianCommand(command);
 }
-

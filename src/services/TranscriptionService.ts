@@ -585,8 +585,31 @@ export class TranscriptionService {
       }
 
       const progress = status.json?.progress;
-      if (progress?.stage && typeof progress.stage === "string") {
-        context?.onProgress?.(80, `Processing (${progress.stage})...`);
+      const stage = typeof progress?.stage === "string" ? progress.stage.trim().toLowerCase() : "";
+      const chunksTotal = typeof progress?.chunksTotal === "number" ? progress.chunksTotal : null;
+      const chunksSucceeded = typeof progress?.chunksSucceeded === "number" ? progress.chunksSucceeded : null;
+      const expectedChunks = typeof status.json?.job?.chunkCount === "number" ? status.json.job.chunkCount : null;
+
+      if (stage === "chunking") {
+        if (expectedChunks && expectedChunks > 0 && typeof chunksTotal === "number") {
+          const created = Math.max(0, Math.min(expectedChunks, Math.floor(chunksTotal)));
+          const pct = 75 + Math.floor((created / expectedChunks) * 4);
+          context?.onProgress?.(pct, `Chunking audio (${created}/${expectedChunks})...`);
+        } else {
+          context?.onProgress?.(78, "Chunking audio...");
+        }
+      } else if (stage === "transcribing") {
+        if (chunksTotal && chunksTotal > 0 && typeof chunksSucceeded === "number") {
+          const done = Math.max(0, Math.min(chunksTotal, Math.floor(chunksSucceeded)));
+          const pct = 80 + Math.floor((done / chunksTotal) * 18);
+          context?.onProgress?.(pct, `Transcribing chunks (${done}/${chunksTotal})...`);
+        } else {
+          context?.onProgress?.(82, "Transcribing audio...");
+        }
+      } else if (stage === "assembling") {
+        context?.onProgress?.(99, "Assembling transcript...");
+      } else if (stage) {
+        context?.onProgress?.(80, `Processing (${stage})...`);
       } else if (jobStatus) {
         context?.onProgress?.(80, `Processing (${jobStatus})...`);
       }

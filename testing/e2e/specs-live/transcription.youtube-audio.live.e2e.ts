@@ -22,15 +22,20 @@ async function execFileWithTimeout(cmd: string, args: string[], timeoutMs: numbe
   await execFileAsync(cmd, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
 }
 
-async function waitForTFile(pathInVault: string, timeoutMs: number): Promise<void> {
+async function waitForTFile(pathInVault: string, timeoutMs: number, minSizeBytes?: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const exists = await browser.executeObsidian(({ app }, filePath) => {
+    const exists = await browser.executeObsidian(({ app }, filePath, minBytes) => {
       const normalized = String(filePath).replace(/\\/g, "/");
       const file = app.vault.getAbstractFileByPath(normalized);
+      const size = (file as any)?.stat?.size;
       // @ts-ignore
-      return !!file && typeof (file as any).extension === "string";
-    }, pathInVault);
+      return (
+        !!file &&
+        typeof (file as any).extension === "string" &&
+        (!minBytes || (typeof size === "number" && size >= minBytes))
+      );
+    }, pathInVault, minSizeBytes ?? null);
     if (exists) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -38,7 +43,7 @@ async function waitForTFile(pathInVault: string, timeoutMs: number): Promise<voi
 }
 
 describe("Transcription + YouTube transcript (live)", function () {
-  this.timeout(600000);
+  this.timeout(1_200_000);
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
   const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
@@ -98,6 +103,7 @@ describe("Transcription + YouTube transcript (live)", function () {
   const meetingWavPath = path.join(audioFolder, `meeting-chunked-${nonce}.wav`);
   const serverlessAudioLimitBytes = 4 * 1024 * 1024 - 64 * 1024;
   const jobsChunkingThresholdBytes = 95 * 1024 * 1024;
+  const jobsMaxAudioBytes = 500 * 1024 * 1024;
 
   before(async () => {
     vaultPath = await ensureE2EVault();
@@ -235,11 +241,11 @@ describe("Transcription + YouTube transcript (live)", function () {
           "-i",
           shortAbs,
           "-ar",
-          "48000",
+          "96000",
           "-ac",
           "2",
           "-c:a",
-          "pcm_s16le",
+          "pcm_s32le",
           introWavAbs,
         ],
         90_000
@@ -251,21 +257,21 @@ describe("Transcription + YouTube transcript (live)", function () {
           "-y",
           "-v",
           "error",
-          "-ss",
-          "0",
-          "-t",
-          "600",
+          "-stream_loop",
+          "-1",
           "-i",
           meetingMp3Abs,
+          "-t",
+          "600",
           "-ar",
-          "48000",
+          "96000",
           "-ac",
           "2",
           "-c:a",
-          "pcm_s16le",
+          "pcm_s32le",
           mainWavAbs,
         ],
-        180_000
+        300_000
       );
 
       await fs.writeFile(concatListAbs, `file '${introWavAbs}'\nfile '${mainWavAbs}'\n`, "utf8");
@@ -301,32 +307,28 @@ describe("Transcription + YouTube transcript (live)", function () {
 
       const meetingStat = await fs.stat(meetingWavAbs);
       expect(meetingStat.size).toBeGreaterThan(jobsChunkingThresholdBytes);
+      expect(meetingStat.size).toBeGreaterThan(400 * 1024 * 1024);
+      expect(meetingStat.size).toBeLessThan(jobsMaxAudioBytes);
 
-      // Copying large files directly onto disk can take Obsidian several minutes to index. Import
-      // the WAV via the vault API so we can start transcribing immediately.
-      await browser.executeObsidian(async ({ app }, { audioFolder, meetingWavPath, meetingWavAbs }) => {
-        const remote: any = (window as any)?.electron?.remote;
-        const nodeFs = remote?.require?.("fs");
-        const fsp = nodeFs?.promises;
-        if (!fsp) throw new Error("Electron remote fs.promises unavailable");
+      const activeVaultPath = await browser.executeObsidian(({ app }) => {
+        const adapter: any = (app as any)?.vault?.adapter;
+        const candidate =
+          typeof adapter?.getBasePath === "function" ? adapter.getBasePath() : adapter?.basePath;
+        return typeof candidate === "string" ? candidate : "";
+      });
+      const targetVaultPath = String(activeVaultPath || vaultPath || "").trim();
+      if (!targetVaultPath) throw new Error("Unable to resolve active vault path for large-audio copy.");
 
-        try {
-          await app.vault.createFolder(audioFolder);
-        } catch (_) {}
-
-        const toArrayBuffer = (buf: any): ArrayBuffer =>
-          buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-
-        const wavBuf = await fsp.readFile(meetingWavAbs);
-        await app.vault.createBinary(meetingWavPath, toArrayBuffer(wavBuf));
-      }, { audioFolder, meetingWavPath, meetingWavAbs });
+      const meetingDestAbs = path.join(targetVaultPath, meetingWavPath);
+      await fs.mkdir(path.dirname(meetingDestAbs), { recursive: true });
+      await fs.copyFile(meetingWavAbs, meetingDestAbs);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
 
     await waitForTFile(mp3Path, 30_000);
     await waitForTFile(oggPath, 30_000);
-    await waitForTFile(meetingWavPath, 120_000);
+    await waitForTFile(meetingWavPath, 600_000, jobsChunkingThresholdBytes);
   });
 
   const start = async (filePath: string): Promise<string> =>
@@ -491,7 +493,7 @@ describe("Transcription + YouTube transcript (live)", function () {
     expect(ogg.statuses.some((s) => s.toLowerCase().includes("transcrib"))).toBe(true);
   });
 
-  it("transcribes a >95MB WAV via the live API (server-side chunking)", async function () {
+  it("transcribes a >400MB WAV via the live API (server-side chunking)", async function () {
     this.timeout(900000);
 
     const result = await waitForResult(await start(meetingWavPath), 840_000);
