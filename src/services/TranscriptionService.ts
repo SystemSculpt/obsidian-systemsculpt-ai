@@ -24,6 +24,12 @@ const MIME_TYPE_MAP = {
 // Maximum file size for upload (2GB)
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 
+// SystemSculpt server-side jobs pipeline limits (match systemsculpt-website).
+const SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES = 500 * 1024 * 1024;
+const SYSTEMSCULPT_JOB_POLL_INTERVAL_MS = 2000;
+const SYSTEMSCULPT_JOB_KICK_INTERVAL_MS = 60_000;
+const SYSTEMSCULPT_JOB_TIMEOUT_MS = 30 * 60_000;
+
 // Expected sample rates for different formats
 const EXPECTED_SAMPLE_RATES: Record<string, number> = {
   wav: 16000,
@@ -256,6 +262,337 @@ export class TranscriptionService {
         : `${baseName}${desiredSuffix}`;
 
     return { filename, mimeType };
+  }
+
+  private extractRequestUrlErrorMessage(response: any): string {
+    const rawText = typeof response?.text === "string" ? response.text : "";
+    if (rawText) {
+      try {
+        const parsed = JSON.parse(rawText);
+        return parsed?.error?.message ?? parsed?.error ?? parsed?.message ?? rawText;
+      } catch {
+        return rawText;
+      }
+    }
+
+    const status = typeof response?.status === "number" ? response.status : "unknown";
+    return `HTTP ${status}`;
+  }
+
+  private async requestSystemSculptJson(options: {
+    url: string;
+    method: "GET" | "POST";
+    body?: any;
+    headers?: Record<string, string>;
+  }): Promise<{ status: number; json: any; headers: Record<string, string>; text: string }> {
+    const licenseKey = this.plugin.settings.licenseKey;
+    const headers: Record<string, string> = {
+      ...(licenseKey ? { "x-license-key": licenseKey } : {}),
+      ...(options.method !== "GET" ? { "content-type": "application/json" } : {}),
+      ...(options.headers ?? {}),
+    };
+
+    const response = await requestUrl({
+      url: options.url,
+      method: options.method,
+      headers,
+      ...(options.method !== "GET" ? { body: JSON.stringify(options.body ?? {}) } : {}),
+      throw: false,
+    });
+
+    const json =
+      response.json ??
+      (() => {
+        try {
+          return response.text ? JSON.parse(response.text) : null;
+        } catch {
+          return null;
+        }
+      })();
+
+    return {
+      status: response.status,
+      json,
+      headers: response.headers ?? {},
+      text: response.text ?? "",
+    };
+  }
+
+  private resolveAbsolutePath(file: TFile): string {
+    const path = require("path");
+    const adapter: any = this.plugin.app?.vault?.adapter;
+    const normalized = normalizePath(file.path);
+
+    if (adapter && typeof adapter.getFullPath === "function") {
+      return adapter.getFullPath(normalized);
+    }
+
+    if (adapter && typeof adapter.basePath === "string" && adapter.basePath.trim()) {
+      return path.join(adapter.basePath, normalized);
+    }
+
+    throw new Error(
+      "Unable to resolve an absolute file path for transcription. This transcription mode requires desktop Obsidian."
+    );
+  }
+
+  private segmentsToSrt(segments: any[]): string {
+    return segments
+      .map((segment: any, index: number) => {
+        const start = this.formatTimestamp(Number(segment?.start ?? 0));
+        const end = this.formatTimestamp(Number(segment?.end ?? 0));
+        const text = String(segment?.text ?? "").trim();
+        return `${index + 1}\n${start} --> ${end}\n${text}\n`;
+      })
+      .join("\n")
+      .trim();
+  }
+
+  private async fetchSignedText(url: string): Promise<string> {
+    const response = await requestUrl({ url, method: "GET", throw: false });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Failed to fetch transcript (HTTP ${response.status}).`);
+    }
+    return String(response.text ?? "");
+  }
+
+  private async transcribeViaSystemSculptJobs(file: TFile, context?: TranscriptionContext): Promise<string> {
+    const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
+    if (!Number.isFinite(fileSize) || fileSize <= 0) {
+      throw new Error("File size is unknown. Please retry after Obsidian finishes indexing the file.");
+    }
+
+    if (fileSize > SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES) {
+      throw new Error(
+        `File too large for transcription. Maximum supported size is ${Math.floor(
+          SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES / (1024 * 1024)
+        )}MB.`
+      );
+    }
+
+    const extension = (file.extension || "").toLowerCase();
+    const contentType =
+      (MIME_TYPE_MAP as Record<string, string>)[extension] || "application/octet-stream";
+
+    const absolutePath = this.resolveAbsolutePath(file);
+    context?.onProgress?.(2, "Preparing upload...");
+
+    const create = await this.requestSystemSculptJson({
+      url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs`,
+      method: "POST",
+      body: {
+        filename: file.name,
+        contentType,
+        contentLengthBytes: fileSize,
+        timestamped: !!context?.timestamped,
+      },
+    });
+
+    if (create.status !== 200 || !create.json?.success || !create.json?.job?.id) {
+      throw new Error(this.extractRequestUrlErrorMessage(create));
+    }
+
+    const jobId = String(create.json.job.id);
+    const partSizeBytes = Number(create.json?.upload?.partSizeBytes);
+    const totalParts = Number(create.json?.upload?.totalParts);
+
+    if (!Number.isFinite(partSizeBytes) || partSizeBytes <= 0) {
+      throw new Error("Server returned an invalid multipart partSizeBytes.");
+    }
+    if (!Number.isFinite(totalParts) || totalParts <= 0) {
+      throw new Error("Server returned an invalid multipart totalParts.");
+    }
+
+    const fs = require("fs");
+    const fileHandle = await fs.promises.open(absolutePath, "r");
+    const parts: Array<{ partNumber: number; etag: string }> = [];
+
+    try {
+      for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+        const offset = (partNumber - 1) * partSizeBytes;
+        const remaining = Math.max(0, fileSize - offset);
+        const bytesToRead = Math.min(partSizeBytes, remaining);
+        if (bytesToRead <= 0) {
+          throw new Error(`Unexpected end of file while uploading part ${partNumber}/${totalParts}.`);
+        }
+
+        const sign = await this.requestSystemSculptJson({
+          url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/upload/part-url?partNumber=${partNumber}`,
+          method: "GET",
+        });
+
+        const signedUrl = sign.json?.part?.url;
+        if (sign.status !== 200 || !sign.json?.success || typeof signedUrl !== "string" || !signedUrl) {
+          throw new Error(this.extractRequestUrlErrorMessage(sign));
+        }
+
+        const chunk = new Uint8Array(bytesToRead);
+        const { bytesRead } = await fileHandle.read(chunk, 0, bytesToRead, offset);
+        if (bytesRead !== bytesToRead) {
+          throw new Error(
+            `Short read while uploading part ${partNumber}/${totalParts} (expected ${bytesToRead}, got ${bytesRead}).`
+          );
+        }
+
+        context?.onProgress?.(
+          5 + Math.floor((partNumber / totalParts) * 60),
+          `Uploading audio (${partNumber}/${totalParts})...`
+        );
+
+        const put = await requestUrl({
+          url: signedUrl,
+          method: "PUT",
+          body: chunk.buffer,
+          throw: false,
+        });
+
+        if (put.status < 200 || put.status >= 300) {
+          throw new Error(`Part upload failed (HTTP ${put.status}) for part ${partNumber}/${totalParts}.`);
+        }
+
+        const etagHeaderKey = Object.keys(put.headers ?? {}).find((k) => k.toLowerCase() === "etag");
+        const etag = etagHeaderKey ? String((put.headers as any)[etagHeaderKey] ?? "").trim() : "";
+        if (!etag) {
+          throw new Error(`Missing ETag for uploaded part ${partNumber}/${totalParts}.`);
+        }
+
+        parts.push({ partNumber, etag });
+      }
+    } catch (error) {
+      await this.requestSystemSculptJson({
+        url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/upload/abort`,
+        method: "POST",
+      }).catch(() => {});
+      throw error;
+    } finally {
+      await fileHandle.close().catch(() => {});
+    }
+
+    context?.onProgress?.(70, "Finalizing upload...");
+
+    const complete = await this.requestSystemSculptJson({
+      url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/upload/complete`,
+      method: "POST",
+      body: { parts },
+    });
+    if (complete.status !== 200 || !complete.json?.success) {
+      throw new Error(this.extractRequestUrlErrorMessage(complete));
+    }
+
+    context?.onProgress?.(75, "Starting transcription...");
+
+    const startUrl = `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/start`;
+    const statusUrl = `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}`;
+    const deadline = Date.now() + SYSTEMSCULPT_JOB_TIMEOUT_MS;
+    let lastKickAt = 0;
+
+    const tryKick = async (): Promise<{ status: number; json: any }> => {
+      lastKickAt = Date.now();
+      const kicked = await this.requestSystemSculptJson({ url: startUrl, method: "POST" });
+      if (kicked.status !== 200 && kicked.status !== 202) {
+        throw new Error(this.extractRequestUrlErrorMessage(kicked));
+      }
+      return { status: kicked.status, json: kicked.json };
+    };
+
+    const extractResult = async (payload: any): Promise<string | null> => {
+      if (!payload || typeof payload !== "object") return null;
+
+      const text = typeof payload.text === "string" ? payload.text : "";
+      const verbose = payload.verbose_json;
+
+      if (context?.timestamped && verbose && Array.isArray(verbose.segments)) {
+        return this.segmentsToSrt(verbose.segments);
+      }
+
+      if (text && (!context?.timestamped || this.hasTimestamps(text))) {
+        return text.trim();
+      }
+
+      const transcriptUrls = payload.transcript_urls;
+      const transcriptTextUrl = typeof transcriptUrls?.text === "string" ? transcriptUrls.text : null;
+      const transcriptJsonUrl = typeof transcriptUrls?.json === "string" ? transcriptUrls.json : null;
+
+      if (context?.timestamped && transcriptJsonUrl) {
+        const jsonText = await this.fetchSignedText(transcriptJsonUrl);
+        try {
+          const json = JSON.parse(jsonText);
+          if (Array.isArray(json?.segments)) {
+            return this.segmentsToSrt(json.segments);
+          }
+        } catch {}
+      }
+
+      if (transcriptTextUrl) {
+        const fetched = await this.fetchSignedText(transcriptTextUrl);
+        if (fetched.trim()) return fetched.trim();
+      }
+
+      return null;
+    };
+
+    const kicked = await tryKick();
+    if (kicked.status === 200) {
+      const maybe = await extractResult(kicked.json);
+      if (maybe) return maybe;
+    }
+
+    while (Date.now() < deadline) {
+      const status = await this.requestSystemSculptJson({ url: statusUrl, method: "GET" });
+      if (status.status !== 200 || !status.json?.success) {
+        throw new Error(this.extractRequestUrlErrorMessage(status));
+      }
+
+      const jobStatus = String(status.json?.job?.status || "");
+      if (jobStatus === "succeeded") {
+        const transcript = status.json?.transcript;
+        const textUrl = typeof transcript?.textUrl === "string" ? transcript.textUrl : null;
+        const jsonUrl = typeof transcript?.jsonUrl === "string" ? transcript.jsonUrl : null;
+
+        if (context?.timestamped && jsonUrl) {
+          const jsonText = await this.fetchSignedText(jsonUrl);
+          try {
+            const json = JSON.parse(jsonText);
+            if (Array.isArray(json?.segments)) return this.segmentsToSrt(json.segments);
+          } catch {}
+        }
+
+        if (textUrl) {
+          const fetched = await this.fetchSignedText(textUrl);
+          if (fetched.trim()) return fetched.trim();
+        }
+
+        throw new Error("Transcription completed, but the transcript could not be retrieved. Please retry.");
+      }
+
+      if (jobStatus === "failed") {
+        const msg = status.json?.job?.errorMessage;
+        throw new Error(typeof msg === "string" && msg.trim() ? msg : "Transcription job failed.");
+      }
+
+      if (jobStatus === "expired") {
+        throw new Error("Transcription job expired before it could complete. Please retry.");
+      }
+
+      const progress = status.json?.progress;
+      if (progress?.stage && typeof progress.stage === "string") {
+        context?.onProgress?.(80, `Processing (${progress.stage})...`);
+      } else if (jobStatus) {
+        context?.onProgress?.(80, `Processing (${jobStatus})...`);
+      }
+
+      if (Date.now() - lastKickAt >= SYSTEMSCULPT_JOB_KICK_INTERVAL_MS) {
+        const kickedAgain = await tryKick();
+        if (kickedAgain.status === 200) {
+          const maybe = await extractResult(kickedAgain.json);
+          if (maybe) return maybe;
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, SYSTEMSCULPT_JOB_POLL_INTERVAL_MS));
+    }
+
+    throw new Error("Transcription timed out. Please try again in a few minutes.");
   }
 
   private async transcribeChunkedAudio(
@@ -1463,13 +1800,28 @@ export class TranscriptionService {
         size: file.stat.size,
         extension
       });
+
+      const provider = this.plugin.settings.transcriptionProvider;
+      const isMobile = this.platform.isMobile();
+
       if (
-        this.plugin.settings.transcriptionProvider === "systemsculpt" &&
+        provider === "systemsculpt" &&
         (!this.plugin.settings.licenseKey || !this.plugin.settings.licenseValid)
       ) {
         throw new Error(
           "A valid SystemSculpt license is required to use the SystemSculpt API for transcription. Please enter a valid license key or switch to a custom transcription provider in the settings."
         );
+      }
+
+      // Desktop: use the server-side jobs pipeline so we can handle large files reliably.
+      if (provider === "systemsculpt" && !isMobile) {
+        const transcriptionText = await this.transcribeViaSystemSculptJobs(file, context);
+        context?.onProgress?.(100, "Transcription complete!");
+        this.info("Transcription pipeline finished (server-side jobs)", {
+          filePath: file.path,
+          characters: transcriptionText.length,
+        });
+        return transcriptionText;
       }
 
       context?.onProgress?.(0, "Reading audio file...");
@@ -1529,7 +1881,6 @@ export class TranscriptionService {
       let mimeType = MIME_TYPE_MAP[extension as keyof typeof MIME_TYPE_MAP];
       let wasResampled = false;
 
-      const provider = this.plugin.settings.transcriptionProvider;
       if (provider === "custom" && !this.plugin.settings.customTranscriptionEndpoint?.trim()) {
         throw new Error(
           "Custom transcription endpoint is required when using a custom transcription provider. Configure it in Settings → SystemSculpt AI → Audio & Transcription."
@@ -1541,7 +1892,6 @@ export class TranscriptionService {
       const chunkTargetSampleRate =
         provider === "custom" ? 16000 : EXPECTED_SAMPLE_RATES[extension] || 16000;
 
-      const isMobile = this.platform.isMobile();
       const resamplingEnabled = this.plugin.settings.enableAutoAudioResampling ?? true;
 
       if (provider === "systemsculpt" && !isMobile && resamplingEnabled && file.stat.size <= AUDIO_UPLOAD_MAX_BYTES) {
