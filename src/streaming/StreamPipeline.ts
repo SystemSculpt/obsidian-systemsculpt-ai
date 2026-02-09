@@ -22,6 +22,12 @@ interface ToolCallAccumulatorState {
 const DONE_MARKER = "[DONE]";
 const MAX_DISCARDED_PAYLOAD_SAMPLES = 5;
 
+type PiNativeToolCallPayload = {
+  id?: unknown;
+  name?: unknown;
+  arguments?: unknown;
+};
+
 export class StreamPipeline {
   private readonly decoder = new TextDecoder();
   private readonly options: StreamPipelineOptions;
@@ -32,6 +38,9 @@ export class StreamPipeline {
   private discardedPayloadCount = 0;
   private discardedPayloadSamples: string[] = [];
   private pendingDataLines: string[] = [];
+  private sawPiNativeTextDelta = false;
+  private sawPiNativeThinkingDelta = false;
+  private sawPiNativeToolEvent = false;
 
   constructor(options: StreamPipelineOptions) {
     this.options = options;
@@ -201,6 +210,15 @@ export class StreamPipeline {
       events.push({ type: "meta", key: "web-search-enabled", value: parsed.webSearchEnabled });
     }
 
+    const piNative = this.handlePiNativeEvent(parsed);
+    if (piNative) {
+      if (piNative.events.length > 0) {
+        events.push(...piNative.events);
+      }
+      done = done || piNative.done;
+      return { events, done };
+    }
+
     if (parsed.error) {
       this.raiseStreamError(parsed);
     }
@@ -303,6 +321,151 @@ export class StreamPipeline {
     }
 
     return { events, done };
+  }
+
+  private handlePiNativeEvent(parsed: any): { events: StreamEvent[]; done: boolean } | null {
+    if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") {
+      return null;
+    }
+
+    const events: StreamEvent[] = [];
+    const type = parsed.type;
+    let done = false;
+
+    switch (type) {
+      case "text_delta": {
+        if (typeof parsed.delta === "string" && parsed.delta.length > 0) {
+          this.sawPiNativeTextDelta = true;
+          events.push(...this.splitContentByThinkTags(parsed.delta));
+        }
+        break;
+      }
+      case "thinking_delta": {
+        if (typeof parsed.delta === "string" && parsed.delta.length > 0) {
+          this.sawPiNativeThinkingDelta = true;
+          events.push({ type: "reasoning", text: parsed.delta });
+        }
+        break;
+      }
+      case "toolcall_end": {
+        const rawCall = this.normalizePiToolCallPayload(parsed.toolCall);
+        if (!rawCall) break;
+        this.sawPiNativeToolEvent = true;
+
+        const event = this.handleToolCallFinal({
+          index: typeof parsed.contentIndex === "number" ? parsed.contentIndex : 0,
+          id: rawCall.id,
+          function: {
+            name: rawCall.name,
+            arguments: rawCall.arguments,
+          },
+        });
+        if (event) events.push(event);
+        break;
+      }
+      case "done": {
+        done = true;
+        if (!this.shouldParsePiDoneMessage()) {
+          break;
+        }
+        if (parsed.message && typeof parsed.message === "object") {
+          events.push(...this.parsePiAssistantMessage(parsed.message));
+        }
+        break;
+      }
+      case "error": {
+        const errorMessage =
+          parsed?.error?.errorMessage ||
+          parsed?.error?.message ||
+          parsed?.errorMessage ||
+          "PI runtime error";
+        throw new SystemSculptError(String(errorMessage), ERROR_CODES.STREAM_ERROR, 500, {
+          model: this.options.model,
+          rawError: parsed?.error ?? parsed,
+        });
+      }
+      // These PI event types are markers/aggregates and should not append output by default.
+      // `text_end` and `thinking_end` usually carry fully aggregated block text and would
+      // duplicate streaming deltas if appended.
+      case "start":
+      case "text_start":
+      case "text_end":
+      case "thinking_start":
+      case "thinking_end":
+      case "toolcall_start":
+      case "toolcall_delta":
+        break;
+      default:
+        return null;
+    }
+
+    return { events, done };
+  }
+
+  private shouldParsePiDoneMessage(): boolean {
+    return !this.sawPiNativeTextDelta && !this.sawPiNativeThinkingDelta && !this.sawPiNativeToolEvent;
+  }
+
+  private parsePiAssistantMessage(message: any): StreamEvent[] {
+    const events: StreamEvent[] = [];
+    const content = Array.isArray(message?.content) ? message.content : [];
+
+    for (let i = 0; i < content.length; i += 1) {
+      const block = content[i];
+      if (!block || typeof block !== "object") continue;
+
+      if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+        events.push(...this.splitContentByThinkTags(block.text));
+        continue;
+      }
+
+      if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) {
+        events.push({ type: "reasoning", text: block.thinking });
+        continue;
+      }
+
+      if (block.type === "toolCall") {
+        const rawCall = this.normalizePiToolCallPayload(block);
+        if (!rawCall) continue;
+        const event = this.handleToolCallFinal({
+          index: i,
+          id: rawCall.id,
+          function: {
+            name: rawCall.name,
+            arguments: rawCall.arguments,
+          },
+        });
+        if (event) events.push(event);
+      }
+    }
+
+    return events;
+  }
+
+  private normalizePiToolCallPayload(value: unknown): { id: string; name: string; arguments: string } | null {
+    if (!value || typeof value !== "object") return null;
+    const candidate = value as PiNativeToolCallPayload;
+
+    const id = typeof candidate.id === "string" && candidate.id.trim().length > 0 ? candidate.id.trim() : "";
+    const name = this.sanitizeToolName(typeof candidate.name === "string" ? candidate.name : "");
+    if (!name) return null;
+
+    let argumentsText = "{}";
+    if (typeof candidate.arguments === "string") {
+      argumentsText = candidate.arguments;
+    } else if (candidate.arguments && typeof candidate.arguments === "object") {
+      try {
+        argumentsText = JSON.stringify(candidate.arguments);
+      } catch {
+        argumentsText = "{}";
+      }
+    }
+
+    return {
+      id,
+      name,
+      arguments: argumentsText,
+    };
   }
 
   private handlePayload(payload: string, line?: string): StreamPipelineResult {
@@ -535,20 +698,41 @@ export class StreamPipeline {
 
   private sanitizeToolName(name: string): string {
     if (!name) return "";
-    let sanitized = String(name);
-    if (sanitized.startsWith("functions.")) {
+    let sanitized = String(name).trim();
+    while (sanitized.startsWith("functions.")) {
       sanitized = sanitized.slice("functions.".length);
     }
-    // Providers disagree on colon semantics:
-    // - OpenRouter -> Gemini: `default_api:mcp-filesystem_read` (namespace prefix)
-    // - Others: `mcp-filesystem_edit:1_foo` (suffix payload/index)
-    // Heuristic: keep the segment that looks like our tool naming (`mcp-*`).
-    const colonIdx = sanitized.lastIndexOf(":");
-    if (colonIdx !== -1 && colonIdx < sanitized.length - 1) {
-      const before = sanitized.slice(0, colonIdx);
-      const after = sanitized.slice(colonIdx + 1);
-      sanitized = after.startsWith("mcp-") || after.startsWith("mcp_") ? after : before;
+
+    if (!sanitized.includes(":")) {
+      return sanitized;
     }
-    return sanitized.trim();
+
+    // Providers disagree on colon semantics:
+    // - Namespace prefixes: `default_api:read`, `default_api:mcp-filesystem_read`
+    // - Suffix payload/index: `read:1_foo`, `mcp-filesystem_edit:1_foo`
+    const parts = sanitized.split(":").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0];
+
+    const mcpPart = parts.find((part) => part.startsWith("mcp-") || part.startsWith("mcp_"));
+    if (mcpPart) {
+      return mcpPart;
+    }
+
+    const first = parts[0];
+    const last = parts[parts.length - 1];
+    const canonicalPiTools = new Set([
+      "read", "write", "edit", "find", "grep", "ls", "move", "trash", "mkdir", "open", "context"
+    ]);
+    const firstLooksLikeNamespace = /(^|[_-])api$/i.test(first) || /^default_api$/i.test(first);
+    const lastLooksLikeProviderSuffix = /^\d+[_-]/.test(last) || /^[a-z]+_[a-z0-9]+$/i.test(last);
+
+    if (canonicalPiTools.has(last.toLowerCase()) || firstLooksLikeNamespace) {
+      return last;
+    }
+    if (lastLooksLikeProviderSuffix) {
+      return first;
+    }
+    return first;
   }
 }

@@ -789,6 +789,26 @@ export class BenchView extends ItemView {
     this.chatContainerEl.empty();
 
     const toolCallManager = new ToolCallManager(mcpService, { plugin: { settings: benchSettings } });
+    // Benchmark runs are fully sandboxed and deterministic; auto-approve all pending
+    // tool calls so execution never blocks on human approvals.
+    const unsubscribeAutoApprove = toolCallManager.on("tool-call:created", ({ toolCall }) => {
+      if (toolCall.state !== "pending") return;
+      try {
+        toolCallManager.approveToolCall(toolCall.id);
+      } catch (error) {
+        try {
+          errorLogger.warn("Failed to auto-approve benchmark tool call", {
+            source: "BenchView",
+            method: "runCaseConversation",
+            metadata: {
+              toolCallId: toolCall.id,
+              toolName: toolCall.request?.function?.name ?? "unknown",
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+        } catch {}
+      }
+    });
     const renderer = new MessageRenderer(this.app, toolCallManager);
     const scrollManager = new ScrollManagerService({ container: this.chatContainerEl });
     const liveRegion = this.chatContainerEl.createDiv({ cls: "benchview-live-region", attr: { "aria-live": "polite" } });
@@ -881,34 +901,39 @@ export class BenchView extends ItemView {
       clearStreamingFootnote: (el) => clearStreamingFootnote(el),
     });
 
-    for (const rawPrompt of caseDef.prompts) {
-      if (signal.aborted) break;
-      const benchRoot = this.getBenchDisplayRoot();
-      const prompt = rawPrompt.split(BENCH_ROOT_PLACEHOLDER).join(benchRoot);
-      const messageId = this.createMessageId();
-      const userMessage: ChatMessage = { role: "user", content: prompt, message_id: messageId };
-      messages.push(userMessage);
-      const { messageEl } = await renderer.renderMessage({
-        app: this.app,
-        messageId,
-        role: "user",
-        content: prompt,
-      });
-      addMessageToContainer(this.chatContainerEl, messageEl, "user", true);
-      try {
-        await orchestrator.runTurn({ includeContextFiles: false, signal });
-      } catch (error: any) {
+    try {
+      for (const rawPrompt of caseDef.prompts) {
+        if (signal.aborted) break;
+        const benchRoot = this.getBenchDisplayRoot();
+        const prompt = rawPrompt.split(BENCH_ROOT_PLACEHOLDER).join(benchRoot);
+        const messageId = this.createMessageId();
+        const userMessage: ChatMessage = { role: "user", content: prompt, message_id: messageId };
+        messages.push(userMessage);
+        const { messageEl } = await renderer.renderMessage({
+          app: this.app,
+          messageId,
+          role: "user",
+          content: prompt,
+        });
+        addMessageToContainer(this.chatContainerEl, messageEl, "user", true);
         try {
-          (error as any).benchMessages = messages;
-        } catch {}
-        throw error;
+          await orchestrator.runTurn({ includeContextFiles: false, signal });
+        } catch (error: any) {
+          try {
+            (error as any).benchMessages = messages;
+          } catch {}
+          throw error;
+        }
       }
+
+      return { messages };
+    } finally {
+      try {
+        unsubscribeAutoApprove();
+      } catch {}
+      scrollManager.destroy();
+      toolCallManager.clear();
     }
-
-    scrollManager.destroy();
-    toolCallManager.clear();
-
-    return { messages };
   }
 
   private buildBenchSettings(): any {
@@ -917,6 +942,9 @@ export class BenchView extends ItemView {
     // so we only need to ensure the server is present
     return {
       ...base,
+      // Bench runs operate inside an isolated scratch vault. Auto-approve destructive
+      // filesystem actions to avoid deadlocks during unattended benchmarks.
+      toolingRequireApprovalForDestructiveTools: false,
       mcpServers: [
         {
           id: "mcp-filesystem",

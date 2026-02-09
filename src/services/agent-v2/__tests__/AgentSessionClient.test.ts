@@ -3,17 +3,27 @@ import { AgentSessionClient } from "../AgentSessionClient";
 type RequestRecord = {
   url: string;
   method: string;
+  headers?: Record<string, string>;
   body?: any;
+  stream?: boolean;
 };
 
 describe("AgentSessionClient", () => {
   function createClient(records: RequestRecord[], options?: { sessionStatus?: number }) {
     const sessionStatus = options?.sessionStatus ?? 200;
-    const request = jest.fn(async (input: { url: string; method: string; body?: any }) => {
+    const request = jest.fn(async (input: {
+      url: string;
+      method: string;
+      headers?: Record<string, string>;
+      body?: any;
+      stream?: boolean;
+    }) => {
       records.push({
         url: input.url,
         method: input.method,
+        headers: input.headers,
         body: input.body,
+        stream: input.stream,
       });
 
       if (input.url.endsWith("/api/v2/agent/sessions")) {
@@ -57,17 +67,31 @@ describe("AgentSessionClient", () => {
     await client.startOrContinueTurn({
       chatId: "chat_1",
       modelId: "systemsculpt/ai-agent",
-      messages: [{ role: "user", content: "hello" }],
+      pluginVersion: "4.8.1",
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "hello" },
+      ],
       tools: [],
     });
 
     expect(records).toHaveLength(2);
     expect(records[0].url).toBe("https://api.systemsculpt.com/api/v2/agent/sessions");
     expect(records[1].url).toBe("https://api.systemsculpt.com/api/v2/agent/sessions/sess_abc123/turns");
+    expect(records[0].headers?.["x-plugin-version"]).toBe("4.8.1");
+    expect(records[1].headers?.["x-plugin-version"]).toBe("4.8.1");
     expect(records[1].body).toMatchObject({
       modelId: "systemsculpt/ai-agent",
-      messages: [{ role: "user", content: "hello" }],
-      tools: [],
+      context: {
+        systemPrompt: "You are a helpful assistant.",
+        messages: [
+          {
+            role: "user",
+            content: "hello",
+            timestamp: expect.any(Number),
+          },
+        ],
+      },
       stream: true,
     });
   });
@@ -79,6 +103,7 @@ describe("AgentSessionClient", () => {
     await client.startOrContinueTurn({
       chatId: "chat_1",
       modelId: "systemsculpt/ai-agent",
+      pluginVersion: "4.8.1",
       messages: [{ role: "user", content: "hello" }],
       tools: [],
     });
@@ -88,6 +113,7 @@ describe("AgentSessionClient", () => {
     await client.startOrContinueTurn({
       chatId: "chat_1",
       modelId: "systemsculpt/ai-agent",
+      pluginVersion: "4.8.1",
       messages: [
         { role: "assistant", tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }] },
         { role: "tool", tool_call_id: "call_1", name: "read", content: "{\"ok\":true}" },
@@ -101,8 +127,19 @@ describe("AgentSessionClient", () => {
 
     const submit = records.find((record) => record.url.endsWith("/tool-results"));
     expect(submit?.body).toEqual({
-      results: [{ toolCallId: "call_1", ok: true, output: { ok: true }, toolName: "read" }],
+      toolResults: [
+        {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "{\"ok\":true}" }],
+          isError: false,
+          timestamp: expect.any(Number),
+        },
+      ],
     });
+    const continueRequest = records.find((record) => record.url.endsWith("/continue"));
+    expect(continueRequest?.headers?.["x-plugin-version"]).toBe("4.8.1");
   });
 
   it("throws when the v2 sessions endpoint is unavailable and never calls legacy completions", async () => {
@@ -113,6 +150,7 @@ describe("AgentSessionClient", () => {
       client.startOrContinueTurn({
         chatId: "chat_legacy",
         modelId: "systemsculpt/ai-agent",
+        pluginVersion: "4.8.1",
         messages: [{ role: "user", content: "hello" }],
         tools: [],
       })

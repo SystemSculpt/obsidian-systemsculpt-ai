@@ -20,7 +20,12 @@ import {
   SerializedToolCall
 } from "../../types/toolCalls";
 import { MCPService } from "./MCPService";
-import { splitToolName, requiresUserApproval } from "../../utils/toolPolicy";
+import {
+  splitToolName,
+  requiresUserApproval,
+  resolveCanonicalToolAlias,
+  getCanonicalAliasForMcpTool,
+} from "../../utils/toolPolicy";
 import { buildOpenAIToolDefinition, buildToolCallSignature, TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { errorLogger } from "../../utils/errorLogger";
 
@@ -53,6 +58,11 @@ export class ToolCallManager {
   private readonly MAX_BASE_YAML_RETRY_ATTEMPTS = 3;
   private readonly BASE_YAML_RETRY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
   private readonly baseYamlValidationFailures: Map<string, { count: number; lastAt: number }> = new Map();
+
+  private static readonly MCP_ALIAS_OVERRIDES: Record<string, string> = {
+    "mcp-filesystem_search": "grep",
+    "mcp-filesystem_list_items": "ls",
+  };
 
   constructor(mcpService: MCPService, chatView?: any) {
     this.mcpService = mcpService;
@@ -87,6 +97,114 @@ export class ToolCallManager {
     return Math.max(1, Math.min(50, Math.floor(raw)));
   }
 
+  private resolveExecutableToolName(toolName: string): string {
+    const name = String(toolName ?? "").trim();
+    if (!name) return "";
+    return resolveCanonicalToolAlias(name);
+  }
+
+  private getCanonicalAliasNameForMcpTool(toolName: string): string | null {
+    const normalized = String(toolName ?? "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (ToolCallManager.MCP_ALIAS_OVERRIDES[normalized]) {
+      return ToolCallManager.MCP_ALIAS_OVERRIDES[normalized];
+    }
+    return getCanonicalAliasForMcpTool(normalized);
+  }
+
+  private normalizeToolArgs(toolName: string, rawArgs: any): any {
+    if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) {
+      return rawArgs;
+    }
+
+    const normalizedName = String(toolName ?? "").trim().toLowerCase();
+    if (!normalizedName.startsWith("mcp-filesystem_")) {
+      return rawArgs;
+    }
+
+    const args = { ...(rawArgs as Record<string, any>) };
+    const toString = (value: unknown): string | null => {
+      if (typeof value !== "string") return null;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+    const toStringArray = (value: unknown): string[] | null => {
+      if (typeof value === "string") {
+        const single = toString(value);
+        return single ? [single] : null;
+      }
+      if (Array.isArray(value)) {
+        const items = value
+          .map((item) => toString(item))
+          .filter((item): item is string => !!item);
+        return items.length > 0 ? items : null;
+      }
+      return null;
+    };
+
+    switch (normalizedName) {
+      case "mcp-filesystem_read":
+      case "mcp-filesystem_list_items":
+      case "mcp-filesystem_create_folders":
+      case "mcp-filesystem_trash":
+      case "mcp-filesystem_context": {
+        if (!Array.isArray(args.paths)) {
+          const paths = toStringArray(args.path ?? args.paths ?? args.file);
+          if (paths) args.paths = paths;
+        }
+        break;
+      }
+      case "mcp-filesystem_find":
+      case "mcp-filesystem_search": {
+        if (!Array.isArray(args.patterns)) {
+          const patterns = toStringArray(args.patterns ?? args.pattern ?? args.query ?? args.term);
+          if (patterns) args.patterns = patterns;
+        }
+        break;
+      }
+      case "mcp-filesystem_move": {
+        if (!Array.isArray(args.items)) {
+          const source = toString(args.source ?? args.from ?? args.path);
+          const destination = toString(args.destination ?? args.to ?? args.newPath ?? args.target);
+          if (source && destination) {
+            args.items = [{ source, destination }];
+          }
+        }
+        break;
+      }
+      case "mcp-filesystem_open": {
+        if (!Array.isArray(args.files)) {
+          const paths = toStringArray(args.path ?? args.paths ?? args.file);
+          if (paths) {
+            args.files = paths.map((path) => ({ path }));
+          }
+        }
+        break;
+      }
+      case "mcp-filesystem_edit": {
+        if (!Array.isArray(args.edits)) {
+          const oldText = toString(args.oldText ?? args.search);
+          const newText = toString(args.newText ?? args.replace ?? "");
+          if (oldText !== null && newText !== null) {
+            const edit: Record<string, unknown> = { oldText, newText };
+            if (typeof args.isRegex === "boolean") edit.isRegex = args.isRegex;
+            if (typeof args.flags === "string") edit.flags = args.flags;
+            if (typeof args.occurrence === "string") edit.occurrence = args.occurrence;
+            if (typeof args.mode === "string") edit.mode = args.mode;
+            if (typeof args.preserveIndent === "boolean") edit.preserveIndent = args.preserveIndent;
+            if (args.range && typeof args.range === "object") edit.range = args.range;
+            args.edits = [edit];
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    return args;
+  }
+
   private enqueueExecution(toolCallId: string, options?: ToolExecutionOptions): void {
     this.executionQueue.push({ toolCallId, options });
     this.drainExecutionQueue();
@@ -115,7 +233,8 @@ export class ToolCallManager {
    */
   public shouldAutoApprove(toolName: string): boolean {
     const trustedToolNames = this.chatView?.trustedToolNames ?? new Set<string>();
-    return !requiresUserApproval(toolName, {
+    const resolvedName = this.resolveExecutableToolName(toolName) || toolName;
+    return !requiresUserApproval(resolvedName, {
       trustedToolNames,
       requireDestructiveApproval: this.getRequireDestructiveApproval(),
       autoApproveAllowlist: this.getAutoApproveAllowlist(),
@@ -127,26 +246,38 @@ export class ToolCallManager {
    */
   public async getOpenAITools(): Promise<any[]> {
     const results: any[] = [];
+    const seen = new Set<string>();
+    const pushTool = (name: string, description: string, parameters: any, strict?: boolean): void => {
+      const normalizedName = String(name ?? "").trim();
+      if (!normalizedName || seen.has(normalizedName)) return;
+      results.push(buildOpenAIToolDefinition({
+        name: normalizedName,
+        description,
+        parameters,
+        ...(typeof strict === "boolean" ? { strict } : {}),
+      }));
+      seen.add(normalizedName);
+    };
 
     // Internal tools → OpenAI function format
     for (const [name, entry] of this.toolRegistry) {
       const def = entry.definition;
-      results.push(buildOpenAIToolDefinition({
-        name: def.name,
-        description: def.description,
-        parameters: def.parameters,
-        strict: (def as any).strict,
-      }));
+      pushTool(def.name, def.description, def.parameters, (def as any).strict);
     }
 
     // MCP tools are already returned in OpenAI format by MCPService
     const mcpTools = await this.mcpService.getAvailableTools();
     for (const tool of mcpTools) {
-      results.push(buildOpenAIToolDefinition({
-        name: tool.function.name,
-        description: tool.function.description || "",
-        parameters: tool.function.parameters || {},
-      }));
+      const name = String(tool?.function?.name ?? "");
+      const description = String(tool?.function?.description ?? "");
+      const parameters = tool?.function?.parameters || {};
+
+      pushTool(name, description, parameters);
+
+      const alias = this.getCanonicalAliasNameForMcpTool(name);
+      if (alias) {
+        pushTool(alias, `${description} (PI canonical alias for ${name})`, parameters);
+      }
     }
 
     return results;
@@ -169,7 +300,7 @@ export class ToolCallManager {
   private static readonly INTERNAL_SERVERS = new Set(['mcp-filesystem', 'mcp-youtube']);
 
   private getToolAvailability(toolName: string): { ok: true; serverId?: string } | { ok: false; serverId?: string; error: { code: string; message: string } } {
-    const name = String(toolName ?? "").trim();
+    const name = this.resolveExecutableToolName(toolName);
     if (name.length === 0) {
       return { ok: false, error: { code: "INVALID_TOOL_NAME", message: "Tool call is missing a function name." } };
     }
@@ -214,7 +345,8 @@ export class ToolCallManager {
   }
 
   private getToolCallSignature(request: ToolCallRequest): string | null {
-    const toolName = request?.function?.name ?? "";
+    const requestedName = request?.function?.name ?? "";
+    const toolName = this.resolveExecutableToolName(requestedName);
     if (!toolName) return null;
     return buildToolCallSignature(toolName, request?.function?.arguments);
   }
@@ -225,7 +357,7 @@ export class ToolCallManager {
 
     for (const call of this.toolCalls.values()) {
       if (call.messageId !== messageId) continue;
-      const toolName = call.request?.function?.name ?? "";
+      const toolName = this.resolveExecutableToolName(call.request?.function?.name ?? "");
       if (!toolName) continue;
       const callSignature = buildToolCallSignature(toolName, call.request?.function?.arguments);
       if (callSignature !== signature) continue;
@@ -263,8 +395,11 @@ export class ToolCallManager {
     autoApprove: boolean = false
   ): ToolCall {
     const toolName = request?.function?.name ?? '';
-    const availability = this.getToolAvailability(toolName);
-    const effectiveAutoApprove = availability.ok ? (autoApprove || (toolName ? this.shouldAutoApprove(toolName) : false)) : false;
+    const executableToolName = this.resolveExecutableToolName(toolName);
+    const availability = this.getToolAvailability(executableToolName);
+    const effectiveAutoApprove = availability.ok
+      ? (autoApprove || (executableToolName ? this.shouldAutoApprove(executableToolName) : false))
+      : false;
 
     if (availability.ok) {
       const signature = this.getToolCallSignature(request);
@@ -306,6 +441,7 @@ export class ToolCallManager {
                 messageId,
                 toolCallId: blockedToolCall.id,
                 toolName,
+                executableToolName,
                 repeatStats,
               },
             });
@@ -524,12 +660,16 @@ export class ToolCallManager {
       toolCall.executionStartedAt = Date.now();
       this.updateState(toolCallId, 'executing');
 
+      const requestedToolName = toolCall.request.function.name;
+      const executableToolName = this.resolveExecutableToolName(requestedToolName);
+
       errorLogger.debug('Starting tool call execution', {
         source: 'ToolCallManager',
         method: 'executeToolCall',
         metadata: {
           toolCallId,
-          toolName: toolCall.request.function.name,
+          toolName: requestedToolName,
+          executableToolName,
           messageId: toolCall.messageId,
           autoApproved: toolCall.autoApproved,
         },
@@ -545,10 +685,11 @@ export class ToolCallManager {
       } catch (e: any) {
         throw new Error(`Invalid tool arguments JSON: ${e?.message || 'Unknown parse error'}`);
       }
+      const normalizedArgs = this.normalizeToolArgs(executableToolName, args);
 
       // Execute the tool, respecting timeouts and concurrency limits
-      let result = await this.executeToolWithTimeout(toolCall.request.function.name, args, options);
-      result = this.applyBaseYamlRetryGuard(toolCall.request.function.name, args, result);
+      let result = await this.executeToolWithTimeout(executableToolName, normalizedArgs, options);
+      result = this.applyBaseYamlRetryGuard(executableToolName, normalizedArgs, result);
 
       // Update with result
       toolCall.executionCompletedAt = Date.now();
@@ -561,7 +702,8 @@ export class ToolCallManager {
           method: 'executeToolCall',
           metadata: {
             toolCallId,
-            toolName: toolCall.request.function.name,
+            toolName: requestedToolName,
+            executableToolName,
             messageId: toolCall.messageId,
             executionTime: toolCall.executionCompletedAt - (toolCall.executionStartedAt || 0),
           },
@@ -578,7 +720,8 @@ export class ToolCallManager {
           method: 'executeToolCall',
           metadata: {
             toolCallId,
-            toolName: toolCall.request.function.name,
+            toolName: requestedToolName,
+            executableToolName,
             messageId: toolCall.messageId,
             executionTime: toolCall.executionCompletedAt - (toolCall.executionStartedAt || 0),
             error: result.error,
@@ -687,25 +830,27 @@ export class ToolCallManager {
     options?: ToolExecutionOptions
   ): Promise<ToolCallResult> {
     try {
+      const executableToolName = this.resolveExecutableToolName(toolName);
+      const normalizedArgs = this.normalizeToolArgs(executableToolName, args);
       let resultData: any;
-      if (toolName.startsWith("mcp-")) {
+      if (executableToolName.startsWith("mcp-")) {
         resultData = await this.mcpService.executeTool(
-          toolName,
-          args,
+          executableToolName,
+          normalizedArgs,
           this.chatView, // Pass chatView for additional agent mode check
           { timeoutMs: this.getToolingToolCallTimeoutMs() }
         );
       } else {
-        const tool = this.toolRegistry.get(toolName);
+        const tool = this.toolRegistry.get(executableToolName);
         if (tool) {
-          resultData = await tool.executor(args, options);
+          resultData = await tool.executor(normalizedArgs, options);
         } else {
-          throw new Error(`Tool not found: ${toolName}`);
+          throw new Error(`Tool not found: ${executableToolName}`);
         }
       }
 
       // Apply size limits and truncation to prevent context bloat
-      const processedData = this.processToolResult(resultData, toolName);
+      const processedData = this.processToolResult(resultData, executableToolName);
       
       return {
         success: true,

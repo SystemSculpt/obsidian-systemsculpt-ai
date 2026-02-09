@@ -90,8 +90,8 @@ describe("isCreateFoldersTool", () => {
     expect(isCreateFoldersTool("create")).toBe(false);
   });
 
-  it("returns false for mkdir", () => {
-    expect(isCreateFoldersTool("mkdir")).toBe(false);
+  it("returns true for mkdir alias", () => {
+    expect(isCreateFoldersTool("mkdir")).toBe(true);
   });
 });
 

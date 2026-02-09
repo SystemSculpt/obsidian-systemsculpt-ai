@@ -37,7 +37,7 @@ describe("Embeddings (live) Custom provider core", () => {
   let endpoint = "";
   let model = "";
 
-  before(async () => {
+  before(async function () {
     const vaultPath = await ensureE2EVault();
     await ensurePluginEnabled(PLUGIN_ID, vaultPath);
 
@@ -47,14 +47,20 @@ describe("Embeddings (live) Custom provider core", () => {
       endpoint = lm.endpoint;
       model = lm.model;
       providerLabel = "lmstudio";
-    } catch (_) {
-      const ol = await detectOllamaEmbeddings();
-      endpoint = ol.endpoint;
-      model = ol.model;
-      providerLabel = "ollama";
+    } catch {
+      try {
+        const ol = await detectOllamaEmbeddings();
+        endpoint = ol.endpoint;
+        model = ol.model;
+        providerLabel = "ollama";
+      } catch {
+        this.skip();
+        return;
+      }
     }
     if (!endpoint || !model) {
-      throw new Error("No local custom embeddings provider available (LM Studio or Ollama).");
+      this.skip();
+      return;
     }
 
     await configurePluginForLiveChat({

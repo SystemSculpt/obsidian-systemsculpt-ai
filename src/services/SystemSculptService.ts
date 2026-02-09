@@ -504,6 +504,7 @@ export class SystemSculptService {
       "Content-Type": "application/json",
       Accept: input.stream ? "text/event-stream" : "application/json",
       "x-license-key": this.settings.licenseKey,
+      ...(input.headers || {}),
     };
     const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
 

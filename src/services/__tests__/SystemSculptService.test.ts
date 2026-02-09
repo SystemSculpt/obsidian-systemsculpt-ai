@@ -185,6 +185,35 @@ describe("SystemSculptService", () => {
     expect(modelManagementService.getModels).toHaveBeenCalled();
   });
 
+  it("forwards v2 agent request headers through requestAgentV2", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const response = new Response(JSON.stringify({ ok: true }), { status: 200 });
+    global.fetch = jest.fn().mockResolvedValue(response) as any;
+
+    await (service as any).requestAgentV2({
+      url: "https://api.systemsculpt.com/api/v2/agent/sessions",
+      method: "POST",
+      headers: {
+        "x-plugin-version": "4.8.1",
+      },
+      body: { modelId: "systemsculpt/ai-agent" },
+      stream: false,
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.systemsculpt.com/api/v2/agent/sessions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-license-key": "license",
+          "x-plugin-version": "4.8.1",
+        }),
+      })
+    );
+  });
+
   it("delegates document and audio uploads", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

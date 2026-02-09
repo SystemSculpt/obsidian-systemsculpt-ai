@@ -4,6 +4,7 @@ import { SYSTEMSCULPT_API_ENDPOINTS } from "../../constants/api";
 export type AgentSessionRequest = {
   url: string;
   method: "POST";
+  headers?: Record<string, string>;
   body?: unknown;
   stream?: boolean;
 };
@@ -11,19 +12,27 @@ export type AgentSessionRequest = {
 export type AgentSessionRequestFn = (input: AgentSessionRequest) => Promise<Response>;
 
 type ToolResultPayload = {
+  role: "toolResult";
   toolCallId: string;
-  ok: boolean;
-  output?: unknown;
-  error?: unknown;
-  toolName?: string;
+  toolName: string;
+  content: Array<{ type: "text"; text: string }>;
+  isError: boolean;
+  timestamp: number;
 };
 
 type ApiLikeMessage = {
   role?: unknown;
+  api?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  usage?: unknown;
+  stopReason?: unknown;
+  errorMessage?: unknown;
+  timestamp?: unknown;
   content?: unknown;
   name?: unknown;
   tool_call_id?: unknown;
-  tool_calls?: Array<{ id?: unknown; function?: { name?: unknown } }>;
+  tool_calls?: Array<{ id?: unknown; function?: { name?: unknown; arguments?: unknown } }>;
 };
 
 type StartOrContinueArgs = {
@@ -59,6 +68,18 @@ function parseToolMessageContent(content: unknown): { ok: boolean; output?: unkn
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
+
+function toText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+const STOP_REASONS = new Set(["stop", "length", "toolUse", "error", "aborted"]);
 
 export class AgentSessionClient {
   private baseUrl: string;
@@ -106,7 +127,8 @@ export class AgentSessionClient {
   }
 
   public async startOrContinueTurn(args: StartOrContinueArgs): Promise<Response> {
-    const session = await this.ensureSession(args.chatId, args.modelId, args.pluginVersion);
+    const pluginVersion = this.normalizePluginVersion(args.pluginVersion);
+    const session = await this.ensureSession(args.chatId, args.modelId, pluginVersion);
     const sessionId = session.sessionId;
 
     if (session.machine.isWaitingForTools()) {
@@ -124,10 +146,11 @@ export class AgentSessionClient {
       const toolResultsResponse = await this.requestFn({
         url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TOOL_RESULTS(sessionId)),
         method: "POST",
-        body: { results: toolResults },
+        headers: { "x-plugin-version": pluginVersion },
+        body: { toolResults },
       });
       if (!toolResultsResponse.ok) {
-        throw this.httpError("submit tool results", toolResultsResponse);
+        throw await this.httpError("submit tool results", toolResultsResponse);
       }
 
       toolResults.forEach((result) => session.submittedToolResultIds.add(result.toolCallId));
@@ -136,11 +159,12 @@ export class AgentSessionClient {
       const continueResponse = await this.requestFn({
         url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_CONTINUE(sessionId)),
         method: "POST",
+        headers: { "x-plugin-version": pluginVersion },
         body: { stream: true },
         stream: true,
       });
       if (!continueResponse.ok) {
-        throw this.httpError("continue agent turn", continueResponse);
+        throw await this.httpError("continue agent turn", continueResponse);
       }
 
       return continueResponse;
@@ -152,39 +176,44 @@ export class AgentSessionClient {
     const turnResponse = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS(sessionId)),
       method: "POST",
+      headers: { "x-plugin-version": pluginVersion },
       body: {
         modelId: args.modelId,
-        messages: args.messages,
-        tools: args.tools || [],
+        context: this.buildPiContext(args.messages, args.tools || [], args.modelId),
         stream: true,
       },
       stream: true,
     });
     if (!turnResponse.ok) {
-      throw this.httpError("start agent turn", turnResponse);
+      throw await this.httpError("start agent turn", turnResponse);
     }
 
     return turnResponse;
   }
 
-  private async ensureSession(chatId: string, modelId: string, pluginVersion?: string): Promise<ChatSessionState> {
+  private async ensureSession(
+    chatId: string,
+    modelId: string,
+    pluginVersion: string
+  ): Promise<ChatSessionState> {
     const existing = this.sessionByChatId.get(chatId);
     if (existing) return existing;
 
     const response = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS),
       method: "POST",
+      headers: { "x-plugin-version": pluginVersion },
       body: {
         modelId,
         client: {
           platform: "obsidian",
-          pluginVersion: pluginVersion || "unknown",
+          pluginVersion,
         },
       },
     });
 
     if (!response.ok) {
-      throw this.httpError("create agent session", response);
+      throw await this.httpError("create agent session", response);
     }
 
     const payload = (await response.json()) as { sessionId?: unknown };
@@ -203,9 +232,19 @@ export class AgentSessionClient {
     return state;
   }
 
-  private httpError(action: string, response: Response): Error {
+  private async httpError(action: string, response: Response): Promise<Error> {
     const status = response?.status ?? 0;
-    return new Error(`Failed to ${action}: ${status}`);
+    let detail = "";
+
+    try {
+      const payload = await response.text();
+      const trimmed = payload.trim();
+      if (trimmed.length > 0) {
+        detail = ` (${trimmed.slice(0, 300)})`;
+      }
+    } catch {}
+
+    return new Error(`Failed to ${action}: ${status}${detail}`);
   }
 
   private extractToolResultsFromMessages(
@@ -238,15 +277,299 @@ export class AgentSessionClient {
       if (submittedToolResultIds.has(toolCallId)) continue;
 
       const parsed = parseToolMessageContent(message.content);
+      const textPayload = parsed.ok
+        ? toText(typeof parsed.output === "undefined" ? {} : parsed.output)
+        : toText({ error: parsed.error ?? "Tool execution failed" });
+
       results.push({
+        role: "toolResult",
         toolCallId,
-        ok: parsed.ok,
-        ...(parsed.ok ? { output: parsed.output } : { error: parsed.error }),
         toolName: asString(message.name) || toolNameByCallId.get(toolCallId) || "tool",
+        content: [{ type: "text", text: textPayload || "{}" }],
+        isError: !parsed.ok,
+        timestamp: this.resolveTimestamp(message.timestamp),
       });
     }
 
     return results;
+  }
+
+  private buildPiContext(messages: unknown[], tools: unknown[], modelId: string): Record<string, unknown> {
+    const contextMessages: unknown[] = [];
+    const systemPrompts: string[] = [];
+
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = (messages[index] || {}) as ApiLikeMessage;
+      const role = asString(message.role);
+      const timestamp = this.resolveTimestamp(message.timestamp, index);
+
+      if (role === "system") {
+        const prompt = this.contentToText(message.content).trim();
+        if (prompt.length > 0) {
+          systemPrompts.push(prompt);
+        }
+        continue;
+      }
+
+      if (role === "user") {
+        contextMessages.push({
+          role: "user",
+          content: this.normalizeUserContent(message.content),
+          timestamp,
+        });
+        continue;
+      }
+
+      if (role === "assistant") {
+        contextMessages.push(this.toPiAssistantMessage(message, timestamp, modelId));
+        continue;
+      }
+
+      if (role === "tool") {
+        const toolCallId = asString(message.tool_call_id);
+        if (!toolCallId) continue;
+
+        const parsed = parseToolMessageContent(message.content);
+        const textPayload = parsed.ok
+          ? toText(typeof parsed.output === "undefined" ? {} : parsed.output)
+          : toText({ error: parsed.error ?? "Tool execution failed" });
+
+        contextMessages.push({
+          role: "toolResult",
+          toolCallId,
+          toolName: asString(message.name) || "tool",
+          content: [{ type: "text", text: textPayload || "{}" }],
+          isError: !parsed.ok,
+          timestamp,
+        });
+      }
+    }
+
+    if (contextMessages.length === 0) {
+      throw new Error("Cannot start PI turn without at least one non-system message.");
+    }
+
+    const context: Record<string, unknown> = {
+      messages: contextMessages,
+    };
+
+    const piTools = this.normalizePiTools(tools);
+    if (piTools.length > 0) {
+      context.tools = piTools;
+    }
+
+    if (systemPrompts.length > 0) {
+      context.systemPrompt = systemPrompts.join("\n\n");
+    }
+
+    return context;
+  }
+
+  private normalizePiTools(tools: unknown[]): Array<{
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  }> {
+    const normalized: Array<{
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    }> = [];
+
+    for (const tool of tools) {
+      if (!tool || typeof tool !== "object") continue;
+      const record = tool as Record<string, unknown>;
+
+      const maybeFunction = record.function as Record<string, unknown> | undefined;
+      const name = asString((maybeFunction?.name as unknown) ?? record.name);
+      if (!name) continue;
+
+      const description = asString((maybeFunction?.description as unknown) ?? record.description);
+      const parameters = (maybeFunction?.parameters ?? record.parameters) as Record<string, unknown>;
+      if (!parameters || typeof parameters !== "object") continue;
+
+      normalized.push({
+        name,
+        description,
+        parameters,
+      });
+    }
+
+    return normalized;
+  }
+
+  private toPiAssistantMessage(
+    message: ApiLikeMessage,
+    timestamp: number,
+    modelId: string
+  ): Record<string, unknown> {
+    const contentBlocks: Array<Record<string, unknown>> = [];
+
+    const textContent = this.contentToText(message.content);
+    if (textContent.length > 0) {
+      contentBlocks.push({ type: "text", text: textContent });
+    }
+
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    for (const call of toolCalls) {
+      const id = asString(call?.id);
+      const name = asString(call?.function?.name);
+      if (!id || !name) continue;
+
+      contentBlocks.push({
+        type: "toolCall",
+        id,
+        name,
+        arguments: this.parseToolCallArguments(call?.function?.arguments),
+      });
+    }
+
+    const provider = modelId.split("/")[0] || "systemsculpt";
+    const model = modelId.split("/").slice(1).join("/") || modelId;
+
+    const stopReasonRaw = asString(message.stopReason);
+    const stopReason = STOP_REASONS.has(stopReasonRaw) ? stopReasonRaw : "stop";
+
+    return {
+      role: "assistant",
+      api: asString(message.api) || "openai-completions",
+      provider: asString(message.provider) || provider,
+      model: asString(message.model) || model,
+      content: contentBlocks,
+      usage: this.normalizeAssistantUsage(message.usage),
+      stopReason,
+      ...(asString(message.errorMessage) ? { errorMessage: asString(message.errorMessage) } : {}),
+      timestamp,
+    };
+  }
+
+  private parseToolCallArguments(raw: unknown): Record<string, unknown> {
+    if (raw && typeof raw === "object") {
+      return raw as Record<string, unknown>;
+    }
+
+    const text = asString(raw).trim();
+    if (!text) return {};
+
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object") {
+        return parsed as Record<string, unknown>;
+      }
+      return { value: parsed };
+    } catch {
+      return { value: text };
+    }
+  }
+
+  private normalizeAssistantUsage(raw: unknown): Record<string, unknown> {
+    if (raw && typeof raw === "object") {
+      const usage = raw as Record<string, unknown>;
+      const cost = usage.cost as Record<string, unknown> | undefined;
+
+      if (
+        typeof usage.input === "number" &&
+        typeof usage.output === "number" &&
+        typeof usage.cacheRead === "number" &&
+        typeof usage.cacheWrite === "number" &&
+        typeof usage.totalTokens === "number" &&
+        cost &&
+        typeof cost.input === "number" &&
+        typeof cost.output === "number" &&
+        typeof cost.cacheRead === "number" &&
+        typeof cost.cacheWrite === "number" &&
+        typeof cost.total === "number"
+      ) {
+        return usage;
+      }
+    }
+
+    return {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+      },
+    };
+  }
+
+  private normalizeUserContent(content: unknown): string | Array<Record<string, unknown>> {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return this.contentToText(content);
+
+    const blocks: Array<Record<string, unknown>> = [];
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const entry = part as Record<string, unknown>;
+      const type = asString(entry.type);
+
+      if (type === "text" && typeof entry.text === "string") {
+        blocks.push({ type: "text", text: entry.text });
+        continue;
+      }
+
+      if (
+        type === "image" &&
+        typeof entry.data === "string" &&
+        typeof entry.mimeType === "string"
+      ) {
+        blocks.push({ type: "image", data: entry.data, mimeType: entry.mimeType });
+        continue;
+      }
+    }
+
+    if (blocks.length > 0) {
+      return blocks;
+    }
+
+    return this.contentToText(content);
+  }
+
+  private contentToText(content: unknown): string {
+    if (typeof content === "string") return content;
+    if (content == null) return "";
+
+    if (Array.isArray(content)) {
+      const pieces: string[] = [];
+      for (const part of content) {
+        if (!part || typeof part !== "object") continue;
+        const entry = part as Record<string, unknown>;
+        const type = asString(entry.type);
+        if (type === "text" && typeof entry.text === "string") {
+          pieces.push(entry.text);
+          continue;
+        }
+        if (type === "image_url") {
+          const image = entry.image_url as Record<string, unknown> | undefined;
+          const url = asString(image?.url);
+          if (url) {
+            pieces.push(`[image:${url}]`);
+          }
+        }
+      }
+      return pieces.join("\n");
+    }
+
+    return toText(content);
+  }
+
+  private resolveTimestamp(raw: unknown, offset = 0): number {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw;
+    }
+    return Date.now() + offset;
+  }
+
+  private normalizePluginVersion(raw: string | undefined): string {
+    const pluginVersion = asString(raw).trim();
+    return pluginVersion || "0.0.0";
   }
 
   private endpoint(path: string): string {
@@ -265,6 +588,7 @@ export class AgentSessionClient {
         "Content-Type": "application/json",
         Accept: input.stream ? "text/event-stream" : "application/json",
         "x-license-key": this.licenseKey,
+        ...(input.headers || {}),
       },
       body: typeof input.body === "undefined" ? undefined : JSON.stringify(input.body),
     });

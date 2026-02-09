@@ -25,6 +25,105 @@ describe("StreamPipeline", () => {
     ]);
   });
 
+  test("emits content for PI-native text_delta events", () => {
+    const pipeline = create();
+    const chunk = encode(
+      `event: text_delta\ndata: ${JSON.stringify({ type: "text_delta", delta: "Hello from PI", contentIndex: 0 })}\n\n`
+    );
+
+    const { events, done } = pipeline.push(chunk);
+    expect(done).toBe(false);
+    expect(events).toEqual<StreamEvent[]>([{ type: "content", text: "Hello from PI" }]);
+  });
+
+  test("emits reasoning for PI-native thinking_delta events", () => {
+    const pipeline = create();
+    const chunk = encode(
+      `event: thinking_delta\ndata: ${JSON.stringify({ type: "thinking_delta", delta: "thinking", contentIndex: 0 })}\n\n`
+    );
+
+    const { events, done } = pipeline.push(chunk);
+    expect(done).toBe(false);
+    expect(events).toEqual<StreamEvent[]>([{ type: "reasoning", text: "thinking" }]);
+  });
+
+  test("emits final tool-call for PI-native toolcall_end events", () => {
+    const pipeline = create();
+    const chunk = encode(
+      `event: toolcall_end\ndata: ${JSON.stringify({
+        type: "toolcall_end",
+        contentIndex: 2,
+        toolCall: {
+          id: "call_pi_tool_1",
+          name: "functions.mcp-filesystem_read",
+          arguments: { path: "README.md" },
+        },
+      })}\n\n`
+    );
+
+    const { events, done } = pipeline.push(chunk);
+    expect(done).toBe(false);
+    expect(events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "final",
+        call: expect.objectContaining({
+          id: "call_pi_tool_1",
+          index: 2,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_read",
+            arguments: "{\"path\":\"README.md\"}",
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+  });
+
+  test("does not duplicate content when PI stream emits text_delta then done message", () => {
+    const pipeline = create();
+
+    const first = pipeline.push(
+      encode(
+        `event: text_delta\ndata: ${JSON.stringify({ type: "text_delta", delta: "Hi. What do you need?", contentIndex: 0 })}\n\n`
+      )
+    );
+
+    const second = pipeline.push(
+      encode(
+        `event: done\ndata: ${JSON.stringify({
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hi. What do you need?" }],
+          },
+        })}\n\n`
+      )
+    );
+
+    expect(first.events).toEqual<StreamEvent[]>([{ type: "content", text: "Hi. What do you need?" }]);
+    expect(second.events).toEqual<StreamEvent[]>([]);
+    expect(second.done).toBe(true);
+  });
+
+  test("falls back to done.message content when PI stream has no deltas", () => {
+    const pipeline = create();
+    const chunk = encode(
+      `event: done\ndata: ${JSON.stringify({
+        type: "done",
+        reason: "stop",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "final-only" }],
+        },
+      })}\n\n`
+    );
+
+    const { events, done } = pipeline.push(chunk);
+    expect(done).toBe(true);
+    expect(events).toEqual<StreamEvent[]>([{ type: "content", text: "final-only" }]);
+  });
+
   test("splits <think> blocks into reasoning and content", () => {
     const pipeline = create();
     const chunk = encode(wrapData({ choices: [{ delta: { content: "<think>Plan</think>Answer" } }] }));
@@ -548,6 +647,42 @@ describe("StreamPipeline", () => {
 
     const { events } = pipeline.push(chunk);
     expect((events[0] as any).call.function.name).toBe("mcp-filesystem_read");
+  });
+
+  test("normalizes namespace-prefixed PI canonical tool names", () => {
+    const pipeline = create();
+    const chunk = encode(wrapData({
+      choices: [{
+        message: {
+          tool_calls: [{
+            index: 0,
+            id: "call_1",
+            function: { name: "functions.default_api:read", arguments: "{}" }
+          }]
+        }
+      }]
+    }));
+
+    const { events } = pipeline.push(chunk);
+    expect((events[0] as any).call.function.name).toBe("read");
+  });
+
+  test("normalizes canonical tool names with provider suffix payloads", () => {
+    const pipeline = create();
+    const chunk = encode(wrapData({
+      choices: [{
+        message: {
+          tool_calls: [{
+            index: 0,
+            id: "call_1",
+            function: { name: "functions.read:1_foo", arguments: "{}" }
+          }]
+        }
+      }]
+    }));
+
+    const { events } = pipeline.push(chunk);
+    expect((events[0] as any).call.function.name).toBe("read");
   });
 
   test("handles error without code", () => {

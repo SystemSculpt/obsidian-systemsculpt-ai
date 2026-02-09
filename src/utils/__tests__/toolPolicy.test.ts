@@ -78,6 +78,13 @@ describe("toMcpToolKey", () => {
     const result = toMcpToolKey("");
     expect(result).toBeNull();
   });
+
+  it("maps PI canonical filesystem aliases to mcp tool keys", () => {
+    expect(toMcpToolKey("read")).toBe("mcp-filesystem:read");
+    expect(toMcpToolKey("write")).toBe("mcp-filesystem:write");
+    expect(toMcpToolKey("grep")).toBe("mcp-filesystem:search");
+    expect(toMcpToolKey("ls")).toBe("mcp-filesystem:list_items");
+  });
 });
 
 describe("tool approval policy", () => {
@@ -112,11 +119,18 @@ describe("requiresUserApproval", () => {
   it("requires approval for destructive filesystem tools by default", () => {
     expect(requiresUserApproval("mcp-filesystem_write", { trustedToolNames: new Set() })).toBe(true);
     expect(requiresUserApproval("mcp-filesystem_edit", { trustedToolNames: new Set() })).toBe(true);
+    expect(requiresUserApproval("write", { trustedToolNames: new Set() })).toBe(true);
   });
 
   it("auto-approves destructive filesystem tools when toggle is disabled", () => {
     expect(
       requiresUserApproval("mcp-filesystem_write", {
+        trustedToolNames: new Set(),
+        requireDestructiveApproval: false,
+      })
+    ).toBe(false);
+    expect(
+      requiresUserApproval("write", {
         trustedToolNames: new Set(),
         requireDestructiveApproval: false,
       })
@@ -130,6 +144,16 @@ describe("requiresUserApproval", () => {
         autoApproveAllowlist: ["mcp-filesystem:write"],
       })
     ).toBe(false);
+    expect(
+      requiresUserApproval("write", {
+        trustedToolNames: new Set(),
+        autoApproveAllowlist: ["mcp-filesystem:write"],
+      })
+    ).toBe(false);
+  });
+
+  it("auto-approves canonical read alias by default", () => {
+    expect(requiresUserApproval("read", { trustedToolNames: new Set() })).toBe(false);
   });
 
   it("external tools require approval unless allowlisted", () => {

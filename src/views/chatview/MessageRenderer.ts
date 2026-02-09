@@ -22,6 +22,7 @@ import {
   type InlineBlockType,
 } from "./renderers/InlineCollapsibleBlock";
 import { formatToolDisplayName } from "../../utils/toolDisplay";
+import { resolveCanonicalToolAlias } from "../../utils/toolPolicy";
 import { MermaidPreviewModal } from "../../modals/MermaidPreviewModal";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LARGE_TEXT_UI, LargeTextHelpers } from "../../constants/largeText";
 import { errorLogger } from "../../utils/errorLogger";
@@ -1397,14 +1398,24 @@ export class MessageRenderer extends Component {
       'edit': 'path'
     };
 
-    // Extract the base tool name (remove mcp-filesystem_ prefix if present)
-    const baseName = functionData.name.replace(/^mcp-filesystem_/, '');
+    // Extract the base tool name (normalize PI canonical aliases, then strip mcp prefix)
+    const normalizedToolName = resolveCanonicalToolAlias(functionData.name);
+    const baseName = normalizedToolName.replace(/^mcp-filesystem_/, '');
 
     let filePath: string | null = null;
 
     if (baseName === 'move') {
       if (functionData.arguments.items && Array.isArray(functionData.arguments.items) && functionData.arguments.items.length > 0) {
         filePath = functionData.arguments.items[0].destination;
+      }
+      if (!filePath) {
+        const destination =
+          functionData.arguments.destination ??
+          functionData.arguments.to ??
+          functionData.arguments.newPath;
+        if (typeof destination === "string") {
+          filePath = destination;
+        }
       }
     } else {
       const pathArgument = singleFileTools[baseName];

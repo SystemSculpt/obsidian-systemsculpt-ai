@@ -4,8 +4,46 @@ export type ToolNameParts = {
   canonicalName: string;
 };
 
+/**
+ * PI-style canonical tool aliases mapped onto our filesystem MCP tool surface.
+ * This lets the model call canonical names (e.g. `read`, `ls`, `grep`) while
+ * still executing through the stable `mcp-filesystem_*` implementation.
+ */
+const PI_FILESYSTEM_TOOL_ALIASES: Record<string, string> = Object.freeze({
+  read: "mcp-filesystem_read",
+  write: "mcp-filesystem_write",
+  edit: "mcp-filesystem_edit",
+  move: "mcp-filesystem_move",
+  trash: "mcp-filesystem_trash",
+  find: "mcp-filesystem_find",
+  grep: "mcp-filesystem_search",
+  ls: "mcp-filesystem_list_items",
+  mkdir: "mcp-filesystem_create_folders",
+  open: "mcp-filesystem_open",
+  context: "mcp-filesystem_context",
+});
+
+const MCP_TO_PI_ALIAS: Map<string, string> = new Map();
+for (const [alias, mapped] of Object.entries(PI_FILESYSTEM_TOOL_ALIASES)) {
+  if (!MCP_TO_PI_ALIAS.has(mapped)) {
+    MCP_TO_PI_ALIAS.set(mapped, alias);
+  }
+}
+
+export function resolveCanonicalToolAlias(fullName: string): string {
+  const raw = String(fullName ?? "").trim();
+  if (!raw) return "";
+  const mapped = PI_FILESYSTEM_TOOL_ALIASES[raw.toLowerCase()];
+  return mapped || raw;
+}
+
+export function getCanonicalAliasForMcpTool(fullName: string): string | null {
+  const mapped = resolveCanonicalToolAlias(fullName).toLowerCase();
+  return MCP_TO_PI_ALIAS.get(mapped) || null;
+}
+
 export function splitToolName(fullName: string): ToolNameParts {
-  const name = String(fullName ?? "");
+  const name = resolveCanonicalToolAlias(fullName);
   const firstUnderscoreIndex = name.indexOf("_");
   if (name.startsWith("mcp-") && firstUnderscoreIndex !== -1) {
     const serverId = name.substring(0, firstUnderscoreIndex);
@@ -21,7 +59,7 @@ export function splitToolName(fullName: string): ToolNameParts {
  * the canonical tool key used in settings lists (e.g. `mcp-filesystem:read`).
  */
 export function toMcpToolKey(functionName: string): string | null {
-  const { serverId, canonicalName } = splitToolName(functionName);
+  const { serverId, canonicalName } = splitToolName(resolveCanonicalToolAlias(functionName));
   if (!serverId) return null;
   return `${serverId.toLowerCase()}:${canonicalName}`;
 }
@@ -46,22 +84,25 @@ function normalizeToolAllowlist(allowlist: string[] = []): Set<string> {
 }
 
 export function isToolAllowlisted(functionName: string, allowlist: string[] = []): boolean {
-  const name = String(functionName ?? "").trim().toLowerCase();
-  if (!name) return false;
+  const originalName = String(functionName ?? "").trim();
+  if (!originalName) return false;
+  const name = originalName.toLowerCase();
+  const resolved = resolveCanonicalToolAlias(originalName);
+  const resolvedLower = resolved.toLowerCase();
 
   const normalizedAllowlist = normalizeToolAllowlist(allowlist);
   if (normalizedAllowlist.size === 0) return false;
 
-  if (normalizedAllowlist.has(name)) {
+  if (normalizedAllowlist.has(name) || normalizedAllowlist.has(resolvedLower)) {
     return true;
   }
 
-  const { canonicalName } = splitToolName(name);
+  const { canonicalName } = splitToolName(resolved);
   if (canonicalName && normalizedAllowlist.has(canonicalName)) {
     return true;
   }
 
-  const mcpKey = toMcpToolKey(name);
+  const mcpKey = toMcpToolKey(resolved);
   if (mcpKey && normalizedAllowlist.has(mcpKey)) {
     return true;
   }
@@ -171,12 +212,16 @@ export function requiresUserApproval(
   toolName: string,
   policy: ToolApprovalPolicy = {}
 ): boolean {
+  const rawToolName = String(toolName ?? "").trim();
+  if (!rawToolName) return false;
+  const resolvedToolName = resolveCanonicalToolAlias(rawToolName);
+
   // If trusted for this session, no approval needed
-  if (policy.trustedToolNames?.has(toolName)) {
+  if (policy.trustedToolNames?.has(rawToolName) || policy.trustedToolNames?.has(resolvedToolName)) {
     return false;
   }
 
-  const { serverId, canonicalName } = splitToolName(toolName);
+  const { serverId, canonicalName } = splitToolName(resolvedToolName);
   if (!serverId) {
     return false;
   }
@@ -187,7 +232,7 @@ export function requiresUserApproval(
   }
 
   const requireDestructiveApproval = policy.requireDestructiveApproval !== false;
-  const allowlisted = isToolAllowlisted(toolName, policy.autoApproveAllowlist || []);
+  const allowlisted = isToolAllowlisted(resolvedToolName, policy.autoApproveAllowlist || []);
 
   // Filesystem: only specific destructive tools
   if (serverId === "mcp-filesystem") {
@@ -215,7 +260,7 @@ export function requiresUserApproval(
  * Extract the primary file path from tool args, if any.
  */
 export function extractPrimaryPathArg(toolName: string, args: Record<string, unknown>): string | null {
-  const base = String(toolName ?? "").replace(/^mcp[-_][^_]+_/, "");
+  const base = resolveCanonicalToolAlias(String(toolName ?? "")).replace(/^mcp[-_][^_]+_/, "");
   if (base === "move") {
     const items = (args as { items?: unknown }).items;
     if (Array.isArray(items) && (items[0] as any)?.destination) return String((items[0] as any).destination);

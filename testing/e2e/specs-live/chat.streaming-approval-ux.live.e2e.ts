@@ -7,9 +7,9 @@ import { ensureE2EVault, openFreshChatView, PLUGIN_ID } from "../utils/systemscu
 
 type ApprovalDomSnapshot = {
   assistantCount: number;
-  drawerCollapsed: boolean;
+  pendingToolVisible: boolean;
   statusText: string;
-  approvalDeckVisible: boolean;
+  approvalButtonsVisible: boolean;
 };
 
 describe("ChatView (live) streaming approval UX", () => {
@@ -24,10 +24,19 @@ describe("ChatView (live) streaming approval UX", () => {
     this.timeout(180000);
 
     await openFreshChatView();
+    await browser.executeObsidian(async ({ app }) => {
+      const plugin: any = (app as any)?.plugins?.plugins?.["systemsculpt-ai"];
+      if (!plugin) throw new Error("SystemSculpt plugin missing");
+      plugin.settings = plugin.settings || {};
+      plugin.settings.toolingRequireApprovalForDestructiveTools = true;
+      plugin.settings.mcpAutoAcceptTools = [];
+      if (typeof plugin.saveSettings === "function") {
+        await plugin.saveSettings();
+      }
+    });
 
     const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
-
-    await browser.executeObsidian(({ app }, { nonce }) => {
+    const { toolCallId } = await browser.executeObsidian(({ app }, { nonce }) => {
       const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
       const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
       const activeLeaf: any = app.workspace.activeLeaf as any;
@@ -36,81 +45,45 @@ describe("ChatView (live) streaming approval UX", () => {
         (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
       const view: any = leaf?.view;
       if (!view) throw new Error("Chat view missing");
+      const manager: any = view.toolCallManager;
+      if (!manager) throw new Error("ToolCallManager missing");
 
-      const aiService: any = view.aiService;
-      if (!aiService?.streamMessage) throw new Error("aiService.streamMessage missing");
+      const messageId = `e2e-approval-${Date.now()}-${nonce}`;
+      const request = {
+        id: `call_${nonce}_write`,
+        type: "function",
+        function: {
+          name: "mcp-filesystem_write",
+          arguments: JSON.stringify({ path: `E2E/${nonce}.txt`, content: "hello" }),
+        },
+      };
+      const toolCall = manager.createToolCall(request, messageId, false);
 
-      const w = window as any;
-      if (!w.__ssE2EOriginalStreamMessage) {
-        w.__ssE2EOriginalStreamMessage = aiService.streamMessage.bind(aiService);
-      }
-      w.__ssE2EStreamInvocation = 0;
-
-      aiService.streamMessage = async function* () {
-        w.__ssE2EStreamInvocation += 1;
-        const invocation = w.__ssE2EStreamInvocation;
-        const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-        if (invocation === 1) {
-          yield { type: "reasoning", text: `Reasoning ${nonce}\n` };
-          await wait(50);
-          yield {
-            type: "tool-call",
-            phase: "final",
-            call: {
-              id: `call_${nonce}_write`,
-              type: "function",
-              function: {
-                name: "mcp-filesystem_write",
-                arguments: JSON.stringify({ path: `E2E/${nonce}.txt`, content: "hello" }),
-              },
-            },
-          };
-          return;
-        }
-
-        yield { type: "content", text: `Done ${nonce}` };
+      const message = {
+        role: "assistant",
+        message_id: messageId,
+        content: `Awaiting approval ${nonce}`,
+        tool_calls: [toolCall],
+        messageParts: [
+          {
+            id: `tool_call_part-${toolCall.id}`,
+            type: "tool_call",
+            timestamp: 1,
+            data: toolCall,
+          },
+        ],
       };
 
-      const handler: any = view.inputHandler;
-      const orchestrator: any = handler?.orchestrator;
-      const lifecycle: any = handler?.turnLifecycle;
-      if (!orchestrator?.runTurn) throw new Error("ChatTurnOrchestrator missing");
-      if (!lifecycle?.runTurn) throw new Error("ChatTurnLifecycleController missing");
-
-      void lifecycle.runTurn((signal: AbortSignal) =>
-        orchestrator.runTurn({
-          includeContextFiles: false,
-          signal,
-        })
-      );
+      view.messages.push(message);
+      view.addMessage("assistant", message.content, messageId, message);
+      return { toolCallId: toolCall.id };
     }, { nonce });
 
     const start = Date.now();
     const samples: Array<{ t: number; dom: ApprovalDomSnapshot }> = [];
 
     const snapshotDom = async (): Promise<ApprovalDomSnapshot> =>
-      await browser.execute(() => {
-        const drawer = document.querySelector<HTMLElement>(".systemsculpt-activity-drawer");
-        const status = drawer?.querySelector<HTMLElement>(".systemsculpt-activity-drawer-status");
-        const deck = document.querySelector<HTMLElement>(".ss-approval-deck");
-
-        const assistants = Array.from(
-          document.querySelectorAll<HTMLElement>(".systemsculpt-message.systemsculpt-assistant-message")
-        );
-
-        const deckVisible = !!deck && window.getComputedStyle(deck).display !== "none";
-
-        return {
-          assistantCount: assistants.length,
-          drawerCollapsed: !!drawer?.classList.contains("is-collapsed"),
-          statusText: status?.textContent ?? "",
-          approvalDeckVisible: deckVisible,
-        };
-      });
-
-    const restoreStream = async () => {
-      await browser.executeObsidian(({ app }) => {
+      await browser.executeObsidian(({ app }, { toolCallId }) => {
         const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
         const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
         const activeLeaf: any = app.workspace.activeLeaf as any;
@@ -118,77 +91,84 @@ describe("ChatView (live) streaming approval UX", () => {
           markedLeaf ||
           (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
         const view: any = (leaf as any)?.view;
-        const aiService: any = view?.aiService;
-        const w = window as any;
-        if (aiService && w.__ssE2EOriginalStreamMessage) {
-          aiService.streamMessage = w.__ssE2EOriginalStreamMessage;
-        }
-        delete w.__ssE2EOriginalStreamMessage;
-        delete w.__ssE2EStreamInvocation;
-      });
+        const manager: any = view?.toolCallManager;
+        const call = manager?.getToolCall?.(toolCallId);
+        const pending = call?.state === "pending";
+        const assistantCount = (view?.messages || []).filter((m: any) => m?.role === "assistant").length;
+        return {
+          assistantCount,
+          pendingToolVisible: pending,
+          statusText: String(call?.state ?? ""),
+          approvalButtonsVisible: pending,
+        };
+      }, { toolCallId });
+
+    await browser.waitUntil(
+      async () => {
+        const dom = await snapshotDom();
+        samples.push({ t: Date.now() - start, dom });
+        return dom.approvalButtonsVisible;
+      },
+      { timeout: 30000, timeoutMsg: "Approval controls did not appear." }
+    );
+
+    // Sample a bit after the initial stream ends to catch auto-collapse regressions.
+    for (const delay of [200, 400, 700]) {
+      await browser.pause(delay);
+      samples.push({ t: Date.now() - start, dom: await snapshotDom() });
+    }
+
+    const output = {
+      generatedAt: new Date().toISOString(),
+      nonce,
+      samples,
     };
 
-    try {
-      await browser.waitUntil(
-        async () => {
-          const dom = await snapshotDom();
-          samples.push({ t: Date.now() - start, dom });
-          return dom.approvalDeckVisible;
-        },
-        { timeout: 30000, timeoutMsg: "Approval deck did not appear." }
-      );
+    const outputPath = path.join(process.cwd(), "testing", "e2e", "logs", `streaming-approval-ux-${Date.now()}.json`);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, JSON.stringify(output, null, 2), "utf8");
+    console.log(`[e2e] streaming approval UX metrics written: ${outputPath}`);
 
-      // Sample a bit after the initial stream ends to catch auto-collapse regressions.
-      for (const delay of [200, 400, 700]) {
-        await browser.pause(delay);
-        samples.push({ t: Date.now() - start, dom: await snapshotDom() });
-      }
+    const relevant = samples.filter((s) => s.dom.approvalButtonsVisible);
+    expect(relevant.length).toBeGreaterThan(0);
 
-      const output = {
-        generatedAt: new Date().toISOString(),
-        nonce,
-        samples,
-      };
-
-      const outputPath = path.join(process.cwd(), "testing", "e2e", "logs", `streaming-approval-ux-${Date.now()}.json`);
-      await fs.mkdir(path.dirname(outputPath), { recursive: true });
-      await fs.writeFile(outputPath, JSON.stringify(output, null, 2), "utf8");
-      console.log(`[e2e] streaming approval UX metrics written: ${outputPath}`);
-
-      const relevant = samples.filter((s) => s.dom.approvalDeckVisible);
-      expect(relevant.length).toBeGreaterThan(0);
-
-      for (const sample of relevant) {
-        expect(sample.dom.drawerCollapsed).toBe(false);
-      }
-
-      expect(relevant[relevant.length - 1].dom.statusText.toLowerCase()).toContain("approval");
-
-      // Deny to let the turn finish and keep test isolation.
-      await browser.waitUntil(async () => (await $("button=Deny").isExisting()), { timeout: 20000 });
-      await $("button=Deny").click();
-
-      await browser.waitUntil(
-        async () => {
-          const isGenerating = await browser.executeObsidian(({ app }) => {
-            const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
-            const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
-            const activeLeaf: any = app.workspace.activeLeaf as any;
-            const leaf =
-              markedLeaf ||
-              (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
-            const view: any = (leaf as any)?.view;
-            return !!view?.isGenerating;
-          });
-          return !isGenerating;
-        },
-        { timeout: 60000, timeoutMsg: "Turn did not complete after denying tool call." }
-      );
-
-      const maxAssistantCount = samples.reduce((acc, s) => Math.max(acc, s.dom.assistantCount), 0);
-      expect(maxAssistantCount).toBe(1);
-    } finally {
-      await restoreStream();
+    for (const sample of relevant) {
+      expect(sample.dom.pendingToolVisible).toBe(true);
     }
+
+    expect(relevant[relevant.length - 1].dom.statusText.toLowerCase()).toContain("pending");
+
+    // Deny to let the turn finish and keep test isolation.
+    await browser.executeObsidian(({ app }, { toolCallId }) => {
+      const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+      const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+      const activeLeaf: any = app.workspace.activeLeaf as any;
+      const leaf =
+        markedLeaf ||
+        (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+      const view: any = (leaf as any)?.view;
+      const manager: any = view?.toolCallManager;
+      manager?.denyToolCall?.(toolCallId);
+    }, { toolCallId });
+
+    await browser.waitUntil(
+      async () =>
+        await browser.executeObsidian(({ app }, { toolCallId }) => {
+          const leaves: any[] = app.workspace.getLeavesOfType("systemsculpt-chat-view") as any;
+          const markedLeaf = leaves.find((l) => (l as any)?.view?.__systemsculptE2EActive);
+          const activeLeaf: any = app.workspace.activeLeaf as any;
+          const leaf =
+            markedLeaf ||
+            (activeLeaf?.view?.getViewType?.() === "systemsculpt-chat-view" ? activeLeaf : leaves[0]);
+          const view: any = (leaf as any)?.view;
+          const manager: any = view?.toolCallManager;
+          const call = manager?.getToolCall?.(toolCallId);
+          return call?.state === "denied";
+        }, { toolCallId }),
+      { timeout: 60000, timeoutMsg: "Turn did not complete after denying tool call." }
+    );
+
+    const maxAssistantCount = samples.reduce((acc, s) => Math.max(acc, s.dom.assistantCount), 0);
+    expect(maxAssistantCount).toBe(1);
   });
 });

@@ -52,6 +52,14 @@ function wantsStreamResponse(req, body) {
   return body.stream === true || accept.includes("text/event-stream");
 }
 
+function getTurnMessages(body) {
+  if (Array.isArray(body?.messages)) return body.messages;
+  if (body?.context && typeof body.context === "object" && Array.isArray(body.context.messages)) {
+    return body.context.messages;
+  }
+  return [];
+}
+
 function writeSSE(res, payload, eventName) {
   if (eventName) {
     res.write(`event: ${eventName}\n`);
@@ -160,7 +168,7 @@ app.post(`${AGENT_API_PREFIX}/sessions/:sessionId/turns`, (req, res) => {
   }
 
   const body = req.body && typeof req.body === "object" ? req.body : {};
-  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const messages = getTurnMessages(body);
   const token = extractExactlyToken(messages);
   const stream = wantsStreamResponse(req, body);
   const session = sessions.get(sessionId);

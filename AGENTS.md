@@ -7,6 +7,16 @@ Assume multiple agents (and humans) may be working in parallel in this repo. Tre
 - NEVER run destructive git commands: `git reset`, `git checkout`, `git clean`, `git stash` (including `git pull --rebase --autostash`) unless explicitly asked.
 - NEVER mass-stage/commit: `git add .`, `git add -A`, `git commit -a`.
 - Only stage files you personally changed: `git add <file>`. Ignore unrelated `git status` changes.
+- Do not send emails, messages, posts, broadcasts, payments, or any external side-effecting communication without explicit user approval in the current thread. Draft first, then wait for approval before sending.
+
+## SystemSculpt Repo Map (Core 5)
+
+For cross-repo work, read the target repo's local `AGENTS.md` before making changes.
+
+- `systemsculpt-website` — `/Users/user/gits/systemsculpt-website` — Website + app/API surface.
+- `systemsculpt-discord-bot` — `/Users/user/gits/systemsculpt-discord-bot` — Discord automation/status bot.
+- `system-manager` — `/Users/user/gits/system-manager` — Workspace orchestration TUI.
+- `private-vault` — `/Users/user/gits/private-vault` — Operational/private knowledge vault.
 
 This file is the repo-local “how to work here” guide. It is meant to stay current as the codebase evolves.
 

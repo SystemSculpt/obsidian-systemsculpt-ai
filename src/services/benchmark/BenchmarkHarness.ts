@@ -16,6 +16,7 @@ import type {
 } from "../../types/benchmark";
 import { generateDiff } from "../../utils/diffUtils";
 import { countMessagesTokens } from "../../utils/tokenCounting";
+import { resolveCanonicalToolAlias } from "../../utils/toolPolicy";
 import {
   normalizeLineEndings,
   isHiddenSystemPath,
@@ -500,10 +501,11 @@ function collectBenchmarkMetrics(messages?: ChatMessage[]): BenchmarkCaseMetrics
   let writeChars = 0;
 
   for (const tc of toolCalls) {
-    const name = String(tc?.request?.function?.name ?? "").trim();
-    if (name.length > 0) {
-      toolCallsByName[name] = (toolCallsByName[name] ?? 0) + 1;
+    const rawName = String(tc?.request?.function?.name ?? "").trim();
+    if (rawName.length > 0) {
+      toolCallsByName[rawName] = (toolCallsByName[rawName] ?? 0) + 1;
     }
+    const name = resolveCanonicalToolAlias(rawName);
 
     const started = typeof tc.executionStartedAt === "number" ? tc.executionStartedAt : undefined;
     const completed = typeof tc.executionCompletedAt === "number" ? tc.executionCompletedAt : undefined;

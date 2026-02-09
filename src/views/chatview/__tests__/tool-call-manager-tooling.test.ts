@@ -32,6 +32,21 @@ const createManagerWithMcpTools = (tools: any[], settings: Record<string, unknow
   return new ToolCallManager(mcpService, chatView);
 };
 
+const createManagerWithMcpExecution = (settings: Record<string, unknown> = {}) => {
+  const chatView = {
+    agentMode: true,
+    trustedToolNames: new Set<string>(),
+    plugin: {
+      settings,
+    },
+  } as any;
+  const mcpService = {
+    getAvailableTools: jest.fn().mockResolvedValue([]),
+    executeTool: jest.fn().mockResolvedValue({ ok: true }),
+  } as any;
+  return { manager: new ToolCallManager(mcpService, chatView), mcpService, chatView };
+};
+
 const createRequest = (id: string, name: string, args: Record<string, unknown> = {}): ToolCallRequest => ({
   id,
   type: "function",
@@ -383,8 +398,100 @@ describe("ToolCallManager tooling settings", () => {
     ]);
 
     const tools = await manager.getOpenAITools();
-    expect(tools).toHaveLength(1);
-    expect(tools[0].function.parameters.required).toEqual(["paths"]);
-    expect(tools[0].function.strict).toBeUndefined();
+    const mcpReadTool = tools.find((tool) => tool.function.name === "mcp-filesystem_read");
+    expect(mcpReadTool).toBeDefined();
+    expect(mcpReadTool.function.parameters.required).toEqual(["paths"]);
+    expect(mcpReadTool.function.strict).toBeUndefined();
+
+    const canonicalAlias = tools.find((tool) => tool.function.name === "read");
+    expect(canonicalAlias).toBeDefined();
+    expect(canonicalAlias.function.parameters.required).toEqual(["paths"]);
+  });
+
+  test("includes PI canonical aliases for filesystem MCP tools", async () => {
+    const manager = createManagerWithMcpTools([
+      {
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          description: "Read",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "mcp-filesystem_search",
+          description: "Search",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "mcp-filesystem_list_items",
+          description: "List",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+    ]);
+
+    const tools = await manager.getOpenAITools();
+    const names = tools.map((tool) => tool.function.name);
+
+    expect(names).toContain("mcp-filesystem_read");
+    expect(names).toContain("mcp-filesystem_search");
+    expect(names).toContain("mcp-filesystem_list_items");
+    expect(names).toContain("read");
+    expect(names).toContain("grep");
+    expect(names).toContain("ls");
+  });
+
+  test("routes canonical read alias to mcp-filesystem_read and normalizes args", async () => {
+    const { manager, mcpService, chatView } = createManagerWithMcpExecution({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    const request = createRequest("call_read_alias", "read", { path: "Notes/A.md" });
+    const call = manager.createToolCall(request, "msg-read", manager.shouldAutoApprove(request.function.name));
+
+    for (let i = 0; i < 30 && call.state !== "completed"; i++) {
+      await flush();
+    }
+
+    expect(call.state).toBe("completed");
+    expect(mcpService.executeTool).toHaveBeenCalledWith(
+      "mcp-filesystem_read",
+      { path: "Notes/A.md", paths: ["Notes/A.md"] },
+      chatView,
+      { timeoutMs: 0 }
+    );
+  });
+
+  test("routes canonical move alias to mcp-filesystem_move and normalizes args", async () => {
+    const { manager, mcpService, chatView } = createManagerWithMcpExecution({
+      toolingToolCallTimeoutMs: 0,
+    });
+
+    const request = createRequest("call_move_alias", "move", { from: "A.md", to: "B.md" });
+    const call = manager.createToolCall(request, "msg-move", manager.shouldAutoApprove(request.function.name));
+    expect(call.state).toBe("pending");
+
+    manager.approveToolCall(call.id);
+    for (let i = 0; i < 30 && call.state !== "completed"; i++) {
+      await flush();
+    }
+
+    expect(call.state).toBe("completed");
+    expect(mcpService.executeTool).toHaveBeenCalledWith(
+      "mcp-filesystem_move",
+      {
+        from: "A.md",
+        to: "B.md",
+        items: [{ source: "A.md", destination: "B.md" }],
+      },
+      chatView,
+      { timeoutMs: 0 }
+    );
   });
 });

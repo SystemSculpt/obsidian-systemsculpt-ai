@@ -2,6 +2,7 @@ import { normalizePath, type App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { MCPServer, MCPToolInfo } from "../types/mcp";
 import { buildOpenAIToolDefinition, type OpenAITool } from "../utils/tooling";
+import { resolveCanonicalToolAlias } from "../utils/toolPolicy";
 import type { SystemSculptSettings } from "../types";
 
 // Adapters
@@ -201,13 +202,14 @@ export class MCPService {
     chatView?: any,
     options?: { timeoutMs?: number }
   ): Promise<any> {
-    const firstUnderscoreIndex = toolName.indexOf('_');
+    const resolvedToolName = resolveCanonicalToolAlias(toolName);
+    const firstUnderscoreIndex = resolvedToolName.indexOf('_');
     if (firstUnderscoreIndex === -1) {
       throw new Error(`Invalid tool name format: ${toolName}`);
     }
 
-    const serverId = toolName.substring(0, firstUnderscoreIndex);
-    const actualToolName = toolName.substring(firstUnderscoreIndex + 1);
+    const serverId = resolvedToolName.substring(0, firstUnderscoreIndex);
+    const actualToolName = resolvedToolName.substring(firstUnderscoreIndex + 1);
 
     // Internal servers are always available - no settings lookup needed
     const internalServerIds = ["mcp-filesystem", "mcp-youtube"];
@@ -280,6 +282,15 @@ export class MCPService {
     }
 
     const mapPath = (path: string): string => this.normalizeFilesystemPath(path);
+    const ensureStringArray = (value: unknown): string[] => {
+      if (Array.isArray(value)) {
+        return value.map((entry) => String(entry ?? ""));
+      }
+      if (typeof value === "string") {
+        return [value];
+      }
+      return [];
+    };
 
     switch (toolName) {
       case "read":
@@ -287,8 +298,11 @@ export class MCPService {
       case "list_items":
       case "trash":
       case "context":
-        if (Array.isArray((args as any).paths)) {
-          return { ...args, paths: (args as any).paths.map((p: any) => mapPath(String(p ?? ""))) };
+        {
+          const inputPaths = ensureStringArray((args as any).paths ?? (args as any).path);
+          if (inputPaths.length > 0) {
+            return { ...args, paths: inputPaths.map((p: string) => mapPath(p)) };
+          }
         }
         return args;
       case "write":
@@ -317,6 +331,12 @@ export class MCPService {
               ...file,
               path: mapPath(String(file?.path ?? "")),
             })),
+          };
+        }
+        if (typeof (args as any).path === "string") {
+          return {
+            ...args,
+            files: [{ path: mapPath(String((args as any).path)) }],
           };
         }
         return args;

@@ -49,17 +49,17 @@ describe("Quick Edit (live)", () => {
     const widget = await $(".systemsculpt-quick-edit-widget");
     await widget.waitForExist({ timeout: 15000 });
 
-    const input = await widget.$("textarea.quick-edit-input");
+    const input = await widget.$("textarea.ss-quick-edit-input");
     await input.waitForExist({ timeout: 10000 });
     await input.setValue(`Append this exact line at the end of the file: ${token}`);
 
-    const submit = await widget.$("button.quick-edit-submit-btn");
+    const submit = await widget.$("button.ss-quick-edit-submit-btn");
     await submit.waitForEnabled({ timeout: 10000 });
     await submit.click();
 
     await browser.waitUntil(
       async () => {
-        const confirmRow = await widget.$(".quick-edit-confirm-row");
+        const confirmRow = await widget.$(".ss-quick-edit-confirm-row");
         return await confirmRow.isDisplayed();
       },
       {
@@ -68,7 +68,7 @@ describe("Quick Edit (live)", () => {
       }
     );
 
-    const applyButton = await widget.$("button.quick-edit-confirm-btn");
+    const applyButton = await widget.$("button.ss-quick-edit-confirm-btn");
     await applyButton.waitForEnabled({ timeout: 10000 });
     await applyButton.click();
 

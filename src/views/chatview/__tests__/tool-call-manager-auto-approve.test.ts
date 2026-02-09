@@ -51,6 +51,10 @@ describe("ToolCallManager auto-approval policy", () => {
     expect(manager.shouldAutoApprove("mcp-filesystem_find")).toBe(true);
     expect(manager.shouldAutoApprove("mcp-filesystem_list_items")).toBe(true);
     expect(manager.shouldAutoApprove("mcp-filesystem_context")).toBe(true);
+    expect(manager.shouldAutoApprove("read")).toBe(true);
+    expect(manager.shouldAutoApprove("find")).toBe(true);
+    expect(manager.shouldAutoApprove("grep")).toBe(true);
+    expect(manager.shouldAutoApprove("ls")).toBe(true);
   });
 
   test("destructive filesystem tools require approval", () => {
@@ -61,6 +65,10 @@ describe("ToolCallManager auto-approval policy", () => {
     expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(false);
     expect(manager.shouldAutoApprove("mcp-filesystem_move")).toBe(false);
     expect(manager.shouldAutoApprove("mcp-filesystem_trash")).toBe(false);
+    expect(manager.shouldAutoApprove("write")).toBe(false);
+    expect(manager.shouldAutoApprove("edit")).toBe(false);
+    expect(manager.shouldAutoApprove("move")).toBe(false);
+    expect(manager.shouldAutoApprove("trash")).toBe(false);
   });
 
   test("destructive filesystem tools can auto-approve when confirmations are disabled", () => {
@@ -68,6 +76,8 @@ describe("ToolCallManager auto-approval policy", () => {
 
     expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
     expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(true);
+    expect(manager.shouldAutoApprove("write")).toBe(true);
+    expect(manager.shouldAutoApprove("edit")).toBe(true);
   });
 
   test("allowlisted mutating tools auto-approve", () => {
@@ -75,6 +85,8 @@ describe("ToolCallManager auto-approval policy", () => {
 
     expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
     expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(false);
+    expect(manager.shouldAutoApprove("write")).toBe(true);
+    expect(manager.shouldAutoApprove("edit")).toBe(false);
   });
 
   test("external MCP server tools require approval", () => {
@@ -101,6 +113,16 @@ describe("ToolCallManager auto-approval policy", () => {
     const toolCall = manager.createToolCall(request, "message-1", manager.shouldAutoApprove(request.function.name));
 
     // Should be pending, waiting for user approval
+    expect(toolCall.state).toBe("pending");
+    expect(toolCall.autoApproved).toBe(false);
+  });
+
+  test("canonical destructive aliases start in pending state", () => {
+    const manager = createManager();
+    const request = createRequest("write");
+
+    const toolCall = manager.createToolCall(request, "message-1", manager.shouldAutoApprove(request.function.name));
+
     expect(toolCall.state).toBe("pending");
     expect(toolCall.autoApproved).toBe(false);
   });

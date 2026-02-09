@@ -326,6 +326,20 @@ describe("MCPService", () => {
       ).rejects.toThrow("Invalid tool name format");
     });
 
+    it("executes canonical filesystem aliases via mcp-filesystem", async () => {
+      mockFilesystemAdapter.executeTool.mockResolvedValue({ output: "ok" });
+
+      const result = await service.executeTool("read", { paths: ["Inbox/Test.md"] });
+
+      expect(mockFilesystemAdapter.executeTool).toHaveBeenCalledWith(
+        "read",
+        { paths: ["Inbox/Test.md"] },
+        undefined,
+        undefined
+      );
+      expect(result).toEqual({ output: "ok" });
+    });
+
     it("throws error for unknown server", async () => {
       await expect(
         service.executeTool("unknown-server_tool", {})
@@ -371,6 +385,31 @@ describe("MCPService", () => {
         "read",
         {
           paths: [`${root}/Inbox/Meeting.md`, `${root}/Inbox/Notes.md`],
+        },
+        undefined,
+        undefined
+      );
+    });
+
+    it("maps canonical filesystem read path args when a root is set", async () => {
+      const fsServer = createMockServer({
+        id: "mcp-filesystem",
+        name: "Filesystem",
+        transport: "internal" as any,
+      });
+      mockPlugin.settings.mcpServers = [fsServer];
+      const root = ".systemsculpt/benchmarks/v2/active";
+      service.setFilesystemRoot(root);
+
+      await service.executeTool("read", {
+        path: "Inbox/Meeting.md",
+      });
+
+      expect(mockFilesystemAdapter.executeTool).toHaveBeenCalledWith(
+        "read",
+        {
+          path: "Inbox/Meeting.md",
+          paths: [`${root}/Inbox/Meeting.md`],
         },
         undefined,
         undefined
