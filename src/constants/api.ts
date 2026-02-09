@@ -29,8 +29,12 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
     LIST: "/models",
     GET: (modelId: string) => `/models/${modelId}`,
   },
-  CHAT: {
-    COMPLETIONS: "/chat/completions",
+  AGENT: {
+    BASE: "/api/v2/agent",
+    SESSIONS: "/api/v2/agent/sessions",
+    SESSION_TURNS: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/turns`,
+    SESSION_TOOL_RESULTS: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/tool-results`,
+    SESSION_CONTINUE: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/continue`,
   },
   EMBEDDINGS: {
     GENERATE: "/embeddings",
@@ -69,26 +73,6 @@ export interface LicenseValidationResponse {
   user_name?: string;
   display_name?: string;
   has_agents_pack_access?: boolean;
-}
-
-export interface TokenBalanceResponse {
-  balance: number;
-}
-
-export interface CheckoutResponse {
-  checkoutUrl: string;
-  sessionId: string;
-}
-
-export interface OpenRouterCompletionResponse {
-  id: string;
-  choices: Array<{
-    message: {
-      role: string;
-      content: string;
-    };
-    finish_reason: string;
-  }>;
 }
 
 export const SYSTEMSCULPT_API_HEADERS = {

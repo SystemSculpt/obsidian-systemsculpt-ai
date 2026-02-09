@@ -15,10 +15,12 @@ import {
   sendChatPromptDirect,
   upsertVaultFile,
 } from "../utils/systemsculptChat";
+import { fetchJson } from "../utils/http";
 
 describe("ChatView (mock) core flows", () => {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
-  const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
+  const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL") ?? "http://127.0.0.1:43111/api/v1";
+  const mockApiOrigin = serverUrl.replace(/\/api\/v1\/?$/i, "");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
 
   let vaultPath: string;
@@ -132,6 +134,12 @@ describe("ChatView (mock) core flows", () => {
     const output = await readVaultFile(outputPath);
     expect(output).toContain(alphaToken);
     expect(output).toContain(betaToken);
+
+    const statsResp = await fetchJson(`${mockApiOrigin}/_e2e/stats`, { method: "GET" });
+    expect(statsResp.ok).toBe(true);
+    expect(Number(statsResp.json?.legacyChatCompletions ?? -1)).toBe(0);
+    expect(Number(statsResp.json?.v2Sessions ?? 0)).toBeGreaterThanOrEqual(1);
+    expect(Number(statsResp.json?.v2Turns ?? 0)).toBeGreaterThanOrEqual(1);
   });
 
   it("handles context intake + slash export + web search toggle", async function () {

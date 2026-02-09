@@ -33,6 +33,7 @@ import { ContextFileService } from "./ContextFileService";
 import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
+import { AgentSessionClient, type AgentSessionRequest } from "./agent-v2/AgentSessionClient";
 
 export interface StreamDebugCallbacks {
   onRequest?: (data: {
@@ -92,6 +93,7 @@ export class SystemSculptService {
   private contextFileService: ContextFileService;
   private documentUploadService: DocumentUploadService;
   private audioUploadService: AudioUploadService;
+  private agentSessionClient: AgentSessionClient;
 
   public get extractionsDirectory(): string {
     return this.settings.extractionsDirectory ?? "";
@@ -379,6 +381,11 @@ export class SystemSculptService {
     this.contextFileService = new ContextFileService(plugin.app);
     this.documentUploadService = new DocumentUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
     this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl);
+    this.agentSessionClient = new AgentSessionClient({
+      baseUrl: this.baseUrl,
+      licenseKey: this.settings.licenseKey,
+      request: (input) => this.requestAgentV2(input),
+    });
   }
 
   /**
@@ -461,6 +468,10 @@ export class SystemSculptService {
     this.modelManagementService.updateBaseUrl(this.baseUrl);
     this.documentUploadService.updateConfig(this.baseUrl, this.settings.licenseKey);
     this.audioUploadService.updateBaseUrl(this.baseUrl);
+    this.agentSessionClient.updateConfig({
+      baseUrl: this.baseUrl,
+      licenseKey: this.settings.licenseKey,
+    });
   }
 
   /**
@@ -478,6 +489,59 @@ export class SystemSculptService {
       return `openrouter/${id}`;
     }
     return id;
+  }
+
+  private getAgentV2BaseUrl(): string {
+    const trimmed = this.baseUrl.replace(/\/+$/, '');
+    return trimmed.replace(/\/api\/v1$/i, '');
+  }
+
+  private async requestAgentV2(input: AgentSessionRequest): Promise<Response> {
+    const platform = PlatformContext.get();
+    const transport = platform.preferredTransport({ endpoint: input.url });
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: input.stream ? "text/event-stream" : "application/json",
+      "x-license-key": this.settings.licenseKey,
+    };
+    const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
+
+    if (transport === "fetch" && typeof fetch === "function") {
+      try {
+        return await fetch(input.url, {
+          method: input.method,
+          headers,
+          body,
+          cache: "no-store",
+        } as RequestInit);
+      } catch {}
+    }
+
+    const result = await requestUrl({
+      url: input.url,
+      method: input.method,
+      headers,
+      body,
+      throw: false,
+    });
+
+    const status = result.status || 500;
+    const textBody = typeof result.text === "string"
+      ? result.text
+      : JSON.stringify(result.json || {});
+
+    if (input.stream && status < 400) {
+      return new Response(textBody, {
+        status,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
+
+    return new Response(textBody, {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // DELEGATE TO LICENSE SERVICE
@@ -951,6 +1015,7 @@ export class SystemSculptService {
   }): AsyncGenerator<StreamEvent, void, unknown> {
     // DEVELOPMENT MODE LOGGING: Log development mode status and server configuration
     const { DEVELOPMENT_MODE } = await import('../constants/api');
+    const chatSessionId = sessionId || this.streamingService.generateRequestId();
     
     this.refreshSettings();
     const platform = PlatformContext.get();
@@ -1017,6 +1082,7 @@ export class SystemSculptService {
       let messagesForRequest = preparedMessages;
 
       let response: Response | null = null;
+      const apiMessages = this.toSystemSculptApiMessages(messagesForRequest);
 
       if (isCustom && provider) {
         response = await this.handleCustomProviderCompletion(
@@ -1033,177 +1099,36 @@ export class SystemSculptService {
           debug
         );
       } else {
-        // Regular SystemSculpt API request
-        const { SYSTEMSCULPT_API_ENDPOINTS } = await import('../constants/api');
-        const chatEndpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
-        const transportOptions = { endpoint: chatEndpoint };
-        const canStream = platform.supportsStreaming(transportOptions);
-        const preferredTransport = platform.preferredTransport(transportOptions);
-
-        const sessionIdHash = sessionId ? deterministicId(sessionId, "sess") : undefined;
-
-        const requestBody: Record<string, any> = {
-          model: serverModelId,
-          messages: this.toSystemSculptApiMessages(messagesForRequest),
-          stream: canStream,
-          include_reasoning: includeReasoning !== false,
-        };
-
-        if (Number.isFinite(maxTokens) && (maxTokens as number) > 0) {
-          requestBody.max_tokens = Math.max(1, Math.floor(maxTokens as number));
-        }
-
-        if (sessionIdHash) {
-          requestBody.session_id = sessionIdHash;
-        }
-        
-        // Add plugins if provided (e.g., web search)
-        if (plugins && plugins.length > 0) {
-          requestBody.plugins = plugins;
-        }
-        
-        // Add web search options when available
-        if (resolvedWebSearchOptions) {
-          requestBody.web_search_options = resolvedWebSearchOptions;
-        }
-        
-        // Provider routing: disable fallbacks so failures surface clearly
-        requestBody.provider = { allow_fallbacks: false };
-        
-        // Add MCP tools if compatible
-        if (requestTools.length > 0) {
-          requestBody.tools = requestTools;
-          requestBody.tool_choice = forcedToolName
-            ? { type: "function", function: { name: forcedToolName } }
-            : "auto";
-          requestBody.parallel_tool_calls = false;
-        }
-
-        // Log the request
-        const logger = DebugLogger.getInstance();
-        logger?.logAPIRequest(chatEndpoint, 'POST', requestBody);
-        
-        // Enhanced logging for mobile debugging
-        const requestHeaders: Record<string, string> = {
-          "Content-Type": "application/json",
-          "X-Request-ID": this.streamingService.generateRequestId(),
-          "x-license-key": this.settings.licenseKey,
-        };
-        if (canStream) {
-          requestHeaders.Accept = "text/event-stream";
-          requestHeaders["Cache-Control"] = "no-cache";
+        const endpoint = `${this.getAgentV2BaseUrl()}/api/v2/agent/sessions`
+        const requestBody = {
+          modelId: serverModelId,
+          messages: apiMessages,
+          tools: requestTools,
+          stream: true,
         }
 
         try {
           debug?.onRequest?.({
-            provider: "systemsculpt",
-            endpoint: chatEndpoint,
-            headers: requestHeaders,
+            provider: "systemsculpt-v2",
+            endpoint,
+            headers: {
+              "Content-Type": "application/json",
+              "x-license-key": this.settings.licenseKey,
+            },
             body: requestBody,
-            transport: preferredTransport,
-            canStream,
+            transport: platform.preferredTransport({ endpoint }),
+            canStream: true,
             isCustomProvider: false,
           });
         } catch {}
 
-        if (preferredTransport === "requestUrl") {
-          try {
-            const transportResponse = await requestUrl({
-              url: chatEndpoint,
-              method: 'POST',
-              headers: requestHeaders,
-              body: JSON.stringify(requestBody),
-              throw: false,
-            });
-
-            if (!transportResponse.status || transportResponse.status >= 400) {
-              response = new Response(JSON.stringify(transportResponse.json || {}), {
-                status: transportResponse.status || 500,
-                statusText: 'Error'
-              });
-            } else {
-              const responseData = transportResponse.json;
-              const { createSSEStreamFromChatCompletionJSON } = await import('../utils/streaming');
-              const wrappedStream = createSSEStreamFromChatCompletionJSON(responseData);
-              response = new Response(wrappedStream, {
-                status: 200,
-                statusText: 'OK',
-                headers: {
-                  'Content-Type': 'text/event-stream'
-                }
-              });
-            }
-          } catch (requestError: any) {
-            const rawReason = typeof requestError?.message === 'string'
-              ? requestError.message
-              : requestError?.toString?.() ?? 'Unknown transport error';
-            const reason = rawReason.trim().slice(0, 200);
-            const fallbackMessageBase = platform.isMobile()
-              ? 'Network request failed on mobile'
-              : 'Network request failed while using the fallback transport';
-            const guidance = platform.isMobile()
-              ? 'Ensure your server URL uses HTTPS and the certificate is trusted on this device.'
-              : 'Ensure the endpoint is reachable and not blocked by network policy.';
-            const fallbackMessage = `${fallbackMessageBase}${reason ? ` (${reason})` : ''}. ${guidance}`;
-            throw new SystemSculptError(
-              fallbackMessage,
-              ERROR_CODES.STREAM_ERROR,
-              0,
-              {
-                transport: 'requestUrl',
-                endpoint: chatEndpoint,
-                reason: reason || undefined,
-              }
-            );
-          }
-        } else {
-          try {
-            const fetchOptions: RequestInit = {
-              method: "POST",
-              headers: requestHeaders,
-              body: JSON.stringify(requestBody),
-              signal,
-              mode: 'cors' as RequestMode,
-              credentials: 'omit' as RequestCredentials,
-            };
-
-            response = await fetch(chatEndpoint, fetchOptions);
-          } catch (fetchError: any) {
-            const errorDetails = {
-              message: fetchError.message || 'Unknown fetch error',
-              name: fetchError.name || 'FetchError',
-              isMobile: platform.isMobile(),
-              endpoint: chatEndpoint,
-              baseUrl: this.baseUrl,
-              isOnline: navigator.onLine,
-            };
-
-            const rawReason = typeof fetchError?.message === 'string'
-              ? fetchError.message
-              : fetchError?.toString?.() ?? 'Unknown fetch error';
-            const reason = rawReason.trim().slice(0, 200);
-
-            if (errorDetails.isMobile) {
-              const base = fetchError.message === 'Load failed'
-                ? 'Network request failed on mobile'
-                : 'Network request failed while using fetch on mobile';
-              const fallbackMessage = `${base}${reason ? ` (${reason})` : ''}. This may be caused by network restrictions, captive Wi-Fi, or an untrusted certificate. Please verify the server URL is reachable over HTTPS from this device.`;
-              throw new SystemSculptError(
-                fallbackMessage,
-                ERROR_CODES.STREAM_ERROR,
-                0,
-                {
-                  transport: 'fetch',
-                  endpoint: chatEndpoint,
-                  reason: reason || undefined,
-                  isOnline: navigator.onLine,
-                }
-              );
-            }
-
-            throw fetchError;
-          }
-        }
+        response = await this.agentSessionClient.startOrContinueTurn({
+          chatId: chatSessionId,
+          modelId: serverModelId,
+          messages: apiMessages,
+          tools: requestTools,
+          pluginVersion: (this.plugin as any)?.manifest?.version,
+        });
       }
 
       if (!response) {
@@ -1218,7 +1143,7 @@ export class SystemSculptService {
       const logger = DebugLogger.getInstance();
       const endpoint = isCustom && provider 
         ? provider.endpoint 
-        : `${this.baseUrl}${require('../constants/api').SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
+        : `${this.getAgentV2BaseUrl()}/api/v2/agent`;
       logger?.logAPIResponse(endpoint, response.status);
 
       if (!provider) {
@@ -1266,17 +1191,31 @@ export class SystemSculptService {
       } catch {}
 
       let streamDiagnostics: StreamPipelineDiagnostics | null = null;
+      const markerToolCallIds = new Set<string>();
+      const streamFinalToolCallIds = new Set<string>();
+      let markerWaitingForTools = false;
       const streamIterator = this.streamingService.streamResponse(response, {
         model: actualModelId,
         isCustomProvider: !!provider,
         signal,
-        onRawEvent: debug
-          ? (data) => {
-              try {
-                debug?.onRawEvent?.(data);
-              } catch {}
+        onRawEvent: (data) => {
+          try {
+            const parsed = JSON.parse(data.payload);
+            const marker = parsed?.__systemsculpt;
+            if (marker?.phase === "waiting_for_tools") {
+              markerWaitingForTools = true;
+              const ids = Array.isArray(marker.tool_call_ids) ? marker.tool_call_ids : [];
+              for (const id of ids) {
+                if (typeof id === "string" && id.length > 0) {
+                  markerToolCallIds.add(id);
+                }
+              }
             }
-          : undefined,
+          } catch {}
+          try {
+            debug?.onRawEvent?.(data);
+          } catch {}
+        },
         onDiagnostics: (diagnostics) => {
           streamDiagnostics = diagnostics;
         },
@@ -1286,12 +1225,28 @@ export class SystemSculptService {
       let streamAborted = false;
       try {
         for await (const event of streamIterator) {
+          if (event.type === "tool-call" && event.phase === "final" && typeof event.call?.id === "string") {
+            streamFinalToolCallIds.add(event.call.id);
+          }
           try {
             debug?.onStreamEvent?.({ event });
           } catch {}
           yield event;
         }
         streamCompleted = true;
+
+        if (!provider) {
+          if (markerWaitingForTools) {
+            const ids = markerToolCallIds.size > 0
+              ? Array.from(markerToolCallIds)
+              : Array.from(streamFinalToolCallIds);
+            if (ids.length > 0) {
+              this.agentSessionClient.markWaitingForTools(chatSessionId, ids);
+            }
+          } else if (streamCompleted) {
+            this.agentSessionClient.markTurnCompleted(chatSessionId);
+          }
+        }
       } finally {
         streamAborted = !!signal?.aborted;
         try {
@@ -1320,6 +1275,9 @@ export class SystemSculptService {
           error: error instanceof Error ? error.message : String(error),
           details: error,
         });
+      } catch {}
+      try {
+        this.agentSessionClient.markTurnErrored(chatSessionId);
       } catch {}
       if (onError) {
         let errorMessage =
