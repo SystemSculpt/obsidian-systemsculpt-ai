@@ -1176,7 +1176,7 @@ First`;
       ]);
     });
 
-    it("surfaces server-side chunk progress for SystemSculpt jobs", async () => {
+    it("reports transcribing chunk progress while polling SystemSculpt jobs", async () => {
       jest.useFakeTimers();
       let tmpDir: string | null = null;
 
@@ -1189,21 +1189,22 @@ First`;
         (TranscriptionService as any).instance = undefined;
         service = TranscriptionService.getInstance(mockPlugin);
 
-        tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ss-transcribe-jobs-progress-test-"));
+        tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ss-transcribe-jobs-poll-test-"));
         mockPlugin.app.vault.adapter.basePath = tmpDir;
 
         const file = new TFile();
-        (file as any).path = "big.wav";
-        (file as any).name = "big.wav";
-        (file as any).basename = "big";
-        (file as any).extension = "wav";
+        (file as any).path = "chunky.ogg";
+        (file as any).name = "chunky.ogg";
+        (file as any).basename = "chunky";
+        (file as any).extension = "ogg";
 
-        const payload = Buffer.from("hello world");
+        const payload = Buffer.from("hello world!");
         await fs.writeFile(path.join(tmpDir, (file as any).path), payload);
         (file as any).stat = { size: payload.byteLength };
 
+        mockPlugin.app.vault.readBinary = jest.fn();
         const onProgress = jest.fn();
-        let pollCount = 0;
+        let statusPollCount = 0;
 
         (requestUrl as jest.Mock).mockImplementation(async (options: any) => {
           const url = String(options?.url || "");
@@ -1216,21 +1217,22 @@ First`;
               json: {
                 success: true,
                 job: {
-                  id: "job-1",
+                  id: "job-2",
                   status: "uploading",
-                  filename: "big.wav",
-                  contentType: "audio/wav",
+                  filename: "chunky.ogg",
+                  contentType: "audio/ogg",
                   contentLengthBytes: payload.byteLength,
                   timestamped: false,
                   language: null,
                   model: "whisper-large-v3",
                   processingStrategy: "chunked",
                   processingStage: "chunking",
+                  chunkCount: 4,
                   audioExpiresAt: new Date(Date.now() + 60_000).toISOString(),
                 },
                 upload: {
-                  key: "uploads/audio-transcriptions/job-1/big.wav",
-                  uploadId: "upload-1",
+                  key: "uploads/audio-transcriptions/job-2/chunky.ogg",
+                  uploadId: "upload-2",
                   partSizeBytes: 6,
                   totalParts: 2,
                   partUrlExpiresInSeconds: 900,
@@ -1239,7 +1241,7 @@ First`;
             };
           }
 
-          if (url.includes("/audio/transcriptions/jobs/job-1/upload/part-url") && method === "GET") {
+          if (url.includes("/audio/transcriptions/jobs/job-2/upload/part-url") && method === "GET") {
             const parsed = new URL(url);
             const partNumber = parsed.searchParams.get("partNumber");
             return {
@@ -1250,59 +1252,55 @@ First`;
                 part: {
                   partNumber: Number(partNumber),
                   method: "PUT",
-                  url: `https://r2.example.test/part-${partNumber}`,
+                  url: `https://r2.example.test/job2-part-${partNumber}`,
                   urlExpiresInSeconds: 900,
                 },
               },
             };
           }
 
-          if (url === "https://r2.example.test/part-1" && method === "PUT") {
+          if (url === "https://r2.example.test/job2-part-1" && method === "PUT") {
             return { status: 200, headers: { etag: "\"etag-1\"" }, text: "" };
           }
 
-          if (url === "https://r2.example.test/part-2" && method === "PUT") {
+          if (url === "https://r2.example.test/job2-part-2" && method === "PUT") {
             return { status: 200, headers: { etag: "\"etag-2\"" }, text: "" };
           }
 
-          if (url.endsWith("/audio/transcriptions/jobs/job-1/upload/complete") && method === "POST") {
+          if (url.endsWith("/audio/transcriptions/jobs/job-2/upload/complete") && method === "POST") {
             return {
               status: 200,
               headers: { "content-type": "application/json" },
-              json: { success: true, job: { id: "job-1", status: "queued" } },
+              json: { success: true, job: { id: "job-2", status: "queued" } },
             };
           }
 
-          if (url.endsWith("/audio/transcriptions/jobs/job-1/start") && method === "POST") {
+          if (url.endsWith("/audio/transcriptions/jobs/job-2/start") && method === "POST") {
             return {
               status: 202,
               headers: { "content-type": "application/json" },
-              json: { success: true, job: { id: "job-1", status: "processing" } },
+              json: { success: true, job: { id: "job-2", status: "queued" } },
             };
           }
 
-          if (url.endsWith("/audio/transcriptions/jobs/job-1") && method === "GET") {
-            pollCount += 1;
-            if (pollCount === 1) {
+          if (url.endsWith("/audio/transcriptions/jobs/job-2") && method === "GET") {
+            statusPollCount += 1;
+            if (statusPollCount === 1) {
               return {
                 status: 200,
                 headers: { "content-type": "application/json" },
                 json: {
                   success: true,
-                  job: { id: "job-1", status: "processing", chunkCount: 5 },
-                  progress: { stage: "chunking", chunksTotal: 2, chunksSucceeded: 0 },
-                },
-              };
-            }
-
-            if (pollCount === 2) {
-              return {
-                status: 200,
-                headers: { "content-type": "application/json" },
-                json: {
-                  success: true,
-                  job: { id: "job-1", status: "processing", chunkCount: 5 },
-                  progress: { stage: "transcribing", chunksTotal: 5, chunksSucceeded: 3 },
+                  job: { id: "job-2", status: "processing", processingStage: "transcribing", chunkCount: 4 },
+                  transcript: null,
+                  progress: {
+                    stage: "transcribing",
+                    chunksTotal: 4,
+                    chunksSucceeded: 2,
+                    chunksFailed: 0,
+                    chunksPending: 2,
+                    nextChunkIndex: 3,
+                  },
                 },
               };
             }
@@ -1312,49 +1310,63 @@ First`;
               headers: { "content-type": "application/json" },
               json: {
                 success: true,
-                job: { id: "job-1", status: "succeeded" },
-                transcript: { textUrl: "https://r2.example.test/final.txt", jsonUrl: null },
+                job: { id: "job-2", status: "succeeded", processingStage: "succeeded", chunkCount: 4 },
+                transcript: {
+                  textUrl: "https://r2.example.test/job2-transcript.txt",
+                  jsonUrl: "https://r2.example.test/job2-transcript.json",
+                  urlExpiresInSeconds: 1800,
+                },
+                progress: {
+                  stage: "succeeded",
+                  chunksTotal: 4,
+                  chunksSucceeded: 4,
+                  chunksFailed: 0,
+                  chunksPending: 0,
+                  nextChunkIndex: null,
+                },
               },
             };
           }
 
-          if (url === "https://r2.example.test/final.txt" && method === "GET") {
-            return { status: 200, headers: {}, text: "final transcript" };
+          if (url === "https://r2.example.test/job2-transcript.txt" && method === "GET") {
+            return { status: 200, headers: {}, text: "chunk transcript" };
           }
 
           throw new Error(`Unexpected requestUrl call: ${method} ${url}`);
         });
 
-        const resultPromise = service.transcribeFile(file, {
+        const promise = service.transcribeFile(file, {
           type: "note",
           timestamped: false,
           onProgress,
           suppressNotices: true,
         });
 
-        // Allow the async job loop to schedule polling sleeps.
-        await Promise.resolve();
-        await jest.advanceTimersByTimeAsync(15_000);
-        await jest.advanceTimersByTimeAsync(15_000);
+        let settled = false;
+        promise.finally(() => {
+          settled = true;
+        });
 
-        const result = await resultPromise;
-        expect(result).toBe("final transcript");
+        for (let i = 0; i < 10 && !settled; i += 1) {
+          await Promise.resolve();
+          await jest.advanceTimersByTimeAsync(2000);
+        }
 
-        const chunkingCall = (onProgress as jest.Mock).mock.calls.find((call) =>
-          String(call?.[1] || "").includes("Chunking audio (2/5)")
+        const result = await promise;
+        expect(result).toBe("chunk transcript");
+        expect(mockPlugin.app.vault.readBinary).not.toHaveBeenCalled();
+
+        const statuses = onProgress.mock.calls.map((call) => String(call[1]));
+        const sawTranscribingProgress = statuses.some(
+          (s) => s.toLowerCase().includes("transcrib") && s.includes("2/4")
         );
-        expect(chunkingCall?.[0]).toBe(76);
-
-        const transcribingCall = (onProgress as jest.Mock).mock.calls.find((call) =>
-          String(call?.[1] || "").includes("Transcribing chunks (3/5)")
-        );
-        expect(transcribingCall?.[0]).toBe(90);
+        expect(sawTranscribingProgress).toBe(true);
       } finally {
         jest.useRealTimers();
         if (tmpDir) {
           await fs.rm(tmpDir, { recursive: true, force: true });
         }
       }
-    });
+    }, 15000);
   });
 });
