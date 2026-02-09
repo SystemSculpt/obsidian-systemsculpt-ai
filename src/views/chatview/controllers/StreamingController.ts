@@ -250,6 +250,27 @@ export class StreamingController extends Component {
       assistantMessage.annotations = resolvedAnnotations;
       assistantMessage.webSearchEnabled = webSearchEnabled;
 
+      const hasRenderableOutput =
+        summary.content.trim().length > 0 ||
+        ((summary.reasoning ?? "").trim().length > 0) ||
+        ((assistantMessage.tool_calls?.length ?? 0) > 0);
+
+      if (!abortedBySignal && completedNaturally && !hasRenderableOutput) {
+        completedNaturally = false;
+        try {
+          messageEl.remove();
+        } catch {}
+        try {
+          onError(
+            new SystemSculptError(
+              "Upstream model returned an empty completion.",
+              ERROR_CODES.STREAM_ERROR,
+              502
+            )
+          );
+        } catch {}
+      }
+
       // Only persist if: not aborted, and either completed naturally or we recovered from an error
       const completedSuccessfully = !abortedBySignal && completedNaturally;
       if (completedSuccessfully) {

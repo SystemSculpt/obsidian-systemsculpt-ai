@@ -8,6 +8,7 @@ import { StreamingController } from "../controllers/StreamingController";
 const createController = () => {
   const saveChat = jest.fn().mockResolvedValue(undefined);
   const onAssistantResponse = jest.fn().mockResolvedValue(undefined);
+  const onError = jest.fn();
 
   return {
     controller: new StreamingController({
@@ -30,10 +31,11 @@ const createController = () => {
       updateStreamingStatus: jest.fn(),
       toggleStopButton: jest.fn(),
       onAssistantResponse,
-      onError: jest.fn(),
+      onError,
     }),
     saveChat,
     onAssistantResponse,
+    onError,
   };
 };
 
@@ -162,5 +164,25 @@ describe("StreamingController stream behavior", () => {
 
     expect(result.completed).toBe(false);
     expect(saveChat).not.toHaveBeenCalled();
+  });
+
+  test("does not persist an empty assistant message when stream has no output", async () => {
+    const { controller, saveChat, onAssistantResponse, onError } = createController();
+
+    const stream = (async function* () {})();
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-empty";
+    document.body.appendChild(messageEl);
+
+    const abortController = new AbortController();
+    const result = await controller.stream(stream, messageEl, "assistant-empty", abortController.signal, false);
+
+    expect(result.completed).toBe(false);
+    expect(saveChat).not.toHaveBeenCalled();
+    expect(onAssistantResponse).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]?.message || "").toContain("empty completion");
+    expect(messageEl.isConnected).toBe(false);
   });
 });
