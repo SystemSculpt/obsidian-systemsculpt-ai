@@ -80,6 +80,17 @@ Standard runner (macOS/Linux):
 testing/e2e/run.sh live
 ```
 
+When neither `SYSTEMSCULPT_E2E_SETTINGS_JSON` nor `SYSTEMSCULPT_E2E_VAULT` is set,
+the runner auto-falls back to:
+
+`~/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json`
+
+Disable this fallback explicitly (for CI/isolation) with:
+
+```bash
+SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK=1 testing/e2e/run.sh live
+```
+
 Set the vault path:
 
 ```bash
