@@ -22,6 +22,7 @@ import { Notice } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { MOBILE_STREAM_CONFIG, WEB_SEARCH_CONFIG } from "../constants/webSearch";
+import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 
 // Import the new service classes
 import { StreamingService } from "./StreamingService";
@@ -34,6 +35,7 @@ import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import { AgentSessionClient, type AgentSessionRequest } from "./agent-v2/AgentSessionClient";
+import { normalizePiTools } from "./agent-v2/PiToolAdapter";
 
 export interface StreamDebugCallbacks {
   onRequest?: (data: {
@@ -1100,11 +1102,12 @@ export class SystemSculptService {
           debug
         );
       } else {
-        const endpoint = `${this.getAgentV2BaseUrl()}/api/v2/agent/sessions`
+        const endpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`;
+        const piTools = normalizePiTools(requestTools);
         const requestBody = {
           modelId: serverModelId,
           messages: apiMessages,
-          tools: requestTools,
+          tools: piTools,
           stream: true,
         }
 
@@ -1127,7 +1130,7 @@ export class SystemSculptService {
           chatId: chatSessionId,
           modelId: serverModelId,
           messages: apiMessages,
-          tools: requestTools,
+          tools: piTools,
           pluginVersion: (this.plugin as any)?.manifest?.version,
         });
       }
@@ -1144,7 +1147,7 @@ export class SystemSculptService {
       const logger = DebugLogger.getInstance();
       const endpoint = isCustom && provider 
         ? provider.endpoint 
-        : `${this.getAgentV2BaseUrl()}/api/v2/agent`;
+        : `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`;
       logger?.logAPIResponse(endpoint, response.status);
 
       if (!provider) {

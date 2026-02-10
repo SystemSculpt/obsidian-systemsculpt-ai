@@ -26,7 +26,7 @@ describe("AgentSessionClient", () => {
         stream: input.stream,
       });
 
-      if (input.url.endsWith("/api/v2/agent/sessions")) {
+      if (input.url.endsWith("/api/v1/agent/sessions")) {
         if (sessionStatus !== 200) {
           return {
             status: sessionStatus,
@@ -76,8 +76,8 @@ describe("AgentSessionClient", () => {
     });
 
     expect(records).toHaveLength(2);
-    expect(records[0].url).toBe("https://api.systemsculpt.com/api/v2/agent/sessions");
-    expect(records[1].url).toBe("https://api.systemsculpt.com/api/v2/agent/sessions/sess_abc123/turns");
+    expect(records[0].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions");
+    expect(records[1].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/turns");
     expect(records[0].headers?.["x-plugin-version"]).toBe("4.8.1");
     expect(records[1].headers?.["x-plugin-version"]).toBe("4.8.1");
     expect(records[1].body).toMatchObject({
@@ -94,6 +94,72 @@ describe("AgentSessionClient", () => {
       },
       stream: true,
     });
+  });
+
+  it("normalizes mixed tool definitions into PI-native tools while keeping stable MCP names", async () => {
+    const records: RequestRecord[] = [];
+    const { client } = createClient(records);
+
+    await client.startOrContinueTurn({
+      chatId: "chat_1",
+      modelId: "systemsculpt/ai-agent",
+      pluginVersion: "4.8.1",
+      messages: [{ role: "user", content: "read this file" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "functions.mcp-filesystem_read:1_provider",
+            description: "Read a file",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        },
+        {
+          name: "mcp-filesystem_write",
+          description: "Write a file",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      ],
+    });
+
+    expect(records[1].body?.context?.tools).toEqual([
+      {
+        name: "mcp-filesystem_read",
+        description: "Read a file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "mcp-filesystem_write",
+        description: "Write a file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            content: { type: "string" },
+          },
+          required: ["path", "content"],
+        },
+      },
+    ]);
   });
 
   it("submits pending tool results and continues the turn", async () => {
@@ -122,8 +188,8 @@ describe("AgentSessionClient", () => {
     });
 
     const urls = records.map((record) => record.url);
-    expect(urls).toContain("https://api.systemsculpt.com/api/v2/agent/sessions/sess_abc123/tool-results");
-    expect(urls).toContain("https://api.systemsculpt.com/api/v2/agent/sessions/sess_abc123/continue");
+    expect(urls).toContain("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/tool-results");
+    expect(urls).toContain("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/continue");
 
     const submit = records.find((record) => record.url.endsWith("/tool-results"));
     expect(submit?.body).toEqual({
@@ -142,7 +208,7 @@ describe("AgentSessionClient", () => {
     expect(continueRequest?.headers?.["x-plugin-version"]).toBe("4.8.1");
   });
 
-  it("throws when the v2 sessions endpoint is unavailable and never calls legacy completions", async () => {
+  it("throws when the agent sessions endpoint is unavailable and never calls legacy completions", async () => {
     const records: RequestRecord[] = [];
     const { client } = createClient(records, { sessionStatus: 405 });
 
@@ -157,7 +223,7 @@ describe("AgentSessionClient", () => {
     ).rejects.toThrow("Failed to create agent session: 405");
 
     expect(records).toHaveLength(1);
-    expect(records[0].url).toBe("https://api.systemsculpt.com/api/v2/agent/sessions");
+    expect(records[0].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions");
     const legacyCalls = records.filter((record) => record.url.endsWith("/api/v1/chat/completions"));
     expect(legacyCalls).toHaveLength(0);
   });

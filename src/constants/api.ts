@@ -30,11 +30,11 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
     GET: (modelId: string) => `/models/${modelId}`,
   },
   AGENT: {
-    BASE: "/api/v2/agent",
-    SESSIONS: "/api/v2/agent/sessions",
-    SESSION_TURNS: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/turns`,
-    SESSION_TOOL_RESULTS: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/tool-results`,
-    SESSION_CONTINUE: (sessionId: string) => `/api/v2/agent/sessions/${sessionId}/continue`,
+    BASE: "/api/v1/agent",
+    SESSIONS: "/api/v1/agent/sessions",
+    SESSION_TURNS: (sessionId: string) => `/api/v1/agent/sessions/${sessionId}/turns`,
+    SESSION_TOOL_RESULTS: (sessionId: string) => `/api/v1/agent/sessions/${sessionId}/tool-results`,
+    SESSION_CONTINUE: (sessionId: string) => `/api/v1/agent/sessions/${sessionId}/continue`,
   },
   EMBEDDINGS: {
     GENERATE: "/embeddings",

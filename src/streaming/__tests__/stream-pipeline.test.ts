@@ -106,6 +106,134 @@ describe("StreamPipeline", () => {
     expect(second.done).toBe(true);
   });
 
+  test("ignores PI marker events so aggregated marker payloads do not duplicate deltas", () => {
+    const pipeline = create();
+
+    const markerStart = pipeline.push(
+      encode(
+        `event: text_start\ndata: ${JSON.stringify({ type: "text_start", contentIndex: 0 })}\n\n`
+      )
+    );
+    const delta = pipeline.push(
+      encode(
+        `event: text_delta\ndata: ${JSON.stringify({ type: "text_delta", delta: "Hello marker-safe", contentIndex: 0 })}\n\n`
+      )
+    );
+    const markerEnd = pipeline.push(
+      encode(
+        `event: text_end\ndata: ${JSON.stringify({ type: "text_end", text: "Hello marker-safe", contentIndex: 0 })}\n\n`
+      )
+    );
+    const done = pipeline.push(
+      encode(
+        `event: done\ndata: ${JSON.stringify({
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello marker-safe" }],
+          },
+        })}\n\n`
+      )
+    );
+
+    expect(markerStart.events).toEqual<StreamEvent[]>([]);
+    expect(delta.events).toEqual<StreamEvent[]>([{ type: "content", text: "Hello marker-safe" }]);
+    expect(markerEnd.events).toEqual<StreamEvent[]>([]);
+    expect(done.events).toEqual<StreamEvent[]>([]);
+    expect(done.done).toBe(true);
+  });
+
+  test("preserves PI toolcall_delta argument accumulation into final toolcall_end event", () => {
+    const pipeline = create();
+
+    const first = pipeline.push(
+      encode(
+        `event: toolcall_delta\ndata: ${JSON.stringify({
+          type: "toolcall_delta",
+          contentIndex: 1,
+          toolCall: {
+            id: "call_pi_edit_1",
+            name: "functions.mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hel',
+          },
+        })}\n\n`
+      )
+    );
+
+    const second = pipeline.push(
+      encode(
+        `event: toolcall_delta\ndata: ${JSON.stringify({
+          type: "toolcall_delta",
+          contentIndex: 1,
+          toolCall: {
+            id: "call_pi_edit_1",
+            arguments: 'lo"}]}',
+          },
+        })}\n\n`
+      )
+    );
+
+    const final = pipeline.push(
+      encode(
+        `event: toolcall_end\ndata: ${JSON.stringify({
+          type: "toolcall_end",
+          contentIndex: 1,
+          toolCall: {
+            id: "call_pi_edit_1",
+            name: "functions.mcp-filesystem_edit",
+          },
+        })}\n\n`
+      )
+    );
+
+    expect(first.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "delta",
+        call: expect.objectContaining({
+          id: "call_pi_edit_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hel',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+
+    expect(second.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "delta",
+        call: expect.objectContaining({
+          id: "call_pi_edit_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hello"}]}',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+
+    expect(final.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "final",
+        call: expect.objectContaining({
+          id: "call_pi_edit_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hello"}]}',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+    expect(final.done).toBe(false);
+  });
+
   test("falls back to done.message content when PI stream has no deltas", () => {
     const pipeline = create();
     const chunk = encode(

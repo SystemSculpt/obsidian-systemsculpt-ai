@@ -59,6 +59,12 @@ The request `messages` array is produced inside `ContextFileService.prepareMessa
 - Custom providers use an adapter that builds a provider-specific body and transforms the response into a consistent stream format.
 - Transport/streaming decisions are centralized in `PlatformContext`, which flags mobile/runtime constraints and chooses between native `fetch` streaming and Obsidian `requestUrl` fallbacks (including SSE replay when streaming is unavailable).
 - The native SystemSculpt API receives `{ model, messages, stream: true, include_reasoning: true, ... }`.
+- Agent Mode PI sessions use the canonical v1 contract:
+  - `POST /api/v1/agent/sessions`
+  - `POST /api/v1/agent/sessions/:sessionId/turns`
+  - `POST /api/v1/agent/sessions/:sessionId/tool-results`
+  - `POST /api/v1/agent/sessions/:sessionId/continue`
+- Tool definitions are normalized into PI-native `{ name, description, parameters }` via `PiToolAdapter` before turn requests, preserving stable tool names like `mcp-filesystem_*` for local execution/approval flow.
 - Image parts are preserved initially; if the provider rejects them, the request is retried without images with an inline footnote in the UI.
 - If a provider rejects tools, a retry without tools occurs (with inline footnote explaining the downgrade).
 

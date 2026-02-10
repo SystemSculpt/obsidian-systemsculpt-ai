@@ -185,7 +185,7 @@ describe("SystemSculptService", () => {
     expect(modelManagementService.getModels).toHaveBeenCalled();
   });
 
-  it("forwards v2 agent request headers through requestAgentV2", async () => {
+  it("forwards agent request headers through requestAgentV2", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
 
@@ -193,7 +193,7 @@ describe("SystemSculptService", () => {
     global.fetch = jest.fn().mockResolvedValue(response) as any;
 
     await (service as any).requestAgentV2({
-      url: "https://api.systemsculpt.com/api/v2/agent/sessions",
+      url: "https://api.systemsculpt.com/api/v1/agent/sessions",
       method: "POST",
       headers: {
         "x-plugin-version": "4.8.1",
@@ -203,7 +203,7 @@ describe("SystemSculptService", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://api.systemsculpt.com/api/v2/agent/sessions",
+      "https://api.systemsculpt.com/api/v1/agent/sessions",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

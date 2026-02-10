@@ -65,28 +65,28 @@ describe("SYSTEMSCULPT_API_ENDPOINTS", () => {
 
   describe("AGENT", () => {
     it("has BASE endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE).toBe("/api/v2/agent");
+      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE).toBe("/api/v1/agent");
     });
 
     it("has SESSIONS endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS).toBe("/api/v2/agent/sessions");
+      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS).toBe("/api/v1/agent/sessions");
     });
 
     it("builds SESSION_TURNS endpoint", () => {
       expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS("sess_1")).toBe(
-        "/api/v2/agent/sessions/sess_1/turns"
+        "/api/v1/agent/sessions/sess_1/turns"
       );
     });
 
     it("builds SESSION_TOOL_RESULTS endpoint", () => {
       expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TOOL_RESULTS("sess_1")).toBe(
-        "/api/v2/agent/sessions/sess_1/tool-results"
+        "/api/v1/agent/sessions/sess_1/tool-results"
       );
     });
 
     it("builds SESSION_CONTINUE endpoint", () => {
       expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_CONTINUE("sess_1")).toBe(
-        "/api/v2/agent/sessions/sess_1/continue"
+        "/api/v1/agent/sessions/sess_1/continue"
       );
     });
   });

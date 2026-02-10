@@ -347,6 +347,22 @@ export class StreamPipeline {
         }
         break;
       }
+      case "toolcall_delta": {
+        const rawCall = this.normalizePiToolCallPayload(parsed.toolCall);
+        if (!rawCall) break;
+        this.sawPiNativeToolEvent = true;
+
+        const event = this.handleToolCallDelta({
+          index: typeof parsed.contentIndex === "number" ? parsed.contentIndex : 0,
+          id: rawCall.id,
+          function: {
+            ...(rawCall.name ? { name: rawCall.name } : {}),
+            ...(typeof rawCall.arguments === "string" ? { arguments: rawCall.arguments } : {}),
+          },
+        });
+        if (event) events.push(event);
+        break;
+      }
       case "toolcall_end": {
         const rawCall = this.normalizePiToolCallPayload(parsed.toolCall);
         if (!rawCall) break;
@@ -356,8 +372,8 @@ export class StreamPipeline {
           index: typeof parsed.contentIndex === "number" ? parsed.contentIndex : 0,
           id: rawCall.id,
           function: {
-            name: rawCall.name,
-            arguments: rawCall.arguments,
+            ...(rawCall.name ? { name: rawCall.name } : {}),
+            ...(typeof rawCall.arguments === "string" ? { arguments: rawCall.arguments } : {}),
           },
         });
         if (event) events.push(event);
@@ -393,7 +409,6 @@ export class StreamPipeline {
       case "thinking_start":
       case "thinking_end":
       case "toolcall_start":
-      case "toolcall_delta":
         break;
       default:
         return null;
@@ -426,13 +441,13 @@ export class StreamPipeline {
 
       if (block.type === "toolCall") {
         const rawCall = this.normalizePiToolCallPayload(block);
-        if (!rawCall) continue;
+        if (!rawCall || !rawCall.name) continue;
         const event = this.handleToolCallFinal({
           index: i,
           id: rawCall.id,
           function: {
-            name: rawCall.name,
-            arguments: rawCall.arguments,
+            ...(rawCall.name ? { name: rawCall.name } : {}),
+            ...(typeof rawCall.arguments === "string" ? { arguments: rawCall.arguments } : {}),
           },
         });
         if (event) events.push(event);
@@ -442,29 +457,33 @@ export class StreamPipeline {
     return events;
   }
 
-  private normalizePiToolCallPayload(value: unknown): { id: string; name: string; arguments: string } | null {
+  private normalizePiToolCallPayload(
+    value: unknown
+  ): { id?: string; name?: string; arguments?: string } | null {
     if (!value || typeof value !== "object") return null;
     const candidate = value as PiNativeToolCallPayload;
 
-    const id = typeof candidate.id === "string" && candidate.id.trim().length > 0 ? candidate.id.trim() : "";
+    const id = typeof candidate.id === "string" && candidate.id.trim().length > 0
+      ? candidate.id.trim()
+      : undefined;
     const name = this.sanitizeToolName(typeof candidate.name === "string" ? candidate.name : "");
-    if (!name) return null;
-
-    let argumentsText = "{}";
+    let argumentsText: string | undefined;
     if (typeof candidate.arguments === "string") {
       argumentsText = candidate.arguments;
     } else if (candidate.arguments && typeof candidate.arguments === "object") {
       try {
         argumentsText = JSON.stringify(candidate.arguments);
       } catch {
-        argumentsText = "{}";
+        argumentsText = undefined;
       }
     }
 
+    if (!id && !name && typeof argumentsText === "undefined") return null;
+
     return {
-      id,
-      name,
-      arguments: argumentsText,
+      ...(id ? { id } : {}),
+      ...(name ? { name } : {}),
+      ...(typeof argumentsText === "string" ? { arguments: argumentsText } : {}),
     };
   }
 

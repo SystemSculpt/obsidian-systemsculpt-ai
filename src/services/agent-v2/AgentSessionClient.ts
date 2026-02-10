@@ -1,5 +1,6 @@
 import { AgentTurnStateMachine } from "./AgentTurnStateMachine";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../../constants/api";
+import { normalizePiTools } from "./PiToolAdapter";
 
 export type AgentSessionRequest = {
   url: string;
@@ -353,7 +354,7 @@ export class AgentSessionClient {
       messages: contextMessages,
     };
 
-    const piTools = this.normalizePiTools(tools);
+    const piTools = normalizePiTools(tools);
     if (piTools.length > 0) {
       context.tools = piTools;
     }
@@ -363,39 +364,6 @@ export class AgentSessionClient {
     }
 
     return context;
-  }
-
-  private normalizePiTools(tools: unknown[]): Array<{
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  }> {
-    const normalized: Array<{
-      name: string;
-      description: string;
-      parameters: Record<string, unknown>;
-    }> = [];
-
-    for (const tool of tools) {
-      if (!tool || typeof tool !== "object") continue;
-      const record = tool as Record<string, unknown>;
-
-      const maybeFunction = record.function as Record<string, unknown> | undefined;
-      const name = asString((maybeFunction?.name as unknown) ?? record.name);
-      if (!name) continue;
-
-      const description = asString((maybeFunction?.description as unknown) ?? record.description);
-      const parameters = (maybeFunction?.parameters ?? record.parameters) as Record<string, unknown>;
-      if (!parameters || typeof parameters !== "object") continue;
-
-      normalized.push({
-        name,
-        description,
-        parameters,
-      });
-    }
-
-    return normalized;
   }
 
   private toPiAssistantMessage(
