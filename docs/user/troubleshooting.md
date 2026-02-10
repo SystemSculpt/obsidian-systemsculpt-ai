@@ -14,8 +14,9 @@
 
 ## Document conversion fails (PDF/Office)
 
-- Conversions are capped at ~4.4 MB due to serverless upload limits. Larger files will fail with “413 Request Entity Too Large”.
-- Reduce the file size (compress/export) or split the document into smaller PDFs before converting.
+- **Desktop:** large PDFs/images upload via multipart jobs (currently up to ~25 MB per document).
+- **Mobile:** conversions are capped at ~4.4 MB due to serverless upload limits. Larger files will fail with “413 Request Entity Too Large”.
+- If you hit 413, reduce the file size (compress/export) or split the document into smaller PDFs before converting.
 
 ## Similar Notes empty / embeddings not processing
 

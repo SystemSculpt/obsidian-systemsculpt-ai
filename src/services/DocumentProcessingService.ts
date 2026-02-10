@@ -4,6 +4,9 @@ import { SystemSculptService } from "./SystemSculptService";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { sleep } from "../utils/helpers";
 import type { HttpResponseShim } from "../utils/httpClient";
+import { PlatformContext } from "./PlatformContext";
+import { DOCUMENT_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
+import { DocumentUploadJobsService } from "./DocumentUploadJobsService";
 
 const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   queued: "inbox",
@@ -213,7 +216,51 @@ export class DocumentProcessingService {
 
       let uploadResult: any;
       try {
-        uploadResult = await this.sculptService.uploadDocument(file);
+        const platform = PlatformContext.get();
+        const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
+        const shouldUseJobsUpload =
+          !platform.isMobile() &&
+          Number.isFinite(fileSize) &&
+          fileSize > DOCUMENT_UPLOAD_MAX_BYTES;
+
+        if (shouldUseJobsUpload) {
+          const jobsUploader = new DocumentUploadJobsService(
+            this.app,
+            this.sculptService.baseUrl,
+            this.plugin.settings.licenseKey || ""
+          );
+
+          const reservedStart = 15;
+          const reservedEnd = 35;
+          const reservedRange = Math.max(1, reservedEnd - reservedStart);
+
+          uploadResult = await jobsUploader.uploadDocumentViaJobs(file, {
+            onProgress: (evt) => {
+              const mapped =
+                reservedStart +
+                Math.round((Math.max(0, Math.min(100, evt.progress)) / 100) * reservedRange);
+              this.emitProgress(
+                progressHandler,
+                {
+                  stage: "uploading",
+                  progress: mapped,
+                  label: evt.label,
+                  icon: STAGE_ICONS.uploading,
+                  metadata: {
+                    uploadStage: evt.stage,
+                    ...(evt.stage === "uploading"
+                      ? { partNumber: evt.partNumber, totalParts: evt.totalParts }
+                      : {}),
+                  },
+                },
+                meta,
+                flow
+              );
+            },
+          });
+        } else {
+          uploadResult = await this.sculptService.uploadDocument(file);
+        }
       } catch (uploadError) {
         const message = uploadError instanceof Error
           ? uploadError.message
@@ -319,11 +366,18 @@ export class DocumentProcessingService {
       }
 
       lastStage = "processing";
+      const platform = PlatformContext.get();
+      const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
+      const maxPollAttempts =
+        !platform.isMobile() && Number.isFinite(fileSize) && fileSize > DOCUMENT_UPLOAD_MAX_BYTES
+          ? 180
+          : 30;
       const pollResult = await this.pollUntilComplete(
         documentId,
         progressHandler,
         meta,
-        flow
+        flow,
+        maxPollAttempts
       );
 
       if (!pollResult.completed) {
