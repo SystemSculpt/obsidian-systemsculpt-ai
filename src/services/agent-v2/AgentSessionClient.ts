@@ -80,6 +80,35 @@ function toText(value: unknown): string {
   }
 }
 
+function parseDataUrlImage(url: string): { mimeType: string; data: string } | null {
+  const trimmed = url.trim();
+  if (!trimmed.toLowerCase().startsWith("data:")) return null;
+
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex <= 5) return null;
+
+  const metadata = trimmed.slice(5, commaIndex);
+  const payload = trimmed.slice(commaIndex + 1);
+  if (!payload) return null;
+
+  const parts = metadata
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  if (parts.length === 0) return null;
+  const mimeType = parts[0].toLowerCase();
+  if (!mimeType.startsWith("image/")) return null;
+
+  const hasBase64Flag = parts.slice(1).some((part) => part.toLowerCase() === "base64");
+  if (!hasBase64Flag) return null;
+
+  return {
+    mimeType,
+    data: payload,
+  };
+}
+
 const STOP_REASONS = new Set(["stop", "length", "toolUse", "error", "aborted"]);
 
 export class AgentSessionClient {
@@ -490,6 +519,21 @@ export class AgentSessionClient {
       ) {
         blocks.push({ type: "image", data: entry.data, mimeType: entry.mimeType });
         continue;
+      }
+
+      if (type === "image_url") {
+        const image = entry.image_url as Record<string, unknown> | undefined;
+        const url = asString(image?.url);
+        const parsed = parseDataUrlImage(url);
+        if (parsed) {
+          blocks.push({ type: "image", data: parsed.data, mimeType: parsed.mimeType });
+          continue;
+        }
+        if (url.length > 0) {
+          // PI context currently expects inline image data, so preserve non-data URLs as text markers.
+          blocks.push({ type: "text", text: `[image:${url}]` });
+          continue;
+        }
       }
     }
 

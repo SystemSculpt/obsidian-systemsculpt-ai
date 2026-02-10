@@ -162,6 +162,42 @@ describe("AgentSessionClient", () => {
     ]);
   });
 
+  it("converts image_url data URLs into PI image blocks for user messages", async () => {
+    const records: RequestRecord[] = [];
+    const { client } = createClient(records);
+
+    await client.startOrContinueTurn({
+      chatId: "chat_vision",
+      modelId: "openrouter/moonshotai/kimi-k2.5",
+      pluginVersion: "4.8.1",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what do you see in this image?" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,ZmFrZS1pbWFnZS1kYXRh" } },
+          ],
+        },
+      ],
+      tools: [],
+    });
+
+    expect(records[1].body).toMatchObject({
+      context: {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "what do you see in this image?" },
+              { type: "image", mimeType: "image/png", data: "ZmFrZS1pbWFnZS1kYXRh" },
+            ],
+            timestamp: expect.any(Number),
+          },
+        ],
+      },
+    });
+  });
+
   it("submits pending tool results and continues the turn", async () => {
     const records: RequestRecord[] = [];
     const { client } = createClient(records);
