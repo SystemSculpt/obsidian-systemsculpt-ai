@@ -166,7 +166,7 @@ function updateWrapperBullets(nodes: TreeLayoutNode[], theme: TreeConnectorTheme
   wrappers.forEach((wrapper) => {
     const bullet = wrapper.querySelector<HTMLElement>(".systemsculpt-chat-structured-bullet");
     if (!bullet) return;
-    if (bullet.classList.contains("is-active") || bullet.classList.contains("is-failed") || bullet.classList.contains("is-denied")) {
+    if (bullet.classList.contains("is-active") || bullet.classList.contains("is-failed")) {
       return;
     }
     if (!bullet.textContent || bullet.textContent.trim().length === 0) {

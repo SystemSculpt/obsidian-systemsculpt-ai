@@ -9,9 +9,6 @@ import { TFile } from "obsidian";
  * Represents the state of a tool call throughout its lifecycle
  */
 export type ToolCallState = 
-  | 'pending'      // Tool call detected but not yet approved
-  | 'approved'     // User approved the tool call
-  | 'denied'       // User denied the tool call
   | 'executing'    // Tool is currently executing
   | 'completed'    // Tool execution completed successfully
   | 'failed';      // Tool execution failed
@@ -60,15 +57,11 @@ export interface ToolCall {
   timestamp: number; // When the tool call was created
   
   // Execution tracking
-  approvedAt?: number;
   executionStartedAt?: number;
   executionCompletedAt?: number;
   
   // Result data
   result?: ToolCallResult;
-  
-  // UI state
-  autoApproved?: boolean; // Was this auto-approved based on settings
   
   // Metadata
   serverId?: string; // For MCP tools, the server that provides this tool
@@ -85,8 +78,6 @@ export interface ToolCallEvents {
     newState: ToolCallState;
     toolCall: ToolCall;
   };
-  'tool-call:approved': { toolCallId: string; toolCall: ToolCall };
-  'tool-call:denied': { toolCallId: string; toolCall: ToolCall };
   'tool-call:execution-started': { toolCallId: string; toolCall: ToolCall };
   'tool-call:execution-completed': { 
     toolCallId: string; 
@@ -113,7 +104,6 @@ export interface ToolDefinition {
   };
   // Optional metadata
   serverId?: string; // For MCP tools
-  autoApprove?: boolean; // Can this tool be auto-approved
 }
 
 /**
@@ -125,11 +115,9 @@ export interface SerializedToolCall {
   request: ToolCallRequest;
   state: ToolCallState;
   timestamp: number;
-  approvedAt?: number;
   executionStartedAt?: number;
   executionCompletedAt?: number;
   result?: ToolCallResult;
-  autoApproved?: boolean;
 }
 
 /**
@@ -146,8 +134,6 @@ export interface ToolResultMessage {
  * Options for tool execution
  */
 export interface ToolExecutionOptions {
-  timeout?: number; // Timeout in milliseconds
-  retries?: number; // Number of retries on failure
   signal?: AbortSignal; // For cancellation
   sourceFile?: TFile;
 }

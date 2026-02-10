@@ -6,18 +6,18 @@ This document maps the end-to-end path when a user sends a message from ChatView
 
 1. User types text and clicks Send.
 2. `InputHandler.handleSendMessage()` creates a user `ChatMessage` and appends it to history/UI.
-3. `ChatTurnOrchestrator.runTurn()` starts one assistant stream; if Agent Mode is on and tools run, it may continue with follow-up assistant turns.
-4. `SystemSculptService.streamMessage()` builds the outbound request (system prompt + context + messages + tools), opens a streaming request, and yields chunks.
-5. `StreamingController` renders streaming parts (reasoning/content/tool calls) and finalizes the assistant message.
+3. `InputHandler` starts one PI-managed assistant stream per send.
+4. `SystemSculptService.streamMessage()` builds the outbound request (system prompt + context + messages + tools), opens a PI turn stream, and yields chunks.
+5. `StreamingController` renders streaming parts (reasoning/content/tool calls), updates tool-call cards/chips, and finalizes the assistant message.
 6. `onAssistantResponse` merges/saves the finalized assistant message in `ChatView.messages`.
 
 ## Call Graph (key pieces)
 
 - UI: `ChatView` → `uiSetup.ts` wires `InputHandler`
-- Send: `InputHandler.handleSendMessage()` → `ChatTurnOrchestrator.runTurn()`
-- Stream: `ChatTurnOrchestrator.streamAssistant()` → `SystemSculptService.streamMessage()`
+- Send: `InputHandler.handleSendMessage()` → `InputHandler.streamAssistantTurn()`
+- Stream: `InputHandler.streamAssistantTurn()` → `SystemSculptService.streamMessage()`
 - Assembly: `ContextFileService.prepareMessagesWithContext()` + `SystemPromptService.getSystemPromptContent()`
-- Tools: `ToolCallManager` (create, update, and collect results)
+- Tools: `ToolCallManager` (create/update calls, track status, and collect results)
 - Render: `StreamingController` + `MessagePartManager` + `MessageRenderer`
 
 ## Request Assembly Order (what is sent to the model)
@@ -62,8 +62,6 @@ The request `messages` array is produced inside `ContextFileService.prepareMessa
 - Agent Mode PI sessions use the canonical v1 contract:
   - `POST /api/v1/agent/sessions`
   - `POST /api/v1/agent/sessions/:sessionId/turns`
-  - `POST /api/v1/agent/sessions/:sessionId/tool-results`
-  - `POST /api/v1/agent/sessions/:sessionId/continue`
 - Tool definitions are normalized into PI-native `{ name, description, parameters }` via `PiToolAdapter` before turn requests, preserving stable tool names like `mcp-filesystem_*` for local execution/approval flow.
 - Image parts are preserved initially; if the provider rejects them, the request is retried without images with an inline footnote in the UI.
 - If a provider rejects tools, a retry without tools occurs (with inline footnote explaining the downgrade).
@@ -73,13 +71,17 @@ The request `messages` array is produced inside `ContextFileService.prepareMessa
 - Model availability: errors bubble to `ChatView.handleError()` which switches models or prompts user.
 - Images: detection and conditional retry without images when unsupported.
 - Tools: conditional inclusion based on Agent Mode and provider capability; read-only tools auto-approve, destructive tools require approval unless allowlisted or confirmations are disabled in settings.
+- Tool approval actions are plain-language: `Run once`, `Always allow this tool`, `Deny`. `Always allow this tool` updates the same allowlist exposed in settings.
+- Approved calls can sit in `Approved, waiting to run` before execution starts; chips then move through `Running` to terminal states (`Done`, `Failed`, `Denied`).
 - Tool schemas are normalized before requests: all properties are marked required for provider compatibility and any `strict` flags are stripped.
-- Continuations: after tools finish, if no newer user message exists, run another assistant stream without resending context files.
+- Continuations and loop prevention are owned by PI session runtime.
 
 ## Streaming & Finalization
 
 - Streaming chunks yield `reasoning`, `content`, and `toolCalls`.
 - `StreamingController` interleaves parts, updates tool call UI, and saves incrementally (debounced).
+- Tool cards include layman summaries; `move` calls display path changes as From -> To.
+- `What changed` details are progressive: concise summary first, then richer file/path changes when available.
 - Final assistant message merges any tool calls and is persisted via `onAssistantResponse`.
 
 ## Observations (baseline organization)

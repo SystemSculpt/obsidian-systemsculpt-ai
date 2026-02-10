@@ -78,17 +78,6 @@ describe("SYSTEMSCULPT_API_ENDPOINTS", () => {
       );
     });
 
-    it("builds SESSION_TOOL_RESULTS endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TOOL_RESULTS("sess_1")).toBe(
-        "/api/v1/agent/sessions/sess_1/tool-results"
-      );
-    });
-
-    it("builds SESSION_CONTINUE endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_CONTINUE("sess_1")).toBe(
-        "/api/v1/agent/sessions/sess_1/continue"
-      );
-    });
   });
 
   describe("EMBEDDINGS", () => {

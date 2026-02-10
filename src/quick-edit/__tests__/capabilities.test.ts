@@ -41,25 +41,12 @@ describe("evaluateQuickEditReadiness", () => {
     );
   });
 
-  it("no longer checks mcpEnabled - tools are always available", async () => {
-    // mcpEnabled setting is deprecated - internal tools always work
-    const plugin = createPlugin({ mcpEnabled: false } as any);
+  it("ignores unrelated settings and still reports ready", async () => {
+    const plugin = createPlugin({ debugMode: true } as any);
     const file = createFile("Docs/Example.md");
 
     const result = await evaluateQuickEditReadiness({ plugin, file });
 
-    // Should pass - no mcp-disabled error
-    expect(result.ok).toBe(true);
-  });
-
-  it("no longer checks mcpEnabledTools - all internal tools available", async () => {
-    // mcpEnabledTools setting is deprecated - internal tools always work
-    const plugin = createPlugin({ mcpEnabledTools: [] } as any);
-    const file = createFile("Docs/Example.md");
-
-    const result = await evaluateQuickEditReadiness({ plugin, file });
-
-    // Should pass - no missing-tools error
     expect(result.ok).toBe(true);
   });
 

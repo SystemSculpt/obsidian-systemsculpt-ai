@@ -587,17 +587,13 @@ export class ChatStorageService {
 
         // Determine result shape
         let reconstructedResult: ToolCallResult;
-        let reconstructedState: 'completed' | 'failed' | 'denied' = 'completed';
+        let reconstructedState: 'completed' | 'failed' = 'completed';
 
         if (parsed && typeof parsed === 'object' && parsed.error) {
           // Error object present
           const errorObj = parsed.error;
           const code = String(errorObj.code || 'EXECUTION_FAILED');
-          if (code === 'USER_DENIED') {
-            reconstructedState = 'denied';
-          } else {
-            reconstructedState = 'failed';
-          }
+          reconstructedState = 'failed';
           reconstructedResult = {
             success: false,
             error: {
@@ -651,7 +647,6 @@ export class ChatStorageService {
               state: reconstructedState,
               timestamp: Date.now(),
               result: reconstructedResult,
-              autoApproved: false,
             };
             toolCalls.push(newToolCall);
           }
@@ -1315,6 +1310,13 @@ export class ChatStorageService {
     messageId: string
   ): ToolCall[] {
     if (!toolCalls) return [];
+    const normalizeToolState = (state: unknown): ToolCall["state"] => {
+      if (state === "executing" || state === "completed" || state === "failed") {
+        return state;
+      }
+      return "completed";
+    };
+
     return toolCalls.map((tc) => {
       // It's already in the new format if it has a `request` object.
       if (tc.request?.function) {
@@ -1322,6 +1324,7 @@ export class ChatStorageService {
         if (tc.result && tc.result.success === undefined) {
           tc.result = { success: true, data: tc.result };
         }
+        tc.state = normalizeToolState(tc.state);
         return tc as ToolCall;
       }
 
@@ -1345,9 +1348,8 @@ export class ChatStorageService {
             type: tc.type,
             function: tc.function,
           },
-          state: tc.state || "completed",
+          state: normalizeToolState(tc.state),
           timestamp: tc.timestamp || Date.now(),
-          autoApproved: tc.autoApproved || false,
           result: standardizedResult,
         } as ToolCall;
       }

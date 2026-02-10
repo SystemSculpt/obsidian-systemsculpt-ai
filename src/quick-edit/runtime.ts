@@ -53,7 +53,7 @@ export function createQuickEditRuntime(app: App, plugin: SystemSculptPlugin): Qu
 
     const executeOne = (call: ToolCallRequest) =>
       new Promise<ToolCall>((resolve, reject) => {
-        const toolCall = manager.createToolCall(call, messageId, true);
+        const toolCall = manager.createToolCall(call, messageId);
         if (!toolCall) {
           reject(new Error("Unable to create tool call"));
           return;
@@ -69,7 +69,7 @@ export function createQuickEditRuntime(app: App, plugin: SystemSculptPlugin): Qu
 
         const handleCompleted = ({ toolCall: executed }: { toolCall: ToolCall }) => {
           if (executed.id !== toolCall.id) return;
-          cleanup([offCompleted, offFailed, offDenied]);
+          cleanup([offCompleted, offFailed]);
           resolve(executed);
         };
 
@@ -81,19 +81,12 @@ export function createQuickEditRuntime(app: App, plugin: SystemSculptPlugin): Qu
           error?: { message?: string };
         }) => {
           if (failed.id !== toolCall.id) return;
-          cleanup([offCompleted, offFailed, offDenied]);
+          cleanup([offCompleted, offFailed]);
           reject(new Error(error?.message || "Tool execution failed"));
-        };
-
-        const handleDenied = ({ toolCallId }: { toolCallId: string }) => {
-          if (toolCallId !== toolCall.id) return;
-          cleanup([offCompleted, offFailed, offDenied]);
-          reject(new Error("Tool call denied"));
         };
 
         const offCompleted = manager.on("tool-call:execution-completed", handleCompleted);
         const offFailed = manager.on("tool-call:execution-failed", handleFailed);
-        const offDenied = manager.on("tool-call:denied", handleDenied);
       });
 
     const results: ToolCall[] = [];

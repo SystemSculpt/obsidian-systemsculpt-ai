@@ -35,7 +35,7 @@ const createToolCall = (overrides: Partial<ToolCall> = {}): ToolCall => {
         arguments: JSON.stringify({ patterns: ["private func configureAudioDevice"] }),
       },
     },
-    state: "pending",
+    state: "executing",
     timestamp: Date.now(),
   } as ToolCall;
 
@@ -87,8 +87,8 @@ describe("ToolCallTreeRenderer – tree layout", () => {
   test("renders search tool calls with exploring header and updates on completion", () => {
     const { renderer, messageEl } = setupRenderer();
 
-    const pendingCall = createToolCall({ state: "pending" });
-    const line = renderer.renderToolCallAsContent(messageEl, pendingCall, 0, null, "part-1", false);
+    const executingCall = createToolCall({ state: "executing" });
+    const line = renderer.renderToolCallAsContent(messageEl, executingCall, 0, null, "part-1", false);
 
     expect(line).toBeInstanceOf(HTMLElement);
     expect(line?.classList.contains("systemsculpt-chat-structured-line")).toBe(true);
@@ -144,7 +144,7 @@ describe("ToolCallTreeRenderer – tree layout", () => {
     renderer.renderToolCallAsContent(messageEl, scopedCall, 0, null, "part-scoped", false);
 
     expect(getLineTexts(messageEl)).toEqual([
-      "Searched omni in Guides",
+      "Searched omni in Docs/Guides",
     ]);
   });
 
@@ -199,7 +199,7 @@ test("aggregates browse folder calls into a single visible line", () => {
   renderer.renderToolCallAsContent(messageEl, secondBrowse, 1, browseAnchor, "part-browse-2", false);
 
   expect(getLinePrefixes(messageEl)).toEqual(["└──"]);
-  expect(getLineTexts(messageEl)).toEqual(["Browsed src, guides"]);
+  expect(getLineTexts(messageEl)).toEqual(["Browsed src, docs/guides"]);
 
   const lines = Array.from(messageEl.querySelectorAll<HTMLElement>(".systemsculpt-chat-structured-line"));
   expect(lines).toHaveLength(2);
@@ -257,7 +257,7 @@ test("aggregated browse details persist around other tool types", () => {
 
   expect(getLinePrefixes(messageEl)).toEqual(["├──", "└──"]);
   expect(getLineTexts(messageEl)).toEqual([
-    "Browsed components, utils",
+    "Browsed src/components, src/utils",
     "Searched configureAudioDevice",
   ]);
 
@@ -341,9 +341,9 @@ test("search tool details render comma separated terms", () => {
     renderer.renderToolCallAsContent(messageEl, rename, 2, null, "part-rename", false);
 
     expect(getLineTexts(messageEl)).toEqual([
-      "Moved 1 item to 2025",
-      "Deleted todo.md",
-      "Renamed todo.md → tasks.md",
+      "Moving src/alpha.md -> archive/2025",
+      "Moving to trash notes/todo.md",
+      "Renaming notes/todo.md -> notes/tasks.md",
     ]);
   });
 
@@ -365,7 +365,7 @@ test("search tool details render comma separated terms", () => {
     const line = renderer.renderToolCallAsContent(messageEl, executingEdit, 0, null, "part-3", false);
 
     expect(getHeader(messageEl)?.textContent).toBe("Changing");
-    expect(getLineTexts(messageEl)).toEqual(["Edited todo_list.md"]);
+    expect(getLineTexts(messageEl)).toEqual(["Editing file todo_list.md (1 change block)"]);
 
     const failedEdit = {
       ...executingEdit,
@@ -378,4 +378,57 @@ test("search tool details render comma separated terms", () => {
   });
 
   // Approval UI coverage lives in the approval panel tests.
+
+  test("inline status reflects executing state", () => {
+    const { renderer } = setupRenderer();
+    const container = document.createElement("div");
+
+    renderer.renderToolCallInline(
+      container,
+      createToolCall({
+        state: "executing",
+        request: {
+          id: "call-executing",
+          type: "function",
+          function: {
+            name: "mcp-filesystem_write",
+            arguments: JSON.stringify({ path: "notes/todo.md", content: "x" }),
+          },
+        },
+      }),
+      0
+    );
+
+    const status = container.querySelector<HTMLElement>(".systemsculpt-inline-tool-status");
+    expect(status?.textContent?.trim()).toBe("Running");
+  });
+
+  test("does not render local approval actions for executing destructive tools", () => {
+    const { renderer, messageEl } = setupRenderer();
+
+    const line = renderer.renderToolCallAsContent(
+      messageEl,
+      createToolCall({
+        state: "executing",
+        request: {
+          id: "call-approval-copy",
+          type: "function",
+          function: {
+            name: "mcp-filesystem_write",
+            arguments: JSON.stringify({ path: "notes/todo.md", content: "new text" }),
+          },
+        },
+      }),
+      0,
+      null,
+      "part-approval-copy",
+      false
+    );
+
+    const labels = getLineActionButtons(line).map((btn) => btn.textContent?.trim());
+    expect(labels).toEqual([]);
+
+    const helper = line.querySelector<HTMLElement>(".systemsculpt-approval-helper");
+    expect(helper).toBeNull();
+  });
 });

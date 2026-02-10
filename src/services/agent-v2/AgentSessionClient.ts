@@ -1,4 +1,3 @@
-import { AgentTurnStateMachine } from "./AgentTurnStateMachine";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../../constants/api";
 import { normalizePiTools } from "./PiToolAdapter";
 
@@ -11,15 +10,6 @@ export type AgentSessionRequest = {
 };
 
 export type AgentSessionRequestFn = (input: AgentSessionRequest) => Promise<Response>;
-
-type ToolResultPayload = {
-  role: "toolResult";
-  toolCallId: string;
-  toolName: string;
-  content: Array<{ type: "text"; text: string }>;
-  isError: boolean;
-  timestamp: number;
-};
 
 type ApiLikeMessage = {
   role?: unknown;
@@ -46,8 +36,6 @@ type StartOrContinueArgs = {
 
 type ChatSessionState = {
   sessionId: string;
-  machine: AgentTurnStateMachine;
-  submittedToolResultIds: Set<string>;
 };
 
 function parseToolMessageContent(content: unknown): { ok: boolean; output?: unknown; error?: unknown } {
@@ -132,26 +120,6 @@ export class AgentSessionClient {
     this.licenseKey = next.licenseKey;
   }
 
-  public markWaitingForTools(chatId: string, toolCallIds: string[]): void {
-    const state = this.sessionByChatId.get(chatId);
-    if (!state) return;
-
-    state.machine.markWaitingForTools(toolCallIds);
-    state.submittedToolResultIds.clear();
-  }
-
-  public markTurnCompleted(chatId: string): void {
-    const state = this.sessionByChatId.get(chatId);
-    if (!state) return;
-    state.machine.markCompleted();
-  }
-
-  public markTurnErrored(chatId: string): void {
-    const state = this.sessionByChatId.get(chatId);
-    if (!state) return;
-    state.machine.markError();
-  }
-
   public clearSession(chatId: string): void {
     this.sessionByChatId.delete(chatId);
   }
@@ -160,48 +128,6 @@ export class AgentSessionClient {
     const pluginVersion = this.normalizePluginVersion(args.pluginVersion);
     const session = await this.ensureSession(args.chatId, args.modelId, pluginVersion);
     const sessionId = session.sessionId;
-
-    if (session.machine.isWaitingForTools()) {
-      const pendingToolCallIds = session.machine.getPendingToolCallIds();
-      const toolResults = this.extractToolResultsFromMessages(
-        args.messages,
-        pendingToolCallIds,
-        session.submittedToolResultIds
-      );
-
-      if (toolResults.length === 0) {
-        throw new Error("No tool results available for pending tool calls.");
-      }
-
-      const toolResultsResponse = await this.requestFn({
-        url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TOOL_RESULTS(sessionId)),
-        method: "POST",
-        headers: { "x-plugin-version": pluginVersion },
-        body: { toolResults },
-      });
-      if (!toolResultsResponse.ok) {
-        throw await this.httpError("submit tool results", toolResultsResponse);
-      }
-
-      toolResults.forEach((result) => session.submittedToolResultIds.add(result.toolCallId));
-      session.machine.markToolResultsSubmitted();
-
-      const continueResponse = await this.requestFn({
-        url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_CONTINUE(sessionId)),
-        method: "POST",
-        headers: { "x-plugin-version": pluginVersion },
-        body: { stream: true },
-        stream: true,
-      });
-      if (!continueResponse.ok) {
-        throw await this.httpError("continue agent turn", continueResponse);
-      }
-
-      return continueResponse;
-    }
-
-    session.machine.startTurn(sessionId);
-    session.submittedToolResultIds.clear();
 
     const turnResponse = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS(sessionId)),
@@ -254,8 +180,6 @@ export class AgentSessionClient {
 
     const state: ChatSessionState = {
       sessionId,
-      machine: new AgentTurnStateMachine(),
-      submittedToolResultIds: new Set<string>(),
     };
 
     this.sessionByChatId.set(chatId, state);
@@ -275,53 +199,6 @@ export class AgentSessionClient {
     } catch {}
 
     return new Error(`Failed to ${action}: ${status}${detail}`);
-  }
-
-  private extractToolResultsFromMessages(
-    messages: unknown[],
-    pendingToolCallIds: string[],
-    submittedToolResultIds: Set<string>
-  ): ToolResultPayload[] {
-    const pendingSet = new Set(pendingToolCallIds);
-    const toolNameByCallId = new Map<string, string>();
-
-    for (const raw of messages) {
-      const message = (raw || {}) as ApiLikeMessage;
-      if (asString(message.role) !== "assistant") continue;
-      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-      for (const call of toolCalls) {
-        const id = asString(call?.id);
-        const name = asString(call?.function?.name);
-        if (!id || !name) continue;
-        toolNameByCallId.set(id, name);
-      }
-    }
-
-    const results: ToolResultPayload[] = [];
-    for (const raw of messages) {
-      const message = (raw || {}) as ApiLikeMessage;
-      if (asString(message.role) !== "tool") continue;
-
-      const toolCallId = asString(message.tool_call_id);
-      if (!toolCallId || !pendingSet.has(toolCallId)) continue;
-      if (submittedToolResultIds.has(toolCallId)) continue;
-
-      const parsed = parseToolMessageContent(message.content);
-      const textPayload = parsed.ok
-        ? toText(typeof parsed.output === "undefined" ? {} : parsed.output)
-        : toText({ error: parsed.error ?? "Tool execution failed" });
-
-      results.push({
-        role: "toolResult",
-        toolCallId,
-        toolName: asString(message.name) || toolNameByCallId.get(toolCallId) || "tool",
-        content: [{ type: "text", text: textPayload || "{}" }],
-        isError: !parsed.ok,
-        timestamp: this.resolveTimestamp(message.timestamp),
-      });
-    }
-
-    return results;
   }
 
   private buildPiContext(messages: unknown[], tools: unknown[], modelId: string): Record<string, unknown> {

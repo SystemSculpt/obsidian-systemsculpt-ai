@@ -5,26 +5,12 @@
   -webkit-user-select: text;
 }
 
-.systemsculpt-tool-call-group[data-group-status="denied"] .systemsculpt-chat-structured-title {
-  color: var(--color-orange);
-  user-select: text;
-  -webkit-user-select: text;
-}
-
 .systemsculpt-tool-call-group .systemsculpt-chat-structured-bullet.is-failed {
   color: var(--color-red);
 }
 
-.systemsculpt-tool-call-group .systemsculpt-chat-structured-bullet.is-denied {
-  color: var(--color-orange);
-}
-
 .systemsculpt-tool-call-group .systemsculpt-chat-structured-line[data-state="failed"] {
   color: var(--color-red);
-}
-
-.systemsculpt-tool-call-group .systemsculpt-chat-structured-line[data-state="denied"] {
-  color: var(--color-orange);
 }
 
 /* Token badge for inline tool call display (legacy support) */
@@ -54,7 +40,7 @@
 
 .systemsculpt-tool-call-content-info {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
@@ -66,9 +52,10 @@
   font-size: var(--font-ui-smaller);
   flex-shrink: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .systemsculpt-tool-call-content-stats {
@@ -79,6 +66,7 @@
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .systemsculpt-tool-call-content-body {

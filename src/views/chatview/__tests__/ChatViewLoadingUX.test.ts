@@ -25,9 +25,7 @@ describe("ChatView loading UX", () => {
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
         customProviders: [],
-        mcpEnabled: false,
         mcpServers: [],
-        mcpAutoAcceptTools: [],
       },
     };
 

@@ -47,7 +47,6 @@ const createPluginStub = () => {
       titleGenerationPromptPath: "",
       postProcessingPromptType: "summary",
       postProcessingPromptFilePath: "",
-      mcpEnabled: false,
       embeddingsEnabled: false,
       enableSystemSculptProvider: false,
       useSystemSculptAsFallback: false,

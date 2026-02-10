@@ -15,6 +15,8 @@ export interface InlineBlockOptions {
   isStreaming: boolean;
   title: string;
   icon?: string;
+  statusText?: string;
+  statusState?: string;
 }
 
 const DEFAULT_ICONS: Record<InlineBlockType, string> = {
@@ -26,7 +28,7 @@ const DEFAULT_ICONS: Record<InlineBlockType, string> = {
  * Creates an inline collapsible block element.
  */
 export function createInlineBlock(options: InlineBlockOptions): HTMLElement {
-  const { type, partId, isStreaming, title, icon } = options;
+  const { type, partId, isStreaming, title, icon, statusText, statusState } = options;
 
   const wrapper = document.createElement("div");
   wrapper.className = `systemsculpt-inline-collapsible systemsculpt-inline-${type}`;
@@ -47,6 +49,13 @@ export function createInlineBlock(options: InlineBlockOptions): HTMLElement {
   // Title
   const titleEl = header.createDiv({ cls: "systemsculpt-inline-collapsible-title" });
   titleEl.textContent = title;
+
+  // Optional status chip
+  if (statusText) {
+    const statusEl = header.createDiv({ cls: "systemsculpt-inline-collapsible-status" });
+    statusEl.textContent = statusText;
+    applyStatusStateClass(statusEl, statusState);
+  }
 
   // Chevron
   const chevronEl = header.createDiv({ cls: "systemsculpt-inline-collapsible-chevron" });
@@ -112,6 +121,49 @@ export function setTitle(block: HTMLElement, title: string): void {
   const titleEl = block.querySelector(".systemsculpt-inline-collapsible-title");
   if (titleEl) {
     titleEl.textContent = title;
+  }
+}
+
+/**
+ * Updates the status chip text of an inline block.
+ */
+export function setStatus(block: HTMLElement, statusText?: string, statusState?: string): void {
+  let statusEl = block.querySelector(".systemsculpt-inline-collapsible-status") as HTMLElement | null;
+  if (!statusText) {
+    statusEl?.remove();
+    return;
+  }
+
+  if (!statusEl) {
+    const header = block.querySelector(".systemsculpt-inline-collapsible-header") as HTMLElement | null;
+    const chevron = block.querySelector(".systemsculpt-inline-collapsible-chevron");
+    if (!header) return;
+    statusEl = document.createElement("div");
+    statusEl.className = "systemsculpt-inline-collapsible-status";
+    if (chevron) {
+      header.insertBefore(statusEl, chevron);
+    } else {
+      header.appendChild(statusEl);
+    }
+  }
+  statusEl.textContent = statusText;
+  applyStatusStateClass(statusEl, statusState);
+}
+
+function applyStatusStateClass(statusEl: HTMLElement, statusState?: string): void {
+  statusEl.classList.remove("is-pending", "is-success", "is-error");
+  switch (statusState) {
+    case "executing":
+      statusEl.classList.add("is-pending");
+      break;
+    case "completed":
+      statusEl.classList.add("is-success");
+      break;
+    case "failed":
+      statusEl.classList.add("is-error");
+      break;
+    default:
+      break;
   }
 }
 

@@ -198,7 +198,7 @@ describe("AgentSessionClient", () => {
     });
   });
 
-  it("submits pending tool results and continues the turn", async () => {
+  it("always starts PI turns directly without local tool-results continuation choreography", async () => {
     const records: RequestRecord[] = [];
     const { client } = createClient(records);
 
@@ -209,8 +209,6 @@ describe("AgentSessionClient", () => {
       messages: [{ role: "user", content: "hello" }],
       tools: [],
     });
-
-    client.markWaitingForTools("chat_1", ["call_1"]);
 
     await client.startOrContinueTurn({
       chatId: "chat_1",
@@ -223,25 +221,11 @@ describe("AgentSessionClient", () => {
       tools: [],
     });
 
-    const urls = records.map((record) => record.url);
-    expect(urls).toContain("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/tool-results");
-    expect(urls).toContain("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/continue");
-
-    const submit = records.find((record) => record.url.endsWith("/tool-results"));
-    expect(submit?.body).toEqual({
-      toolResults: [
-        {
-          role: "toolResult",
-          toolCallId: "call_1",
-          toolName: "read",
-          content: [{ type: "text", text: "{\"ok\":true}" }],
-          isError: false,
-          timestamp: expect.any(Number),
-        },
-      ],
-    });
-    const continueRequest = records.find((record) => record.url.endsWith("/continue"));
-    expect(continueRequest?.headers?.["x-plugin-version"]).toBe("4.8.1");
+    expect(records).toHaveLength(3);
+    expect(records[0].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions");
+    expect(records[1].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/turns");
+    expect(records[2].url).toBe("https://api.systemsculpt.com/api/v1/agent/sessions/sess_abc123/turns");
+    expect(records[2].headers?.["x-plugin-version"]).toBe("4.8.1");
   });
 
   it("throws when the agent sessions endpoint is unavailable and never calls legacy completions", async () => {

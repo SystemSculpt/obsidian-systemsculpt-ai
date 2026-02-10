@@ -115,10 +115,8 @@ export function mapAssistantToolCallsForApi(rawToolCalls: any[]): any[] {
         "state",
         "messageId",
         "timestamp",
-        "approvedAt",
         "executionStartedAt",
         "executionCompletedAt",
-        "autoApproved",
         "serverId",
         "index",
       ]);
@@ -257,11 +255,6 @@ export function buildToolResultMessagesFromToolCalls(toolCalls: any[]): ChatMess
       toolContent = safeStringify(
         { error: result?.error || { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' } },
         JSON.stringify({ error: { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' } })
-      );
-    } else if (state === 'denied') {
-      toolContent = safeStringify(
-        { error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } },
-        JSON.stringify({ error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } })
       );
     } else {
       continue;

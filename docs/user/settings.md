@@ -28,7 +28,7 @@ Chat experience defaults:
 
 - Chat UI preferences and defaults (where available)
 - Default chat tag applied to new chat history notes (frontmatter `tags`)
-- Agent Mode safety approvals and allowlist
+- Agent Mode behavior and indicators
 - Favorite models and quick picks
 - Template selection and insertion behavior
 

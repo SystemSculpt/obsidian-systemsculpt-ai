@@ -252,6 +252,35 @@
   text-overflow: ellipsis;
 }
 
+.systemsculpt-inline-collapsible-status {
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+  color: var(--text-faint);
+  background: color-mix(in srgb, rgb(var(--background-modifier-border-rgb)) 50%, var(--ss-layer-base));
+  padding: 2px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.systemsculpt-inline-collapsible-status:empty {
+  display: none;
+}
+
+.systemsculpt-inline-collapsible-status.is-pending {
+  color: var(--text-muted);
+}
+
+.systemsculpt-inline-collapsible-status.is-success {
+  color: var(--color-green);
+  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 12%, var(--ss-layer-base));
+}
+
+.systemsculpt-inline-collapsible-status.is-error {
+  color: var(--color-red);
+  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 12%, var(--ss-layer-base));
+}
+
 .systemsculpt-inline-collapsible-chevron {
   width: 12px;
   height: 12px;
@@ -371,9 +400,11 @@
 
 .systemsculpt-inline-tool-summary {
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1 1 220px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .systemsculpt-inline-tool-error {

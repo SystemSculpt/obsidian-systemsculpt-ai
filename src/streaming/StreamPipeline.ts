@@ -380,6 +380,15 @@ export class StreamPipeline {
         break;
       }
       case "done": {
+        const reason =
+          typeof parsed.reason === "string"
+            ? parsed.reason
+            : typeof parsed?.message?.stopReason === "string"
+              ? parsed.message.stopReason
+              : "";
+        if (reason.length > 0) {
+          events.push({ type: "meta", key: "stop-reason", value: reason });
+        }
         done = true;
         if (!this.shouldParsePiDoneMessage()) {
           break;

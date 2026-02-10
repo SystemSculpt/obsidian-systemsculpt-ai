@@ -415,9 +415,11 @@ describe("countToolResultTokens", () => {
     expect(countToolResultTokens(undefined)).toBe(0);
   });
 
-  it("returns 0 for pending state", () => {
+  it("returns 0 for non-terminal states", () => {
     const toolCall = { state: "pending" };
     expect(countToolResultTokens(toolCall)).toBe(0);
+    expect(countToolResultTokens({ state: "approved" })).toBe(0);
+    expect(countToolResultTokens({ state: "denied" })).toBe(0);
   });
 
   it("counts completed successful result", () => {
@@ -443,12 +445,6 @@ describe("countToolResultTokens", () => {
       state: "failed",
       result: { success: false, error: { code: "ERR", message: "Failed" } },
     };
-    const tokens = countToolResultTokens(toolCall);
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("counts denied result", () => {
-    const toolCall = { state: "denied" };
     const tokens = countToolResultTokens(toolCall);
     expect(tokens).toBeGreaterThan(0);
   });

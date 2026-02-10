@@ -311,8 +311,6 @@ export function countToolResultTokens(toolCall: any): number {
     } else if (state === 'failed' || (state === 'completed' && !result?.success)) {
       const errorObj = result?.error || { code: 'EXECUTION_FAILED', message: 'Tool execution failed without a specific error.' };
       contentToSend = JSON.stringify({ error: errorObj });
-    } else if (state === 'denied') {
-      contentToSend = JSON.stringify({ error: { code: 'USER_DENIED', message: 'The user has explicitly denied this tool call request.' } });
     } else {
       // Non-terminal or unknown state contributes nothing yet
       return 0;

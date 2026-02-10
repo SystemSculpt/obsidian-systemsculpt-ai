@@ -389,7 +389,7 @@ describe("buildToolResultMessagesFromToolCalls", () => {
     expect(result[0].content).toContain("Failed");
   });
 
-  it("builds error message for denied tool call", () => {
+  it("skips unsupported legacy tool states", () => {
     const toolCalls = [
       {
         id: "call_123",
@@ -397,7 +397,7 @@ describe("buildToolResultMessagesFromToolCalls", () => {
       },
     ];
     const result = buildToolResultMessagesFromToolCalls(toolCalls);
-    expect(result[0].content).toContain("USER_DENIED");
+    expect(result).toHaveLength(0);
   });
 
   it("skips pending tool calls", () => {

@@ -355,7 +355,7 @@ export const uiSetup = {
       // Find the message element and re-render its parts
       const messageEl = chatView.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement;
       if (messageEl) {
-      // Batch approver overlay removed; pending lines always visible in tree
+      // Tool call lines are always rendered inline in the tree.
 
         // Targeted re-render with non-streaming flag
         const partList = chatView.messageRenderer.normalizeMessageToParts(message);

@@ -22,7 +22,6 @@ const createManager = (settings: Record<string, unknown> = {}) => {
 
   const chatView = {
     agentMode: true,
-    trustedToolNames: new Set<string>(),
     plugin: {
       settings: { ...baseSettings, ...settings },
     },
@@ -32,7 +31,7 @@ const createManager = (settings: Record<string, unknown> = {}) => {
   return manager;
 };
 
-describe("ToolCallManager auto-approval policy", () => {
+describe("ToolCallManager PI-managed execution lifecycle", () => {
   const createRequest = (name: string): ToolCallRequest => ({
     id: `${name}-id`,
     type: "function",
@@ -42,121 +41,43 @@ describe("ToolCallManager auto-approval policy", () => {
     },
   });
 
-  test("read-only filesystem tools are auto-approved", () => {
-    const manager = createManager();
-
-    // Read-only tools - auto-approved
-    expect(manager.shouldAutoApprove("mcp-filesystem_search")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_read")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_find")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_list_items")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_context")).toBe(true);
-    expect(manager.shouldAutoApprove("read")).toBe(true);
-    expect(manager.shouldAutoApprove("find")).toBe(true);
-    expect(manager.shouldAutoApprove("grep")).toBe(true);
-    expect(manager.shouldAutoApprove("ls")).toBe(true);
-  });
-
-  test("destructive filesystem tools require approval", () => {
-    const manager = createManager();
-
-    // Destructive tools - require approval (return false)
-    expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(false);
-    expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(false);
-    expect(manager.shouldAutoApprove("mcp-filesystem_move")).toBe(false);
-    expect(manager.shouldAutoApprove("mcp-filesystem_trash")).toBe(false);
-    expect(manager.shouldAutoApprove("write")).toBe(false);
-    expect(manager.shouldAutoApprove("edit")).toBe(false);
-    expect(manager.shouldAutoApprove("move")).toBe(false);
-    expect(manager.shouldAutoApprove("trash")).toBe(false);
-  });
-
-  test("destructive filesystem tools can auto-approve when confirmations are disabled", () => {
-    const manager = createManager({ toolingRequireApprovalForDestructiveTools: false });
-
-    expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(true);
-    expect(manager.shouldAutoApprove("write")).toBe(true);
-    expect(manager.shouldAutoApprove("edit")).toBe(true);
-  });
-
-  test("allowlisted mutating tools auto-approve", () => {
-    const manager = createManager({ mcpAutoAcceptTools: ["mcp-filesystem:write"] });
-
-    expect(manager.shouldAutoApprove("mcp-filesystem_write")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-filesystem_edit")).toBe(false);
-    expect(manager.shouldAutoApprove("write")).toBe(true);
-    expect(manager.shouldAutoApprove("edit")).toBe(false);
-  });
-
-  test("external MCP server tools require approval", () => {
-    const manager = createManager();
-
-    // External MCP server tools - require approval
-    expect(manager.shouldAutoApprove("mcp-shell_run_command")).toBe(false);
-    expect(manager.shouldAutoApprove("mcp-shell_execute")).toBe(false);
-    expect(manager.shouldAutoApprove("mcp-custom_anything")).toBe(false);
-  });
-
-  test("youtube tools are auto-approved (read-only)", () => {
-    const manager = createManager();
-
-    // YouTube is read-only, auto-approved
-    expect(manager.shouldAutoApprove("mcp-youtube_transcript")).toBe(true);
-    expect(manager.shouldAutoApprove("mcp-youtube_metadata")).toBe(true);
-  });
-
-  test("destructive tool calls start in pending state", () => {
+  test("tool calls enter execution immediately without local approval", () => {
     const manager = createManager();
     const request = createRequest("mcp-filesystem_write");
 
-    const toolCall = manager.createToolCall(request, "message-1", manager.shouldAutoApprove(request.function.name));
+    const toolCall = manager.createToolCall(request, "message-1");
 
-    // Should be pending, waiting for user approval
-    expect(toolCall.state).toBe("pending");
-    expect(toolCall.autoApproved).toBe(false);
+    expect(toolCall.state === "executing" || toolCall.state === "failed").toBe(true);
   });
 
-  test("canonical destructive aliases start in pending state", () => {
+  test("canonical aliases also execute immediately", () => {
     const manager = createManager();
     const request = createRequest("write");
 
-    const toolCall = manager.createToolCall(request, "message-1", manager.shouldAutoApprove(request.function.name));
+    const toolCall = manager.createToolCall(request, "message-1");
 
-    expect(toolCall.state).toBe("pending");
-    expect(toolCall.autoApproved).toBe(false);
-  });
-
-  test("read-only tool calls execute immediately", () => {
-    const manager = createManager();
-    const request = createRequest("mcp-filesystem_read");
-
-    const toolCall = manager.createToolCall(request, "message-1", manager.shouldAutoApprove(request.function.name));
-
-    // Should go straight to executing
-    expect(toolCall.state).toBe("executing");
-    expect(toolCall.autoApproved).toBe(true);
+    expect(toolCall.state === "executing" || toolCall.state === "failed").toBe(true);
   });
 
   test("fails tools when custom server is explicitly disabled", () => {
     const manager = createManager({
-      mcpServers: [{ id: "mcp-custom", name: "Custom", transport: "http", isEnabled: false }]
+      mcpServers: [{ id: "mcp-custom", name: "Custom", transport: "http", isEnabled: false }],
     });
     const request = createRequest("mcp-custom_write");
 
-    const toolCall = manager.createToolCall(request, "message-2", true);
+    const toolCall = manager.createToolCall(request, "message-2");
 
     expect(toolCall.state).toBe("failed");
     expect(toolCall.result?.error?.code).toBe("MCP_SERVER_DISABLED");
   });
 
-  test("custom server tools work when server is enabled", () => {
+  test("custom server tools are available when server is enabled", () => {
     const manager = createManager({
-      mcpServers: [{ id: "mcp-custom", name: "Custom", transport: "http", isEnabled: true }]
+      mcpServers: [{ id: "mcp-custom", name: "Custom", transport: "http", isEnabled: true }],
     });
     const request = createRequest("mcp-custom_search");
 
-    const toolCall = manager.createToolCall(request, "message-3", true);
+    const toolCall = manager.createToolCall(request, "message-3");
 
     expect(toolCall.state).not.toBe("failed");
   });
@@ -165,9 +86,8 @@ describe("ToolCallManager auto-approval policy", () => {
     const manager = createManager({});
     const request = createRequest("mcp-filesystem_write");
 
-    const toolCall = manager.createToolCall(request, "message-4", true);
+    const toolCall = manager.createToolCall(request, "message-4");
 
-    expect(toolCall.state).toBe("executing");
-    expect(toolCall.autoApproved).toBe(true);
+    expect(toolCall.state).not.toBe("failed");
   });
 });

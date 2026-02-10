@@ -57,7 +57,6 @@
 @import 'components/tool-call-ui.css';  /* Enhanced tool call UI components */
 @import 'components/tool-results.css';  /* Enhanced tool call results display */
 @import 'components/tool-states.css';  /* Tool call state transitions and animations */
-@import 'components/tool-approval.css';  /* Tool approval buttons for destructive operations */
 @import 'components/notices.css';
 @import 'components/update-drawer.css';  /* Update notification drawer styling */
 @import 'components/slash-commands.css';  /* Slash command menu styles */

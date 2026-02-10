@@ -35,8 +35,8 @@ const createPluginStub = (app: App) => {
       customProviders: [],
       enableSystemSculptProvider: false,
       mcpServers: [],
-      mcpAutoAcceptTools: [],
-      toolingRequireApprovalForDestructiveTools: true,
+      defaultChatTag: "",
+      respectReducedMotion: true,
       favoriteModels: [],
     },
     modelService: {
@@ -73,8 +73,10 @@ describe("Chat tab native layout", () => {
     await displayChatTabContent(container, tab);
 
     const names = Array.from(container.querySelectorAll('.setting-item .setting-item-name')).map((el) => el.textContent?.trim());
-    expect(names).toContain("Require approval for destructive tools");
-    expect(names).toContain("Auto-approve tool list");
+    expect(names).toContain("Default system prompt");
+    expect(names).toContain("Default chat tag");
+    expect(names).toContain("Default Chat Font Size");
+    expect(names).toContain("Honor OS Reduced Motion");
     expect(names).toContain("Favorite models");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });

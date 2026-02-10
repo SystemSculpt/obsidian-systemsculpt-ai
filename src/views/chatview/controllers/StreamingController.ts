@@ -55,7 +55,7 @@ export class StreamingController extends Component {
     seedParts?: MessagePart[],
     externalTracker?: StreamingMetricsTracker,
     skipIndicatorLifecycle?: boolean,
-  ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean }> {
+  ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
     const {
       toolCallManager,
       scrollManager,
@@ -84,6 +84,7 @@ export class StreamingController extends Component {
     const emittedToolCalls = new Set<string>();
 
     let webSearchEnabled = initialWebSearchEnabled;
+    let stopReason: string | undefined;
     let collectedAnnotations: Annotation[] = [];
     const collectedReasoningDetails: unknown[] = [];
 
@@ -167,6 +168,9 @@ export class StreamingController extends Component {
               webSearchEnabled = !!event.value;
             } else if (event.key === "inline-footnote" && setStreamingFootnote) {
               setStreamingFootnote(messageEl, String(event.value ?? ""));
+            } else if (event.key === "stop-reason") {
+              const normalized = String(event.value ?? "").trim();
+              stopReason = normalized.length > 0 ? normalized : undefined;
             }
             break;
           }
@@ -249,6 +253,9 @@ export class StreamingController extends Component {
         : extractAnnotations(summary.content);
       assistantMessage.annotations = resolvedAnnotations;
       assistantMessage.webSearchEnabled = webSearchEnabled;
+      if (stopReason) {
+        (assistantMessage as any).stopReason = stopReason;
+      }
 
       const hasRenderableOutput =
         summary.content.trim().length > 0 ||
@@ -302,6 +309,7 @@ export class StreamingController extends Component {
       message: assistantMessage,
       messageEl,
       completed,
+      ...(stopReason ? { stopReason } : {}),
     };
   }
 
@@ -422,8 +430,7 @@ export class StreamingController extends Component {
       },
     };
 
-    const autoApprove = toolCallManager.shouldAutoApprove(request.function.name);
-    const toolCall = toolCallManager.createToolCall(request, messageId, autoApprove);
+    const toolCall = toolCallManager.createToolCall(request, messageId);
     if (!toolCall) {
       try {
         errorLogger.debug("Tool call manager returned null", {

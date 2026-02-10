@@ -17,11 +17,13 @@ import {
   getBlockContent,
   setExpanded,
   setStreaming,
+  setStatus,
   setTitle,
   isUserExpanded,
   type InlineBlockType,
 } from "./renderers/InlineCollapsibleBlock";
 import { formatToolDisplayName } from "../../utils/toolDisplay";
+import { getToolCallStatusText } from "../../utils/toolCallNarrative";
 import { resolveCanonicalToolAlias } from "../../utils/toolPolicy";
 import { MermaidPreviewModal } from "../../modals/MermaidPreviewModal";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LARGE_TEXT_UI, LargeTextHelpers } from "../../constants/largeText";
@@ -81,7 +83,7 @@ export class MessageRenderer extends Component {
     // No periodic drawer cleanup required now that reasoning uses structured layout
   }
 
-  /** Get the tool call manager for accessing approval state */
+  /** Get the tool call manager for tool-call state and rendering integration */
   public getToolCallManager(): ToolCallManager | undefined {
     return this.toolCallManager;
   }
@@ -502,6 +504,7 @@ export class MessageRenderer extends Component {
         if (functionData?.name) {
           setTitle(element, formatToolDisplayName(functionData.name));
         }
+        setStatus(element, getToolCallStatusText(toolCall.state), toolCall.state);
 
         // Re-render content
         const contentContainer = getBlockContent(element);
@@ -596,6 +599,8 @@ export class MessageRenderer extends Component {
       isStreaming,
       title: displayName,
       icon: 'wrench',
+      statusText: getToolCallStatusText(toolCall.state),
+      statusState: toolCall.state,
     });
 
     block.classList.add('systemsculpt-unified-part');

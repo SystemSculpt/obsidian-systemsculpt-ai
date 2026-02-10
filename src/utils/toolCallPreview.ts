@@ -253,11 +253,25 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
   const args = (fn.arguments ?? {}) as Record<string, any>;
 
   if (base === "move") {
+    const destinationFallback =
+      typeof args.destination === "string"
+        ? args.destination
+        : typeof args.target === "string"
+          ? args.target
+          : typeof args.to === "string"
+            ? args.to
+            : typeof args.targetPath === "string"
+              ? args.targetPath
+              : "";
+
     const rawItems = Array.isArray(args.items) ? args.items : [];
     // De-duplicate identical move pairs (source,destination)
     const seen = new Set<string>();
     const items = rawItems
-      .map((it: any) => ({ source: String(it?.source ?? ""), destination: String(it?.destination ?? "") }))
+      .map((it: any) => ({
+        source: String(it?.source ?? it?.path ?? it?.from ?? ""),
+        destination: String(it?.destination ?? destinationFallback ?? ""),
+      }))
       .filter((it: any) => it.source && it.destination)
       .filter((it: any) => {
         const key = `${it.source}\u0000${it.destination}`;
@@ -265,6 +279,18 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
         seen.add(key);
         return true;
       });
+
+    if (items.length === 0 && Array.isArray(args.paths) && destinationFallback) {
+      for (const path of args.paths) {
+        const source = String(path ?? "");
+        if (!source) continue;
+        const key = `${source}\u0000${destinationFallback}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ source, destination: destinationFallback });
+      }
+    }
+
     if (items.length === 0) return null;
     return { type: "move", items };
   }

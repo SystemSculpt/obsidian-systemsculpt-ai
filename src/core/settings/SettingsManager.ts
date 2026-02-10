@@ -122,19 +122,6 @@ export class SettingsManager {
       };
     }
     
-    if (!Array.isArray(migratedSettings.mcpEnabledTools)) {
-      migratedSettings.mcpEnabledTools = DEFAULT_SETTINGS.mcpEnabledTools;
-    }
-    
-    if (!Array.isArray(migratedSettings.mcpAutoAcceptTools)) {
-      migratedSettings.mcpAutoAcceptTools = DEFAULT_SETTINGS.mcpAutoAcceptTools;
-    }
-
-    if (typeof migratedSettings.toolingRequireApprovalForDestructiveTools !== "boolean") {
-      migratedSettings.toolingRequireApprovalForDestructiveTools =
-        DEFAULT_SETTINGS.toolingRequireApprovalForDestructiveTools;
-    }
-
     if ("toolingAutoApproveReadOnly" in migratedSettings) {
       delete (migratedSettings as any).toolingAutoApproveReadOnly;
     }
@@ -329,58 +316,6 @@ export class SettingsManager {
 
     if (!Array.isArray(validatedSettings.favoriteModels)) {
       validatedSettings.favoriteModels = [];
-    }
-
-    // Validate and deduplicate MCP tool arrays
-    if (!Array.isArray(validatedSettings.mcpEnabledTools)) {
-      validatedSettings.mcpEnabledTools = defaultSettings.mcpEnabledTools;
-    } else {
-      const originalLength = validatedSettings.mcpEnabledTools.length;
-      // Deduplicate enabled tools array to fix any existing duplicates
-      validatedSettings.mcpEnabledTools = [...new Set(validatedSettings.mcpEnabledTools)];
-      const deduplicatedLength = validatedSettings.mcpEnabledTools.length;
-      
-      if (originalLength !== deduplicatedLength) {
-      }
-    }
-
-    if (!Array.isArray(validatedSettings.mcpAutoAcceptTools)) {
-      validatedSettings.mcpAutoAcceptTools = defaultSettings.mcpAutoAcceptTools;
-    } else {
-      const originalLength = validatedSettings.mcpAutoAcceptTools.length;
-      // Deduplicate auto-accept tools array to fix any existing duplicates
-      validatedSettings.mcpAutoAcceptTools = [...new Set(validatedSettings.mcpAutoAcceptTools)];
-      const deduplicatedLength = validatedSettings.mcpAutoAcceptTools.length;
-      
-      if (originalLength !== deduplicatedLength) {
-      }
-    }
-
-    if (typeof validatedSettings.toolingRequireApprovalForDestructiveTools !== "boolean") {
-      validatedSettings.toolingRequireApprovalForDestructiveTools =
-        defaultSettings.toolingRequireApprovalForDestructiveTools;
-    }
-
-    const concurrencyRaw = Number(validatedSettings.toolingConcurrencyLimit);
-    if (!Number.isFinite(concurrencyRaw)) {
-      validatedSettings.toolingConcurrencyLimit = defaultSettings.toolingConcurrencyLimit;
-    } else {
-      validatedSettings.toolingConcurrencyLimit = Math.max(1, Math.min(8, Math.floor(concurrencyRaw)));
-    }
-
-    const timeoutRaw = Number(validatedSettings.toolingToolCallTimeoutMs);
-    if (!Number.isFinite(timeoutRaw)) {
-      validatedSettings.toolingToolCallTimeoutMs = defaultSettings.toolingToolCallTimeoutMs;
-    } else {
-      // 0 disables per-tool timeouts; clamp to a sane ceiling.
-      validatedSettings.toolingToolCallTimeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.floor(timeoutRaw)));
-    }
-
-    const maxToolResultsRaw = Number(validatedSettings.toolingMaxToolResultsInContext);
-    if (!Number.isFinite(maxToolResultsRaw)) {
-      validatedSettings.toolingMaxToolResultsInContext = defaultSettings.toolingMaxToolResultsInContext;
-    } else {
-      validatedSettings.toolingMaxToolResultsInContext = Math.max(1, Math.min(50, Math.floor(maxToolResultsRaw)));
     }
 
     // Validate directories - these are critical for proper functioning
@@ -718,24 +653,6 @@ export class SettingsManager {
 
     // Merge new settings into the manager's internal copy
     let updatedSettings = { ...this.settings, ...newSettings };
-    
-    // Deduplicate MCP tool arrays to fix any existing duplicates
-    if (updatedSettings.mcpEnabledTools && Array.isArray(updatedSettings.mcpEnabledTools)) {
-      const originalLength = updatedSettings.mcpEnabledTools.length;
-      updatedSettings.mcpEnabledTools = [...new Set(updatedSettings.mcpEnabledTools)];
-      const deduplicatedLength = updatedSettings.mcpEnabledTools.length;
-      
-      if (originalLength !== deduplicatedLength) {
-      }
-    }
-    if (updatedSettings.mcpAutoAcceptTools && Array.isArray(updatedSettings.mcpAutoAcceptTools)) {
-      const originalLength = updatedSettings.mcpAutoAcceptTools.length;
-      updatedSettings.mcpAutoAcceptTools = [...new Set(updatedSettings.mcpAutoAcceptTools)];
-      const deduplicatedLength = updatedSettings.mcpAutoAcceptTools.length;
-      
-      if (originalLength !== deduplicatedLength) {
-      }
-    }
     
     // Validate the merged settings including phantom tool cleanup
     this.settings = await this.validateSettingsAsync(updatedSettings);

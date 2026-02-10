@@ -65,7 +65,6 @@ export class ChatView extends ItemView {
   public webSearchEnabled: boolean = false;
   public agentMode: boolean = true;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
-  public trustedToolNames: Set<string> = new Set();
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
   private systemPromptService: SystemPromptService;
@@ -1064,7 +1063,6 @@ export class ChatView extends ItemView {
     const promise = (async () => {
       this.chatId = chatId;
       this.isFullyLoaded = false; // Mark as not loaded while loading
-      this.trustedToolNames.clear(); // Clear session trust on chat load
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
 
@@ -1180,35 +1178,6 @@ export class ChatView extends ItemView {
       if (this.activeLoad?.promise === promise) {
         this.activeLoad = null;
       }
-    }
-  }
-
-  /**
-   * Trust a specific tool for the remainder of this chat session.
-   * Also auto-approves any pending tool calls with the same name.
-   */
-  public trustToolForSession(toolName: string): void {
-    this.trustedToolNames.add(toolName);
-    // Auto-approve any pending tool calls with this name
-    if (this.toolCallManager) {
-      const pendingCalls = this.toolCallManager.getPendingToolCalls();
-      for (const tc of pendingCalls) {
-        const tcToolName = tc.request?.function?.name;
-        if (tcToolName === toolName) {
-          this.toolCallManager.approveToolCall(tc.id);
-        }
-      }
-    }
-  }
-
-  /**
-   * Approve all pending tool calls at once.
-   */
-  public approveAllPendingToolCalls(): void {
-    if (!this.toolCallManager) return;
-    const pendingCalls = this.toolCallManager.getPendingToolCalls();
-    for (const tc of pendingCalls) {
-      this.toolCallManager.approveToolCall(tc.id);
     }
   }
 

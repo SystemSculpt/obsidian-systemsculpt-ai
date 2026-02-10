@@ -324,17 +324,6 @@ export interface SystemSculptSettings {
    * Model Context Protocol (MCP) settings
    */
   mcpServers: MCPServer[]; // Custom HTTP servers only - internal servers (filesystem, youtube) are always available
-  mcpEnabledTools: string[]; // @deprecated - No longer used. All tools from internal servers are always available.
-  mcpAutoAcceptTools: string[]; // Array of "serverId:toolName" for mutating tools that auto-accept without confirmation
-  mcpEnabled: boolean; // @deprecated - No longer used. Internal MCP servers are always enabled.
-
-  /**
-   * Tool execution policy for Agent + MCP
-   */
-  toolingRequireApprovalForDestructiveTools: boolean;
-  toolingConcurrencyLimit: number;
-  toolingToolCallTimeoutMs: number;
-  toolingMaxToolResultsInContext: number;
 
   /**
    * Optional tag applied to new chat history notes.
@@ -610,18 +599,10 @@ Raw transcript:`,
 
   /**
    * MCP (Model Context Protocol) defaults
-   * Note: Internal servers (filesystem, youtube) are now hardcoded in MCPService
-   * and are always available. These defaults are kept for backwards compatibility.
+   * Note: Internal servers (filesystem, youtube) are hardcoded in MCPService
+   * and are always available.
    */
   mcpServers: [], // Only custom HTTP servers - internal servers are hardcoded
-  mcpEnabledTools: [], // @deprecated - no longer used, all internal tools always available
-  mcpAutoAcceptTools: [],
-  mcpEnabled: true, // @deprecated - internal MCP is always enabled
-
-  toolingRequireApprovalForDestructiveTools: true,
-  toolingConcurrencyLimit: 3,
-  toolingToolCallTimeoutMs: 30000,
-  toolingMaxToolResultsInContext: 15,
 
   defaultChatTag: "",
   chatFontSize: "medium",

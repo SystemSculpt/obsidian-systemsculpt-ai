@@ -5,14 +5,21 @@ import {
   formatToolDisplayName,
   getFunctionDataFromToolCall,
 } from "../../../utils/toolDisplay";
-import { extractPrimaryPathArg, isMutatingTool, requiresUserApproval, splitToolName } from "../../../utils/toolPolicy";
-import { isWriteOrEditTool, renderOperationsInlinePreview, prepareWriteEditPreview, prepareOperationsPreview } from "../../../utils/toolCallPreview";
-import { DiffViewer } from "../../../components/DiffViewer";
+import { extractPrimaryPathArg, isMutatingTool, splitToolName } from "../../../utils/toolPolicy";
+import {
+  isWriteOrEditTool,
+  renderOperationsInlinePreview,
+  renderWriteEditInlineDiff,
+} from "../../../utils/toolCallPreview";
+import {
+  buildToolCallNarrative,
+  getToolCallStatusText,
+} from "../../../utils/toolCallNarrative";
 import { errorLogger } from "../../../utils/errorLogger";
 import { rebuildTreeConnectors, seedTreeLine, TREE_HEADER_SYMBOL, setBulletSymbol } from "../utils/treeConnectors";
 
 type ActivityType = "explore" | "mutate" | "run";
-type GroupStatus = "active" | "failed" | "denied" | "completed";
+type GroupStatus = "active" | "failed" | "completed";
 
 interface ToolCallGroup {
   messageEl: HTMLElement;
@@ -42,19 +49,16 @@ const ACTIVITY_LABELS: Record<ActivityType, Record<GroupStatus, string>> = {
   explore: {
     active: "Exploring",
     failed: "Exploration Failed",
-    denied: "Exploration Denied",
     completed: "Explored",
   },
   mutate: {
     active: "Changing",
     failed: "Change Failed",
-    denied: "Change Denied",
     completed: "Changed",
   },
   run: {
     active: "Running",
     failed: "Command Failed",
-    denied: "Command Denied",
     completed: "Ran",
   },
 };
@@ -62,7 +66,6 @@ const ACTIVITY_LABELS: Record<ActivityType, Record<GroupStatus, string>> = {
 const BULLET_SYMBOLS: Record<GroupStatus, string> = {
   active: "",
   failed: "x",
-  denied: "!",
   completed: TREE_HEADER_SYMBOL,
 };
 
@@ -74,40 +77,6 @@ export class ToolCallTreeRenderer extends Component {
   constructor(parent: MessageRenderer) {
     super();
     this.parent = parent;
-  }
-
-  /** Get the ToolCallManager from the parent MessageRenderer */
-  private getToolCallManager(): import("../ToolCallManager").ToolCallManager | undefined {
-    return this.parent.getToolCallManager?.();
-  }
-
-  /** Get the ChatView from the ToolCallManager */
-  private getChatView(): any {
-    return this.getToolCallManager()?.["chatView"];
-  }
-
-  /** Get the trusted tool names from the current chat session */
-  private getTrustedToolNames(): Set<string> {
-    return this.getChatView()?.trustedToolNames ?? new Set<string>();
-  }
-
-  private getAutoApproveAllowlist(): string[] {
-    return (this.getChatView()?.plugin?.settings?.mcpAutoAcceptTools || []).slice();
-  }
-
-  private getRequireDestructiveApproval(): boolean {
-    const raw = this.getChatView()?.plugin?.settings?.toolingRequireApprovalForDestructiveTools;
-    return raw !== false;
-  }
-
-  /** Check if a tool call requires user approval */
-  private toolRequiresApproval(toolCall: ToolCall): boolean {
-    const toolName = toolCall.request?.function?.name ?? "";
-    return requiresUserApproval(toolName, {
-      trustedToolNames: this.getTrustedToolNames(),
-      requireDestructiveApproval: this.getRequireDestructiveApproval(),
-      autoApproveAllowlist: this.getAutoApproveAllowlist(),
-    });
   }
 
   /** Get the App instance from the parent MessageRenderer */
@@ -257,88 +226,11 @@ export class ToolCallTreeRenderer extends Component {
       : descriptor.label;
     lineEl.createSpan({ cls: 'systemsculpt-inline-tool-summary', text: summaryText });
 
-    // Approval buttons for pending destructive tool calls
-    const needsApproval = toolCall.state === 'pending' && this.toolRequiresApproval(toolCall);
-    if (needsApproval) {
-      const actionsEl = lineEl.createDiv({ cls: 'systemsculpt-inline-tool-actions' });
-      this.renderApprovalButtons(actionsEl, toolCall);
-
-      // Show preview of changes for pending destructive tools
-      void this.renderApprovalPreview(container, toolCall);
-    }
-
-    // Error message only (if failed/denied)
-    if ((toolCall.state === 'failed' || toolCall.state === 'denied') && toolCall.result?.error) {
+    // Error message only (if failed)
+    if (toolCall.state === 'failed' && toolCall.result?.error) {
       const errorEl = container.createDiv({ cls: 'systemsculpt-inline-tool-error' });
       const errorMsg = toolCall.result.error.message ?? 'Operation failed';
       errorEl.textContent = this.limitText(errorMsg, 80);
-    }
-  }
-
-  /**
-   * Render a preview of what changes will be made for pending destructive tool calls.
-   * Shows diffs for write/edit, and file lists for move/trash.
-   */
-  private async renderApprovalPreview(container: HTMLElement, toolCall: ToolCall): Promise<void> {
-    const fn = getFunctionDataFromToolCall(toolCall);
-    if (!fn) return;
-
-    const { canonicalName } = splitToolName(fn.name);
-    const app = this.getApp();
-
-    // Remove any existing preview to avoid duplicates
-    const existingPreview = container.querySelector('.systemsculpt-approval-preview');
-    existingPreview?.remove();
-
-    const previewContainer = container.createDiv({ cls: 'systemsculpt-approval-preview' });
-
-    try {
-      if (canonicalName === 'write' || canonicalName === 'edit') {
-        // Show diff preview for write/edit
-        if (!app) return;
-        const preview = await prepareWriteEditPreview(app, toolCall);
-        if (!preview || !preview.diff) return;
-
-        const diffContainer = previewContainer.createDiv({ cls: 'systemsculpt-approval-diff' });
-        const viewer = new DiffViewer({
-          container: diffContainer,
-          diffResult: preview.diff,
-          fileName: preview.path,
-          maxContextLines: 3,
-          showLineNumbers: true,
-        });
-        viewer.render();
-
-      } else if (canonicalName === 'move' || canonicalName === 'trash') {
-        // Show file operation preview
-        const preview = prepareOperationsPreview(toolCall);
-        if (!preview) return;
-
-        const opsContainer = previewContainer.createDiv({ cls: 'systemsculpt-approval-ops' });
-        const list = opsContainer.createEl('ul');
-
-        if (preview.type === 'move') {
-          for (const item of preview.items) {
-            const li = list.createEl('li');
-            const srcCode = li.createEl('code', { cls: 'ss-modal__inline-code' });
-            srcCode.textContent = this.prettyPath(item.source);
-            srcCode.setAttribute('title', item.source);
-            li.createSpan({ text: ' → ' });
-            const dstCode = li.createEl('code', { cls: 'ss-modal__inline-code' });
-            dstCode.textContent = this.prettyPath(item.destination);
-            dstCode.setAttribute('title', item.destination);
-          }
-        } else if (preview.type === 'trash') {
-          for (const item of preview.items) {
-            const li = list.createEl('li');
-            const code = li.createEl('code', { cls: 'ss-modal__inline-code' });
-            code.textContent = this.prettyPath(item.path);
-            code.setAttribute('title', item.path);
-          }
-        }
-      }
-    } catch (error) {
-      this.safeLog('approval-preview-error', toolCall, { error });
     }
   }
 
@@ -347,31 +239,20 @@ export class ToolCallTreeRenderer extends Component {
    */
   private updateInlineStatus(statusEl: HTMLElement, state: ToolCall['state'] | undefined): void {
     statusEl.className = 'systemsculpt-inline-tool-status';
+    statusEl.textContent = getToolCallStatusText(state);
 
     switch (state) {
       case 'completed':
         statusEl.classList.add('is-success');
-        statusEl.textContent = 'Done';
         break;
       case 'failed':
         statusEl.classList.add('is-error');
-        statusEl.textContent = 'Failed';
-        break;
-      case 'denied':
-        statusEl.classList.add('is-error');
-        statusEl.textContent = 'Denied';
         break;
       case 'executing':
         statusEl.classList.add('is-pending');
-        statusEl.textContent = 'Running...';
-        break;
-      case 'pending':
-      case 'approved':
-        statusEl.classList.add('is-pending');
-        statusEl.textContent = 'Pending';
         break;
       default:
-        statusEl.textContent = '';
+        break;
     }
   }
 
@@ -441,7 +322,7 @@ export class ToolCallTreeRenderer extends Component {
 
   private populateLine(line: HTMLElement, toolCall: ToolCall, index: number): void {
     line.dataset.toolCallId = toolCall.id;
-    line.dataset.state = toolCall.state ?? "pending";
+    line.dataset.state = toolCall.state ?? "executing";
     line.dataset.order = String(index);
 
     const descriptor = this.getToolCallDescriptor(toolCall);
@@ -505,6 +386,17 @@ export class ToolCallTreeRenderer extends Component {
       // Use existing operations renderer for move/trash/create_folders
       if (/(^|_)(move|trash|create_folders)$/.test(canonical)) {
         void renderOperationsInlinePreview(line, toolCall);
+        return;
+      }
+
+      // Show inline diff details for write/edit after execution.
+      if (isWriteOrEditTool(fn.name)) {
+        if (toolCall.state === "executing") {
+          return;
+        }
+        const app = this.getApp();
+        if (!app) return;
+        void renderWriteEditInlineDiff(app, line, toolCall);
         return;
       }
 
@@ -660,8 +552,7 @@ export class ToolCallTreeRenderer extends Component {
     if (calls.length === 0) {
       group.titleEl.textContent = "";
       setBulletSymbol(group.bulletEl, "");
-      group.bulletEl.classList.remove("is-active", "is-failed", "is-denied");
-      this.removeAllowAllButton(group);
+      group.bulletEl.classList.remove("is-active", "is-failed");
       return;
     }
 
@@ -678,54 +569,8 @@ export class ToolCallTreeRenderer extends Component {
       group.bulletEl.classList.add("is-active");
     } else if (status === "failed") {
       group.bulletEl.classList.add("is-failed");
-    } else if (status === "denied") {
-      group.bulletEl.classList.add("is-denied");
     }
     setBulletSymbol(group.bulletEl, BULLET_SYMBOLS[status]);
-
-    // Check for multiple pending destructive calls and show "Allow All" button
-    const pendingDestructive = calls.filter(
-      (tc) => tc.state === "pending" && this.toolRequiresApproval(tc)
-    );
-    if (pendingDestructive.length > 1) {
-      this.renderAllowAllButton(group, pendingDestructive.length);
-    } else {
-      this.removeAllowAllButton(group);
-    }
-  }
-
-  /**
-   * Render an "Allow All" button when multiple pending destructive calls exist.
-   */
-  private renderAllowAllButton(group: ToolCallGroup, count: number): void {
-    let container = group.wrapper.querySelector<HTMLElement>(".systemsculpt-allow-all-container");
-    if (!container) {
-      container = document.createElement("div");
-      container.className = "systemsculpt-allow-all-container";
-      // Insert after the header, before linesContainer
-      group.wrapper.insertBefore(container, group.linesContainer);
-    }
-
-    container.empty();
-
-    const chatView = this.getChatView();
-    const btn = container.createEl("button", {
-      cls: "systemsculpt-button systemsculpt-button-primary systemsculpt-button-small",
-      text: `Allow All (${count})`,
-    });
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      chatView?.approveAllPendingToolCalls?.();
-    });
-  }
-
-  /**
-   * Remove the "Allow All" button from a group.
-   */
-  private removeAllowAllButton(group: ToolCallGroup): void {
-    const container = group.wrapper.querySelector(".systemsculpt-allow-all-container");
-    container?.remove();
   }
 
   private computeActivity(calls: ToolCall[]): ActivityType {
@@ -750,12 +595,11 @@ export class ToolCallTreeRenderer extends Component {
     const hasActive = calls.some((call) => this.isActiveState(call.state));
     if (hasActive) return "active";
     if (calls.some((call) => call.state === "failed")) return "failed";
-    if (calls.some((call) => call.state === "denied")) return "denied";
     return "completed";
   }
 
   private isActiveState(state: ToolCall["state"] | undefined): boolean {
-    return state === "pending" || state === "approved" || state === "executing";
+    return state === "executing";
   }
 
   private categorizeToolCall(toolCall: ToolCall): ActivityType {
@@ -774,73 +618,7 @@ export class ToolCallTreeRenderer extends Component {
   }
 
   private getToolCallDescriptor(toolCall: ToolCall): ToolCallDescriptor {
-    const fn = getFunctionDataFromToolCall(toolCall);
-    if (!fn) {
-      return {
-        label: "Tool",
-        detail: "call",
-        allowAggregation: false,
-      };
-    }
-
-    const canonical = this.canonicalFunctionName(fn.name);
-    const args = fn.arguments ?? {};
-
-    if (canonical === "list_items") {
-      return {
-        label: "Browsed",
-        detail: this.describeBrowseDetail(args),
-        allowAggregation: true,
-      };
-    }
-
-    if (/(^|_)(search|find)/.test(canonical)) {
-      return {
-        label: "Searched",
-        detail: this.describeSearchLikeDetail(canonical, args, toolCall.result),
-        allowAggregation: true,
-      };
-    }
-
-    if (/^read/.test(canonical)) {
-      return {
-        label: "Read",
-        detail: this.describeReadDetail(args, toolCall.result),
-        allowAggregation: true,
-      };
-    }
-
-    if (isWriteOrEditTool(fn.name)) {
-      return {
-        label: "Edited",
-        detail: this.describeWriteEditDetail(canonical, args),
-        allowAggregation: false,
-      };
-    }
-
-    if (/(^|_)(write)/.test(canonical)) {
-      return {
-        label: "Write",
-        detail: this.describeWriteDetail(args),
-        allowAggregation: false,
-      };
-    }
-
-    if (/(^|_)(move|trash|delete|rename)/.test(canonical)) {
-      return this.describeFileOperationDescriptor(canonical, args);
-    }
-
-    const primaryPath = extractPrimaryPathArg(fn.name, args);
-    const displayName = this.singleLine(formatToolDisplayName(fn.name));
-    const fallbackDetail = primaryPath ? this.prettyPath(primaryPath) : this.describeGenericArguments(args);
-
-    const allowAggregation = !this.isMutatingToolCall(toolCall);
-
-    return {
-      label: displayName,
-      detail: fallbackDetail,
-      allowAggregation,
-    };
+    return buildToolCallNarrative(toolCall).summary;
   }
 
   private describeToolCall(toolCall: ToolCall): string {
@@ -1192,74 +970,9 @@ export class ToolCallTreeRenderer extends Component {
       return;
     }
 
+    void representativeToolCall;
     actions.empty();
-    actions.style.removeProperty("display");
-
-    // Only show actions for pending state
-    if (representativeToolCall.state !== "pending") {
-      actions.style.display = "none";
-      return;
-    }
-
-    // Check if this tool requires user approval
-    if (!this.toolRequiresApproval(representativeToolCall)) {
-      actions.style.display = "none";
-      return;
-    }
-
-    // Render approval buttons: [Allow] [Always Allow] [Block]
-    this.renderApprovalButtons(actions, representativeToolCall);
-  }
-
-  /**
-   * Render the approval action buttons for a pending tool call.
-   */
-  private renderApprovalButtons(container: HTMLElement, toolCall: ToolCall): void {
-    const toolCallManager = this.getToolCallManager();
-    const chatView = this.getChatView();
-    if (!toolCallManager) {
-      return;
-    }
-
-    const toolName = toolCall.request?.function?.name ?? "";
-    const { canonicalName } = splitToolName(toolName);
-
-    // Create button group container
-    const buttonGroup = container.createDiv({ cls: "systemsculpt-approval-buttons" });
-
-    // Allow button - approves this single call
-    const allowBtn = buttonGroup.createEl("button", {
-      cls: "systemsculpt-button systemsculpt-button-primary systemsculpt-button-small",
-      text: "Allow",
-    });
-    allowBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      toolCallManager.approveToolCall(toolCall.id);
-    });
-
-    // Always Allow button - trusts this tool for the session
-    const alwaysBtn = buttonGroup.createEl("button", {
-      cls: "systemsculpt-button systemsculpt-button-secondary systemsculpt-button-small",
-      text: "Always Allow",
-      attr: { title: `Trust "${canonicalName || toolName}" for this session` },
-    });
-    alwaysBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      chatView?.trustToolForSession?.(toolName);
-    });
-
-    // Block button - denies this call
-    const blockBtn = buttonGroup.createEl("button", {
-      cls: "systemsculpt-button systemsculpt-button-danger systemsculpt-button-small",
-      text: "Block",
-    });
-    blockBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      toolCallManager.denyToolCall(toolCall.id);
-    });
+    actions.style.display = "none";
   }
 
   private isMutatingToolCall(toolCall: ToolCall): boolean {

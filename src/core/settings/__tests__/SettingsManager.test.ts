@@ -35,8 +35,6 @@ jest.mock("../../../types", () => ({
       inboxFolder: "Inbox",
       templates: {},
     },
-    mcpEnabledTools: [],
-    mcpAutoAcceptTools: [],
     mcpServers: [],
     debugMode: false,
     logLevel: 2,
@@ -48,8 +46,6 @@ jest.mock("../../../types", () => ({
     selectedModelProviders: [],
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
-    toolingRequireApprovalForDestructiveTools: true,
-    toolingConcurrencyLimit: 4,
     defaultAgentBudget: 10,
     agentDefaultAction: "approve",
     agentLoopBehavior: "manual",
@@ -204,16 +200,6 @@ describe("SettingsManager", () => {
       it("initializes missing favoriteModels", () => {
         const result = migrateSettings({});
         expect(result.favoriteModels).toEqual([]);
-      });
-
-      it("initializes missing mcpEnabledTools", () => {
-        const result = migrateSettings({});
-        expect(result.mcpEnabledTools).toEqual([]);
-      });
-
-      it("initializes missing mcpAutoAcceptTools", () => {
-        const result = migrateSettings({});
-        expect(result.mcpAutoAcceptTools).toEqual([]);
       });
 
       it("initializes missing mcpServers", () => {
@@ -372,75 +358,6 @@ describe("SettingsManager", () => {
         expect(result.favoriteModels).toEqual([]);
       });
 
-      it("initializes non-array mcpEnabledTools", () => {
-        const result = validateSettings({ ...DEFAULT_SETTINGS, mcpEnabledTools: undefined });
-        expect(result.mcpEnabledTools).toEqual([]);
-      });
-
-      it("initializes non-array mcpAutoAcceptTools", () => {
-        const result = validateSettings({ ...DEFAULT_SETTINGS, mcpAutoAcceptTools: {} });
-        expect(result.mcpAutoAcceptTools).toEqual([]);
-      });
-    });
-
-    describe("MCP tool deduplication", () => {
-      it("deduplicates mcpEnabledTools", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          mcpEnabledTools: ["tool1", "tool2", "tool1", "tool2"],
-        });
-        expect(result.mcpEnabledTools).toEqual(["tool1", "tool2"]);
-      });
-
-      it("deduplicates mcpAutoAcceptTools", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          mcpAutoAcceptTools: ["tool1", "tool1", "tool1"],
-        });
-        expect(result.mcpAutoAcceptTools).toEqual(["tool1"]);
-      });
-    });
-
-    describe("tooling settings validation", () => {
-      it("defaults invalid toolingRequireApprovalForDestructiveTools", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          toolingRequireApprovalForDestructiveTools: "nope",
-        });
-        expect(result.toolingRequireApprovalForDestructiveTools).toBe(true);
-      });
-
-      it("clamps toolingConcurrencyLimit to min 1", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          toolingConcurrencyLimit: 0,
-        });
-        expect(result.toolingConcurrencyLimit).toBe(1);
-      });
-
-      it("clamps toolingConcurrencyLimit to max 8", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          toolingConcurrencyLimit: 100,
-        });
-        expect(result.toolingConcurrencyLimit).toBe(8);
-      });
-
-      it("floors toolingConcurrencyLimit", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          toolingConcurrencyLimit: 3.7,
-        });
-        expect(result.toolingConcurrencyLimit).toBe(3);
-      });
-
-      it("defaults non-finite toolingConcurrencyLimit", () => {
-        const result = validateSettings({
-          ...DEFAULT_SETTINGS,
-          toolingConcurrencyLimit: NaN,
-        });
-        expect(result.toolingConcurrencyLimit).toBe(4);
-      });
     });
   });
 

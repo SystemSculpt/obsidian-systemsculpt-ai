@@ -200,46 +200,6 @@ new Setting(containerEl)
             });
     });
 
-// --- Agent Mode safety ---
-containerEl.createEl("h3", { text: "Agent Mode safety" });
-
-new Setting(containerEl)
-    .setName("Require approval for destructive tools")
-    .setDesc("When enabled, write/edit/move/trash tool calls require confirmation. External MCP tools always require approval.")
-    .addToggle((toggle: ToggleComponent) => {
-        toggle
-            .setValue(plugin.settings.toolingRequireApprovalForDestructiveTools ?? true)
-            .onChange(async (value) => {
-                if (!value) {
-                    const confirmDisable = confirm("Disable confirmations for destructive Agent Mode tools? This lets tools edit or delete notes without asking.");
-                    if (!confirmDisable) {
-                        toggle.setValue(true);
-                        return;
-                    }
-                }
-                await plugin.getSettingsManager().updateSettings({ toolingRequireApprovalForDestructiveTools: value });
-                new Notice(`Destructive tool confirmations ${value ? 'enabled' : 'disabled'}.`);
-            });
-    });
-
-new Setting(containerEl)
-    .setName("Auto-approve tool list")
-    .setDesc("Optional allowlist for mutating tools that can run without confirmation. One tool per line (e.g., mcp-filesystem:write or mcp-filesystem_write).")
-    .addTextArea((text: TextAreaComponent) => {
-        const current = (plugin.settings.mcpAutoAcceptTools || []).join("\n");
-        text
-            .setValue(current)
-            .setPlaceholder("mcp-filesystem:write\nmcp-filesystem:edit")
-            .onChange(async (value) => {
-                const normalized = value
-                    .split(/\r?\n/)
-                    .map((line) => line.trim())
-                    .filter((line) => line.length > 0);
-                await plugin.getSettingsManager().updateSettings({ mcpAutoAcceptTools: normalized });
-            });
-        text.inputEl.rows = 4;
-    });
-
 // --- Favorites Management Section ---
 containerEl.createEl("h3", { text: "Favorites" });
 

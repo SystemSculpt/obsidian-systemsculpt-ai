@@ -8,7 +8,6 @@ import { ToolCallManager } from "../chatview/ToolCallManager";
 import { MessageRenderer } from "../chatview/MessageRenderer";
 import { ScrollManagerService } from "../chatview/ScrollManagerService";
 import { StreamingController } from "../chatview/controllers/StreamingController";
-import { ChatTurnOrchestrator } from "../chatview/controllers/ChatTurnOrchestrator";
 import { addMessageToContainer, createAssistantMessageContainer, hideStreamingStatus, showStreamingStatus, updateStreamingStatus, setStreamingFootnote, clearStreamingFootnote } from "../chatview/handlers/MessageElements";
 import { toolDefinitions } from "../../mcp-tools/filesystem/toolDefinitions";
 import { OBSIDIAN_BENCHMARK_V2, BENCH_ROOT_PLACEHOLDER } from "../../benchmarks/obsidianCoreV2";
@@ -789,26 +788,6 @@ export class BenchView extends ItemView {
     this.chatContainerEl.empty();
 
     const toolCallManager = new ToolCallManager(mcpService, { plugin: { settings: benchSettings } });
-    // Benchmark runs are fully sandboxed and deterministic; auto-approve all pending
-    // tool calls so execution never blocks on human approvals.
-    const unsubscribeAutoApprove = toolCallManager.on("tool-call:created", ({ toolCall }) => {
-      if (toolCall.state !== "pending") return;
-      try {
-        toolCallManager.approveToolCall(toolCall.id);
-      } catch (error) {
-        try {
-          errorLogger.warn("Failed to auto-approve benchmark tool call", {
-            source: "BenchView",
-            method: "runCaseConversation",
-            metadata: {
-              toolCallId: toolCall.id,
-              toolName: toolCall.request?.function?.name ?? "unknown",
-              error: error instanceof Error ? error.message : String(error),
-            },
-          });
-        } catch {}
-      }
-    });
     const renderer = new MessageRenderer(this.app, toolCallManager);
     const scrollManager = new ScrollManagerService({ container: this.chatContainerEl });
     const liveRegion = this.chatContainerEl.createDiv({ cls: "benchview-live-region", attr: { "aria-live": "polite" } });
@@ -870,37 +849,6 @@ export class BenchView extends ItemView {
       clearStreamingFootnote: (el) => clearStreamingFootnote(el),
     });
 
-    const orchestrator = new ChatTurnOrchestrator({
-      app: this.app,
-      plugin: this.plugin,
-      aiService: this.plugin.aiService,
-      streamingController,
-      toolCallManager,
-      messageRenderer: renderer,
-      getMessages: () => messages,
-      getSelectedModelId: () => this.selectedModelId,
-      getSystemPrompt: () => ({ type: "agent" }),
-      getSystemPromptOverride: () => systemPromptOverride,
-      getContextFiles: () => new Set<string>(),
-      agentMode: () => true,
-      webSearchEnabled: () => false,
-      createAssistantMessageContainer: (breakGroup?: boolean) =>
-        createAssistantMessageContainer(this.chatContainerEl, () => this.createMessageId(), this, breakGroup),
-      generateMessageId: () => this.createMessageId(),
-      onAssistantResponse,
-      onError: (err) => {
-        if (err instanceof Error) {
-          new Notice(err.message, 6000);
-        }
-      },
-      // Streaming indicator lifecycle methods (turn-level management)
-      showStreamingStatus: (el) => showStreamingStatus(el, liveRegion),
-      hideStreamingStatus: (el) => hideStreamingStatus(el, liveRegion),
-      updateStreamingStatus: (el, status, text, metrics) => updateStreamingStatus(el, liveRegion, status, text, metrics),
-      setStreamingFootnote: (el, text) => setStreamingFootnote(el, text),
-      clearStreamingFootnote: (el) => clearStreamingFootnote(el),
-    });
-
     try {
       for (const rawPrompt of caseDef.prompts) {
         if (signal.aborted) break;
@@ -917,7 +865,34 @@ export class BenchView extends ItemView {
         });
         addMessageToContainer(this.chatContainerEl, messageEl, "user", true);
         try {
-          await orchestrator.runTurn({ includeContextFiles: false, signal });
+          const container = createAssistantMessageContainer(
+            this.chatContainerEl,
+            () => this.createMessageId(),
+            this,
+            true
+          );
+          const assistantMessageId = container.messageEl.dataset.messageId || this.createMessageId();
+          container.messageEl.dataset.messageId = assistantMessageId;
+
+          const stream = this.plugin.aiService.streamMessage({
+            messages,
+            model: this.selectedModelId,
+            contextFiles: new Set<string>(),
+            systemPromptType: "agent",
+            systemPromptOverride,
+            agentMode: true,
+            signal,
+            toolCallManager,
+            sessionId: caseDef.id,
+          });
+
+          await streamingController.stream(
+            stream,
+            container.messageEl,
+            assistantMessageId,
+            signal,
+            false
+          );
         } catch (error: any) {
           try {
             (error as any).benchMessages = messages;
@@ -928,9 +903,6 @@ export class BenchView extends ItemView {
 
       return { messages };
     } finally {
-      try {
-        unsubscribeAutoApprove();
-      } catch {}
       scrollManager.destroy();
       toolCallManager.clear();
     }
@@ -942,9 +914,6 @@ export class BenchView extends ItemView {
     // so we only need to ensure the server is present
     return {
       ...base,
-      // Bench runs operate inside an isolated scratch vault. Auto-approve destructive
-      // filesystem actions to avoid deadlocks during unattended benchmarks.
-      toolingRequireApprovalForDestructiveTools: false,
       mcpServers: [
         {
           id: "mcp-filesystem",

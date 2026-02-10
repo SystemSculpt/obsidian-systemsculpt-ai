@@ -102,7 +102,9 @@ describe("StreamPipeline", () => {
     );
 
     expect(first.events).toEqual<StreamEvent[]>([{ type: "content", text: "Hi. What do you need?" }]);
-    expect(second.events).toEqual<StreamEvent[]>([]);
+    expect(second.events).toEqual<StreamEvent[]>([
+      { type: "meta", key: "stop-reason", value: "stop" },
+    ]);
     expect(second.done).toBe(true);
   });
 
@@ -140,7 +142,9 @@ describe("StreamPipeline", () => {
     expect(markerStart.events).toEqual<StreamEvent[]>([]);
     expect(delta.events).toEqual<StreamEvent[]>([{ type: "content", text: "Hello marker-safe" }]);
     expect(markerEnd.events).toEqual<StreamEvent[]>([]);
-    expect(done.events).toEqual<StreamEvent[]>([]);
+    expect(done.events).toEqual<StreamEvent[]>([
+      { type: "meta", key: "stop-reason", value: "stop" },
+    ]);
     expect(done.done).toBe(true);
   });
 
@@ -249,7 +253,10 @@ describe("StreamPipeline", () => {
 
     const { events, done } = pipeline.push(chunk);
     expect(done).toBe(true);
-    expect(events).toEqual<StreamEvent[]>([{ type: "content", text: "final-only" }]);
+    expect(events).toEqual<StreamEvent[]>([
+      { type: "meta", key: "stop-reason", value: "stop" },
+      { type: "content", text: "final-only" },
+    ]);
   });
 
   test("splits <think> blocks into reasoning and content", () => {

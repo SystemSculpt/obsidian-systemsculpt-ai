@@ -68,6 +68,24 @@ describe("StreamingController stream behavior", () => {
     expect(onAssistantResponse).toHaveBeenCalledTimes(1);
   });
 
+  test("captures PI stop reason metadata on the assistant message", async () => {
+    const { controller } = createController();
+    const stream = (async function* () {
+      yield { type: "content", text: "Tool phase done." } as any;
+      yield { type: "meta", key: "stop-reason", value: "toolUse" } as any;
+    })();
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-stop-reason";
+
+    const abortController = new AbortController();
+    const result = await controller.stream(stream, messageEl, "assistant-stop-reason", abortController.signal, false);
+
+    expect(result.completed).toBe(true);
+    expect(result.stopReason).toBe("toolUse");
+    expect((result.message as any).stopReason).toBe("toolUse");
+  });
+
   test("backfills reasoning_details ids from tool_calls", async () => {
     const saveChat = jest.fn().mockResolvedValue(undefined);
     const onAssistantResponse = jest.fn().mockResolvedValue(undefined);

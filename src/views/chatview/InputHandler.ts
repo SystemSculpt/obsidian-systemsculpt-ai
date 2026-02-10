@@ -33,9 +33,8 @@ import { createAssistantMessageContainer as createAssistantMessageContainerExter
 import type { StreamingMetrics } from "./StreamingMetricsTracker";
 import { extractAnnotationsFromResponse as extractAnnotationsFromResponseExternal } from "./handlers/Annotations";
 import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleSaveChatAsNote as handleSaveChatAsNoteExternal } from "./handlers/NotesHandlers";
-// Orchestrated turn handling
+// Turn lifecycle handling
 import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
-import { ChatTurnOrchestrator } from "./controllers/ChatTurnOrchestrator";
 import { errorLogger } from "../../utils/errorLogger";
 import { mentionsObsidianBases } from "../../utils/obsidianBases";
 
@@ -146,7 +145,6 @@ export class InputHandler extends Component {
 
   // ───────────────────────── Streaming controller ──────────────────────────
   private streamingController: StreamingController;
-  private orchestrator: ChatTurnOrchestrator;
   private turnLifecycle: ChatTurnLifecycleController;
 
   constructor(options: InputHandlerOptions) {
@@ -180,9 +178,6 @@ export class InputHandler extends Component {
     this.getChatId = options.getChatId;
     this.toolCallManager = options.toolCallManager;
     this.chatView = options.chatView;
-    
-    // Tool-call UI updates are handled per-turn by the orchestrator
-    // Approval prompts are surfaced by the tool call UI when required.
 
     // InputHandler initialized with RecorderService - silent setup
     this.recorderService = RecorderService.getInstance(this.app, this.plugin, {
@@ -275,42 +270,116 @@ export class InputHandler extends Component {
     });
     this.addChild(this.streamingController);
 
-    // Initialize the orchestrator to coordinate streams + continuations
-    this.orchestrator = new ChatTurnOrchestrator({
-      app: this.app,
-      plugin: this.plugin,
-      aiService: this.aiService,
-      streamingController: this.streamingController,
-      toolCallManager: this.toolCallManager,
-      messageRenderer: this.messageRenderer,
-      getMessages: this.getMessages,
-      getSelectedModelId: this.getSelectedModelId,
-      getSystemPrompt: this.getSystemPrompt,
-      getContextFiles: () => this.chatView.contextManager.getContextFiles(),
-      getChatId: this.getChatId,
-      getDebugLogger: () => this.chatView.getDebugLogService(),
-      agentMode: () => this.chatView?.agentMode || false,
-      webSearchEnabled: () => this.webSearchEnabled,
-      createAssistantMessageContainer: (breakGroup?: boolean) => this.createAssistantMessageContainer(breakGroup),
-      generateMessageId: this.generateMessageId.bind(this),
-      onAssistantResponse: this.onAssistantResponse,
-      onError: this.onError,
-      // Streaming indicator lifecycle methods (turn-level management)
-      showStreamingStatus: this.showStreamingStatus.bind(this),
-      hideStreamingStatus: this.hideStreamingStatus.bind(this),
-      updateStreamingStatus: this.updateStreamingStatus.bind(this),
-      setStreamingFootnote: this.setStreamingFootnote.bind(this),
-      clearStreamingFootnote: this.clearStreamingFootnote.bind(this),
-      onCompatibilityNotice: (info) => {
-        void this.chatView?.notifyCompatibilityNotice?.(info);
-      },
-    });
-    // Orchestrator is a plain class; no need to register as child component
-
     this.turnLifecycle = new ChatTurnLifecycleController({
       getIsGenerating: () => this.isGenerating,
       setGenerating: (generating) => this.setGeneratingState(generating),
     });
+  }
+
+  private async streamAssistantTurn(
+    signal: AbortSignal,
+    includeContextFiles: boolean
+  ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
+    const { messageEl } = this.createAssistantMessageContainer();
+    let messageId = messageEl.dataset.messageId;
+    if (!messageId || messageId.trim().length === 0) {
+      messageId = this.generateMessageId();
+      messageEl.dataset.messageId = messageId;
+    }
+
+    const sys = this.getSystemPrompt();
+    const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
+
+    const stream = this.aiService.streamMessage({
+      messages: this.getMessages(),
+      model: this.getSelectedModelId(),
+      contextFiles,
+      systemPromptType: sys.type,
+      systemPromptPath: sys.path,
+      agentMode: this.chatView?.agentMode || false,
+      signal,
+      toolCallManager: this.chatView?.agentMode ? this.toolCallManager : undefined,
+      plugins: this.webSearchEnabled
+        ? [{ id: WEB_SEARCH_CONFIG.PLUGIN_ID, max_results: WEB_SEARCH_CONFIG.MAX_RESULTS }]
+        : undefined,
+      web_search_options: this.webSearchEnabled
+        ? { search_context_size: WEB_SEARCH_CONFIG.DEFAULT_CONTEXT_SIZE }
+        : undefined,
+      sessionId: this.getChatId(),
+      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
+        chatId: this.getChatId(),
+        assistantMessageId: messageId,
+        modelId: this.getSelectedModelId(),
+      }) || undefined,
+    });
+
+    return await this.streamingController.stream(
+      stream,
+      messageEl,
+      messageId,
+      signal,
+      this.webSearchEnabled
+    );
+  }
+
+  private areToolCallsSettledForMessage(messageId: string): boolean {
+    const toolCalls = this.toolCallManager.getToolCallsForMessage(messageId);
+    if (toolCalls.length === 0) return true;
+    return toolCalls.every((toolCall) => toolCall.state !== "executing");
+  }
+
+  private async waitForToolCallsToSettle(messageId: string, signal: AbortSignal): Promise<void> {
+    if (this.areToolCallsSettledForMessage(messageId)) return;
+
+    await new Promise<void>((resolve) => {
+      let unsubscribe: (() => void) | null = null;
+      const cleanup = () => {
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+        signal.removeEventListener("abort", onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        resolve();
+      };
+
+      unsubscribe = this.toolCallManager.on("tool-call:state-changed", ({ toolCall }) => {
+        if (toolCall.messageId !== messageId) return;
+        if (!this.areToolCallsSettledForMessage(messageId)) return;
+        cleanup();
+        resolve();
+      });
+
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  private async shouldContinuePiTurn(
+    turnResult: { messageId: string; message: ChatMessage; completed: boolean; stopReason?: string },
+    signal: AbortSignal
+  ): Promise<boolean> {
+    if (signal.aborted) return false;
+    if (!this.chatView?.agentMode) return false;
+    if (!turnResult.completed) return false;
+
+    const stopReason =
+      typeof turnResult.stopReason === "string"
+        ? turnResult.stopReason
+        : typeof (turnResult.message as any)?.stopReason === "string"
+          ? String((turnResult.message as any).stopReason)
+          : "";
+    if (stopReason !== "toolUse") return false;
+
+    const messageId = (turnResult.message as any)?.message_id || turnResult.messageId;
+    if (!messageId || typeof messageId !== "string") return false;
+
+    await this.waitForToolCallsToSettle(messageId, signal);
+    if (signal.aborted) return false;
+
+    const settledToolCalls = this.toolCallManager.getToolCallsForMessage(messageId);
+    return settledToolCalls.length > 0;
   }
 
   private setupInput(): void {
@@ -499,20 +568,12 @@ export class InputHandler extends Component {
         } as any;
         await this.onMessageSubmit(userMessage);
 
-        // Cancel any pending tool-calls when a fresh user message arrives
-        const pendingToolCalls = this.toolCallManager.getPendingToolCalls();
-        for (const toolCall of pendingToolCalls) {
-          this.toolCallManager.cancelToolCall(
-            toolCall.id,
-            "The user sent a follow-up message instead of approving this tool call."
-          );
+        // Keep taking PI-native turns until PI signals we're done.
+        let shouldContinue = true;
+        while (shouldContinue && !signal.aborted) {
+          const turnResult = await this.streamAssistantTurn(signal, true);
+          shouldContinue = await this.shouldContinuePiTurn(turnResult, signal);
         }
-
-        // Run orchestrated assistant stream with bounded tool continuations
-        await this.orchestrator.runTurn({
-          includeContextFiles: true,
-          signal,
-        });
       });
     } finally {
       this.focus();
@@ -1260,9 +1321,8 @@ export class InputHandler extends Component {
 
   private toggleStopButton(show: boolean): void {
     if (this.stopButton) {
-      // StreamingController toggles this based on stream activity, but the chat
-      // turn may still be in-progress (e.g., waiting for tool approval/execution
-      // or continuations). Never hide Stop while the handler is generating.
+      // StreamingController toggles this based on stream activity.
+      // Never hide Stop while the handler is generating.
       const shouldShow = show || this.isGenerating;
       this.stopButton.setDisabled(!shouldShow);
       this.stopButton.buttonEl.style.display = shouldShow ? "flex" : "none";

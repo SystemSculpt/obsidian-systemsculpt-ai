@@ -1195,27 +1195,11 @@ export class SystemSculptService {
       } catch {}
 
       let streamDiagnostics: StreamPipelineDiagnostics | null = null;
-      const markerToolCallIds = new Set<string>();
-      const streamFinalToolCallIds = new Set<string>();
-      let markerWaitingForTools = false;
       const streamIterator = this.streamingService.streamResponse(response, {
         model: actualModelId,
         isCustomProvider: !!provider,
         signal,
         onRawEvent: (data) => {
-          try {
-            const parsed = JSON.parse(data.payload);
-            const marker = parsed?.__systemsculpt;
-            if (marker?.phase === "waiting_for_tools") {
-              markerWaitingForTools = true;
-              const ids = Array.isArray(marker.tool_call_ids) ? marker.tool_call_ids : [];
-              for (const id of ids) {
-                if (typeof id === "string" && id.length > 0) {
-                  markerToolCallIds.add(id);
-                }
-              }
-            }
-          } catch {}
           try {
             debug?.onRawEvent?.(data);
           } catch {}
@@ -1229,28 +1213,12 @@ export class SystemSculptService {
       let streamAborted = false;
       try {
         for await (const event of streamIterator) {
-          if (event.type === "tool-call" && event.phase === "final" && typeof event.call?.id === "string") {
-            streamFinalToolCallIds.add(event.call.id);
-          }
           try {
             debug?.onStreamEvent?.({ event });
           } catch {}
           yield event;
         }
         streamCompleted = true;
-
-        if (!provider) {
-          if (markerWaitingForTools) {
-            const ids = markerToolCallIds.size > 0
-              ? Array.from(markerToolCallIds)
-              : Array.from(streamFinalToolCallIds);
-            if (ids.length > 0) {
-              this.agentSessionClient.markWaitingForTools(chatSessionId, ids);
-            }
-          } else if (streamCompleted) {
-            this.agentSessionClient.markTurnCompleted(chatSessionId);
-          }
-        }
       } finally {
         streamAborted = !!signal?.aborted;
         try {
@@ -1279,9 +1247,6 @@ export class SystemSculptService {
           error: error instanceof Error ? error.message : String(error),
           details: error,
         });
-      } catch {}
-      try {
-        this.agentSessionClient.markTurnErrored(chatSessionId);
       } catch {}
       if (onError) {
         let errorMessage =

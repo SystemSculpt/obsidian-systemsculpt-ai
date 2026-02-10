@@ -53,7 +53,6 @@ export class ContextFileService {
         request: managerCall.request || call.request,
         messageId: managerCall.messageId || call.messageId,
         timestamp: managerCall.timestamp ?? call.timestamp,
-        autoApproved: managerCall.autoApproved ?? call.autoApproved,
       } as ToolCall;
 
       if (!merged.result && call.result) {
@@ -539,11 +538,6 @@ export class ContextFileService {
       idx += 1;
     }
 
-    // Apply context management for tool results if we have a ToolCallManager
-    if (toolCallManager && agentMode) {
-      this.optimizeToolResultsContext(preparedMessages, toolCallManager);
-    }
-
     // Defensive: ensure tool result messages always directly follow their declaring assistant tool_calls message.
     // Some providers (e.g., MiniMax) hard-fail invalid sequences with HTTP 400.
     if (agentMode) {
@@ -564,71 +558,4 @@ export class ContextFileService {
     return preparedMessages;
   }
 
-  /**
-   * Optimize tool results context using industry best practices
-   */
-  public optimizeToolResultsContext(preparedMessages: ChatMessage[], toolCallManager: any): void {
-    const maxToolResults = typeof toolCallManager.getMaxToolResultsInContext === "function"
-      ? toolCallManager.getMaxToolResultsInContext()
-      : 15;
-
-    // Get recent tool results for context
-    const recentToolResults = toolCallManager.getToolResultsForContext();
-
-    // Count tool messages in current prepared messages
-    const toolMessageCount = preparedMessages.filter(msg => msg.role === 'tool').length;
-
-    // If we have too many tool messages, apply context management
-    if (toolMessageCount > maxToolResults) {
-      // Keep only the most recent tool results (by id)
-      const recentToolCallIds = new Set(recentToolResults.map((tc: any) => tc.id));
-
-      // First pass: filter tool messages to only keep those whose tool_call_id is recent
-      // and concurrently prune assistant tool_calls to only keep recent ids.
-      const filtered: ChatMessage[] = [];
-
-      for (const msg of preparedMessages) {
-        if (msg.role === 'tool') {
-          // Keep only tool messages for recent tool calls
-          const keep = !!(msg as any).tool_call_id && recentToolCallIds.has((msg as any).tool_call_id);
-          if (keep) filtered.push(msg);
-          continue;
-        }
-
-        if (msg.role === 'assistant' && Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
-          // Prune tool_calls inside assistant messages to match the kept tool results
-          const originalToolCalls = (msg as any).tool_calls as any[];
-          const prunedToolCalls = originalToolCalls.filter(tc => recentToolCallIds.has(tc.id));
-
-          if (prunedToolCalls.length > 0) {
-            // Preserve message but with pruned tool_calls
-            const updatedMsg: ChatMessage = {
-              ...msg,
-              tool_calls: prunedToolCalls as any,
-            } as any;
-            filtered.push(updatedMsg);
-          } else {
-            // No recent tool calls left on this assistant message
-            // If it has substantive content, keep it; otherwise drop it to avoid dangling tool_calls without outputs
-            const hasContent = typeof msg.content === 'string' ? msg.content.trim().length > 0 : Array.isArray(msg.content) && (msg.content as any[]).length > 0;
-            if (hasContent) {
-              const updatedMsg: ChatMessage = {
-                ...msg,
-                tool_calls: undefined,
-              } as any;
-              filtered.push(updatedMsg);
-            }
-          }
-          continue;
-        }
-
-        // All other messages are kept as-is
-        filtered.push(msg);
-      }
-
-      // Replace the array contents
-      preparedMessages.length = 0;
-      preparedMessages.push(...filtered);
-    }
-  }
 }

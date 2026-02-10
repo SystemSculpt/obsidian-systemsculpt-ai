@@ -2,7 +2,7 @@ import { ChatView } from "./ChatView";
 import { ChatRole, MultiPartContent, ChatMessage, MessagePart, UrlCitation } from "../../types";
 import { ButtonComponent, Notice } from "obsidian";
 import { appendMessageToGroupedContainer, removeGroupIfEmpty } from "./utils/MessageGrouping";
-// Batch approver UI removed; pending actions now use the tree UI inline
+// Tool call rendering is fully status-driven from PI tool events.
 
 export const messageHandling = {
   addMessage: async function(chatView: ChatView, role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage, targetContainer?: HTMLElement | DocumentFragment): Promise<void> {
@@ -68,19 +68,16 @@ export const messageHandling = {
             request: toolCall.request,
             state: toolCall.state,
             timestamp: toolCall.timestamp,
-            approvedAt: toolCall.approvedAt,
             executionStartedAt: toolCall.executionStartedAt,
             executionCompletedAt: toolCall.executionCompletedAt,
             result: toolCall.result,
-            autoApproved: toolCall.autoApproved
           };
           chatView.toolCallManager.restoreToolCall(serializedToolCall, message.message_id);
         }
       }
     }
 
-    // Previously we hid pending lines and showed a batch approver.
-    // Now we always show pending lines inline using the tree UI.
+    // Tool call lines are always rendered inline in the tree UI.
 
     // Always use sequential rendering for consistency
     const partList = chatView.messageRenderer.normalizeMessageToParts(message);

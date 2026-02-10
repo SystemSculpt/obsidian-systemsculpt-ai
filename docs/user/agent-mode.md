@@ -1,17 +1,38 @@
 # Agent Mode (MCP tools)
 
-Agent Mode lets the model request structured tool calls that run inside your vault, with an explicit approve/deny flow.
+Agent Mode lets the model request structured tool calls that run inside your vault. Tool continuation, retry, and policy decisions are PI-managed.
 
 ## How it works
 
 1. You enable Agent Mode in the chat UI.
 2. The model requests a tool call (for example: search for a file, read a note, apply an edit).
-3. You approve or deny the call.
-4. The tool runs, and the result is returned to the model in-context.
+3. PI applies its tool policy and continuation behavior.
+4. Tool results are returned to the model in-context.
 
 ## Enable/disable
 
 Agent Mode is per-chat. Use the **Agent Mode** chip next to Model/Prompt in the chat toolbar, or open **Chat Settings** (gear icon) to toggle it.
+
+## Tool call UI
+
+### Approval actions
+
+- Tool approval actions, when shown, come from PI policy/runtime behavior.
+
+### Status chips
+
+- `Awaiting approval`: waiting for your decision.
+- `Approved, waiting to run`: approved, but waiting to execute.
+- `Running`: currently executing.
+- `Done`: finished successfully.
+- `Denied`: rejected by user.
+- `Failed`: execution returned an error.
+
+### Summaries and details
+
+- Tool cards use plain-language summaries so each action is readable without inspecting raw arguments.
+- `move` calls show path changes explicitly as From -> To.
+- `What changed` details expand progressively: brief summary first, then concrete file/path changes as results arrive.
 
 ## Built-in tools
 
@@ -54,18 +75,8 @@ Filesystem tools take vault-relative paths (for example: `My Folder/My Note.md`)
 
 ## Tool loop guard
 
-To prevent infinite approval loops, Agent Mode blocks repeated tool calls within the same assistant turn:
+Tool-loop prevention and continuation behavior are controlled by the PI runtime. If PI blocks a repeated/failing tool sequence, the chat will show the runtime-provided error and stop continuing that loop.
 
-- Denied tools are blocked from repeating for that turn.
-- Failed tools get up to two attempts per turn; further repeats are blocked.
+## Safety policy
 
-When this happens, you’ll see a tool error indicating the loop guard fired. Fix the underlying issue (path, frontmatter, permissions) and send a new message to try again.
-
-## Safety toggle
-
-In **Settings → Chat & Templates → Agent Mode safety**, you can:
-
-- Require approval for destructive tools (`write`/`edit`/`move`/`trash`).
-- Add an auto-approve allowlist for specific mutating tools (advanced).
-
-External MCP tools still require approval unless explicitly allowlisted.
+Safety policy is managed by PI runtime behavior.

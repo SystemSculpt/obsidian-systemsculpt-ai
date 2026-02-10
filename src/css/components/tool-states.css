@@ -89,10 +89,6 @@
   color: var(--text-error);
 }
 
-.systemsculpt-tool-status-icon--denied {
-  color: var(--text-warning);
-}
-
 .systemsculpt-tool-status-icon--pending {
   color: var(--text-muted);
 }
