@@ -60,7 +60,7 @@ describe("StreamingController stream behavior", () => {
     messageEl.dataset.messageId = "assistant-seeded";
 
     const abortController = new AbortController();
-    const result = await controller.stream(stream, messageEl, "assistant-seeded", abortController.signal, false, seedParts);
+    const result = await controller.stream(stream, messageEl, "assistant-seeded", abortController.signal, seedParts);
 
     expect(result.completed).toBe(true);
     expect(result.messageId).toBe("assistant-seeded");
@@ -79,7 +79,7 @@ describe("StreamingController stream behavior", () => {
     messageEl.dataset.messageId = "assistant-stop-reason";
 
     const abortController = new AbortController();
-    const result = await controller.stream(stream, messageEl, "assistant-stop-reason", abortController.signal, false);
+    const result = await controller.stream(stream, messageEl, "assistant-stop-reason", abortController.signal);
 
     expect(result.completed).toBe(true);
     expect(result.stopReason).toBe("toolUse");
@@ -158,7 +158,7 @@ describe("StreamingController stream behavior", () => {
     messageEl.dataset.messageId = "assistant-tools";
 
     const abortController = new AbortController();
-    const result = await controller.stream(stream, messageEl, "assistant-tools", abortController.signal, false);
+    const result = await controller.stream(stream, messageEl, "assistant-tools", abortController.signal);
 
     expect(result.completed).toBe(true);
     expect(Array.isArray((result.message as any).reasoning_details)).toBe(true);
@@ -178,7 +178,7 @@ describe("StreamingController stream behavior", () => {
     const abortController = new AbortController();
     abortController.abort();
 
-    const result = await controller.stream(stream, messageEl, "assistant-abort", abortController.signal, false);
+    const result = await controller.stream(stream, messageEl, "assistant-abort", abortController.signal);
 
     expect(result.completed).toBe(false);
     expect(saveChat).not.toHaveBeenCalled();
@@ -194,7 +194,7 @@ describe("StreamingController stream behavior", () => {
     document.body.appendChild(messageEl);
 
     const abortController = new AbortController();
-    const result = await controller.stream(stream, messageEl, "assistant-empty", abortController.signal, false);
+    const result = await controller.stream(stream, messageEl, "assistant-empty", abortController.signal);
 
     expect(result.completed).toBe(false);
     expect(saveChat).not.toHaveBeenCalled();

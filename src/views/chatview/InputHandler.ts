@@ -22,7 +22,6 @@ import { messageHandling } from "./messageHandling";
 import { AtMentionMenu } from "../../components/AtMentionMenu";
 import { AgentSelectionMenu } from "./AgentSelectionMenu";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../constants/largeText";
-import { WEB_SEARCH_CONFIG } from "../../constants/webSearch";
 import { ERROR_CODES } from "../../utils/errors";
 import { showPopup } from "../../core/ui/";
 
@@ -112,8 +111,6 @@ export class InputHandler extends Component {
   private getChatTitle: () => string;
   private addFileToContext: (file: TFile) => Promise<void>;
   private addMessageToHistory: (message: ChatMessage) => Promise<void>;
-  public webSearchEnabled = false;
-  private webSearchButton: ButtonComponent;
   private pendingLargeTextContent: string | null = null;
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
@@ -278,7 +275,8 @@ export class InputHandler extends Component {
 
   private async streamAssistantTurn(
     signal: AbortSignal,
-    includeContextFiles: boolean
+    includeContextFiles: boolean,
+    agentModeOverride?: boolean
   ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
     const { messageEl } = this.createAssistantMessageContainer();
     let messageId = messageEl.dataset.messageId;
@@ -289,38 +287,32 @@ export class InputHandler extends Component {
 
     const sys = this.getSystemPrompt();
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
+    const agentModeForTurn = typeof agentModeOverride === "boolean" ? agentModeOverride : (this.chatView?.agentMode || false);
 
-    const stream = this.aiService.streamMessage({
-      messages: this.getMessages(),
-      model: this.getSelectedModelId(),
-      contextFiles,
-      systemPromptType: sys.type,
-      systemPromptPath: sys.path,
-      agentMode: this.chatView?.agentMode || false,
-      signal,
-      toolCallManager: this.chatView?.agentMode ? this.toolCallManager : undefined,
-      plugins: this.webSearchEnabled
-        ? [{ id: WEB_SEARCH_CONFIG.PLUGIN_ID, max_results: WEB_SEARCH_CONFIG.MAX_RESULTS }]
-        : undefined,
-      web_search_options: this.webSearchEnabled
-        ? { search_context_size: WEB_SEARCH_CONFIG.DEFAULT_CONTEXT_SIZE }
-        : undefined,
-      sessionId: this.getChatId(),
-      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
-        chatId: this.getChatId(),
-        assistantMessageId: messageId,
+	    const stream = this.aiService.streamMessage({
+	      messages: this.getMessages(),
+	      model: this.getSelectedModelId(),
+	      contextFiles,
+	      systemPromptType: sys.type,
+	      systemPromptPath: sys.path,
+	      signal,
+	      agentMode: agentModeForTurn,
+	      toolCallManager: agentModeForTurn ? this.toolCallManager : undefined,
+	      sessionId: this.getChatId(),
+	      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
+	        chatId: this.getChatId(),
+	        assistantMessageId: messageId,
         modelId: this.getSelectedModelId(),
       }) || undefined,
     });
 
-    return await this.streamingController.stream(
-      stream,
-      messageEl,
-      messageId,
-      signal,
-      this.webSearchEnabled
-    );
-  }
+	    return await this.streamingController.stream(
+	      stream,
+	      messageEl,
+	      messageId,
+	      signal
+	    );
+	  }
 
   private areToolCallsSettledForMessage(messageId: string): boolean {
     const toolCalls = this.toolCallManager.getToolCallsForMessage(messageId);
@@ -394,19 +386,6 @@ export class InputHandler extends Component {
     const composer = createChatComposer(this.container, {
       onEditSystemPrompt: this.onEditSystemPrompt,
       onAddContextFile: this.onAddContextFile,
-      isWebSearchAllowed: () => {
-        const isNativeProvider = this.plugin.settings.activeProvider.type === "native";
-        const currentProvider = this.plugin.settings.customProviders.find(
-          (p) => p.id === this.plugin.settings.activeProvider.id
-        );
-        const isOpenRouter = currentProvider?.endpoint.includes("openrouter.ai");
-        return isNativeProvider || !!isOpenRouter;
-      },
-      getWebSearchEnabled: () => this.webSearchEnabled,
-      toggleWebSearchEnabled: () => {
-        this.webSearchEnabled = !this.webSearchEnabled;
-      },
-      updateWebSearchButtonState: () => this.updateWebSearchButtonState(),
       onSend: () => this.handleSendMessage(),
       onStop: () => this.handleStopGeneration(),
       registerDomEvent: this.registerDomEvent.bind(this),
@@ -425,10 +404,8 @@ export class InputHandler extends Component {
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
-    this.webSearchButton = composer.webSearchButton;
 
     // Initialize states that depend on runtime conditions
-    this.updateWebSearchButtonState();
     this.updateSendButtonState();
     this.renderContextAttachments();
 
@@ -468,7 +445,6 @@ export class InputHandler extends Component {
       // Keep most controls enabled - they only affect future messages, not current generation
       this.settingsButton.setDisabled(false); // Settings changes only affect next message
       this.attachButton.setDisabled(false); // Users can add context for their next message
-      this.webSearchButton.setDisabled(false); // Toggle only affects next message
       this.micButton.setDisabled(!this.hasProLicense()); // Voice input just adds text to input field
       // Note: Save As Note functionality moved to slash command menu
       
@@ -534,7 +510,7 @@ export class InputHandler extends Component {
     // this.scrollManager.resetScrollState();
   }
 
-  private async handleSendMessage(): Promise<void> {
+  private async handleSendMessage(overrides?: { includeContextFiles?: boolean; agentModeOverride?: boolean }): Promise<void> {
     let messageText: string = this.input.value.trim();
     if (!messageText) return;
 
@@ -556,6 +532,9 @@ export class InputHandler extends Component {
 
     await this.maybePromptEnableAgentModeForBases(messageText);
 
+    const includeContextFiles = overrides?.includeContextFiles ?? true;
+    const agentModeOverride = overrides?.agentModeOverride;
+
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
@@ -571,14 +550,33 @@ export class InputHandler extends Component {
         // Keep taking PI-native turns until PI signals we're done.
         let shouldContinue = true;
         while (shouldContinue && !signal.aborted) {
-          const turnResult = await this.streamAssistantTurn(signal, true);
+          const turnResult = await this.streamAssistantTurn(signal, includeContextFiles, agentModeOverride);
           shouldContinue = await this.shouldContinuePiTurn(turnResult, signal);
         }
       });
+    } catch (err) {
+      // StreamingController already forwards errors into ChatView.handleError via onError.
+      // Swallow here to avoid "Uncaught (in promise)" in the Obsidian console.
+      if (!(err instanceof SystemSculptError && err.code === ERROR_CODES.STREAM_ERROR)) {
+        try {
+          this.onError(err as any);
+        } catch {}
+      }
+      try {
+        errorLogger.debug("Chat turn failed", {
+          source: "InputHandler",
+          method: "handleSendMessage",
+          metadata: { modelId: this.getSelectedModelId?.() },
+        });
+      } catch {}
     } finally {
       this.focus();
       await this.chatView.contextManager.validateAndCleanContextFiles();
     }
+  }
+
+  public async submitWithOverrides(overrides: { includeContextFiles?: boolean; agentModeOverride?: boolean }): Promise<void> {
+    await this.handleSendMessage(overrides);
   }
 
   private async maybePromptEnableAgentModeForBases(messageText: string): Promise<void> {
@@ -895,18 +893,17 @@ export class InputHandler extends Component {
     this.input.focus();
   }
 
-  public getDebugState(): {
-    value: string;
-    placeholder: string | null;
-    disabled: boolean;
-    selectionStart: number | null;
-    selectionEnd: number | null;
-    isGenerating: boolean;
-    webSearchEnabled: boolean;
-    pendingLargeTextContent: string | null;
-    pendingLargeTextContentLength: number | null;
-    attachments: Array<{
-      key: string;
+	  public getDebugState(): {
+	    value: string;
+	    placeholder: string | null;
+	    disabled: boolean;
+	    selectionStart: number | null;
+	    selectionEnd: number | null;
+	    isGenerating: boolean;
+	    pendingLargeTextContent: string | null;
+	    pendingLargeTextContentLength: number | null;
+	    attachments: Array<{
+	      key: string;
       text: string;
       dataset: Record<string, string | null>;
       html: string;
@@ -915,7 +912,7 @@ export class InputHandler extends Component {
     attachmentsHtml: string | null;
     inputWrapperHtml: string | null;
     inputHtml: string;
-    buttons: {
+	    buttons: {
       send: {
         text: string;
         tooltip: string | null;
@@ -929,18 +926,11 @@ export class InputHandler extends Component {
         disabled: boolean;
         display: string | null;
         classList: string[];
-      } | null;
-      webSearch: {
-        text: string;
-        tooltip: string | null;
-        disabled: boolean;
-        display: string | null;
-        classList: string[];
-      } | null;
-      mic: {
-        text: string;
-        tooltip: string | null;
-        disabled: boolean;
+	      } | null;
+	      mic: {
+	        text: string;
+	        tooltip: string | null;
+	        disabled: boolean;
         display: string | null;
         classList: string[];
       } | null;
@@ -994,29 +984,27 @@ export class InputHandler extends Component {
       };
     });
 
-    return {
-      value: this.input?.value ?? "",
-      placeholder: this.input?.placeholder ?? null,
-      disabled: Boolean(this.input?.disabled),
-      selectionStart: this.input?.selectionStart ?? null,
-      selectionEnd: this.input?.selectionEnd ?? null,
-      isGenerating: this.isGenerating,
-      webSearchEnabled: this.webSearchEnabled,
-      pendingLargeTextContent: this.pendingLargeTextContent,
-      pendingLargeTextContentLength: this.pendingLargeTextContent ? this.pendingLargeTextContent.length : null,
-      attachments,
+	    return {
+	      value: this.input?.value ?? "",
+	      placeholder: this.input?.placeholder ?? null,
+	      disabled: Boolean(this.input?.disabled),
+	      selectionStart: this.input?.selectionStart ?? null,
+	      selectionEnd: this.input?.selectionEnd ?? null,
+	      isGenerating: this.isGenerating,
+	      pendingLargeTextContent: this.pendingLargeTextContent,
+	      pendingLargeTextContentLength: this.pendingLargeTextContent ? this.pendingLargeTextContent.length : null,
+	      attachments,
       attachmentCount: attachments.length,
       attachmentsHtml: this.attachmentsEl?.innerHTML ?? null,
       inputWrapperHtml: this.inputWrapper?.innerHTML ?? null,
       inputHtml: this.input?.outerHTML ?? "",
-      buttons: {
-        send: describeButton(this.sendButton),
-        stop: describeButton(this.stopButton),
-        webSearch: describeButton(this.webSearchButton),
-        mic: describeButton(this.micButton),
-        attach: describeButton(this.attachButton),
-        settings: describeButton(this.settingsButton),
-      },
+	      buttons: {
+	        send: describeButton(this.sendButton),
+	        stop: describeButton(this.stopButton),
+	        mic: describeButton(this.micButton),
+	        attach: describeButton(this.attachButton),
+	        settings: describeButton(this.settingsButton),
+	      },
       menus: {
         slashCommandMenuOpen: this.slashCommandMenu?.isOpen?.() ?? null,
         atMentionMenuOpen: this.atMentionMenu?.isOpen?.() ?? null,
@@ -1148,95 +1136,12 @@ export class InputHandler extends Component {
     this.input.focus();
   }
 
-  private updateWebSearchButtonState(): void {
-    if (!this.webSearchButton || !this.webSearchButton.buttonEl) return;
-
-    const webSearchAllowed = this.chatView?.supportsWebSearch?.() ?? false;
-
-    if (!webSearchAllowed && this.webSearchEnabled) {
-      this.webSearchEnabled = false;
-      if (this.chatView) this.chatView.webSearchEnabled = false;
-      try {
-        if (this.chatView?.messages?.length === 0) {
-          this.chatView.displayChatStatus();
-        }
-      } catch {}
-    }
-
-    if (!webSearchAllowed) {
-      this.webSearchButton.buttonEl.style.display = "none";
-      try {
-        if (this.chatView?.messages?.length === 0) {
-          this.chatView.displayChatStatus();
-        }
-      } catch {}
-      return;
-    }
-
-    this.webSearchButton.buttonEl.style.display = "flex";
-    if (this.chatView) this.chatView.webSearchEnabled = this.webSearchEnabled;
-
-    if (this.webSearchEnabled) {
-      this.webSearchButton.buttonEl.classList.add("ss-active");
-      this.webSearchButton.setTooltip("Web search enabled (click to disable)");
-    } else {
-      this.webSearchButton.buttonEl.classList.remove("ss-active");
-      this.webSearchButton.setTooltip("Toggle web search (model-supported only)");
-    }
-
-    try {
-      if (this.chatView?.messages?.length === 0) {
-        this.chatView.displayChatStatus();
-      }
-    } catch {}
-  }
-
-  // Public toggle used by status pills
-  public toggleWebSearchEnabled(): void {
-    if (!this.chatView?.supportsWebSearch?.()) {
-      if (this.webSearchEnabled) {
-        this.webSearchEnabled = false;
-        if (this.chatView) this.chatView.webSearchEnabled = false;
-        this.updateWebSearchButtonState();
-      }
-      try {
-        new Notice("Selected model does not support web search.", 2500);
-      } catch {}
-      return;
-    }
-
-    this.webSearchEnabled = !this.webSearchEnabled;
-    if (this.chatView) this.chatView.webSearchEnabled = this.webSearchEnabled;
-    this.updateWebSearchButtonState();
-    try {
-      if (this.webSearchEnabled) new Notice("Web search enabled");
-      else new Notice("Web search disabled");
-    } catch {}
-    // Keep empty-chat status UI in sync
-    try {
-      if (this.chatView?.messages?.length === 0) {
-        this.chatView.displayChatStatus();
-      }
-    } catch {}
-  }
-
-  public disableWebSearch(): void {
-    if (!this.webSearchEnabled) return;
-    this.webSearchEnabled = false;
-    if (this.chatView) this.chatView.webSearchEnabled = false;
-    this.updateWebSearchButtonState();
-  }
-
-  public refreshWebSearchControls(): void {
-    this.updateWebSearchButtonState();
-  }
-
   public refreshTokenCounter(): void {
     // Token counter has been removed
   }
 
   public onModelChange(): void {
-    this.updateWebSearchButtonState();
+    // no-op (kept for UI hooks)
   }
 
   public async handleOpenChatHistoryFile(): Promise<void> {

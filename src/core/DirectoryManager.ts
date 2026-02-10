@@ -93,6 +93,7 @@ export class DirectoryManager {
         settings.chatsDirectory,
         settings.savedChatsDirectory,
         settings.benchmarksDirectory,
+        settings.webResearchDirectory,
         settings.recordingsDirectory,
         settings.systemPromptsDirectory,
         settings.attachmentsDirectory,

@@ -69,16 +69,13 @@ describe("createChatComposer", () => {
     jest.clearAllMocks();
   });
 
-  it("hides web search button when not allowed", () => {
+  it("creates the expected core elements", () => {
     const root = document.createElement("div");
+    const onSend = jest.fn();
     const composer = createChatComposer(root, {
       onEditSystemPrompt: jest.fn(),
       onAddContextFile: jest.fn(),
-      isWebSearchAllowed: () => false,
-      getWebSearchEnabled: () => false,
-      toggleWebSearchEnabled: jest.fn(),
-      updateWebSearchButtonState: jest.fn(),
-      onSend: jest.fn(),
+      onSend,
       onStop: jest.fn(),
       registerDomEvent: (el, type, cb) => el.addEventListener(type as any, cb as any),
       onKeyDown: jest.fn(),
@@ -88,37 +85,81 @@ describe("createChatComposer", () => {
       hasProLicense: () => true,
     });
 
-    expect(composer.webSearchButton.buttonEl.style.display).toBe("none");
+    expect(composer.input.tagName).toBe("TEXTAREA");
+    expect(composer.sendButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.stopButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.attachButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.settingsButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.micButton.buttonEl.tagName).toBe("BUTTON");
+
+    // Send button starts disabled until the host enables it.
+    expect(composer.sendButton.buttonEl.disabled).toBe(true);
   });
 
-  it("toggles web search and updates state on click", () => {
+  it("toggles has-value class as input changes", () => {
     const root = document.createElement("div");
-    const toggleWebSearchEnabled = jest.fn();
-    const updateWebSearchButtonState = jest.fn();
+    const onInput = jest.fn();
 
     const composer = createChatComposer(root, {
       onEditSystemPrompt: jest.fn(),
       onAddContextFile: jest.fn(),
-      isWebSearchAllowed: () => true,
-      getWebSearchEnabled: () => true,
-      toggleWebSearchEnabled,
-      updateWebSearchButtonState,
       onSend: jest.fn(),
       onStop: jest.fn(),
       registerDomEvent: (el, type, cb) => el.addEventListener(type as any, cb as any),
       onKeyDown: jest.fn(),
-      onInput: jest.fn(),
+      onInput,
       onPaste: jest.fn(),
       handleMicClick: jest.fn(),
       hasProLicense: () => true,
     });
 
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    composer.webSearchButton.buttonEl.click();
+    expect(composer.inputWrap.classList.contains("has-value")).toBe(false);
 
-    expect(toggleWebSearchEnabled).toHaveBeenCalled();
-    expect(updateWebSearchButtonState).toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalled();
-    logSpy.mockRestore();
+    composer.input.value = "hello";
+    composer.input.dispatchEvent(new (window as any).Event("input", { bubbles: true }));
+    expect(onInput).toHaveBeenCalled();
+    expect(composer.inputWrap.classList.contains("has-value")).toBe(true);
+
+    composer.input.value = "";
+    composer.input.dispatchEvent(new (window as any).Event("input", { bubbles: true }));
+    expect(composer.inputWrap.classList.contains("has-value")).toBe(false);
+  });
+
+  it("invokes button callbacks", () => {
+    const root = document.createElement("div");
+    const onAddContextFile = jest.fn();
+    const onEditSystemPrompt = jest.fn();
+    const onSend = jest.fn();
+    const onStop = jest.fn();
+    const handleMicClick = jest.fn();
+
+    const composer = createChatComposer(root, {
+      onEditSystemPrompt,
+      onAddContextFile,
+      onSend,
+      onStop,
+      registerDomEvent: (el, type, cb) => el.addEventListener(type as any, cb as any),
+      onKeyDown: jest.fn(),
+      onInput: jest.fn(),
+      onPaste: jest.fn(),
+      handleMicClick,
+      hasProLicense: () => true,
+    });
+
+    composer.attachButton.buttonEl.click();
+    expect(onAddContextFile).toHaveBeenCalled();
+
+    composer.settingsButton.buttonEl.click();
+    expect(onEditSystemPrompt).toHaveBeenCalled();
+
+    composer.sendButton.setDisabled(false);
+    composer.sendButton.buttonEl.click();
+    expect(onSend).toHaveBeenCalled();
+
+    composer.stopButton.buttonEl.click();
+    expect(onStop).toHaveBeenCalled();
+
+    composer.micButton.buttonEl.click();
+    expect(handleMicClick).toHaveBeenCalled();
   });
 });

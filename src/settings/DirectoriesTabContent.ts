@@ -23,7 +23,8 @@ async function handleDirectoryChange(
         | "extractionsDirectory"
         | "systemPromptsDirectory"
         | "savedChatsDirectory"
-        | "benchmarksDirectory",
+        | "benchmarksDirectory"
+        | "webResearchDirectory",
     createFolder: boolean = false
 ) {
     const { app, plugin } = tabInstance;
@@ -60,7 +61,8 @@ function createDirectorySetting(
         | "extractionsDirectory"
         | "systemPromptsDirectory"
         | "savedChatsDirectory"
-        | "benchmarksDirectory",
+        | "benchmarksDirectory"
+        | "webResearchDirectory",
     placeholder: string
 ) {
     const { app, plugin } = tabInstance;
@@ -134,6 +136,15 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         "Select the directory where benchmark reports are exported",
         "benchmarksDirectory",
         "Path relative to vault root (empty = SystemSculpt/Benchmarks)"
+    );
+
+    createDirectorySetting(
+        containerEl,
+        tabInstance,
+        "Web Research Directory",
+        "Select the directory where web search and fetch corpus files are stored",
+        "webResearchDirectory",
+        "Path relative to vault root (empty = SystemSculpt/Web Research)"
     );
 
     createDirectorySetting(

@@ -1,5 +1,5 @@
 import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
-import { ChatMessage, ChatRole, SystemPromptPreset, MessagePart } from "../../types";
+import { ChatMessage, MessagePart } from "../../types";
 import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
 import type { ToolCallManager } from "./ToolCallManager";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
@@ -309,9 +309,7 @@ export class ChatStorageService {
               return null;
             }
             
-            // Extract filename without extension for chatId
-            const filename = filePath.split('/').pop()?.replace('.md', '') || '';
-            const parsed = this.parseMarkdownContent(content, filename);
+            const parsed = this.parseMarkdownContent(content);
 
             if (!parsed) return null;
 
@@ -372,40 +370,10 @@ export class ChatStorageService {
       }
 
       const content = await this.app.vault.read(file);
-      return this.parseMarkdownContent(content, chatId);
+      return this.parseMarkdownContent(content);
     } catch (error) {
       return null;
     }
-  }
-
-  private generateMarkdownContent(
-    metadata: ChatMetadata,
-    messages: ChatMessage[]
-  ): string {
-    const yamlMetadata = {
-      systemsculpt_chat: true,
-      ...metadata,
-    };
-
-    const metadataSection = [
-      "---",
-      stringifyYaml(yamlMetadata).trim(),
-      "---",
-      "",
-    ].join("\n");
-
-    const messagesSection = messages
-      .map((msg) =>
-        [
-          `<!-- SYSTEMSCULPT-MESSAGE-START role="${msg.role}" message-id="${msg.message_id}" -->`,
-          msg.content,
-          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
-          "",
-        ].join("\n")
-      )
-      .join("\n");
-
-    return metadataSection + messagesSection;
   }
 
   private parseMetadata(content: string): ChatMetadata | null {
@@ -503,7 +471,7 @@ export class ChatStorageService {
     }
   }
 
-  private parseMarkdownContent(content: string, filename?: string): {
+  private parseMarkdownContent(content: string): {
     id: string;
     messages: ChatMessage[];
     selectedModelId: string;
@@ -516,11 +484,6 @@ export class ChatStorageService {
     chatFontSize?: "small" | "medium" | "large";
     agentMode?: boolean;
   } | null {
-    // Handle very old five-backtick legacy format first
-    if (this.isFiveBacktickLegacyFile(content)) {
-      return this.parseFiveBacktickLegacyFile(content, filename);
-    }
-
     // NEW: Delegate modern parsing logic to central serializer
     const parsed = ChatMarkdownSerializer.parseMarkdown(content);
     if (parsed) {
@@ -838,9 +801,6 @@ export class ChatStorageService {
       if (incoming.annotations && incoming.annotations.length > 0) {
         activeAssistant.annotations = incoming.annotations;
       }
-      if (typeof incoming.webSearchEnabled === "boolean") {
-        activeAssistant.webSearchEnabled = incoming.webSearchEnabled;
-      }
     };
 
     for (const msg of result) {
@@ -867,45 +827,6 @@ export class ChatStorageService {
   }
 
   /**
-   * Validate and fix tool call IDs to ensure they follow OpenAI format
-   * Also creates a mapping for tool result messages that reference the old IDs
-   */
-  private validateAndFixToolCallIds(toolCalls: any[], idMapping?: Map<string, string>): any[] {
-    const generateUUID = () => {
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-      });
-    };
-
-    return toolCalls.map(toolCall => {
-      if (!toolCall.id) {
-        // Generate OpenAI-compatible ID if missing
-        const newId = `call_${generateUUID().replace(/-/g, '').substring(0, 24)}`;
-        // Generated missing tool call ID for compatibility
-        return { ...toolCall, id: newId };
-      }
-
-      // Check if the ID is in an unexpected format and needs fixing
-      if (toolCall.id.startsWith('tool_') && toolCall.id.includes('_mcp-')) {
-        // Convert MCP-style ID to OpenAI format
-        const newId = `call_${generateUUID().replace(/-/g, '').substring(0, 24)}`;
-        // Tool call ID converted to OpenAI format for compatibility
-        
-        // Store the mapping for tool result messages
-        if (idMapping) {
-          idMapping.set(toolCall.id, newId);
-        }
-        
-        return { ...toolCall, id: newId };
-      }
-
-      // ID looks valid, keep as-is
-      return toolCall;
-    });
-  }
-
-  /**
    * Validates that a file has the expected chat file structure
    */
   private isValidChatFile(content: string): boolean {
@@ -915,25 +836,8 @@ export class ChatStorageService {
     // Check for SystemSculpt message markers (current format)
     const hasMessageMarkers = content.includes('SYSTEMSCULPT-MESSAGE-START') && 
                               content.includes('SYSTEMSCULPT-MESSAGE-END');
-    
-    // Check for legacy format patterns
-    const hasLegacyFormat = this.isFiveBacktickLegacyFile(content);
-    
-    return hasFrontmatter || hasMessageMarkers || hasLegacyFormat;
-  }
 
-  /**
-   * Detects if this is a legacy chat file format
-   */
-  private isFiveBacktickLegacyFile(content: string): boolean {
-    // Legacy format has specific headers and code block patterns
-    const hasContextFilesHeader = content.includes('# Context Files');
-    const hasChatHistoryHeader = content.includes('# AI Chat History');
-    const hasUserBlocks = /`{4,5}user/.test(content);
-    const hasAiBlocks = /`{4,5}ai/.test(content);
-    
-    // Must have the header structure AND message blocks
-    return (hasContextFilesHeader || hasChatHistoryHeader) && (hasUserBlocks || hasAiBlocks);
+    return hasFrontmatter || hasMessageMarkers;
   }
 
   /**
@@ -973,312 +877,6 @@ export class ChatStorageService {
     const hasExpectedFields = /\bid\s*:/.test(content) || /\bmodel\s*:/.test(content) || /\btitle\s*:/.test(content);
     
     return hasYamlStructure || hasExpectedFields;
-  }
-
-  /**
-   * Format tool arguments for display
-   */
-  private formatToolArguments(args: string): string {
-    try {
-      const parsed = JSON.parse(args);
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return args; // Return as-is if not valid JSON
-    }
-  }
-
-  /**
-   * Reconstruct message parts from chronological content blocks for consistency
-   */
-  private reconstructMessagePartsFromContent(content: string, reasoning: string, toolCalls: any[]): MessagePart[] {
-    const parts: MessagePart[] = [];
-    let timestamp = Date.now();
-    let toolCallIndex = 0;
-    
-    // Parse chronological blocks in order they appear in content
-    // Look for REASONING-BLOCK, TOOL-CALL-DATA, and CONTENT-PART
-    const blockPattern = /<!-- REASONING-BLOCK -->\n([\s\S]*?)\n<!-- \/REASONING-BLOCK -->|<!-- TOOL-CALL-DATA\n([\s\S]*?)\n-->|<!-- CONTENT-PART -->\n([\s\S]*?)\n<!-- \/CONTENT-PART -->/g;
-    let match;
-    
-    while ((match = blockPattern.exec(content)) !== null) {
-      if (match[1]) {
-        // Reasoning block
-        const reasoningTimestamp = timestamp++;
-        parts.push({
-          id: `reasoning-${reasoningTimestamp}`,
-          type: 'reasoning',
-          timestamp: reasoningTimestamp,
-          data: match[1].trimEnd() // Only trim trailing whitespace, preserve internal formatting
-        });
-      } else if (match[2]) {
-        // Tool call data
-        try {
-          const toolCallData = JSON.parse(match[2]);
-          const toolCallTimestamp = timestamp++;
-          parts.push({
-            id: `tool_call-${toolCallTimestamp}`,
-            type: 'tool_call',
-            timestamp: toolCallTimestamp,
-            data: toolCallData
-          });
-        } catch (error) {
-        }
-      } else if (match[3]) {
-        // Content part
-        const contentTimestamp = timestamp++;
-        parts.push({
-          id: `content-${contentTimestamp}`,
-          type: 'content',
-          timestamp: contentTimestamp,
-          data: match[3].trim()
-        });
-      }
-    }
-    
-    // CRITICAL: Always add passed-in tool calls if they weren't found in blocks
-    // This handles cases where tool calls were extracted but not matched by the regex
-    const foundToolCallIds = new Set(
-      parts.filter(p => p.type === 'tool_call')
-        .map(p => (p.data as any).id)
-    );
-    
-    if (toolCalls && toolCalls.length > 0) {
-      toolCalls.forEach(toolCall => {
-        if (!foundToolCallIds.has(toolCall.id)) {
-          const toolCallTimestamp = timestamp++;
-          parts.push({
-            id: `tool_call-${toolCallTimestamp}`,
-            type: 'tool_call',
-            timestamp: toolCallTimestamp,
-            data: toolCall
-          });
-        }
-      });
-    }
-    
-    // If no chronological blocks found, fall back to simple reconstruction
-    if (parts.length === 0) {
-      if (reasoning) {
-        const reasoningTimestamp = timestamp++;
-        parts.push({
-          id: `reasoning-${reasoningTimestamp}`,
-          type: 'reasoning',
-          timestamp: reasoningTimestamp,
-          data: reasoning
-        });
-      }
-      
-      // Add content as final part
-      const cleanContent = this.extractNonChronologicalContent(content);
-      if (cleanContent.trim()) {
-        const contentTimestamp = timestamp++;
-        parts.push({
-          id: `content-${contentTimestamp}`,
-          type: 'content',
-          timestamp: contentTimestamp,
-          data: cleanContent
-        });
-      }
-    }
-    
-    // Always add clean content at the end if we have parts
-    if (parts.length > 0) {
-      const cleanContent = this.extractNonChronologicalContent(content);
-      if (cleanContent.trim()) {
-        // Check if we already have a content part
-        const hasContentPart = parts.some(p => p.type === 'content');
-        if (!hasContentPart) {
-          const contentTimestamp = timestamp++;
-          parts.push({
-            id: `content-${contentTimestamp}`,
-            type: 'content',
-            timestamp: contentTimestamp,
-            data: cleanContent
-          });
-        }
-      }
-    }
-    
-    return parts;
-  }
-
-  /**
-   * Extract only the non-chronological content (regular text) from storage content
-   */
-  private extractNonChronologicalContent(content: string): string {
-    // Remove all chronological blocks
-    let cleaned = content
-      .replace(/<!-- REASONING-BLOCK -->\n[\s\S]*?\n<!-- \/REASONING-BLOCK -->/g, '')
-      .replace(/<!-- TOOL-CALL-DATA\n[\s\S]*?\n-->/g, '')
-      .replace(/<!-- CONTENT-PART -->\n[\s\S]*?\n<!-- \/CONTENT-PART -->/g, '');
-    
-    // Clean up extra whitespace
-    cleaned = cleaned.replace(/\n\n\n+/g, '\n\n').trim();
-    
-    return cleaned;
-  }
-
-  /**
-   * Check if content contains chronological blocks from storage
-   */
-  private containsChronologicalBlocks(content: string): boolean {
-    return content.includes('<!-- REASONING-BLOCK -->') ||
-           content.includes('<!-- TOOL-CALL-DATA') ||
-           content.includes('<!-- CONTENT-PART -->');
-  }
-
-  /**
-   * Parse legacy chat file format (old ````user/````ai format)
-   */
-  private parseFiveBacktickLegacyFile(content: string, filename?: string): {
-    id: string;
-    messages: ChatMessage[];
-    selectedModelId: string;
-    lastModified: number;
-    title: string;
-    version?: number;
-    context_files?: string[];
-    systemPromptType: "general-use" | "concise" | "agent" | "custom";
-    systemPromptPath?: string;
-    agentMode?: boolean;
-  } | null {
-    try {
-      // Silently parse legacy chat file - backwards compatibility working as expected
-      
-      const messages: ChatMessage[] = [];
-      const timestamp = Date.now();
-      // Use filename as chatId for legacy files, fallback to random ID
-      const chatId = filename || this.generateMessageId();
-      
-      // Extract context files from the legacy format
-      const contextFiles: string[] = [];
-      const contextSection = content.match(/# Context Files\n([\s\S]*?)(?=# AI Chat History|$)/);
-      if (contextSection && contextSection[1]) {
-        const links = contextSection[1].match(/\[\[(.*?)\]\]/g);
-        if (links) {
-          contextFiles.push(...links.map(link => link.replace(/\[\[(.*?)\]\]/, '$1')));
-          // Found context files - silent discovery
-        }
-      }
-      
-      // Parse messages from code blocks
-      // Match patterns like `````user or ````ai-gpt-4o
-      const messageRegex = /`{4,5}(user|ai(?:-[\w-]+)?)\n([\s\S]*?)\n`{4,5}/g;
-      
-      let match;
-      while ((match = messageRegex.exec(content)) !== null) {
-        const rolePrefix = match[1];
-        const messageContent = match[2].trim();
-        
-        // Legacy message found and parsed successfully
-        
-        // Determine role
-        let role: ChatRole;
-        if (rolePrefix === 'user') {
-          role = 'user';
-        } else if (rolePrefix.startsWith('ai')) {
-          role = 'assistant';
-        } else {
-          continue; // Skip unknown roles
-        }
-        
-        // Generate message ID
-        const messageId = this.generateMessageId();
-        
-        messages.push({
-          role,
-          content: messageContent,
-          message_id: messageId,
-        });
-      }
-      
-      // Legacy parser extracted messages - silent success
-      
-      // Extract title from content or use fallback
-      let title = "Legacy Chat";
-      const firstUserMessage = messages.find(m => m.role === 'user');
-      if (firstUserMessage && typeof firstUserMessage.content === 'string') {
-        // Use first 50 characters of first user message as title
-        title = firstUserMessage.content.substring(0, 50).replace(/\n/g, ' ').trim();
-        if (title.length >= 50) title += '...';
-      }
-      
-      const result = {
-        id: chatId,
-        messages,
-        selectedModelId: "gpt-4o", // Default model for legacy files
-        lastModified: timestamp,
-        title,
-        version: 0,
-        context_files: contextFiles.length > 0 ? contextFiles : undefined,
-        systemPromptType: "general-use" as const,
-        agentMode: true
-      };
-
-      // Legacy parser completed - silent success
-      return result;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
-   * Fallback parsing for files that might be corrupted or in old format
-   */
-  private tryFallbackParsing(content: string): {
-    id: string;
-    messages: ChatMessage[];
-    selectedModelId: string;
-    lastModified: number;
-    title: string;
-    version?: number;
-    context_files?: string[];
-    systemPromptType: "general-use" | "concise" | "agent" | "custom";
-    systemPromptPath?: string;
-    agentMode?: boolean;
-  } | null {
-    try {
-      // Generate fallback metadata
-      const timestamp = Date.now();
-      const fallbackId = this.generateMessageId();
-      
-      // Try to extract messages even without proper metadata
-      const messages: ChatMessage[] = [];
-      
-      // Look for SystemSculpt message markers - only match at line boundaries
-      const messageRegex = /(?:^|\n)\s*<!--\s*SYSTEMSCULPT-MESSAGE-START\s*role=[\'\"]?(user|assistant)[\'\"]?\s*message-id=[\'\"]?([^\'\"\\s>]+)[\'\"]?\s*-->\s*([\s\S]*?)\s*<!--\s*SYSTEMSCULPT-MESSAGE-END\s*-->(?=\s*(?:\n|$))/gm;
-      
-      let msgMatch;
-      while ((msgMatch = messageRegex.exec(content)) !== null) {
-        const role = msgMatch[1];
-        const messageId = msgMatch[2];
-        const messageContent = msgMatch[3];
-        
-        messages.push({
-          role: role as ChatRole,
-          content: messageContent.trim(),
-          message_id: messageId,
-        });
-      }
-      
-      // Only return fallback result if we found at least one message
-      if (messages.length > 0) {
-        return {
-          id: fallbackId,
-          messages,
-          selectedModelId: "gpt-3.5-turbo", // Default fallback model
-          lastModified: timestamp,
-          title: "Recovered Chat",
-          version: 0,
-          systemPromptType: "general-use",
-          agentMode: true
-        };
-      }
-      
-      return null;
-    } catch (error) {
-      return null;
-    }
   }
 
   async getMetadata(chatId: string): Promise<ChatMetadata | null> {

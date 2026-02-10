@@ -238,6 +238,125 @@ describe("StreamPipeline", () => {
     expect(final.done).toBe(false);
   });
 
+  test("supports PI toolcall_delta events emitted as { delta, partial } without toolCall", () => {
+    const pipeline = create();
+
+    const first = pipeline.push(
+      encode(
+        `event: toolcall_delta\ndata: ${JSON.stringify({
+          type: "toolcall_delta",
+          contentIndex: 1,
+          delta: { arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hel' },
+          partial: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "" },
+              {
+                type: "toolCall",
+                id: "call_pi_partial_1",
+                name: "functions.mcp-filesystem_edit",
+                arguments: {},
+              },
+            ],
+          },
+        })}\n\n`
+      )
+    );
+
+    const second = pipeline.push(
+      encode(
+        `event: toolcall_delta\ndata: ${JSON.stringify({
+          type: "toolcall_delta",
+          contentIndex: 1,
+          delta: { arguments: 'lo"}]}' },
+          partial: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "" },
+              {
+                type: "toolCall",
+                id: "call_pi_partial_1",
+                name: "functions.mcp-filesystem_edit",
+                arguments: {},
+              },
+            ],
+          },
+        })}\n\n`
+      )
+    );
+
+    const final = pipeline.push(
+      encode(
+        `event: toolcall_end\ndata: ${JSON.stringify({
+          type: "toolcall_end",
+          contentIndex: 1,
+          toolCall: {
+            id: "call_pi_partial_1",
+            name: "functions.mcp-filesystem_edit",
+          },
+        })}\n\n`
+      )
+    );
+
+    expect(first.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "delta",
+        call: expect.objectContaining({
+          id: "call_pi_partial_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hel',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+
+    expect(second.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "delta",
+        call: expect.objectContaining({
+          id: "call_pi_partial_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hello"}]}',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+
+    expect(final.events).toEqual<StreamEvent[]>([
+      {
+        type: "tool-call",
+        phase: "final",
+        call: expect.objectContaining({
+          id: "call_pi_partial_1",
+          index: 1,
+          function: expect.objectContaining({
+            name: "mcp-filesystem_edit",
+            arguments: '{"path":"README.md","ops":[{"op":"replace","text":"hello"}]}',
+          }),
+        }) as StreamToolCall,
+      },
+    ]);
+  });
+
+  test("emits stop-reason toolUse when finish_reason indicates tool calls", () => {
+    const pipeline = create();
+    const chunk = encode(
+      wrapData({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
+    );
+
+    const { events, done } = pipeline.push(chunk);
+    expect(done).toBe(false);
+    expect(events).toEqual<StreamEvent[]>([
+      { type: "meta", key: "stop-reason", value: "toolUse" },
+    ]);
+  });
+
   test("falls back to done.message content when PI stream has no deltas", () => {
     const pipeline = create();
     const chunk = encode(
@@ -351,14 +470,12 @@ describe("StreamPipeline", () => {
     ]);
   });
 
-  test("emits meta events for web search flag", () => {
+  test("ignores webSearchEnabled flags (UI no longer consumes these as meta events)", () => {
     const pipeline = create();
     const chunk = encode(wrapData({ webSearchEnabled: true }));
 
     const { events } = pipeline.push(chunk);
-    expect(events).toEqual<StreamEvent[]>([
-      { type: "meta", key: "web-search-enabled", value: true },
-    ]);
+    expect(events).toEqual<StreamEvent[]>([]);
   });
 
   test("emits annotations events when citations are included", () => {
@@ -891,6 +1008,7 @@ describe("StreamPipeline", () => {
 
     const { events, done } = pipeline.push(chunk);
     expect(events).toContainEqual({ type: "content", text: "final" });
+    expect(events).toContainEqual({ type: "meta", key: "stop-reason", value: "stop" });
     // done is only true if also isFinalFlush=true, so it should be false here
     expect(done).toBe(false);
   });
@@ -999,12 +1117,12 @@ describe("StreamPipeline", () => {
     expect((events[0] as any).call.id).toBe("call_fc");
   });
 
-  test("webSearchEnabled false is still emitted", () => {
+  test("webSearchEnabled false produces no meta events", () => {
     const pipeline = create();
     const chunk = encode(wrapData({ webSearchEnabled: false }));
 
     const { events } = pipeline.push(chunk);
-    expect(events).toEqual([{ type: "meta", key: "web-search-enabled", value: false }]);
+    expect(events).toEqual([]);
   });
 
   test("handles array of objects with text in content normalization", () => {

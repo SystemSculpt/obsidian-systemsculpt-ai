@@ -242,7 +242,6 @@ export function createSSEStreamFromChatCompletionJSON(
       let reasoningDetails: any[] | null = null;
       let toolCalls: any[] | null = null;
       let annotations: any[] | null = null;
-      let webSearchEnabled: boolean | null = null;
 
       let functionCall: any = null;
       if (responseData?.choices && responseData.choices[0]) {
@@ -260,14 +259,8 @@ export function createSSEStreamFromChatCompletionJSON(
         annotations = Array.isArray(responseData.annotations) ? responseData.annotations : null;
         toolCalls = Array.isArray(responseData.tool_calls) ? responseData.tool_calls : null;
         functionCall = (responseData as any).function_call || null;
-        webSearchEnabled = typeof responseData.webSearchEnabled === 'boolean' ? responseData.webSearchEnabled : null;
       } else if (typeof responseData === 'string') {
         content = responseData;
-      }
-
-      if (webSearchEnabled) {
-        enqueueSSE({ webSearchEnabled: true });
-        await new Promise((r) => setTimeout(r, delayMs));
       }
 
       if (reasoning) {

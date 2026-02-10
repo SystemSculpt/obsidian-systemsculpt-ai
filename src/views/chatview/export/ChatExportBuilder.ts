@@ -82,10 +82,6 @@ export class ChatExportBuilder {
       }
     }
 
-    if (typeof this.context.webSearchEnabled === 'boolean') {
-      lines.push(`webSearch: ${this.context.webSearchEnabled}`);
-    }
-
     lines.push('options:');
     OPTION_KEYS.forEach((key) => {
       lines.push(`  ${key}: ${options[key]}`);

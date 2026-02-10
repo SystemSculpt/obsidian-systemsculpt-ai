@@ -51,7 +51,6 @@ export class StreamingController extends Component {
     messageEl: HTMLElement,
     messageId: string,
     abortSignal: AbortSignal,
-    initialWebSearchEnabled?: boolean,
     seedParts?: MessagePart[],
     externalTracker?: StreamingMetricsTracker,
     skipIndicatorLifecycle?: boolean,
@@ -83,7 +82,6 @@ export class StreamingController extends Component {
     const pendingToolCalls = new Map<string, StreamToolCall>();
     const emittedToolCalls = new Set<string>();
 
-    let webSearchEnabled = initialWebSearchEnabled;
     let stopReason: string | undefined;
     let collectedAnnotations: Annotation[] = [];
     const collectedReasoningDetails: unknown[] = [];
@@ -164,9 +162,7 @@ export class StreamingController extends Component {
             break;
           }
           case "meta": {
-            if (event.key === "web-search-enabled") {
-              webSearchEnabled = !!event.value;
-            } else if (event.key === "inline-footnote" && setStreamingFootnote) {
+            if (event.key === "inline-footnote" && setStreamingFootnote) {
               setStreamingFootnote(messageEl, String(event.value ?? ""));
             } else if (event.key === "stop-reason") {
               const normalized = String(event.value ?? "").trim();
@@ -252,7 +248,6 @@ export class StreamingController extends Component {
         ? [...collectedAnnotations]
         : extractAnnotations(summary.content);
       assistantMessage.annotations = resolvedAnnotations;
-      assistantMessage.webSearchEnabled = webSearchEnabled;
       if (stopReason) {
         (assistantMessage as any).stopReason = stopReason;
       }

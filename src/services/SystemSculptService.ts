@@ -3,15 +3,14 @@ import {
   ChatMessage,
   SystemSculptModel,
   SystemSculptSettings,
-  CustomProvider,
   ApiStatusResponse,
 } from "../types";
 import {
   SystemSculptError,
   ERROR_CODES,
+  isContextOverflowErrorMessage,
 } from "../utils/errors";
 // License checks removed for Agent Mode access
-import { CustomProviderService } from "./CustomProviderService";
 import { MCPService } from "../views/chatview/MCPService";
 import SystemSculptPlugin from "../main";
 import { DebugLogger } from "../utils/debugLogger";
@@ -21,7 +20,6 @@ import { deterministicId } from "../utils/id";
 import { Notice } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
-import { MOBILE_STREAM_CONFIG, WEB_SEARCH_CONFIG } from "../constants/webSearch";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 
 // Import the new service classes
@@ -36,6 +34,9 @@ import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import { AgentSessionClient, type AgentSessionRequest } from "./agent-v2/AgentSessionClient";
 import { normalizePiTools } from "./agent-v2/PiToolAdapter";
+import type { CustomProvider } from "../types/llm";
+import { postJsonStreaming } from "../utils/streaming";
+import { RuntimeIncompatibilityService } from "./RuntimeIncompatibilityService";
 
 export interface StreamDebugCallbacks {
   onRequest?: (data: {
@@ -66,7 +67,7 @@ export interface StreamDebugCallbacks {
 
 interface PreparedChatRequest {
   isCustom: boolean;
-  provider?: CustomProvider;
+  customProvider?: CustomProvider;
   actualModelId: string;
   serverModelId: string;
   preparedMessages: ChatMessage[];
@@ -82,7 +83,6 @@ interface PreparedChatRequest {
 export class SystemSculptService {
   private settings: SystemSculptSettings;
   private static instance: SystemSculptService | null = null;
-  private customProviderService: CustomProviderService;
   private mcpService: MCPService;
   public baseUrl: string;
   private plugin: SystemSculptPlugin;
@@ -112,6 +112,60 @@ export class SystemSculptService {
         parameters: normalizeJsonSchema(tool.function.parameters || {}),
       },
     }));
+  }
+
+  private shouldFallbackWithoutTools(error: unknown): boolean {
+    if (!error) return false;
+
+    if (error instanceof SystemSculptError) {
+      if (error.metadata?.shouldResubmitWithoutTools) {
+        return true;
+      }
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    const lc = (message || "").toLowerCase();
+    if (!lc) return false;
+
+    return (
+      lc.includes("does not support tools") ||
+      lc.includes("tools not supported") ||
+      lc.includes("tool calling not supported") ||
+      lc.includes("tool calling is not supported") ||
+      lc.includes("tool_calls not supported") ||
+      lc.includes("function calling not supported") ||
+      lc.includes("function_calling not supported") ||
+      lc.includes("function_call not supported") ||
+      lc.includes("additional properties are not allowed: 'tools'") ||
+      lc.includes("unknown field: tools") ||
+      lc.includes("unsupported parameter: tools") ||
+      (lc.includes("extra fields not permitted") && lc.includes("tools"))
+    );
+  }
+
+  private isContextOverflowError(error: unknown): boolean {
+    if (!error) return false;
+
+    if (error instanceof SystemSculptError) {
+      const upstreamMessage =
+        typeof error.metadata?.upstreamMessage === "string"
+          ? String(error.metadata.upstreamMessage)
+          : "";
+      if (isContextOverflowErrorMessage(upstreamMessage || error.message)) {
+        return true;
+      }
+
+      const raw = error.metadata?.rawError as any;
+      const rawMessage = typeof raw?.message === "string" ? raw.message : "";
+      const rawType = typeof raw?.type === "string" ? raw.type : "";
+      const rawCode = typeof raw?.code === "string" ? raw.code : "";
+      if (isContextOverflowErrorMessage(rawMessage || rawType || rawCode)) {
+        return true;
+      }
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return isContextOverflowErrorMessage(message);
   }
 
   private toSystemSculptApiMessages(messages: ChatMessage[]): any[] {
@@ -231,27 +285,24 @@ export class SystemSculptService {
     systemPromptOverride?: string;
     agentMode?: boolean;
     toolCallManager?: any;
-    plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-    web_search_options?: { search_context_size?: "low" | "medium" | "high" };
     emitNotices?: boolean;
   }): Promise<PreparedChatRequest> {
     this.refreshSettings();
 
-    const {
-      messages,
-      model,
-      contextFiles,
-      systemPromptType,
-      systemPromptPath,
-      systemPromptOverride,
-      agentMode,
-      toolCallManager,
-      plugins,
-      web_search_options,
-      emitNotices = false,
-    } = options;
+	    const {
+	      messages,
+	      model,
+	      contextFiles,
+	      systemPromptType,
+	      systemPromptPath,
+	      systemPromptOverride,
+	      agentMode,
+	      toolCallManager,
+	      emitNotices = false,
+	    } = options;
 
-    const { isCustom, provider, actualModelId } = await this.modelManagementService.getModelInfo(model);
+    const modelInfo = await this.modelManagementService.getModelInfo(model);
+    const { actualModelId } = modelInfo;
     const serverModelId = this.normalizeServerModelId(actualModelId);
     const contextFileSet = contextFiles || new Set<string>();
     const imageContextCount = this.countImageContextFiles(contextFileSet);
@@ -335,42 +386,33 @@ export class SystemSculptService {
       );
     }
 
-    const preparedMessages = await this.contextFileService.prepareMessagesWithContext(
-      messages,
-      contextFileSet,
-      systemPromptType,
-      systemPromptPath,
-      effectiveAgentMode,
-      imagesEnabledForRequest,
-      toolCallManager,
-      finalSystemPrompt
-    );
+	    const preparedMessages = await this.contextFileService.prepareMessagesWithContext(
+	      messages,
+	      contextFileSet,
+	      systemPromptType,
+	      systemPromptPath,
+	      effectiveAgentMode,
+	      imagesEnabledForRequest,
+	      toolCallManager,
+	      finalSystemPrompt
+	    );
 
-    const hasWebPlugin = Array.isArray(plugins) && plugins.some((plugin) => plugin && plugin.id === WEB_SEARCH_CONFIG.PLUGIN_ID);
-    const resolvedWebSearchOptions = web_search_options ?? (hasWebPlugin ? { search_context_size: WEB_SEARCH_CONFIG.DEFAULT_CONTEXT_SIZE } : undefined);
-
-    return {
-      isCustom,
-      provider,
-      actualModelId,
-      serverModelId,
-      preparedMessages,
-      requestTools,
-      effectiveAgentMode,
-      resolvedWebSearchOptions,
-      finalSystemPrompt,
-    };
-  }
+	    return {
+	      isCustom: modelInfo.isCustom,
+	      customProvider: modelInfo.isCustom ? (modelInfo.provider as CustomProvider) : undefined,
+	      actualModelId,
+	      serverModelId,
+	      preparedMessages,
+	      requestTools,
+	      effectiveAgentMode,
+	      finalSystemPrompt,
+	    };
+	  }
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = plugin.settings;
     
-    // Defensive check to ensure CustomProviderService is properly initialized
-    if (!plugin.customProviderService) {
-      throw new Error("SystemSculptService requires CustomProviderService to be initialized first. This is likely a plugin initialization order issue.");
-    }
-    this.customProviderService = plugin.customProviderService;
     this.mcpService = new MCPService(plugin, plugin.app);
     
     // Ensure baseUrl is never empty - use development mode aware default if needed
@@ -577,426 +619,22 @@ export class SystemSculptService {
     return this.audioUploadService.uploadAudio(file);
   }
 
-  /**
-   * Handle custom provider completion requests using the adapter pattern
-   */
-  private async handleCustomProviderCompletion(
-    provider: CustomProvider,
-    messages: ChatMessage[],
-    modelId: string,
-    mcpTools: any[] = [],
-    signal?: AbortSignal,
-    plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>,
-    web_search_options?: { search_context_size?: "low" | "medium" | "high" },
-    forcedToolName?: string,
-    maxTokens?: number,
-    includeReasoning?: boolean,
-    debug?: StreamDebugCallbacks
-  ): Promise<Response> {
-    try {
-      const adapter = this.customProviderService.getProviderAdapter(provider);
-      const platform = PlatformContext.get();
-      const isMobile = platform.isMobile();
-      const fullEndpoint = adapter.getChatEndpoint();
-      const transportOptions = { endpoint: fullEndpoint };
-      const canStream = platform.supportsStreaming(transportOptions);
-      const preferredTransport = platform.preferredTransport(transportOptions);
-      try {
-        console.debug('[SystemSculpt][Transport] handleCustomProviderCompletion transport', {
-          provider: provider.name || provider.id,
-          endpoint: fullEndpoint,
-          canStream,
-          preferredTransport,
-          isMobile,
-        });
-      } catch {}
-
-      // Start with provider headers, then ensure JSON content-type for POST bodies
-      const headers = { ...adapter.getHeaders() } as Record<string, string>;
-      if (!Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
-        headers['Content-Type'] = 'application/json';
-      }
-      if (canStream) {
-        headers['Accept'] = headers['Accept'] || 'text/event-stream';
-        headers['Cache-Control'] = headers['Cache-Control'] || 'no-cache';
-      }
-
-      // Build request body using adapter (extras handled inside adapter)
-      const requestBody = adapter.buildRequestBody(
-        messages,
-        modelId,
-        mcpTools,
-        canStream,
-        { plugins, web_search_options, maxTokens, includeReasoning }
-      );
-
-      try {
-        debug?.onRequest?.({
-          provider: provider.name || provider.id || "custom",
-          endpoint: fullEndpoint,
-          headers,
-          body: requestBody,
-          transport: preferredTransport,
-          canStream,
-          isCustomProvider: true,
-        });
-      } catch {}
-
-      if (forcedToolName && Array.isArray((requestBody as any).tools) && (requestBody as any).tools.length > 0) {
-        const firstTool = (requestBody as any).tools[0];
-        const isAnthropicToolList = firstTool && typeof firstTool === "object" && typeof firstTool.name === "string";
-        (requestBody as any).tool_choice = isAnthropicToolList
-          ? { type: "tool", name: forcedToolName }
-          : { type: "function", function: { name: forcedToolName } };
-      }
-
-      if (forcedToolName && Array.isArray((requestBody as any).functions) && (requestBody as any).functions.length > 0) {
-        (requestBody as any).function_call = { name: forcedToolName };
-      }
-
-      // Log the request
-      const logger = DebugLogger.getInstance();
-      logger?.logAPIRequest(fullEndpoint, 'POST', requestBody);
-      
-      // Prefer native fetch when the platform supports streaming; otherwise fall back
-      // to the resilient transport wrapper (requestUrl + virtual SSE) for mobile and
-      // environments where direct streaming fails.
-      const hasTools = Array.isArray((requestBody as any).tools) && (requestBody as any).tools.length > 0;
-      const hasFunctions = Array.isArray((requestBody as any).functions) && (requestBody as any).functions.length > 0;
-      try {
-        const toolMode = hasTools ? "tools" : hasFunctions ? "functions" : "none";
-        const messageList: any[] = Array.isArray((requestBody as any).messages) ? (requestBody as any).messages : [];
-        const messagesWithReasoningDetails = messageList.filter((m) => Array.isArray(m?.reasoning_details)).length;
-        const reasoningDetailsItemCount = messageList.reduce((acc, m) => {
-          if (!Array.isArray(m?.reasoning_details)) return acc;
-          return acc + m.reasoning_details.length;
-        }, 0);
-        const assistantToolCallsMissingReasoningDetails = messageList.filter((m) => {
-          const hasToolCalls = Array.isArray(m?.tool_calls) && m.tool_calls.length > 0;
-          if (!hasToolCalls) return false;
-          return !Array.isArray(m?.reasoning_details);
-        }).length;
-        console.debug('[SystemSculpt][CustomProvider] request details', {
-          endpoint: fullEndpoint,
-          model: modelId,
-          stream: requestBody.stream,
-          hasTools,
-          hasFunctions,
-          toolMode,
-          messageCount: (requestBody.messages as any[])?.length,
-          messagesWithReasoningDetails,
-          reasoningDetailsItemCount,
-          assistantToolCallsMissingReasoningDetails,
-          transport: preferredTransport
-      });
-      } catch {}
-      let response: Response | null = null;
-      const isOpenRouter = fullEndpoint.includes("openrouter.ai");
-
-      const sendRequest = async (body: Record<string, any>): Promise<Response> => {
-        if (preferredTransport === "fetch" && typeof fetch === "function") {
-          try {
-            const { sanitizeFetchHeadersForUrl } = await import("../utils/streaming");
-            const fetchHeaders = sanitizeFetchHeadersForUrl(fullEndpoint, headers);
-            const fetchOptions: RequestInit = {
-              method: "POST",
-              headers: fetchHeaders,
-              body: JSON.stringify(body),
-              signal,
-              mode: "cors" as RequestMode,
-              credentials: "omit" as RequestCredentials,
-              cache: "no-store",
-            };
-            return await fetch(fullEndpoint, fetchOptions);
-          } catch (e) {
-            const isAbortError =
-              (e instanceof DOMException && e.name === "AbortError") ||
-              (e instanceof Error && e.name === "AbortError") ||
-              (typeof (e as any)?.message === "string" &&
-                String((e as any).message).toLowerCase().includes("abort"));
-            if (signal?.aborted || isAbortError) {
-              throw e;
-            }
-            try {
-              console.debug("[SystemSculpt][Transport] fetch failed, falling back to requestUrl", {
-                endpoint: fullEndpoint,
-                error: (e as Error)?.message ?? String(e),
-              });
-            } catch {}
-            const { postJsonStreaming } = await import("../utils/streaming");
-            return await postJsonStreaming(fullEndpoint, headers, body, isMobile, signal);
-          }
-        }
-
-        try {
-          console.debug("[SystemSculpt][Transport] using resilient postJsonStreaming fallback", {
-            endpoint: fullEndpoint,
-            preferredTransport,
-            canStream,
-            isMobile,
-          });
-        } catch {}
-        const { postJsonStreaming } = await import("../utils/streaming");
-        return await postJsonStreaming(fullEndpoint, headers, body, isMobile, signal);
-      };
-
-      let lastRequestBody: Record<string, any> = requestBody;
-      let openRouterFallback:
-        | {
-            order: string[];
-            endpoints: Array<{ tag: string; provider_name?: string }>;
-          }
-        | null = null;
-      let openRouterAvoidTag: string | undefined;
-
-      const ensureOpenRouterFallback = async (): Promise<
-        | {
-            order: string[];
-            endpoints: Array<{ tag: string; provider_name?: string }>;
-          }
-        | null
-      > => {
-        if (openRouterFallback) return openRouterFallback;
-        const apiKey = typeof provider.apiKey === "string" ? provider.apiKey.trim() : "";
-        if (!apiKey) return null;
-
-        const apiBase =
-          typeof provider.endpoint === "string" && provider.endpoint.trim().length > 0
-            ? provider.endpoint.trim()
-            : fullEndpoint;
-
-        const { getOpenRouterProviderOrderForModel } = await import("../utils/openrouterRouting");
-        openRouterFallback = await getOpenRouterProviderOrderForModel({
-          apiBase,
-          apiKey,
-          modelId,
-          hasTools,
-          signal,
-        });
-        return openRouterFallback;
-      };
-
-      const maxAttempts = isOpenRouter ? 3 : 1;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        let bodyForAttempt: Record<string, any> = requestBody;
-
-        if (isOpenRouter && attempt > 0) {
-          const fallback = await ensureOpenRouterFallback();
-          if (!fallback || fallback.order.length <= 1) {
-            break;
-          }
-
-          let order = fallback.order;
-          if (openRouterAvoidTag) {
-            order = order.filter((t) => t !== openRouterAvoidTag);
-          }
-
-          const shift = attempt - 1;
-          if (order.length <= shift) {
-            break;
-          }
-
-          bodyForAttempt = {
-            ...requestBody,
-            provider: {
-              ...(typeof (requestBody as any).provider === "object" && (requestBody as any).provider
-                ? (requestBody as any).provider
-                : {}),
-              order: order.slice(shift),
-              allow_fallbacks: true,
-            },
-          };
-        }
-
-        lastRequestBody = bodyForAttempt;
-
-        // Capture retries in debug logs (max 2 extra attempts)
-        try {
-          if (attempt > 0) {
-            debug?.onRequest?.({
-              provider: provider.name || provider.id || "custom",
-              endpoint: fullEndpoint,
-              headers,
-              body: bodyForAttempt,
-              transport: preferredTransport,
-              canStream,
-              isCustomProvider: true,
-            });
-          }
-        } catch {}
-
-        response = await sendRequest(bodyForAttempt);
-        if (response.ok) break;
-
-        if (!isOpenRouter || attempt + 1 >= maxAttempts) {
-          break;
-        }
-
-        const status = response.status;
-        const statusText = response.statusText;
-        const responseHeaders = new Headers(response.headers);
-        const text = await response.text().catch(() => "");
-
-        let data: unknown = undefined;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = undefined;
-        }
-
-        const { isRetryableOpenRouterProviderError, findOpenRouterEndpointTagForProviderName } =
-          await import("../utils/openrouterRouting");
-
-        const retryable = isRetryableOpenRouterProviderError(status, data);
-        if (!retryable) {
-          response = new Response(text, { status, statusText, headers: responseHeaders });
-          break;
-        }
-
-        const providerName =
-          typeof (data as any)?.error?.metadata?.provider_name === "string"
-            ? (data as any).error.metadata.provider_name
-            : undefined;
-
-        const fallback = await ensureOpenRouterFallback();
-        if (fallback && providerName) {
-          openRouterAvoidTag = findOpenRouterEndpointTagForProviderName(
-            fallback.endpoints as any,
-            providerName
-          );
-        }
-
-        // Rebuild response for potential final error handling if subsequent retries also fail
-        response = new Response(text, { status, statusText, headers: responseHeaders });
-      }
-
-      if (!response) {
-        throw new SystemSculptError(
-          "No response returned from the provider transport",
-          ERROR_CODES.STREAM_ERROR,
-          0
-        );
-      }
-
-      if (!response.ok) {
-        // OpenRouter + Gemini tool calling can fail if `reasoning_details` and tool call IDs
-        // are not preserved exactly between the tool call turn and the follow-up. When this
-        // happens, upstream often returns "Corrupted thought signature" / missing signature
-        // errors. Log a sanitized request summary (no prompt contents) to aid debugging.
-        try {
-          const endpoint = String(fullEndpoint || "");
-          const modelLower = String(modelId || "").toLowerCase();
-          const isOpenRouter = endpoint.includes("openrouter.ai");
-          const isGemini = modelLower.includes("gemini");
-          if (isOpenRouter && isGemini) {
-            const messageList: any[] = Array.isArray((lastRequestBody as any)?.messages)
-              ? ((lastRequestBody as any).messages as any[])
-              : [];
-            const roleSequence = messageList.map((m) => String(m?.role || "unknown"));
-
-            const assistantToolCallSummaries = messageList
-              .map((m, idx) => ({ m, idx }))
-              .filter(({ m }) => String(m?.role) === "assistant" && Array.isArray(m?.tool_calls) && m.tool_calls.length > 0)
-              .map(({ m, idx }) => {
-                const toolCallIds = (m.tool_calls as any[])
-                  .map((tc) => tc?.id)
-                  .filter((id) => typeof id === "string" && id.trim().length > 0);
-                const reasoningIds = (Array.isArray(m?.reasoning_details) ? (m.reasoning_details as any[]) : [])
-                  .map((d) => d?.id)
-                  .filter((id) => typeof id === "string" && id.trim().length > 0);
-                const missingReasoning = toolCallIds.length > 0 && reasoningIds.length === 0;
-                const mismatch = toolCallIds.some((id) => !reasoningIds.includes(id)) || reasoningIds.some((id) => !toolCallIds.includes(id));
-                return {
-                  index: idx,
-                  toolCallIds,
-                  reasoningIds,
-                  missingReasoning,
-                  mismatch,
-                };
-              });
-
-            const toolMessageSummaries = messageList
-              .map((m, idx) => ({ m, idx }))
-              .filter(({ m }) => String(m?.role) === "tool")
-              .map(({ m, idx }) => ({
-                index: idx,
-                tool_call_id: typeof m?.tool_call_id === "string" ? m.tool_call_id : undefined,
-                contentLength: typeof m?.content === "string" ? m.content.length : 0,
-              }));
-
-            const summary = {
-              endpoint,
-              model: modelId,
-              stream: (lastRequestBody as any)?.stream,
-              include_reasoning: (lastRequestBody as any)?.include_reasoning,
-              toolCount: Array.isArray((lastRequestBody as any)?.tools)
-                ? (lastRequestBody as any).tools.length
-                : 0,
-              messageCount: messageList.length,
-              roleSequence,
-              assistantToolCallSummaries,
-              toolMessageSummaries,
-              contentLengths: messageList.map((m) => (typeof m?.content === "string" ? m.content.length : 0)),
-            };
-            console.error(
-              "[SystemSculpt][OpenRouter][Gemini] request summary for error",
-              JSON.stringify(summary, null, 2)
-            );
-          }
-        } catch {}
-
-        await StreamingErrorHandler.handleStreamError(response, true, {
-          provider: provider.name || provider.id,
-          endpoint: fullEndpoint,
-          model: modelId
-        });
-      }
-
-      try {
-        const responseHeaders: Record<string, string> = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[key] = value;
-        });
-        debug?.onResponse?.({
-          provider: provider.name || provider.id || "custom",
-          endpoint: fullEndpoint,
-          status: response.status,
-          headers: responseHeaders,
-          isCustomProvider: true,
-        });
-      } catch {}
-
-      // Transform the response stream if needed (e.g., for Anthropic)
-      const { stream, headers: transformHeaders } = await adapter.transformStreamResponse(response, isMobile);
-      
-      return new Response(stream, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: transformHeaders || response.headers
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async *streamMessage({
-    messages,
-    model,
-    onError,
-    contextFiles,
-    systemPromptType,
-    systemPromptPath,
-    systemPromptOverride,
-    agentMode,
-    signal,
-    toolCallManager,
-    plugins,
-    web_search_options,
-    forcedToolName,
-    maxTokens,
-    includeReasoning,
-    debug,
-    sessionId,
+	  async *streamMessage({
+	    messages,
+	    model,
+	    onError,
+	    contextFiles,
+	    systemPromptType,
+	    systemPromptPath,
+	    systemPromptOverride,
+	    agentMode,
+	    signal,
+	    toolCallManager,
+	    forcedToolName,
+	    maxTokens,
+	    includeReasoning,
+	    debug,
+	    sessionId,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -1004,16 +642,14 @@ export class SystemSculptService {
     contextFiles?: Set<string>;
     systemPromptType?: string;
     systemPromptPath?: string;
-    systemPromptOverride?: string;
-    agentMode?: boolean;
-    signal?: AbortSignal;
-    toolCallManager?: any;
-    plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-    web_search_options?: { search_context_size?: "low" | "medium" | "high" };
-    forcedToolName?: string;
-    maxTokens?: number;
-    includeReasoning?: boolean;
-    debug?: StreamDebugCallbacks;
+	    systemPromptOverride?: string;
+	    agentMode?: boolean;
+	    signal?: AbortSignal;
+	    toolCallManager?: any;
+	    forcedToolName?: string;
+	    maxTokens?: number;
+	    includeReasoning?: boolean;
+	    debug?: StreamDebugCallbacks;
     sessionId?: string;
   }): AsyncGenerator<StreamEvent, void, unknown> {
     // DEVELOPMENT MODE LOGGING: Log development mode status and server configuration
@@ -1033,31 +669,317 @@ export class SystemSculptService {
         metadata: { model, agentMode: !!agentMode }
       });
 
-      const prepared = await this.prepareChatRequest({
-        messages,
-        model,
-        contextFiles,
-        systemPromptType,
-        systemPromptPath,
-        systemPromptOverride,
-        agentMode,
-        toolCallManager,
-        plugins,
-        web_search_options,
-        emitNotices: true,
-      });
+	      const prepared = await this.prepareChatRequest({
+	        messages,
+	        model,
+	        contextFiles,
+	        systemPromptType,
+	        systemPromptPath,
+	        systemPromptOverride,
+	        agentMode,
+	        toolCallManager,
+	        emitNotices: true,
+	      });
 
       const {
         isCustom,
-        provider,
+        customProvider,
         actualModelId,
         serverModelId,
-        preparedMessages,
-        requestTools,
-        effectiveAgentMode,
-        resolvedWebSearchOptions,
-        finalSystemPrompt,
-      } = prepared;
+	        preparedMessages,
+	        requestTools,
+	        effectiveAgentMode,
+	        finalSystemPrompt,
+	      } = prepared;
+
+      if (isCustom && customProvider) {
+        const adapter = this.plugin.customProviderService.getProviderAdapter(customProvider);
+        const endpoint = adapter.getChatEndpoint();
+
+        const headers = {
+          "Content-Type": "application/json",
+          ...adapter.getHeaders(),
+        };
+
+        const baseContextFiles = contextFiles ? new Set(contextFiles) : new Set<string>();
+        const baseMessages = Array.isArray(messages) ? [...messages] : [];
+
+        const trimToRecentMessages = (all: ChatMessage[], maxCount: number): ChatMessage[] => {
+          if (!Array.isArray(all)) return [];
+          if (maxCount <= 0) return [];
+          if (all.length <= maxCount) return all;
+          return all.slice(-maxCount);
+        };
+
+        const trimToMinimalMessages = (all: ChatMessage[]): ChatMessage[] => {
+          if (!Array.isArray(all) || all.length === 0) return [];
+          // Prefer the last user message; if missing, keep the last message.
+          const lastUser = [...all].reverse().find((msg) => msg?.role === "user");
+          return lastUser ? [lastUser] : [all[all.length - 1]];
+        };
+
+        const buildAttemptRequestBody = async (opts: {
+          attemptMessages: ChatMessage[];
+          attemptContextFiles: Set<string>;
+          attemptAgentMode: boolean;
+        }): Promise<{ requestBody: any; prepared: PreparedChatRequest }> => {
+	          const attemptPrepared = await this.prepareChatRequest({
+	            messages: opts.attemptMessages,
+	            model,
+	            contextFiles: opts.attemptContextFiles,
+	            systemPromptType,
+	            systemPromptPath,
+	            systemPromptOverride,
+	            agentMode: opts.attemptAgentMode,
+	            toolCallManager,
+	            emitNotices: false,
+	          });
+
+          const attemptRequestBody = adapter.buildRequestBody(
+            attemptPrepared.preparedMessages,
+            attemptPrepared.actualModelId,
+	            attemptPrepared.requestTools,
+	            true,
+	            {
+	              maxTokens,
+	              includeReasoning,
+	            }
+	          );
+
+          return { requestBody: attemptRequestBody, prepared: attemptPrepared };
+        };
+
+        // Initial attempt uses the already-prepared request (so notices and prompt assembly match).
+        let attemptAgentMode = !!agentMode;
+        let attemptContextFiles = baseContextFiles;
+        let attemptMessages = baseMessages;
+
+        let activePrepared: PreparedChatRequest = prepared;
+        let activeRequestBody: any = adapter.buildRequestBody(
+          preparedMessages,
+          actualModelId,
+	          requestTools,
+	          true,
+	          {
+	            maxTokens,
+	            includeReasoning,
+	          }
+	        );
+
+        let emittedAssistantOutput = false;
+        let attempt = 0;
+
+        let droppedContextFiles = false;
+        let trimmedHistory = false;
+        let trimmedMinimal = false;
+        let disabledToolsForToolRejection = false;
+        let disabledToolsForContextLimit = false;
+
+        const MAX_ATTEMPTS = 5;
+        while (attempt < MAX_ATTEMPTS) {
+          try {
+            try {
+              debug?.onRequest?.({
+                provider: customProvider.name || "custom-provider",
+                endpoint,
+                headers,
+                body: activeRequestBody,
+                transport: platform.preferredTransport({ endpoint }),
+                canStream: platform.supportsStreaming({ endpoint }),
+                isCustomProvider: true,
+              });
+            } catch {}
+
+            const response = await postJsonStreaming(endpoint, headers, activeRequestBody, platform.isMobile(), signal);
+
+            try {
+              const responseHeaders: Record<string, string> = {};
+              response.headers.forEach((value, key) => {
+                responseHeaders[key] = value;
+              });
+              debug?.onResponse?.({
+                provider: customProvider.name || "custom-provider",
+                endpoint,
+                status: response.status,
+                headers: responseHeaders,
+                isCustomProvider: true,
+              });
+            } catch {}
+
+            if (!response.ok) {
+              await StreamingErrorHandler.handleStreamError(response, true, {
+                provider: customProvider.name,
+                endpoint,
+                model: actualModelId,
+              });
+            }
+
+            const transformed = await adapter.transformStreamResponse(response, platform.isMobile());
+            const streamResponse = new Response(transformed.stream, {
+              status: response.status,
+              headers: transformed.headers,
+            });
+
+            let streamDiagnostics: StreamPipelineDiagnostics | null = null;
+            const streamIterator = this.streamingService.streamResponse(streamResponse, {
+              model: activePrepared.actualModelId,
+              isCustomProvider: true,
+              signal,
+              onRawEvent: (data) => {
+                try {
+                  debug?.onRawEvent?.(data);
+                } catch {}
+              },
+              onDiagnostics: (diagnostics) => {
+                streamDiagnostics = diagnostics;
+              },
+            });
+
+            let streamCompleted = false;
+            let streamAborted = false;
+            try {
+              for await (const event of streamIterator) {
+                if (event.type === "content" || event.type === "reasoning" || event.type === "tool-call") {
+                  emittedAssistantOutput = true;
+                }
+                try {
+                  debug?.onStreamEvent?.({ event });
+                } catch {}
+                yield event;
+              }
+              streamCompleted = true;
+            } finally {
+              streamAborted = !!signal?.aborted;
+              try {
+                debug?.onStreamEnd?.({
+                  completed: streamCompleted,
+                  aborted: streamAborted,
+                  diagnostics: streamDiagnostics ?? undefined,
+                });
+              } catch {}
+            }
+
+            return;
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            if (signal?.aborted) {
+              return;
+            }
+
+            const canRetry = !emittedAssistantOutput && attempt < MAX_ATTEMPTS - 1;
+            const needsToolFallback = canRetry && !disabledToolsForToolRejection && this.shouldFallbackWithoutTools(error);
+
+            if (needsToolFallback) {
+              attempt += 1;
+              disabledToolsForToolRejection = true;
+              attemptAgentMode = false;
+
+              try {
+                const incompat = RuntimeIncompatibilityService.getInstance(this.plugin);
+                await incompat.markToolIncompatible(model);
+              } catch {}
+              try {
+                new Notice("Model rejected tools; continuing without Agent Mode tools.", 5000);
+              } catch {}
+
+              try {
+                yield { type: "meta", key: "inline-footnote", value: "Retrying without Agent Mode tools…" } as any;
+              } catch {}
+
+              const rebuilt = await buildAttemptRequestBody({
+                attemptMessages,
+                attemptContextFiles,
+                attemptAgentMode,
+              });
+              activePrepared = rebuilt.prepared;
+              activeRequestBody = rebuilt.requestBody;
+              continue;
+            }
+
+            const isContextOverflow = canRetry && this.isContextOverflowError(error);
+            if (isContextOverflow) {
+              // Prefer keeping Agent Mode when possible; shed context first.
+              if (!droppedContextFiles && attemptContextFiles.size > 0) {
+                attempt += 1;
+                droppedContextFiles = true;
+                attemptContextFiles = new Set<string>();
+                try {
+                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying without attached context files…" } as any;
+                } catch {}
+
+                const rebuilt = await buildAttemptRequestBody({
+                  attemptMessages,
+                  attemptContextFiles,
+                  attemptAgentMode,
+                });
+                activePrepared = rebuilt.prepared;
+                activeRequestBody = rebuilt.requestBody;
+                continue;
+              }
+
+              if (!trimmedHistory && attemptMessages.length > 8) {
+                attempt += 1;
+                trimmedHistory = true;
+                attemptMessages = trimToRecentMessages(baseMessages, 12);
+                try {
+                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying with shortened chat history…" } as any;
+                } catch {}
+
+                const rebuilt = await buildAttemptRequestBody({
+                  attemptMessages,
+                  attemptContextFiles,
+                  attemptAgentMode,
+                });
+                activePrepared = rebuilt.prepared;
+                activeRequestBody = rebuilt.requestBody;
+                continue;
+              }
+
+              if (!disabledToolsForContextLimit && attemptAgentMode) {
+                attempt += 1;
+                disabledToolsForContextLimit = true;
+                attemptAgentMode = false;
+                try {
+                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying without Agent Mode tools…" } as any;
+                } catch {}
+
+                const rebuilt = await buildAttemptRequestBody({
+                  attemptMessages,
+                  attemptContextFiles,
+                  attemptAgentMode,
+                });
+                activePrepared = rebuilt.prepared;
+                activeRequestBody = rebuilt.requestBody;
+                continue;
+              }
+
+              if (!trimmedMinimal) {
+                attempt += 1;
+                trimmedMinimal = true;
+                attemptMessages = trimToMinimalMessages(baseMessages);
+                try {
+                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying with minimal context…" } as any;
+                } catch {}
+
+                const rebuilt = await buildAttemptRequestBody({
+                  attemptMessages,
+                  attemptContextFiles,
+                  attemptAgentMode,
+                });
+                activePrepared = rebuilt.prepared;
+                activeRequestBody = rebuilt.requestBody;
+                continue;
+              }
+            }
+
+            throw error;
+          }
+        }
+
+        return;
+      }
 
       // Debug: log the final system prompt being sent (first system message)
       try {
@@ -1082,96 +1004,64 @@ export class SystemSculptService {
         }
       } catch {}
 
-      let messagesForRequest = preparedMessages;
+      const apiMessages = this.toSystemSculptApiMessages(preparedMessages);
+      const endpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`;
+      const piTools = normalizePiTools(requestTools);
+      const requestBody = {
+        modelId: serverModelId,
+        messages: apiMessages,
+        tools: piTools,
+        stream: true,
+      };
 
-      let response: Response | null = null;
-      const apiMessages = this.toSystemSculptApiMessages(messagesForRequest);
-
-      if (isCustom && provider) {
-        response = await this.handleCustomProviderCompletion(
-          provider,
-          messagesForRequest,
-          actualModelId,
-          requestTools,
-          signal,
-          plugins,
-          resolvedWebSearchOptions,
-          forcedToolName,
-          maxTokens,
-          includeReasoning,
-          debug
-        );
-      } else {
-        const endpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`;
-        const piTools = normalizePiTools(requestTools);
-        const requestBody = {
-          modelId: serverModelId,
-          messages: apiMessages,
-          tools: piTools,
-          stream: true,
-        }
-
-        try {
-          debug?.onRequest?.({
-            provider: "systemsculpt-v2",
-            endpoint,
-            headers: {
-              "Content-Type": "application/json",
-              "x-license-key": this.settings.licenseKey,
-            },
-            body: requestBody,
-            transport: platform.preferredTransport({ endpoint }),
-            canStream: true,
-            isCustomProvider: false,
-          });
-        } catch {}
-
-        response = await this.agentSessionClient.startOrContinueTurn({
-          chatId: chatSessionId,
-          modelId: serverModelId,
-          messages: apiMessages,
-          tools: piTools,
-          pluginVersion: (this.plugin as any)?.manifest?.version,
+      try {
+        debug?.onRequest?.({
+          provider: "systemsculpt-v2",
+          endpoint,
+          headers: {
+            "Content-Type": "application/json",
+            "x-license-key": this.settings.licenseKey,
+          },
+          body: requestBody,
+          transport: platform.preferredTransport({ endpoint }),
+          canStream: true,
+          isCustomProvider: false,
         });
-      }
+      } catch {}
 
-      if (!response) {
-        throw new SystemSculptError(
-          "No response returned from the streaming API transport",
-          ERROR_CODES.STREAM_ERROR,
-          0
-        );
-      }
+      const response = await this.agentSessionClient.startOrContinueTurn({
+        chatId: chatSessionId,
+        modelId: serverModelId,
+        messages: apiMessages,
+        tools: piTools,
+        pluginVersion: (this.plugin as any)?.manifest?.version,
+      });
 
       // Log API response status
       const logger = DebugLogger.getInstance();
-      const endpoint = isCustom && provider 
-        ? provider.endpoint 
-        : `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`;
-      logger?.logAPIResponse(endpoint, response.status);
+      const responseLogEndpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`;
+      logger?.logAPIResponse(responseLogEndpoint, response.status);
 
-      if (!provider) {
-        try {
-          const responseHeaders: Record<string, string> = {};
-          response.headers.forEach((value, key) => {
-            responseHeaders[key] = value;
-          });
-          debug?.onResponse?.({
-            provider: "systemsculpt",
-            endpoint,
-            status: response.status,
-            headers: responseHeaders,
-            isCustomProvider: false,
-          });
-        } catch {}
-      }
+      try {
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[key] = value;
+        });
+        debug?.onResponse?.({
+          provider: "systemsculpt",
+          endpoint: responseLogEndpoint,
+          status: response.status,
+          headers: responseHeaders,
+          isCustomProvider: false,
+        });
+      } catch {}
 
       if (!response.ok) {
-        logger?.logAPIResponse(endpoint, response.status, null, { message: `HTTP ${response.status}` });
-        await StreamingErrorHandler.handleStreamError(response, !!provider, {
-          provider: provider?.name || provider?.id,
-          endpoint,
-          model: actualModelId
+        logger?.logAPIResponse(responseLogEndpoint, response.status, null, { message: `HTTP ${response.status}` });
+        await StreamingErrorHandler.handleStreamError(response, false, {
+          provider: "systemsculpt-v2",
+          endpoint: responseLogEndpoint,
+          model: serverModelId || actualModelId
         });
       }
       if (!response.body) {
@@ -1196,8 +1086,8 @@ export class SystemSculptService {
 
       let streamDiagnostics: StreamPipelineDiagnostics | null = null;
       const streamIterator = this.streamingService.streamResponse(response, {
-        model: actualModelId,
-        isCustomProvider: !!provider,
+        model: serverModelId || actualModelId,
+        isCustomProvider: false,
         signal,
         onRawEvent: (data) => {
           try {
@@ -1279,8 +1169,6 @@ export class SystemSculptService {
     systemPromptPath,
     agentMode,
     toolCallManager,
-    plugins,
-    web_search_options,
     sessionId,
   }: {
     messages: ChatMessage[];
@@ -1290,8 +1178,6 @@ export class SystemSculptService {
     systemPromptPath?: string;
     agentMode?: boolean;
     toolCallManager?: any;
-    plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-    web_search_options?: { search_context_size?: "low" | "medium" | "high" };
     sessionId?: string;
   }): Promise<{ requestBody: Record<string, any>; preparedMessages: ChatMessage[]; actualModelId: string }> {
     const prepared = await this.prepareChatRequest({
@@ -1302,8 +1188,6 @@ export class SystemSculptService {
       systemPromptPath,
       agentMode,
       toolCallManager,
-      plugins,
-      web_search_options,
       emitNotices: false,
     });
 
@@ -1317,13 +1201,6 @@ export class SystemSculptService {
 
     if (sessionId) {
       requestBody.session_id = deterministicId(sessionId, "sess");
-    }
-
-    if (plugins && plugins.length > 0) {
-      requestBody.plugins = plugins;
-    }
-    if (prepared.resolvedWebSearchOptions) {
-      requestBody.web_search_options = prepared.resolvedWebSearchOptions;
     }
 
     if (prepared.requestTools.length > 0) {

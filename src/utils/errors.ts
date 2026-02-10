@@ -65,6 +65,34 @@ export function isAuthFailureMessage(message?: string | null): boolean {
   return AUTH_FAILURE_SNIPPETS.some((snippet) => normalized.includes(snippet));
 }
 
+/**
+ * Detect "prompt too long / context length exceeded" style errors across providers.
+ * This is intentionally heuristic: upstreams vary a lot (OpenAI, Anthropic, llama.cpp, etc.).
+ */
+export function isContextOverflowErrorMessage(message?: string | null): boolean {
+  if (!message) return false;
+  const lc = String(message).toLowerCase();
+  if (!lc) return false;
+
+  // llama.cpp / LM Studio style
+  if (lc.includes("tokens to keep") && lc.includes("context length")) return true;
+  if ((lc.includes("n_keep") || lc.includes("n_ctx") || lc.includes("n ctx")) && lc.includes("context")) return true;
+
+  // OpenAI / general
+  if (lc.includes("context_length_exceeded")) return true;
+  if (lc.includes("maximum context length")) return true;
+  if (lc.includes("context length") && (lc.includes("exceed") || lc.includes("greater than") || lc.includes("too long") || lc.includes("limit"))) {
+    return true;
+  }
+  if (lc.includes("context window") && (lc.includes("exceed") || lc.includes("too long") || lc.includes("too small") || lc.includes("limit"))) {
+    return true;
+  }
+  if (lc.includes("prompt is too long") || lc.includes("prompt too long")) return true;
+  if (lc.includes("too many tokens") && (lc.includes("maximum") || lc.includes("context") || lc.includes("limit"))) return true;
+
+  return false;
+}
+
 
 export class SystemSculptError extends Error {
   constructor(
@@ -128,4 +156,3 @@ export function getErrorMessage(code: ErrorCode, model?: string): string {
   }
   return message;
 }
-

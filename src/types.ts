@@ -122,6 +122,10 @@ export interface SystemSculptSettings {
    * Directory where benchmark reports are exported
    */
   benchmarksDirectory: string;
+  /**
+   * Directory where web research corpus artifacts are stored.
+   */
+  webResearchDirectory: string;
   lastValidated: number;
   /**
    * For backward compatibility, we'll keep systemPrompt as the last-saved
@@ -488,6 +492,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
   benchmarksDirectory: "SystemSculpt/Benchmarks",
+  webResearchDirectory: "SystemSculpt/Web Research",
   lastValidated: 0,
   // This is the fallback system prompt if the user hasn't chosen a custom or preset
   systemPrompt:
@@ -795,7 +800,6 @@ export interface ChatMessage {
   systemPromptType?: string;
   systemPromptPath?: string;
   annotations?: Annotation[];
-  webSearchEnabled?: boolean;
   // Additional fields for tool messages
   tool_call_id?: string;
   name?: string;
@@ -842,14 +846,13 @@ export interface SystemSculptStreamChunk {
     text?: string;
     reasoning?: string;
   };
-  error?: {
-    code: string;
-    message: string;
-    statusCode?: number;
-    model?: string;
-  };
-  webSearchEnabled?: boolean;
-}
+	  error?: {
+	    code: string;
+	    message: string;
+	    statusCode?: number;
+	    model?: string;
+	  };
+	}
 
 export interface SystemPromptPreset {
   id: string;

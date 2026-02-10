@@ -7,6 +7,7 @@ import {
   getErrorMessage,
   ErrorCode,
   isAuthFailureMessage,
+  isContextOverflowErrorMessage,
 } from "../errors";
 
 describe("errors", () => {
@@ -136,6 +137,29 @@ describe("errors", () => {
 
     it("does not flag rate limit messages", () => {
       expect(isAuthFailureMessage("Rate limit exceeded")).toBe(false);
+    });
+  });
+
+  describe("isContextOverflowErrorMessage", () => {
+    it("detects llama.cpp / LM Studio context length errors", () => {
+      expect(
+        isContextOverflowErrorMessage(
+          "The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input"
+        )
+      ).toBe(true);
+    });
+
+    it("detects OpenAI-style maximum context length errors", () => {
+      expect(
+        isContextOverflowErrorMessage(
+          "This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens."
+        )
+      ).toBe(true);
+    });
+
+    it("does not flag unrelated errors", () => {
+      expect(isContextOverflowErrorMessage("Rate limit exceeded")).toBe(false);
+      expect(isContextOverflowErrorMessage("Invalid API key")).toBe(false);
     });
   });
 

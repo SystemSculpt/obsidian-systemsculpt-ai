@@ -886,14 +886,13 @@ export class BenchView extends ItemView {
             sessionId: caseDef.id,
           });
 
-          await streamingController.stream(
-            stream,
-            container.messageEl,
-            assistantMessageId,
-            signal,
-            false
-          );
-        } catch (error: any) {
+	          await streamingController.stream(
+	            stream,
+	            container.messageEl,
+	            assistantMessageId,
+	            signal
+	          );
+	        } catch (error: any) {
           try {
             (error as any).benchMessages = messages;
           } catch {}

@@ -56,7 +56,6 @@ export interface MessageRenderOptions {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   annotations?: Annotation[];
-  webSearchEnabled?: boolean;
 }
 
 export class MessageRenderer extends Component {
@@ -99,14 +98,12 @@ export class MessageRenderer extends Component {
     role,
     content,
     annotations,
-    webSearchEnabled,
   }: {
     app: App;
     messageId: string;
     role: ChatRole;
     content: string | MultiPartContent[] | null;
     annotations?: Annotation[];
-    webSearchEnabled?: boolean;
   }): Promise<{ messageEl: HTMLElement; contentEl: HTMLElement }> {
     const messageEl = document.createElement("div");
     messageEl.classList.add("systemsculpt-message");
@@ -147,8 +144,8 @@ export class MessageRenderer extends Component {
       await this.renderMarkdownContent(String(content), contentEl, false);
     }
 
-    // Add citations if available and this is an assistant message with web search enabled
-    if (role === "assistant" && webSearchEnabled && annotations && annotations.length > 0) {
+    // Add citations if available.
+    if (role === "assistant" && annotations && annotations.length > 0) {
       // Extract URL citations from annotations
       const urlCitations = annotations
         .filter(annotation => annotation.type === "url_citation" && annotation.url_citation)

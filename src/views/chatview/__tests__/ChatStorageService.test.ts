@@ -625,47 +625,18 @@ Hello
       expect((service as any).isValidChatFile(content)).toBe(true);
     });
 
-    it("accepts legacy format files", () => {
+    it("rejects legacy five-backtick format files", () => {
       const content = `# AI Chat History
 
 \`\`\`\`\`user
 Hello
 \`\`\`\`\``;
-      expect((service as any).isValidChatFile(content)).toBe(true);
+      expect((service as any).isValidChatFile(content)).toBe(false);
     });
 
     it("rejects plain text files", () => {
       const content = "Just some plain text without any special format.";
       expect((service as any).isValidChatFile(content)).toBe(false);
-    });
-  });
-
-  describe("isFiveBacktickLegacyFile", () => {
-    it("detects legacy format with context files header", () => {
-      const content = `# Context Files
-
-[[file.md]]
-
-\`\`\`\`\`user
-Hello
-\`\`\`\`\``;
-      expect((service as any).isFiveBacktickLegacyFile(content)).toBe(true);
-    });
-
-    it("detects legacy format with chat history header", () => {
-      const content = `# AI Chat History
-
-\`\`\`\`\`user
-Hello
-\`\`\`\`\``;
-      expect((service as any).isFiveBacktickLegacyFile(content)).toBe(true);
-    });
-
-    it("requires both header and message blocks", () => {
-      const content = `# AI Chat History
-
-Just some text without backticks`;
-      expect((service as any).isFiveBacktickLegacyFile(content)).toBe(false);
     });
   });
 
@@ -768,23 +739,6 @@ title: No ID
     });
   });
 
-  describe("formatToolArguments", () => {
-    it("formats valid JSON arguments", () => {
-      const args = '{"key":"value"}';
-      const result = (service as any).formatToolArguments(args);
-
-      expect(result).toContain("key");
-      expect(result).toContain("value");
-    });
-
-    it("returns original string for invalid JSON", () => {
-      const args = "not valid json";
-      const result = (service as any).formatToolArguments(args);
-
-      expect(result).toBe(args);
-    });
-  });
-
   describe("generateMessageId", () => {
     it("generates UUID format", () => {
       const id = (service as any).generateMessageId();
@@ -839,88 +793,6 @@ title: No ID
       expect(result[0].id).toBe("call_456");
       expect(result[0].request.function.name).toBe("old_tool");
       expect(result[0].messageId).toBe("msg-1");
-    });
-  });
-
-  describe("containsChronologicalBlocks", () => {
-    it("detects reasoning blocks", () => {
-      const content = "Some text <!-- REASONING-BLOCK --> reasoning <!-- /REASONING-BLOCK -->";
-      expect((service as any).containsChronologicalBlocks(content)).toBe(true);
-    });
-
-    it("detects tool call data", () => {
-      const content = "Some text <!-- TOOL-CALL-DATA\n{} --> more text";
-      expect((service as any).containsChronologicalBlocks(content)).toBe(true);
-    });
-
-    it("detects content parts", () => {
-      const content = "Some text <!-- CONTENT-PART --> content <!-- /CONTENT-PART -->";
-      expect((service as any).containsChronologicalBlocks(content)).toBe(true);
-    });
-
-    it("returns false for plain content", () => {
-      const content = "Just plain text without any blocks";
-      expect((service as any).containsChronologicalBlocks(content)).toBe(false);
-    });
-  });
-
-  describe("extractNonChronologicalContent", () => {
-    it("removes reasoning blocks", () => {
-      const content = "Before <!-- REASONING-BLOCK -->\nreasoning\n<!-- /REASONING-BLOCK --> After";
-      const result = (service as any).extractNonChronologicalContent(content);
-
-      expect(result).not.toContain("REASONING-BLOCK");
-      expect(result).toContain("Before");
-      expect(result).toContain("After");
-    });
-
-    it("removes tool call data blocks", () => {
-      const content = "Before <!-- TOOL-CALL-DATA\n{}\n--> After";
-      const result = (service as any).extractNonChronologicalContent(content);
-
-      expect(result).not.toContain("TOOL-CALL-DATA");
-    });
-
-    it("removes content part blocks", () => {
-      const content = "Before <!-- CONTENT-PART -->\ncontent\n<!-- /CONTENT-PART --> After";
-      const result = (service as any).extractNonChronologicalContent(content);
-
-      expect(result).not.toContain("CONTENT-PART");
-    });
-
-    it("cleans up extra whitespace", () => {
-      const content = "Text\n\n\n\n\nMore text";
-      const result = (service as any).extractNonChronologicalContent(content);
-
-      expect(result).not.toMatch(/\n\n\n/);
-    });
-  });
-
-  describe("validateAndFixToolCallIds", () => {
-    it("generates ID when missing", () => {
-      const toolCalls = [{ function: { name: "test" } }];
-
-      const result = (service as any).validateAndFixToolCallIds(toolCalls);
-
-      expect(result[0].id).toMatch(/^call_/);
-    });
-
-    it("converts MCP-style IDs to OpenAI format", () => {
-      const idMapping = new Map();
-      const toolCalls = [{ id: "tool_123_mcp-server_test", function: { name: "test" } }];
-
-      const result = (service as any).validateAndFixToolCallIds(toolCalls, idMapping);
-
-      expect(result[0].id).toMatch(/^call_/);
-      expect(idMapping.size).toBe(1);
-    });
-
-    it("keeps valid IDs unchanged", () => {
-      const toolCalls = [{ id: "call_abc123", function: { name: "test" } }];
-
-      const result = (service as any).validateAndFixToolCallIds(toolCalls);
-
-      expect(result[0].id).toBe("call_abc123");
     });
   });
 
@@ -1026,164 +898,6 @@ title: No ID
       expect(result[0].tool_calls).toHaveLength(2);
       expect(result[0].tool_calls?.every((tc: any) => tc.messageId === "a1")).toBe(true);
       expect(result[1].role).toBe("user");
-    });
-  });
-
-  describe("parseFiveBacktickLegacyFile", () => {
-    it("parses legacy format with user and ai messages", () => {
-      const content = `# AI Chat History
-
-\`\`\`\`\`user
-Hello, how are you?
-\`\`\`\`\`
-
-\`\`\`\`\`ai-gpt-4
-I'm doing great, thanks!
-\`\`\`\`\``;
-
-      const result = (service as any).parseFiveBacktickLegacyFile(content, "legacy-chat");
-
-      expect(result).not.toBeNull();
-      expect(result.id).toBe("legacy-chat");
-      expect(result.messages).toHaveLength(2);
-      expect(result.messages[0].role).toBe("user");
-      expect(result.messages[1].role).toBe("assistant");
-    });
-
-    it("extracts context files from legacy format", () => {
-      const content = `# Context Files
-
-[[notes/file1.md]]
-[[notes/file2.md]]
-
-# AI Chat History
-
-\`\`\`\`\`user
-Hello
-\`\`\`\`\``;
-
-      const result = (service as any).parseFiveBacktickLegacyFile(content, "legacy-context");
-
-      expect(result).not.toBeNull();
-      expect(result.context_files).toBeDefined();
-      expect(result.context_files).toHaveLength(2);
-    });
-
-    it("generates title from first user message", () => {
-      const content = `# AI Chat History
-
-\`\`\`\`\`user
-This is a very long first message that should be truncated for the title
-\`\`\`\`\``;
-
-      const result = (service as any).parseFiveBacktickLegacyFile(content, "legacy");
-
-      expect(result).not.toBeNull();
-      expect(result.title).toContain("This is a very long");
-    });
-
-    it("returns null on parse error", () => {
-      // Mock a situation where parsing would fail
-      const originalExec = RegExp.prototype.exec;
-      RegExp.prototype.exec = () => {
-        throw new Error("Parse error");
-      };
-
-      const result = (service as any).parseFiveBacktickLegacyFile("content", "test");
-
-      RegExp.prototype.exec = originalExec;
-
-      // After the error, result should be null
-    });
-  });
-
-  describe("tryFallbackParsing", () => {
-    it("returns null when no messages found", () => {
-      const content = "Just plain text without any message markers";
-
-      const result = (service as any).tryFallbackParsing(content);
-
-      expect(result).toBeNull();
-    });
-
-    it("returns null for content without valid markers", () => {
-      const content = "Some content that looks like messages but isn't properly formatted";
-
-      const result = (service as any).tryFallbackParsing(content);
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("reconstructMessagePartsFromContent", () => {
-    it("reconstructs parts from reasoning blocks", () => {
-      const content = `<!-- REASONING-BLOCK -->
-I am thinking about this
-<!-- /REASONING-BLOCK -->
-
-Some content here`;
-
-      const result = (service as any).reconstructMessagePartsFromContent(
-        content,
-        "",
-        []
-      );
-
-      expect(result.some((p: any) => p.type === "reasoning")).toBe(true);
-    });
-
-    it("reconstructs parts from tool call data", () => {
-      const content = `<!-- TOOL-CALL-DATA
-{"id": "call_123", "function": {"name": "test"}}
--->`;
-
-      const result = (service as any).reconstructMessagePartsFromContent(
-        content,
-        "",
-        []
-      );
-
-      expect(result.some((p: any) => p.type === "tool_call")).toBe(true);
-    });
-
-    it("reconstructs parts from content blocks", () => {
-      const content = `<!-- CONTENT-PART -->
-This is content
-<!-- /CONTENT-PART -->`;
-
-      const result = (service as any).reconstructMessagePartsFromContent(
-        content,
-        "",
-        []
-      );
-
-      expect(result.some((p: any) => p.type === "content")).toBe(true);
-    });
-
-    it("falls back to simple reconstruction when no blocks", () => {
-      const content = "Just plain content";
-      const reasoning = "Some reasoning";
-
-      const result = (service as any).reconstructMessagePartsFromContent(
-        content,
-        reasoning,
-        []
-      );
-
-      expect(result.length).toBeGreaterThan(0);
-    });
-
-    it("adds tool calls that were not found in blocks", () => {
-      const content = "Some content";
-      const toolCalls = [{ id: "call_123", function: { name: "test" } }];
-
-      const result = (service as any).reconstructMessagePartsFromContent(
-        content,
-        "",
-        toolCalls
-      );
-
-      expect(result.some((p: any) => p.type === "tool_call")).toBe(true);
     });
   });
 });

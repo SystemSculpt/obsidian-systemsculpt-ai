@@ -83,8 +83,6 @@ export abstract class BaseProviderAdapter {
     mcpTools?: any[],
     streaming?: boolean,
     extras?: {
-      plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-      web_search_options?: { search_context_size?: 'low' | 'medium' | 'high' };
       maxTokens?: number;
       includeReasoning?: boolean;
     }

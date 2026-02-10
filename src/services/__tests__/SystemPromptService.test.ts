@@ -214,14 +214,15 @@ describe("SystemPromptService", () => {
       const result = service.appendToolsHint("Original prompt", true);
 
       expect(result).toContain("Original prompt");
-      expect(result).toContain("filesystem tools");
+      expect(result).toContain("web_search");
+      expect(result).toContain("mcp-filesystem_read");
       expect(result).toContain("JSON");
     });
 
     it("handles empty prompt with tools hint", () => {
       const result = service.appendToolsHint("", true);
 
-      expect(result).toContain("filesystem tools");
+      expect(result).toContain("web_search");
       expect(result.startsWith("\n")).toBe(false);
     });
   });

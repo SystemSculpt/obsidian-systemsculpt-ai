@@ -297,8 +297,6 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
     mcpTools?: any[],
     streaming: boolean = true,
     extras?: {
-      plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-      web_search_options?: { search_context_size?: 'low' | 'medium' | 'high' };
       maxTokens?: number;
       includeReasoning?: boolean;
     }
@@ -382,8 +380,6 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
     try {
       const isOpenRouter = this.provider.endpoint.includes('openrouter.ai');
       if (isOpenRouter && extras) {
-        if (extras.plugins && extras.plugins.length > 0) requestBody.plugins = extras.plugins;
-        if (extras.web_search_options) requestBody.web_search_options = extras.web_search_options;
         const modelLower = modelId.toLowerCase();
         const supportsReasoning = modelLower.includes('claude') ||
           modelLower.includes('thinking') ||

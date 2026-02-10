@@ -33,7 +33,6 @@ export interface ChatExportContext {
   chatVersion?: number;
   exportedAt: Date;
   model?: ChatExportModelInfo;
-  webSearchEnabled?: boolean;
   systemPrompt?: ChatExportSystemPromptInfo;
   contextFiles: ChatExportContextFile[];
   messages: ChatMessage[];

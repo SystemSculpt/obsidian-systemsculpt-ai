@@ -73,7 +73,6 @@ export class ChatExportService {
       chatVersion: this.chatView.chatVersion,
       exportedAt,
       model: modelLabel ? { id: this.chatView.selectedModelId, label: modelLabel } : undefined,
-      webSearchEnabled: this.chatView.webSearchEnabled,
       systemPrompt,
       contextFiles,
       messages: [...this.chatView.messages],

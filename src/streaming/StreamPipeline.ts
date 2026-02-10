@@ -41,6 +41,7 @@ export class StreamPipeline {
   private sawPiNativeTextDelta = false;
   private sawPiNativeThinkingDelta = false;
   private sawPiNativeToolEvent = false;
+  private emittedStopReasonFromFinishReason = false;
 
   constructor(options: StreamPipelineOptions) {
     this.options = options;
@@ -206,10 +207,6 @@ export class StreamPipeline {
       done = true;
     }
 
-    if (parsed.webSearchEnabled !== undefined) {
-      events.push({ type: "meta", key: "web-search-enabled", value: parsed.webSearchEnabled });
-    }
-
     const piNative = this.handlePiNativeEvent(parsed);
     if (piNative) {
       if (piNative.events.length > 0) {
@@ -300,6 +297,18 @@ export class StreamPipeline {
       if (typeof choice.finish_reason === "string" && choice.finish_reason === "stop") {
         done = done || isFinalFlush;
       }
+
+      // Tool-use continuation is PI-native, but many OpenAI-compatible providers only expose
+      // a finish_reason like "tool_calls". Map those to PI stop reasons so the UI can
+      // continue the turn loop when Agent Mode is enabled.
+      const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason.trim() : "";
+      if (finishReason && !this.emittedStopReasonFromFinishReason) {
+        const mappedStopReason = this.mapFinishReasonToPiStopReason(finishReason);
+        if (mappedStopReason) {
+          this.emittedStopReasonFromFinishReason = true;
+          events.push({ type: "meta", key: "stop-reason", value: mappedStopReason });
+        }
+      }
     } else if (parsed.message?.content) {
       const contentText = this.normalizeText(parsed.message.content);
       if (contentText) {
@@ -348,16 +357,28 @@ export class StreamPipeline {
         break;
       }
       case "toolcall_delta": {
-        const rawCall = this.normalizePiToolCallPayload(parsed.toolCall);
+        const index = typeof parsed.contentIndex === "number" ? parsed.contentIndex : 0;
+        let rawCall = this.normalizePiToolCallPayload(parsed.toolCall);
+        let argsDelta = typeof parsed?.delta?.arguments === "string" ? parsed.delta.arguments : undefined;
+
+        if (!rawCall) {
+          rawCall = this.extractPiToolCallFromPartial(parsed.partial, index);
+          if (typeof argsDelta !== "string" || argsDelta.length === 0) {
+            // Some runtimes encode the delta as a bare string chunk.
+            if (typeof parsed?.delta === "string") {
+              argsDelta = parsed.delta;
+            }
+          }
+        }
         if (!rawCall) break;
         this.sawPiNativeToolEvent = true;
 
         const event = this.handleToolCallDelta({
-          index: typeof parsed.contentIndex === "number" ? parsed.contentIndex : 0,
+          index,
           id: rawCall.id,
           function: {
             ...(rawCall.name ? { name: rawCall.name } : {}),
-            ...(typeof rawCall.arguments === "string" ? { arguments: rawCall.arguments } : {}),
+            ...(typeof argsDelta === "string" ? { arguments: argsDelta } : (typeof rawCall.arguments === "string" ? { arguments: rawCall.arguments } : {})),
           },
         });
         if (event) events.push(event);
@@ -494,6 +515,34 @@ export class StreamPipeline {
       ...(name ? { name } : {}),
       ...(typeof argumentsText === "string" ? { arguments: argumentsText } : {}),
     };
+  }
+
+  private extractPiToolCallFromPartial(
+    partial: unknown,
+    contentIndex: number
+  ): { id?: string; name?: string; arguments?: string } | null {
+    if (!partial || typeof partial !== "object") return null;
+    const record = partial as Record<string, unknown>;
+    const content = Array.isArray(record.content) ? (record.content as unknown[]) : null;
+    if (!content || contentIndex < 0 || contentIndex >= content.length) return null;
+    return this.normalizePiToolCallPayload(content[contentIndex]);
+  }
+
+  private mapFinishReasonToPiStopReason(finishReason: string): string | null {
+    const lc = (finishReason || "").toLowerCase();
+    if (!lc) return null;
+
+    // OpenAI-style tool calling
+    if (lc === "tool_calls" || lc === "tool_call" || lc === "tooluse" || lc === "tool_use" || lc === "function_call") {
+      return "toolUse";
+    }
+
+    if (lc === "stop" || lc === "length") {
+      return lc;
+    }
+
+    // Preserve other finish reasons as-is; useful for diagnostics even if the UI ignores them.
+    return finishReason;
   }
 
   private handlePayload(payload: string, line?: string): StreamPipelineResult {

@@ -256,8 +256,6 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     mcpTools?: any[],
     streaming: boolean = true,
     _extras?: {
-      plugins?: Array<{ id: string; max_results?: number; search_prompt?: string }>;
-      web_search_options?: { search_context_size?: 'low' | 'medium' | 'high' };
       maxTokens?: number;
       includeReasoning?: boolean;
     }

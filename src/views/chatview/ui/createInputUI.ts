@@ -1,12 +1,8 @@
-import { ButtonComponent, Notice } from "obsidian";
+import { ButtonComponent } from "obsidian";
 
 export interface ChatComposerDeps {
   onEditSystemPrompt: () => void;
   onAddContextFile: () => void;
-  isWebSearchAllowed: () => boolean;
-  getWebSearchEnabled: () => boolean;
-  toggleWebSearchEnabled: () => void;
-  updateWebSearchButtonState: () => void;
   onSend: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
   registerDomEvent: <K extends keyof HTMLElementEventMap>(
@@ -30,7 +26,6 @@ export interface ChatComposerElements {
   input: HTMLTextAreaElement;
   settingsButton: ButtonComponent;
   attachButton: ButtonComponent;
-  webSearchButton: ButtonComponent;
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
   micButton: ButtonComponent;
@@ -60,23 +55,6 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .onClick(() => deps.onAddContextFile());
   attachButton.buttonEl.setAttribute("aria-label", "Add context file");
   attachButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
-
-  const webSearchButton = new ButtonComponent(leftGroup)
-    .setIcon("globe")
-    .setTooltip("Toggle web search (model-supported only)")
-    .setClass("clickable-icon")
-    .onClick(() => {
-      deps.toggleWebSearchEnabled();
-      deps.updateWebSearchButtonState();
-      if (deps.getWebSearchEnabled()) new Notice("Web search enabled");
-      else new Notice("Web search disabled");
-    });
-  webSearchButton.buttonEl.setAttribute("aria-label", "Toggle web search");
-  webSearchButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
-
-  if (!deps.isWebSearchAllowed()) {
-    webSearchButton.buttonEl.style.display = "none";
-  }
 
   const settingsButton = new ButtonComponent(rightGroup)
     .setIcon("settings")
@@ -162,7 +140,6 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     input: input as HTMLTextAreaElement,
     settingsButton,
     attachButton,
-    webSearchButton,
     sendButton,
     stopButton,
     micButton,

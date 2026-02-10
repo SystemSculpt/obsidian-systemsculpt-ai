@@ -383,12 +383,10 @@ describe("OpenAICompatibleAdapter", () => {
         undefined,
         true,
         {
-          plugins: [{ id: "web" }],
           includeReasoning: true,
         }
       );
 
-      expect(body.plugins).toEqual([{ id: "web" }]);
       expect(body.include_reasoning).toBe(true);
     });
 

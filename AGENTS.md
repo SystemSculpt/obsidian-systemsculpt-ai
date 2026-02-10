@@ -73,61 +73,21 @@ Docs that should typically be updated when these change:
 - `docs/user/ribbon-icons.md`
 - `docs/user/agent-mode.md`
 
+## PI Framework Canonicality (CRITICAL)
+
+- PI is the canonical runtime for Agent Mode orchestration (continuations, loop guards, policy/approvals when supported).
+- Do not re-implement tool approval/continuation/loop-prevention locally if PI already supports it; if glue is unavoidable, keep it minimal and document why + a removal plan in `docs/`.
+- When researching/answering tool-call questions, stay PI-canonical by default; only reference non-PI frameworks if the user explicitly asks for cross-framework comparison.
+
 ## Architecture (how the plugin works)
 
-### Lifecycle and managers
+Use `docs/chat-request-flow.md` as the deep dive. Key pointers:
 
-- `src/main.ts` owns the plugin lifecycle and initialization phases.
-- Key managers/services are created during initialization (examples):
-  - `ViewManager` (`src/core/plugin/views.ts`) — registers views, restores chat leaves, initializes ribbon icons.
-  - `CommandManager` (`src/core/plugin/commands.ts`) — registers most user commands (chat, daily vault, automations, etc.).
-  - `SettingsManager` (`src/core/settings/SettingsManager.ts`) — persists plugin settings and exposes `updateSettings(...)`.
-
-### Chat stack (UI → request → stream → render)
-
-Use `docs/chat-request-flow.md` as the detailed map, but the short version is:
-
-1. **Chat UI** (`src/views/chatview/`) collects user input and orchestrates a turn.
-2. **Request assembly** happens in the service layer (centralized in `SystemSculptService`).
-3. **Transport** is selected by `PlatformContext` (desktop vs mobile and endpoint constraints).
-4. **Streaming** responses are normalized and transformed into consistent events.
-5. **Rendering/finalization** updates the UI progressively and persists the final message.
-
-### Networking / providers / transport
-
-- **Never bypass transport selection.** Always route outbound HTTP via `PlatformContext`:
-  - `src/services/PlatformContext.ts` decides `fetch` vs Obsidian `requestUrl`.
-  - `supportsStreaming()` is false on mobile and for endpoints on the avoidlist (defaults empty).
-- **Single source of truth for chat requests:**
-  - `src/services/SystemSculptService.ts` (not ad‑hoc fetch calls inside views).
-- **Error-driven fallbacks:**
-  - `src/services/StreamingErrorHandler.ts` sets metadata like `shouldResubmitWithoutTools` / `shouldResubmitWithoutImages`. UI/orchestrator code should honor these hints instead of guessing.
-
-### Streaming pipeline
-
-- Stream normalization and parsing lives under `src/streaming/` (not in UI).
-- Keep streaming transformations deterministic and side-effect free (easy to test, easy to reason about).
-
-### Agent Mode (MCP)
-
-- Tool schemas are defined under `src/mcp-tools/**` and must remain the canonical tool surface.
-- Treat tool definitions as a public API: tool names are stable, changes require doc updates and (ideally) tests.
-- Prefer explicit, auditable tool calls. Keep mutating operations gated behind the existing approval UX.
-
-### Embeddings / Similar Notes
-
-- Orchestrator: `src/services/embeddings/EmbeddingsManager.ts`
-- User-facing surface:
-  - Similar Notes panel view
-  - Commands for rebuild / stats
-  - Settings under **Embeddings & Search**
-- Design constraint: embeddings work should not block the UI thread; favor incremental/background processing and clear progress state.
-
-### Daily Vault / Automations / Audio
-
-- Daily note workflows live under `src/services/daily/` and are surfaced via settings + commands.
-- Automations have their own commands and modals; keep automation definitions centralized (avoid duplicating the same workflow config in multiple places).
-- Audio/transcription flows should be cancelable and should surface actionable errors (key/endpoint/model mismatch is the common failure mode).
+- Lifecycle/entrypoint: `src/main.ts`
+- Chat UI orchestration: `src/views/chatview/`
+- Request building + transport selection: `src/services/SystemSculptService.ts` + `src/services/PlatformContext.ts` (do not bypass)
+- Stream parsing/normalization: `src/streaming/` (keep deterministic + side-effect free)
+- Agent Mode tool surface (public API): `src/mcp-tools/**`
 
 ## Design principles (repo-level invariants)
 

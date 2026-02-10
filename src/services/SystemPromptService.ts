@@ -104,7 +104,8 @@ export class SystemPromptService {
   appendToolsHint(prompt: string, hasTools: boolean): string {
     if (!hasTools) return prompt;
     const hint = [
-      "You have access to filesystem tools to interact with the user's vault.",
+      "You have access to tools to interact with the user's vault and the public web (web_search, web_fetch).",
+      "Only use web_search/web_fetch when the user explicitly asks you to look something up online, verify something on the web, or provides a URL to fetch.",
       "Use the tool names exactly as listed (for example, mcp-filesystem_read).",
       "Tool arguments must be valid JSON that matches the tool schema exactly (no extra keys).",
       "Never fabricate file contents or tool results—when you need an exact string from the vault, use a tool and copy it verbatim.",

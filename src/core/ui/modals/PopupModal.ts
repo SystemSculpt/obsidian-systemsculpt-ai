@@ -1,5 +1,7 @@
 import { App, setIcon } from "obsidian";
 
+export type PopupResultAction = "primary" | "secondary" | "cancel";
+
 interface PopupOptions {
   primaryButton?: string;
   secondaryButton?: string;
@@ -23,9 +25,9 @@ export class PopupComponent {
   private options: PopupOptions;
   private containerEl: HTMLElement;
   private resolvePromise: (
-    value: { confirmed: boolean; inputs?: string[]; checkboxChecked?: boolean } | null
+    value: { confirmed: boolean; action?: PopupResultAction; inputs?: string[]; checkboxChecked?: boolean } | null
   ) => void;
-  private result: { confirmed: boolean; inputs?: string[]; checkboxChecked?: boolean } | null = null;
+  private result: { confirmed: boolean; action?: PopupResultAction; inputs?: string[]; checkboxChecked?: boolean } | null = null;
   private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
 
   constructor(app: App, message: string, options: PopupOptions = {}) {
@@ -136,7 +138,7 @@ export class PopupComponent {
         text: this.options.secondaryButton,
       });
       this.registerListener(secondaryButton, "click", () => {
-        this.result = { confirmed: false };
+        this.result = { confirmed: false, action: "secondary" };
         this.close();
       });
     }
@@ -168,12 +170,14 @@ export class PopupComponent {
 
         this.result = {
           confirmed: true,
+          action: "primary",
           inputs: inputs.map((input) => input.value),
           checkboxChecked: this.checkboxEl?.checked ?? false,
         };
       } else {
         this.result = {
           confirmed: true,
+          action: "primary",
           checkboxChecked: this.checkboxEl?.checked ?? false,
         };
       }
@@ -183,7 +187,7 @@ export class PopupComponent {
     // Add keyboard handlers
     this.registerListener(this.containerEl, "keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        this.result = { confirmed: false };
+        this.result = { confirmed: false, action: "cancel" };
         this.close();
       }
       if (e.key === "Enter" && !e.isComposing && !e.shiftKey) {
@@ -194,7 +198,7 @@ export class PopupComponent {
     // Close on background click
     this.registerListener(this.containerEl, "mousedown", (e: MouseEvent) => {
       if (e.target === this.containerEl) {
-        this.result = { confirmed: false };
+        this.result = { confirmed: false, action: "cancel" };
         this.close();
       }
     });
@@ -211,7 +215,7 @@ export class PopupComponent {
     }, 200); // Match the animation duration
   }
 
-  public open(): Promise<{ confirmed: boolean; inputs?: string[]; checkboxChecked?: boolean } | null> {
+  public open(): Promise<{ confirmed: boolean; action?: PopupResultAction; inputs?: string[]; checkboxChecked?: boolean } | null> {
     return new Promise((resolve) => {
       this.resolvePromise = resolve;
       this.createPopup();
@@ -223,7 +227,7 @@ export async function showPopup(
   app: App,
   message: string,
   options: PopupOptions = {}
-): Promise<{ confirmed: boolean; inputs?: string[]; checkboxChecked?: boolean } | null> {
+): Promise<{ confirmed: boolean; action?: PopupResultAction; inputs?: string[]; checkboxChecked?: boolean } | null> {
   const popup = new PopupComponent(app, message, options);
   return popup.open();
 }

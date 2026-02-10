@@ -154,14 +154,6 @@ export function countRequestTokens(body: any): number {
     } catch {}
   }
 
-  // Include web_search_options/plugins minimally
-  if (body.web_search_options) {
-    try { total += countTextTokens(JSON.stringify(body.web_search_options)); } catch {}
-  }
-  if (Array.isArray(body.plugins) && body.plugins.length > 0) {
-    try { total += countTextTokens(JSON.stringify(body.plugins)); } catch {}
-  }
-
   return total;
 }
 

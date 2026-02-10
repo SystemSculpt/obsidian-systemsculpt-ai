@@ -1,11 +1,12 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component } from "obsidian";
 import { SystemSculptService } from "../../services/SystemSculptService";
+import { registerWebResearchTools } from "../../services/web/registerWebResearchTools";
 import { ChatMessage, ChatRole, MultiPartContent, LICENSE_URL, SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
-import { SystemSculptError } from "../../utils/errors";
+import { SystemSculptError, isContextOverflowErrorMessage } from "../../utils/errors";
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
@@ -49,8 +50,6 @@ export class ChatView extends ItemView {
   public systemPromptIndicator: HTMLElement;
   public agentModeIndicator: HTMLElement;
   public currentModelName: string = "";
-  public currentModelSupportsWebSearch: boolean | null = null;
-  public currentModelSupportedParameters: string[] = [];
   public isGenerating = false;
   public contextManager: FileContextManager;
   public scrollManager: ScrollManagerService;
@@ -62,7 +61,6 @@ export class ChatView extends ItemView {
   public chatTitle: string;
   public chatVersion: number = 0;
   public currentPrompt?: string;
-  public webSearchEnabled: boolean = false;
   public agentMode: boolean = true;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
@@ -157,6 +155,12 @@ export class ChatView extends ItemView {
 
     if (!this.toolCallManager) {
       this.toolCallManager = new ToolCallManager(new MCPService(this.plugin, this.app), this);
+      // PI extension: web research tools (web_search, web_fetch)
+      registerWebResearchTools({
+        toolCallManager: this.toolCallManager,
+        plugin: this.plugin,
+        chatView: this,
+      });
     }
 
     if (!this.chatStorage) {
@@ -299,6 +303,49 @@ export class ChatView extends ItemView {
       errorLogger.error(errorMessage, error, { ...errorContext, metadata: { ...errorContext.metadata, ...error.metadata } });
     } else {
       errorLogger.error(errorMessage, undefined, errorContext);
+    }
+
+    const upstreamMessage =
+      error instanceof SystemSculptError && typeof error.metadata?.upstreamMessage === "string"
+        ? String(error.metadata.upstreamMessage)
+        : "";
+
+    if (isContextOverflowErrorMessage(errorMessage) || isContextOverflowErrorMessage(upstreamMessage)) {
+      await this.resetFailedAssistantTurn();
+
+      const result = await showPopup(
+        this.app,
+        "This request doesn't fit in the selected model's context window.",
+        {
+          title: "Context Limit Reached",
+          icon: "alert-triangle",
+          primaryButton: "Choose Larger-Context Model",
+          secondaryButton: "Retry (Minimal)",
+          description:
+            "Tip: If you're using a local provider (LM Studio, Ollama), reload the model with a larger context length, or shorten the message and attached context.",
+        }
+      );
+
+      if (result?.action === "primary") {
+        const modal = new StandardModelSelectionModal({
+          app: this.app,
+          plugin: this.plugin,
+          currentModelId: this.selectedModelId,
+          onSelect: async (selection) => {
+            await this.setSelectedModelId(selection.modelId);
+          },
+        });
+        modal.open();
+        return;
+      }
+
+      if (result?.action === "secondary") {
+        try {
+          await this.inputHandler?.submitWithOverrides?.({ includeContextFiles: false, agentModeOverride: false });
+        } catch {}
+      }
+
+      return;
     }
     
     if (
@@ -722,40 +769,22 @@ export class ChatView extends ItemView {
 
     // Agent Mode
     const agentModeEnabled = !!this.agentMode;
-    createPill({
-      icon: 'wrench',
-      label: 'Agent Mode',
-      value: agentModeEnabled ? 'On' : 'Off',
+	    createPill({
+	      icon: 'wrench',
+	      label: 'Agent Mode',
+	      value: agentModeEnabled ? 'On' : 'Off',
       isOn: agentModeEnabled,
       title: agentModeEnabled
         ? 'Agent Mode enabled (click to disable tools)'
         : 'Agent Mode disabled (click to enable tools)',
       onClick: async () => {
         await this.setAgentMode(!this.agentMode);
-      }
-    });
+	      }
+	    });
 
-    // Web Search
-    const webSearchAllowed = this.supportsWebSearch();
-    const webSearchEnabled = !!this.inputHandler?.webSearchEnabled;
-    createPill({
-      icon: 'globe',
-      label: 'Search',
-      value: webSearchEnabled ? 'On' : 'Off',
-      isOn: webSearchEnabled,
-      isDisabled: !webSearchAllowed,
-      title: webSearchAllowed ? 'Toggle web search' : 'Web search not supported for the selected model',
-      onClick: () => {
-        if (!this.inputHandler) return;
-        this.inputHandler.toggleWebSearchEnabled();
-        // Keep status synced
-        this.notifySettingsChanged();
-      }
-    });
-
-    // Font Size
-    const fontLabel = this.chatFontSize.charAt(0).toUpperCase() + this.chatFontSize.slice(1);
-    createPill({
+	    // Font Size
+	    const fontLabel = this.chatFontSize.charAt(0).toUpperCase() + this.chatFontSize.slice(1);
+	    createPill({
       icon: 'type',
       label: 'Font',
       value: fontLabel,
@@ -778,74 +807,9 @@ export class ChatView extends ItemView {
     try { statusContainer.removeClass('no-animate'); } catch {}
   }
 
-  public supportsWebSearch(): boolean {
-    if (this.currentModelSupportsWebSearch === true) {
-      return true;
-    }
-
-    if (Array.isArray(this.currentModelSupportedParameters) && this.currentModelSupportedParameters.length > 0) {
-      if (this.currentModelSupportedParameters.includes('web_search_options') || this.currentModelSupportedParameters.includes('plugins')) {
-        return true;
-      }
-    }
-
-    const activeProvider = this.plugin.settings.activeProvider ?? { type: 'native', id: 'systemsculpt' };
-    const isNativeProvider = activeProvider.type === 'native';
-    const currentProvider = this.plugin.settings.customProviders?.find((p) => p.id === activeProvider.id);
-    const isOpenRouter = !!currentProvider?.endpoint?.includes('openrouter.ai');
-    return isNativeProvider || isOpenRouter;
-  }
-
-  private async refreshModelMetadata(): Promise<void> {
-    const canonicalId = this.selectedModelId ? ensureCanonicalId(this.selectedModelId) : '';
-    const previouslySupported = this.supportsWebSearch();
-
-    let modelSupportsWebSearch: boolean | null = null;
-    let supportedParameters: string[] = [];
-
-    if (canonicalId) {
-      try {
-        const model = await this.plugin.modelService.getModelById(canonicalId);
-        if (model) {
-          if (Array.isArray(model.capabilities)) {
-            modelSupportsWebSearch = model.capabilities.includes('web_search') ? true : null;
-          } else {
-            modelSupportsWebSearch = null;
-          }
-          supportedParameters = Array.isArray(model.supported_parameters) ? model.supported_parameters : [];
-        } else {
-          modelSupportsWebSearch = null;
-          supportedParameters = [];
-        }
-      } catch (error) {
-        modelSupportsWebSearch = null;
-        supportedParameters = [];
-      }
-    } else {
-      modelSupportsWebSearch = null;
-      supportedParameters = [];
-    }
-
-    this.currentModelSupportsWebSearch = modelSupportsWebSearch;
-    this.currentModelSupportedParameters = supportedParameters;
-
-    const supportsNow = this.supportsWebSearch();
-
-    if (!supportsNow && this.inputHandler?.webSearchEnabled) {
-      this.inputHandler.disableWebSearch();
-      this.webSearchEnabled = false;
-      try {
-        new Notice('Web search disabled: selected model does not support it.', 2500);
-      } catch {}
-    } else {
-      this.inputHandler?.refreshWebSearchControls();
-    }
-    this.inputHandler?.refreshTokenCounter();
-
-    if (this.messages.length === 0 || previouslySupported !== supportsNow) {
-      this.displayChatStatus();
-    }
-  }
+	  private async refreshModelMetadata(): Promise<void> {
+	    this.inputHandler?.refreshTokenCounter();
+	  }
 
   /**
    * Re-render the chat status block when the chat is empty so UI stays in sync
@@ -1824,9 +1788,6 @@ export class ChatView extends ItemView {
         isGenerating: this.isGenerating,
         selectedModelId: this.selectedModelId,
         currentModelName: this.currentModelName,
-        currentModelSupportsWebSearch: this.currentModelSupportsWebSearch,
-        currentModelSupportedParameters: this.currentModelSupportedParameters,
-        webSearchEnabled: this.webSearchEnabled,
         agentMode: this.agentMode,
         systemPromptType: this.systemPromptType,
         systemPromptPath: this.systemPromptPath,

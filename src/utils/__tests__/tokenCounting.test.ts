@@ -157,22 +157,6 @@ describe("countRequestTokens", () => {
     expect(tokens).toBeGreaterThan(0);
   });
 
-  it("counts web_search_options tokens", () => {
-    const body = {
-      web_search_options: { enabled: true },
-    };
-    const tokens = countRequestTokens(body);
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("counts plugins tokens", () => {
-    const body = {
-      plugins: [{ name: "web_search" }],
-    };
-    const tokens = countRequestTokens(body);
-    expect(tokens).toBeGreaterThan(0);
-  });
-
   it("counts combined request", () => {
     const body = {
       system: "You are helpful.",

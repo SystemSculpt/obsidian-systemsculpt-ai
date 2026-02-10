@@ -87,8 +87,8 @@ export const messageHandling = {
       chatView.messageRenderer.renderUnifiedMessageParts(messageEl, partList.parts);
     }
 
-    // Handle web search citations if present
-    if (message.webSearchEnabled && message.annotations) {
+    // Render URL citations if present.
+    if (message.annotations) {
       const urlCitations = message.annotations
         .filter(annotation => annotation.type === "url_citation" && annotation.url_citation)
         .map(annotation => annotation.url_citation)
