@@ -23,6 +23,7 @@ jest.mock("../../../utils/urlHelpers", () => ({
 
 // Mock the API constants
 jest.mock("../../../constants/api", () => ({
+  DEVELOPMENT_MODE: "PRODUCTION",
   API_BASE_URL: "https://api.systemsculpt.com/api/v1",
   SYSTEMSCULPT_API_HEADERS: {
     DEFAULT: {
@@ -85,6 +86,23 @@ describe("SystemSculptEnvironment", () => {
     it("handles undefined serverUrl", () => {
       const settings = { serverUrl: undefined as any };
       const url = SystemSculptEnvironment.resolveBaseUrl(settings);
+
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
+    });
+
+    it("forces production API when serverUrl points to localhost", () => {
+      const settings = { serverUrl: "http://localhost:3001/api/v1" };
+      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
+
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
+    });
+
+    it("forces production API when override points to localhost", () => {
+      const settings = { serverUrl: "https://custom.example.com/api/v1" };
+      const url = SystemSculptEnvironment.resolveBaseUrl(
+        settings,
+        "http://127.0.0.1:3001/api/v1"
+      );
 
       expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
