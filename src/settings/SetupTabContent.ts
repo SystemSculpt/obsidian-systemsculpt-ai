@@ -9,6 +9,7 @@ import { scanLocalLLMProviders } from "../services/providers/LocalLLMScanner";
 import { ListSelectionModal, ListItem } from "../core/ui/modals/standard/ListSelectionModal";
 import { createExternalHelpLink } from "./uiHelpers";
 import type { CustomProvider } from "../types/llm";
+import { SystemSculptService } from "../services/SystemSculptService";
 
 const PROVIDER_PRESETS: Array<{ id: string; name: string; endpoint: string; description: string }> = [
   {
@@ -259,6 +260,68 @@ function renderAccountSection(root: HTMLElement, tabInstance: SystemSculptSettin
           new Notice('License key copied to clipboard.');
         });
     });
+  }
+
+  if (isProActive && (plugin.settings.licenseKey || '').trim().length > 0) {
+    const creditsSetting = new Setting(root)
+      .setName('Credits')
+      .setDesc('Fetching credits balance…');
+
+    const aiService = SystemSculptService.getInstance(plugin);
+
+    const formatCredits = (value: number): string => {
+      try {
+        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+      } catch {
+        return String(value);
+      }
+    };
+
+    const formatDate = (iso: string): string => {
+      if (!iso) return 'unknown';
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return 'unknown';
+      try {
+        return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+      } catch {
+        return date.toISOString().slice(0, 10);
+      }
+    };
+
+    let purchaseUrl: string | null = null;
+
+    const syncCredits = async () => {
+      try {
+        creditsSetting.setDesc('Fetching credits balance…');
+        const balance = await aiService.getCreditsBalance();
+        purchaseUrl = balance.purchaseUrl;
+        creditsSetting.setDesc(
+          `Remaining: ${formatCredits(balance.totalRemaining)} credits (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.`
+        );
+      } catch (error: any) {
+        const message = error?.message || String(error);
+        creditsSetting.setDesc(`Unable to fetch credits balance. (${message})`);
+      }
+    };
+
+    creditsSetting.addButton((button) => {
+      button
+        .setButtonText('Refresh')
+        .onClick(async () => {
+          await syncCredits();
+        });
+    });
+
+    creditsSetting.addExtraButton((button) => {
+      button
+        .setIcon('external-link')
+        .setTooltip('Buy more credits')
+        .onClick(() => {
+          window.open(purchaseUrl || SYSTEMSCULPT_WEBSITE.LICENSE, '_blank');
+        });
+    });
+
+    void syncCredits();
   }
 }
 

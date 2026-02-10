@@ -72,6 +72,14 @@ export const uiSetup = {
         if (hasCompatibilityChange(oldSettings, newSettings)) {
           void uiSetup.updateToolCompatibilityWarning(chatView);
         }
+        const licenseChanged =
+          oldSettings?.licenseValid !== newSettings?.licenseValid ||
+          oldSettings?.licenseKey !== newSettings?.licenseKey;
+        if (licenseChanged) {
+          void chatView.refreshCreditsBalance();
+        } else {
+          void chatView.updateCreditsIndicator();
+        }
       })
     );
 
@@ -279,6 +287,7 @@ export const uiSetup = {
     // Initialize system prompt indicator
     void chatView.updateSystemPromptIndicator();
     void chatView.updateAgentModeIndicator();
+    void chatView.updateCreditsIndicator();
 
     // Check if we need to prompt for initial model selection
     if (!chatView.plugin.settings.selectedModelId && !chatView.plugin.hasPromptedForDefaultModel) {
@@ -406,6 +415,7 @@ export const uiSetup = {
    * 1. Model button
    * 2. System Prompt button
    * 3. Agent Mode button
+   * 4. Credits button (when available)
    */
   ensureButtonOrder: function(chatView: ChatView): void {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -428,6 +438,11 @@ export const uiSetup = {
     // 3. Agent Mode button (always third)
     if (chatView.agentModeIndicator) {
       buttons.push(chatView.agentModeIndicator);
+    }
+
+    // 4. Credits button (optional)
+    if (chatView.creditsIndicator) {
+      buttons.push(chatView.creditsIndicator);
     }
     
     // Remove all buttons from the section
@@ -718,6 +733,85 @@ export const uiSetup = {
     const iconSpan = chatView.agentModeIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
     setIcon(iconSpan, "wrench");
     chatView.agentModeIndicator.createSpan({ text: `Agent ${isOn ? "On" : "Off"}` });
+
+    this.ensureButtonOrder(chatView);
+  },
+
+  updateCreditsIndicator: async function(chatView: ChatView): Promise<void> {
+    const container = chatView.containerEl.children[1] as HTMLElement;
+    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
+    if (!modelSection) return;
+
+    const isProActive =
+      chatView.plugin.settings.licenseValid === true &&
+      !!chatView.plugin.settings.licenseKey?.trim();
+
+    if (!isProActive) {
+      if (chatView.creditsIndicator) {
+        chatView.creditsIndicator.style.display = "none";
+      }
+      return;
+    }
+
+    if (!chatView.creditsIndicator) {
+      chatView.creditsIndicator = modelSection.createEl("div", {
+        cls: "systemsculpt-chip systemsculpt-credits-indicator",
+      }) as HTMLElement;
+
+      chatView.registerDomEvent(chatView.creditsIndicator, "click", () => {
+        chatView.openSetupTab("overview");
+      });
+
+      chatView.registerDomEvent(chatView.creditsIndicator, "keydown", (event: KeyboardEvent) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          (event.target as HTMLElement)?.click();
+        }
+      });
+    } else {
+      chatView.creditsIndicator.empty();
+    }
+
+    chatView.creditsIndicator.style.display = "";
+
+    const formatCredits = (value: number): string => {
+      try {
+        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+      } catch {
+        return String(value);
+      }
+    };
+
+    const formatDate = (iso: string): string => {
+      if (!iso) return "unknown";
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return "unknown";
+      try {
+        return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+      } catch {
+        return date.toISOString().slice(0, 10);
+      }
+    };
+
+    const balance = chatView.creditsBalance;
+    const label = balance
+      ? `Credits ${formatCredits(balance.totalRemaining)}`
+      : "Credits …";
+
+    const iconSpan = chatView.creditsIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
+    setIcon(iconSpan, "coins");
+    chatView.creditsIndicator.createSpan({ text: label });
+
+    const title = balance
+      ? `Credits remaining: ${formatCredits(balance.totalRemaining)} (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.`
+      : "Credits balance (click to view)";
+
+    chatView.creditsIndicator.setAttrs({
+      role: "button",
+      tabindex: 0,
+      "aria-label": title,
+      title,
+    });
 
     this.ensureButtonOrder(chatView);
   },

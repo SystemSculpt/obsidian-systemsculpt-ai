@@ -29,6 +29,10 @@ export const ERROR_CODES = {
   // Generic Errors
   UNKNOWN_ERROR: "UNKNOWN_ERROR",
   QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
+
+  // Billing / Credits
+  INSUFFICIENT_CREDITS: "INSUFFICIENT_CREDITS",
+  TURN_IN_FLIGHT: "TURN_IN_FLIGHT",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -148,6 +152,10 @@ export function getErrorMessage(code: ErrorCode, model?: string): string {
     // Generic Errors
     [ERROR_CODES.UNKNOWN_ERROR]: "An unexpected error occurred. Please try again.",
     [ERROR_CODES.QUOTA_EXCEEDED]: "Usage quota exceeded. Please check your account limits.",
+
+    // Billing / Credits
+    [ERROR_CODES.INSUFFICIENT_CREDITS]: "Insufficient credits. Please add credits to continue.",
+    [ERROR_CODES.TURN_IN_FLIGHT]: "A previous request is still processing. Please wait for it to finish.",
   };
 
   const message = messages[code];

@@ -140,10 +140,6 @@ export class AgentSessionClient {
       },
       stream: true,
     });
-    if (!turnResponse.ok) {
-      throw await this.httpError("start agent turn", turnResponse);
-    }
-
     return turnResponse;
   }
 

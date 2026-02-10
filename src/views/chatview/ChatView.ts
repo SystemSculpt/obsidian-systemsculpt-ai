@@ -1,12 +1,12 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component } from "obsidian";
-import { SystemSculptService } from "../../services/SystemSculptService";
+import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { registerWebResearchTools } from "../../services/web/registerWebResearchTools";
 import { ChatMessage, ChatRole, MultiPartContent, LICENSE_URL, SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
-import { SystemSculptError, isContextOverflowErrorMessage } from "../../utils/errors";
+import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from "../../utils/errors";
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
@@ -49,8 +49,11 @@ export class ChatView extends ItemView {
   public modelIndicator: HTMLElement;
   public systemPromptIndicator: HTMLElement;
   public agentModeIndicator: HTMLElement;
+  public creditsIndicator: HTMLElement;
   public currentModelName: string = "";
   public isGenerating = false;
+  public creditsBalance: CreditsBalanceSnapshot | null = null;
+  private creditsBalanceRefreshPromise: Promise<void> | null = null;
   public contextManager: FileContextManager;
   public scrollManager: ScrollManagerService;
   public layoutChangeHandler: () => void;
@@ -193,10 +196,12 @@ export class ChatView extends ItemView {
     this.ensureCoreServicesReady();
     await uiSetup.onOpen(this);
     await this.refreshModelMetadata();
+    void this.refreshCreditsBalance();
   }
   updateModelIndicator = () => uiSetup.updateModelIndicator(this);
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
   updateAgentModeIndicator = () => uiSetup.updateAgentModeIndicator(this);
+  updateCreditsIndicator = () => uiSetup.updateCreditsIndicator(this);
   updateToolCompatibilityWarning = () => uiSetup.updateToolCompatibilityWarning(this);
   addMessage = (role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage) =>
     messageHandling.addMessage(this, role, content, existingMessageId, completeMessage);
@@ -347,6 +352,66 @@ export class ChatView extends ItemView {
 
       return;
     }
+
+    if (error instanceof SystemSculptError && error.code === ERROR_CODES.INSUFFICIENT_CREDITS) {
+      await this.resetFailedAssistantTurn();
+
+      const formatCredits = (value: number): string => {
+        try {
+          return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+        } catch {
+          return String(value);
+        }
+      };
+
+      const formatDate = (iso: string): string => {
+        if (!iso) return 'unknown';
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return 'unknown';
+        try {
+          return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+        } catch {
+          return date.toISOString().slice(0, 10);
+        }
+      };
+
+      const remaining = typeof error.metadata?.creditsRemaining === 'number'
+        ? error.metadata.creditsRemaining
+        : Number(error.metadata?.creditsRemaining ?? 0);
+      const cycleEndsAt = typeof error.metadata?.cycleEndsAt === 'string' ? error.metadata.cycleEndsAt : '';
+      const purchaseUrl = typeof error.metadata?.purchaseUrl === 'string' ? error.metadata.purchaseUrl : null;
+
+      const actionLabel = purchaseUrl ? 'Buy credits' : 'Open Setup';
+      const result = await showPopup(
+        this.app,
+        `You don't have enough credits to run this request.\n\nRemaining: ${formatCredits(remaining)} credits\nResets: ${formatDate(cycleEndsAt)}`,
+        {
+          title: 'Out of credits',
+          icon: 'credit-card',
+          primaryButton: actionLabel,
+          secondaryButton: 'OK',
+        }
+      );
+
+      if (result?.action === 'primary' || result?.confirmed) {
+        if (purchaseUrl) {
+          window.open(purchaseUrl, '_blank');
+        } else {
+          this.openSetupTab('overview');
+        }
+      }
+
+      void this.refreshCreditsBalance();
+      return;
+    }
+
+    if (error instanceof SystemSculptError && error.code === ERROR_CODES.TURN_IN_FLIGHT) {
+      await this.resetFailedAssistantTurn();
+      const lockUntil = typeof error.metadata?.lockUntil === 'string' ? error.metadata.lockUntil : '';
+      const suffix = lockUntil ? ` (lock until ${lockUntil})` : '';
+      new Notice(`A previous request is still processing. Please wait and try again.${suffix}`, 8000);
+      return;
+    }
     
     if (
       error instanceof SystemSculptError &&
@@ -471,6 +536,39 @@ export class ChatView extends ItemView {
     try {
       await uiSetup.updateToolCompatibilityWarning(this);
     } catch {}
+  }
+
+  public async refreshCreditsBalance(): Promise<void> {
+    const isProActive =
+      !!(this.plugin.settings.licenseValid === true && this.plugin.settings.licenseKey?.trim());
+
+    if (!isProActive) {
+      this.creditsBalance = null;
+      try {
+        await this.updateCreditsIndicator();
+      } catch {}
+      return;
+    }
+
+    if (this.creditsBalanceRefreshPromise) {
+      return this.creditsBalanceRefreshPromise;
+    }
+
+    this.creditsBalanceRefreshPromise = (async () => {
+      try {
+        this.creditsBalance = await this.aiService.getCreditsBalance();
+      } catch {
+        // Avoid noisy toasts; the balance UI is a convenience panel.
+      } finally {
+        try {
+          await this.updateCreditsIndicator();
+        } catch {}
+      }
+    })().finally(() => {
+      this.creditsBalanceRefreshPromise = null;
+    });
+
+    return this.creditsBalanceRefreshPromise;
   }
 
   public hasConfiguredProvider(): boolean {

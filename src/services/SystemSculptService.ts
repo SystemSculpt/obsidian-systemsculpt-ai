@@ -65,6 +65,18 @@ export interface StreamDebugCallbacks {
   onError?: (data: { error: string; details?: any }) => void;
 }
 
+export type CreditsBalanceSnapshot = {
+  includedRemaining: number;
+  addOnRemaining: number;
+  totalRemaining: number;
+  includedPerMonth: number;
+  cycleEndsAt: string;
+  cycleStartedAt: string;
+  cycleAnchorAt: string;
+  turnInFlightUntil: string | null;
+  purchaseUrl: string | null;
+};
+
 interface PreparedChatRequest {
   isCustom: boolean;
   customProvider?: CustomProvider;
@@ -617,6 +629,89 @@ export class SystemSculptService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     return this.audioUploadService.uploadAudio(file);
+  }
+
+  public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {
+    this.refreshSettings();
+
+    const licenseKey = (this.settings.licenseKey || "").trim();
+    if (!licenseKey) {
+      throw new SystemSculptError(
+        "License key required to fetch credits balance.",
+        ERROR_CODES.INVALID_LICENSE,
+        401
+      );
+    }
+
+    const url = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CREDITS.BALANCE}`;
+    const platform = PlatformContext.get();
+    const transport = platform.preferredTransport({ endpoint: url });
+
+    const headers: Record<string, string> = {
+      ...SystemSculptEnvironment.buildHeaders(licenseKey),
+      Accept: "application/json",
+    };
+
+    let response: Response;
+    if (transport === "fetch" && typeof fetch === "function") {
+      response = await fetch(url, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      } as RequestInit);
+    } else {
+      const result = await requestUrl({
+        url,
+        method: "GET",
+        headers,
+        throw: false,
+      });
+
+      const status = result.status || 500;
+      const textBody =
+        typeof result.text === "string"
+          ? result.text
+          : JSON.stringify(result.json || {});
+
+      response = new Response(textBody, {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!response.ok) {
+      await StreamingErrorHandler.handleStreamError(response, false, {
+        provider: "systemsculpt",
+        endpoint: url,
+        model: "credits",
+      });
+    }
+
+    const payload = (await response.json()) as any;
+    const asNumber = (value: unknown): number => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    };
+    const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+
+    return {
+      includedRemaining: asNumber(payload?.included_remaining),
+      addOnRemaining: asNumber(payload?.add_on_remaining),
+      totalRemaining: asNumber(payload?.total_remaining),
+      includedPerMonth: asNumber(payload?.included_per_month),
+      cycleEndsAt: asString(payload?.cycle_ends_at),
+      cycleStartedAt: asString(payload?.cycle_started_at),
+      cycleAnchorAt: asString(payload?.cycle_anchor_at),
+      turnInFlightUntil: asString(payload?.turn_in_flight_until) || null,
+      purchaseUrl:
+        typeof payload?.purchase_url === "string" && payload.purchase_url.trim().length > 0
+          ? payload.purchase_url.trim()
+          : null,
+    };
   }
 
 	  async *streamMessage({

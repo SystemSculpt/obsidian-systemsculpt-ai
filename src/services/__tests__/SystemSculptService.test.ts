@@ -76,6 +76,12 @@ jest.mock("../StreamingErrorHandler", () => ({
 jest.mock("../api/SystemSculptEnvironment", () => ({
   SystemSculptEnvironment: {
     resolveBaseUrl: jest.fn(() => "https://api.systemsculpt.test/api/v1"),
+    buildHeaders: jest.fn((licenseKey?: string) => ({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-SystemSculpt-Client": "obsidian-plugin",
+      ...(licenseKey ? { "x-license-key": licenseKey } : {}),
+    })),
   },
 }));
 
@@ -271,6 +277,42 @@ describe("SystemSculptService", () => {
     });
 
     expect(requestBody.session_id).toBe(deterministicId("chat-123", "sess"));
+  });
+
+  it("fetches credits balance from the SystemSculpt API", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const response = new Response(
+      JSON.stringify({
+        included_remaining: 9000,
+        add_on_remaining: 0,
+        total_remaining: 9000,
+        included_per_month: 10000,
+        cycle_anchor_at: "2026-02-01T00:00:00.000Z",
+        cycle_started_at: "2026-02-01T00:00:00.000Z",
+        cycle_ends_at: "2026-03-01T00:00:00.000Z",
+        turn_in_flight_until: null,
+        purchase_url: null,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+    global.fetch = jest.fn().mockResolvedValue(response) as any;
+
+    const balance = await service.getCreditsBalance();
+    expect(balance.totalRemaining).toBe(9000);
+    expect(balance.includedPerMonth).toBe(10000);
+    expect(balance.cycleEndsAt).toBe("2026-03-01T00:00:00.000Z");
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.systemsculpt.test/api/v1/credits/balance",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          "x-license-key": "license",
+        }),
+      })
+    );
   });
 
   it("uses development base url when configured", () => {

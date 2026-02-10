@@ -551,13 +551,14 @@ export class InputHandler extends Component {
         let shouldContinue = true;
         while (shouldContinue && !signal.aborted) {
           const turnResult = await this.streamAssistantTurn(signal, includeContextFiles, agentModeOverride);
+          void this.chatView.refreshCreditsBalance();
           shouldContinue = await this.shouldContinuePiTurn(turnResult, signal);
         }
       });
     } catch (err) {
       // StreamingController already forwards errors into ChatView.handleError via onError.
       // Swallow here to avoid "Uncaught (in promise)" in the Obsidian console.
-      if (!(err instanceof SystemSculptError && err.code === ERROR_CODES.STREAM_ERROR)) {
+      if (!(err instanceof SystemSculptError)) {
         try {
           this.onError(err as any);
         } catch {}

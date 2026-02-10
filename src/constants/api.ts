@@ -34,6 +34,9 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
     SESSIONS: "/api/v1/agent/sessions",
     SESSION_TURNS: (sessionId: string) => `/api/v1/agent/sessions/${sessionId}/turns`,
   },
+  CREDITS: {
+    BALANCE: "/credits/balance",
+  },
   EMBEDDINGS: {
     GENERATE: "/embeddings",
   },

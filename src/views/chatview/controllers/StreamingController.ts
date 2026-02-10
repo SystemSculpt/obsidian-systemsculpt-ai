@@ -194,8 +194,12 @@ export class StreamingController extends Component {
       } catch {}
 
       if (onError) {
-        const errorMessage = err?.message || err?.toString?.() || "Unknown streaming error";
-        onError(new SystemSculptError(errorMessage, ERROR_CODES.STREAM_ERROR, 500, { cause: err }));
+        if (err instanceof SystemSculptError) {
+          onError(err);
+        } else {
+          const errorMessage = err?.message || err?.toString?.() || "Unknown streaming error";
+          onError(new SystemSculptError(errorMessage, ERROR_CODES.STREAM_ERROR, 500, { cause: err }));
+        }
       }
       throw err;
     } finally {

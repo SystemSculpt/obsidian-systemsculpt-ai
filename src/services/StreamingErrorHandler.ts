@@ -232,74 +232,110 @@ export class StreamingErrorHandler {
           const isStringError = typeof data.error === 'string';
           const upstreamCode = isStringError ? String(data.error) : String(data.error?.code || '');
           const upstreamMessage = isStringError ? (data.message || '') : (data.error?.message || '');
+          const normalizedUpstreamCode = upstreamCode.trim().toLowerCase();
 
-          errorCode = (isStringError ? ERROR_CODES.STREAM_ERROR : (data.error.code || ERROR_CODES.STREAM_ERROR)) as ErrorCode;
-          errorMessage = upstreamMessage || getErrorMessage(errorCode);
-          
-          // Check for 429 rate limiting errors specifically
-          if (status === 429 || errorMessage.includes('rate-limited') || errorMessage.includes('429')) {
-            errorCode = ERROR_CODES.QUOTA_EXCEEDED;
-            // Enhance error message with retry guidance
-            errorMessage = errorMessage.includes('rate-limited upstream') 
-              ? errorMessage + ' OpenRouter is automatically trying alternative providers.'
-              : 'Rate limit exceeded. Please try again in a moment.';
+          const asNumber = (value: unknown): number => {
+            if (typeof value === 'number' && Number.isFinite(value)) return value;
+            if (typeof value === 'string') {
+              const parsed = Number(value);
+              if (Number.isFinite(parsed)) return parsed;
+            }
+            return 0;
+          };
+
+          if (normalizedUpstreamCode === 'insufficient_credits') {
+            errorCode = ERROR_CODES.INSUFFICIENT_CREDITS;
+            errorMessage = upstreamMessage || getErrorMessage(errorCode);
             metadata = {
               model: data.model,
               statusCode: status,
               rawError: data.error,
-              isRateLimited: true,
-              shouldRetry: true,
-              retryAfterSeconds: 5 // Suggest 5 second retry delay
+              creditsRemaining: asNumber((data.error as any)?.credits_remaining),
+              cycleEndsAt: String((data.error as any)?.cycle_ends_at || ''),
+              purchaseUrl: typeof (data.error as any)?.purchase_url === 'string' ? (data.error as any).purchase_url : null,
+              ...(requestId ? { requestId } : {}),
+              ...(context?.endpoint ? { endpoint: context.endpoint } : {}),
+            };
+          } else if (normalizedUpstreamCode === 'turn_in_flight') {
+            errorCode = ERROR_CODES.TURN_IN_FLIGHT;
+            errorMessage = upstreamMessage || getErrorMessage(errorCode);
+            metadata = {
+              model: data.model,
+              statusCode: status,
+              rawError: data.error,
+              lockUntil: String((data.error as any)?.lock_until || ''),
+              ...(requestId ? { requestId } : {}),
+              ...(context?.endpoint ? { endpoint: context.endpoint } : {}),
             };
           } else {
-            metadata = {
-              model: data.model,
-              statusCode: status,
-              rawError: data.error,
-              ...(isStringError && { upstreamCode }),
-              ...(requestId ? { requestId } : {}),
-              ...(errorType ? { errorType } : {}),
-              ...(errorHttpCode ? { errorHttpCode } : {}),
-              ...(context?.endpoint ? { endpoint: context.endpoint } : {})
-            };
-            if (context?.model && !metadata.model) {
-              metadata.model = context.model;
-            }
+            errorCode = (isStringError ? ERROR_CODES.STREAM_ERROR : (data.error.code || ERROR_CODES.STREAM_ERROR)) as ErrorCode;
+            errorMessage = upstreamMessage || getErrorMessage(errorCode);
 
-            if (status === 404 ||
-                errorCode === ERROR_CODES.MODEL_UNAVAILABLE ||
-                errorMessage.includes('unavailable') ||
-                errorMessage.includes('not found')) {
-              metadata.shouldResubmit = true;
-            }
-            const lcUpstream = (errorMessage || '').toLowerCase();
-            if (
-              lcUpstream.includes('does not support tools') ||
-              lcUpstream.includes('tools not supported') ||
-              lcUpstream.includes('tool calling not supported') ||
-              lcUpstream.includes('tool calling is not supported') ||
-              lcUpstream.includes('tool_calls not supported') ||
-              lcUpstream.includes('function calling not supported') ||
-              lcUpstream.includes('function_calling not supported') ||
-              lcUpstream.includes('function_call not supported') ||
-              lcUpstream.includes("additional properties are not allowed: 'tools'") ||
-              lcUpstream.includes('unknown field: tools') ||
-              // OpenRouter-specific patterns
-              lcUpstream.includes('no endpoints found') ||
-              lcUpstream.includes('endpoints found that support tool') ||
-              lcUpstream.includes('does not support function calling') ||
-              lcUpstream.includes('model does not support tool use') ||
-              lcUpstream.includes('unsupported parameter: tools') ||
-              (lcUpstream.includes('extra fields not permitted') && lcUpstream.includes('tools'))
-            ) {
-              (metadata as any).shouldResubmitWithoutTools = true;
-              (metadata as any).toolSupport = false;
-            }
+            // Check for 429 rate limiting errors specifically
+            if (status === 429 || errorMessage.includes('rate-limited') || errorMessage.includes('429')) {
+              errorCode = ERROR_CODES.QUOTA_EXCEEDED;
+              // Enhance error message with retry guidance
+              errorMessage = errorMessage.includes('rate-limited upstream') 
+                ? errorMessage + ' OpenRouter is automatically trying alternative providers.'
+                : 'Rate limit exceeded. Please try again in a moment.';
+              metadata = {
+                model: data.model,
+                statusCode: status,
+                rawError: data.error,
+                isRateLimited: true,
+                shouldRetry: true,
+                retryAfterSeconds: 5 // Suggest 5 second retry delay
+              };
+            } else {
+              metadata = {
+                model: data.model,
+                statusCode: status,
+                rawError: data.error,
+                ...(isStringError && { upstreamCode }),
+                ...(requestId ? { requestId } : {}),
+                ...(errorType ? { errorType } : {}),
+                ...(errorHttpCode ? { errorHttpCode } : {}),
+                ...(context?.endpoint ? { endpoint: context.endpoint } : {})
+              };
+              if (context?.model && !metadata.model) {
+                metadata.model = context.model;
+              }
 
-            // Detect upstream rejection of image input for non-vision models
-            if (isImageUnsupportedMessage(lcUpstream)) {
-              (metadata as any).shouldResubmitWithoutImages = true;
-              (metadata as any).imageSupport = false;
+              if (status === 404 ||
+                  errorCode === ERROR_CODES.MODEL_UNAVAILABLE ||
+                  errorMessage.includes('unavailable') ||
+                  errorMessage.includes('not found')) {
+                metadata.shouldResubmit = true;
+              }
+              const lcUpstream = (errorMessage || '').toLowerCase();
+              if (
+                lcUpstream.includes('does not support tools') ||
+                lcUpstream.includes('tools not supported') ||
+                lcUpstream.includes('tool calling not supported') ||
+                lcUpstream.includes('tool calling is not supported') ||
+                lcUpstream.includes('tool_calls not supported') ||
+                lcUpstream.includes('function calling not supported') ||
+                lcUpstream.includes('function_calling not supported') ||
+                lcUpstream.includes('function_call not supported') ||
+                lcUpstream.includes("additional properties are not allowed: 'tools'") ||
+                lcUpstream.includes('unknown field: tools') ||
+                // OpenRouter-specific patterns
+                lcUpstream.includes('no endpoints found') ||
+                lcUpstream.includes('endpoints found that support tool') ||
+                lcUpstream.includes('does not support function calling') ||
+                lcUpstream.includes('model does not support tool use') ||
+                lcUpstream.includes('unsupported parameter: tools') ||
+                (lcUpstream.includes('extra fields not permitted') && lcUpstream.includes('tools'))
+              ) {
+                (metadata as any).shouldResubmitWithoutTools = true;
+                (metadata as any).toolSupport = false;
+              }
+
+              // Detect upstream rejection of image input for non-vision models
+              if (isImageUnsupportedMessage(lcUpstream)) {
+                (metadata as any).shouldResubmitWithoutImages = true;
+                (metadata as any).imageSupport = false;
+              }
             }
           }
         }
