@@ -1,10 +1,7 @@
 name: Release Obsidian plugin
 
 on:
-  push:
-    tags:
-      - "*"
-
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
