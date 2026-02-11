@@ -1,0 +1,190 @@
+/**
+ * Credits Balance Modal
+ */
+
+.ss-credits-balance-modal.ss-modal--medium {
+  width: 540px;
+  max-width: 96vw;
+}
+
+.ss-credits-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ss-credits-balance__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ss-credits-balance__hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.ss-credits-balance__hero.is-low {
+  border-color: color-mix(in srgb, var(--text-warning, var(--text-error)) 45%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-warning, var(--text-error)) 8%, var(--background-secondary));
+}
+
+.ss-credits-balance__hero.is-empty {
+  opacity: 0.9;
+}
+
+.ss-credits-balance__hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ss-credits-balance__hero-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ss-credits-balance__hero-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-credits-balance__hero-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-normal);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-balance__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-credits-balance__meter-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-credits-balance__meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.ss-credits-balance__meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  transition: width 160ms ease;
+}
+
+.ss-credits-balance__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ss-credits-balance__stat {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary-alt);
+  padding: 10px;
+}
+
+.ss-credits-balance__stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.ss-credits-balance__stat-value {
+  font-size: 13px;
+  color: var(--text-normal);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-balance__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary-alt);
+  padding: 10px;
+}
+
+.ss-credits-balance__timeline-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ss-credits-balance__timeline-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-credits-balance__timeline-value {
+  font-size: 12px;
+  color: var(--text-normal);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-balance__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ss-credits-balance__hint.is-warning {
+  color: var(--text-warning, var(--text-error));
+}
+
+.ss-credits-balance__status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-credits-balance__status.is-warning {
+  color: var(--text-warning, var(--text-error));
+}
+
+.ss-credits-balance__status.is-error {
+  color: var(--text-error);
+}
+
+.ss-credits-balance-modal .ss-modal__footer .ss-button.is-loading {
+  opacity: 0.65;
+}
+
+@media (max-width: 720px) {
+  .ss-credits-balance__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-credits-balance__timeline-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .ss-credits-balance__timeline-value {
+    text-align: left;
+  }
+}

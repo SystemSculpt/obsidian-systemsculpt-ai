@@ -78,7 +78,7 @@ jest.mock("../AudioUploadService", () => ({
   AudioUploadService: jest.fn().mockImplementation(() => {
     audioUploadService = {
       uploadAudio: jest.fn().mockResolvedValue({ documentId: "audio", status: "ok" }),
-      updateBaseUrl: jest.fn(),
+      updateConfig: jest.fn(),
     };
     return audioUploadService;
   }),

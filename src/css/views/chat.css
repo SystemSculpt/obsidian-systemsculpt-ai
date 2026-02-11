@@ -351,6 +351,38 @@
   box-shadow: inset 0 0 0 1px var(--interactive-accent);
 }
 
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator {
+  position: relative;
+  color: var(--text-faint);
+  opacity: 0.82;
+}
+
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator:hover,
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator:focus-visible {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator .systemsculpt-model-indicator-icon {
+  margin-right: 0;
+  color: inherit;
+}
+
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator.is-loading {
+  opacity: 0.65;
+}
+
+.systemsculpt-chat-composer-toolbar .systemsculpt-credits-indicator.is-low::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--text-warning, var(--text-error));
+}
+
 .systemsculpt-chat-composer-chips {
   flex: 1 1 auto;
   min-width: 0;

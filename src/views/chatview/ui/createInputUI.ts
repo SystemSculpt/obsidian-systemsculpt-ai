@@ -62,7 +62,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .setClass("clickable-icon")
     .onClick(() => deps.onEditSystemPrompt());
   settingsButton.buttonEl.setAttribute("aria-label", "Chat settings");
-  settingsButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
+  settingsButton.buttonEl.classList.add("systemsculpt-chat-composer-button", "systemsculpt-chat-settings-button");
 
   const inputWrap = root.createDiv({ cls: "systemsculpt-chat-composer-input" });
 

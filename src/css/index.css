@@ -73,6 +73,7 @@
 @import 'modals/janitor-modal.css';  /* Modern Janitor modal styling */
 @import 'modals/changelog-modal.css';  /* Changelog modal styling */
 @import 'modals/embeddings-status-modal.css';  /* Embeddings status modal */
+@import 'modals/credits-balance-modal.css';  /* Credits and usage modal */
 @import 'modals/bulk-automation-modal.css';  /* Bulk automation confirmation and progress widgets */
 
 

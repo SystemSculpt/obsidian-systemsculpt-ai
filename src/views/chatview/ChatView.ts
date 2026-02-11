@@ -571,6 +571,25 @@ export class ChatView extends ItemView {
     return this.creditsBalanceRefreshPromise;
   }
 
+  public async openCreditsBalanceModal(): Promise<void> {
+    try {
+      const { CreditsBalanceModal } = await import("../../modals/CreditsBalanceModal");
+      const modal = new CreditsBalanceModal(this.app, {
+        initialBalance: this.creditsBalance,
+        fallbackPurchaseUrl: LICENSE_URL,
+        loadBalance: async () => {
+          await this.refreshCreditsBalance();
+          return this.creditsBalance;
+        },
+        onOpenSetup: () => this.openSetupTab("overview"),
+      });
+      modal.open();
+    } catch (error) {
+      // Fall back to setup if modal bootstrapping fails.
+      this.openSetupTab("overview");
+    }
+  }
+
   public hasConfiguredProvider(): boolean {
     const settings = this.plugin.settings;
     const hasSystemSculpt = !!(settings.enableSystemSculptProvider && settings.licenseKey?.trim() && settings.licenseValid === true);

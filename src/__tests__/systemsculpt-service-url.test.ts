@@ -68,7 +68,7 @@ jest.mock('../services/DocumentUploadService', () => ({
 
 jest.mock('../services/AudioUploadService', () => ({
   AudioUploadService: jest.fn().mockImplementation(() => ({
-    updateBaseUrl: jest.fn(),
+    updateConfig: jest.fn(),
     uploadAudio: jest.fn(),
   })),
 }));

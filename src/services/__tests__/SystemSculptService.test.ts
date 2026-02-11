@@ -25,7 +25,7 @@ const documentUploadService = {
 };
 const audioUploadService = {
   uploadAudio: jest.fn().mockResolvedValue({ documentId: "audio", status: "ok" }),
-  updateBaseUrl: jest.fn(),
+  updateConfig: jest.fn(),
 };
 const contextFileService = {
   prepareMessagesWithContext: jest.fn(async (messages: any[]) => messages),
@@ -152,7 +152,11 @@ describe("SystemSculptService", () => {
     expect(licenseService.updateBaseUrl).toHaveBeenCalled();
     expect(modelManagementService.updateBaseUrl).toHaveBeenCalled();
     expect(documentUploadService.updateConfig).toHaveBeenCalled();
-    expect(audioUploadService.updateBaseUrl).toHaveBeenCalled();
+    expect(audioUploadService.updateConfig).toHaveBeenCalled();
+    expect(audioUploadService.updateConfig).toHaveBeenCalledWith(
+      "https://api.systemsculpt.test/api/v1",
+      "license"
+    );
   });
 
   it("normalizes vendor model ids for the server", () => {

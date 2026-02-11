@@ -415,7 +415,6 @@ export const uiSetup = {
    * 1. Model button
    * 2. System Prompt button
    * 3. Agent Mode button
-   * 4. Credits button (when available)
    */
   ensureButtonOrder: function(chatView: ChatView): void {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -440,11 +439,6 @@ export const uiSetup = {
       buttons.push(chatView.agentModeIndicator);
     }
 
-    // 4. Credits button (optional)
-    if (chatView.creditsIndicator) {
-      buttons.push(chatView.creditsIndicator);
-    }
-    
     // Remove all buttons from the section
     modelSection.empty();
     
@@ -739,8 +733,10 @@ export const uiSetup = {
 
   updateCreditsIndicator: async function(chatView: ChatView): Promise<void> {
     const container = chatView.containerEl.children[1] as HTMLElement;
-    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    if (!modelSection) return;
+    const toolbarRightGroup = container?.querySelector(".systemsculpt-chat-composer-toolbar-group.mod-right") as HTMLElement | null;
+    const fallbackModelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
+    const targetSection = toolbarRightGroup ?? fallbackModelSection;
+    if (!targetSection) return;
 
     const isProActive =
       chatView.plugin.settings.licenseValid === true &&
@@ -754,25 +750,30 @@ export const uiSetup = {
     }
 
     if (!chatView.creditsIndicator) {
-      chatView.creditsIndicator = modelSection.createEl("div", {
-        cls: "systemsculpt-chip systemsculpt-credits-indicator",
+      chatView.creditsIndicator = targetSection.createEl("button", {
+        cls: "clickable-icon systemsculpt-chat-composer-button systemsculpt-credits-indicator",
+        attr: {
+          type: "button",
+        },
       }) as HTMLElement;
 
       chatView.registerDomEvent(chatView.creditsIndicator, "click", () => {
-        chatView.openSetupTab("overview");
-      });
-
-      chatView.registerDomEvent(chatView.creditsIndicator, "keydown", (event: KeyboardEvent) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          (event.target as HTMLElement)?.click();
-        }
+        void chatView.openCreditsBalanceModal();
       });
     } else {
       chatView.creditsIndicator.empty();
+      if (chatView.creditsIndicator.parentElement !== targetSection) {
+        targetSection.appendChild(chatView.creditsIndicator);
+      }
+    }
+
+    const settingsButton = targetSection.querySelector(".systemsculpt-chat-settings-button");
+    if (settingsButton?.parentElement === targetSection) {
+      targetSection.insertBefore(chatView.creditsIndicator, settingsButton);
     }
 
     chatView.creditsIndicator.style.display = "";
+    chatView.creditsIndicator.classList.toggle("is-loading", !chatView.creditsBalance);
 
     const formatCredits = (value: number): string => {
       try {
@@ -794,26 +795,21 @@ export const uiSetup = {
     };
 
     const balance = chatView.creditsBalance;
-    const label = balance
-      ? `Credits ${formatCredits(balance.totalRemaining)}`
-      : "Credits …";
+    const lowCreditsThreshold = 1000;
+    const isLowBalance = !!balance && balance.totalRemaining <= lowCreditsThreshold;
+    chatView.creditsIndicator.classList.toggle("is-low", isLowBalance);
 
     const iconSpan = chatView.creditsIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
     setIcon(iconSpan, "coins");
-    chatView.creditsIndicator.createSpan({ text: label });
 
     const title = balance
       ? `Credits remaining: ${formatCredits(balance.totalRemaining)} (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.`
       : "Credits balance (click to view)";
 
     chatView.creditsIndicator.setAttrs({
-      role: "button",
-      tabindex: 0,
       "aria-label": title,
       title,
     });
-
-    this.ensureButtonOrder(chatView);
   },
 
   /**

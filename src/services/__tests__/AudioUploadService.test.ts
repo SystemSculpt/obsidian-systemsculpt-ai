@@ -46,7 +46,7 @@ describe("AudioUploadService", () => {
     jest.clearAllMocks();
     mockApp = createMockApp();
     requestUrlMock = requestUrl as jest.Mock;
-    service = new AudioUploadService(mockApp, "https://api.example.com");
+    service = new AudioUploadService(mockApp, "https://api.example.com", "test-license-key");
   });
 
   describe("constructor", () => {
@@ -57,6 +57,16 @@ describe("AudioUploadService", () => {
     it("stores the provided values", () => {
       expect((service as any).app).toBe(mockApp);
       expect((service as any).baseUrl).toBe("https://api.example.com");
+      expect((service as any).licenseKey).toBe("test-license-key");
+    });
+  });
+
+  describe("updateConfig", () => {
+    it("updates base URL and license key", () => {
+      service.updateConfig("https://new.api.com", "new-license");
+
+      expect((service as any).baseUrl).toBe("https://new.api.com");
+      expect((service as any).licenseKey).toBe("new-license");
     });
   });
 
@@ -83,6 +93,16 @@ describe("AudioUploadService", () => {
     };
 
     describe("file size validation", () => {
+      it("throws when license key is missing", async () => {
+        service.updateConfig("https://api.example.com", "");
+        const file = createMockFile("test.mp3");
+
+        await expect(service.uploadAudio(file)).rejects.toThrow(
+          "A valid license key is required for audio transcription uploads"
+        );
+        expect(requestUrlMock).not.toHaveBeenCalled();
+      });
+
       it("throws when file size exceeds limit", async () => {
         const { validateFileSize } = require("../../utils/FileValidator");
         validateFileSize.mockResolvedValueOnce(false);
@@ -191,6 +211,7 @@ describe("AudioUploadService", () => {
           expect.objectContaining({
             headers: expect.objectContaining({
               "Content-Type": expect.stringContaining("multipart/form-data; boundary="),
+              "x-license-key": "test-license-key",
             }),
           })
         );

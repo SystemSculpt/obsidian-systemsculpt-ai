@@ -2,6 +2,7 @@ import { App, TFile, requestUrl } from "obsidian";
 import { validateFileSize, formatFileSize } from "../utils/FileValidator";
 import { logMobileError } from "../utils/errorHandling";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
+import { ERROR_CODES, SystemSculptError } from "../utils/errors";
 
 /**
  * Service responsible for audio upload and transcription
@@ -9,14 +10,24 @@ import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 export class AudioUploadService {
   private app: App;
   private baseUrl: string;
+  private licenseKey: string;
 
-  constructor(app: App, baseUrl: string) {
+  constructor(app: App, baseUrl: string, licenseKey: string) {
     this.app = app;
     this.baseUrl = baseUrl;
+    this.licenseKey = licenseKey;
   }
 
   /**
-   * Update the base URL
+   * Update base URL and license key
+   */
+  public updateConfig(baseUrl: string, licenseKey: string): void {
+    this.baseUrl = baseUrl;
+    this.licenseKey = licenseKey;
+  }
+
+  /**
+   * Update only the base URL. Prefer updateConfig to keep base URL + license key in sync.
    */
   public updateBaseUrl(baseUrl: string): void {
     this.baseUrl = baseUrl;
@@ -30,6 +41,15 @@ export class AudioUploadService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     try {
+      const licenseKey = this.licenseKey?.trim();
+      if (!licenseKey) {
+        throw new SystemSculptError(
+          "A valid license key is required for audio transcription uploads",
+          ERROR_CODES.PRO_REQUIRED,
+          403
+        );
+      }
+
       const maxBytes = AUDIO_UPLOAD_MAX_BYTES;
       const maxSizeLabel = formatFileSize(maxBytes);
       // Validate file size first
@@ -81,6 +101,7 @@ export class AudioUploadService {
         method: 'POST',
         headers: {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'x-license-key': licenseKey,
         },
         body: formDataArray.buffer,
         throw: false,
