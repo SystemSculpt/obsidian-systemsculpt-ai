@@ -93,7 +93,8 @@
     "test:related": "node scripts/jest.mjs --config jest.config.cjs --findRelatedTests --passWithNoTests",
     "test:leaks": "node scripts/jest.mjs --config jest.config.cjs --maxWorkers=1 --openHandlesTimeout=200 --passWithNoTests",
     "test:embeddings": "node scripts/jest.mjs --config jest.embeddings.config.cjs --passWithNoTests",
-    "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests"
+    "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
+    "release:plugin": "node scripts/release-plugin.mjs"
   },
   "ts-node": {
     "experimentalSpecifierResolution": "node",

@@ -30,6 +30,7 @@ npm run build             # production bundle; writes main.js + styles.css
 npm run check:plugin      # tsc --noEmit + bundle resolution
 npm run check:plugin:fast # faster local sanity pass
 npm run check:e2e         # tsc --noEmit for WDIO e2e harness + specs
+npm run release:plugin    # local one-command release (bump, tag, push, GitHub release assets)
 npm test                  # Jest (passWithNoTests)
 npm run test:debug        # Jest with console output enabled (still spied for assertions)
 npm run test:strict       # Jest strict mode: fail on console.* usage
