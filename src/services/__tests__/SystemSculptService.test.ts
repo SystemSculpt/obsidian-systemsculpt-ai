@@ -351,8 +351,13 @@ describe("SystemSculptService", () => {
             add_on_after: 0,
             total_before: 100,
             total_after: 97,
+            raw_usd: 0.002553,
             file_size_bytes: 48203,
             file_format: "wav",
+            billing_formula_version: "raw_usd_x_markup_x_credits_per_usd.ceil.v1",
+            billing_credits_per_usd: 800,
+            billing_markup_multiplier: 1.25,
+            billing_credits_exact: 2.553,
           },
         ],
         next_before: "2026-02-11T00:00:00.000Z",
@@ -370,6 +375,8 @@ describe("SystemSculptService", () => {
     expect(usage.items).toHaveLength(1);
     expect(usage.items[0]?.endpoint).toBe("audio/transcriptions/jobs/start");
     expect(usage.items[0]?.creditsCharged).toBe(3);
+    expect(usage.items[0]?.rawUsd).toBe(0.002553);
+    expect(usage.items[0]?.billingCreditsExact).toBe(2.553);
     expect(usage.nextBefore).toBe("2026-02-11T00:00:00.000Z");
 
     const [requestedUrl] = (global.fetch as jest.Mock).mock.calls[0] ?? [];

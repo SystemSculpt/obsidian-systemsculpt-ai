@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component } from "obsidian";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { registerWebResearchTools } from "../../services/web/registerWebResearchTools";
-import { ChatMessage, ChatRole, MultiPartContent, LICENSE_URL, SystemSculptSettings } from "../../types";
+import { ChatMessage, ChatRole, MultiPartContent, SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
@@ -24,6 +24,7 @@ import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import { removeGroupIfEmpty } from "./utils/MessageGrouping";
+import { classifyQuotaExceededError } from "./utils/quotaError";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
@@ -412,10 +413,35 @@ export class ChatView extends ItemView {
       new Notice(`A previous request is still processing. Please wait and try again.${suffix}`, 8000);
       return;
     }
+
+    const quotaClassification =
+      error instanceof SystemSculptError && error.code === ERROR_CODES.QUOTA_EXCEEDED
+        ? classifyQuotaExceededError(error)
+        : null;
+
+    if (quotaClassification) {
+      if (quotaClassification.isTransientRateLimit) {
+        await this.resetFailedAssistantTurn();
+        const details =
+          quotaClassification.retryAfterSeconds > 0
+            ? ` Please wait about ${quotaClassification.retryAfterSeconds}s and try again.`
+            : " Please wait a moment and try again.";
+        new Notice(`The upstream provider is temporarily rate-limited.${details}`, 8000);
+        return;
+      }
+
+      new Notice(
+        "Usage quota is exhausted for the current provider. Add credits or switch to a different model/provider.",
+        10000
+      );
+    }
+
+    const shouldRecoverFromQuotaBySwitching =
+      !!quotaClassification && !quotaClassification.isTransientRateLimit;
     
     if (
       error instanceof SystemSculptError &&
-      (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR" || error.code === "QUOTA_EXCEEDED")
+      (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR" || shouldRecoverFromQuotaBySwitching)
     ) {
       // Handle model unavailability by automatically switching models
       if (error.code === "MODEL_UNAVAILABLE") {
@@ -572,27 +598,16 @@ export class ChatView extends ItemView {
   }
 
   public async openCreditsBalanceModal(): Promise<void> {
-    try {
-      const { CreditsBalanceModal } = await import("../../modals/CreditsBalanceModal");
-      const modal = new CreditsBalanceModal(this.app, {
-        initialBalance: this.creditsBalance,
-        fallbackPurchaseUrl: LICENSE_URL,
-        loadBalance: async () => {
-          await this.refreshCreditsBalance();
-          return this.creditsBalance;
-        },
-        loadUsage: (params) =>
-          this.aiService.getCreditsUsage({
-            limit: params?.limit,
-            before: params?.before,
-          }),
-        onOpenSetup: () => this.openSetupTab("overview"),
-      });
-      modal.open();
-    } catch (error) {
-      // Fall back to setup if modal bootstrapping fails.
-      this.openSetupTab("overview");
-    }
+    await this.plugin.openCreditsBalanceModal({
+      initialBalance: this.creditsBalance,
+      onBalanceUpdated: async (balance) => {
+        this.creditsBalance = balance;
+        try {
+          await this.updateCreditsIndicator();
+        } catch {}
+      },
+      settingsTab: "overview",
+    });
   }
 
   public hasConfiguredProvider(): boolean {
@@ -603,17 +618,7 @@ export class ChatView extends ItemView {
   }
 
   public openSetupTab(targetTab: string = "overview"): void {
-    try {
-      // @ts-ignore – Obsidian typings omit the settings API
-      this.app.setting.open();
-      // @ts-ignore
-      this.app.setting.openTabById(this.plugin.manifest.id);
-      window.setTimeout(() => {
-        this.app.workspace.trigger("systemsculpt:settings-focus-tab", targetTab);
-      }, 100);
-    } catch (error) {
-      new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
-    }
+    this.plugin.openSettingsTab(targetTab);
   }
 
   public async promptProviderSetup(customMessage?: string): Promise<void> {

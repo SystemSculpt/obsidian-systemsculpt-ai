@@ -184,6 +184,32 @@ describe("StreamingController stream behavior", () => {
     expect(saveChat).not.toHaveBeenCalled();
   });
 
+  test("treats abort-during-next-event wait as cancellation (not empty completion)", async () => {
+    const { controller, saveChat, onError } = createController();
+    const abortController = new AbortController();
+
+    const stream = (async function* () {
+      yield { type: "meta", key: "inline-footnote", value: "Retrying…" } as any;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    })();
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-abort-after-meta";
+    document.body.appendChild(messageEl);
+
+    setTimeout(() => abortController.abort(), 0);
+    const result = await controller.stream(
+      stream,
+      messageEl,
+      "assistant-abort-after-meta",
+      abortController.signal
+    );
+
+    expect(result.completed).toBe(false);
+    expect(saveChat).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   test("does not persist an empty assistant message when stream has no output", async () => {
     const { controller, saveChat, onAssistantResponse, onError } = createController();
 

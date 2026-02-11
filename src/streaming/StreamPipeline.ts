@@ -420,15 +420,7 @@ export class StreamPipeline {
         break;
       }
       case "error": {
-        const errorMessage =
-          parsed?.error?.errorMessage ||
-          parsed?.error?.message ||
-          parsed?.errorMessage ||
-          "PI runtime error";
-        throw new SystemSculptError(String(errorMessage), ERROR_CODES.STREAM_ERROR, 500, {
-          model: this.options.model,
-          rawError: parsed?.error ?? parsed,
-        });
+        throw this.buildPiNativeError(parsed);
       }
       // These PI event types are markers/aggregates and should not append output by default.
       // `text_end` and `thinking_end` usually carry fully aggregated block text and would
@@ -584,6 +576,96 @@ export class StreamPipeline {
       provider: payload.provider,
       finishReason: payload.choices?.[0]?.finish_reason,
     });
+  }
+
+  private buildPiNativeError(parsed: any): SystemSculptError {
+    const rawError = parsed?.error ?? parsed;
+    const errorMessage = String(
+      parsed?.error?.errorMessage ||
+      parsed?.error?.message ||
+      parsed?.errorMessage ||
+      parsed?.message ||
+      "PI runtime error"
+    );
+    const errorCodeRaw = String(parsed?.error?.code || parsed?.code || "").toLowerCase();
+    const provider = typeof parsed?.provider === "string"
+      ? parsed.provider
+      : typeof parsed?.error?.provider === "string"
+        ? parsed.error.provider
+        : typeof parsed?.error?.provider_name === "string"
+          ? parsed.error.provider_name
+          : undefined;
+    const parsedStatus =
+      this.toFiniteNumber(
+        parsed?.error?.statusCode ??
+        parsed?.error?.status ??
+        parsed?.statusCode ??
+        parsed?.status ??
+        parsed?.error?.http_code
+      ) ?? 0;
+    const rateLimited =
+      parsedStatus === 429 ||
+      errorCodeRaw.includes("rate_limit") ||
+      errorCodeRaw.includes("rate-limit") ||
+      errorCodeRaw.includes("throttle") ||
+      this.isRateLimitMessage(errorMessage);
+
+    const retryAfterSeconds =
+      this.toFiniteNumber(
+        parsed?.error?.retryAfterSeconds ??
+        parsed?.error?.retry_after_seconds ??
+        parsed?.error?.retry_after ??
+        parsed?.retryAfterSeconds ??
+        parsed?.retry_after_seconds ??
+        parsed?.retry_after
+      ) ?? undefined;
+
+    const statusCode = rateLimited ? (parsedStatus || 429) : (parsedStatus || 500);
+    const code = rateLimited ? ERROR_CODES.QUOTA_EXCEEDED : ERROR_CODES.STREAM_ERROR;
+    const metadata: Record<string, unknown> = {
+      model: this.options.model,
+      rawError,
+      upstreamMessage: errorMessage,
+      ...(provider ? { provider } : {}),
+      ...(parsedStatus > 0 ? { statusCode: parsedStatus } : {}),
+    };
+
+    if (rateLimited) {
+      metadata.isRateLimited = true;
+      metadata.shouldRetry = true;
+      if (typeof retryAfterSeconds === "number") {
+        metadata.retryAfterSeconds = retryAfterSeconds;
+      }
+    }
+
+    return new SystemSculptError(errorMessage, code, statusCode, metadata);
+  }
+
+  private isRateLimitMessage(message: string): boolean {
+    const lc = String(message || "").toLowerCase();
+    if (!lc) return false;
+    return (
+      lc.includes("rate-limited upstream") ||
+      lc.includes("rate limited upstream") ||
+      lc.includes("temporarily rate-limited") ||
+      lc.includes("temporarily rate limited") ||
+      lc.includes("rate limit") ||
+      lc.includes("too many requests") ||
+      lc.includes("429")
+    );
+  }
+
+  private toFiniteNumber(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return null;
   }
 
   private normalizeText(value: any): string | null {

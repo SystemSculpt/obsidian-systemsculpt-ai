@@ -4,7 +4,7 @@
 
 import { StreamPipeline } from "../StreamPipeline";
 import type { StreamEvent, StreamToolCall } from "../types";
-import { SystemSculptError } from "../../utils/errors";
+import { ERROR_CODES, SystemSculptError } from "../../utils/errors";
 
 const enc = new TextEncoder();
 
@@ -534,6 +534,35 @@ describe("StreamPipeline", () => {
     }));
 
     expect(() => pipeline.push(chunk)).toThrow(SystemSculptError);
+  });
+
+  test("classifies PI upstream rate-limit errors as retryable quota errors", () => {
+    const pipeline = create();
+    const chunk = encode(
+      `event: error\ndata: ${JSON.stringify({
+        type: "error",
+        error: {
+          errorMessage:
+            "Provider returned error moonshotai/kimi-k2.5 is temporarily rate-limited upstream. Please retry shortly.",
+          provider: "openrouter",
+          retryAfterSeconds: 3,
+        },
+      })}\n\n`
+    );
+
+    try {
+      pipeline.push(chunk);
+      throw new Error("Expected pipeline.push() to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SystemSculptError);
+      const systemError = error as SystemSculptError;
+      expect(systemError.code).toBe(ERROR_CODES.QUOTA_EXCEEDED);
+      expect(systemError.statusCode).toBe(429);
+      expect(systemError.metadata?.shouldRetry).toBe(true);
+      expect(systemError.metadata?.retryAfterSeconds).toBe(3);
+      expect(systemError.metadata?.isRateLimited).toBe(true);
+      expect(systemError.metadata?.provider).toBe("openrouter");
+    }
   });
 
   test("flush() emits any remaining tool calls", () => {

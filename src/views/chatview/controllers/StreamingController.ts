@@ -182,6 +182,12 @@ export class StreamingController extends Component {
 
         this.scheduleStickToBottom(scrollManager);
       }
+      // Abort can happen while awaiting the next event (no further events emitted).
+      // In that case the loop exits naturally, so we need a final abort check here.
+      if (abortSignal.aborted) {
+        abortedBySignal = true;
+      }
+
       // If we exit the loop without throwing and not via abort, mark as completed
       if (!abortedBySignal) completedNaturally = true;
     } catch (err: any) {

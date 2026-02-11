@@ -108,8 +108,13 @@ export type CreditsUsageSnapshot = {
   addOnAfter: number;
   totalBefore: number;
   totalAfter: number;
+  rawUsd?: number;
   fileSizeBytes: number | null;
   fileFormat: string | null;
+  billingFormulaVersion?: string | null;
+  billingCreditsPerUsd?: number | null;
+  billingMarkupMultiplier?: number | null;
+  billingCreditsExact?: number | null;
 };
 
 export type CreditsUsageHistoryPage = {
@@ -218,6 +223,171 @@ export class SystemSculptService {
 
     const message = error instanceof Error ? error.message : String(error);
     return isContextOverflowErrorMessage(message);
+  }
+
+  private shouldRetryRateLimitedStreamTurn(error: unknown): { retryAfterSeconds?: number } | null {
+    const parseSeconds = (value: unknown): number | undefined => {
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        return value;
+      }
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          return parsed;
+        }
+      }
+      return undefined;
+    };
+
+    const isRateLimitLikeMessage = (message: string): boolean => {
+      const lc = String(message || "").toLowerCase();
+      if (!lc) return false;
+      return (
+        lc.includes("rate-limited upstream") ||
+        lc.includes("rate limited upstream") ||
+        lc.includes("temporarily rate-limited") ||
+        lc.includes("temporarily rate limited") ||
+        lc.includes("throttled") ||
+        lc.includes("too many requests") ||
+        lc.includes("retry after") ||
+        lc.includes("retry shortly") ||
+        lc.includes("rate limit") ||
+        lc.includes("rate_limit")
+      );
+    };
+
+    const isHardQuotaLikeMessage = (message: string): boolean => {
+      const lc = String(message || "").toLowerCase();
+      if (!lc) return false;
+      return (
+        lc.includes("insufficient_quota") ||
+        lc.includes("insufficient quota") ||
+        lc.includes("quota exhausted") ||
+        lc.includes("usage quota exceeded") ||
+        lc.includes("insufficient credits") ||
+        lc.includes("out of credits") ||
+        lc.includes("credits exhausted") ||
+        lc.includes("add credits") ||
+        lc.includes("purchase credits") ||
+        lc.includes("billing") ||
+        lc.includes("payment")
+      );
+    };
+
+    if (error instanceof SystemSculptError) {
+      const metadata = (error.metadata || {}) as Record<string, any>;
+      const rawError = (metadata.rawError || {}) as Record<string, any>;
+      const upstreamMessage =
+        typeof metadata.upstreamMessage === "string"
+          ? metadata.upstreamMessage
+          : "";
+      const rawMessage =
+        typeof rawError.message === "string"
+          ? rawError.message
+          : typeof rawError.errorMessage === "string"
+            ? rawError.errorMessage
+            : "";
+      const rawCode = typeof rawError.code === "string" ? rawError.code : "";
+      const rawType = typeof rawError.type === "string" ? rawError.type : "";
+      const nestedRawError =
+        rawError.error && typeof rawError.error === "object"
+          ? (rawError.error as Record<string, any>)
+          : {};
+      const nestedRawCode = typeof nestedRawError.code === "string" ? nestedRawError.code : "";
+      const nestedRawType = typeof nestedRawError.type === "string" ? nestedRawError.type : "";
+      const metadataErrorCode = typeof metadata.errorCode === "string" ? metadata.errorCode : "";
+      const metadataType = typeof metadata.type === "string" ? metadata.type : "";
+      const fullMessage = [
+        error.message,
+        upstreamMessage,
+        rawMessage,
+        rawCode,
+        rawType,
+        nestedRawCode,
+        nestedRawType,
+        metadataErrorCode,
+        metadataType,
+      ]
+        .join(" ")
+        .trim();
+      const statusCode = Number(metadata.statusCode ?? error.statusCode ?? 0);
+      const explicitRetry = metadata.shouldRetry === true || metadata.isRateLimited === true;
+      const retryAfterSeconds =
+        parseSeconds(metadata.retryAfterSeconds) ??
+        parseSeconds(metadata.retryAfter) ??
+        parseSeconds(metadata.retry_after_seconds) ??
+        parseSeconds(metadata.retry_after) ??
+        parseSeconds(rawError.retryAfterSeconds) ??
+        parseSeconds(rawError.retry_after_seconds) ??
+        parseSeconds(rawError.retry_after);
+      const hasRetryAfter = typeof retryAfterSeconds === "number";
+      const rateLimitLike = isRateLimitLikeMessage(fullMessage);
+      const hardQuotaLike = isHardQuotaLikeMessage(fullMessage);
+      const statusSuggestsRateLimit = statusCode === 429 && rateLimitLike;
+      const isTransientRateLimit =
+        !hardQuotaLike &&
+        (explicitRetry || hasRetryAfter || rateLimitLike || statusSuggestsRateLimit);
+
+      if (isTransientRateLimit) {
+        return typeof retryAfterSeconds === "number"
+          ? { retryAfterSeconds }
+          : {};
+      }
+    }
+
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (isHardQuotaLikeMessage(message)) {
+      return null;
+    }
+    if (isRateLimitLikeMessage(message)) {
+      return {};
+    }
+
+    return null;
+  }
+
+  private getRateLimitedRetryDelayMs(retryAfterSeconds: number | undefined, retryAttempt: number): number {
+    if (typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+      return Math.max(0, Math.min(15000, Math.round(retryAfterSeconds * 1000)));
+    }
+
+    const cappedAttempt = Math.max(1, Math.min(5, retryAttempt));
+    const baseMs = 750;
+    return Math.min(15000, baseMs * (2 ** (cappedAttempt - 1)));
+  }
+
+  private async waitForRetryWindow(delayMs: number, signal?: AbortSignal): Promise<void> {
+    if (!Number.isFinite(delayMs) || delayMs < 0) return;
+    if (signal?.aborted) return;
+
+    await new Promise<void>((resolve) => {
+      let resolved = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (signal) {
+          signal.removeEventListener("abort", onAbort);
+        }
+      };
+
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve();
+      };
+
+      const onAbort = () => finish();
+      if (signal) {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      timeoutId = setTimeout(() => finish(), delayMs);
+    });
   }
 
   private toSystemSculptApiMessages(messages: ChatMessage[]): any[] {
@@ -886,11 +1056,25 @@ export class SystemSculptService {
       addOnAfter: asNumber(item?.add_on_after),
       totalBefore: asNumber(item?.total_before),
       totalAfter: asNumber(item?.total_after),
+      rawUsd: asNumber(item?.raw_usd),
       fileSizeBytes:
         item?.file_size_bytes === null || item?.file_size_bytes === undefined
           ? null
           : asNumber(item?.file_size_bytes),
       fileFormat: asNullableString(item?.file_format),
+      billingFormulaVersion: asNullableString(item?.billing_formula_version),
+      billingCreditsPerUsd:
+        item?.billing_credits_per_usd === null || item?.billing_credits_per_usd === undefined
+          ? null
+          : asNumber(item?.billing_credits_per_usd),
+      billingMarkupMultiplier:
+        item?.billing_markup_multiplier === null || item?.billing_markup_multiplier === undefined
+          ? null
+          : asNumber(item?.billing_markup_multiplier),
+      billingCreditsExact:
+        item?.billing_credits_exact === null || item?.billing_credits_exact === undefined
+          ? null
+          : asNumber(item?.billing_credits_exact),
     }));
 
     return {
@@ -1309,96 +1493,164 @@ export class SystemSculptService {
         });
       } catch {}
 
-      const response = await this.agentSessionClient.startOrContinueTurn({
-        chatId: chatSessionId,
-        modelId: serverModelId,
-        messages: apiMessages,
-        tools: piTools,
-        pluginVersion: (this.plugin as any)?.manifest?.version,
-      });
-
-      // Log API response status
       const logger = DebugLogger.getInstance();
       const responseLogEndpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`;
-      logger?.logAPIResponse(responseLogEndpoint, response.status);
+      let emittedAssistantOutput = false;
+      let attempt = 0;
+      const MAX_PI_STREAM_ATTEMPTS = 3;
 
-      try {
-        const responseHeaders: Record<string, string> = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[key] = value;
-        });
-        debug?.onResponse?.({
-          provider: "systemsculpt",
-          endpoint: responseLogEndpoint,
-          status: response.status,
-          headers: responseHeaders,
-          isCustomProvider: false,
-        });
-      } catch {}
-
-      if (!response.ok) {
-        logger?.logAPIResponse(responseLogEndpoint, response.status, null, { message: `HTTP ${response.status}` });
-        await StreamingErrorHandler.handleStreamError(response, false, {
-          provider: "systemsculpt-v2",
-          endpoint: responseLogEndpoint,
-          model: serverModelId || actualModelId
-        });
-      }
-      if (!response.body) {
-        throw new SystemSculptError(
-          "Missing response body from streaming API",
-          ERROR_CODES.STREAM_ERROR,
-          response.status
-        );
-      }
-      // Log response meta for diagnostics
-      try {
-        errorLogger.debug('Streaming response received', {
-          source: 'SystemSculptService',
-          method: 'streamMessage',
-          metadata: {
-            status: response.status,
-            contentType: response.headers.get('content-type') || 'unknown',
-            hasBody: !!response.body
-          }
-        });
-      } catch {}
-
-      let streamDiagnostics: StreamPipelineDiagnostics | null = null;
-      const streamIterator = this.streamingService.streamResponse(response, {
-        model: serverModelId || actualModelId,
-        isCustomProvider: false,
-        signal,
-        onRawEvent: (data) => {
-          try {
-            debug?.onRawEvent?.(data);
-          } catch {}
-        },
-        onDiagnostics: (diagnostics) => {
-          streamDiagnostics = diagnostics;
-        },
-      });
-
-      let streamCompleted = false;
-      let streamAborted = false;
-      try {
-        for await (const event of streamIterator) {
-          try {
-            debug?.onStreamEvent?.({ event });
-          } catch {}
-          yield event;
+      while (attempt < MAX_PI_STREAM_ATTEMPTS) {
+        if (signal?.aborted) {
+          return;
         }
-        streamCompleted = true;
-      } finally {
-        streamAborted = !!signal?.aborted;
         try {
-          debug?.onStreamEnd?.({
-            completed: streamCompleted,
-            aborted: streamAborted,
-            diagnostics: streamDiagnostics ?? undefined,
+          const response = await this.agentSessionClient.startOrContinueTurn({
+            chatId: chatSessionId,
+            modelId: serverModelId,
+            messages: apiMessages,
+            tools: piTools,
+            pluginVersion: (this.plugin as any)?.manifest?.version,
           });
-        } catch {}
+
+          // Log API response status
+          logger?.logAPIResponse(responseLogEndpoint, response.status);
+
+          try {
+            const responseHeaders: Record<string, string> = {};
+            response.headers.forEach((value, key) => {
+              responseHeaders[key] = value;
+            });
+            debug?.onResponse?.({
+              provider: "systemsculpt",
+              endpoint: responseLogEndpoint,
+              status: response.status,
+              headers: responseHeaders,
+              isCustomProvider: false,
+            });
+          } catch {}
+
+          if (!response.ok) {
+            logger?.logAPIResponse(responseLogEndpoint, response.status, null, { message: `HTTP ${response.status}` });
+            await StreamingErrorHandler.handleStreamError(response, false, {
+              provider: "systemsculpt-v2",
+              endpoint: responseLogEndpoint,
+              model: serverModelId || actualModelId
+            });
+          }
+          if (!response.body) {
+            throw new SystemSculptError(
+              "Missing response body from streaming API",
+              ERROR_CODES.STREAM_ERROR,
+              response.status
+            );
+          }
+          // Log response meta for diagnostics
+          try {
+            errorLogger.debug('Streaming response received', {
+              source: 'SystemSculptService',
+              method: 'streamMessage',
+              metadata: {
+                status: response.status,
+                contentType: response.headers.get('content-type') || 'unknown',
+                hasBody: !!response.body,
+                attempt: attempt + 1,
+              }
+            });
+          } catch {}
+
+          let streamDiagnostics: StreamPipelineDiagnostics | null = null;
+          const streamIterator = this.streamingService.streamResponse(response, {
+            model: serverModelId || actualModelId,
+            isCustomProvider: false,
+            signal,
+            onRawEvent: (data) => {
+              try {
+                debug?.onRawEvent?.(data);
+              } catch {}
+            },
+            onDiagnostics: (diagnostics) => {
+              streamDiagnostics = diagnostics;
+            },
+          });
+
+          let streamCompleted = false;
+          let streamAborted = false;
+          try {
+            for await (const event of streamIterator) {
+              if (event.type === "content" || event.type === "reasoning" || event.type === "tool-call") {
+                emittedAssistantOutput = true;
+              }
+              try {
+                debug?.onStreamEvent?.({ event });
+              } catch {}
+              yield event;
+            }
+            streamCompleted = true;
+          } finally {
+            streamAborted = !!signal?.aborted;
+            try {
+              debug?.onStreamEnd?.({
+                completed: streamCompleted,
+                aborted: streamAborted,
+                diagnostics: streamDiagnostics ?? undefined,
+              });
+            } catch {}
+          }
+
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          if (signal?.aborted) {
+            return;
+          }
+
+          const retryHints = this.shouldRetryRateLimitedStreamTurn(error);
+          const canRetry =
+            !emittedAssistantOutput &&
+            retryHints !== null &&
+            attempt < MAX_PI_STREAM_ATTEMPTS - 1;
+          if (!canRetry) {
+            throw error;
+          }
+
+          attempt += 1;
+          const retryDelayMs = this.getRateLimitedRetryDelayMs(retryHints?.retryAfterSeconds, attempt);
+          try {
+            errorLogger.debug("Retrying PI turn after transient upstream rate limit", {
+              source: "SystemSculptService",
+              method: "streamMessage",
+              metadata: {
+                model: serverModelId || actualModelId,
+                attempt,
+                maxAttempts: MAX_PI_STREAM_ATTEMPTS,
+                delayMs: retryDelayMs,
+              },
+            });
+          } catch {}
+          await this.waitForRetryWindow(retryDelayMs, signal);
+          if (signal?.aborted) {
+            return;
+          }
+          // Yield one event-loop tick so aborts queued immediately after backoff
+          // are observed before issuing another upstream turn request.
+          await this.waitForRetryWindow(0, signal);
+          if (signal?.aborted) {
+            return;
+          }
+          try {
+            yield {
+              type: "meta",
+              key: "inline-footnote",
+              value: `Provider is temporarily rate-limited. Retrying automatically (${attempt + 1}/${MAX_PI_STREAM_ATTEMPTS})…`,
+            } as any;
+          } catch {}
+          continue;
+        }
       }
+
+      return;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         // Handle abort gracefully
