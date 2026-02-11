@@ -1,6 +1,6 @@
-import { SystemSculptSettings } from "../../types";
 import SystemSculptPlugin from "../../main";
 import { Notice } from "obsidian";
+import { redactSettingsForBackup } from "./backupSanitizer";
 
 /**
  * Service for handling automatic periodic backups of settings
@@ -69,15 +69,17 @@ export class AutomaticBackupService {
     public async createAutomaticBackup(): Promise<boolean> {
         try {
             const settings = this.plugin.getSettingsManager().getSettings();
+            const redactedSettings = redactSettingsForBackup(settings as unknown as Record<string, unknown>);
             
             // Create backup data with metadata
             const backupData = {
-                ...settings,
+                ...redactedSettings,
                 _backupMeta: {
                     type: 'automatic',
                     timestamp: Date.now(),
                     createdAt: new Date().toISOString(),
-                    version: '1.0'
+                    version: '1.1',
+                    redactedSecrets: true,
                 }
             };
 

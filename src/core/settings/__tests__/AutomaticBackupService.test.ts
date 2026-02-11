@@ -212,9 +212,50 @@ describe("AutomaticBackupService", () => {
 
       expect(backupData._backupMeta).toBeDefined();
       expect(backupData._backupMeta.type).toBe("automatic");
-      expect(backupData._backupMeta.version).toBe("1.0");
+      expect(backupData._backupMeta.version).toBe("1.1");
+      expect(backupData._backupMeta.redactedSecrets).toBe(true);
       expect(backupData._backupMeta.timestamp).toBeGreaterThan(0);
       expect(backupData._backupMeta.createdAt).toBeDefined();
+    });
+
+    it("redacts secrets from automatic backups", async () => {
+      mockPlugin.getSettingsManager = () => ({
+        getSettings: () => ({
+          automaticBackupsEnabled: true,
+          automaticBackupInterval: 24,
+          automaticBackupRetentionDays: 30,
+          lastAutomaticBackup: 0,
+          licenseKey: "license-secret",
+          openAiApiKey: "openai-secret",
+          customTranscriptionApiKey: "transcription-secret",
+          replicateApiKey: "replicate-secret",
+          embeddingsCustomApiKey: "embeddings-secret",
+          readwiseApiToken: "readwise-secret",
+          customProviders: [
+            { id: "provider-a", endpoint: "https://api.example.com", apiKey: "provider-secret" },
+          ],
+          mcpServers: [
+            { id: "mcp-a", transport: "http", apiKey: "mcp-secret", isEnabled: true },
+          ],
+        }),
+        updateSettings: mockPlugin._updateSettings,
+      });
+
+      service = new AutomaticBackupService(mockPlugin);
+      await service.createAutomaticBackup();
+
+      const writeCall = mockPlugin.app.vault.adapter.write.mock.calls[0];
+      const backupData = JSON.parse(writeCall[1]);
+
+      expect(backupData.licenseKey).toBe("");
+      expect(backupData.openAiApiKey).toBe("");
+      expect(backupData.customTranscriptionApiKey).toBe("");
+      expect(backupData.replicateApiKey).toBe("");
+      expect(backupData.embeddingsCustomApiKey).toBe("");
+      expect(backupData.readwiseApiToken).toBe("");
+      expect(backupData.customProviders[0].apiKey).toBe("");
+      expect(backupData.customProviders[0].endpoint).toBe("https://api.example.com");
+      expect(backupData.mcpServers[0].apiKey).toBe("");
     });
 
     it("generates filename with current date", async () => {

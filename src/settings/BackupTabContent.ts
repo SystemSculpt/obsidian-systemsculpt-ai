@@ -16,7 +16,7 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
   new Setting(containerEl)
     .setName('Automatic backups')
-    .setDesc('Create a backup every 24 hours. Backups include providers, favorites, and preferences.')
+    .setDesc('Create a backup every 24 hours. Backups include providers, favorites, and preferences, but exclude secret keys and tokens.')
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.automaticBackupsEnabled)
@@ -35,7 +35,7 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
   new Setting(containerEl)
     .setName('Manual backups')
-    .setDesc('Create or restore backups on demand. Files live in .systemsculpt/settings-backups inside your vault.');
+    .setDesc('Create or restore backups on demand. Files live in .systemsculpt/settings-backups inside your vault, with sensitive keys redacted.');
 
   const restoreSetting = new Setting(containerEl)
     .setName('Restore from backup')

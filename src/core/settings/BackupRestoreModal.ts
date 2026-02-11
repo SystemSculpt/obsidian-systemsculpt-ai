@@ -1,6 +1,7 @@
-import { App, setIcon, Notice, TextComponent } from "obsidian";
+import { App, Notice, TextComponent } from "obsidian";
 import { ListSelectionModal, ListItem } from "../ui/modals/standard/ListSelectionModal";
 import SystemSculptPlugin from "../../main";
+import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
 
 /**
  * Modal for displaying and restoring settings backups
@@ -237,15 +238,17 @@ export class BackupRestoreModal {
             
             // Get current settings
             const currentSettings = this.plugin.getSettingsManager().getSettings();
+            const redactedSettings = redactSettingsForBackup(currentSettings as unknown as Record<string, unknown>);
             
             // Add metadata to identify this as a manual backup
             const backupData = {
-                ...currentSettings,
+                ...redactedSettings,
                 _backupMeta: {
                     type: 'manual',
                     name: backupName,
                     timestamp: timestamp,
-                    createdAt: new Date().toISOString()
+                    createdAt: new Date().toISOString(),
+                    redactedSecrets: true,
                 }
             };
             
@@ -494,8 +497,14 @@ export class BackupRestoreModal {
                 return false;
             }
 
+            const currentSettings = this.plugin.getSettingsManager().getSettings() as unknown as Record<string, unknown>;
+            const restoredSettings = applyCurrentSecretsToBackup(
+                backupSettings as Record<string, unknown>,
+                currentSettings,
+            );
+
             // Apply settings
-            await this.plugin.getSettingsManager().updateSettings(backupSettings);
+            await this.plugin.getSettingsManager().updateSettings(restoredSettings as any);
             new Notice("Settings restored successfully", 3000);
             
             return true;

@@ -2,6 +2,7 @@ import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflow
 import { AGENT_CONFIG } from "../../constants/agent";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
+import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
 
 // Current settings version - increment when making breaking changes to settings structure
 const CURRENT_SETTINGS_VERSION = "1.0";
@@ -201,13 +202,24 @@ export class SettingsManager {
    */
   private async restoreFromBackup(): Promise<any | null> {
     try {
+      const hydrateBackup = (candidate: unknown): Record<string, unknown> | null => {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+          return null;
+        }
+        return applyCurrentSecretsToBackup(
+          candidate as Record<string, unknown>,
+          this.settings as unknown as Record<string, unknown>,
+        );
+      };
+
       // First try to restore from the new vault-based location if storage manager is available
       if (this.plugin.storage) {
         try {
           // Try to get the latest backup from the vault storage
           const latestBackup = await this.plugin.storage.readFile('settings', 'backups/settings-backup-latest.json', true);
-          if (latestBackup) {
-            return latestBackup;
+          const hydratedLatestBackup = hydrateBackup(latestBackup);
+          if (hydratedLatestBackup) {
+            return hydratedLatestBackup;
           }
 
           // If no latest backup, try to find the most recent daily backup
@@ -219,8 +231,9 @@ export class SettingsManager {
 
           if (dailyBackups.length > 0) {
             const newestBackup = await this.plugin.storage.readFile('settings', `backups/${dailyBackups[0]}`, true);
-            if (newestBackup) {
-              return newestBackup;
+            const hydratedNewestBackup = hydrateBackup(newestBackup);
+            if (hydratedNewestBackup) {
+              return hydratedNewestBackup;
             }
           }
         } catch (e) {
@@ -237,7 +250,10 @@ export class SettingsManager {
         // Read the latest backup file
         const backupData = await this.plugin.app.vault.adapter.read(latestBackupPath);
         const backupSettings = JSON.parse(backupData);
-        return backupSettings;
+        const hydratedBackup = hydrateBackup(backupSettings);
+        if (hydratedBackup) {
+          return hydratedBackup;
+        }
       }
 
       // If no latest backup, try to find the most recent daily backup
@@ -252,7 +268,10 @@ export class SettingsManager {
           const newestBackup = backupFiles[0];
           const backupData = await this.plugin.app.vault.adapter.read(newestBackup);
           const backupSettings = JSON.parse(backupData);
-          return backupSettings;
+          const hydratedBackup = hydrateBackup(backupSettings);
+          if (hydratedBackup) {
+            return hydratedBackup;
+          }
         }
       } catch (e) {
       }
@@ -595,7 +614,8 @@ export class SettingsManager {
   private async backupSettings(): Promise<void> {
     if (!this.isInitialized || !this.settings) return;
     try {
-      const backupData = JSON.stringify(this.settings, null, 2);
+      const redactedSettings = redactSettingsForBackup(this.settings as unknown as Record<string, unknown>);
+      const backupData = JSON.stringify(redactedSettings, null, 2);
       
       // Use explicit relative paths to prevent path resolution issues
       const backupDir = ".systemsculpt/settings-backups";
