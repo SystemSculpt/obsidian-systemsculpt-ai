@@ -306,6 +306,16 @@ function renderAccountSection(root: HTMLElement, tabInstance: SystemSculptSettin
 
     creditsSetting.addButton((button) => {
       button
+        .setButtonText('Details')
+        .onClick(async () => {
+          await plugin.openCreditsBalanceModal({
+            settingsTab: "overview",
+          });
+        });
+    });
+
+    creditsSetting.addButton((button) => {
+      button
         .setButtonText('Refresh')
         .onClick(async () => {
           await syncCredits();

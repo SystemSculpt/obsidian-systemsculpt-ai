@@ -256,10 +256,20 @@
 
 .ss-credits-usage__item-meta,
 .ss-credits-usage__item-details,
+.ss-credits-usage__item-billing-note,
+.ss-credits-usage__item-cache-note,
 .ss-credits-usage__item-balance-trail {
   font-size: 11px;
   color: var(--text-muted);
   overflow-wrap: anywhere;
+}
+
+.ss-credits-usage__item-billing-note {
+  color: var(--text-normal);
+}
+
+.ss-credits-usage__item-cache-note {
+  color: var(--text-normal);
 }
 
 .ss-credits-usage__item-balance-trail {

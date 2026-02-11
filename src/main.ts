@@ -20,9 +20,9 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  */
 import { Plugin, Notice, MarkdownView, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter } from "obsidian";
 import { initializeNotificationQueue } from "./core/ui/notifications";
-import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel } from "./types";
+import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptModel } from "./types/llm";
-import { SystemSculptService } from "./services/SystemSculptService";
+import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
@@ -2107,6 +2107,62 @@ export default class SystemSculptPlugin extends Plugin {
       }
     }
     return false;
+  }
+
+  public openSettingsTab(targetTab: string = "overview"): void {
+    try {
+      // @ts-ignore – Obsidian typings omit the settings API
+      this.app.setting.open();
+      // @ts-ignore – Obsidian typings omit the settings API
+      this.app.setting.openTabById(this.manifest.id);
+      window.setTimeout(() => {
+        this.app.workspace.trigger("systemsculpt:settings-focus-tab", targetTab);
+      }, 100);
+    } catch {
+      new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
+    }
+  }
+
+  public async openCreditsBalanceModal(options?: {
+    initialBalance?: CreditsBalanceSnapshot | null;
+    onBalanceUpdated?: (balance: CreditsBalanceSnapshot | null) => void | Promise<void>;
+    settingsTab?: string;
+  }): Promise<void> {
+    const initialBalance = options?.initialBalance ?? null;
+    let lastKnownBalance = initialBalance;
+    const settingsTab = options?.settingsTab ?? "overview";
+
+    try {
+      const { CreditsBalanceModal } = await import("./modals/CreditsBalanceModal");
+      const modal = new CreditsBalanceModal(this.app, {
+        initialBalance,
+        fallbackPurchaseUrl: LICENSE_URL,
+        loadBalance: async () => {
+          try {
+            const balance = await this.aiService.getCreditsBalance();
+            lastKnownBalance = balance;
+            if (options?.onBalanceUpdated) {
+              await options.onBalanceUpdated(balance);
+            }
+            return balance;
+          } catch {
+            // Keep the last known snapshot on transient failures so the credits
+            // indicator doesn't regress to an unknown state.
+            return lastKnownBalance;
+          }
+        },
+        loadUsage: (params) =>
+          this.aiService.getCreditsUsage({
+            limit: params?.limit,
+            before: params?.before,
+          }),
+        onOpenSetup: () => this.openSettingsTab(settingsTab),
+      });
+      modal.open();
+    } catch {
+      // Fall back to settings if modal bootstrapping fails.
+      this.openSettingsTab(settingsTab);
+    }
   }
 
   hasRecorderService(): boolean {

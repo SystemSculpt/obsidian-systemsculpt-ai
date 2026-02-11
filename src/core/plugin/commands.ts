@@ -32,6 +32,7 @@ export class CommandManager {
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
     this.registerOpenSettings();
+    this.registerOpenCreditsBalance();
     this.registerChangeChatModel();
     this.registerSetDefaultChatModel();
     this.registerChatWithFile();
@@ -165,10 +166,19 @@ export class CommandManager {
       id: "open-systemsculpt-settings",
       name: "Open SystemSculpt AI Settings",
       callback: () => {
-        // @ts-ignore – this is a known Obsidian API bug
-        this.app.setting.open();
-        // @ts-ignore
-        this.app.setting.openTabById(this.plugin.manifest.id);
+        this.plugin.openSettingsTab("overview");
+      },
+    });
+  }
+
+  private registerOpenCreditsBalance() {
+    this.plugin.addCommand({
+      id: "open-credits-balance",
+      name: "Open Credits & Usage",
+      callback: async () => {
+        await this.plugin.openCreditsBalanceModal({
+          settingsTab: "overview",
+        });
       },
     });
   }

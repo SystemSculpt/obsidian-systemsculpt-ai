@@ -312,13 +312,29 @@ export class CreditsBalanceModal extends StandardModal {
       }
       details.setText(detailParts.length > 0 ? detailParts.join("  •  ") : this.formatUsageKind(item.usageKind));
 
+      const billingNote = this.formatBillingNote(item);
+      if (billingNote) {
+        row.createDiv({
+          cls: "ss-credits-usage__item-billing-note",
+          text: billingNote,
+        });
+      }
+
+      const cacheNote = this.formatCacheNote(item);
+      if (cacheNote) {
+        row.createDiv({
+          cls: "ss-credits-usage__item-cache-note",
+          text: cacheNote,
+        });
+      }
+
       const balanceTrail = row.createDiv({ cls: "ss-credits-usage__item-balance-trail" });
       balanceTrail.setText(
         `Balance: ${this.formatCredits(item.totalBefore)} → ${this.formatCredits(item.totalAfter)}`
       );
     }
 
-    this.usageHintEl.setText("Each row shows an auditable charge with usage basis, credits spent, and balance impact.");
+    this.usageHintEl.setText("Each row shows what was billed. When available, we also show exact usage, rounding, and prompt-cache read/write behavior.");
     this.usageHintEl.removeClass("is-warning");
     this.updateUsageLoadMoreButton();
   }
@@ -560,6 +576,58 @@ export class CreditsBalanceModal extends StandardModal {
     } catch {
       return String(safeValue);
     }
+  }
+
+  private formatBillingNote(item: CreditsUsageSnapshot): string | null {
+    const exactRaw = item.billingCreditsExact;
+    if (exactRaw === null || exactRaw === undefined || !Number.isFinite(exactRaw)) {
+      return null;
+    }
+
+    const exact = Math.max(0, Number(exactRaw));
+    if (exact <= 0) {
+      return null;
+    }
+
+    const charged = Number.isFinite(item.creditsCharged) ? Math.max(0, item.creditsCharged) : 0;
+    const epsilon = 0.000001;
+
+    if (charged - exact > epsilon) {
+      return `You used ${this.formatExactCredits(exact)} credits; billed ${this.formatCredits(charged)} because billing rounds up each request.`;
+    }
+
+    return `You used ${this.formatExactCredits(exact)} credits for this request.`;
+  }
+
+  private formatExactCredits(value: number): string {
+    const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+    if (safeValue === 0) {
+      return "0";
+    }
+    if (safeValue >= 100) {
+      return Math.round(safeValue).toString();
+    }
+
+    const precision = safeValue < 0.001 ? 6 : safeValue < 1 ? 4 : 3;
+    return safeValue.toFixed(precision).replace(/\.?0+$/, "");
+  }
+
+  private formatCacheNote(item: CreditsUsageSnapshot): string | null {
+    const readTokens = Number.isFinite(item.cacheReadTokens) ? Math.max(0, item.cacheReadTokens) : 0;
+    const writeTokens = Number.isFinite(item.cacheWriteTokens) ? Math.max(0, item.cacheWriteTokens) : 0;
+
+    if (readTokens <= 0 && writeTokens <= 0) {
+      return null;
+    }
+
+    if (readTokens > 0 && writeTokens > 0) {
+      return `Prompt cache: reused ${this.formatCompactNumber(readTokens)} tokens from earlier context and wrote ${this.formatCompactNumber(writeTokens)} tokens for future turns.`;
+    }
+    if (readTokens > 0) {
+      return `Prompt cache: reused ${this.formatCompactNumber(readTokens)} tokens from earlier context.`;
+    }
+
+    return `Prompt cache: wrote ${this.formatCompactNumber(writeTokens)} tokens for future turns.`;
   }
 
   private asSafeCredit(value: unknown): number {

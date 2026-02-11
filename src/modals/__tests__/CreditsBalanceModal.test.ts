@@ -299,4 +299,146 @@ describe("CreditsBalanceModal", () => {
     expect(modal.modalEl.textContent).toContain("3 credits");
     expect(modal.modalEl.textContent).not.toContain("$");
   });
+
+  it("explains exact vs billed credits when usage is rounded up", async () => {
+    const loadBalance = jest.fn().mockResolvedValue({
+      includedRemaining: 2200,
+      addOnRemaining: 300,
+      totalRemaining: 2500,
+      includedPerMonth: 3000,
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: "https://systemsculpt.com/buy-credits",
+    });
+    const loadUsage = jest.fn().mockResolvedValue({
+      items: [
+        {
+          id: "tx_embed_1",
+          createdAt: "2026-02-11T08:09:00.000Z",
+          transactionType: "agent_turn" as const,
+          endpoint: "embeddings",
+          usageKind: "embeddings" as const,
+          provider: "openai",
+          model: "text-embedding-3-small",
+          durationSeconds: 0,
+          totalTokens: 514,
+          inputTokens: 514,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          pageCount: 0,
+          creditsCharged: 1,
+          includedDelta: -1,
+          addOnDelta: 0,
+          totalDelta: -1,
+          includedBefore: 100,
+          includedAfter: 99,
+          addOnBefore: 0,
+          addOnAfter: 0,
+          totalBefore: 100,
+          totalAfter: 99,
+          rawUsd: 0.0000103,
+          fileSizeBytes: null,
+          fileFormat: null,
+          transcriptionJobId: null,
+          documentId: null,
+          videoId: null,
+          billingFormulaVersion: "raw_usd_x_markup_x_credits_per_usd.ceil.v1",
+          billingCreditsPerUsd: 800,
+          billingMarkupMultiplier: 1.25,
+          billingCreditsExact: 0.0103,
+          metadata: {},
+        },
+      ],
+      nextBefore: null,
+    });
+
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      loadBalance,
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("You used 0.0103 credits; billed 1 because billing rounds up each request.");
+  });
+
+  it("shows cache read and write usage in plain language", async () => {
+    const loadBalance = jest.fn().mockResolvedValue({
+      includedRemaining: 2200,
+      addOnRemaining: 300,
+      totalRemaining: 2500,
+      includedPerMonth: 3000,
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: "https://systemsculpt.com/buy-credits",
+    });
+    const loadUsage = jest.fn().mockResolvedValue({
+      items: [
+        {
+          id: "tx_cache_1",
+          createdAt: "2026-02-11T08:12:00.000Z",
+          transactionType: "agent_turn" as const,
+          endpoint: "chat/completions",
+          usageKind: "agent_turn" as const,
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          durationSeconds: 0,
+          totalTokens: 1650,
+          inputTokens: 1100,
+          outputTokens: 550,
+          cacheReadTokens: 1200,
+          cacheWriteTokens: 450,
+          pageCount: 0,
+          creditsCharged: 2,
+          includedDelta: -2,
+          addOnDelta: 0,
+          totalDelta: -2,
+          includedBefore: 100,
+          includedAfter: 98,
+          addOnBefore: 0,
+          addOnAfter: 0,
+          totalBefore: 100,
+          totalAfter: 98,
+          rawUsd: 0.0017,
+          fileSizeBytes: null,
+          fileFormat: null,
+          transcriptionJobId: null,
+          documentId: null,
+          videoId: null,
+          billingFormulaVersion: "raw_usd_x_markup_x_credits_per_usd.ceil.v1",
+          billingCreditsPerUsd: 800,
+          billingMarkupMultiplier: 1.25,
+          billingCreditsExact: 1.7,
+          metadata: {},
+        },
+      ],
+      nextBefore: null,
+    });
+
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      loadBalance,
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("Prompt cache: reused 1,200 tokens from earlier context and wrote 450 tokens for future turns.");
+  });
 });
