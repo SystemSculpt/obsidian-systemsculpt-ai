@@ -77,6 +77,46 @@ export type CreditsBalanceSnapshot = {
   purchaseUrl: string | null;
 };
 
+export type CreditsUsageSnapshot = {
+  id: string;
+  createdAt: string;
+  transactionType: "agent_turn";
+  endpoint: string | null;
+  usageKind:
+    | "audio_transcription"
+    | "embeddings"
+    | "document_processing"
+    | "youtube_transcript"
+    | "agent_turn"
+    | "request";
+  provider: string | null;
+  model: string | null;
+  durationSeconds: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  pageCount: number;
+  creditsCharged: number;
+  includedDelta: number;
+  addOnDelta: number;
+  totalDelta: number;
+  includedBefore: number;
+  includedAfter: number;
+  addOnBefore: number;
+  addOnAfter: number;
+  totalBefore: number;
+  totalAfter: number;
+  fileSizeBytes: number | null;
+  fileFormat: string | null;
+};
+
+export type CreditsUsageHistoryPage = {
+  items: CreditsUsageSnapshot[];
+  nextBefore: string | null;
+};
+
 interface PreparedChatRequest {
   isCustom: boolean;
   customProvider?: CustomProvider;
@@ -711,6 +751,151 @@ export class SystemSculptService {
         typeof payload?.purchase_url === "string" && payload.purchase_url.trim().length > 0
           ? payload.purchase_url.trim()
           : null,
+    };
+  }
+
+  public async getCreditsUsage(params?: {
+    limit?: number;
+    before?: string;
+    endpoints?: string[];
+  }): Promise<CreditsUsageHistoryPage> {
+    this.refreshSettings();
+
+    const licenseKey = (this.settings.licenseKey || "").trim();
+    if (!licenseKey) {
+      throw new SystemSculptError(
+        "License key required to fetch credits usage.",
+        ERROR_CODES.INVALID_LICENSE,
+        401
+      );
+    }
+
+    const requestUrlValue = new URL(
+      `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CREDITS.USAGE}`
+    );
+    if (typeof params?.limit === "number" && Number.isFinite(params.limit) && params.limit > 0) {
+      requestUrlValue.searchParams.set("limit", String(Math.floor(params.limit)));
+    }
+    if (typeof params?.before === "string" && params.before.trim().length > 0) {
+      requestUrlValue.searchParams.set("before", params.before.trim());
+    }
+    if (Array.isArray(params?.endpoints)) {
+      for (const endpoint of params.endpoints) {
+        if (typeof endpoint !== "string") continue;
+        const trimmed = endpoint.trim();
+        if (!trimmed) continue;
+        requestUrlValue.searchParams.append("endpoint", trimmed);
+      }
+    }
+
+    const platform = PlatformContext.get();
+    const transport = platform.preferredTransport({ endpoint: requestUrlValue.toString() });
+
+    const headers: Record<string, string> = {
+      ...SystemSculptEnvironment.buildHeaders(licenseKey),
+      Accept: "application/json",
+    };
+
+    let response: Response;
+    if (transport === "fetch" && typeof fetch === "function") {
+      response = await fetch(requestUrlValue.toString(), {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      } as RequestInit);
+    } else {
+      const result = await requestUrl({
+        url: requestUrlValue.toString(),
+        method: "GET",
+        headers,
+        throw: false,
+      });
+
+      const status = result.status || 500;
+      const textBody =
+        typeof result.text === "string"
+          ? result.text
+          : JSON.stringify(result.json || {});
+
+      response = new Response(textBody, {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!response.ok) {
+      await StreamingErrorHandler.handleStreamError(response, false, {
+        provider: "systemsculpt",
+        endpoint: requestUrlValue.toString(),
+        model: "credits-usage",
+      });
+    }
+
+    const payload = (await response.json()) as any;
+    const asNumber = (value: unknown): number => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    };
+    const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+    const asNullableString = (value: unknown): string | null => {
+      const str = asString(value).trim();
+      return str.length > 0 ? str : null;
+    };
+    const asUsageKind = (value: unknown): CreditsUsageSnapshot["usageKind"] => {
+      const raw = asString(value);
+      if (
+        raw === "audio_transcription" ||
+        raw === "embeddings" ||
+        raw === "document_processing" ||
+        raw === "youtube_transcript" ||
+        raw === "agent_turn" ||
+        raw === "request"
+      ) {
+        return raw;
+      }
+      return "request";
+    };
+
+    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+    const items: CreditsUsageSnapshot[] = rawItems.map((item: any) => ({
+      id: asString(item?.id),
+      createdAt: asString(item?.created_at),
+      transactionType: "agent_turn",
+      endpoint: asNullableString(item?.endpoint),
+      usageKind: asUsageKind(item?.usage_kind),
+      provider: asNullableString(item?.provider),
+      model: asNullableString(item?.model),
+      durationSeconds: asNumber(item?.duration_seconds),
+      totalTokens: asNumber(item?.total_tokens),
+      inputTokens: asNumber(item?.input_tokens),
+      outputTokens: asNumber(item?.output_tokens),
+      cacheReadTokens: asNumber(item?.cache_read_tokens),
+      cacheWriteTokens: asNumber(item?.cache_write_tokens),
+      pageCount: asNumber(item?.page_count),
+      creditsCharged: asNumber(item?.credits_charged),
+      includedDelta: asNumber(item?.included_delta),
+      addOnDelta: asNumber(item?.add_on_delta),
+      totalDelta: asNumber(item?.total_delta),
+      includedBefore: asNumber(item?.included_before),
+      includedAfter: asNumber(item?.included_after),
+      addOnBefore: asNumber(item?.add_on_before),
+      addOnAfter: asNumber(item?.add_on_after),
+      totalBefore: asNumber(item?.total_before),
+      totalAfter: asNumber(item?.total_after),
+      fileSizeBytes:
+        item?.file_size_bytes === null || item?.file_size_bytes === undefined
+          ? null
+          : asNumber(item?.file_size_bytes),
+      fileFormat: asNullableString(item?.file_format),
+    }));
+
+    return {
+      items,
+      nextBefore: asNullableString(payload?.next_before),
     };
   }
 

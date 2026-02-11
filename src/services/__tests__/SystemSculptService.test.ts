@@ -319,6 +319,66 @@ describe("SystemSculptService", () => {
     );
   });
 
+  it("fetches credits usage history from the SystemSculpt API", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const response = new Response(
+      JSON.stringify({
+        items: [
+          {
+            id: "tx_1",
+            created_at: "2026-02-11T00:00:00.000Z",
+            transaction_type: "agent_turn",
+            endpoint: "audio/transcriptions/jobs/start",
+            usage_kind: "audio_transcription",
+            provider: "groq",
+            model: "whisper-large-v3",
+            duration_seconds: 23,
+            total_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            page_count: 0,
+            credits_charged: 3,
+            included_delta: -3,
+            add_on_delta: 0,
+            total_delta: -3,
+            included_before: 100,
+            included_after: 97,
+            add_on_before: 0,
+            add_on_after: 0,
+            total_before: 100,
+            total_after: 97,
+            file_size_bytes: 48203,
+            file_format: "wav",
+          },
+        ],
+        next_before: "2026-02-11T00:00:00.000Z",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+    global.fetch = jest.fn().mockResolvedValue(response) as any;
+
+    const usage = await service.getCreditsUsage({
+      limit: 25,
+      before: "2026-02-12T00:00:00.000Z",
+      endpoints: ["audio/transcriptions/jobs/start"],
+    });
+
+    expect(usage.items).toHaveLength(1);
+    expect(usage.items[0]?.endpoint).toBe("audio/transcriptions/jobs/start");
+    expect(usage.items[0]?.creditsCharged).toBe(3);
+    expect(usage.nextBefore).toBe("2026-02-11T00:00:00.000Z");
+
+    const [requestedUrl] = (global.fetch as jest.Mock).mock.calls[0] ?? [];
+    expect(String(requestedUrl)).toContain("https://api.systemsculpt.test/api/v1/credits/usage?");
+    expect(String(requestedUrl)).toContain("limit=25");
+    expect(String(requestedUrl)).toContain("before=2026-02-12T00%3A00%3A00.000Z");
+    expect(String(requestedUrl)).toContain("endpoint=audio%2Ftranscriptions%2Fjobs%2Fstart");
+  });
+
   it("uses development base url when configured", () => {
     (SystemSculptEnvironment.resolveBaseUrl as jest.Mock).mockReturnValueOnce("https://api.systemsculpt.test/api/v1");
     const plugin = createPlugin();

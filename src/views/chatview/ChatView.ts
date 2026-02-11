@@ -581,6 +581,11 @@ export class ChatView extends ItemView {
           await this.refreshCreditsBalance();
           return this.creditsBalance;
         },
+        loadUsage: (params) =>
+          this.aiService.getCreditsUsage({
+            limit: params?.limit,
+            before: params?.before,
+          }),
         onOpenSetup: () => this.openSetupTab("overview"),
       });
       modal.open();

@@ -13,6 +13,45 @@
   gap: 12px;
 }
 
+.ss-credits-balance__tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ss-credits-balance__tab {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-primary-alt);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.ss-credits-balance__tab:hover,
+.ss-credits-balance__tab:focus-visible {
+  color: var(--text-normal);
+  border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+}
+
+.ss-credits-balance__tab.is-active {
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+}
+
+.ss-credits-balance__panel {
+  display: none;
+}
+
+.ss-credits-balance__panel.is-active {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .ss-credits-balance__summary {
   display: flex;
   flex-direction: column;
@@ -174,7 +213,87 @@
   opacity: 0.65;
 }
 
+.ss-credits-usage__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.ss-credits-usage__item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary-alt);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-credits-usage__item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.ss-credits-usage__item-title {
+  font-size: 12px;
+  color: var(--text-normal);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ss-credits-usage__item-credits {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-normal);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-usage__item-meta,
+.ss-credits-usage__item-details,
+.ss-credits-usage__item-balance-trail {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ss-credits-usage__item-balance-trail {
+  color: var(--text-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-usage__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ss-credits-usage__hint.is-warning {
+  color: var(--text-warning, var(--text-error));
+}
+
+.ss-credits-usage__load-more {
+  align-self: flex-start;
+}
+
+.ss-credits-usage__load-more.is-loading {
+  opacity: 0.65;
+}
+
 @media (max-width: 720px) {
+  .ss-credits-balance__tabs {
+    width: 100%;
+  }
+
+  .ss-credits-balance__tab {
+    flex: 1 1 0;
+  }
+
   .ss-credits-balance__stats {
     grid-template-columns: 1fr;
   }

@@ -138,6 +138,7 @@ describe("CreditsBalanceModal", () => {
         purchaseUrl: "https://systemsculpt.com/buy-credits",
       },
       loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
       onOpenSetup,
     });
 
@@ -179,6 +180,7 @@ describe("CreditsBalanceModal", () => {
       initialBalance: null,
       fallbackPurchaseUrl: null,
       loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
       onOpenSetup: jest.fn(),
     });
 
@@ -221,6 +223,7 @@ describe("CreditsBalanceModal", () => {
         purchaseUrl: null,
       },
       loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
       onOpenSetup: jest.fn(),
     });
 
@@ -230,5 +233,70 @@ describe("CreditsBalanceModal", () => {
     // Conservative total should show the lower derived amount (2,500), not reported 2,900.
     expect(modal.modalEl.textContent).toContain("2,500 credits");
     expect(modal.modalEl.textContent).toContain("Balance sources disagree");
+  });
+
+  it("shows usage history in the second tab", async () => {
+    const loadBalance = jest.fn().mockResolvedValue({
+      includedRemaining: 2200,
+      addOnRemaining: 300,
+      totalRemaining: 2500,
+      includedPerMonth: 3000,
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: "https://systemsculpt.com/buy-credits",
+    });
+    const loadUsage = jest.fn().mockResolvedValue({
+      items: [
+        {
+          id: "tx_1",
+          createdAt: "2026-02-11T00:00:00.000Z",
+          transactionType: "agent_turn" as const,
+          endpoint: "audio/transcriptions/jobs/start",
+          usageKind: "audio_transcription" as const,
+          provider: "groq",
+          model: "whisper-large-v3",
+          durationSeconds: 23,
+          totalTokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          pageCount: 0,
+          creditsCharged: 3,
+          includedDelta: -3,
+          addOnDelta: 0,
+          totalDelta: -3,
+          includedBefore: 100,
+          includedAfter: 97,
+          addOnBefore: 0,
+          addOnAfter: 0,
+          totalBefore: 100,
+          totalAfter: 97,
+          fileSizeBytes: 48203,
+          fileFormat: "wav",
+        },
+      ],
+      nextBefore: null,
+    });
+
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      loadBalance,
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+
+    expect(loadUsage).toHaveBeenCalledTimes(1);
+    expect(modal.modalEl.textContent).toContain("audio/transcriptions/jobs/start");
+    expect(modal.modalEl.textContent).toContain("3 credits");
+    expect(modal.modalEl.textContent).not.toContain("$");
   });
 });

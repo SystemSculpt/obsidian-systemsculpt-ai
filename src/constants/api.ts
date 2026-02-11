@@ -36,6 +36,7 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
   },
   CREDITS: {
     BALANCE: "/credits/balance",
+    USAGE: "/credits/usage",
   },
   EMBEDDINGS: {
     GENERATE: "/embeddings",
