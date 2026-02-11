@@ -48,6 +48,7 @@ Web tools are registered in `ChatView.ensureCoreServicesReady()` via `registerWe
 - If tools are unsupported, tool declarations are removed.
 - If image input is unsupported, image context is removed.
 - Service can retry without tools/images when provider responses indicate incompatibility.
+- PI/SystemSculpt turns auto-retry transient upstream rate-limit errors (before any assistant output is emitted), so users usually do not need to resend the prompt.
 
 ## Streaming events handled
 

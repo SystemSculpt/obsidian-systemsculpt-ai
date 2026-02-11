@@ -15,6 +15,7 @@ Source of truth:
 | Open SystemSculpt Chat History |  | `open-chat-history` | Opens chat history modal |
 | Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
+| Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
 
 ## Chat and writing

@@ -8,7 +8,7 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 
 | Tab label | What it covers |
 | --- | --- |
-| `Overview & Setup` | Account/license, provider setup, API keys, provider connection helpers |
+| `Overview & Setup` | Account/license, credits and usage access, provider setup, API keys, provider connection helpers |
 | `Models & Prompts` | Chat/title/post-processing model defaults, prompt selection, prompt files |
 | `Chat & Templates` | Chat defaults, default prompt/tag/font preferences, favorites, template insertion |
 | `Daily Vault` | Daily note structure, templates, reminders, streak/analytics toggles, daily actions |

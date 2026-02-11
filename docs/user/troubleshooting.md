@@ -16,6 +16,7 @@
 
 - Try a different model/provider first.
 - Some providers reject tools or images; service layer may retry without them.
+- Transient upstream rate limits are retried automatically when no assistant output has started yet.
 - Check for notices/footnotes in chat that explain fallback behavior.
 
 ## Similar Notes is empty
