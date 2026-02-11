@@ -1,16 +1,17 @@
 # Ribbon icons
 
-SystemSculpt AI adds ribbon icons (left sidebar). You can hide/reorder ribbon icons using Obsidian’s core UI.
+Source of truth: `src/core/plugin/ribbons.ts`.
 
-This list is meant to match `src/core/plugin/ribbons.ts`.
+SystemSculpt adds the following ribbon actions in this order:
 
-| Ribbon action | What it does |
-| --- | --- |
-| Open SystemSculpt Chat | Opens the main chat view |
-| Open SystemSculpt Chat History | Opens the chat history picker/modal |
-| Open SystemSculpt Janitor | Opens the Janitor modal |
-| Open Similar Notes Panel | Opens the Similar Notes view |
-| Open SystemSculpt Search | Opens the SystemSculpt search modal |
-| Process Meeting Audio | Opens the meeting processor modal |
-| YouTube Canvas | Opens the YouTube Canvas modal |
+| Icon name | Ribbon action label | Behavior |
+| --- | --- | --- |
+| `message-square` | Open SystemSculpt Chat | Opens a new chat view |
+| `history` | Open SystemSculpt Chat History | Opens chat history modal |
+| `trash` | Open SystemSculpt Janitor | Opens janitor modal |
+| `network` | Open Similar Notes Panel | Opens Similar Notes view |
+| `search` | Open SystemSculpt Search | Opens search modal |
+| `file-audio` | Process Meeting Audio | Opens meeting processor modal |
+| `youtube` | YouTube Canvas | Opens YouTube Canvas modal |
 
+You can hide or reorder ribbon icons with Obsidian's standard ribbon controls.

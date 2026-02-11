@@ -1,45 +1,21 @@
-# UI Layout Insets (Status Bar Overlap)
+# UI layout insets
 
-Obsidian does not expose a direct API for status bar height. The only official API surface is `addStatusBarItem()`, which returns an `HTMLElement` for *adding* items, not measuring layout. The status bar itself lives outside the workspace container, so the safest approach is to measure DOM overlap and apply an inset to the view container.
+Last verified: **2026-02-11**.
 
-We use a reusable helper to do this: `attachOverlapInsetManager`.
+SystemSculpt uses overlap-based inset handling for views that could collide with docked UI (such as the status bar).
 
-## When to use
+## Helper service
 
-- Any view that needs to avoid overlapping a fixed or docked UI element (status bar, ribbons, docked toolbars).
-- Situations where the element can appear/disappear with themes or layout changes.
+- `src/core/ui/services/OverlapInsetService.ts`
+- `attachOverlapInsetManager(...)` computes overlap and applies inset values.
 
-## How it works
+## Typical usage
 
-1. Find the anchor element (the UI you must avoid).
-2. Measure overlap between the view container and the anchor using `getBoundingClientRect()`.
-3. Apply the overlap as an inset:
-   - Inline `padding-bottom` (optional) so it wins against theme CSS.
-   - A CSS variable so styles can react if needed.
-4. Recompute on `layout-change`, `css-change`, window resize, and `ResizeObserver`.
+1. Provide a target container element.
+2. Provide an anchor lookup (for example `.status-bar`).
+3. Apply inset as CSS variable and/or inline padding.
+4. Recompute on layout/theme/resize changes.
 
-## Usage
+## Why this exists
 
-```ts
-import { attachOverlapInsetManager } from "../core/ui/services/OverlapInsetService";
-
-attachOverlapInsetManager(chatView, {
-  app: chatView.app,
-  container,
-  cssVariable: "--systemsculpt-status-bar-offset",
-  applyPaddingBottom: true,
-  getAnchor: () => document.body.querySelector(".status-bar") as HTMLElement | null,
-});
-```
-
-## Options
-
-- `cssVariable` (default `--systemsculpt-overlap-inset`): where the computed px value is stored.
-- `applyPaddingBottom` (default `true`): apply inline `padding-bottom` to the container.
-- `retryCount` / `retryIntervalMs`: retries for late-created anchors.
-
-## Notes
-
-- `getAnchor` should return `null` on mobile or when the target UI is hidden.
-- The helper is safe to call once per view; it registers its own cleanup via the `Component` lifecycle.
-- If you only need the CSS variable (no inline padding), set `applyPaddingBottom: false` and handle layout in CSS.
+Obsidian does not expose a direct status-bar-height API for plugin layout calculations, so DOM overlap measurement is used.

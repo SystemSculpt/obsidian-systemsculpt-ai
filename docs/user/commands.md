@@ -1,96 +1,81 @@
-# Commands & hotkeys
+# Commands and hotkeys
 
-SystemSculpt AI registers commands in Obsidian’s command palette.
+Source of truth:
 
-Notes:
+- `src/core/plugin/commands.ts`
+- `src/main.ts` (additional diagnostics/search commands)
 
-- Some commands only appear when they apply (for example, **Chat with File** requires an active file).
-- `Mod` means **Cmd** on macOS and **Ctrl** on Windows/Linux.
+`Mod` means `Cmd` on macOS and `Ctrl` on Windows/Linux.
 
-## Core commands
+## Core and navigation
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Open SystemSculpt Chat |  | Opens the main chat view |
-| Open SystemSculpt Chat History |  | Opens the chat history picker/modal |
-| Resume Chat from Current History File |  | Only appears when the active file is a chat history file |
-| Open SystemSculpt AI Settings |  | Jumps to the plugin’s settings tab |
-| Reload Obsidian |  | Reloads the app window |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Open SystemSculpt Chat |  | `open-systemsculpt-chat` | Opens a new chat view |
+| Open SystemSculpt Chat History |  | `open-chat-history` | Opens chat history modal |
+| Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
+| Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
+| Reload Obsidian |  | `reload-obsidian` | Reloads app window |
 
-## Chat + writing
+## Chat and writing
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Change Chat Model (Current Chat) |  | Requires an active SystemSculpt chat view |
-| Set Default Chat Model |  | Updates the default model for new chats |
-| Change/Generate Title | `Mod`+`Shift`+`T` | Works in chat view or on a Markdown file |
-| Open Template Selection |  | Inserts a selected template into the active editor |
-| Quick Edit (Active File) |  | Opens the Quick Edit widget for the current file |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Change Chat Model (Current Chat) |  | `change-chat-model` | Requires active SystemSculpt chat view |
+| Set Default Chat Model |  | `set-default-chat-model` | Sets default model for new chats |
+| Change/Generate Title | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
+| Open Template Selection |  | `open-template-modal` | Inserts a template into active editor |
+| Quick Edit (Active File) |  | `quick-file-edit` | Opens Quick Edit widget |
+| Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
 
-## Files + context
+## Search and embeddings
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Chat with File |  | Creates a chat preloaded with the active file (supports many file types) |
-
-## Search + Similar Notes (Embeddings)
-
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Open Similar Notes Panel |  | Opens the Similar Notes view |
-| Find Similar Notes (Current Note) |  | Requires an active editor file; opens Similar Notes if embeddings enabled |
-| Process Embeddings |  | Informational (processing is automatic) |
-| Rebuild Embeddings |  | Clears all embeddings; files will be re-processed |
-| Rebuild Embeddings (Current Model) |  | Rebuilds only the current provider/model namespace |
-| Show Embeddings Database Statistics (Debug) |  | Only appears when embeddings are enabled |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Opens search modal |
+| Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
+| Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
+| Process Embeddings |  | `process-embeddings` | Informational; processing is automatic |
+| Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
+| Rebuild Embeddings (Current Model) |  | `rebuild-embeddings-current-model` | Rebuilds only current provider/model namespace |
+| Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Daily Vault
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Open Today's Daily Note |  | Opens (or creates, depending on settings) today's daily note |
-| Create Daily Note |  | Forces creation of today’s daily note |
-| Open Yesterday's Daily Note |  | Opens yesterday’s note if it exists |
-| Start Daily Review |  | Runs the daily review flow |
-| Start Weekly Review |  | Runs the weekly review flow |
-| View Daily Streak |  | Shows streak stats in a notice |
-| Open Daily Vault Settings |  | Focuses the Daily Vault tab inside settings |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Open Today's Daily Note |  | `daily-vault-open-today` | Opens/creates today's note per settings |
+| Create Daily Note |  | `daily-vault-create-note` | Forces creation flow |
+| Open Yesterday's Daily Note |  | `daily-vault-open-yesterday` | Opens yesterday when available |
+| Start Daily Review |  | `daily-vault-start-daily-review` | Starts daily review flow |
+| Start Weekly Review |  | `daily-vault-start-weekly-review` | Starts weekly review flow |
+| View Daily Streak |  | `daily-vault-view-streak` | Shows streak summary |
+| Open Daily Vault Settings |  | `daily-vault-open-settings` | Focuses Daily Vault tab |
 
-## Audio + transcription
+## Audio and media
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Toggle Audio Recorder | `Mod`+`R` | Starts/stops recording (if enabled/configured) |
-| Open Meeting Processor |  | Opens the meeting processing modal |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Toggle Audio Recorder | `Mod+R` | `toggle-audio-recorder` | Starts/stops recording |
+| Open Meeting Processor |  | `open-meeting-processor` | Opens meeting processor modal |
+| YouTube Canvas - Extract transcript and create note |  | `open-youtube-canvas` | Opens YouTube Canvas modal |
+| Run Audio Chunking Analysis |  | `audio-chunking-analysis` | Developer-facing analysis command |
 
-## Automations
+## Automations and CanvasFlow
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Run Workflow Automation |  | Runs an automation against the active Markdown note |
-| Show Automation Backlog |  | Opens the automation backlog modal |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Run Workflow Automation |  | `run-workflow-automation` | Runs automation for active markdown note |
+| Show Automation Backlog |  | `open-automation-backlog` | Opens automation backlog modal |
+| CanvasFlow - Create Prompt Node (Active Canvas) |  | `canvasflow-create-prompt-node` | Only when active view is Canvas |
+| CanvasFlow - Toggle Enhancements |  | `canvasflow-toggle-enhancements` | Toggles CanvasFlow enhancement mode |
 
-## Tooling + maintenance
+## Benchmark and diagnostics
 
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Open SystemSculpt Search | `Mod`+`K` | Opens SystemSculpt’s search modal |
-| Open SystemSculpt Janitor |  | Opens the Janitor modal |
-| Open SystemSculpt Benchmark |  | Runs the built-in benchmark UI |
-| Open SystemSculpt Benchmark Results |  | Opens the benchmark results viewer |
-| YouTube Canvas - Extract transcript and create note |  | Creates a note from a YouTube transcript (language selectable in the modal; generation can be cancelled) |
-
-## CanvasFlow (experimental)
-
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| CanvasFlow - Create Prompt Node (Active Canvas) |  | Only appears when the active view is an Obsidian Canvas |
-| CanvasFlow - Toggle Enhancements |  | Enables/disables the CanvasFlow Run button in the Canvas selection toolbar (and injected prompt controls on prompt nodes) |
-
-## Diagnostics (advanced)
-
-| Command | Default hotkey | Notes |
-| --- | --- | --- |
-| Copy Resource Usage Report |  | Copies a summary (or saves it) under `.systemsculpt/diagnostics` |
-| Run Audio Chunking Analysis |  | Developer-oriented analysis tool |
-| Toggle Mobile Emulation Mode |  | Developer tool (only works in compatible Obsidian builds) |
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| Open SystemSculpt Benchmark |  | `open-systemsculpt-benchmark` | Opens benchmark runner view |
+| Open SystemSculpt Benchmark Results |  | `open-systemsculpt-benchmark-results` | Opens leaderboard/results view |
+| Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Opens janitor modal |
+| Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
+| Toggle Mobile Emulation Mode |  | `toggle-mobile-emulation` | Developer tool for supported builds |

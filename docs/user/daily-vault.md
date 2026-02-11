@@ -1,29 +1,40 @@
 # Daily Vault
 
-Daily Vault helps you create and manage daily notes, run review flows, and track streak/analytics (depending on your configuration).
+Daily Vault provides daily-note creation, review flows, and streak/analytics settings.
 
 ## Configure
 
-Obsidian Settings → **SystemSculpt AI** → **Daily Vault**:
+Open `Settings -> SystemSculpt AI -> Daily Vault`.
 
-- Daily note naming and directory
-- Template configuration
-- Review flows and reminders
-- Streak tracking and optional status indicators
+Main sections in current UI:
 
-## Commands
+- Daily Note Structure
+- Daily Templates
+- Time-Based Features
+- Habit Tracking
+- Interface Preferences
+- Advanced Features
+- Actions
 
-Daily Vault commands (see [Commands & hotkeys](commands.md)):
+## Daily commands
 
-- **Open Today's Daily Note**
-- **Create Daily Note**
-- **Open Yesterday's Daily Note**
-- **Start Daily Review**
-- **Start Weekly Review**
-- **View Daily Streak**
-- **Open Daily Vault Settings**
+| Command | ID |
+| --- | --- |
+| Open Today's Daily Note | `daily-vault-open-today` |
+| Create Daily Note | `daily-vault-create-note` |
+| Open Yesterday's Daily Note | `daily-vault-open-yesterday` |
+| Start Daily Review | `daily-vault-start-daily-review` |
+| Start Weekly Review | `daily-vault-start-weekly-review` |
+| View Daily Streak | `daily-vault-view-streak` |
+| Open Daily Vault Settings | `daily-vault-open-settings` |
 
-## Notes
+## Action utilities in settings
 
-- If streak data looks wrong, verify your daily note directory/template settings and ensure the notes are being created where the plugin expects.
-- If you recently changed the daily note directory, you may need to re-open today's note once so the plugin re-syncs its internal state.
+- `Run test` daily note creation
+- `Create folders` for daily structure
+- `Reset` daily settings to defaults
+
+## Troubleshooting pointers
+
+- Re-check daily directory format/template settings first.
+- If streaks look wrong, verify where daily notes are being created.

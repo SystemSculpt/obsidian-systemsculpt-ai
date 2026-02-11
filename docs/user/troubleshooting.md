@@ -1,41 +1,44 @@
 # Troubleshooting
 
-## “No models available” / provider errors
+## Provider or model list issues
 
-- Confirm your provider API key and endpoint in **Overview & Setup**.
-- Some providers require specific base URLs or headers; verify the provider’s docs.
-- If you see “API error 429: too many authentication failures,” update your API key/license and retry after a few minutes (the provider may temporarily lock out repeated failed auth attempts).
-- If you’re on mobile, some transports/streaming behaviors differ; try switching models/providers to isolate the issue.
+- Verify provider setup under `Settings -> SystemSculpt AI -> Overview & Setup`.
+- Re-check API keys/endpoints for the selected provider.
+- If model lists fail, test with a second provider to isolate provider-side issues.
 
-## Chat can’t stream / weird partial output
+## Agent Mode tool behavior seems wrong
 
-- Try a different provider/model to confirm it’s not provider-specific.
-- If the provider rejects tools or images, the plugin may retry without them (you’ll usually see an inline notice/footnote in the UI).
+- Confirm Agent Mode is enabled in the current chat.
+- Remember destructive filesystem tools may require approval.
+- If behavior is unexpected, disable allowlisted tools and retry.
 
-## Document conversion fails (PDF/Office)
+## Streaming issues
 
-- **Desktop:** large PDFs/images upload via multipart jobs (currently up to ~25 MB per document).
-- **Mobile:** conversions are capped at ~4.4 MB due to serverless upload limits. Larger files will fail with “413 Request Entity Too Large”.
-- If you hit 413, reduce the file size (compress/export) or split the document into smaller PDFs before converting.
+- Try a different model/provider first.
+- Some providers reject tools or images; service layer may retry without them.
+- Check for notices/footnotes in chat that explain fallback behavior.
 
-## Similar Notes empty / embeddings not processing
+## Similar Notes is empty
 
-1. Confirm **Embeddings & Search** is enabled and a model is selected.
-2. Check exclusions (folder/file exclusions can exclude most of the vault).
-3. Use **Show Embeddings Database Statistics (Debug)** (only appears when embeddings are enabled).
-4. As a last resort, try **Rebuild Embeddings** (clears all embeddings).
+1. Enable embeddings in `Embeddings & Search`.
+2. Verify provider/model config.
+3. Review exclusions (chat history, folders, patterns).
+4. Run `Show Embeddings Database Statistics (Debug)`.
+5. If needed, run `Rebuild Embeddings`.
 
-See: [Similar Notes](similar-notes.md).
+## Daily Vault issues
 
-## Daily Vault streak or note creation issues
+- Use `Open Daily Vault Settings` and verify format/path/template fields.
+- Run `Open Today's Daily Note` once after changing settings.
 
-- Command palette → **Open Daily Vault Settings** and verify directory/name/template settings.
-- Run **Open Today's Daily Note** once after changing configuration to ensure the plugin re-syncs.
+## Audio/transcription failures
 
-## Diagnostics helpers (advanced)
+- Verify transcription provider credentials and endpoint.
+- Verify the model supports transcription.
+- For local endpoints, verify local connectivity and process health.
 
-These commands can help you capture lightweight diagnostics:
+## Diagnostics helpers
 
-- **Copy Resource Usage Report**
-
-They may save reports under `.systemsculpt/diagnostics` if clipboard copy fails.
+- `Copy Resource Usage Report`
+- Advanced tab: `Copy diagnostics snapshot`
+- Advanced tab: `Open diagnostics folder`

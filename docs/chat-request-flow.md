@@ -1,109 +1,75 @@
-# ChatView → Request Flow (Baseline)
+# Chat request flow
 
-This document maps the end-to-end path when a user sends a message from ChatView, showing the exact order of message assembly, system prompt handling, context injection, tool usage, and streaming.
+Last verified against code: **2026-02-11**.
 
-## High-level Flow
+This doc describes the current send/stream pipeline for ChatView.
 
-1. User types text and clicks Send.
-2. `InputHandler.handleSendMessage()` creates a user `ChatMessage` and appends it to history/UI.
-3. `InputHandler` starts one PI-managed assistant stream per send.
-4. `SystemSculptService.streamMessage()` builds the outbound request (system prompt + context + messages + tools), opens a PI turn stream, and yields chunks.
-5. `StreamingController` renders streaming parts (reasoning/content/tool calls), updates tool-call cards/chips, and finalizes the assistant message.
-6. `onAssistantResponse` merges/saves the finalized assistant message in `ChatView.messages`.
+## Main pipeline
 
-## Call Graph (key pieces)
+1. User sends a message in `ChatView`.
+2. `InputHandler` appends the user message and starts `streamAssistantTurn(...)`.
+3. `SystemSculptService.streamMessage(...)` prepares model, prompt, context, and tools.
+4. Service opens a provider stream and yields normalized `StreamEvent` chunks.
+5. `StreamingController.stream(...)` renders chunks, tracks tool calls, and persists final assistant output.
+6. If PI indicates tool continuation (`stopReason = toolUse`), `InputHandler` decides whether to continue the turn.
 
-- UI: `ChatView` → `uiSetup.ts` wires `InputHandler`
-- Send: `InputHandler.handleSendMessage()` → `InputHandler.streamAssistantTurn()`
-- Stream: `InputHandler.streamAssistantTurn()` → `SystemSculptService.streamMessage()`
-- Assembly: `ContextFileService.prepareMessagesWithContext()` + `SystemPromptService.getSystemPromptContent()`
-- Tools: `ToolCallManager` (create/update calls, track status, and collect results)
-- Render: `StreamingController` + `MessagePartManager` + `MessageRenderer`
+## Key components
 
-## Request Assembly Order (what is sent to the model)
+- Entry UI: `src/views/chatview/ChatView.ts`
+- Send orchestration: `src/views/chatview/InputHandler.ts`
+- Request assembly + provider routing: `src/services/SystemSculptService.ts`
+- Prompt composition: `src/services/PromptBuilder.ts`, `src/services/SystemPromptService.ts`
+- Context + tool-message shaping: `src/services/ContextFileService.ts`
+- Streaming/render/persist: `src/views/chatview/controllers/StreamingController.ts`
+- Tool execution + policy: `src/views/chatview/ToolCallManager.ts`, `src/utils/toolPolicy.ts`
 
-The request `messages` array is produced inside `ContextFileService.prepareMessagesWithContext()` and then used by `SystemSculptService.streamMessage()`.
+## Request assembly order
 
-1) System message (always first)
+`ContextFileService.prepareMessagesWithContext(...)` and `SystemSculptService.prepareChatRequest(...)` produce the request payload.
 
-- Source: `SystemPromptService.getSystemPromptContent(type, path, agentMode)`.
-- If Agent Mode is ON and the selected prompt type is not `agent`, the agent prompt is prefixed to the selected prompt (concatenation) before sending.
-- If prompt cannot be resolved, a minimal fallback prompt is used.
+1. System message is added first.
+2. Conversation history is normalized.
+3. Context file messages are inserted before the latest user message.
+4. Document references (`doc:<id>`) are attached to the latest user message.
+5. Tool declarations are added when Agent Mode is active and tool-compatible.
 
-2) Conversation history (prior turns)
+## Tool surfaces currently injected in chat
 
-- All user/assistant messages from `ChatView.messages` are included with their `role`, `content`, `message_id`.
-- Assistant tool calls:
-  - If Agent Mode is ON, assistant messages with `tool_calls` are kept and normalized for the API. Matching tool result messages (role=`tool`) are generated on-the-fly from stored results and appended immediately after the assistant message.
-  - If Agent Mode is OFF, tool calls are stripped from assistant messages and only their textual content is sent.
-- Any existing `role: "tool"` messages in `ChatView.messages` are ignored (tool results are reconstructed from `tool_calls`).
+- Filesystem MCP tools
+- YouTube transcript MCP tool
+- Web research tools (`web_search`, `web_fetch`)
 
-3) Context messages (files and vault structure)
+Web tools are registered in `ChatView.ensureCoreServicesReady()` via `registerWebResearchTools(...)`.
 
-- Context files are inserted immediately before the most recent user message.
-- For regular files: a `user` message is created as `Context from <path>:\n\n<contents>`.
-- For images: a multi-part `user` message is created with a `text` part and an `image_url` part.
-- Vault structure (if enabled): a `user` message with a summarized directory map is created.
-- Document references (`doc:<id>`) are attached to the last user message via `documentContext.documentIds` and not sent as separate messages.
+## Compatibility and fallback behavior
 
-4) Tooling hint in system prompt (when tools available)
+`SystemSculptService` checks model compatibility for tools and images.
 
-- Now unified via `PromptBuilder.buildSystemPrompt(...)` which assembles: base prompt → optional agent prefix → optional tools hint. `SystemSculptService` computes tools up front, calls `PromptBuilder`, and passes the final prompt to `ContextFileService.prepareMessagesWithContext(...)` so the system message ID is deterministic for the final content.
+- If tools are unsupported, tool declarations are removed.
+- If image input is unsupported, image context is removed.
+- Service can retry without tools/images when provider responses indicate incompatibility.
 
-5) Plugins / Web search (optional)
+## Streaming events handled
 
-- If web search is enabled, an OpenRouter-compatible `plugins` array is included in the provider-specific request (e.g., `{ id: "web-search", max_results: N }`).
+`StreamingController` processes these event types:
 
-## Provider/Transport
+- `reasoning`
+- `reasoning-details`
+- `content`
+- `tool-call`
+- `annotations`
+- `meta`
+- `footnote`
 
-- Custom providers use an adapter that builds a provider-specific body and transforms the response into a consistent stream format.
-- Transport/streaming decisions are centralized in `PlatformContext`, which flags mobile/runtime constraints and chooses between native `fetch` streaming and Obsidian `requestUrl` fallbacks (including SSE replay when streaming is unavailable).
-- The native SystemSculpt API receives `{ model, messages, stream: true, include_reasoning: true, ... }`.
-- Agent Mode PI sessions use the canonical v1 contract:
-  - `POST /api/v1/agent/sessions`
-  - `POST /api/v1/agent/sessions/:sessionId/turns`
-- Tool definitions are normalized into PI-native `{ name, description, parameters }` via `PiToolAdapter` before turn requests, preserving stable tool names like `mcp-filesystem_*` for local execution/approval flow.
-- Image parts are preserved initially; if the provider rejects them, the request is retried without images with an inline footnote in the UI.
-- If a provider rejects tools, a retry without tools occurs (with inline footnote explaining the downgrade).
+Final assistant message includes merged content, parts, tool calls, annotations, and optional stop reason.
 
-## Runtime Checks and Guardrails
+## Continuation logic
 
-- Model availability: errors bubble to `ChatView.handleError()` which switches models or prompts user.
-- Images: detection and conditional retry without images when unsupported.
-- Tools: conditional inclusion based on Agent Mode and provider capability; read-only tools auto-approve, destructive tools require approval unless allowlisted or confirmations are disabled in settings.
-- Tool approval actions are plain-language: `Run once`, `Always allow this tool`, `Deny`. `Always allow this tool` updates the same allowlist exposed in settings.
-- Approved calls can sit in `Approved, waiting to run` before execution starts; chips then move through `Running` to terminal states (`Done`, `Failed`, `Denied`).
-- Tool schemas are normalized before requests: all properties are marked required for provider compatibility and any `strict` flags are stripped.
-- Continuations and loop prevention are owned by PI session runtime.
+After a streamed turn completes, `InputHandler.shouldContinuePiTurn(...)` checks:
 
-## Streaming & Finalization
+- Agent Mode is active
+- Turn completed successfully
+- `stopReason` is `toolUse`
+- Tool calls for that message reached a settled state
 
-- Streaming chunks yield `reasoning`, `content`, and `toolCalls`.
-- `StreamingController` interleaves parts, updates tool call UI, and saves incrementally (debounced).
-- Tool cards include layman summaries; `move` calls display path changes as From -> To.
-- `What changed` details are progressive: concise summary first, then richer file/path changes when available.
-- Final assistant message merges any tool calls and is persisted via `onAssistantResponse`.
-
-## Observations (baseline organization)
-
-- System prompt construction is centralized: `PromptBuilder` composes the effective prompt and `ContextFileService` inserts it. No later mutation of the system message.
-- Chat storage records both `content` and `messageParts` for assistant messages. `messageParts` drives rendering; `content` acts as a fallback/snapshot.
-- Tool messages are not stored directly; they are derived from `assistant.tool_calls` on request assembly, preventing drift between UI and request payload.
-- Context files are injected at a single, clear point: immediately before the latest user message.
-- Retries (without tools/images) are handled within the service layer and surfaced to the UI via inline footnotes.
-
-## Notable Friction / Potential Cleanups
-
-- Tool hint in system prompt: consolidated in `PromptBuilder`.
-- System prompt export path uses the same agent-prefix combination helper in `SystemPromptService` (kept consistent).
-- `getMessages()` → `toApiBaseMessages()` helper replaces ad‑hoc stripping of `messageParts`.
-- Web search/plugin flags are injected in adapters via an `extras` parameter to `buildRequestBody` (currently used by OpenRouter).
-
-## TL;DR Order
-
-1) System message (selected prompt; maybe agent-prefixed) 
-2) Conversation messages up to now (assistant tool_calls normalized when Agent Mode ON) 
-3) Context messages inserted immediately before the latest user message (files, images, vault summary) 
-4) Document IDs attached to the latest user message (if any) 
-5) Optional tools declaration + system prompt note (Agent Mode ON) 
-6) Optional `plugins` (web search) depending on provider
+If true, the next PI-managed turn is started.

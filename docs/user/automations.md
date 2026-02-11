@@ -1,21 +1,29 @@
 # Automations
 
-Automations are opt-in workflows that can process the active note (and related context) to do structured tasks (for example: routing a capture note, running a meeting flow, etc.).
+Automations process notes from capture folders into destination folders using workflow templates.
 
 ## Configure
 
-Obsidian Settings → **SystemSculpt AI** → **Automations**:
+Open `Settings -> SystemSculpt AI -> Automations`.
 
-- Enable/disable individual automations
-- Set destinations (for example: where output should be created)
+Current built-in automation templates (`src/constants/workflowTemplates.ts`):
 
-## Run an automation
+- Meeting Transcript -> Summary + Tasks
+- Web Clipping -> Summary + Insights
+- Idea Dump -> Project Inbox
 
-- Open a Markdown note
-- Command palette → **Run Workflow Automation**
-- Pick an automation from the list
+Each card lets you configure:
 
-## Backlog
+- Capture source folder
+- Destination folder
+- Enable automation toggle
 
-- Command palette → **Show Automation Backlog**
+## Commands
 
+- `Run Workflow Automation` (for active markdown note)
+- `Show Automation Backlog`
+
+## Notes
+
+- Automations run against markdown notes.
+- `Skipped workflow items` can be cleared from the Automations tab.

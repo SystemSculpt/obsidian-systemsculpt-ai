@@ -1,33 +1,46 @@
-# Audio & transcription
+# Audio and transcription
 
-SystemSculpt AI includes audio recording and transcription tooling (depending on your configuration and license/features).
+SystemSculpt supports in-app recording plus transcription workflows.
 
 ## Configure
 
-Obsidian Settings → **SystemSculpt AI** → **Audio & Transcription**:
+Open `Settings -> SystemSculpt AI -> Audio & Transcription`.
 
-- Microphone selection (where applicable)
-- Transcription provider/model selection
-- Post-processing options (where applicable)
+Recording controls include:
 
-## Commands and ribbon actions
+- Preferred microphone
+- Auto-transcribe recordings
+- Auto-paste transcription
+- Keep recordings after transcription
+- Clean output only
+- Auto-submit after transcription
+- Post-processing toggle
 
-See: [Commands & hotkeys](commands.md) and [Ribbon icons](ribbon-icons.md).
+Transcription controls include:
 
-- **Toggle Audio Recorder** (`Mod`+`R`) — start/stop recording
-- **Open Meeting Processor** — open the meeting processing modal
-- Ribbon: **Process Meeting Audio** — opens the same meeting processor entrypoint
+- Provider selection (`SystemSculpt API` or `Custom`)
+- Optional auto audio format conversion (advanced/desktop path)
+- Custom endpoint/API key/model fields (advanced mode)
+- Provider presets for custom mode (`Groq`, `OpenAI`, `Local`)
 
-## Meeting Processor
+## Commands and ribbon
 
-- The vault picker shows whether each audio file is **Processed**, **Unprocessed**, or **Out of date**.
-- Use the **All / Unprocessed / Processed** toggle to quickly narrow the list.
-- **Out of date** means the output note exists but is older than the audio file.
+- `Toggle Audio Recorder` (`Mod+R`)
+- `Open Meeting Processor`
+- Ribbon: `Process Meeting Audio`
 
-## Tips
+## Supported recording/transcription extensions
 
-- Supported audio file types: `mp3`, `wav`, `m4a`, `webm`, `ogg`.
-- On iOS, if the app is locked/backgrounded during recording, SystemSculpt now saves the captured portion and stops gracefully; keep the app unlocked for uninterrupted continuous capture.
-- If transcription fails, first confirm your provider key/endpoint and that the selected model supports audio/transcription on your provider.
-- If you’re using a local transcription server, confirm it’s reachable from Obsidian and not blocked by OS/network restrictions.
-- Large recordings are automatically chunked during transcription to stay under request size limits (for example, the SystemSculpt API upload limit is ~4MB per request; some custom providers allow ~25MB per request). Chunked transcriptions may take longer to complete.
+- `wav`, `m4a`, `webm`, `ogg`, `mp3`
+
+## Pipeline behavior notes
+
+- Desktop + SystemSculpt provider uses a server-side jobs pipeline (large-file capable).
+- Mobile/provider-specific direct uploads have stricter request-size constraints.
+- Custom-provider path uses direct upload and chunks audio when required.
+
+## If transcription fails
+
+1. Verify provider credentials and endpoint.
+2. Verify selected model supports transcription on that provider.
+3. For custom local servers, verify local reachability from Obsidian.

@@ -1,18 +1,16 @@
 # Getting started
 
-SystemSculpt AI runs entirely inside Obsidian and connects to the model provider(s) you choose.
+SystemSculpt AI runs inside Obsidian and uses the model providers you configure.
 
 ## Install
 
 ### Community Plugins (recommended)
 
-1. Obsidian → **Settings** → **Community plugins**
-2. Search for **SystemSculpt AI**
-3. **Install** → **Enable**
+1. Open `Settings -> Community plugins`.
+2. Search for `SystemSculpt AI`.
+3. Click `Install`, then `Enable`.
 
-### Manual install (developers)
-
-1. Clone this repo into your vault’s plugins folder:
+### Manual install
 
 ```bash
 cd /path/to/vault/.obsidian/plugins/
@@ -22,39 +20,41 @@ npm install
 npm run build
 ```
 
-## First run setup
+## First-run setup
 
-1. Open **Settings** → **SystemSculpt AI** → **Overview & Setup**
-2. Choose a provider and enter your API key / endpoint (if required)
-3. (Optional) Set defaults in **Models & Prompts** and **Chat & Templates**
+1. Open `Settings -> SystemSculpt AI -> Overview & Setup`.
+2. Add a provider (OpenAI, Anthropic, OpenRouter, MiniMax, Moonshot/Kimi, Groq, Ollama, LM Studio, or custom OpenAI-compatible).
+3. Add API credentials for that provider.
+4. Optional: enter and activate a SystemSculpt license key.
 
-If you have a SystemSculpt license, the default SystemSculpt model is backed by OpenRouter `x-ai/grok-4.1-fast` and supports image inputs.
+## Start chatting
 
-See: [Settings overview](settings.md).
-
-## Start a chat
-
-- Command palette → **Open SystemSculpt Chat**
-- Or click the **SystemSculpt Chat** ribbon icon (left sidebar)
+- Command palette: `Open SystemSculpt Chat`
+- Ribbon icon: `Open SystemSculpt Chat`
 
 ## Add context
 
-Common ways to give the model context:
+- Drag files into chat.
+- Attach files with the paperclip in chat.
+- Type `@` to mention files.
+- Use `Chat with File` from the command palette.
 
-- Drag notes/files into the chat
-- Use the paperclip button to attach context files (they’ll appear above the message box; click `x` to remove)
-- Type `@` to mention a file (if enabled in the chat UI)
-- Use **Chat with File** from the command palette while viewing a note
-- Attach an image (requires a vision-capable model/provider)
+## Turn on Agent Mode (optional)
 
-## Try Agent Mode (optional)
-
-Agent Mode lets the model request explicit tool calls that operate inside your vault (file reads, edits, search, etc.).
-
-See: [Agent Mode](agent-mode.md).
+- Agent Mode is per chat.
+- Toggle it from the chat toolbar.
+- When enabled, the model can request tool calls (filesystem, web research, YouTube transcript).
 
 ## Enable Similar Notes (optional)
 
-Similar Notes is powered by embeddings (vector search) and must be enabled in settings.
+1. Open `Settings -> SystemSculpt AI -> Embeddings & Search`.
+2. Enable embeddings.
+3. Choose `SystemSculpt` or `Custom provider`.
+4. Open `Open Similar Notes Panel`.
 
-See: [Similar Notes](similar-notes.md).
+## Next docs
+
+- [Settings](settings.md)
+- [Commands](commands.md)
+- [Agent Mode](agent-mode.md)
+- [Troubleshooting](troubleshooting.md)
