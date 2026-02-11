@@ -11,7 +11,7 @@ import SystemSculptPlugin from "../main";
 export class ModelManagementService {
   private plugin: SystemSculptPlugin;
   private baseUrl: string;
-  private static readonly DEFAULT_UPSTREAM_MODEL = "openrouter/x-ai/grok-4.1-fast";
+  private static readonly DEFAULT_UPSTREAM_MODEL = "openrouter/google/gemini-3-flash-preview";
   
   constructor(plugin: SystemSculptPlugin, baseUrl: string) {
     this.plugin = plugin;

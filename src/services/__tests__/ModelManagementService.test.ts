@@ -291,7 +291,7 @@ describe("ModelManagementService", () => {
 
       const info = await service.getModelInfo("systemsculpt::ai-agent");
 
-      expect(info.upstreamModelId).toBe("openrouter/x-ai/grok-4.1-fast");
+      expect(info.upstreamModelId).toBe("openrouter/google/gemini-3-flash-preview");
     });
 
     it("throws error for model not found", async () => {
@@ -457,7 +457,7 @@ describe("ModelManagementService", () => {
 
       expect(model.context_length).toBe(128000);
       expect(model.capabilities).toContain("tools");
-      expect(model.upstream_model).toBe("openrouter/x-ai/grok-4.1-fast");
+      expect(model.upstream_model).toBe("openrouter/google/gemini-3-flash-preview");
     });
   });
 });

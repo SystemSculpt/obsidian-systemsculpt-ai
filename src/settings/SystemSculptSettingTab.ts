@@ -264,7 +264,7 @@ async display(): Promise<void> {
         button.setDisabled(true);
         await this.plugin.getSettingsManager().updateSettings({
           settingsMode: "standard",
-          selectedModelId: this.plugin.settings.selectedModelId || "systemsculpt@@moonshotai/kimi-k2",
+          selectedModelId: this.plugin.settings.selectedModelId || "systemsculpt@@systemsculpt/ai-agent",
           systemPromptType: "general-use",
           systemPromptPath: "",
           chatFontSize: "medium",

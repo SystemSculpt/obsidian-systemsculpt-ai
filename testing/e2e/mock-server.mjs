@@ -124,7 +124,7 @@ app.get(`${LEGACY_API_PREFIX}/models`, (req, res) => {
     {
       id: "systemsculpt/ai-agent",
       name: "SystemSculpt AI Agent (Mock)",
-      upstream_model: "openrouter/x-ai/grok-4.1-fast",
+      upstream_model: "openrouter/google/gemini-3-flash-preview",
     },
   ]);
 });
