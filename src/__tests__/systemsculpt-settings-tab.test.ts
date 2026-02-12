@@ -2,6 +2,7 @@
 
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App } from "obsidian";
+import { buildSettingsTabConfigs } from "../settings/SettingsTabRegistry";
 
 jest.mock("../settings/SettingsTabRegistry", () => ({
   buildSettingsTabConfigs: jest.fn(() => [
@@ -90,7 +91,24 @@ describe("SystemSculptSettingTab native layout", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
+    (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
+      {
+        id: "overview",
+        label: "Overview",
+        sections: [
+          (parent: HTMLElement) => {
+            parent.createDiv({ cls: "setting-item" });
+          },
+        ],
+      },
+    ]);
     app = new App();
+    if (!(app.workspace as any).offref) {
+      Object.defineProperty(app.workspace, "offref", {
+        value: jest.fn(),
+        writable: true,
+      });
+    }
   });
 
   const renderTab = async () => {
@@ -117,5 +135,46 @@ describe("SystemSculptSettingTab native layout", () => {
     const tab = await renderTab();
     expect(tab.containerEl.querySelector(".systemsculpt-settings-tabs")).toBeNull();
     expect(tab.containerEl.querySelector(".ss-settings-tab-bar")).not.toBeNull();
+  });
+
+  it("preserves active tab across settings rerenders", async () => {
+    (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
+      {
+        id: "overview",
+        label: "Overview",
+        sections: [
+          (parent: HTMLElement) => {
+            parent.createDiv({ cls: "setting-item", text: "Overview item" });
+          },
+        ],
+      },
+      {
+        id: "embeddings",
+        label: "Embeddings",
+        sections: [
+          (parent: HTMLElement) => {
+            parent.createDiv({ cls: "setting-item", text: "Embeddings item" });
+          },
+        ],
+      },
+    ]);
+
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    await tab.display();
+
+    const embeddingsButton = tab.containerEl.querySelector('button[data-tab="embeddings"]') as HTMLElement | null;
+    expect(embeddingsButton).not.toBeNull();
+    embeddingsButton?.click();
+
+    await tab.display();
+
+    const embeddingsButtonAfter = tab.containerEl.querySelector('button[data-tab="embeddings"]') as HTMLElement | null;
+    const embeddingsPanelAfter = tab.containerEl.querySelector(
+      '.systemsculpt-tab-content[data-tab="embeddings"]'
+    ) as HTMLElement | null;
+
+    expect(embeddingsButtonAfter?.classList.contains("mod-active")).toBe(true);
+    expect(embeddingsPanelAfter?.classList.contains("is-active")).toBe(true);
   });
 });

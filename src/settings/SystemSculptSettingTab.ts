@@ -333,7 +333,9 @@ async display(): Promise<void> {
   });
 
   this.tabsDef = visibleTabs.map(({ id, label }) => ({ id, label }));
-  this.activeTabId = this.tabsDef[0]?.id ?? "overview";
+  const previousActiveTabId = this.activeTabId;
+  const hasPreviousActiveTab = this.tabsDef.some((tab) => tab.id === previousActiveTabId);
+  this.activeTabId = hasPreviousActiveTab ? previousActiveTabId : (this.tabsDef[0]?.id ?? "overview");
 
   for (const [index, cfg] of visibleTabs.entries()) {
     const button = tabBar.createEl("button", {
