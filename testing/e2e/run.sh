@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${REPO_ROOT}"
+
+load_env_file() {
+  local file_path="${1:?file path required}"
+  if [[ ! -f "${file_path}" ]]; then
+    return
+  fi
+  # shellcheck disable=SC1090
+  set -a
+  source "${file_path}"
+  set +a
+}
+
+load_env_file "${REPO_ROOT}/.env.local"
+load_env_file "${REPO_ROOT}/.env"
+
 MODE="${1:-live}"
 SPEC="${SYSTEMSCULPT_E2E_SPEC:-}"
 VAULT="${SYSTEMSCULPT_E2E_VAULT:-}"
@@ -38,6 +56,29 @@ read_settings_json_key() {
   local settings_path="${2:?settings_path required}"
 
   node -e 'const fs=require("fs");const p=process.argv[1];const k=process.argv[2];const j=JSON.parse(fs.readFileSync(p,"utf8"));const v=j?.[k];process.stdout.write(v==null?"":String(v))' "$settings_path" "$key"
+}
+
+hydrate_e2e_env_from_settings_json() {
+  SETTINGS_JSON="$(resolve_settings_json)"
+
+  if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
+    export SYSTEMSCULPT_E2E_LICENSE_KEY="$(read_settings_json_key licenseKey "${SETTINGS_JSON}")"
+  fi
+  if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
+    export SYSTEMSCULPT_E2E_SERVER_URL="$(read_settings_json_key serverUrl "${SETTINGS_JSON}")"
+  fi
+  if [[ -z "${SYSTEMSCULPT_E2E_MODEL_ID:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
+    export SYSTEMSCULPT_E2E_MODEL_ID="$(read_settings_json_key selectedModelId "${SETTINGS_JSON}")"
+  fi
+}
+
+require_e2e_license_key() {
+  if [[ -n "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" ]]; then
+    return
+  fi
+  echo "Missing SYSTEMSCULPT_E2E_LICENSE_KEY." >&2
+  echo "Set it in .env.local or provide SYSTEMSCULPT_E2E_SETTINGS_JSON / SYSTEMSCULPT_E2E_VAULT for auto-loading." >&2
+  exit 1
 }
 
 run_build_if_needed() {
@@ -93,22 +134,8 @@ NODE
 
 case "$MODE" in
   live)
-    SETTINGS_JSON="$(resolve_settings_json)"
-    if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_LICENSE_KEY="$(read_settings_json_key licenseKey "$SETTINGS_JSON")"
-    fi
-    if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_SERVER_URL="$(read_settings_json_key serverUrl "$SETTINGS_JSON")"
-    fi
-    if [[ -z "${SYSTEMSCULPT_E2E_MODEL_ID:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_MODEL_ID="$(read_settings_json_key selectedModelId "$SETTINGS_JSON")"
-    fi
-
-    if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" ]]; then
-      echo "Missing SYSTEMSCULPT_E2E_LICENSE_KEY." >&2
-      echo "Set it directly or provide SYSTEMSCULPT_E2E_SETTINGS_JSON / SYSTEMSCULPT_E2E_VAULT for auto-loading." >&2
-      exit 1
-    fi
+    hydrate_e2e_env_from_settings_json
+    require_e2e_license_key
 
     run_build_if_needed
     if [[ -n "$SPEC" ]]; then
@@ -118,22 +145,8 @@ case "$MODE" in
     fi
     ;;
   emu)
-    SETTINGS_JSON="$(resolve_settings_json)"
-    if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_LICENSE_KEY="$(read_settings_json_key licenseKey "$SETTINGS_JSON")"
-    fi
-    if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_SERVER_URL="$(read_settings_json_key serverUrl "$SETTINGS_JSON")"
-    fi
-    if [[ -z "${SYSTEMSCULPT_E2E_MODEL_ID:-}" && -n "${SETTINGS_JSON}" && -f "${SETTINGS_JSON}" ]]; then
-      export SYSTEMSCULPT_E2E_MODEL_ID="$(read_settings_json_key selectedModelId "$SETTINGS_JSON")"
-    fi
-
-    if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" ]]; then
-      echo "Missing SYSTEMSCULPT_E2E_LICENSE_KEY." >&2
-      echo "Set it directly or provide SYSTEMSCULPT_E2E_SETTINGS_JSON / SYSTEMSCULPT_E2E_VAULT for auto-loading." >&2
-      exit 1
-    fi
+    hydrate_e2e_env_from_settings_json
+    require_e2e_license_key
 
     run_build_if_needed
     if [[ -n "$SPEC" ]]; then
@@ -144,9 +157,8 @@ case "$MODE" in
     ;;
   mock)
     start_mock_server
-    if [[ -z "${SYSTEMSCULPT_E2E_LICENSE_KEY:-}" ]]; then
-      export SYSTEMSCULPT_E2E_LICENSE_KEY="mock-license"
-    fi
+    hydrate_e2e_env_from_settings_json
+    require_e2e_license_key
     if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" ]]; then
       export SYSTEMSCULPT_E2E_SERVER_URL="http://127.0.0.1:${SYSTEMSCULPT_E2E_MOCK_PORT}/api/v1"
     fi

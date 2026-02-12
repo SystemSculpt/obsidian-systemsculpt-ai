@@ -106,6 +106,97 @@ export function getEnv(name: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function getE2EVaultDisplayName(): string {
+  const raw = getEnv("SYSTEMSCULPT_E2E_VAULT_NAME") ?? "SystemSculpt Studio";
+  const cleaned = raw.replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned.length > 0 ? cleaned : "SystemSculpt Studio";
+}
+
+function getE2EWindowMode(): "none" | "capture" | "background" {
+  const mode = String(process.env.SYSTEMSCULPT_E2E_WINDOW_MODE || "")
+    .trim()
+    .toLowerCase();
+  if (mode === "capture" || mode === "background") return mode;
+  return "none";
+}
+
+async function seedBelievableVaultContent(vaultPath: string): Promise<void> {
+  const seedFiles: Array<{ filePath: string; content: string }> = [
+    {
+      filePath: "Home.md",
+      content: [
+        "# Home",
+        "",
+        "- Current focus: ship product demos and improve conversion.",
+        "- This vault is used for realistic SystemSculpt workflow testing.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Projects/Revenue Sprint/Email Campaign Plan.md",
+      content: [
+        "# Email Campaign Plan",
+        "",
+        "- Goal: improve click-through without sounding promotional.",
+        "- Demo asset needed: short workflow GIF inside Obsidian.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Projects/Revenue Sprint/Feature Brief.md",
+      content: [
+        "# Feature Brief",
+        "",
+        "- Turn scattered notes into action-ready output.",
+        "- Keep everything inside one workspace.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Projects/Revenue Sprint/Customer Notes.md",
+      content: [
+        "# Customer Notes",
+        "",
+        "- Pain: context switching across apps.",
+        "- Pain: hard to turn notes into final copy quickly.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Areas/Marketing/Newsletter Ideas.md",
+      content: [
+        "# Newsletter Ideas",
+        "",
+        "- Show one concrete workflow per send.",
+        "- End with one clear CTA.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Reference/SystemSculpt/Quick Wins.md",
+      content: [
+        "# Quick Wins",
+        "",
+        "- Use @-mention to add relevant context.",
+        "- Export polished output directly from chat.",
+      ].join("\n"),
+    },
+    {
+      filePath: "Journal/2026-02-12.md",
+      content: [
+        "# 2026-02-12",
+        "",
+        "- Build a realistic GIF showcase flow for monetization email.",
+      ].join("\n"),
+    },
+  ];
+
+  for (const seed of seedFiles) {
+    const absolutePath = path.join(vaultPath, seed.filePath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    try {
+      await fs.access(absolutePath);
+      continue;
+    } catch (_) {}
+    await fs.writeFile(absolutePath, `${seed.content.trim()}\n`);
+  }
+}
+
 export async function configurePluginForLiveChat(params: {
   licenseKey: string;
   serverUrl?: string | null;
@@ -210,8 +301,11 @@ export async function ensureE2EVault(): Promise<string> {
   const tmpRoot = path.resolve(process.cwd(), "testing/e2e/fixtures/.tmp-vaults");
   await fs.mkdir(tmpRoot, { recursive: true });
 
-  const vaultPath = path.join(tmpRoot, `vault-${Date.now()}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`);
+  const runDir = path.join(tmpRoot, `run-${Date.now()}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`);
+  const vaultPath = path.join(runDir, getE2EVaultDisplayName());
+  await fs.mkdir(runDir, { recursive: true });
   await fs.cp(templateVaultPath, vaultPath, { recursive: true });
+  await seedBelievableVaultContent(vaultPath);
 
   // Avoid leaking secrets/stale state between runs by starting from a clean plugin data.json.
   try {
@@ -339,39 +433,65 @@ export async function openFreshChatView(): Promise<void> {
 }
 
 export async function tryBackgroundObsidianWindow(): Promise<void> {
+  const windowMode = getE2EWindowMode();
+  if (windowMode === "none") return;
+
   try {
-    // Best-effort: move/blur the Obsidian Electron window to reduce focus stealing during live E2E runs.
-    // Avoid `minimize()` here: Chromium heavily throttles timers/paint for minimized windows which can cause flaky UI waits.
-    await browser.execute(() => {
+    await browser.execute((mode: "capture" | "background") => {
       try {
-        const win = (window as any)?.electron?.remote?.getCurrentWindow?.();
+        const remote = (window as any)?.electron?.remote;
+        const win = remote?.getCurrentWindow?.();
         if (!win) return;
 
-        if (typeof win.setSkipTaskbar === "function") {
-          win.setSkipTaskbar(true);
+        if (mode === "capture") {
+          if (typeof win.isMinimized === "function" && win.isMinimized() && typeof win.restore === "function") {
+            win.restore();
+          }
+          if (typeof win.setSkipTaskbar === "function") win.setSkipTaskbar(false);
+          if (typeof win.setFocusable === "function") win.setFocusable(true);
+          if (typeof win.setVisibleOnAllWorkspaces === "function") {
+            win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+          }
+          if (typeof win.setAlwaysOnTop === "function") {
+            try {
+              win.setAlwaysOnTop(true, "floating", 1);
+            } catch (_) {
+              win.setAlwaysOnTop(true);
+            }
+          }
+
+          const screen = remote?.screen;
+          const display = screen?.getPrimaryDisplay?.();
+          const workArea = display?.workArea;
+          if (workArea && typeof win.setBounds === "function") {
+            const targetWidth = Math.max(980, Math.min(1600, Math.floor(workArea.width * 0.78)));
+            const targetHeight = Math.max(720, Math.min(1280, Math.floor(workArea.height * 0.86)));
+            const targetX = Math.floor(workArea.x + (workArea.width - targetWidth) / 2);
+            const targetY = Math.floor(workArea.y + Math.max(24, (workArea.height - targetHeight) / 2));
+            win.setBounds({ x: targetX, y: targetY, width: targetWidth, height: targetHeight }, false);
+          }
+
+          if (typeof win.moveTop === "function") win.moveTop();
+          if (typeof win.show === "function") win.show();
+          if (typeof win.focus === "function") win.focus();
+          return;
         }
-        if (typeof win.setFocusable === "function") {
-          win.setFocusable(false);
-        }
-        if (typeof win.setAlwaysOnTop === "function") {
-          win.setAlwaysOnTop(false);
-        }
+
+        if (typeof win.setSkipTaskbar === "function") win.setSkipTaskbar(true);
+        if (typeof win.setFocusable === "function") win.setFocusable(false);
+        if (typeof win.setAlwaysOnTop === "function") win.setAlwaysOnTop(false);
         if (typeof win.setVisibleOnAllWorkspaces === "function") {
           win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         }
-        if (typeof win.setPosition === "function") {
-          win.setPosition(-10000, -10000, false);
-        }
-        if (typeof win.blur === "function") {
-          win.blur();
-        }
+        if (typeof win.setPosition === "function") win.setPosition(-10000, -10000, false);
+        if (typeof win.blur === "function") win.blur();
 
-        const app = (window as any)?.electron?.remote?.app;
+        const app = remote?.app;
         if (app?.dock && typeof app.dock.hide === "function") {
           app.dock.hide();
         }
       } catch (_) {}
-    });
+    }, windowMode);
   } catch (_) {}
 }
 

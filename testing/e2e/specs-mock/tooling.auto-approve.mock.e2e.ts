@@ -20,7 +20,7 @@ describe("Tooling (mock) auto-approve read-only", () => {
 
   const nonce = crypto.randomUUID().slice(0, 8);
   const token = `AUTO_${nonce}`;
-  const readPath = "E2E/auto-approve.md";
+  const readPath = "Reference/SystemSculpt/Auto Approve Readme.md";
 
   before(async () => {
     vaultPath = await ensureE2EVault();

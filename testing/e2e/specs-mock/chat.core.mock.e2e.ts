@@ -30,11 +30,11 @@ describe("ChatView (mock) core flows", () => {
   const betaToken = `BETA_${nonce}`;
   const okToken = `OK_${nonce}`;
 
-  const alphaPath = "E2E/alpha.md";
-  const betaPath = "E2E/beta.md";
-  const outputPath = "E2E/output.md";
-  const mentionPath = "E2E/mention.md";
-  const dragPath = "E2E/drag.md";
+  const alphaPath = "Projects/Revenue Sprint/Alpha Notes.md";
+  const betaPath = "Projects/Revenue Sprint/Beta Notes.md";
+  const outputPath = "Projects/Revenue Sprint/Output Draft.md";
+  const mentionPath = "Reference/SystemSculpt/Mention Sample.md";
+  const dragPath = "Reference/SystemSculpt/Drag Sample.md";
 
   before(async () => {
     vaultPath = await ensureE2EVault();
