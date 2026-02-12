@@ -14,7 +14,7 @@ Typecheck the E2E harness/specs (fast sanity gate):
 npm run check:e2e
 ```
 
-### Mock chat specs (deterministic, no secrets)
+### Mock chat specs (deterministic backend, real license key)
 
 Runs the E2E suite against a local mock SystemSculpt API server (started automatically).
 
@@ -22,9 +22,16 @@ Runs the E2E suite against a local mock SystemSculpt API server (started automat
 npm run e2e:mock
 ```
 
+License key requirement:
+
+- `SYSTEMSCULPT_E2E_LICENSE_KEY` is still required by the plugin startup checks.
+- `testing/e2e/run.sh` auto-loads env from repo-local `.env.local` / `.env` before resolving fallback settings JSON.
+- If env is missing, it falls back to vault settings JSON (for example `~/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json`).
+
 Optional:
 - `SYSTEMSCULPT_E2E_MOCK_PORT` (default: `43111`)
 - `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
+- `SYSTEMSCULPT_E2E_VAULT_NAME` (default: `SystemSculpt Studio`; display name used for temp vault folder/title)
 - `SYSTEMSCULPT_E2E_SPEC` (run a single spec file, useful for CI sharding and local debugging)
 - `SYSTEMSCULPT_E2E_MOCK_DEBUG` (`1` enables mock server request logging)
 
@@ -44,7 +51,7 @@ npm run e2e:live
 
 Note: `npm run e2e:live` runs the full live suite in parallel (multiple Obsidian instances) for speed.
 
-FYI: Obsidian is a real Electron app during E2E runs, so it may still steal focus. The harness attempts to move/blur the window after reload, but macOS may still focus it during WebDriver interactions.
+FYI: Obsidian is a real Electron app during E2E runs, so it may still steal focus during WebDriver interactions. The harness now keeps the Obsidian window visible (no force-hide/offscreen behavior), which is required for reliable window-targeted GIF capture.
 
 Required:
 - `SYSTEMSCULPT_E2E_LICENSE_KEY`
@@ -53,8 +60,9 @@ Optional:
 - `SYSTEMSCULPT_E2E_SERVER_URL` (defaults to the plugin’s configured server URL)
 - `SYSTEMSCULPT_E2E_MODEL_ID` (defaults to `systemsculpt@@systemsculpt/ai-agent` in the specs)
 - `SYSTEMSCULPT_E2E_SETTINGS_JSON` (override the settings file used to seed live settings)
+ - `SYSTEMSCULPT_E2E_VAULT_NAME` (default: `SystemSculpt Studio`; display name used for temp vault folder/title)
+ - `SYSTEMSCULPT_E2E_WINDOW_MODE` (`capture` pins the Obsidian window visible + always-on-top for recording; `background` re-enables offscreen focus-avoid mode; default: no window manipulation)
  - `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
- - `SYSTEMSCULPT_E2E_FOCUS_GUARD` (`1` enables the macOS focus guard; default: enabled on macOS, disabled elsewhere)
  - `SYSTEMSCULPT_E2E_SKIP_BUILD` (`1` skips `npm run build` inside the runner)
 
 ### Mobile emulation specs
@@ -103,6 +111,13 @@ Or point directly at the settings file:
 SYSTEMSCULPT_E2E_SETTINGS_JSON="/absolute/path/to/your/vault/.obsidian/plugins/systemsculpt-ai/data.json" testing/e2e/run.sh live
 ```
 
+Optional repo-local env file (gitignored) for stable local runs:
+
+```bash
+# .env.local
+SYSTEMSCULPT_E2E_LICENSE_KEY=your-license-key
+```
+
 Mobile emulation runs also require live env values (same loader):
 
 ```bash
@@ -127,6 +142,7 @@ The runner exports these env vars from the vault settings:
 - WDIO configs: `testing/e2e/wdio.live.conf.mjs`, `testing/e2e/wdio.emu.conf.mjs`, `testing/e2e/wdio.mock.conf.mjs`
 - Fixture vault: `testing/e2e/fixtures/vault`
 - Per-worker temp vaults: `testing/e2e/fixtures/.tmp-vaults` (auto-created; safe to delete)
+- Temp vaults are copied under realistic folder names (default: `SystemSculpt Studio`) so UI captures look natural.
 - Logs/screenshots: `testing/e2e/logs`
 - Mock server: `testing/e2e/mock-server.mjs`
 
