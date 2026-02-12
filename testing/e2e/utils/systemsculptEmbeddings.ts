@@ -242,3 +242,89 @@ export async function getSimilarNotesViewState(): Promise<{
     };
   });
 }
+
+export async function startEmbeddingsProcessingFromView(): Promise<void> {
+  const result = await browser.executeObsidian(async ({ app }) => {
+    const leaves = app.workspace.getLeavesOfType("systemsculpt-embeddings-view");
+    const leaf = leaves[0];
+    const view: any = leaf?.view;
+    if (!view) {
+      return { ok: false, reason: "No Similar Notes view found" };
+    }
+
+    const root = view.containerEl as HTMLElement | undefined;
+    if (!root) {
+      return { ok: false, reason: "Embeddings view container missing" };
+    }
+
+    const ctaButton = root.querySelector(".embeddings-view-processing .mod-cta") as HTMLButtonElement | null;
+    if (!ctaButton) {
+      return { ok: false, reason: "Start Processing button not found" };
+    }
+
+    ctaButton.click();
+    return { ok: true };
+  });
+
+  if (!result?.ok) {
+    throw new Error(`Unable to start embeddings processing from view: ${result?.reason || "unknown error"}`);
+  }
+}
+
+export async function waitForEmbeddingsProgressUi(params?: { timeoutMs?: number }): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(() => {
+        const progressEl = document.querySelector(".embeddings-view-processing .processing-progress");
+        const barEl = document.querySelector(".embeddings-view-processing .systemsculpt-progress-fill");
+        return !!progressEl || !!barEl;
+      }),
+    {
+      timeout: params?.timeoutMs ?? 30000,
+      interval: 120,
+      timeoutMsg: "Embeddings processing UI did not appear in time.",
+    }
+  );
+}
+
+export async function waitForEmbeddingsProcessingToComplete(params?: {
+  timeoutMs?: number;
+  minPresent?: number;
+}): Promise<EmbeddingsStats> {
+  const minPresent = params?.minPresent ?? 1;
+
+  await browser.waitUntil(
+    async () =>
+      await browser.executeObsidian(
+        async ({ app }, { pluginId, minPresent }) => {
+          const pluginsApi: any = (app as any).plugins;
+          const plugin = pluginsApi?.getPlugin?.(pluginId);
+          if (!plugin) return false;
+
+          const manager = plugin.getOrCreateEmbeddingsManager?.();
+          if (!manager) return false;
+
+          try {
+            await manager.awaitReady?.();
+          } catch (_) {
+            return false;
+          }
+
+          const processing =
+            typeof manager.isCurrentlyProcessing === "function" ? !!manager.isCurrentlyProcessing() : false;
+          const stats = typeof manager.getStats === "function" ? manager.getStats() : null;
+          const present = Number(stats?.present ?? 0);
+
+          return !processing && present >= minPresent;
+        },
+        { pluginId: PLUGIN_ID, minPresent }
+      ),
+    {
+      timeout: params?.timeoutMs ?? 240000,
+      interval: 300,
+      timeoutMsg: `Embeddings processing did not complete with minPresent=${minPresent}`,
+    }
+  );
+
+  return await getEmbeddingsStats();
+}
