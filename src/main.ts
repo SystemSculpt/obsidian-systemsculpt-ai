@@ -2112,12 +2112,21 @@ export default class SystemSculptPlugin extends Plugin {
   public openSettingsTab(targetTab: string = "overview"): void {
     try {
       // @ts-ignore – Obsidian typings omit the settings API
-      this.app.setting.open();
-      // @ts-ignore – Obsidian typings omit the settings API
-      this.app.setting.openTabById(this.manifest.id);
+      const settingsApi: any = this.app.setting;
+      const isSettingsModalOpen = !!document.querySelector(".modal.mod-settings");
+      const activeSettingsTabId = String(settingsApi?.activeTab?.id ?? "");
+
+      if (!isSettingsModalOpen) {
+        settingsApi.open();
+      }
+      if (activeSettingsTabId !== this.manifest.id) {
+        settingsApi.openTabById(this.manifest.id);
+      }
+
+      const focusDelay = activeSettingsTabId === this.manifest.id ? 0 : 100;
       window.setTimeout(() => {
         this.app.workspace.trigger("systemsculpt:settings-focus-tab", targetTab);
-      }, 100);
+      }, focusDelay);
     } catch {
       new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
     }

@@ -1155,11 +1155,7 @@ export class EmbeddingsView extends ItemView {
         cls: 'mod-muted'
       });
       settingsBtn.addEventListener('click', () => {
-        // Open SystemSculpt settings
-        // @ts-ignore
-        this.app.setting.open();
-        // @ts-ignore
-        this.app.setting.openTabById(this.plugin.manifest.id);
+        this.plugin.openSettingsTab("embeddings");
       });
     }
   }

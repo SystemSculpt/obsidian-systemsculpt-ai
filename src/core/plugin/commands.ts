@@ -662,14 +662,8 @@ export class CommandManager {
       name: "Open Daily Vault Settings",
       callback: async () => {
         try {
-          // @ts-ignore – Obsidian API typing gap
-          this.app.setting.open();
-          // @ts-ignore – Obsidian API typing gap
-          this.app.setting.openTabById(this.plugin.manifest.id);
-          window.setTimeout(() => {
-            this.plugin.getDailySettingsService();
-            this.app.workspace.trigger("systemsculpt:settings-focus-tab", "daily-vault");
-          }, 100);
+          this.plugin.getDailySettingsService();
+          this.plugin.openSettingsTab("daily-vault");
         } catch (error) {
           logger?.error("Failed to open Daily Vault settings", error, {
             source: "CommandManager",

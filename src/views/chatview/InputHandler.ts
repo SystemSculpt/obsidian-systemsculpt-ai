@@ -1316,13 +1316,7 @@ export class InputHandler extends Component {
 
   private openSetupTabFallback(tabId: string = "overview"): void {
     try {
-      // @ts-ignore – Obsidian typings omit the settings API
-      this.app.setting.open();
-      // @ts-ignore
-      this.app.setting.openTabById(this.plugin.manifest.id);
-      window.setTimeout(() => {
-        this.app.workspace.trigger("systemsculpt:settings-focus-tab", tabId);
-      }, 100);
+      this.plugin.openSettingsTab(tabId);
     } catch (error) {
       new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
     }

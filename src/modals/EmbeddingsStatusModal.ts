@@ -407,14 +407,7 @@ export class EmbeddingsStatusModal extends StandardModal {
 
   private openSettings(): void {
     try {
-      (this.plugin.app as any).setting.open();
-      (this.plugin.app as any).setting.openTabById(this.plugin.manifest.id);
-      window.setTimeout(() => {
-        try {
-          this.plugin.app.workspace.trigger("systemsculpt:settings-focus-tab", "embeddings");
-        } catch {
-        }
-      }, 80);
+      this.plugin.openSettingsTab("embeddings");
       this.close();
     } catch {
     }
