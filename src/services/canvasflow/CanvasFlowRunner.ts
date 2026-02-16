@@ -175,7 +175,7 @@ export class CanvasFlowRunner {
     if (!promptParsed.ok) {
       throw new Error(
         promptParsed.reason === "not-canvasflow-prompt"
-          ? "This node's file is not a CanvasFlow prompt note. Add ss_flow_kind: prompt in frontmatter."
+          ? "This node's file is not a SystemSculpt prompt note. Add ss_flow_kind: prompt in frontmatter."
           : `Prompt note invalid: ${promptParsed.reason}`
       );
     }
@@ -328,9 +328,9 @@ export class CanvasFlowRunner {
 
     setStatus("Done.");
     if (generatedImagePaths.length === 1) {
-      new Notice(`CanvasFlow: generated ${generatedImagePaths[0]} (${modelDisplayName})`);
+      new Notice(`SystemSculpt: generated ${generatedImagePaths[0]} (${modelDisplayName})`);
     } else {
-      new Notice(`CanvasFlow: generated ${generatedImagePaths.length} images (${modelDisplayName})`);
+      new Notice(`SystemSculpt: generated ${generatedImagePaths.length} images (${modelDisplayName})`);
     }
   }
 

@@ -37,6 +37,7 @@ import {
   getCuratedReplicateModel,
   getCuratedReplicateModelGroups,
 } from "./ReplicateModelCatalog";
+import { tryCopyImageFileToClipboard } from "../../utils/clipboard";
 
 type PromptCacheEntry = {
   mtime: number;
@@ -95,6 +96,7 @@ export class CanvasFlowEnhancer {
   private readonly runner: CanvasFlowRunner;
   private runningNodeKeys = new Set<string>();
   private creatingFromImageKeys = new Set<string>();
+  private copyingImageKeys = new Set<string>();
   private workspaceEventRefs: any[] = [];
 
   constructor(
@@ -223,6 +225,8 @@ export class CanvasFlowEnhancer {
     // higher up in the DOM), so remove from both the view root and the document.
     root.querySelectorAll(".ss-canvasflow-menu-run").forEach((el) => el.remove());
     root.ownerDocument?.querySelectorAll?.(".ss-canvasflow-menu-run")?.forEach?.((el: any) => el?.remove?.());
+    root.querySelectorAll(".ss-canvasflow-menu-copy-image").forEach((el) => el.remove());
+    root.ownerDocument?.querySelectorAll?.(".ss-canvasflow-menu-copy-image")?.forEach?.((el: any) => el?.remove?.());
     root.querySelectorAll(".ss-canvasflow-menu-new-prompt").forEach((el) => el.remove());
     root.ownerDocument?.querySelectorAll?.(".ss-canvasflow-menu-new-prompt")?.forEach?.((el: any) => el?.remove?.());
   }
@@ -610,7 +614,7 @@ export class CanvasFlowEnhancer {
     );
 
     const header = controls.createDiv({ cls: "ss-canvasflow-node-header" });
-    header.createDiv({ text: "CanvasFlow Prompt", cls: "ss-canvasflow-node-title" });
+    header.createDiv({ text: "SystemSculpt Prompt", cls: "ss-canvasflow-node-title" });
     const badges = header.createDiv({ cls: "ss-canvasflow-node-badges" });
     badges.createEl("code", { text: options.promptFile.basename, cls: "ss-canvasflow-node-badge" });
     const modelBadgeData = formatReplicateModelBadge(effectiveModelSlug);
@@ -900,7 +904,7 @@ export class CanvasFlowEnhancer {
         }
       } catch (error: any) {
         setStatus("Save failed.");
-        new Notice(`CanvasFlow: failed to save prompt: ${error?.message || error}`);
+        new Notice(`SystemSculpt: failed to save prompt: ${error?.message || error}`);
       }
     };
 
@@ -1017,7 +1021,7 @@ export class CanvasFlowEnhancer {
         });
       } catch (error: any) {
         setStatus(String(error?.message || error || "Run failed"));
-        new Notice(`CanvasFlow run failed: ${error?.message || error}`);
+        new Notice(`SystemSculpt run failed: ${error?.message || error}`);
       } finally {
         runBtn.disabled = false;
         runBtn.classList.remove("ss-canvasflow-is-loading");
@@ -1257,7 +1261,7 @@ export class CanvasFlowEnhancer {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "clickable-icon ss-canvasflow-menu-run";
-    btn.setAttribute("aria-label", "CanvasFlow: Run");
+    btn.setAttribute("aria-label", "SystemSculpt - Run");
     btn.setAttribute("data-tooltip-position", "top");
     this.setMenuButtonIcon(btn, "play");
 
@@ -1270,6 +1274,36 @@ export class CanvasFlowEnhancer {
     menuEl.querySelectorAll(".ss-canvasflow-menu-run").forEach((el) => el.remove());
   }
 
+  private ensureMenuCopyImageButton(menuEl: HTMLElement): HTMLButtonElement {
+    const existing = menuEl.querySelector<HTMLButtonElement>("button.ss-canvasflow-menu-copy-image");
+    const newPromptBtn = menuEl.querySelector<HTMLButtonElement>("button.ss-canvasflow-menu-new-prompt");
+    if (existing) {
+      if (newPromptBtn && existing.nextElementSibling !== newPromptBtn) {
+        menuEl.insertBefore(existing, newPromptBtn);
+      }
+      return existing;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "clickable-icon ss-canvasflow-menu-copy-image";
+    btn.setAttribute("aria-label", "SystemSculpt - Copy Image to Clipboard");
+    btn.setAttribute("data-tooltip-position", "top");
+    this.setMenuButtonIcon(btn, "copy");
+
+    if (newPromptBtn) {
+      menuEl.insertBefore(btn, newPromptBtn);
+    } else {
+      menuEl.appendChild(btn);
+    }
+
+    return btn;
+  }
+
+  private removeMenuCopyImageButton(menuEl: HTMLElement): void {
+    menuEl.querySelectorAll(".ss-canvasflow-menu-copy-image").forEach((el) => el.remove());
+  }
+
   private ensureMenuNewPromptButton(menuEl: HTMLElement): HTMLButtonElement {
     const existing = menuEl.querySelector<HTMLButtonElement>("button.ss-canvasflow-menu-new-prompt");
     if (existing) {
@@ -1279,7 +1313,7 @@ export class CanvasFlowEnhancer {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "clickable-icon ss-canvasflow-menu-new-prompt";
-    btn.setAttribute("aria-label", "CanvasFlow: New prompt");
+    btn.setAttribute("aria-label", "SystemSculpt - New Prompt");
     btn.setAttribute("data-tooltip-position", "top");
     this.setMenuButtonIcon(btn, "sparkles");
 
@@ -1316,6 +1350,7 @@ export class CanvasFlowEnhancer {
     const selectedIds = internalSelection !== null ? internalSelection : this.getSelectedNodeIds(options.root);
     if (selectedIds.length !== 1) {
       this.removeMenuRunButton(menuEl);
+      this.removeMenuCopyImageButton(menuEl);
       this.removeMenuNewPromptButton(menuEl);
       return;
     }
@@ -1324,6 +1359,7 @@ export class CanvasFlowEnhancer {
     const node = options.nodesById.get(selectedNodeId);
     if (!node || !isCanvasFileNode(node)) {
       this.removeMenuRunButton(menuEl);
+      this.removeMenuCopyImageButton(menuEl);
       this.removeMenuNewPromptButton(menuEl);
       return;
     }
@@ -1331,8 +1367,9 @@ export class CanvasFlowEnhancer {
     const filePath = String(node.file || "");
     const lower = filePath.toLowerCase();
 
-    // CanvasFlow prompt note -> show Run button.
+    // SystemSculpt prompt note -> show Run button.
     if (lower.endsWith(".md")) {
+      this.removeMenuCopyImageButton(menuEl);
       this.removeMenuNewPromptButton(menuEl);
 
       const promptAbs = this.app.vault.getAbstractFileByPath(filePath);
@@ -1370,7 +1407,7 @@ export class CanvasFlowEnhancer {
 
           const canvasAbs = this.app.vault.getAbstractFileByPath(canvasPath);
           if (!(canvasAbs instanceof TFile)) {
-            new Notice("CanvasFlow: canvas file not found.");
+            new Notice("SystemSculpt: canvas file not found.");
             return;
           }
 
@@ -1379,11 +1416,11 @@ export class CanvasFlowEnhancer {
             return;
           }
 
-          const originalLabel = btn.getAttribute("aria-label") || "CanvasFlow: Run";
+          const originalLabel = btn.getAttribute("aria-label") || "SystemSculpt - Run";
           btn.disabled = true;
           btn.classList.add("ss-canvasflow-is-loading");
           this.setMenuButtonIcon(btn, "loader");
-          btn.setAttribute("aria-label", "CanvasFlow: Running...");
+          btn.setAttribute("aria-label", "SystemSculpt - Running...");
 
           this.runningNodeKeys.add(runKey);
           void this.runner
@@ -1391,11 +1428,11 @@ export class CanvasFlowEnhancer {
               canvasFile: canvasAbs,
               promptNodeId: nodeId,
               status: (status) => {
-                btn.setAttribute("aria-label", `CanvasFlow: ${status}`);
+                btn.setAttribute("aria-label", `SystemSculpt - ${status}`);
               },
             })
             .catch((error: any) => {
-              new Notice(`CanvasFlow run failed: ${error?.message || error}`);
+              new Notice(`SystemSculpt run failed: ${error?.message || error}`);
             })
             .finally(() => {
               this.runningNodeKeys.delete(runKey);
@@ -1414,21 +1451,39 @@ export class CanvasFlowEnhancer {
     if (isImagePath(filePath)) {
       this.removeMenuRunButton(menuEl);
 
-      const btn = this.ensureMenuNewPromptButton(menuEl);
-      btn.dataset.ssCanvasflowCanvasPath = options.canvasFile.path;
-      btn.dataset.ssCanvasflowImageNodeId = selectedNodeId;
+      const copyBtn = this.ensureMenuCopyImageButton(menuEl);
+      copyBtn.dataset.ssCanvasflowCanvasPath = options.canvasFile.path;
+      copyBtn.dataset.ssCanvasflowImageNodeId = selectedNodeId;
+
+      const copyKey = this.getCopyKey(options.canvasFile.path, selectedNodeId);
+      const copying = this.copyingImageKeys.has(copyKey);
+      copyBtn.disabled = copying;
+      copyBtn.classList.toggle("ss-canvasflow-is-loading", copying);
+      this.setMenuButtonIcon(copyBtn, copying ? "loader" : "copy");
+
+      if (!(copyBtn as any).__ssCanvasflowCopyImageBound) {
+        (copyBtn as any).__ssCanvasflowCopyImageBound = true;
+        copyBtn.addEventListener("click", (e) => {
+          stopEvent(e);
+          void this.handleCopySelectedImageToClipboard(copyBtn);
+        });
+      }
+
+      const newPromptBtn = this.ensureMenuNewPromptButton(menuEl);
+      newPromptBtn.dataset.ssCanvasflowCanvasPath = options.canvasFile.path;
+      newPromptBtn.dataset.ssCanvasflowImageNodeId = selectedNodeId;
 
       const createKey = this.getCreateKey(options.canvasFile.path, selectedNodeId);
       const creating = this.creatingFromImageKeys.has(createKey);
-      btn.disabled = creating;
-      btn.classList.toggle("ss-canvasflow-is-loading", creating);
-      this.setMenuButtonIcon(btn, creating ? "loader" : "sparkles");
+      newPromptBtn.disabled = creating;
+      newPromptBtn.classList.toggle("ss-canvasflow-is-loading", creating);
+      this.setMenuButtonIcon(newPromptBtn, creating ? "loader" : "sparkles");
 
-      if (!(btn as any).__ssCanvasflowNewPromptBound) {
-        (btn as any).__ssCanvasflowNewPromptBound = true;
-        btn.addEventListener("click", (e) => {
+      if (!(newPromptBtn as any).__ssCanvasflowNewPromptBound) {
+        (newPromptBtn as any).__ssCanvasflowNewPromptBound = true;
+        newPromptBtn.addEventListener("click", (e) => {
           stopEvent(e);
-          void this.handleCreatePromptFromSelectedImage(btn);
+          void this.handleCreatePromptFromSelectedImage(newPromptBtn);
         });
       }
 
@@ -1437,11 +1492,16 @@ export class CanvasFlowEnhancer {
 
     // Default: neither prompt nor image.
     this.removeMenuRunButton(menuEl);
+    this.removeMenuCopyImageButton(menuEl);
     this.removeMenuNewPromptButton(menuEl);
   }
 
   private getCreateKey(canvasPath: string, imageNodeId: string): string {
     return `${canvasPath}::image::${imageNodeId}`;
+  }
+
+  private getCopyKey(canvasPath: string, imageNodeId: string): string {
+    return `${canvasPath}::image-copy::${imageNodeId}`;
   }
 
   private findControllerForCanvasPath(canvasPath: string): LeafController | null {
@@ -1468,6 +1528,79 @@ export class CanvasFlowEnhancer {
     return null;
   }
 
+  private async handleCopySelectedImageToClipboard(btn: HTMLButtonElement): Promise<void> {
+    const canvasPath = String(btn.dataset.ssCanvasflowCanvasPath || "").trim();
+    const imageNodeId = String(btn.dataset.ssCanvasflowImageNodeId || "").trim();
+    if (!canvasPath || !imageNodeId) {
+      return;
+    }
+
+    const canvasAbs = this.app.vault.getAbstractFileByPath(canvasPath);
+    if (!(canvasAbs instanceof TFile)) {
+      new Notice("SystemSculpt: canvas file not found.");
+      return;
+    }
+
+    const copyKey = this.getCopyKey(canvasPath, imageNodeId);
+    if (this.copyingImageKeys.has(copyKey)) {
+      return;
+    }
+
+    const originalLabel =
+      btn.getAttribute("aria-label") || "SystemSculpt - Copy Image to Clipboard";
+    const originalIcon = String(btn.getAttribute("data-ss-canvasflow-icon") || "copy");
+
+    this.copyingImageKeys.add(copyKey);
+    btn.disabled = true;
+
+    try {
+      const canvasRaw = await this.app.vault.read(canvasAbs);
+      const doc = parseCanvasDocument(canvasRaw);
+      if (!doc) {
+        new Notice("SystemSculpt: failed to parse .canvas file.");
+        return;
+      }
+
+      const { nodesById } = indexCanvas(doc);
+      const imageNode = nodesById.get(imageNodeId);
+      if (!imageNode || !isCanvasFileNode(imageNode)) {
+        new Notice("SystemSculpt: selected node is not a file node.");
+        return;
+      }
+
+      const imagePath = String(imageNode.file || "").trim();
+      if (!imagePath || !isImagePath(imagePath)) {
+        new Notice("SystemSculpt: selected node is not an image.");
+        return;
+      }
+
+      const imageAbs = this.app.vault.getAbstractFileByPath(imagePath);
+      if (!(imageAbs instanceof TFile)) {
+        new Notice("SystemSculpt: image file not found.");
+        return;
+      }
+
+      btn.classList.add("ss-canvasflow-is-loading");
+      this.setMenuButtonIcon(btn, "loader");
+      btn.setAttribute("aria-label", "SystemSculpt - Copying Image...");
+
+      const copied = await tryCopyImageFileToClipboard(this.app, imageAbs);
+      if (copied) {
+        new Notice("Image copied to clipboard.");
+      } else {
+        new Notice("Unable to copy image to clipboard.");
+      }
+    } catch {
+      new Notice("Unable to copy image to clipboard.");
+    } finally {
+      this.copyingImageKeys.delete(copyKey);
+      btn.disabled = false;
+      btn.classList.remove("ss-canvasflow-is-loading");
+      this.setMenuButtonIcon(btn, originalIcon);
+      btn.setAttribute("aria-label", originalLabel);
+    }
+  }
+
   private async handleCreatePromptFromSelectedImage(btn: HTMLButtonElement): Promise<void> {
     const canvasPath = String(btn.dataset.ssCanvasflowCanvasPath || "").trim();
     const imageNodeId = String(btn.dataset.ssCanvasflowImageNodeId || "").trim();
@@ -1477,7 +1610,7 @@ export class CanvasFlowEnhancer {
 
     const canvasAbs = this.app.vault.getAbstractFileByPath(canvasPath);
     if (!(canvasAbs instanceof TFile)) {
-      new Notice("CanvasFlow: canvas file not found.");
+      new Notice("SystemSculpt: canvas file not found.");
       return;
     }
 
@@ -1486,7 +1619,7 @@ export class CanvasFlowEnhancer {
       return;
     }
 
-    const originalLabel = btn.getAttribute("aria-label") || "CanvasFlow: New prompt";
+    const originalLabel = btn.getAttribute("aria-label") || "SystemSculpt - New Prompt";
     const originalIcon = String(btn.getAttribute("data-ss-canvasflow-icon") || "sparkles");
 
     this.creatingFromImageKeys.add(createKey);
@@ -1496,32 +1629,32 @@ export class CanvasFlowEnhancer {
       const canvasRaw = await this.app.vault.read(canvasAbs);
       const doc = parseCanvasDocument(canvasRaw);
       if (!doc) {
-        new Notice("CanvasFlow: failed to parse .canvas file.");
+        new Notice("SystemSculpt: failed to parse .canvas file.");
         return;
       }
 
       const { nodesById } = indexCanvas(doc);
       const imageNode = nodesById.get(imageNodeId);
       if (!imageNode || !isCanvasFileNode(imageNode)) {
-        new Notice("CanvasFlow: selected node is not a file node.");
+        new Notice("SystemSculpt: selected node is not a file node.");
         return;
       }
 
       const imagePath = String(imageNode.file || "").trim();
       if (!imagePath || !isImagePath(imagePath)) {
-        new Notice("CanvasFlow: selected node is not an image.");
+        new Notice("SystemSculpt: selected node is not an image.");
         return;
       }
 
       const modelSlug = String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
       if (!modelSlug) {
-        new Notice("CanvasFlow: set a default Replicate model first (Settings -> Image Generation).");
+        new Notice("SystemSculpt: set a default Replicate model first (Settings -> Image Generation).");
         return;
       }
 
       btn.classList.add("ss-canvasflow-is-loading");
       this.setMenuButtonIcon(btn, "loader");
-      btn.setAttribute("aria-label", "CanvasFlow: Creating prompt...");
+      btn.setAttribute("aria-label", "SystemSculpt - Creating Prompt...");
 
       const replicateInput: Record<string, unknown> =
         modelSlug === "google/nano-banana-pro"
@@ -1550,9 +1683,9 @@ export class CanvasFlowEnhancer {
         this.scheduleUpdate(controller);
       }
 
-      new Notice("CanvasFlow: prompt created. Type your prompt and press Cmd/Ctrl+Enter to run.");
+      new Notice("SystemSculpt: prompt created. Type your prompt and press Cmd/Ctrl+Enter to run.");
     } catch (error: any) {
-      new Notice(`CanvasFlow: failed to create prompt: ${error?.message || error}`);
+      new Notice(`SystemSculpt: failed to create prompt: ${error?.message || error}`);
     } finally {
       this.creatingFromImageKeys.delete(createKey);
       btn.disabled = false;
@@ -1593,7 +1726,7 @@ export class CanvasFlowEnhancer {
       .join("\n")
       .replace(/\n{3,}/g, "\n\n");
 
-    const notePath = await this.getAvailableNotePath(promptsDir, `CanvasFlow Prompt ${this.nowStamp()}`);
+    const notePath = await this.getAvailableNotePath(promptsDir, `SystemSculpt Prompt ${this.nowStamp()}`);
     const promptFile = await this.app.vault.create(notePath, template.endsWith("\n") ? template : `${template}\n`);
 
     const placed = computeNextNodePosition(options.imageNode, {
@@ -1639,7 +1772,7 @@ export class CanvasFlowEnhancer {
   }
 
   private async getAvailableNotePath(folderPath: string, baseName: string): Promise<string> {
-    const safeBase = sanitizeChatTitle(baseName).trim() || "CanvasFlow Prompt";
+    const safeBase = sanitizeChatTitle(baseName).trim() || "SystemSculpt Prompt";
     let attempt = 0;
     while (attempt < 1000) {
       const suffix = attempt === 0 ? "" : ` (${attempt})`;

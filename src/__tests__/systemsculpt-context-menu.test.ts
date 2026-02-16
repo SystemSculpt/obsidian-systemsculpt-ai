@@ -2,6 +2,7 @@ import type { App, Menu, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { FileContextMenuService } from "../context-menu/FileContextMenuService";
 import { errorLogger } from "../utils/errorLogger";
+import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import type {
   DocumentProcessingModalHandle,
   DocumentProcessingModalLauncher,
@@ -11,6 +12,10 @@ jest.mock("../views/chatview/ChatView", () => ({
   ChatView: jest.fn().mockImplementation(() => ({
     addFileToContext: jest.fn(),
   })),
+}));
+
+jest.mock("../utils/clipboard", () => ({
+  tryCopyImageFileToClipboard: jest.fn(),
 }));
 
 const createMenuStub = () => {
@@ -177,6 +182,9 @@ const bootstrap = (
     service.start();
   }
 
+  (tryCopyImageFileToClipboard as jest.Mock).mockReset();
+  (tryCopyImageFileToClipboard as jest.Mock).mockResolvedValue(true);
+
   return {
     app,
     plugin,
@@ -306,11 +314,61 @@ const bootstrap = (
   it("does not add entries for unsupported files", () => {
     const { handlers } = bootstrap();
     const menu = createMenuStub();
+    const file = createFile("zip");
+
+    emitFileMenu(handlers, menu, file, "preview");
+
+    expect(menu.recordedItems).toHaveLength(0);
+  });
+
+  it("adds copy image entry for image files", () => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
     const file = createFile("png");
 
     emitFileMenu(handlers, menu, file, "preview");
 
-    expect(menu.recordedItems.some((item) => item.title.includes("Markdown"))).toBe(false);
+    const titles = menu.recordedItems.map((item) => item.title);
+    expect(titles).toContain("SystemSculpt - Copy Image to Clipboard");
+  });
+
+  it("copies image to clipboard when copy image menu item is clicked", async () => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
+    const file = createFile("png");
+
+    emitFileMenu(handlers, menu, file, "file-explorer");
+
+    const entry = menu.recordedItems.find(
+      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+    );
+    expect(entry).toBeDefined();
+    await entry!.onClick?.();
+
+    expect(tryCopyImageFileToClipboard).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ path: file.path })
+    );
+  });
+
+  it("shows failure notice when copy image fails", async () => {
+    const { handlers } = bootstrap();
+    (tryCopyImageFileToClipboard as jest.Mock).mockResolvedValueOnce(false);
+    const menu = createMenuStub();
+    const file = createFile("png");
+
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    emitFileMenu(handlers, menu, file, "file-explorer");
+
+    const entry = menu.recordedItems.find(
+      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+    );
+    expect(entry).toBeDefined();
+    await entry!.onClick?.();
+
+    expect(logSpy).toHaveBeenCalledWith("Notice: Unable to copy image to clipboard.");
+    logSpy.mockRestore();
   });
 
   it("adds a single entry when multiple files are selected but only one is convertible", () => {

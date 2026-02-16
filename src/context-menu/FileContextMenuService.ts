@@ -28,6 +28,7 @@ import {
   type DocumentProcessingModalLauncher,
 } from "../modals/DocumentProcessingModal";
 import { TranscriptionTitleService } from "../services/transcription/TranscriptionTitleService";
+import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const CHAT_IMAGE_EXTENSIONS = new Set([
@@ -37,6 +38,12 @@ const CHAT_IMAGE_EXTENSIONS = new Set([
   "gif",
   "webp",
   "svg",
+]);
+const COPYABLE_IMAGE_EXTENSIONS = new Set([
+  ...CHAT_IMAGE_EXTENSIONS,
+  "bmp",
+  "tiff",
+  "tif",
 ]);
 
 const CONVERT_MENU_TITLE = "Convert to Markdown";
@@ -261,6 +268,7 @@ export class FileContextMenuService {
     const extension = normalizeFileExtension(file.extension);
     this.logMenuOpen(file, extension, context);
     const shouldChat = this.shouldOfferChatWithFile(extension);
+    const shouldCopyImage = this.shouldOfferCopyImage(extension);
     const shouldConvertDocument = isDocumentFileExtension(extension);
     const shouldConvertAudio = isAudioFileExtension(extension);
 
@@ -271,11 +279,12 @@ export class FileContextMenuService {
       leafType: context.leafType,
       multiSelectCount: context.multiSelectCount,
       shouldChat,
+      shouldCopyImage,
       shouldConvertDocument,
       shouldConvertAudio,
     });
 
-    if (!shouldChat && !shouldConvertDocument && !shouldConvertAudio) {
+    if (!shouldChat && !shouldCopyImage && !shouldConvertDocument && !shouldConvertAudio) {
       return;
     }
 
@@ -284,6 +293,10 @@ export class FileContextMenuService {
 
     if (shouldChat) {
       this.addChatWithFileMenuItem(menu, file, context);
+    }
+
+    if (shouldCopyImage) {
+      this.addCopyImageToClipboardMenuItem(menu, file, context);
     }
 
     if (shouldConvertDocument) {
@@ -323,9 +336,15 @@ export class FileContextMenuService {
     const ext = normalizeFileExtension(file.extension);
     return (
       this.shouldOfferChatWithFile(ext) ||
+      this.shouldOfferCopyImage(ext) ||
       isDocumentFileExtension(ext) ||
       isAudioFileExtension(ext)
     );
+  }
+
+  private shouldOfferCopyImage(extension: string): boolean {
+    if (!extension) return false;
+    return COPYABLE_IMAGE_EXTENSIONS.has(extension);
   }
 
   private addChatWithFileMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
@@ -346,6 +365,28 @@ export class FileContextMenuService {
           } catch (error) {
             this.error("Chat with file failed", error, { filePath: file.path });
             new Notice("Failed to open chat with file", 5000);
+          }
+        });
+    });
+  }
+
+  private addCopyImageToClipboardMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
+    menu.addItem((item) => {
+      item
+        .setTitle("SystemSculpt - Copy Image to Clipboard")
+        .setIcon("copy")
+        .setSection("systemsculpt")
+        .onClick(async () => {
+          this.info("Copy image to clipboard triggered", {
+            filePath: file.path,
+            source: context.source,
+          });
+
+          const copied = await tryCopyImageFileToClipboard(this.app, file);
+          if (copied) {
+            new Notice("Image copied to clipboard.");
+          } else {
+            new Notice("Unable to copy image to clipboard.");
           }
         });
     });

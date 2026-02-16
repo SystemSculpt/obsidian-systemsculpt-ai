@@ -276,6 +276,7 @@
 
 /* Canvas selection toolbar buttons */
 .ss-canvasflow-menu-run.ss-canvasflow-is-loading svg,
+.ss-canvasflow-menu-copy-image.ss-canvasflow-is-loading svg,
 .ss-canvasflow-menu-new-prompt.ss-canvasflow-is-loading svg {
   animation: ss-canvasflow-spin 1s linear infinite;
 }

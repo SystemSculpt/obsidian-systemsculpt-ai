@@ -62,14 +62,14 @@ Source of truth:
 | YouTube Canvas - Extract transcript and create note |  | `open-youtube-canvas` | Opens YouTube Canvas modal |
 | Run Audio Chunking Analysis |  | `audio-chunking-analysis` | Developer-facing analysis command |
 
-## Automations and CanvasFlow
+## Automations and SystemSculpt Canvas
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Run Workflow Automation |  | `run-workflow-automation` | Runs automation for active markdown note |
 | Show Automation Backlog |  | `open-automation-backlog` | Opens automation backlog modal |
-| CanvasFlow - Create Prompt Node (Active Canvas) |  | `canvasflow-create-prompt-node` | Only when active view is Canvas |
-| CanvasFlow - Toggle Enhancements |  | `canvasflow-toggle-enhancements` | Toggles CanvasFlow enhancement mode |
+| SystemSculpt - Create Prompt Node (Active Canvas) |  | `canvasflow-create-prompt-node` | Only when active view is Canvas |
+| SystemSculpt - Toggle Canvas Enhancements |  | `canvasflow-toggle-enhancements` | Toggles SystemSculpt canvas enhancement mode |
 
 ## Benchmark and diagnostics
 

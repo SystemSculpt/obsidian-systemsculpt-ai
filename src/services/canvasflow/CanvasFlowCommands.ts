@@ -33,7 +33,7 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 }
 
 async function getAvailableNotePath(app: App, folderPath: string, baseName: string): Promise<string> {
-  const safeBase = sanitizeChatTitle(baseName).trim() || "CanvasFlow Prompt";
+  const safeBase = sanitizeChatTitle(baseName).trim() || "SystemSculpt Prompt";
   let attempt = 0;
   while (attempt < 1000) {
     const suffix = attempt === 0 ? "" : ` (${attempt})`;
@@ -48,7 +48,7 @@ async function getAvailableNotePath(app: App, folderPath: string, baseName: stri
 
 export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin: SystemSculptPlugin): Promise<void> {
   if (!Platform.isDesktopApp) {
-    new Notice("CanvasFlow is desktop-only.");
+    new Notice("SystemSculpt canvas tools are desktop-only.");
     return;
   }
 
@@ -94,7 +94,7 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
     .join("\n")
     .replace(/\n{3,}/g, "\n\n");
 
-  const notePath = await getAvailableNotePath(app, promptsDir, `CanvasFlow Prompt ${nowStamp()}`);
+  const notePath = await getAvailableNotePath(app, promptsDir, `SystemSculpt Prompt ${nowStamp()}`);
   const promptFile = await app.vault.create(notePath, template.endsWith("\n") ? template : `${template}\n`);
 
   const pos = computeNewNodePositionNearRightEdge(doc);
@@ -108,5 +108,5 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
   const updatedDoc = added.doc;
   await app.vault.modify(canvasFile, serializeCanvasDocument(updatedDoc));
 
-  new Notice("CanvasFlow prompt node created.");
+  new Notice("SystemSculpt prompt node created.");
 }

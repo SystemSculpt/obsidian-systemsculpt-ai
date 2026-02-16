@@ -19,21 +19,21 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   containerEl.createEl("h3", { text: "Image Generation" });
   containerEl.createEl("p", {
-    text: "Configure Replicate and enable CanvasFlow (experimental) to run ComfyUI-like image graphs inside Obsidian Canvas.",
+    text: "Configure Replicate and enable SystemSculpt Canvas (experimental) to run ComfyUI-like image graphs inside Obsidian Canvas.",
     cls: "setting-item-description",
   });
 
   new Setting(containerEl)
-    .setName("Enable CanvasFlow enhancements (experimental)")
+    .setName("Enable SystemSculpt Canvas enhancements (experimental)")
     .setDesc(
-      "Adds a CanvasFlow Run button to the Canvas selection toolbar and injects prompt controls into CanvasFlow prompt nodes. Desktop-only. Expect breakage after Obsidian updates."
+      "Adds SystemSculpt canvas action buttons to the Canvas selection toolbar and injects prompt controls into SystemSculpt prompt nodes. Desktop-only. Expect breakage after Obsidian updates."
     )
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.canvasFlowEnabled === true)
         .onChange(async (value) => {
           await plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: value });
-          new Notice(value ? "CanvasFlow enabled." : "CanvasFlow disabled.");
+          new Notice(value ? "SystemSculpt canvas enhancements enabled." : "SystemSculpt canvas enhancements disabled.");
         });
     });
 
@@ -54,7 +54,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   const modelSetting = new Setting(containerEl)
     .setName("Default image model")
-    .setDesc("Used when a CanvasFlow prompt node doesn't specify ss_replicate_model. Use the browser button to pick a model.");
+    .setDesc("Used when a SystemSculpt prompt node doesn't specify ss_replicate_model. Use the browser button to pick a model.");
 
   modelSetting.addText((text) => {
     text
@@ -119,7 +119,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   new Setting(containerEl)
     .setName("Prediction poll interval (ms)")
-    .setDesc("How often CanvasFlow checks Replicate for status updates.")
+    .setDesc("How often SystemSculpt canvas generation checks Replicate for status updates.")
     .addText((text) => {
       text
         .setPlaceholder("1000")
@@ -213,7 +213,7 @@ async function openReplicateModelBrowser(tabInstance: SystemSculptSettingTab): P
     size: "large",
     customContent: (containerEl) => {
       const hint = containerEl.createEl("p", {
-        text: "Pick a model for CanvasFlow. The dropdown in prompt nodes uses the same curated list.",
+        text: "Pick a model for SystemSculpt canvas prompts. The dropdown in prompt nodes uses the same curated list.",
         cls: "setting-item-description",
       });
       hint.style.marginTop = "0";

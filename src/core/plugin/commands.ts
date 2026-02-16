@@ -741,7 +741,7 @@ export class CommandManager {
   private registerCanvasFlowCommands() {
     this.plugin.addCommand({
       id: "canvasflow-create-prompt-node",
-      name: "CanvasFlow - Create Prompt Node (Active Canvas)",
+      name: "SystemSculpt - Create Prompt Node (Active Canvas)",
       checkCallback: (checking: boolean) => {
         const leaf = this.app.workspace.activeLeaf;
         const viewType = (leaf?.view as any)?.getViewType?.();
@@ -752,7 +752,7 @@ export class CommandManager {
               const { createCanvasFlowPromptNodeInActiveCanvas } = await import("../../services/canvasflow/CanvasFlowCommands");
               await createCanvasFlowPromptNodeInActiveCanvas(this.app, this.plugin);
             } catch (error: any) {
-              new Notice(`CanvasFlow failed: ${error?.message || error}`);
+              new Notice(`SystemSculpt canvas action failed: ${error?.message || error}`);
             }
           })();
         }
@@ -762,11 +762,11 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "canvasflow-toggle-enhancements",
-      name: "CanvasFlow - Toggle Enhancements",
+      name: "SystemSculpt - Toggle Canvas Enhancements",
       callback: async () => {
         const next = !(this.plugin.settings.canvasFlowEnabled === true);
         await this.plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: next });
-        new Notice(next ? "CanvasFlow enabled." : "CanvasFlow disabled.");
+        new Notice(next ? "SystemSculpt canvas enhancements enabled." : "SystemSculpt canvas enhancements disabled.");
       },
     });
   }

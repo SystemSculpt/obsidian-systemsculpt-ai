@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { tryCopyToClipboard } from "../clipboard";
+import { tryCopyImageFileToClipboard } from "../clipboard";
 
 describe("clipboard", () => {
   describe("tryCopyToClipboard", () => {
@@ -174,6 +175,189 @@ describe("clipboard", () => {
 
       expect(result).toBe(true);
       expect(writeText).toHaveBeenCalledWith(unicodeText);
+    });
+  });
+
+  describe("tryCopyImageFileToClipboard", () => {
+    const originalGlobalRequire = (global as any).require;
+    const originalWindowRequire = (window as any).require;
+
+    const makeFile = (extension: string) =>
+      ({
+        extension,
+      }) as any;
+
+    const makeApp = (bytes: ArrayBuffer) =>
+      ({
+        vault: {
+          readBinary: jest.fn().mockResolvedValue(bytes),
+        },
+      }) as any;
+
+    afterEach(() => {
+      delete (global as any).ClipboardItem;
+      if (typeof originalGlobalRequire === "undefined") {
+        delete (global as any).require;
+      } else {
+        (global as any).require = originalGlobalRequire;
+      }
+      if (typeof originalWindowRequire === "undefined") {
+        delete (window as any).require;
+      } else {
+        (window as any).require = originalWindowRequire;
+      }
+    });
+
+    it("writes PNG image data to clipboard", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      const clipboardItems: any[] = [];
+      (global as any).ClipboardItem = class {
+        data: Record<string, Blob>;
+        constructor(data: Record<string, Blob>) {
+          this.data = data;
+          clipboardItems.push(this);
+        }
+      };
+
+      const app = makeApp(new Uint8Array([1, 2, 3]).buffer);
+      const file = makeFile("png");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(true);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(clipboardItems).toHaveLength(1);
+      expect(Object.keys(clipboardItems[0].data)).toEqual(["image/png"]);
+      expect(clipboardItems[0].data["image/png"]).toBeInstanceOf(Blob);
+      expect(clipboardItems[0].data["image/png"].type).toBe("image/png");
+    });
+
+    it("maps JPG to image/jpeg", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      let capturedData: Record<string, Blob> | null = null;
+      (global as any).ClipboardItem = class {
+        constructor(data: Record<string, Blob>) {
+          capturedData = data;
+        }
+      };
+
+      const app = makeApp(new Uint8Array([7]).buffer);
+      const file = makeFile("jpg");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(true);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(capturedData).not.toBeNull();
+      expect(Object.keys(capturedData!)).toEqual(["image/jpeg"]);
+    });
+
+    it("returns false when ClipboardItem is unavailable", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      const app = makeApp(new Uint8Array([1]).buffer);
+      const file = makeFile("png");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it("returns false when clipboard write fails", async () => {
+      const write = jest.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      (global as any).ClipboardItem = class {
+        constructor(_data: Record<string, Blob>) {}
+      };
+
+      const app = makeApp(new Uint8Array([1]).buffer);
+      const file = makeFile("png");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(false);
+      expect(write).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to electron clipboard when web clipboard write fails", async () => {
+      const write = jest.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      (global as any).ClipboardItem = class {
+        constructor(_data: Record<string, Blob>) {}
+      };
+
+      const createFromDataURL = jest.fn().mockReturnValue({
+        isEmpty: () => false,
+      });
+      const writeImage = jest.fn();
+      const mockRequire = jest.fn().mockImplementation((mod: string) => {
+        if (mod !== "electron") throw new Error("unexpected module");
+        return {
+          clipboard: { writeImage },
+          nativeImage: { createFromDataURL },
+        };
+      });
+      (global as any).require = mockRequire;
+      (window as any).require = mockRequire;
+
+      const app = makeApp(new Uint8Array([1, 2, 3]).buffer);
+      const file = makeFile("png");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(true);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(createFromDataURL).toHaveBeenCalledTimes(1);
+      expect(writeImage).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns false for unsupported file extension", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write },
+        writable: true,
+        configurable: true,
+      });
+
+      (global as any).ClipboardItem = class {
+        constructor(_data: Record<string, Blob>) {}
+      };
+
+      const app = makeApp(new Uint8Array([1]).buffer);
+      const file = makeFile("heic");
+
+      const result = await tryCopyImageFileToClipboard(app, file);
+
+      expect(result).toBe(false);
+      expect(write).not.toHaveBeenCalled();
     });
   });
 });
