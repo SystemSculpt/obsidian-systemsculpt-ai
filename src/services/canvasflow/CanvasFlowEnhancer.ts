@@ -1,4 +1,4 @@
-import { App, Notice, Platform, setIcon, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { App, Modal, Notice, Platform, setIcon, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
 import YAML from "yaml";
 import type SystemSculptPlugin from "../../main";
 import {
@@ -23,6 +23,10 @@ import {
   CANVASFLOW_PROMPT_NODE_CSS_VAR_HEIGHT,
   CANVASFLOW_PROMPT_NODE_CSS_VAR_WIDTH,
   CANVASFLOW_PROMPT_NODE_HEIGHT_PX,
+  CANVASFLOW_PROMPT_NODE_MAX_HEIGHT_PX,
+  CANVASFLOW_PROMPT_NODE_MAX_WIDTH_PX,
+  CANVASFLOW_PROMPT_NODE_MIN_HEIGHT_PX,
+  CANVASFLOW_PROMPT_NODE_MIN_WIDTH_PX,
   CANVASFLOW_PROMPT_NODE_WIDTH_PX,
 } from "./CanvasFlowUiConstants";
 import {
@@ -36,16 +40,13 @@ import {
 } from "./ImageGenerationModelCatalog";
 import { tryCopyImageFileToClipboard } from "../../utils/clipboard";
 import { findCanvasSelectionMenu } from "./CanvasFlowSelectionMenuHelpers";
-import { syncCanvasFlowAspectRatioPresetControls } from "./CanvasFlowPromptNodeState";
 import { CanvasFlowCanvasAdapter } from "./CanvasFlowCanvasAdapter";
 import {
   clampImageCount,
   cloneCanvasFlowPromptDraft,
   createCanvasFlowPromptDraft,
-  deriveDimensionsFromAspectPreset,
   getDraftAspectRatioOrDefault,
   getEffectiveDraftModel,
-  parsePositiveInt,
   type CanvasFlowPromptDraft,
   type CanvasFlowPromptDraftEntry,
 } from "./CanvasFlowPromptDraftState";
@@ -85,24 +86,16 @@ type PromptNodeControllerState = {
 };
 
 type PromptInspectorState = {
+  modal: CanvasFlowPromptInspectorModal;
+  isOpen: boolean;
+  closingProgrammatically: boolean;
   rootEl: HTMLElement;
-  emptyEl: HTMLElement;
-  contentEl: HTMLElement;
   titleEl: HTMLElement;
   pathEl: HTMLElement;
   modelSelect: HTMLSelectElement;
-  seedInput: HTMLInputElement;
-  imageCountSelect: HTMLSelectElement;
-  aspectRatioPresetSelect: HTMLSelectElement;
-  aspectRatioHelpEl: HTMLElement;
-  widthInput: HTMLInputElement;
-  heightInput: HTMLInputElement;
+  imageCountButtons: HTMLButtonElement[];
+  aspectRatioButtons: HTMLButtonElement[];
   promptTextarea: HTMLTextAreaElement;
-  nanoWrap: HTMLElement;
-  nanoAspectSelect: HTMLSelectElement;
-  nanoResolutionSelect: HTMLSelectElement;
-  nanoFormatSelect: HTMLSelectElement;
-  nanoSafetySelect: HTMLSelectElement;
   openBtn: HTMLButtonElement;
   saveBtn: HTMLButtonElement;
   runBtn: HTMLButtonElement;
@@ -112,6 +105,9 @@ type PromptInspectorState = {
   saveTimer: number | null;
   saveChain: Promise<void>;
 };
+
+const SIMPLE_ASPECT_RATIO_OPTIONS = ["16:9", "1:1", "9:16"] as const;
+const DEFAULT_SIMPLE_ASPECT_RATIO = "1:1";
 
 type LeafController = {
   leaf: WorkspaceLeaf;
@@ -123,7 +119,6 @@ type LeafController = {
   canvasFileMtime: number;
   cachedCanvasDoc: ReturnType<typeof parseCanvasDocument> | null;
   promptFileCache: Map<string, PromptCacheEntry>;
-  normalizedInternalNodeSizes: Set<string>;
   pendingFocusNodeId: string | null;
   pendingFocusAttempts: number;
   promptNodeControllers: Map<string, PromptNodeControllerState>;
@@ -163,6 +158,24 @@ function formatImageModelBadge(
   }
 
   return { text: curated.label, title: curated.id };
+}
+
+class CanvasFlowPromptInspectorModal extends Modal {
+  constructor(
+    app: App,
+    private readonly onDidOpen: () => void,
+    private readonly onDidClose: () => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.onDidOpen();
+  }
+
+  onClose(): void {
+    this.onDidClose();
+  }
 }
 
 export class CanvasFlowEnhancer {
@@ -222,8 +235,8 @@ export class CanvasFlowEnhancer {
       controller.promptNodeControllers.clear();
       controller.promptDrafts.clear();
       controller.latestPromptStates.clear();
+      this.hidePromptInspector(controller);
       controller.selectedPromptNodeId = null;
-      controller.inspector = null;
     }
     this.controllers.clear();
     this.runningNodeKeys = new Set();
@@ -276,7 +289,6 @@ export class CanvasFlowEnhancer {
       canvasFileMtime: 0,
       cachedCanvasDoc: null,
       promptFileCache: new Map(),
-      normalizedInternalNodeSizes: new Set(),
       pendingFocusNodeId: null,
       pendingFocusAttempts: 0,
       promptNodeControllers: new Map(),
@@ -500,8 +512,8 @@ export class CanvasFlowEnhancer {
       this.removeInjectedControls(controller.leaf);
       controller.promptNodeControllers.clear();
       controller.latestPromptStates.clear();
+      this.hidePromptInspector(controller);
       controller.selectedPromptNodeId = null;
-      controller.inspector = null;
       return;
     }
 
@@ -519,9 +531,6 @@ export class CanvasFlowEnhancer {
     const canvasMtime = canvasFile.stat?.mtime ?? 0;
     const pathChanged = controller.canvasFilePath !== canvasFile.path;
     if (pathChanged || controller.canvasFileMtime !== canvasMtime) {
-      if (pathChanged) {
-        controller.normalizedInternalNodeSizes.clear();
-      }
       controller.canvasFilePath = canvasFile.path;
       controller.canvasFileMtime = canvasMtime;
       const raw = await this.app.vault.read(canvasFile);
@@ -550,29 +559,6 @@ export class CanvasFlowEnhancer {
         continue;
       }
 
-      // Keep the Canvas doc's notion of width/height aligned with our fixed-size UI.
-      // Otherwise, edges/ports can render offset from the visual node (Canvas uses doc dims for layout).
-      const desiredWidth = CANVASFLOW_PROMPT_NODE_WIDTH_PX;
-      const desiredHeight = CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
-
-      // Best-effort: normalize internal Canvas sizing at least once per node, so connection handles/edges
-      // don't render offset when we clamp the DOM.
-      try {
-        if (!controller.normalizedInternalNodeSizes.has(nodeId)) {
-          const did = this.canvasAdapter.trySetPromptNodeSize(leaf, nodeId, desiredWidth, desiredHeight);
-          if (did) {
-            controller.normalizedInternalNodeSizes.add(nodeId);
-          }
-        }
-      } catch {}
-
-      const currentWidth = typeof node.width === "number" && Number.isFinite(node.width) ? (node.width as number) : null;
-      const currentHeight = typeof node.height === "number" && Number.isFinite(node.height) ? (node.height as number) : null;
-      if (currentWidth !== desiredWidth || currentHeight !== desiredHeight) {
-        (node as any).width = desiredWidth;
-        (node as any).height = desiredHeight;
-        canvasDocDirty = true;
-      }
       const promptMtime = promptFile.stat?.mtime ?? 0;
       const state: PromptNodeRenderState = {
         nodeId,
@@ -587,6 +573,10 @@ export class CanvasFlowEnhancer {
       this.syncPromptDraftFromSource(controller, state);
     }
 
+    controller.latestPromptStates = promptStates;
+    canvasDocDirty =
+      this.reconcilePromptNodeControllers(controller, promptStates, canvasFile, nodesById) || canvasDocDirty;
+
     if (canvasDocDirty) {
       try {
         await this.app.vault.modify(canvasFile, serializeCanvasDocument(doc));
@@ -597,9 +587,6 @@ export class CanvasFlowEnhancer {
       }
     }
 
-    controller.latestPromptStates = promptStates;
-    this.reconcilePromptNodeControllers(controller, promptStates, canvasFile);
-
     await this.ensureSelectionMenuButtons({
       controller,
       root,
@@ -608,7 +595,7 @@ export class CanvasFlowEnhancer {
     });
 
     this.syncPromptInspectorSelection(controller, root, canvasFile.path);
-    this.tryFocusPendingPrompt(controller, root);
+    this.tryFocusPendingPrompt(controller);
   }
 
   private async getPromptNoteCached(
@@ -828,13 +815,6 @@ export class CanvasFlowEnhancer {
     const imageCount = clampImageCount(options.draft.imageCount);
     const imagesPart = imageCount === 1 ? "1 image" : `${imageCount} images`;
 
-    const seedText = String(options.draft.seedText || "").trim();
-    const seedPart = seedText ? `Seed ${seedText}` : "Random seed";
-
-    const width = parsePositiveInt(options.draft.widthText);
-    const height = parsePositiveInt(options.draft.heightText);
-    const sizePart = width !== null && height !== null ? `${width}x${height}` : "Default size";
-
     const isNano = options.effectiveModel === "google/nano-banana-pro";
     const ratioRaw = isNano
       ? String(options.draft.nano.aspect_ratio || "match_input_image").trim()
@@ -848,10 +828,10 @@ export class CanvasFlowEnhancer {
         ? "Match input"
         : ratioRaw.includes(":")
           ? formatImageAspectRatioLabel(ratioRaw)
-          : ratioRaw || "Default ratio";
+        : ratioRaw || "Default ratio";
 
     const dirtyPart = options.isDirty ? "Unsaved" : "Saved";
-    return [imagesPart, ratioPart, sizePart, seedPart, dirtyPart].join(" • ");
+    return [imagesPart, ratioPart, dirtyPart].join(" • ");
   }
 
   private setPromptNodeStatus(card: PromptNodeControllerState, text: string): void {
@@ -875,20 +855,22 @@ export class CanvasFlowEnhancer {
     const card = controller.promptNodeControllers.get(nodeId);
     if (!state || !card) return;
     this.updatePromptNodeCard(controller, card, state, controller.canvasFilePath || "");
+    this.syncPromptNodeSizing(controller, state, card, null);
   }
 
   private reconcilePromptNodeControllers(
     controller: LeafController,
     promptStates: Map<string, PromptNodeRenderState>,
-    canvasFile: TFile
-  ): void {
+    canvasFile: TFile,
+    nodesById: Map<string, any>
+  ): boolean {
+    let canvasDocDirty = false;
     const staleNodeIds = Array.from(controller.promptNodeControllers.keys()).filter((nodeId) => !promptStates.has(nodeId));
     for (const staleNodeId of staleNodeIds) {
       this.removePromptNodeController(controller, staleNodeId);
     }
 
     for (const state of promptStates.values()) {
-      this.enforcePromptNodeSizing(state.nodeEl);
       state.nodeEl.classList.add("ss-canvasflow-prompt-node");
       const host = this.canvasAdapter.findNodeContentHost(state.nodeEl);
 
@@ -909,7 +891,149 @@ export class CanvasFlowEnhancer {
       }
 
       this.updatePromptNodeCard(controller, nodeController, state, canvasFile.path);
+      const node = nodesById.get(state.nodeId) || null;
+      canvasDocDirty = this.syncPromptNodeSizing(controller, state, nodeController, node) || canvasDocDirty;
     }
+
+    return canvasDocDirty;
+  }
+
+  private syncPromptNodeSizing(
+    controller: LeafController,
+    state: PromptNodeRenderState,
+    nodeController: PromptNodeControllerState,
+    canvasNode: any | null
+  ): boolean {
+    const desiredWidth = this.measurePromptNodeWidth(state.nodeEl, nodeController.cardEl);
+    const readPx = (value: string | null | undefined): number | null => {
+      const parsed = Number.parseInt(String(value || "").replace("px", "").trim(), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const styleWidth = readPx(state.nodeEl.style.getPropertyValue(CANVASFLOW_PROMPT_NODE_CSS_VAR_WIDTH)) ?? readPx(state.nodeEl.style.width);
+    const styleHeight =
+      readPx(state.nodeEl.style.getPropertyValue(CANVASFLOW_PROMPT_NODE_CSS_VAR_HEIGHT)) ?? readPx(state.nodeEl.style.height);
+
+    let desiredHeight = this.measurePromptNodeHeight(state.nodeEl, nodeController.cardEl);
+    if (styleWidth !== desiredWidth) {
+      this.enforcePromptNodeSizing(state.nodeEl, {
+        widthPx: desiredWidth,
+        heightPx: styleHeight ?? desiredHeight,
+      });
+      desiredHeight = this.measurePromptNodeHeight(state.nodeEl, nodeController.cardEl);
+    }
+
+    const needsDomSizing = styleWidth !== desiredWidth || styleHeight !== desiredHeight;
+    if (needsDomSizing) {
+      this.enforcePromptNodeSizing(state.nodeEl, { widthPx: desiredWidth, heightPx: desiredHeight });
+    }
+
+    let needsCanvasNodeUpdate = false;
+    if (canvasNode && isCanvasFileNode(canvasNode)) {
+      const currentWidth =
+        typeof canvasNode.width === "number" && Number.isFinite(canvasNode.width) ? (canvasNode.width as number) : null;
+      const currentHeight =
+        typeof canvasNode.height === "number" && Number.isFinite(canvasNode.height) ? (canvasNode.height as number) : null;
+      needsCanvasNodeUpdate = currentWidth !== desiredWidth || currentHeight !== desiredHeight;
+      if (needsCanvasNodeUpdate) {
+        (canvasNode as any).width = desiredWidth;
+        (canvasNode as any).height = desiredHeight;
+      }
+    }
+
+    if (needsDomSizing || needsCanvasNodeUpdate) {
+      try {
+        this.canvasAdapter.trySetPromptNodeSize(controller.leaf, state.nodeId, desiredWidth, desiredHeight);
+      } catch {}
+    }
+
+    return needsCanvasNodeUpdate;
+  }
+
+  private measurePromptNodeWidth(nodeEl: HTMLElement, cardEl: HTMLElement): number {
+    const parsePx = (value: string | null | undefined): number => {
+      const parsed = Number.parseFloat(String(value || "").replace("px", "").trim());
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const readGap = (el: HTMLElement | null): number => {
+      if (!el) return 0;
+      try {
+        const win = el.ownerDocument?.defaultView || window;
+        return parsePx(win.getComputedStyle(el).columnGap || win.getComputedStyle(el).gap);
+      } catch {
+        return 0;
+      }
+    };
+
+    const sumWidths = (els: HTMLElement[]): number => {
+      let total = 0;
+      for (const el of els) {
+        total += Math.ceil(el.scrollWidth || 0);
+      }
+      return total;
+    };
+
+    const headerEl = cardEl.querySelector<HTMLElement>(".ss-canvasflow-node-card-header");
+    const titleEl = cardEl.querySelector<HTMLElement>(".ss-canvasflow-node-card-title");
+    const modelBadgeEl = cardEl.querySelector<HTMLElement>(".ss-canvasflow-node-card-model");
+    const actionsEl = cardEl.querySelector<HTMLElement>(".ss-canvasflow-node-card-actions");
+    const metaEl = cardEl.querySelector<HTMLElement>(".ss-canvasflow-node-card-meta");
+
+    const headerChildren: HTMLElement[] = [];
+    if (titleEl) headerChildren.push(titleEl);
+    if (modelBadgeEl) headerChildren.push(modelBadgeEl);
+    const headerGap = headerChildren.length > 1 ? readGap(headerEl) * (headerChildren.length - 1) : 0;
+    const headerWidth = sumWidths(headerChildren) + headerGap;
+
+    const actionButtons = actionsEl ? Array.from(actionsEl.querySelectorAll<HTMLElement>("button")) : [];
+    const actionsGap = actionButtons.length > 1 ? readGap(actionsEl) * (actionButtons.length - 1) : 0;
+    const actionsWidth = sumWidths(actionButtons) + actionsGap;
+
+    const metaWidth = metaEl ? Math.min(Math.ceil(metaEl.scrollWidth || 0), 420) : 0;
+
+    let cardHorizontalPadding = 0;
+    try {
+      const win = nodeEl.ownerDocument?.defaultView || window;
+      const style = win.getComputedStyle(cardEl);
+      cardHorizontalPadding = parsePx(style.paddingLeft) + parsePx(style.paddingRight);
+    } catch {}
+
+    const contentWidth = Math.max(260, headerWidth, actionsWidth, metaWidth);
+    const raw = Math.ceil(contentWidth + cardHorizontalPadding + 18);
+    return Math.max(CANVASFLOW_PROMPT_NODE_MIN_WIDTH_PX, Math.min(CANVASFLOW_PROMPT_NODE_MAX_WIDTH_PX, raw));
+  }
+
+  private measurePromptNodeHeight(nodeEl: HTMLElement, cardEl: HTMLElement): number {
+    let measured = 0;
+    try {
+      measured = Math.ceil(cardEl.scrollHeight);
+    } catch {}
+
+    if (!Number.isFinite(measured) || measured <= 0) {
+      try {
+        measured = Math.ceil(cardEl.getBoundingClientRect().height);
+      } catch {
+        measured = 0;
+      }
+    }
+
+    let borderTop = 0;
+    let borderBottom = 0;
+    try {
+      const win = nodeEl.ownerDocument?.defaultView || window;
+      const style = win.getComputedStyle(nodeEl);
+      borderTop = Number.parseFloat(style.borderTopWidth || "0") || 0;
+      borderBottom = Number.parseFloat(style.borderBottomWidth || "0") || 0;
+    } catch {}
+
+    const next = Math.ceil(Math.max(0, measured) + borderTop + borderBottom + 2);
+    const fallback = CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
+    const clamped = Math.max(
+      CANVASFLOW_PROMPT_NODE_MIN_HEIGHT_PX,
+      Math.min(CANVASFLOW_PROMPT_NODE_MAX_HEIGHT_PX, Number.isFinite(next) && next > 0 ? next : fallback)
+    );
+    return Math.floor(clamped);
   }
 
   private createPromptNodeCard(
@@ -978,18 +1102,46 @@ export class CanvasFlowEnhancer {
       });
     });
 
+    let pointerDownX = 0;
+    let pointerDownY = 0;
+    let suppressClickOpen = false;
+
     // Keep canvas drag behavior intact when interacting with card copy.
-    cardEl.addEventListener("pointerdown", (e) => {
+    cardEl.addEventListener("pointerdown", (e: PointerEvent) => {
       const target = (e.target as HTMLElement | null) || null;
       if (target?.closest("button")) {
         stopPropagationOnly(e);
+        return;
       }
+      pointerDownX = e.clientX;
+      pointerDownY = e.clientY;
+      suppressClickOpen = false;
     });
     cardEl.addEventListener("mousedown", (e) => {
       const target = (e.target as HTMLElement | null) || null;
       if (target?.closest("button")) {
         stopPropagationOnly(e);
       }
+    });
+    cardEl.addEventListener("pointermove", (e: PointerEvent) => {
+      const dx = Math.abs(e.clientX - pointerDownX);
+      const dy = Math.abs(e.clientY - pointerDownY);
+      if (dx > 4 || dy > 4) {
+        suppressClickOpen = true;
+      }
+    });
+    cardEl.addEventListener("pointercancel", () => {
+      suppressClickOpen = false;
+    });
+    // Open inspector modal only on explicit click, not on selection changes from drag operations.
+    cardEl.addEventListener("click", (e) => {
+      const target = (e.target as HTMLElement | null) || null;
+      if (target?.closest("button")) return;
+      if (suppressClickOpen) {
+        suppressClickOpen = false;
+        return;
+      }
+      this.focusPromptInspectorForNode(controller, state.nodeId, false);
     });
 
     this.updatePromptNodeCard(controller, nodeController, state, canvasPath);
@@ -1041,9 +1193,9 @@ export class CanvasFlowEnhancer {
     if (running) {
       card.hintEl.setText("Running generation...");
     } else if (isSelected) {
-      card.hintEl.setText("Editing in inspector. Press Cmd/Ctrl+Enter to run.");
+      card.hintEl.setText("Editing in modal. Press Cmd/Ctrl+Enter to run.");
     } else if (draftEntry.dirty) {
-      card.hintEl.setText("Unsaved edits. Open inspector to review.");
+      card.hintEl.setText("Unsaved edits. Select this node to review.");
     } else {
       card.hintEl.setText("Select this node to edit prompt settings.");
     }
@@ -1067,8 +1219,6 @@ export class CanvasFlowEnhancer {
   }
 
   private focusPromptInspectorForNode(controller: LeafController, nodeId: string, focusPrompt: boolean): void {
-    const root = this.canvasAdapter.getRoot(controller.leaf);
-    if (!root) return;
     const state = controller.latestPromptStates.get(nodeId);
     if (!state) return;
 
@@ -1077,33 +1227,53 @@ export class CanvasFlowEnhancer {
       nodeController.cardEl.classList.toggle("is-selected", id === nodeId);
     }
 
-    const inspector = this.ensurePromptInspector(controller, root);
-    this.bindInspectorToPromptNode(controller, inspector, state, controller.canvasFilePath || "", focusPrompt);
+    const inspector = this.ensurePromptInspector(controller);
+    this.bindInspectorToPromptNode(controller, inspector, state, focusPrompt);
   }
 
-  private ensurePromptInspector(controller: LeafController, root: HTMLElement): PromptInspectorState {
-    if (controller.inspector && root.contains(controller.inspector.rootEl)) {
-      return controller.inspector;
-    }
+  private ensurePromptInspector(controller: LeafController): PromptInspectorState {
+    const existing = controller.inspector;
+    if (existing) return existing;
 
-    const existing = root.querySelector<HTMLElement>(".ss-canvasflow-inspector");
-    if (existing) {
-      existing.remove();
-    }
+    let inspectorRef: PromptInspectorState | null = null;
+    const modal = new CanvasFlowPromptInspectorModal(
+      this.app,
+      () => {
+        if (inspectorRef) {
+          inspectorRef.isOpen = true;
+        }
+      },
+      () => {
+        const inspector = inspectorRef;
+        if (!inspector) return;
 
-    const inspectorRoot = root.createDiv({ cls: "ss-canvasflow-inspector is-collapsed" });
-    const emptyEl = inspectorRoot.createDiv({ cls: "ss-canvasflow-inspector-empty" });
-    emptyEl.setText("");
-    emptyEl.style.display = "none";
+        inspector.isOpen = false;
+        const closedProgrammatically = inspector.closingProgrammatically;
+        inspector.closingProgrammatically = false;
+        inspector.boundNodeId = null;
+        if (inspector.saveTimer !== null) {
+          window.clearTimeout(inspector.saveTimer);
+          inspector.saveTimer = null;
+        }
 
-    const contentEl = inspectorRoot.createDiv({ cls: "ss-canvasflow-inspector-content" });
-    contentEl.style.display = "none";
+        if (controller.inspector === inspector) {
+          controller.inspector = null;
+        }
 
-    const header = contentEl.createDiv({ cls: "ss-canvasflow-inspector-header" });
+        if (!closedProgrammatically) {
+          this.handleManualInspectorClose(controller);
+        }
+      }
+    );
+    modal.modalEl.addClass("ss-canvasflow-inspector-modal");
+    modal.titleEl.setText("SystemSculpt Prompt");
+
+    const inspectorRoot = modal.contentEl.createDiv({ cls: "ss-canvasflow-inspector" });
+    const header = inspectorRoot.createDiv({ cls: "ss-canvasflow-inspector-header" });
     const titleEl = header.createDiv({ cls: "ss-canvasflow-inspector-title" });
     const pathEl = header.createEl("code", { cls: "ss-canvasflow-inspector-path" });
 
-    const fields = contentEl.createDiv({ cls: "ss-canvasflow-fields ss-canvasflow-inspector-fields" });
+    const fields = inspectorRoot.createDiv({ cls: "ss-canvasflow-fields ss-canvasflow-inspector-fields" });
     const createField = (label: string, cls = "ss-canvasflow-field") => {
       const field = fields.createDiv({ cls });
       field.createDiv({ text: label, cls: "ss-canvasflow-field-label" });
@@ -1113,93 +1283,57 @@ export class CanvasFlowEnhancer {
     const modelField = createField("Model (optional)");
     const modelSelect = modelField.createEl("select", { cls: "ss-canvasflow-model" });
 
-    const seedField = createField("Seed (optional)");
-    const seedInput = seedField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-version" });
-    seedInput.type = "text";
-    seedInput.placeholder = "Random if empty";
-
     const imageCountField = createField("Images");
-    const imageCountSelect = imageCountField.createEl("select", { cls: "ss-canvasflow-image-count" });
+    const imageCountButtonsWrap = imageCountField.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-image-count-row" });
+    const imageCountButtons: HTMLButtonElement[] = [];
     for (const n of [1, 2, 3, 4]) {
-      imageCountSelect.createEl("option", { value: String(n), text: String(n) });
+      const btn = imageCountButtonsWrap.createEl("button", {
+        text: String(n),
+        cls: "ss-canvasflow-choice-btn ss-canvasflow-image-count-btn",
+      });
+      btn.type = "button";
+      btn.dataset.value = String(n);
+      imageCountButtons.push(btn);
     }
 
-    const aspectRatioField = createField("Aspect ratio", "ss-canvasflow-field ss-canvasflow-field-aspect-ratio-preset");
-    const aspectRatioPresetSelect = aspectRatioField.createEl("select", { cls: "ss-canvasflow-aspect-ratio-preset" });
-    const aspectRatioHelpEl = aspectRatioField.createDiv({ cls: "ss-canvasflow-field-hint ss-canvasflow-aspect-ratio-help" });
+    const aspectRatioField = createField("Aspect ratio");
+    const aspectRatioButtonsWrap = aspectRatioField.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-aspect-ratio-row" });
+    const aspectRatioButtons: HTMLButtonElement[] = [];
+    for (const ratio of SIMPLE_ASPECT_RATIO_OPTIONS) {
+      const btn = aspectRatioButtonsWrap.createEl("button", {
+        text: ratio,
+        cls: "ss-canvasflow-choice-btn ss-canvasflow-aspect-ratio-btn",
+      });
+      btn.type = "button";
+      btn.dataset.value = ratio;
+      aspectRatioButtons.push(btn);
+    }
 
-    const widthField = createField("Width", "ss-canvasflow-field ss-canvasflow-field-width");
-    const widthInput = widthField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-width" });
-    widthInput.type = "number";
-    widthInput.min = "1";
-    widthInput.placeholder = "Default";
-
-    const heightField = createField("Height", "ss-canvasflow-field ss-canvasflow-field-height");
-    const heightInput = heightField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-height" });
-    heightInput.type = "number";
-    heightInput.min = "1";
-    heightInput.placeholder = "Default";
-
-    contentEl.createDiv({ text: "Prompt", cls: "ss-canvasflow-field-label ss-canvasflow-prompt-label" });
-    const promptTextarea = contentEl.createEl("textarea", { cls: "ss-canvasflow-prompt ss-canvasflow-inspector-prompt" });
+    inspectorRoot.createDiv({ text: "Prompt", cls: "ss-canvasflow-field-label ss-canvasflow-prompt-label" });
+    const promptTextarea = inspectorRoot.createEl("textarea", { cls: "ss-canvasflow-prompt ss-canvasflow-inspector-prompt" });
     promptTextarea.placeholder = "What should happen next?";
 
-    const nanoWrap = contentEl.createDiv({ cls: "ss-canvasflow-nano-config ss-canvasflow-inspector-nano" });
-    nanoWrap.createDiv({ text: "Nano Banana Pro", cls: "ss-canvasflow-section-title" });
-    const nanoGrid = nanoWrap.createDiv({ cls: "ss-canvasflow-grid" });
-
-    const createNanoSelectField = (label: string, cls: string, values: string[]) => {
-      const field = nanoGrid.createDiv({ cls: "ss-canvasflow-field" });
-      field.createDiv({ text: label, cls: "ss-canvasflow-field-label" });
-      const select = field.createEl("select", { cls });
-      for (const v of values) {
-        select.createEl("option", { value: v, text: v });
-      }
-      return select;
-    };
-
-    const nanoAspectSelect = createNanoSelectField(
-      "Aspect ratio",
-      "ss-canvasflow-aspect-ratio",
-      ["match_input_image", "9:16", "16:9", "1:1", "4:3", "3:4"]
-    );
-    const nanoResolutionSelect = createNanoSelectField("Resolution", "ss-canvasflow-resolution", ["1080p", "2K", "4K"]);
-    const nanoFormatSelect = createNanoSelectField("Output format", "ss-canvasflow-output-format", ["jpg", "png", "webp"]);
-    const nanoSafetySelect = createNanoSelectField(
-      "Safety filter",
-      "ss-canvasflow-safety",
-      ["block_only_high", "block_medium_and_above", "block_low_and_above"]
-    );
-
-    const actions = contentEl.createDiv({ cls: "ss-canvasflow-actions ss-canvasflow-inspector-actions" });
+    const actions = inspectorRoot.createDiv({ cls: "ss-canvasflow-actions ss-canvasflow-inspector-actions" });
     const openBtn = actions.createEl("button", { text: "Open", cls: "ss-canvasflow-btn" });
     openBtn.type = "button";
     const saveBtn = actions.createEl("button", { text: "Save", cls: "ss-canvasflow-btn" });
     saveBtn.type = "button";
     const runBtn = actions.createEl("button", { text: "Run", cls: "ss-canvasflow-btn ss-canvasflow-btn-primary" });
     runBtn.type = "button";
-    const statusEl = contentEl.createDiv({ cls: "ss-canvasflow-status ss-canvasflow-inspector-status" });
+    const statusEl = inspectorRoot.createDiv({ cls: "ss-canvasflow-status ss-canvasflow-inspector-status" });
     statusEl.setText("");
 
     const inspector: PromptInspectorState = {
+      modal,
+      isOpen: false,
+      closingProgrammatically: false,
       rootEl: inspectorRoot,
-      emptyEl,
-      contentEl,
       titleEl,
       pathEl,
       modelSelect,
-      seedInput,
-      imageCountSelect,
-      aspectRatioPresetSelect,
-      aspectRatioHelpEl,
-      widthInput,
-      heightInput,
+      imageCountButtons,
+      aspectRatioButtons,
       promptTextarea,
-      nanoWrap,
-      nanoAspectSelect,
-      nanoResolutionSelect,
-      nanoFormatSelect,
-      nanoSafetySelect,
       openBtn,
       saveBtn,
       runBtn,
@@ -1209,6 +1343,7 @@ export class CanvasFlowEnhancer {
       saveTimer: null,
       saveChain: Promise.resolve(),
     };
+    inspectorRef = inspector;
 
     const onDraftInput = () => {
       const nodeId = this.updateDraftFromInspectorFields(controller, inspector);
@@ -1222,47 +1357,31 @@ export class CanvasFlowEnhancer {
       });
     };
 
-    modelSelect.addEventListener("change", () => {
-      onDraftInput();
-      this.updateInspectorModelVisibility(controller, inspector);
-    });
+    modelSelect.addEventListener("change", onDraftInput);
     bindBlurSave(modelSelect);
 
-    seedInput.addEventListener("input", onDraftInput);
-    bindBlurSave(seedInput);
-
-    imageCountSelect.addEventListener("change", onDraftInput);
-    bindBlurSave(imageCountSelect);
-
-    aspectRatioPresetSelect.addEventListener("change", () => {
-      if (inspector.suppressDraftEvents) return;
-      const dims = deriveDimensionsFromAspectPreset({
-        preset: aspectRatioPresetSelect.value,
-        widthText: widthInput.value,
-        heightText: heightInput.value,
+    for (const btn of imageCountButtons) {
+      btn.addEventListener("click", (e) => {
+        stopEvent(e);
+        if (inspector.suppressDraftEvents) return;
+        this.setActiveChoiceButtons(imageCountButtons, String(btn.dataset.value || "1"));
+        onDraftInput();
+        this.queueInspectorDraftSave(controller, inspector, "choice");
       });
-      widthInput.value = dims.widthText;
-      heightInput.value = dims.heightText;
-      onDraftInput();
-    });
-    bindBlurSave(aspectRatioPresetSelect);
+    }
 
-    widthInput.addEventListener("input", onDraftInput);
-    heightInput.addEventListener("input", onDraftInput);
-    bindBlurSave(widthInput);
-    bindBlurSave(heightInput);
+    for (const btn of aspectRatioButtons) {
+      btn.addEventListener("click", (e) => {
+        stopEvent(e);
+        if (inspector.suppressDraftEvents) return;
+        this.setActiveChoiceButtons(aspectRatioButtons, String(btn.dataset.value || DEFAULT_SIMPLE_ASPECT_RATIO));
+        onDraftInput();
+        this.queueInspectorDraftSave(controller, inspector, "choice");
+      });
+    }
 
     promptTextarea.addEventListener("input", onDraftInput);
     bindBlurSave(promptTextarea);
-
-    nanoAspectSelect.addEventListener("change", onDraftInput);
-    nanoResolutionSelect.addEventListener("change", onDraftInput);
-    nanoFormatSelect.addEventListener("change", onDraftInput);
-    nanoSafetySelect.addEventListener("change", onDraftInput);
-    bindBlurSave(nanoAspectSelect);
-    bindBlurSave(nanoResolutionSelect);
-    bindBlurSave(nanoFormatSelect);
-    bindBlurSave(nanoSafetySelect);
 
     promptTextarea.addEventListener("keydown", (e) => {
       const isModEnter = (e.key === "Enter" || e.code === "Enter") && (e.ctrlKey || e.metaKey);
@@ -1305,9 +1424,34 @@ export class CanvasFlowEnhancer {
       });
     });
 
-    this.setPromptInspectorEmptyState(inspector, "");
     controller.inspector = inspector;
     return inspector;
+  }
+
+  private setActiveChoiceButtons(buttons: HTMLButtonElement[], value: string): void {
+    const next = String(value || "").trim();
+    for (const btn of buttons) {
+      const isActive = String(btn.dataset.value || "").trim() === next;
+      btn.classList.toggle("is-active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    }
+  }
+
+  private getActiveChoiceValue(buttons: HTMLButtonElement[], fallback: string): string {
+    const active = buttons.find((btn) => btn.classList.contains("is-active")) || null;
+    const value = String(active?.dataset?.value || "").trim();
+    return value || String(fallback || "").trim();
+  }
+
+  private handleManualInspectorClose(controller: LeafController): void {
+    controller.selectedPromptNodeId = null;
+    for (const nodeController of controller.promptNodeControllers.values()) {
+      nodeController.cardEl.classList.remove("is-selected");
+    }
+
+    const root = this.canvasAdapter.getRoot(controller.leaf);
+    this.canvasAdapter.clearSelection(controller.leaf, root);
+    this.scheduleSelectionUiUpdate(controller);
   }
 
   private hidePromptInspector(controller: LeafController): void {
@@ -1317,22 +1461,13 @@ export class CanvasFlowEnhancer {
       window.clearTimeout(inspector.saveTimer);
       inspector.saveTimer = null;
     }
+    inspector.closingProgrammatically = true;
     try {
-      inspector.rootEl.remove();
+      inspector.modal.close();
     } catch {}
-    controller.inspector = null;
-    controller.selectedPromptNodeId = null;
-  }
-
-  private setPromptInspectorEmptyState(inspector: PromptInspectorState, text: string, showHint = false): void {
-    inspector.boundNodeId = null;
-    const hint = String(text || "").trim();
-    inspector.emptyEl.setText(hint);
-    inspector.emptyEl.style.display = showHint && hint.length > 0 ? "" : "none";
-    inspector.contentEl.style.display = "none";
-    inspector.rootEl.classList.add("is-collapsed");
-    inspector.rootEl.classList.remove("is-unselected");
-    this.setInspectorStatus(inspector, "");
+    if (controller.inspector === inspector) {
+      controller.inspector = null;
+    }
   }
 
   private syncPromptInspectorSelection(controller: LeafController, root: HTMLElement, canvasPath: string): void {
@@ -1352,65 +1487,59 @@ export class CanvasFlowEnhancer {
       if (!state) continue;
       nodeController.cardEl.classList.toggle("is-selected", nodeId === nextSelectedNodeId);
       this.updatePromptNodeCard(controller, nodeController, state, canvasPath);
+      this.syncPromptNodeSizing(controller, state, nodeController, null);
     }
 
-    const inspector = this.ensurePromptInspector(controller, root);
     if (!nextSelectedNodeId) {
-      const boundNodeId = String(inspector.boundNodeId || "").trim();
-      if (boundNodeId && controller.latestPromptStates.has(boundNodeId)) {
-        const boundState = controller.latestPromptStates.get(boundNodeId);
-        if (boundState) {
-          inspector.rootEl.classList.remove("is-collapsed");
-          const entry = this.getPromptDraftEntry(controller, boundState);
-          if (!entry.dirty) {
-            this.bindInspectorToPromptNode(controller, inspector, boundState, canvasPath, false);
-          } else {
-            this.setInspectorStatus(inspector, "Unsaved edits.");
-          }
-          inspector.rootEl.classList.add("is-unselected");
-          return;
-        }
-      }
-      this.setPromptInspectorEmptyState(inspector, "");
+      this.hidePromptInspector(controller);
       return;
     }
 
     const state = controller.latestPromptStates.get(nextSelectedNodeId);
     if (!state) {
-      this.setPromptInspectorEmptyState(inspector, "");
+      this.hidePromptInspector(controller);
       return;
     }
 
-    if (inspector.boundNodeId === nextSelectedNodeId) {
-      const entry = this.getPromptDraftEntry(controller, state);
-      if (entry.dirty) {
-        this.setInspectorStatus(inspector, "Unsaved edits.");
-        this.updateInspectorModelVisibility(controller, inspector);
-        return;
-      }
+    const inspector = controller.inspector;
+    if (!inspector) {
+      return;
+    }
+    if (inspector.boundNodeId !== nextSelectedNodeId) {
+      this.hidePromptInspector(controller);
+      return;
     }
 
-    this.bindInspectorToPromptNode(controller, inspector, state, canvasPath, false);
+    const entry = this.getPromptDraftEntry(controller, state);
+    if (entry.dirty) {
+      this.setInspectorStatus(inspector, "Unsaved edits.");
+      return;
+    }
+
+    this.bindInspectorToPromptNode(controller, inspector, state, false);
   }
 
   private bindInspectorToPromptNode(
     controller: LeafController,
     inspector: PromptInspectorState,
     state: PromptNodeRenderState,
-    _canvasPath: string,
     focusPrompt: boolean
   ): void {
     const draftEntry = this.getPromptDraftEntry(controller, state);
     const draft = cloneCanvasFlowPromptDraft(draftEntry.draft);
     const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
-    const serverModels = this.getCachedImageGenerationModels();
+    const preferredAspectCandidate = String(draft.aspectRatioPreset || draft.nano?.aspect_ratio || "").trim();
+    const preferredAspect = SIMPLE_ASPECT_RATIO_OPTIONS.includes(preferredAspectCandidate as any)
+      ? preferredAspectCandidate
+      : DEFAULT_SIMPLE_ASPECT_RATIO;
+
+    if (!inspector.isOpen) {
+      inspector.modal.open();
+    }
 
     inspector.suppressDraftEvents = true;
     inspector.boundNodeId = state.nodeId;
-    inspector.rootEl.classList.remove("is-collapsed");
-    inspector.rootEl.classList.remove("is-unselected");
-    inspector.emptyEl.style.display = "none";
-    inspector.contentEl.style.display = "";
+    inspector.modal.titleEl.setText(`SystemSculpt Prompt: ${state.promptFile.basename}`);
     inspector.titleEl.setText(state.promptFile.basename);
     inspector.pathEl.setText(state.promptFile.path);
 
@@ -1420,34 +1549,11 @@ export class CanvasFlowEnhancer {
       selectedValue: draft.explicitModel,
     });
     inspector.modelSelect.value = draft.explicitModel;
-    inspector.seedInput.value = draft.seedText;
-    inspector.imageCountSelect.value = String(clampImageCount(draft.imageCount));
-    inspector.widthInput.value = draft.widthText;
-    inspector.heightInput.value = draft.heightText;
+    this.setActiveChoiceButtons(inspector.imageCountButtons, String(clampImageCount(draft.imageCount)));
+    this.setActiveChoiceButtons(inspector.aspectRatioButtons, preferredAspect);
     inspector.promptTextarea.value = draft.body;
-    inspector.nanoAspectSelect.value = draft.nano.aspect_ratio;
-    inspector.nanoResolutionSelect.value = draft.nano.resolution;
-    inspector.nanoFormatSelect.value = draft.nano.output_format;
-    inspector.nanoSafetySelect.value = draft.nano.safety_filter_level;
-
-    const effectiveModel = getEffectiveDraftModel({
-      explicitModel: draft.explicitModel,
-      settingsModelSlug,
-    });
-    const selectedRatio = syncCanvasFlowAspectRatioPresetControls({
-      select: inspector.aspectRatioPresetSelect,
-      modelId: effectiveModel || DEFAULT_IMAGE_GENERATION_MODEL_ID,
-      preferred: draft.aspectRatioPreset,
-      helpEl: inspector.aspectRatioHelpEl,
-      serverModels,
-      deferWhileFocused: true,
-    });
-    if (selectedRatio && inspector.aspectRatioPresetSelect.value !== selectedRatio) {
-      inspector.aspectRatioPresetSelect.value = selectedRatio;
-    }
 
     inspector.suppressDraftEvents = false;
-    this.updateInspectorModelVisibility(controller, inspector);
     if (draftEntry.dirty) {
       this.setInspectorStatus(inspector, "Unsaved edits.");
     } else {
@@ -1455,11 +1561,13 @@ export class CanvasFlowEnhancer {
     }
 
     if (focusPrompt) {
-      try {
-        inspector.promptTextarea.focus();
-        const end = inspector.promptTextarea.value.length;
-        inspector.promptTextarea.setSelectionRange(end, end);
-      } catch {}
+      window.setTimeout(() => {
+        try {
+          inspector.promptTextarea.focus();
+          const end = inspector.promptTextarea.value.length;
+          inspector.promptTextarea.setSelectionRange(end, end);
+        } catch {}
+      }, 0);
     }
   }
 
@@ -1468,46 +1576,6 @@ export class CanvasFlowEnhancer {
     const lower = String(text || "").toLowerCase();
     inspector.statusEl.classList.toggle("ss-is-error", /\b(failed|error)\b/.test(lower));
     inspector.statusEl.classList.toggle("ss-is-success", /\bdone|saved\b/.test(lower));
-  }
-
-  private updateInspectorModelVisibility(controller: LeafController, inspector: PromptInspectorState): void {
-    const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
-    const effectiveModel = getEffectiveDraftModel({
-      explicitModel: inspector.modelSelect.value,
-      settingsModelSlug,
-    });
-    const isNano = effectiveModel === "google/nano-banana-pro";
-    inspector.nanoWrap.style.display = isNano ? "" : "none";
-
-    const ratioField = inspector.aspectRatioPresetSelect.closest(".ss-canvasflow-field") as HTMLElement | null;
-    const widthField = inspector.widthInput.closest(".ss-canvasflow-field") as HTMLElement | null;
-    const heightField = inspector.heightInput.closest(".ss-canvasflow-field") as HTMLElement | null;
-    if (ratioField) ratioField.style.display = isNano ? "none" : "";
-    if (widthField) widthField.style.display = isNano ? "none" : "";
-    if (heightField) heightField.style.display = isNano ? "none" : "";
-
-    if (isNano) {
-      inspector.aspectRatioHelpEl.setText("");
-      return;
-    }
-
-    const serverModels = this.getCachedImageGenerationModels();
-    const preferred = String(inspector.aspectRatioPresetSelect.value || "").trim();
-    syncCanvasFlowAspectRatioPresetControls({
-      select: inspector.aspectRatioPresetSelect,
-      modelId: effectiveModel || DEFAULT_IMAGE_GENERATION_MODEL_ID,
-      preferred,
-      helpEl: inspector.aspectRatioHelpEl,
-      serverModels,
-      deferWhileFocused: true,
-    });
-
-    if (!inspector.suppressDraftEvents) {
-      const nodeId = this.updateDraftFromInspectorFields(controller, inspector);
-      if (nodeId) {
-        this.refreshPromptNodeCard(controller, nodeId);
-      }
-    }
   }
 
   private updateDraftFromInspectorFields(controller: LeafController, inspector: PromptInspectorState): string | null {
@@ -1522,16 +1590,16 @@ export class CanvasFlowEnhancer {
     const nextDraft: CanvasFlowPromptDraft = cloneCanvasFlowPromptDraft(entry.draft);
     nextDraft.body = inspector.promptTextarea.value;
     nextDraft.explicitModel = String(inspector.modelSelect.value || "").trim();
-    nextDraft.seedText = String(inspector.seedInput.value || "").trim();
-    nextDraft.imageCount = clampImageCount(Number(inspector.imageCountSelect.value));
-    nextDraft.aspectRatioPreset = String(inspector.aspectRatioPresetSelect.value || "").trim();
-    nextDraft.widthText = String(inspector.widthInput.value || "").trim();
-    nextDraft.heightText = String(inspector.heightInput.value || "").trim();
+    nextDraft.seedText = "";
+    nextDraft.imageCount = clampImageCount(Number(this.getActiveChoiceValue(inspector.imageCountButtons, "1")));
+    nextDraft.aspectRatioPreset = this.getActiveChoiceValue(inspector.aspectRatioButtons, DEFAULT_SIMPLE_ASPECT_RATIO);
+    nextDraft.widthText = "";
+    nextDraft.heightText = "";
     nextDraft.nano = {
-      aspect_ratio: String(inspector.nanoAspectSelect.value || "match_input_image"),
-      resolution: String(inspector.nanoResolutionSelect.value || "4K"),
-      output_format: String(inspector.nanoFormatSelect.value || "jpg"),
-      safety_filter_level: String(inspector.nanoSafetySelect.value || "block_only_high"),
+      aspect_ratio: nextDraft.aspectRatioPreset || DEFAULT_SIMPLE_ASPECT_RATIO,
+      resolution: "4K",
+      output_format: "jpg",
+      safety_filter_level: "block_only_high",
     };
 
     entry.draft = nextDraft;
@@ -1584,7 +1652,10 @@ export class CanvasFlowEnhancer {
 
     const draft = cloneCanvasFlowPromptDraft(entry.draft);
     const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
-    const serverModels = this.getCachedImageGenerationModels();
+    const selectedSimpleRatioCandidate = String(draft.aspectRatioPreset || draft.nano?.aspect_ratio || "").trim();
+    const selectedSimpleRatio = SIMPLE_ASPECT_RATIO_OPTIONS.includes(selectedSimpleRatioCandidate as any)
+      ? selectedSimpleRatioCandidate
+      : DEFAULT_SIMPLE_ASPECT_RATIO;
 
     try {
       status?.("Saving...");
@@ -1605,12 +1676,7 @@ export class CanvasFlowEnhancer {
         delete nextFrontmatter["ss_image_model"];
       }
 
-      const parsedSeed = String(draft.seedText || "").trim() ? Number(draft.seedText) : NaN;
-      if (Number.isFinite(parsedSeed) && parsedSeed >= 0) {
-        nextFrontmatter["ss_seed"] = Math.floor(parsedSeed);
-      } else {
-        delete nextFrontmatter["ss_seed"];
-      }
+      delete nextFrontmatter["ss_seed"];
 
       const imageCount = clampImageCount(draft.imageCount);
       if (imageCount > 1) {
@@ -1619,17 +1685,8 @@ export class CanvasFlowEnhancer {
         delete nextFrontmatter["ss_image_count"];
       }
 
-      const widthValue = parsePositiveInt(draft.widthText);
-      const heightValue = parsePositiveInt(draft.heightText);
-      const normalizedWidth = widthValue ?? heightValue;
-      const normalizedHeight = heightValue ?? widthValue;
-      if (normalizedWidth !== null && normalizedHeight !== null) {
-        nextFrontmatter["ss_image_width"] = normalizedWidth;
-        nextFrontmatter["ss_image_height"] = normalizedHeight;
-      } else {
-        delete nextFrontmatter["ss_image_width"];
-        delete nextFrontmatter["ss_image_height"];
-      }
+      delete nextFrontmatter["ss_image_width"];
+      delete nextFrontmatter["ss_image_height"];
 
       const effectiveModel = getEffectiveDraftModel({
         explicitModel,
@@ -1639,10 +1696,10 @@ export class CanvasFlowEnhancer {
       const nextInput: Record<string, unknown> = { ...existingInput };
 
       if (effectiveModel === "google/nano-banana-pro") {
-        nextInput.aspect_ratio = draft.nano.aspect_ratio || "match_input_image";
-        nextInput.resolution = draft.nano.resolution || "4K";
-        nextInput.output_format = draft.nano.output_format || "jpg";
-        nextInput.safety_filter_level = draft.nano.safety_filter_level || "block_only_high";
+        nextInput.aspect_ratio = selectedSimpleRatio;
+        nextInput.resolution = "4K";
+        nextInput.output_format = "jpg";
+        nextInput.safety_filter_level = "block_only_high";
       } else {
         delete (nextInput as any).aspect_ratio;
         delete (nextInput as any).resolution;
@@ -1650,23 +1707,14 @@ export class CanvasFlowEnhancer {
         delete (nextInput as any).safety_filter_level;
       }
 
-      if (normalizedWidth !== null && normalizedHeight !== null) {
-        nextInput.width = normalizedWidth;
-        nextInput.height = normalizedHeight;
-      } else {
-        delete (nextInput as any).width;
-        delete (nextInput as any).height;
-      }
+      delete (nextInput as any).width;
+      delete (nextInput as any).height;
 
       nextFrontmatter["ss_image_options"] = nextInput;
       if (effectiveModel === "google/nano-banana-pro") {
         delete nextFrontmatter["ss_image_aspect_ratio"];
       } else {
-        nextFrontmatter["ss_image_aspect_ratio"] = getDraftAspectRatioOrDefault({
-          draftAspectRatio: draft.aspectRatioPreset,
-          effectiveModel,
-          serverModels,
-        });
+        nextFrontmatter["ss_image_aspect_ratio"] = selectedSimpleRatio;
       }
 
       const updated = replaceMarkdownFrontmatterAndBody(raw, nextFrontmatter, draft.body);
@@ -1772,15 +1820,23 @@ export class CanvasFlowEnhancer {
     }
 
     if (controller.inspector?.boundNodeId === nodeId) {
-      controller.inspector.rootEl.classList.add("is-unselected");
+      this.hidePromptInspector(controller);
     }
 
     this.scheduleSelectionUiUpdate(controller);
   }
 
-  private enforcePromptNodeSizing(nodeEl: HTMLElement): void {
-    const widthPx = CANVASFLOW_PROMPT_NODE_WIDTH_PX;
-    const heightPx = CANVASFLOW_PROMPT_NODE_HEIGHT_PX;
+  private enforcePromptNodeSizing(nodeEl: HTMLElement, options?: { widthPx?: number; heightPx?: number }): void {
+    const requestedWidth = Math.floor(Number(options?.widthPx ?? CANVASFLOW_PROMPT_NODE_WIDTH_PX));
+    const widthPx = Math.max(
+      CANVASFLOW_PROMPT_NODE_MIN_WIDTH_PX,
+      Math.min(CANVASFLOW_PROMPT_NODE_MAX_WIDTH_PX, Number.isFinite(requestedWidth) ? requestedWidth : CANVASFLOW_PROMPT_NODE_WIDTH_PX)
+    );
+    const requestedHeight = Math.floor(Number(options?.heightPx ?? CANVASFLOW_PROMPT_NODE_HEIGHT_PX));
+    const heightPx = Math.max(
+      CANVASFLOW_PROMPT_NODE_MIN_HEIGHT_PX,
+      Math.min(CANVASFLOW_PROMPT_NODE_MAX_HEIGHT_PX, Number.isFinite(requestedHeight) ? requestedHeight : CANVASFLOW_PROMPT_NODE_HEIGHT_PX)
+    );
     const width = `${widthPx}px`;
     const height = `${heightPx}px`;
 
@@ -1862,7 +1918,7 @@ export class CanvasFlowEnhancer {
     window.setTimeout(hideHandles, 250);
   }
 
-  private tryFocusPendingPrompt(controller: LeafController, root: HTMLElement): void {
+  private tryFocusPendingPrompt(controller: LeafController): void {
     const nodeId = String(controller.pendingFocusNodeId || "").trim();
     if (!nodeId) {
       controller.pendingFocusAttempts = 0;

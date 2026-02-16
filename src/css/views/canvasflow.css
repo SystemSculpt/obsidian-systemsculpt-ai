@@ -14,12 +14,11 @@
 /* CanvasFlow prompt nodes: hide the default file preview/editor and make the node look like a "node editor"
    panel (ComfyUI vibes) rather than a normal Canvas note card. */
 .canvas-node.ss-canvasflow-prompt-node {
-  /* Fixed sizing for a consistent node editor feel.
-     Width/height are set from JS via CSS vars so we can keep a single source of truth. */
+  /* Width is fixed for layout stability; height is measured from card content by JS. */
   min-width: var(--ss-canvasflow-prompt-width, 520px) !important;
   max-width: var(--ss-canvasflow-prompt-width, 520px) !important;
-  min-height: var(--ss-canvasflow-prompt-height, 560px) !important;
-  max-height: var(--ss-canvasflow-prompt-height, 560px) !important;
+  min-height: var(--ss-canvasflow-prompt-height, 360px) !important;
+  max-height: var(--ss-canvasflow-prompt-height, 360px) !important;
 
   border-radius: 14px;
   overflow: hidden;
@@ -85,7 +84,7 @@
   border-top: none;
   padding: 12px 12px 12px 18px;
   border-radius: 0;
-  height: 100%;
+  height: auto;
   position: relative;
   background:
     radial-gradient(900px 360px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 20%, transparent), transparent 60%),
@@ -181,42 +180,20 @@
 }
 
 .ss-canvasflow-node-card-status {
-  margin-top: auto;
+  margin-top: 6px;
+}
+
+.ss-canvasflow-inspector-modal {
+  width: min(860px, 94vw);
 }
 
 .ss-canvasflow-inspector {
-  position: absolute;
-  right: 14px;
-  top: 14px;
-  width: min(430px, 38vw);
-  max-height: calc(100% - 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 72vh;
   overflow: auto;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
-  background:
-    radial-gradient(1000px 420px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 20%, transparent), transparent 58%),
-    linear-gradient(180deg, var(--background-secondary), var(--background-primary));
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.42);
-  z-index: 35;
-}
-
-.ss-canvasflow-inspector.is-collapsed {
-  display: none;
-}
-
-.ss-canvasflow-inspector.is-unselected {
-  border-color: color-mix(in srgb, var(--text-muted) 45%, var(--background-modifier-border));
-  opacity: 0.92;
-}
-
-.ss-canvasflow-inspector-empty {
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 14px;
-}
-
-.ss-canvasflow-inspector-content {
-  padding: 12px;
+  padding-right: 2px;
 }
 
 .ss-canvasflow-inspector-header {
@@ -253,17 +230,18 @@
 }
 
 @media (max-width: 1200px) {
-  .ss-canvasflow-inspector {
-    width: min(380px, 44vw);
+  .ss-canvasflow-inspector-modal {
+    width: min(760px, 94vw);
   }
 }
 
 @media (max-width: 960px) {
+  .ss-canvasflow-inspector-modal {
+    width: min(96vw, 96vw);
+  }
+
   .ss-canvasflow-inspector {
-    position: static;
-    width: auto;
-    max-height: none;
-    margin: 10px;
+    max-height: 68vh;
   }
 }
 
@@ -330,6 +308,34 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.ss-canvasflow-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ss-canvasflow-choice-btn {
+  appearance: none;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.ss-canvasflow-choice-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-canvasflow-choice-btn.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 .ss-canvasflow-field-label {

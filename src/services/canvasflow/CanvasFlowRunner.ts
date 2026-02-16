@@ -5,6 +5,7 @@ import { resolveSystemSculptApiBaseUrl } from "../../utils/urlHelpers";
 import {
   addEdge,
   addFileNode,
+  addTextNode,
   type CanvasDocument,
   type CanvasNode,
   computeNextNodePosition,
@@ -69,6 +70,28 @@ type CanvasFlowGenerationRunResult = {
   pollUrl?: string;
   finalJob: SystemSculptGenerationJobResponse;
 };
+
+type CanvasFlowOutputSlot = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type CanvasFlowGenerationPlaceholderSession = {
+  canvasDoc: CanvasDocument;
+  placeholderNodeIds: string[];
+  outputSlots: CanvasFlowOutputSlot[];
+  phase: string;
+  startedAtMs: number;
+  spinnerFrame: number;
+  updateTimerId: ReturnType<typeof setInterval> | null;
+  updateQueue: Promise<void>;
+  stopped: boolean;
+};
+
+const CANVASFLOW_PLACEHOLDER_SPINNER_FRAMES = ["|", "/", "-", "\\", "|", "/", "-", "\\"];
+const CANVASFLOW_PLACEHOLDER_TICK_MS = 1000;
 
 function isHttpUrl(value: string): boolean {
   const trimmed = value.trim();
@@ -206,6 +229,80 @@ function hashFnv1a(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function parseAspectRatioValue(aspectRatio: string | undefined): number | null {
+  const raw = String(aspectRatio || "").trim().toLowerCase();
+  if (!raw) return null;
+
+  const match = raw.match(/^(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return width / height;
+}
+
+function resolveOutputFrameForAspectRatio(aspectRatio: string | undefined): { width: number; height: number } {
+  const ratio = parseAspectRatioValue(aspectRatio);
+  const longSide = 320;
+  if (!ratio) return { width: longSide, height: longSide };
+
+  if (ratio >= 1) {
+    return {
+      width: longSide,
+      height: Math.max(160, Math.round(longSide / ratio)),
+    };
+  }
+
+  return {
+    width: Math.max(160, Math.round(longSide * ratio)),
+    height: longSide,
+  };
+}
+
+function formatElapsedTimer(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function normalizePlaceholderPhase(phase: string): string {
+  const compact = String(phase || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "Preparing generation...";
+
+  const lower = compact.toLowerCase();
+  if (lower.includes("reading input image")) return "Preparing input images...";
+  if (lower.includes("submitting generation job")) return "Submitting generation job...";
+  if (lower.includes("starting generation")) return "Queued for generation...";
+  if (lower.includes("generating image")) return "Generating images...";
+  if (lower.includes("refreshing output url")) return "Refreshing output links...";
+  if (lower.includes("retrying download")) return "Retrying output download...";
+  if (lower.includes("downloading generated image")) return "Downloading generated images...";
+  if (lower.includes("updating canvas")) return "Placing images on canvas...";
+  if (lower.includes("missing") && lower.includes("input image")) return "Some input images are missing.";
+
+  if (compact.length <= 56) return compact;
+  return `${compact.slice(0, 53)}...`;
+}
+
+function formatPlaceholderText(options: {
+  imageIndex: number;
+  imageCount: number;
+  spinnerFrame: number;
+  phase: string;
+  elapsedMs: number;
+}): string {
+  const spinner =
+    CANVASFLOW_PLACEHOLDER_SPINNER_FRAMES[
+      Math.abs(options.spinnerFrame) % CANVASFLOW_PLACEHOLDER_SPINNER_FRAMES.length
+    ] || "|";
+  const imageLabel = options.imageCount > 1 ? `Image ${options.imageIndex} of ${options.imageCount}` : "Image 1 of 1";
+  return `SystemSculpt CanvasFlow\n${imageLabel}  ${spinner}\n${normalizePlaceholderPhase(options.phase)}\nElapsed ${formatElapsedTimer(options.elapsedMs)}`;
+}
+
 export class CanvasFlowRunner {
   private readonly imageClientFactory: CanvasFlowImageGenerationClientFactory;
 
@@ -247,6 +344,13 @@ export class CanvasFlowRunner {
       .filter((model) => model.id.length > 0);
   }
 
+  private resolveMaxImagesPerJob(modelId: string): number {
+    const curated = getCuratedImageGenerationModel(modelId, this.getCachedImageGenerationModels());
+    const raw = Number(curated?.maxImagesPerJob);
+    if (!Number.isFinite(raw)) return 1;
+    return Math.max(1, Math.floor(raw));
+  }
+
   async runPromptNode(options: {
     canvasFile: TFile;
     promptNodeId: string;
@@ -272,73 +376,371 @@ export class CanvasFlowRunner {
       pluginVersion: this.plugin.manifest?.version ?? "0.0.0",
     });
 
-    const collectedInputs = await this.collectInputImages({
-      canvasDoc: context.canvasDoc,
-      promptNodeId: options.promptNodeId,
-      status: setStatus,
-      signal: options.signal,
-    });
+    let workingCanvasDoc = context.canvasDoc;
+    let placeholderSession: CanvasFlowGenerationPlaceholderSession | null = null;
 
-    if (collectedInputs.ignoredInputImageCount > 0) {
-      new Notice(
-        `SystemSculpt CanvasFlow: using ${collectedInputs.inputImages.length} input images (ignored ${collectedInputs.ignoredInputImageCount} beyond limit ${MAX_CANVASFLOW_INPUT_IMAGES}).`
-      );
+    const setStatusWithPlaceholders = (statusText: string): void => {
+      setStatus(statusText);
+      if (!placeholderSession || placeholderSession.stopped) return;
+      placeholderSession.phase = String(statusText || "").trim() || placeholderSession.phase;
+    };
+
+    try {
+      placeholderSession = await this.createGenerationPlaceholderSession({
+        canvasFile: options.canvasFile,
+        canvasDoc: workingCanvasDoc,
+        promptNode: context.promptNode,
+        promptNodeId: options.promptNodeId,
+        imageCount: context.imageCount,
+        aspectRatio: context.aspectRatio,
+      });
+      if (placeholderSession) {
+        workingCanvasDoc = placeholderSession.canvasDoc;
+        setStatusWithPlaceholders("Preparing generation...");
+      }
+
+      const collectedInputs = await this.collectInputImages({
+        canvasDoc: workingCanvasDoc,
+        promptNodeId: options.promptNodeId,
+        status: setStatusWithPlaceholders,
+        signal: options.signal,
+      });
+
+      if (collectedInputs.ignoredInputImageCount > 0) {
+        new Notice(
+          `SystemSculpt CanvasFlow: using ${collectedInputs.inputImages.length} input images (ignored ${collectedInputs.ignoredInputImageCount} beyond limit ${MAX_CANVASFLOW_INPUT_IMAGES}).`
+        );
+      }
+      if (collectedInputs.connectedImageCount > 0 && collectedInputs.inputImages.length === 0) {
+        setStatusWithPlaceholders("Input images missing; running prompt without image input.");
+      } else if (collectedInputs.missingInputImageCount > 0) {
+        setStatusWithPlaceholders(
+          `Missing ${collectedInputs.missingInputImageCount} input image(s); continuing with ${collectedInputs.inputImages.length} image(s).`
+        );
+      }
+
+      const desiredImageCount = Math.max(1, Math.min(4, Math.floor(context.imageCount || 1)));
+      const maxPerJob = this.resolveMaxImagesPerJob(context.modelId);
+      const savedOutputs: CanvasFlowSavedOutput[] = [];
+      const maxBatchRuns = Math.max(3, desiredImageCount * 3);
+      let batchRunCount = 0;
+
+      if (desiredImageCount > maxPerJob) {
+        const runs = Math.ceil(desiredImageCount / maxPerJob);
+        setStatusWithPlaceholders(`Model limit is ${maxPerJob} image(s) per run; generating in ${runs} runs...`);
+      }
+
+      while (savedOutputs.length < desiredImageCount && batchRunCount < maxBatchRuns) {
+        const remaining = desiredImageCount - savedOutputs.length;
+        const batchCount = Math.max(1, Math.min(remaining, maxPerJob));
+        const batchIndex = batchRunCount + 1;
+        const batchSeed =
+          context.seed !== null && Number.isFinite(context.seed) ? Math.max(0, Math.floor(context.seed + savedOutputs.length)) : null;
+
+        if (batchRunCount > 0) {
+          setStatusWithPlaceholders(
+            desiredImageCount > 1
+              ? `Generating remaining images (${savedOutputs.length + 1}-${savedOutputs.length + batchCount} of ${desiredImageCount})...`
+              : "Generating image..."
+          );
+        }
+
+        const generationRun = await this.submitAndAwaitGeneration({
+          runScopeKey: `${options.canvasFile.path}::${options.promptNodeId}::batch-${batchIndex}`,
+          client,
+          modelId: context.modelId,
+          promptText: context.promptText,
+          inputImages: collectedInputs.inputImages,
+          imageCount: batchCount,
+          aspectRatio: context.aspectRatio,
+          seed: batchSeed,
+          status: setStatusWithPlaceholders,
+          signal: options.signal,
+        });
+        batchRunCount += 1;
+
+        const outputs = generationRun.finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
+        if (outputs.length === 0) {
+          if (savedOutputs.length === 0) {
+            throw new Error("Image generation completed, but no output URLs were returned.");
+          }
+          break;
+        }
+
+        const outputsNeeded = outputs.slice(0, remaining);
+        const savedBatch = await this.saveGeneratedOutputs({
+          client,
+          outputs: outputsNeeded,
+          generationJobId: generationRun.jobId,
+          pollUrl: generationRun.pollUrl,
+          modelId: context.modelId,
+          promptFile: context.promptFile,
+          promptText: context.promptText,
+          inputImagePaths: collectedInputs.inputImagePaths,
+          job: generationRun.finalJob,
+          status: setStatusWithPlaceholders,
+          signal: options.signal,
+        });
+        savedOutputs.push(...savedBatch);
+
+        if (savedOutputs.length < desiredImageCount) {
+          const remainingAfterBatch = desiredImageCount - savedOutputs.length;
+          setStatusWithPlaceholders(
+            `Model returned ${savedOutputs.length}/${desiredImageCount} image(s); generating ${remainingAfterBatch} more...`
+          );
+        }
+      }
+
+      if (savedOutputs.length === 0) {
+        throw new Error("Image generation completed, but no output URLs were returned.");
+      }
+      if (savedOutputs.length < desiredImageCount) {
+        const missingCount = desiredImageCount - savedOutputs.length;
+        new Notice(
+          `SystemSculpt CanvasFlow: generated ${savedOutputs.length}/${desiredImageCount} image(s). ${missingCount} image(s) were not returned by the provider.`
+        );
+      }
+
+      if (placeholderSession) {
+        await this.stopGenerationPlaceholderSession(placeholderSession);
+        workingCanvasDoc = await this.replacePlaceholderNodesWithOutputs({
+          canvasFile: options.canvasFile,
+          canvasDoc: placeholderSession.canvasDoc,
+          promptNodeId: options.promptNodeId,
+          placeholderNodeIds: placeholderSession.placeholderNodeIds,
+          outputSlots: placeholderSession.outputSlots,
+          savedOutputs,
+          status: setStatusWithPlaceholders,
+        });
+      } else {
+        await this.attachGeneratedOutputsToCanvas({
+          canvasFile: options.canvasFile,
+          canvasDoc: workingCanvasDoc,
+          promptNode: context.promptNode,
+          promptNodeId: options.promptNodeId,
+          savedOutputs,
+          aspectRatio: context.aspectRatio,
+          status: setStatusWithPlaceholders,
+        });
+      }
+
+      setStatus("Done.");
+      if (savedOutputs.length === 1) {
+        new Notice(`SystemSculpt: generated ${savedOutputs[0].imagePath} (${context.modelDisplayName})`);
+      } else {
+        new Notice(`SystemSculpt: generated ${savedOutputs.length} images (${context.modelDisplayName})`);
+      }
+    } catch (error) {
+      if (placeholderSession) {
+        try {
+          await this.stopGenerationPlaceholderSession(placeholderSession);
+          await this.removePlaceholderNodes({
+            canvasFile: options.canvasFile,
+            canvasDoc: placeholderSession.canvasDoc,
+            placeholderNodeIds: placeholderSession.placeholderNodeIds,
+          });
+        } catch {
+          // Placeholder cleanup is best-effort.
+        }
+      }
+      throw error;
     }
-    if (collectedInputs.connectedImageCount > 0 && collectedInputs.inputImages.length === 0) {
-      setStatus("Input images missing; running prompt without image input.");
-    } else if (collectedInputs.missingInputImageCount > 0) {
-      setStatus(
-        `Missing ${collectedInputs.missingInputImageCount} input image(s); continuing with ${collectedInputs.inputImages.length} image(s).`
-      );
+  }
+
+  private computeOutputSlots(options: {
+    promptNode: CanvasNode;
+    imageCount: number;
+    aspectRatio?: string;
+  }): CanvasFlowOutputSlot[] {
+    const outputCount = Math.max(1, Math.floor(options.imageCount || 1));
+    const frame = resolveOutputFrameForAspectRatio(options.aspectRatio);
+    const placed = computeNextNodePosition(options.promptNode, {
+      dx: 80,
+      defaultWidth: frame.width,
+      defaultHeight: frame.height,
+    });
+    const gapX = 80;
+    const slots: CanvasFlowOutputSlot[] = [];
+    for (let idx = 0; idx < outputCount; idx += 1) {
+      slots.push({
+        x: placed.x + idx * (placed.width + gapX),
+        y: placed.y,
+        width: placed.width,
+        height: placed.height,
+      });
+    }
+    return slots;
+  }
+
+  private async createGenerationPlaceholderSession(options: {
+    canvasFile: TFile;
+    canvasDoc: CanvasDocument;
+    promptNode: CanvasNode;
+    promptNodeId: string;
+    imageCount: number;
+    aspectRatio?: string;
+  }): Promise<CanvasFlowGenerationPlaceholderSession | null> {
+    try {
+      const outputSlots = this.computeOutputSlots({
+        promptNode: options.promptNode,
+        imageCount: options.imageCount,
+        aspectRatio: options.aspectRatio,
+      });
+      let updatedDoc = options.canvasDoc;
+      const placeholderNodeIds: string[] = [];
+
+      for (const [idx, slot] of outputSlots.entries()) {
+        const added = addTextNode(updatedDoc, {
+          text: formatPlaceholderText({
+            imageIndex: idx + 1,
+            imageCount: outputSlots.length,
+            phase: "Preparing generation...",
+            elapsedMs: 0,
+            spinnerFrame: idx,
+          }),
+          x: slot.x,
+          y: slot.y,
+          width: slot.width,
+          height: slot.height,
+        });
+        updatedDoc = added.doc;
+        placeholderNodeIds.push(added.nodeId);
+        updatedDoc = addEdge(updatedDoc, { fromNode: options.promptNodeId, toNode: added.nodeId }).doc;
+      }
+
+      await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(updatedDoc));
+
+      const session: CanvasFlowGenerationPlaceholderSession = {
+        canvasDoc: updatedDoc,
+        placeholderNodeIds,
+        outputSlots,
+        phase: "Preparing generation...",
+        startedAtMs: Date.now(),
+        spinnerFrame: 0,
+        updateTimerId: null,
+        updateQueue: Promise.resolve(),
+        stopped: false,
+      };
+
+      this.enqueuePlaceholderRender({
+        canvasFile: options.canvasFile,
+        session,
+      });
+      session.updateTimerId = setInterval(() => {
+        this.enqueuePlaceholderRender({
+          canvasFile: options.canvasFile,
+          session,
+        });
+      }, CANVASFLOW_PLACEHOLDER_TICK_MS);
+      return session;
+    } catch {
+      return null;
+    }
+  }
+
+  private enqueuePlaceholderRender(options: {
+    canvasFile: TFile;
+    session: CanvasFlowGenerationPlaceholderSession;
+  }): void {
+    const { session } = options;
+    if (session.stopped) return;
+
+    session.updateQueue = session.updateQueue
+      .catch(() => {})
+      .then(async () => {
+        if (session.stopped) return;
+
+        session.spinnerFrame += 1;
+        const elapsedMs = Date.now() - session.startedAtMs;
+        const nodesById = indexCanvas(session.canvasDoc).nodesById;
+
+        for (const [idx, nodeId] of session.placeholderNodeIds.entries()) {
+          const node = nodesById.get(nodeId);
+          if (!node) continue;
+          const slot = session.outputSlots[idx];
+          if (!slot) continue;
+
+          node.type = "text";
+          node.x = slot.x;
+          node.y = slot.y;
+          node.width = slot.width;
+          node.height = slot.height;
+          node.text = formatPlaceholderText({
+            imageIndex: idx + 1,
+            imageCount: session.placeholderNodeIds.length,
+            phase: session.phase,
+            elapsedMs,
+            spinnerFrame: session.spinnerFrame + idx,
+          });
+          delete (node as any).file;
+          delete (node as any).label;
+          delete (node as any).url;
+        }
+
+        await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(session.canvasDoc));
+      });
+  }
+
+  private async stopGenerationPlaceholderSession(session: CanvasFlowGenerationPlaceholderSession): Promise<void> {
+    if (session.stopped) return;
+    session.stopped = true;
+    if (session.updateTimerId !== null) {
+      clearInterval(session.updateTimerId);
+      session.updateTimerId = null;
+    }
+    await session.updateQueue.catch(() => {});
+  }
+
+  private async replacePlaceholderNodesWithOutputs(options: {
+    canvasFile: TFile;
+    canvasDoc: CanvasDocument;
+    promptNodeId: string;
+    placeholderNodeIds: string[];
+    outputSlots: CanvasFlowOutputSlot[];
+    savedOutputs: CanvasFlowSavedOutput[];
+    status: RunStatusUpdater;
+  }): Promise<CanvasDocument> {
+    options.status("Updating canvas...");
+    const placeholderSet = new Set(options.placeholderNodeIds);
+    let updatedDoc: CanvasDocument = {
+      ...options.canvasDoc,
+      nodes: options.canvasDoc.nodes.filter((node) => !placeholderSet.has(node.id)),
+      edges: options.canvasDoc.edges.filter(
+        (edge) => !placeholderSet.has(edge.fromNode) && !placeholderSet.has(edge.toNode)
+      ),
+    };
+
+    for (const [idx, saved] of options.savedOutputs.entries()) {
+      const slot = options.outputSlots[idx];
+      if (!slot) continue;
+      const added = addFileNode(updatedDoc, {
+        filePath: saved.imagePath,
+        x: slot.x,
+        y: slot.y,
+        width: slot.width,
+        height: slot.height,
+      });
+      updatedDoc = added.doc;
+      updatedDoc = addEdge(updatedDoc, { fromNode: options.promptNodeId, toNode: added.nodeId }).doc;
     }
 
-    const generationRun = await this.submitAndAwaitGeneration({
-      runScopeKey: `${options.canvasFile.path}::${options.promptNodeId}`,
-      client,
-      modelId: context.modelId,
-      promptText: context.promptText,
-      inputImages: collectedInputs.inputImages,
-      imageCount: context.imageCount,
-      aspectRatio: context.aspectRatio,
-      seed: context.seed,
-      status: setStatus,
-      signal: options.signal,
-    });
+    await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(updatedDoc));
+    return updatedDoc;
+  }
 
-    const outputs = generationRun.finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
-    if (outputs.length === 0) {
-      throw new Error("Image generation completed, but no output URLs were returned.");
-    }
-
-    const savedOutputs = await this.saveGeneratedOutputs({
-      client,
-      outputs,
-      generationJobId: generationRun.jobId,
-      pollUrl: generationRun.pollUrl,
-      modelId: context.modelId,
-      promptFile: context.promptFile,
-      promptText: context.promptText,
-      inputImagePaths: collectedInputs.inputImagePaths,
-      job: generationRun.finalJob,
-      status: setStatus,
-      signal: options.signal,
-    });
-
-    await this.attachGeneratedOutputsToCanvas({
-      canvasFile: options.canvasFile,
-      canvasDoc: context.canvasDoc,
-      promptNode: context.promptNode,
-      promptNodeId: options.promptNodeId,
-      savedOutputs,
-      status: setStatus,
-    });
-
-    setStatus("Done.");
-    if (savedOutputs.length === 1) {
-      new Notice(`SystemSculpt: generated ${savedOutputs[0].imagePath} (${context.modelDisplayName})`);
-    } else {
-      new Notice(`SystemSculpt: generated ${savedOutputs.length} images (${context.modelDisplayName})`);
-    }
+  private async removePlaceholderNodes(options: {
+    canvasFile: TFile;
+    canvasDoc: CanvasDocument;
+    placeholderNodeIds: string[];
+  }): Promise<CanvasDocument> {
+    const placeholderSet = new Set(options.placeholderNodeIds);
+    const updatedDoc: CanvasDocument = {
+      ...options.canvasDoc,
+      nodes: options.canvasDoc.nodes.filter((node) => !placeholderSet.has(node.id)),
+      edges: options.canvasDoc.edges.filter((edge) => !placeholderSet.has(edge.fromNode) && !placeholderSet.has(edge.toNode)),
+    };
+    await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(updatedDoc));
+    return updatedDoc;
   }
 
   private async resolvePromptRunContext(options: {
@@ -697,22 +1099,26 @@ export class CanvasFlowRunner {
     promptNode: CanvasNode;
     promptNodeId: string;
     savedOutputs: CanvasFlowSavedOutput[];
+    aspectRatio?: string;
     status: RunStatusUpdater;
   }): Promise<void> {
     options.status("Updating canvas...");
-    const placed = computeNextNodePosition(options.promptNode, { dx: 80, defaultWidth: 320, defaultHeight: 320 });
+    const slots = this.computeOutputSlots({
+      promptNode: options.promptNode,
+      imageCount: options.savedOutputs.length,
+      aspectRatio: options.aspectRatio,
+    });
     let updatedDoc = options.canvasDoc;
-    const gapX = 80;
 
     for (const [idx, saved] of options.savedOutputs.entries()) {
-      const x = placed.x + idx * (placed.width + gapX);
-      const y = placed.y;
+      const slot = slots[idx] || slots[slots.length - 1];
+      if (!slot) continue;
       const added = addFileNode(updatedDoc, {
         filePath: saved.imagePath,
-        x,
-        y,
-        width: placed.width,
-        height: placed.height,
+        x: slot.x,
+        y: slot.y,
+        width: slot.width,
+        height: slot.height,
       });
       updatedDoc = added.doc;
       updatedDoc = addEdge(updatedDoc, { fromNode: options.promptNodeId, toNode: added.nodeId }).doc;

@@ -222,6 +222,35 @@ export function addFileNode(
   };
 }
 
+export function addTextNode(
+  doc: CanvasDocument,
+  options: {
+    text: string;
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+    nodeId?: string;
+  }
+): { doc: CanvasDocument; nodeId: string } {
+  const nodeId = options.nodeId || generateId("ss-node");
+  const node: CanvasNode = {
+    id: nodeId,
+    type: "text",
+    text: String(options.text || ""),
+    x: options.x,
+    y: options.y,
+    width: options.width,
+    height: options.height,
+  };
+
+  const nextNodes = [...doc.nodes, node];
+  return {
+    doc: { ...doc, nodes: nextNodes },
+    nodeId,
+  };
+}
+
 export function addEdge(
   doc: CanvasDocument,
   options: {

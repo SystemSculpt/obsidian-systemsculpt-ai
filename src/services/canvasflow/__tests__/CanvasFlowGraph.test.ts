@@ -1,6 +1,7 @@
 import {
   addEdge,
   addFileNode,
+  addTextNode,
   findIncomingImageFileForNode,
   findIncomingImageFilesForNode,
   indexCanvas,
@@ -79,6 +80,29 @@ describe("CanvasFlowGraph", () => {
 
     const text = serializeCanvasDocument(doc);
     expect(text).toContain('"viewport"');
+  });
+
+  it("adds text nodes for canvas placeholders", () => {
+    const raw = JSON.stringify({
+      nodes: [],
+      edges: [],
+    });
+    let doc = parseCanvasDocument(raw)!;
+    const added = addTextNode(doc, {
+      text: "Generating...",
+      x: 120,
+      y: 240,
+      width: 320,
+      height: 180,
+    });
+    doc = added.doc;
+
+    expect(doc.nodes).toHaveLength(1);
+    expect(doc.nodes[0].id).toBe(added.nodeId);
+    expect(doc.nodes[0].type).toBe("text");
+    expect(doc.nodes[0].text).toBe("Generating...");
+    expect(doc.nodes[0].width).toBe(320);
+    expect(doc.nodes[0].height).toBe(180);
   });
 
   it("indexes nodes and edges", () => {
