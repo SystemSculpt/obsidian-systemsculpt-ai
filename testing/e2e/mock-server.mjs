@@ -5,6 +5,10 @@ const LEGACY_API_PREFIX = "/api/v1";
 const AGENT_API_PREFIX = "/api/v2/agent";
 const DEFAULT_PORT = 43111;
 const DEBUG = process.env.SYSTEMSCULPT_E2E_MOCK_DEBUG === "1";
+const TINY_PNG_BUFFER = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9slt4d8AAAAASUVORK5CYII=",
+  "base64"
+);
 
 function getPort() {
   const raw = process.env.SYSTEMSCULPT_E2E_MOCK_PORT || process.env.PORT || "";
@@ -92,12 +96,16 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 const sessions = new Map();
+const imageJobs = new Map();
 const requestStats = {
   v2Sessions: 0,
   v2Turns: 0,
   v2ToolResults: 0,
   v2Continue: 0,
   legacyChatCompletions: 0,
+  imageModels: 0,
+  imageJobsCreated: 0,
+  imageJobPolls: 0,
 };
 
 app.get(`${LEGACY_API_PREFIX}/license/validate`, (req, res) => {
@@ -127,6 +135,125 @@ app.get(`${LEGACY_API_PREFIX}/models`, (req, res) => {
       upstream_model: "openrouter/google/gemini-3-flash-preview",
     },
   ]);
+});
+
+app.get(`${LEGACY_API_PREFIX}/images/models`, (req, res) => {
+  const licenseKey = requireLicense(req, res);
+  if (!licenseKey) return;
+  requestStats.imageModels += 1;
+
+  res.status(200).json({
+    contract: "systemsculpt-image-v1",
+    provider: "openrouter",
+    models: [
+      {
+        id: "openai/gpt-5-image-mini",
+        name: "OpenAI GPT-5 Image Mini",
+        provider: "openrouter",
+        input_modalities: ["text", "image"],
+        output_modalities: ["image"],
+        supports_image_input: true,
+        max_images_per_job: 4,
+        default_aspect_ratio: "1:1",
+        allowed_aspect_ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+      },
+    ],
+  });
+});
+
+app.post(`${LEGACY_API_PREFIX}/images/generations/jobs`, (req, res) => {
+  const licenseKey = requireLicense(req, res);
+  if (!licenseKey) return;
+  requestStats.imageJobsCreated += 1;
+
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    res.status(400).json({ error: "prompt is required" });
+    return;
+  }
+
+  const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "openai/gpt-5-image-mini";
+  const countRaw = body.options && typeof body.options === "object" ? Number(body.options.count || 1) : 1;
+  const count = Number.isFinite(countRaw) ? Math.max(1, Math.min(4, Math.floor(countRaw))) : 1;
+
+  const jobId = `imgjob_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const createdAt = new Date().toISOString();
+  const readyAt = Date.now() + 1200;
+  imageJobs.set(jobId, {
+    id: jobId,
+    model,
+    prompt,
+    count,
+    createdAt,
+    readyAt,
+  });
+
+  res.status(202).json({
+    job: {
+      id: jobId,
+      status: "queued",
+      model,
+      created_at: createdAt,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      attempt_count: 0,
+    },
+    poll_url: `/api/v1/images/generations/jobs/${jobId}`,
+  });
+});
+
+app.get(`${LEGACY_API_PREFIX}/images/generations/jobs/:jobId`, (req, res) => {
+  const licenseKey = requireLicense(req, res);
+  if (!licenseKey) return;
+  requestStats.imageJobPolls += 1;
+
+  const { jobId } = req.params || {};
+  const job = jobId ? imageJobs.get(jobId) : null;
+  if (!job) {
+    res.status(404).json({ error: "Job not found." });
+    return;
+  }
+
+  const done = Date.now() >= job.readyAt;
+  const status = done ? "succeeded" : "queued";
+  const outputs = done
+    ? Array.from({ length: job.count }).map((_, index) => ({
+        index,
+        mime_type: "image/png",
+        size_bytes: TINY_PNG_BUFFER.byteLength,
+        width: 1,
+        height: 1,
+        url: `http://127.0.0.1:${getPort()}/mock/images/${job.id}/${index}.png`,
+        url_expires_in_seconds: 1800,
+      }))
+    : [];
+
+  res.status(200).json({
+    job: {
+      id: job.id,
+      status,
+      model: job.model,
+      created_at: job.createdAt,
+      processing_started_at: job.createdAt,
+      completed_at: done ? new Date().toISOString() : null,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      error_code: null,
+      error_message: null,
+      attempt_count: 1,
+    },
+    outputs,
+    usage: {
+      provider: "openrouter",
+      raw_usd: 0.02,
+      cost_source: "mock",
+      estimated: true,
+    },
+  });
+});
+
+app.get("/mock/images/:jobId/:index.png", (_req, res) => {
+  res.setHeader("Content-Type", "image/png");
+  res.status(200).send(TINY_PNG_BUFFER);
 });
 
 app.post(`${AGENT_API_PREFIX}/sessions`, (req, res) => {

@@ -18,43 +18,46 @@ describe("PromptNote", () => {
   });
 
   describe("parseCanvasFlowPromptNote", () => {
-    it("parses a replicate prompt note", () => {
+    it("parses an openrouter-backed image prompt note", () => {
       const md = [
         "---",
         "ss_flow_kind: prompt",
-        "ss_flow_backend: replicate",
-        "ss_replicate_model: acme/my-model",
-        "ss_replicate_version: ver123",
-        "ss_replicate_prompt_key: prompt",
-        "ss_replicate_image_key: image",
+        "ss_flow_backend: openrouter",
+        "ss_image_model: openai/gpt-5-image-mini",
         "ss_image_count: 3",
-        "ss_replicate_input:",
-        "  width: 512",
-        "  height: 768",
+        "ss_image_aspect_ratio: 16:9",
+        "ss_seed: 42",
         "---",
         "",
-        "A cute cat astronaut",
+        "A cinematic city at dawn",
         "",
       ].join("\n");
 
       const res = parseCanvasFlowPromptNote(md);
       expect(res.ok).toBe(true);
       if (!res.ok) return;
-      expect(res.config.backend).toBe("replicate");
-      expect(res.config.replicateModelSlug).toBe("acme/my-model");
-      expect(res.config.replicateVersionId).toBe("ver123");
-      expect(res.config.replicatePromptKey).toBe("prompt");
-      expect(res.config.replicateImageKey).toBe("image");
+      expect(res.config.backend).toBe("openrouter");
+      expect(res.config.imageModelId).toBe("openai/gpt-5-image-mini");
       expect(res.config.imageCount).toBe(3);
-      expect(res.config.replicateInput.width).toBe(512);
-      expect(res.config.replicateInput.height).toBe(768);
-      expect(res.body).toContain("A cute cat astronaut");
+      expect(res.config.aspectRatio).toBe("16:9");
+      expect(res.config.seed).toBe(42);
+      expect(res.body).toContain("A cinematic city at dawn");
     });
 
     it("rejects non-prompt notes", () => {
+      const md = ["---", "ss_flow_kind: not-prompt", "---", "", "Hello"].join("\n");
+
+      const res = parseCanvasFlowPromptNote(md);
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.reason).toBe("not-canvasflow-prompt");
+    });
+
+    it("rejects unsupported backend", () => {
       const md = [
         "---",
-        "ss_flow_kind: not-prompt",
+        "ss_flow_kind: prompt",
+        "ss_flow_backend: replicate",
         "---",
         "",
         "Hello",
@@ -63,7 +66,7 @@ describe("PromptNote", () => {
       const res = parseCanvasFlowPromptNote(md);
       expect(res.ok).toBe(false);
       if (res.ok) return;
-      expect(res.reason).toBe("not-canvasflow-prompt");
+      expect(res.reason).toContain("unsupported backend");
     });
   });
 
@@ -72,7 +75,7 @@ describe("PromptNote", () => {
       const original = [
         "---",
         "ss_flow_kind: prompt",
-        "ss_flow_backend: replicate",
+        "ss_flow_backend: openrouter",
         "---",
         "",
         "Old prompt",
@@ -81,7 +84,7 @@ describe("PromptNote", () => {
 
       const updated = replaceMarkdownBodyPreservingFrontmatter(original, "New prompt");
       expect(updated).toContain("ss_flow_kind: prompt");
-      expect(updated).toContain("ss_flow_backend: replicate");
+      expect(updated).toContain("ss_flow_backend: openrouter");
       expect(updated).toContain("New prompt");
       expect(updated).not.toContain("Old prompt");
     });
@@ -97,7 +100,7 @@ describe("PromptNote", () => {
       const original = [
         "---",
         "ss_flow_kind: prompt",
-        "ss_flow_backend: replicate",
+        "ss_flow_backend: openrouter",
         "---",
         "",
         "Old prompt",
@@ -108,15 +111,15 @@ describe("PromptNote", () => {
         original,
         {
           ss_flow_kind: "prompt",
-          ss_flow_backend: "replicate",
-          ss_replicate_model: "acme/model",
-          ss_replicate_input: { width: 512 },
+          ss_flow_backend: "openrouter",
+          ss_image_model: "openai/gpt-5-image-mini",
+          ss_image_count: 2,
         },
         "New prompt"
       );
 
-      expect(updated).toContain("ss_replicate_model: acme/model");
-      expect(updated).toContain("width: 512");
+      expect(updated).toContain("ss_image_model: openai/gpt-5-image-mini");
+      expect(updated).toContain("ss_image_count: 2");
       expect(updated).toContain("New prompt");
       expect(updated).not.toContain("Old prompt");
     });

@@ -86,6 +86,22 @@ describe("SYSTEMSCULPT_API_ENDPOINTS", () => {
     });
   });
 
+  describe("IMAGES", () => {
+    it("has MODELS endpoint", () => {
+      expect(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.MODELS).toBe("/images/models");
+    });
+
+    it("has GENERATION_JOBS endpoint", () => {
+      expect(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.GENERATION_JOBS).toBe("/images/generations/jobs");
+    });
+
+    it("builds GENERATION_JOB endpoint with encoded id", () => {
+      expect(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.GENERATION_JOB("job/1")).toBe(
+        "/images/generations/jobs/job%2F1"
+      );
+    });
+  });
+
   describe("SYSTEM_PROMPTS", () => {
     it("builds GET endpoint with ID", () => {
       const endpoint = SYSTEMSCULPT_API_ENDPOINTS.SYSTEM_PROMPTS.GET("prompt-1");

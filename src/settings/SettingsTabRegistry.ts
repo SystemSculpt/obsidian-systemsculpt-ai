@@ -137,8 +137,8 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
       ],
       anchor: {
-        title: "SystemSculpt Canvas, Replicate, Images",
-        desc: "Configure Replicate API key and model selection for SystemSculpt canvas image generation inside Obsidian Canvas.",
+        title: "SystemSculpt Canvas, OpenRouter, Images",
+        desc: "Configure model selection for SystemSculpt canvas image generation (OpenRouter provider) inside Obsidian Canvas.",
       },
     },
     {

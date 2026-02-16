@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../main";
 import { addFileNode, computeNewNodePositionNearRightEdge, parseCanvasDocument, serializeCanvasDocument } from "./CanvasFlowGraph";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 import { CANVASFLOW_PROMPT_NODE_HEIGHT_PX, CANVASFLOW_PROMPT_NODE_WIDTH_PX } from "./CanvasFlowUiConstants";
+import { DEFAULT_IMAGE_GENERATION_MODEL_ID } from "./ImageGenerationModelCatalog";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -74,17 +75,15 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
   const promptsDir = "SystemSculpt/CanvasFlow/Prompts";
   await ensureFolder(app, promptsDir);
 
-  const modelSlug = String(plugin.settings.replicateDefaultModelSlug || "").trim();
-  const modelLine = modelSlug ? `ss_replicate_model: ${modelSlug}\n` : "";
-  const imageKeyLine = modelSlug === "google/nano-banana-pro" ? "ss_replicate_image_key: image_input\n" : "";
+  const modelId = String(plugin.settings.imageGenerationDefaultModelId || "").trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+  const modelLine = modelId ? `ss_image_model: ${modelId}\n` : "";
 
   const template = [
     "---",
     "ss_flow_kind: prompt",
-    "ss_flow_backend: replicate",
+    "ss_flow_backend: openrouter",
     modelLine.trimEnd(),
-    imageKeyLine.trimEnd(),
-    "ss_replicate_input: {}",
+    "ss_image_count: 1",
     "---",
     "",
     "Describe your prompt here.",

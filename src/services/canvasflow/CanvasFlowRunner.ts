@@ -1,5 +1,7 @@
 import { App, Notice, TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { API_BASE_URL } from "../../constants/api";
+import { resolveSystemSculptApiBaseUrl } from "../../utils/urlHelpers";
 import {
   addEdge,
   addFileNode,
@@ -11,8 +13,15 @@ import {
   serializeCanvasDocument,
 } from "./CanvasFlowGraph";
 import { parseCanvasFlowPromptNote } from "./PromptNote";
-import { getCuratedReplicateModel, getEffectiveReplicateImageInputSpec } from "./ReplicateModelCatalog";
-import { ReplicateImageService, type ReplicatePrediction } from "./ReplicateImageService";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  getCuratedImageGenerationModel,
+} from "./ImageGenerationModelCatalog";
+import {
+  SystemSculptImageGenerationService,
+  type SystemSculptGenerationJobResponse,
+  type SystemSculptImageGenerationOutput,
+} from "./SystemSculptImageGenerationService";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 
 type RunStatusUpdater = (status: string) => void;
@@ -20,27 +29,6 @@ type RunStatusUpdater = (status: string) => void;
 function isHttpUrl(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.startsWith("http://") || trimmed.startsWith("https://");
-}
-
-function findFirstUrl(output: unknown): string | null {
-  if (typeof output === "string") {
-    return isHttpUrl(output) ? output.trim() : null;
-  }
-  if (Array.isArray(output)) {
-    for (const item of output) {
-      const found = findFirstUrl(item);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (output && typeof output === "object") {
-    for (const value of Object.values(output as Record<string, unknown>)) {
-      const found = findFirstUrl(value);
-      if (found) return found;
-    }
-    return null;
-  }
-  return null;
 }
 
 function mimeFromExtension(ext: string): string {
@@ -62,6 +50,10 @@ function extensionFromContentType(contentType: string | undefined): string | nul
   return null;
 }
 
+function extensionFromMimeType(mimeType: string | undefined): string | null {
+  return extensionFromContentType(mimeType);
+}
+
 function extensionFromUrl(url: string): string | null {
   try {
     const u = new URL(url);
@@ -69,7 +61,9 @@ function extensionFromUrl(url: string): string | null {
     const last = path.split("/").pop() || "";
     const ext = last.includes(".") ? last.split(".").pop() || "" : "";
     const clean = ext.toLowerCase();
-    if (clean === "png" || clean === "jpg" || clean === "jpeg" || clean === "webp" || clean === "gif") return clean === "jpeg" ? "jpg" : clean;
+    if (clean === "png" || clean === "jpg" || clean === "jpeg" || clean === "webp" || clean === "gif") {
+      return clean === "jpeg" ? "jpg" : clean;
+    }
     return null;
   } catch {
     return null;
@@ -83,18 +77,17 @@ function nowStamp(): { iso: string; compact: string } {
   return { iso: d.toISOString(), compact };
 }
 
-function formatReplicateModelDisplayName(modelSlug: string): string {
-  const slug = String(modelSlug || "").trim();
-  const entry = getCuratedReplicateModel(slug);
-  return entry?.label || slug || "Replicate";
+function formatImageModelDisplayName(modelId: string): string {
+  const id = String(modelId || "").trim();
+  const entry = getCuratedImageGenerationModel(id);
+  return entry?.label || id || "OpenRouter";
 }
 
-function formatReplicateModelFileBase(modelSlug: string): string {
-  const slug = String(modelSlug || "").trim();
-  const entry = getCuratedReplicateModel(slug);
+function formatImageModelFileBase(modelId: string): string {
+  const id = String(modelId || "").trim();
+  const entry = getCuratedImageGenerationModel(id);
   if (entry?.label) return entry.label;
-  // Replace path separators so `sanitizeChatTitle` doesn't collapse owner/name.
-  return slug.replace(/[\\/]+/g, "-") || "generation";
+  return id.replace(/[\\/]+/g, "-") || "generation";
 }
 
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
@@ -103,7 +96,6 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
   const exists = await app.vault.adapter.exists(normalized);
   if (exists) return;
 
-  // Obsidian's createFolder doesn't always create intermediate segments; do it ourselves.
   const parts = normalized.split("/").filter(Boolean);
   let current = "";
   for (const part of parts) {
@@ -129,14 +121,11 @@ async function getAvailableFilePath(app: App, folderPath: string, baseName: stri
 }
 
 function base64FromArrayBuffer(arrayBuffer: ArrayBuffer): string {
-  // Desktop-only feature; Buffer should be available in Obsidian Desktop.
-  const buf = Buffer.from(new Uint8Array(arrayBuffer));
-  return buf.toString("base64");
+  const buffer = Buffer.from(new Uint8Array(arrayBuffer));
+  return buffer.toString("base64");
 }
 
 export class CanvasFlowRunner {
-  private readonly resolvedVersionCache = new Map<string, string>(); // modelSlug -> latestVersionId
-
   constructor(private readonly app: App, private readonly plugin: SystemSculptPlugin) {}
 
   async runPromptNode(options: {
@@ -147,10 +136,12 @@ export class CanvasFlowRunner {
   }): Promise<void> {
     const setStatus = options.status || (() => {});
 
-    const apiKey = String(this.plugin.settings.replicateApiKey || "").trim();
-    if (!apiKey) {
-      throw new Error("Replicate API key is not configured. Set it in Settings -> Image Generation.");
+    const licenseKey = String(this.plugin.settings.licenseKey || "").trim();
+    if (!licenseKey) {
+      throw new Error("License key is not configured. Validate your license in Settings -> Setup.");
     }
+
+    const baseUrl = resolveSystemSculptApiBaseUrl(String(this.plugin.settings.serverUrl || API_BASE_URL));
 
     const canvasRaw = await this.app.vault.read(options.canvasFile);
     const doc = parseCanvasDocument(canvasRaw);
@@ -185,122 +176,108 @@ export class CanvasFlowRunner {
       throw new Error("Prompt is empty.");
     }
 
-    const modelSlug =
-      String(promptParsed.config.replicateModelSlug || "").trim() ||
-      String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
-    if (!modelSlug) {
-      throw new Error("No Replicate model set. Choose a default model in Settings -> Image Generation, or set ss_replicate_model in the prompt note.");
+    const modelId =
+      String(promptParsed.config.imageModelId || "").trim() ||
+      String(this.plugin.settings.imageGenerationDefaultModelId || "").trim() ||
+      DEFAULT_IMAGE_GENERATION_MODEL_ID;
+    if (!modelId) {
+      throw new Error("No image model set. Choose a default model in Settings -> Image Generation, or set ss_image_model in the prompt note.");
     }
 
-    const modelDisplayName = formatReplicateModelDisplayName(modelSlug);
+    const modelDisplayName = formatImageModelDisplayName(modelId);
     const imageCount = Math.max(1, Math.min(4, Math.floor(promptParsed.config.imageCount || 1)));
+    const aspectRatio = String(promptParsed.config.aspectRatio || "").trim() || undefined;
+    const seed = promptParsed.config.seed;
 
-    const replicate = new ReplicateImageService(apiKey);
-
-    const versionId = await this.resolveVersionId({
-      replicate,
-      modelSlug,
-      promptOverrideVersion: promptParsed.config.replicateVersionId,
+    const service = new SystemSculptImageGenerationService({
+      baseUrl,
+      licenseKey,
     });
 
-    const input: Record<string, unknown> = { ...(promptParsed.config.replicateInput || {}) };
-    input[promptParsed.config.replicatePromptKey] = promptText;
-
-    const hasExplicitImageKey = "ss_replicate_image_key" in (promptParsed.frontmatter || {});
-    const imageSpec = getEffectiveReplicateImageInputSpec({
-      modelSlug,
-      replicateImageKey: promptParsed.config.replicateImageKey,
-      hasExplicitImageKey,
-      replicateInput: input,
-    });
-
+    const inputImages: Array<{ type: "data_url"; data_url: string }> = [];
     const incomingImage = findIncomingImageFileForNode(doc, options.promptNodeId);
     if (incomingImage) {
-      if (imageSpec.kind === "none") {
-        setStatus("Model doesn't accept image input; running prompt without image.");
+      const imageAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
+      if (imageAbs instanceof TFile) {
+        setStatus("Reading input image...");
+        const imgBytes = await this.app.vault.readBinary(imageAbs);
+        const ext = String(imageAbs.extension || "").toLowerCase();
+        const mime = mimeFromExtension(ext);
+        const b64 = base64FromArrayBuffer(imgBytes);
+        inputImages.push({
+          type: "data_url",
+          data_url: `data:${mime};base64,${b64}`,
+        });
       } else {
-        const imgAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
-        if (imgAbs instanceof TFile) {
-          setStatus("Reading input image...");
-          const imgBytes = await this.app.vault.readBinary(imgAbs);
-          const ext = String(imgAbs.extension || "").toLowerCase();
-          const mime = mimeFromExtension(ext);
-          const b64 = base64FromArrayBuffer(imgBytes);
-          const dataUrl = `data:${mime};base64,${b64}`;
-
-          const imageKey = imageSpec.key;
-          if (imageSpec.kind === "array") {
-            const existing = input[imageKey];
-            if (Array.isArray(existing)) {
-              input[imageKey] = [...existing, dataUrl];
-            } else if (typeof existing === "string" && existing.trim()) {
-              input[imageKey] = [existing, dataUrl];
-            } else {
-              input[imageKey] = [dataUrl];
-            }
-          } else {
-            input[imageKey] = dataUrl;
-          }
-        } else {
-          setStatus("Input image missing; running prompt without image.");
-        }
+        setStatus("Input image missing; running prompt without image.");
       }
     }
 
-    const outputDir = String(this.plugin.settings.replicateOutputDir || "").trim() || "SystemSculpt/Attachments/Generations";
+    setStatus("Submitting generation job...");
+    const job = await service.createGenerationJob({
+      model: modelId,
+      prompt: promptText,
+      input_images: inputImages,
+      options: {
+        count: imageCount,
+        ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+        ...(seed !== null && Number.isFinite(seed) ? { seed } : {}),
+      },
+    });
+
+    const jobId = String(job.job?.id || "").trim();
+    if (!jobId) {
+      throw new Error("Image generation API did not return a job id.");
+    }
+
+    setStatus("Waiting for image generation...");
+    const finalJob = await service.waitForGenerationJob(jobId, {
+      pollIntervalMs: this.plugin.settings.imageGenerationPollIntervalMs ?? 1000,
+      signal: options.signal,
+      onUpdate: (status) => {
+        const s = String(status.job?.status || "").trim();
+        if (s === "queued" || s === "processing") {
+          setStatus(imageCount > 1 ? `Generation (${s})...` : `Generation: ${s}...`);
+        }
+      },
+    });
+
+    const outputs = finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
+    if (outputs.length === 0) {
+      throw new Error("Image generation completed, but no output URLs were returned.");
+    }
+
+    const outputDir = String(this.plugin.settings.imageGenerationOutputDir || "").trim() || "SystemSculpt/Attachments/Generations";
     await ensureFolder(this.app, outputDir);
 
     const stamp = nowStamp();
-    const generatorBaseName = formatReplicateModelFileBase(modelSlug);
+    const generatorBaseName = formatImageModelFileBase(modelId);
     const generatedImagePaths: string[] = [];
 
-    for (let i = 1; i <= imageCount; i++) {
+    for (const [idx, output] of outputs.entries()) {
       if (options.signal?.aborted) {
         throw new Error("Aborted");
       }
 
-      setStatus(imageCount > 1 ? `Creating Replicate prediction (${i}/${imageCount})...` : "Creating Replicate prediction...");
-      const prediction = await replicate.createPrediction({ version: versionId, input });
-      const predictionId = String(prediction?.id || "").trim();
-      if (!predictionId) {
-        throw new Error("Replicate did not return a prediction id.");
-      }
+      const imageOrdinal = idx + 1;
+      setStatus(outputs.length > 1 ? `Downloading generated image (${imageOrdinal}/${outputs.length})...` : "Downloading generated image...");
+      const download = await service.downloadImage(output.url);
+      const ext = extensionFromContentType(download.contentType) || extensionFromMimeType(output.mime_type) || extensionFromUrl(output.url) || "png";
 
-      setStatus(imageCount > 1 ? `Waiting for Replicate (${i}/${imageCount})...` : "Waiting for Replicate...");
-      const finalPrediction = await replicate.waitForPrediction(predictionId, {
-        pollIntervalMs: this.plugin.settings.replicatePollIntervalMs ?? 1000,
-        signal: options.signal,
-        onUpdate: (p) => {
-          if (p.status === "processing" || p.status === "starting") {
-            setStatus(imageCount > 1 ? `Replicate (${i}/${imageCount}): ${p.status}...` : `Replicate: ${p.status}...`);
-          }
-        },
-      });
-
-      const outputUrl = findFirstUrl(finalPrediction.output);
-      if (!outputUrl) {
-        throw new Error("Replicate prediction completed, but no output URL was found.");
-      }
-
-      setStatus(imageCount > 1 ? `Downloading generated image (${i}/${imageCount})...` : "Downloading generated image...");
-      const download = await replicate.downloadOutput(outputUrl);
-      const ext = extensionFromContentType(download.contentType) || extensionFromUrl(outputUrl) || "png";
-
-      const indexSuffix = imageCount > 1 ? `-${String(i).padStart(2, "0")}` : "";
+      const indexSuffix = outputs.length > 1 ? `-${String(imageOrdinal).padStart(2, "0")}` : "";
       const imagePath = await getAvailableFilePath(this.app, outputDir, `${generatorBaseName}-${stamp.compact}${indexSuffix}`, ext);
       await this.app.vault.createBinary(imagePath, download.arrayBuffer);
       generatedImagePaths.push(imagePath);
 
-      if (this.plugin.settings.replicateSaveMetadataSidecar !== false) {
+      if (this.plugin.settings.imageGenerationSaveMetadataSidecar !== false) {
         await this.writeSidecar({
           imagePath,
           stampIso: stamp.iso,
           promptFilePath: promptAbstract.path,
           promptText,
-          modelSlug,
-          versionId,
-          prediction: finalPrediction,
-          outputUrl,
+          modelId,
+          job: finalJob,
+          output,
           inputImagePath: incomingImage?.imagePath || null,
         });
       }
@@ -334,59 +311,47 @@ export class CanvasFlowRunner {
     }
   }
 
-  private async resolveVersionId(options: {
-    replicate: ReplicateImageService;
-    modelSlug: string;
-    promptOverrideVersion: string | null;
-  }): Promise<string> {
-    const override = String(options.promptOverrideVersion || "").trim();
-    if (override) return override;
-
-    const settingsSlug = String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
-    const settingsVersion = String(this.plugin.settings.replicateResolvedVersion || "").trim();
-    if (settingsVersion && settingsSlug && settingsSlug === options.modelSlug) {
-      return settingsVersion;
-    }
-
-    const cached = this.resolvedVersionCache.get(options.modelSlug);
-    if (cached) {
-      return cached;
-    }
-
-    const details = await options.replicate.resolveLatestVersion(options.modelSlug);
-    this.resolvedVersionCache.set(details.slug, details.latestVersionId);
-    return details.latestVersionId;
-  }
-
   private async writeSidecar(options: {
     imagePath: string;
     stampIso: string;
     promptFilePath: string;
     promptText: string;
-    modelSlug: string;
-    versionId: string;
-    prediction: ReplicatePrediction;
-    outputUrl: string;
+    modelId: string;
+    job: SystemSculptGenerationJobResponse;
+    output: SystemSculptImageGenerationOutput;
     inputImagePath: string | null;
   }): Promise<void> {
     try {
       const sidecarPath = normalizePath(`${options.imagePath}.systemsculpt.json`);
-      const curated = getCuratedReplicateModel(options.modelSlug);
+      const curated = getCuratedImageGenerationModel(options.modelId);
       const payload = {
         kind: "canvasflow_generation",
         created_at: options.stampIso,
         prompt_file: options.promptFilePath,
         prompt: options.promptText,
-        replicate: {
-          model: options.modelSlug,
-          model_label: curated?.label ?? null,
-          model_provider: curated?.provider ?? null,
-          version: options.versionId,
-          prediction_id: options.prediction?.id,
-          output_url: options.outputUrl,
-          status: options.prediction?.status,
-          error: options.prediction?.error ?? null,
+        provider: "openrouter",
+        model: {
+          id: options.modelId,
+          label: curated?.label ?? null,
+          provider: curated?.provider ?? null,
         },
+        job: {
+          id: options.job.job.id,
+          status: options.job.job.status,
+          error_code: options.job.job.error_code ?? null,
+          error_message: options.job.job.error_message ?? null,
+          attempt_count: options.job.job.attempt_count ?? null,
+          completed_at: options.job.job.completed_at ?? null,
+        },
+        output: {
+          index: options.output.index,
+          url: options.output.url,
+          mime_type: options.output.mime_type,
+          size_bytes: options.output.size_bytes,
+          width: options.output.width,
+          height: options.output.height,
+        },
+        usage: options.job.usage ?? null,
         input_image: options.inputImagePath,
       };
 

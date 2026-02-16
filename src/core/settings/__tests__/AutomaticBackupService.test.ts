@@ -228,7 +228,6 @@ describe("AutomaticBackupService", () => {
           licenseKey: "license-secret",
           openAiApiKey: "openai-secret",
           customTranscriptionApiKey: "transcription-secret",
-          replicateApiKey: "replicate-secret",
           embeddingsCustomApiKey: "embeddings-secret",
           readwiseApiToken: "readwise-secret",
           customProviders: [
@@ -250,7 +249,6 @@ describe("AutomaticBackupService", () => {
       expect(backupData.licenseKey).toBe("");
       expect(backupData.openAiApiKey).toBe("");
       expect(backupData.customTranscriptionApiKey).toBe("");
-      expect(backupData.replicateApiKey).toBe("");
       expect(backupData.embeddingsCustomApiKey).toBe("");
       expect(backupData.readwiseApiToken).toBe("");
       expect(backupData.customProviders[0].apiKey).toBe("");

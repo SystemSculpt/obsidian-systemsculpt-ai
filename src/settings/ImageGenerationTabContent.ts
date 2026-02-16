@@ -2,12 +2,13 @@ import { Notice, Setting } from "obsidian";
 import { ListSelectionModal, type ListItem } from "../core/ui/modals/standard/ListSelectionModal";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { ReplicateImageService } from "../services/canvasflow/ReplicateImageService";
 import {
-  REPLICATE_PRICING_SNAPSHOT_DATE,
-  formatCuratedModelOptionText,
-  getCuratedReplicateModelGroups,
-} from "../services/canvasflow/ReplicateModelCatalog";
+  DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  IMAGE_GENERATION_PRICING_SNAPSHOT_DATE,
+  formatCuratedImageModelOptionText,
+  getCuratedImageGenerationModelGroups,
+} from "../services/canvasflow/ImageGenerationModelCatalog";
+import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
 
 export async function displayImageGenerationTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -19,7 +20,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   containerEl.createEl("h3", { text: "Image Generation" });
   containerEl.createEl("p", {
-    text: "Configure Replicate and enable SystemSculpt Canvas (experimental) to run ComfyUI-like image graphs inside Obsidian Canvas.",
+    text: "Configure SystemSculpt Canvas (experimental) and run image generation through the SystemSculpt API with OpenRouter providers.",
     cls: "setting-item-description",
   });
 
@@ -37,72 +38,32 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
         });
     });
 
-  containerEl.createEl("h3", { text: "Replicate" });
-
-  new Setting(containerEl)
-    .setName("Replicate API key")
-    .setDesc("Required to search models and generate images via Replicate.")
-    .addText((text) => {
-      text
-        .setPlaceholder("r8_...")
-        .setValue(plugin.settings.replicateApiKey || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ replicateApiKey: value });
-        });
-      text.inputEl.type = "password";
-    });
+  containerEl.createEl("h3", { text: "SystemSculpt Image API (OpenRouter)" });
 
   const modelSetting = new Setting(containerEl)
     .setName("Default image model")
-    .setDesc("Used when a SystemSculpt prompt node doesn't specify ss_replicate_model. Use the browser button to pick a model.");
+    .setDesc("Used when a prompt node doesn't specify ss_image_model. The default is a low-cost OpenAI image model for testing.");
 
   modelSetting.addText((text) => {
     text
-      .setPlaceholder("Example: stability-ai/sdxl")
-      .setValue(plugin.settings.replicateDefaultModelSlug || "")
+      .setPlaceholder(DEFAULT_IMAGE_GENERATION_MODEL_ID)
+      .setValue(plugin.settings.imageGenerationDefaultModelId || DEFAULT_IMAGE_GENERATION_MODEL_ID)
       .onChange(async (value) => {
-        await plugin.getSettingsManager().updateSettings({
-          replicateDefaultModelSlug: value.trim(),
-          // Clear resolved version when slug changes; user can re-resolve.
-          replicateResolvedVersion:
-            value.trim() !== (plugin.settings.replicateDefaultModelSlug || "").trim()
-              ? ""
-              : plugin.settings.replicateResolvedVersion,
-        });
+        const trimmed = value.trim();
+        await plugin
+          .getSettingsManager()
+          .updateSettings({ imageGenerationDefaultModelId: trimmed || DEFAULT_IMAGE_GENERATION_MODEL_ID });
       });
   });
 
   modelSetting.addExtraButton((button) => {
     button
       .setIcon("search")
-      .setTooltip("Browse Replicate models")
+      .setTooltip("Browse curated image models")
       .onClick(async () => {
-        await openReplicateModelBrowser(tabInstance);
+        await openImageModelBrowser(tabInstance);
       });
   });
-
-  modelSetting.addExtraButton((button) => {
-    button
-      .setIcon("refresh-cw")
-      .setTooltip("Resolve latest version for the default model")
-      .onClick(async () => {
-        button.setDisabled(true);
-        try {
-          await resolveDefaultModelVersion(tabInstance);
-        } finally {
-          button.setDisabled(false);
-        }
-      });
-  });
-
-  const versionSetting = new Setting(containerEl)
-    .setName("Resolved model version")
-    .setDesc("Pinned Replicate version id used when your prompt file doesn't specify ss_replicate_version.");
-
-  const versionValue = versionSetting.controlEl.createEl("code", {
-    text: plugin.settings.replicateResolvedVersion?.trim() ? plugin.settings.replicateResolvedVersion.trim() : "(not set)",
-  });
-  versionValue.addClass("systemsculpt-inline-code");
 
   new Setting(containerEl)
     .setName("Output folder")
@@ -110,52 +71,51 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
     .addText((text) => {
       text
         .setPlaceholder("SystemSculpt/Attachments/Generations")
-        .setValue(plugin.settings.replicateOutputDir || "")
+        .setValue(plugin.settings.imageGenerationOutputDir || "")
         .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ replicateOutputDir: value.trim() });
+          await plugin.getSettingsManager().updateSettings({ imageGenerationOutputDir: value.trim() });
         });
       attachFolderSuggester(text.inputEl, (value) => text.setValue(value), tabInstance.app);
     });
 
   new Setting(containerEl)
-    .setName("Prediction poll interval (ms)")
-    .setDesc("How often SystemSculpt canvas generation checks Replicate for status updates.")
+    .setName("Job poll interval (ms)")
+    .setDesc("How often SystemSculpt canvas generation checks image job status updates.")
     .addText((text) => {
       text
         .setPlaceholder("1000")
-        .setValue(String(plugin.settings.replicatePollIntervalMs ?? 1000))
+        .setValue(String(plugin.settings.imageGenerationPollIntervalMs ?? 1000))
         .onChange(async (value) => {
           const parsed = Number.parseInt(value, 10);
           if (!Number.isFinite(parsed) || parsed <= 0) {
             return;
           }
-          await plugin.getSettingsManager().updateSettings({ replicatePollIntervalMs: parsed });
+          await plugin.getSettingsManager().updateSettings({ imageGenerationPollIntervalMs: parsed });
         });
       text.inputEl.inputMode = "numeric";
     });
 
   new Setting(containerEl)
     .setName("Write metadata sidecar")
-    .setDesc("When enabled, writes a JSON file next to each generated image with prompt, model, and prediction metadata.")
+    .setDesc("When enabled, writes a JSON file next to each generated image with prompt, model, and job metadata.")
     .addToggle((toggle) => {
       toggle
-        .setValue(plugin.settings.replicateSaveMetadataSidecar !== false)
+        .setValue(plugin.settings.imageGenerationSaveMetadataSidecar !== false)
         .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ replicateSaveMetadataSidecar: value });
+          await plugin.getSettingsManager().updateSettings({ imageGenerationSaveMetadataSidecar: value });
         });
     });
 
   new Setting(containerEl)
-    .setName("Test Replicate connection")
-    .setDesc("Validates your API key and default model by resolving the latest version.")
+    .setName("Test image generation API")
+    .setDesc("Validates your license and SystemSculpt image model access by listing available models.")
     .addButton((button) => {
       button.setButtonText("Test").onClick(async () => {
         button.setDisabled(true);
         try {
-          await resolveDefaultModelVersion(tabInstance);
-          new Notice("Replicate connection OK.");
+          await testImageGenerationConnection(tabInstance);
         } catch (error: any) {
-          new Notice(`Replicate test failed: ${error?.message || error}`);
+          new Notice(`Image generation API test failed: ${error?.message || error}`);
         } finally {
           button.setDisabled(false);
         }
@@ -163,57 +123,65 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
     });
 }
 
-async function resolveDefaultModelVersion(tabInstance: SystemSculptSettingTab): Promise<void> {
+async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab): Promise<void> {
   const { plugin } = tabInstance;
-  const key = String(plugin.settings.replicateApiKey || "").trim();
-  if (!key) {
-    new Notice("Set your Replicate API key first.");
+  const licenseKey = String(plugin.settings.licenseKey || "").trim();
+  if (!licenseKey) {
+    new Notice("Set and validate your license key first.");
     return;
   }
 
-  const slug = String(plugin.settings.replicateDefaultModelSlug || "").trim();
-  if (!slug) {
-    new Notice("Pick a default Replicate model first.");
-    return;
-  }
-
-  const service = new ReplicateImageService(key);
-  const details = await service.resolveLatestVersion(slug);
-  await plugin.getSettingsManager().updateSettings({
-    replicateDefaultModelSlug: details.slug,
-    replicateResolvedVersion: details.latestVersionId,
+  const service = new SystemSculptImageGenerationService({
+    baseUrl: plugin.settings.serverUrl,
+    licenseKey,
   });
-  new Notice("Resolved latest Replicate version.");
+
+  const response = await service.listModels();
+  const models = response.models || [];
+  if (models.length === 0) {
+    throw new Error("No image generation models were returned by the server.");
+  }
+
+  const configured = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
+  const fallback = models[0]?.id || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+  const nextModel = configured || fallback;
+
+  await plugin.getSettingsManager().updateSettings({
+    imageGenerationDefaultModelId: nextModel,
+  });
+
+  new Notice(`Image generation API connection OK (${models.length} model${models.length === 1 ? "" : "s"}).`);
   tabInstance.display();
 }
 
-async function openReplicateModelBrowser(tabInstance: SystemSculptSettingTab): Promise<void> {
+async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promise<void> {
   const { plugin } = tabInstance;
-  const currentDefault = String(plugin.settings.replicateDefaultModelSlug || "").trim();
-  const groups = getCuratedReplicateModelGroups();
+  const currentDefault = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
+  const groups = getCuratedImageGenerationModelGroups();
   const items: ListItem[] = [];
-  for (const g of groups) {
-    for (const model of g.models) {
+
+  for (const group of groups) {
+    for (const model of group.models) {
       items.push({
-        id: model.slug,
-        title: formatCuratedModelOptionText(model),
+        id: model.id,
+        title: formatCuratedImageModelOptionText(model),
         description: model.pricing.lines.join(" | "),
         icon: "image",
         badge: model.pricing.summary,
-        selected: model.slug === currentDefault,
-        metadata: { slug: model.slug, provider: g.provider },
+        selected: model.id === currentDefault,
+        metadata: { id: model.id, provider: group.provider },
       });
     }
   }
 
   const modal = new ListSelectionModal(tabInstance.app, items, {
-    title: "Replicate models (curated)",
-    description: `Newest-gen image models. Prices are snapshots from replicate.com as of ${REPLICATE_PRICING_SNAPSHOT_DATE}.`,
+    title: "Image models (curated)",
+    description: `Costs are estimated from SystemSculpt image model metadata as of ${IMAGE_GENERATION_PRICING_SNAPSHOT_DATE}.`,
     withSearch: true,
     size: "large",
-    customContent: (containerEl) => {
-      const hint = containerEl.createEl("p", {
-        text: "Pick a model for SystemSculpt canvas prompts. The dropdown in prompt nodes uses the same curated list.",
+    customContent: (el) => {
+      const hint = el.createEl("p", {
+        text: "Pick a default model for CanvasFlow prompt nodes.",
         cls: "setting-item-description",
       });
       hint.style.marginTop = "0";
@@ -221,36 +189,15 @@ async function openReplicateModelBrowser(tabInstance: SystemSculptSettingTab): P
   });
 
   const [selection] = await modal.openAndGetSelection();
-  const slug = String(selection?.metadata?.slug || "").trim();
-  if (!slug) {
+  const modelId = String(selection?.metadata?.id || "").trim();
+  if (!modelId) {
     return;
   }
 
-  // Always set the slug immediately; version resolution is best-effort.
   await plugin.getSettingsManager().updateSettings({
-    replicateDefaultModelSlug: slug,
-    replicateResolvedVersion: "",
+    imageGenerationDefaultModelId: modelId,
   });
 
-  const key = String(plugin.settings.replicateApiKey || "").trim();
-  if (key) {
-    try {
-      const service = new ReplicateImageService(key);
-      const details = await service.resolveLatestVersion(slug);
-      await plugin.getSettingsManager().updateSettings({
-        replicateDefaultModelSlug: details.slug,
-        replicateResolvedVersion: details.latestVersionId,
-      });
-      new Notice(`Default Replicate model set to ${details.slug}`);
-      tabInstance.display();
-      return;
-    } catch (error: any) {
-      new Notice(`Set default model to ${slug}, but failed to resolve version: ${error?.message || error}`);
-      tabInstance.display();
-      return;
-    }
-  }
-
-  new Notice(`Default Replicate model set to ${slug}.`);
+  new Notice(`Default image model set to ${modelId}.`);
   tabInstance.display();
 }

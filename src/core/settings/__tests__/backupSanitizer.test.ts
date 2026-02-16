@@ -6,7 +6,6 @@ describe("backupSanitizer", () => {
       licenseKey: "license-secret",
       openAiApiKey: "openai-secret",
       customTranscriptionApiKey: "transcription-secret",
-      replicateApiKey: "replicate-secret",
       embeddingsCustomApiKey: "embeddings-secret",
       readwiseApiToken: "readwise-secret",
       customProviders: [
@@ -23,7 +22,6 @@ describe("backupSanitizer", () => {
     expect(redacted.licenseKey).toBe("");
     expect(redacted.openAiApiKey).toBe("");
     expect(redacted.customTranscriptionApiKey).toBe("");
-    expect(redacted.replicateApiKey).toBe("");
     expect(redacted.embeddingsCustomApiKey).toBe("");
     expect(redacted.readwiseApiToken).toBe("");
     expect(redacted.customProviders[0].apiKey).toBe("");
@@ -50,7 +48,6 @@ describe("backupSanitizer", () => {
       licenseKey: "current-license-key",
       openAiApiKey: "current-openai-key",
       customTranscriptionApiKey: "current-transcription-key",
-      replicateApiKey: "current-replicate-key",
       embeddingsCustomApiKey: "current-embeddings-key",
       readwiseApiToken: "current-readwise-key",
       customProviders: [
@@ -66,7 +63,6 @@ describe("backupSanitizer", () => {
     expect(restored.licenseKey).toBe("current-license-key");
     expect(restored.openAiApiKey).toBe("current-openai-key");
     expect(restored.customTranscriptionApiKey).toBe("current-transcription-key");
-    expect(restored.replicateApiKey).toBe("current-replicate-key");
     expect(restored.embeddingsCustomApiKey).toBe("current-embeddings-key");
     expect(restored.readwiseApiToken).toBe("current-readwise-key");
     expect(restored.customProviders[0].apiKey).toBe("current-provider-a-key");

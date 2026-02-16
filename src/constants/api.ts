@@ -41,6 +41,11 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
   EMBEDDINGS: {
     GENERATE: "/embeddings",
   },
+  IMAGES: {
+    MODELS: "/images/models",
+    GENERATION_JOBS: "/images/generations/jobs",
+    GENERATION_JOB: (jobId: string) => `/images/generations/jobs/${encodeURIComponent(jobId)}`,
+  },
   SYSTEM_PROMPTS: {
     GET: (id: string) => `/system-prompts/${id}`,
     LIST: "/system-prompts",

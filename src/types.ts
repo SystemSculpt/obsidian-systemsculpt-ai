@@ -360,18 +360,15 @@ export interface SystemSculptSettings {
   canvasFlowEnabled: boolean;
 
   /**
-   * Replicate (image generation). Used by CanvasFlow.
+   * SystemSculpt-hosted image generation (OpenRouter provider).
+   * Used by CanvasFlow.
    */
-  replicateApiKey: string;
-  /** Default Replicate model slug, like "owner/name". */
-  replicateDefaultModelSlug: string;
-  /** Resolved Replicate version id for the default model slug. */
-  replicateResolvedVersion: string;
-  replicatePollIntervalMs: number;
+  imageGenerationDefaultModelId: string;
+  imageGenerationPollIntervalMs: number;
   /** Folder path inside the vault where generated images are saved. */
-  replicateOutputDir: string;
+  imageGenerationOutputDir: string;
   /** When enabled, write a JSON sidecar next to each generated image. */
-  replicateSaveMetadataSidecar: boolean;
+  imageGenerationSaveMetadataSidecar: boolean;
 
   /**
    * Embeddings settings for the new embeddings system
@@ -616,12 +613,10 @@ Raw transcript:`,
 
   canvasFlowEnabled: false,
 
-  replicateApiKey: "",
-  replicateDefaultModelSlug: "",
-  replicateResolvedVersion: "",
-  replicatePollIntervalMs: 1000,
-  replicateOutputDir: "SystemSculpt/Attachments/Generations",
-  replicateSaveMetadataSidecar: true,
+  imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+  imageGenerationPollIntervalMs: 1000,
+  imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
+  imageGenerationSaveMetadataSidecar: true,
 
   /**
    * Embeddings defaults

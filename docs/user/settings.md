@@ -14,7 +14,7 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | `Daily Vault` | Daily note structure, templates, reminders, streak/analytics toggles, daily actions |
 | `Automations` | Workflow automation cards, capture/destination folders, enable/disable automation rules |
 | `Audio & Transcription` | Recording preferences, transcription provider, auto actions, custom endpoint settings |
-| `Image Generation` | CanvasFlow toggle, Replicate API key/model/version/output options |
+| `Image Generation` | CanvasFlow toggle, SystemSculpt API image model selection, output/polling options |
 | `Files & Backup` | Directory paths, directory diagnostics, automatic backups, restore workflow |
 | `Embeddings & Search` | Embeddings enable/provider config, processing status, exclusions, clear-data action |
 | `Data` | Readwise integration, token validation, import options, sync schedule and status |

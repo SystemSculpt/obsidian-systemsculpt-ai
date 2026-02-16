@@ -33,10 +33,11 @@ import {
   CANVASFLOW_PROMPT_NODE_WIDTH_PX,
 } from "./CanvasFlowUiConstants";
 import {
-  formatCuratedModelOptionText,
-  getCuratedReplicateModel,
-  getCuratedReplicateModelGroups,
-} from "./ReplicateModelCatalog";
+  DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  formatCuratedImageModelOptionText,
+  getCuratedImageGenerationModel,
+  getCuratedImageGenerationModelGroups,
+} from "./ImageGenerationModelCatalog";
 import { tryCopyImageFileToClipboard } from "../../utils/clipboard";
 
 type PromptCacheEntry = {
@@ -77,18 +78,18 @@ function stopPropagationOnly(e: Event): void {
   e.stopPropagation();
 }
 
-function formatReplicateModelBadge(modelSlug: string): { text: string; title: string } {
-  const slug = String(modelSlug || "").trim();
-  if (!slug) {
+function formatImageModelBadge(modelId: string): { text: string; title: string } {
+  const id = String(modelId || "").trim();
+  if (!id) {
     return { text: "(no model)", title: "" };
   }
 
-  const curated = getCuratedReplicateModel(slug);
+  const curated = getCuratedImageGenerationModel(id);
   if (!curated) {
-    return { text: slug, title: slug };
+    return { text: id, title: id };
   }
 
-  return { text: curated.label, title: curated.slug };
+  return { text: curated.label, title: curated.id };
 }
 
 export class CanvasFlowEnhancer {
@@ -386,11 +387,11 @@ export class CanvasFlowEnhancer {
     if (keepSelected) extras.add(keepSelected);
     if (modelFromNote) extras.add(modelFromNote);
 
-    const groups = getCuratedReplicateModelGroups();
+    const groups = getCuratedImageGenerationModelGroups();
     const curatedSlugs = new Set<string>();
     for (const group of groups) {
       for (const model of group.models) {
-        curatedSlugs.add(model.slug);
+        curatedSlugs.add(model.id);
       }
     }
 
@@ -400,9 +401,9 @@ export class CanvasFlowEnhancer {
       .sort((a, b) => a.localeCompare(b));
 
     select.empty();
-    const defaultEntry = settingsModelSlug ? getCuratedReplicateModel(settingsModelSlug) : null;
+    const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug) : null;
     const defaultLabel = defaultEntry
-      ? `(Default: ${defaultEntry.label} (${defaultEntry.slug})  ${defaultEntry.pricing.summary})`
+      ? `(Default: ${defaultEntry.label} (${defaultEntry.id})  ${defaultEntry.pricing.summary})`
       : settingsModelSlug
         ? `(Default: ${settingsModelSlug})`
         : "(Default model)";
@@ -412,7 +413,7 @@ export class CanvasFlowEnhancer {
       const optgroup = select.createEl("optgroup");
       optgroup.label = group.provider;
       for (const model of group.models) {
-        optgroup.createEl("option", { value: model.slug, text: formatCuratedModelOptionText(model) });
+        optgroup.createEl("option", { value: model.id, text: formatCuratedImageModelOptionText(model) });
       }
     }
 
@@ -452,24 +453,25 @@ export class CanvasFlowEnhancer {
     this.enforcePromptNodeSizing(options.nodeEl);
 
     const host = findCanvasNodeContentHost(options.nodeEl);
-    const settingsModelSlug = String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
-    const modelFromNote = String(options.promptConfig.replicateModelSlug || "").trim();
-    const versionFromNote = String(options.promptConfig.replicateVersionId || "").trim();
+    const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
+    const modelFromNote = String(options.promptConfig.imageModelId || "").trim();
+    const versionFromNote =
+      options.promptConfig.seed !== null && Number.isFinite(options.promptConfig.seed)
+        ? String(options.promptConfig.seed)
+        : "";
     const effectiveModelSlug = modelFromNote || settingsModelSlug;
 
-    const replicateInputRaw = readRecord(options.promptFrontmatter["ss_replicate_input"]);
+    const imageOptionsRaw = readRecord(options.promptFrontmatter["ss_image_options"]);
     const imageCount = Math.max(1, Math.min(4, Math.floor(options.promptConfig.imageCount || 1)));
     const widthFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_width"]);
     const heightFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_height"]);
-    const width =
-      widthFromFrontmatter ?? readNumber(replicateInputRaw["width"]) ?? readNumber(options.promptConfig.replicateInput["width"]);
-    const height =
-      heightFromFrontmatter ?? readNumber(replicateInputRaw["height"]) ?? readNumber(options.promptConfig.replicateInput["height"]);
+    const width = widthFromFrontmatter ?? readNumber(imageOptionsRaw["width"]);
+    const height = heightFromFrontmatter ?? readNumber(imageOptionsRaw["height"]);
     const nanoDefaults = {
-      aspect_ratio: readString(replicateInputRaw["aspect_ratio"]) || "match_input_image",
-      resolution: readString(replicateInputRaw["resolution"]) || "4K",
-      output_format: readString(replicateInputRaw["output_format"]) || "jpg",
-      safety_filter_level: readString(replicateInputRaw["safety_filter_level"]) || "block_only_high",
+      aspect_ratio: readString(imageOptionsRaw["aspect_ratio"]) || "match_input_image",
+      resolution: readString(imageOptionsRaw["resolution"]) || "4K",
+      output_format: readString(imageOptionsRaw["output_format"]) || "jpg",
+      safety_filter_level: readString(imageOptionsRaw["safety_filter_level"]) || "block_only_high",
     };
 
     let existing = host.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${CSS.escape(options.nodeId)}"]`);
@@ -512,7 +514,7 @@ export class CanvasFlowEnhancer {
 
       const modelBadge = existing.querySelector<HTMLElement>("[data-ss-canvasflow-model-badge]");
       if (modelBadge) {
-        const badge = formatReplicateModelBadge(effectiveModelSlug);
+        const badge = formatImageModelBadge(effectiveModelSlug);
         modelBadge.setText(badge.text);
         modelBadge.title = badge.title;
       }
@@ -617,7 +619,7 @@ export class CanvasFlowEnhancer {
     header.createDiv({ text: "SystemSculpt Prompt", cls: "ss-canvasflow-node-title" });
     const badges = header.createDiv({ cls: "ss-canvasflow-node-badges" });
     badges.createEl("code", { text: options.promptFile.basename, cls: "ss-canvasflow-node-badge" });
-    const modelBadgeData = formatReplicateModelBadge(effectiveModelSlug);
+    const modelBadgeData = formatImageModelBadge(effectiveModelSlug);
     const modelBadge = badges.createEl("code", { text: modelBadgeData.text, cls: "ss-canvasflow-node-badge" });
     modelBadge.title = modelBadgeData.title;
     modelBadge.dataset.ssCanvasflowModelBadge = "true";
@@ -660,11 +662,11 @@ export class CanvasFlowEnhancer {
     this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
 
     const versionField = fields.createDiv({ cls: "ss-canvasflow-field" });
-    versionField.createDiv({ text: "Version (optional)", cls: "ss-canvasflow-field-label" });
+    versionField.createDiv({ text: "Seed (optional)", cls: "ss-canvasflow-field-label" });
     const versionInput = versionField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-version" });
     versionInput.type = "text";
     versionInput.value = versionFromNote;
-    versionInput.placeholder = "Pinned Replicate version id";
+    versionInput.placeholder = "Random if empty";
 
     const imageCountField = fields.createDiv({ cls: "ss-canvasflow-field" });
     imageCountField.createDiv({ text: "Images", cls: "ss-canvasflow-field-label" });
@@ -785,7 +787,7 @@ export class CanvasFlowEnhancer {
 
     const updateModelBadgeAndVisibility = () => {
       const effective = getEffectiveModel();
-      const badge = formatReplicateModelBadge(effective);
+      const badge = formatImageModelBadge(effective);
       modelBadge.setText(badge.text);
       modelBadge.title = badge.title;
       nanoWrap.style.display = effective === "google/nano-banana-pro" ? "" : "none";
@@ -801,19 +803,20 @@ export class CanvasFlowEnhancer {
 
         const nextFrontmatter: Record<string, unknown> = { ...(parsed.frontmatter || {}) };
         nextFrontmatter["ss_flow_kind"] = "prompt";
-        nextFrontmatter["ss_flow_backend"] = "replicate";
+        nextFrontmatter["ss_flow_backend"] = "openrouter";
 
         const explicitModel = String(modelSelect.value || "").trim();
         const explicitVersion = String(versionInput.value || "").trim();
         if (explicitModel) {
-          nextFrontmatter["ss_replicate_model"] = explicitModel;
+          nextFrontmatter["ss_image_model"] = explicitModel;
         } else {
-          delete nextFrontmatter["ss_replicate_model"];
+          delete nextFrontmatter["ss_image_model"];
         }
-        if (explicitVersion) {
-          nextFrontmatter["ss_replicate_version"] = explicitVersion;
+        const parsedSeed = explicitVersion ? Number(explicitVersion) : NaN;
+        if (Number.isFinite(parsedSeed) && parsedSeed >= 0) {
+          nextFrontmatter["ss_seed"] = Math.floor(parsedSeed);
         } else {
-          delete nextFrontmatter["ss_replicate_version"];
+          delete nextFrontmatter["ss_seed"];
         }
 
         const countRaw = Number(imageCountSelect.value);
@@ -824,7 +827,7 @@ export class CanvasFlowEnhancer {
           delete nextFrontmatter["ss_image_count"];
         }
 
-        let applySizeToReplicateInput = false;
+        let applySizeToImageOptions = false;
         let nextWidth: number | null = null;
         let nextHeight: number | null = null;
 
@@ -835,7 +838,7 @@ export class CanvasFlowEnhancer {
         const initialHeightText = String(heightInput.dataset.ssCanvasflowInitial || "");
         const didSizeChange = String(widthInput.value || "") !== initialWidthText || String(heightInput.value || "") !== initialHeightText;
         if (hadSizeFrontmatter || didSizeChange) {
-          applySizeToReplicateInput = true;
+          applySizeToImageOptions = true;
           const widthValue = readPositiveInt(widthInput.value);
           const heightValue = readPositiveInt(heightInput.value);
           const normalizedWidth = widthValue ?? heightValue;
@@ -851,10 +854,8 @@ export class CanvasFlowEnhancer {
           }
         }
 
-        const previousExplicitModel = String(parsed.frontmatter?.["ss_replicate_model"] || "").trim();
-        const previousEffectiveModel = previousExplicitModel || settingsModelSlug;
-        const effectiveModel = explicitModel || settingsModelSlug;
-        const existingInput = readRecord(nextFrontmatter["ss_replicate_input"]);
+        const effectiveModel = explicitModel || settingsModelSlug || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+        const existingInput = readRecord(nextFrontmatter["ss_image_options"]);
         const nextInput: Record<string, unknown> = { ...existingInput };
 
         if (effectiveModel === "google/nano-banana-pro") {
@@ -863,14 +864,14 @@ export class CanvasFlowEnhancer {
           nextInput.output_format = outputFormatSelect.value;
           nextInput.safety_filter_level = safetySelect.value;
         } else {
-          // Avoid leaking Nano-only keys into other models (Replicate schemas often reject unknown inputs).
+          // Avoid leaking model-specific keys into other models.
           delete (nextInput as any).aspect_ratio;
           delete (nextInput as any).resolution;
           delete (nextInput as any).output_format;
           delete (nextInput as any).safety_filter_level;
         }
 
-        if (applySizeToReplicateInput) {
+        if (applySizeToImageOptions) {
           if (nextWidth !== null && nextHeight !== null) {
             nextInput.width = nextWidth;
             nextInput.height = nextHeight;
@@ -880,14 +881,14 @@ export class CanvasFlowEnhancer {
           }
         }
 
-        nextFrontmatter["ss_replicate_input"] = nextInput;
-
-        // Make Nano Banana work out of the box when a model is explicitly chosen.
-        const currentImageKey = String(nextFrontmatter["ss_replicate_image_key"] || "").trim();
-        if (effectiveModel === "google/nano-banana-pro") {
-          nextFrontmatter["ss_replicate_image_key"] = "image_input";
-        } else if (previousEffectiveModel === "google/nano-banana-pro" && currentImageKey === "image_input") {
-          delete nextFrontmatter["ss_replicate_image_key"];
+        nextFrontmatter["ss_image_options"] = nextInput;
+        const explicitAspectRatio = String(aspectRatioPresetSelect.value || "").trim();
+        const inferredAspectRatio =
+          explicitAspectRatio || inferAspectRatioPreset(nextWidth, nextHeight) || inferAspectRatioPreset(readPositiveInt(widthInput.value), readPositiveInt(heightInput.value));
+        if (inferredAspectRatio) {
+          nextFrontmatter["ss_image_aspect_ratio"] = inferredAspectRatio;
+        } else {
+          delete nextFrontmatter["ss_image_aspect_ratio"];
         }
 
         const updated = replaceMarkdownFrontmatterAndBody(raw, nextFrontmatter, textarea.value);
@@ -1646,18 +1647,14 @@ export class CanvasFlowEnhancer {
         return;
       }
 
-      const modelSlug = String(this.plugin.settings.replicateDefaultModelSlug || "").trim();
-      if (!modelSlug) {
-        new Notice("SystemSculpt: set a default Replicate model first (Settings -> Image Generation).");
-        return;
-      }
+      const modelId = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
 
       btn.classList.add("ss-canvasflow-is-loading");
       this.setMenuButtonIcon(btn, "loader");
       btn.setAttribute("aria-label", "SystemSculpt - Creating Prompt...");
 
-      const replicateInput: Record<string, unknown> =
-        modelSlug === "google/nano-banana-pro"
+      const imageOptions: Record<string, unknown> =
+        modelId === "google/nano-banana-pro"
           ? {
               aspect_ratio: "match_input_image",
               resolution: "4K",
@@ -1671,9 +1668,9 @@ export class CanvasFlowEnhancer {
         doc,
         imageNodeId,
         imageNode,
-        modelSlug,
+        modelId,
         promptText: "",
-        replicateInput,
+        imageOptions,
       });
 
       const controller = this.findControllerForCanvasPath(canvasPath);
@@ -1700,22 +1697,20 @@ export class CanvasFlowEnhancer {
     doc: NonNullable<ReturnType<typeof parseCanvasDocument>>;
     imageNodeId: string;
     imageNode: any;
-    modelSlug: string;
+    modelId: string;
     promptText: string;
-    replicateInput: Record<string, unknown>;
+    imageOptions: Record<string, unknown>;
   }): Promise<{ promptNodeId: string; promptFile: TFile }> {
     const promptsDir = "SystemSculpt/CanvasFlow/Prompts";
     await this.ensureFolder(promptsDir);
 
-    const imageKeyLine = options.modelSlug === "google/nano-banana-pro" ? "ss_replicate_image_key: image_input" : "";
-    const inputLines = this.formatReplicateInputFrontmatter(options.replicateInput);
+    const inputLines = this.formatImageOptionsFrontmatter(options.imageOptions);
 
     const template = [
       "---",
       "ss_flow_kind: prompt",
-      "ss_flow_backend: replicate",
-      `ss_replicate_model: ${options.modelSlug}`,
-      imageKeyLine,
+      "ss_flow_backend: openrouter",
+      `ss_image_model: ${options.modelId}`,
       ...inputLines,
       "---",
       "",
@@ -1785,10 +1780,10 @@ export class CanvasFlowEnhancer {
     return normalizePath(`${folderPath}/${safeBase}-${Date.now().toString(16)}.md`);
   }
 
-  private formatReplicateInputFrontmatter(input: Record<string, unknown>): string[] {
+  private formatImageOptionsFrontmatter(input: Record<string, unknown>): string[] {
     const keys = Object.keys(input || {});
     if (keys.length === 0) {
-      return ["ss_replicate_input: {}"];
+      return ["ss_image_options: {}"];
     }
 
     // Preserve key order for readability.
@@ -1803,7 +1798,7 @@ export class CanvasFlowEnhancer {
       .map((line) => (line.trim().length ? `  ${line}` : line))
       .join("\n");
 
-    return ["ss_replicate_input:", indented];
+    return ["ss_image_options:", indented];
   }
 }
 

@@ -2,7 +2,6 @@ const TOP_LEVEL_SECRET_KEYS = [
   "licenseKey",
   "openAiApiKey",
   "customTranscriptionApiKey",
-  "replicateApiKey",
   "embeddingsCustomApiKey",
   "readwiseApiToken",
 ] as const;

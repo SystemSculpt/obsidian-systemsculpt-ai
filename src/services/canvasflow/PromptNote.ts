@@ -11,13 +11,11 @@ export type PromptNoteParseResult =
 
 export type CanvasFlowPromptConfig = {
   kind: "prompt";
-  backend: "replicate";
-  replicateModelSlug: string | null;
-  replicateVersionId: string | null;
-  replicatePromptKey: string;
-  replicateImageKey: string;
-  replicateInput: Record<string, unknown>;
+  backend: "openrouter";
+  imageModelId: string | null;
   imageCount: number;
+  aspectRatio: string | null;
+  seed: number | null;
 };
 
 export type CanvasFlowPromptParseResult =
@@ -92,46 +90,39 @@ export function parseCanvasFlowPromptNote(markdown: string): CanvasFlowPromptPar
     return { ok: false, reason: "not-canvasflow-prompt" };
   }
 
-  const backend = String(parsed.frontmatter["ss_flow_backend"] || "replicate").trim().toLowerCase();
-  if (backend !== "replicate") {
-    return { ok: false, reason: `unsupported backend: ${backend || "(empty)"}` };
+  const backendRaw = String(parsed.frontmatter["ss_flow_backend"] || "openrouter").trim().toLowerCase();
+  const allowedBackends = new Set(["openrouter", "systemsculpt"]);
+  if (!allowedBackends.has(backendRaw)) {
+    return { ok: false, reason: `unsupported backend: ${backendRaw || "(empty)"}` };
   }
 
-  const replicateModelSlug = readString(parsed.frontmatter["ss_replicate_model"])?.trim() || null;
-  const replicateVersionId = readString(parsed.frontmatter["ss_replicate_version"])?.trim() || null;
-  const replicatePromptKey = readString(parsed.frontmatter["ss_replicate_prompt_key"])?.trim() || "prompt";
-  const replicateImageKey = readString(parsed.frontmatter["ss_replicate_image_key"])?.trim() || "image";
+  const imageOptions = isRecord(parsed.frontmatter["ss_image_options"])
+    ? (parsed.frontmatter["ss_image_options"] as Record<string, unknown>)
+    : {};
 
-  const imageCountRaw = readNumber(parsed.frontmatter["ss_image_count"]);
+  const imageModelId = readString(parsed.frontmatter["ss_image_model"])?.trim() || null;
+
+  const imageCountRaw = readNumber(parsed.frontmatter["ss_image_count"]) ?? readNumber(imageOptions["count"]);
   const imageCount = imageCountRaw === null ? 1 : Math.max(1, Math.min(4, Math.floor(imageCountRaw)));
 
-  const inputFromYaml = parsed.frontmatter["ss_replicate_input"];
-  const replicateInput: Record<string, unknown> = isRecord(inputFromYaml) ? { ...inputFromYaml } : {};
+  const aspectRatio =
+    readString(parsed.frontmatter["ss_image_aspect_ratio"])?.trim() ||
+    readString(imageOptions["aspect_ratio"])?.trim() ||
+    readString(imageOptions["aspectRatio"])?.trim() ||
+    null;
 
-  // Convenience mappings (optional).
-  const width = readNumber(parsed.frontmatter["ss_image_width"]);
-  if (width !== null && !("width" in replicateInput)) replicateInput.width = Math.max(1, Math.floor(width));
-  const height = readNumber(parsed.frontmatter["ss_image_height"]);
-  if (height !== null && !("height" in replicateInput)) replicateInput.height = Math.max(1, Math.floor(height));
-
-  const seed = readNumber(parsed.frontmatter["ss_seed"]);
-  if (seed !== null && !("seed" in replicateInput)) replicateInput.seed = Math.floor(seed);
-  const steps = readNumber(parsed.frontmatter["ss_steps"]);
-  if (steps !== null && !("steps" in replicateInput)) replicateInput.steps = Math.max(1, Math.floor(steps));
-  const guidance = readNumber(parsed.frontmatter["ss_guidance"]);
-  if (guidance !== null && !("guidance" in replicateInput)) replicateInput.guidance = guidance;
+  const seedRaw = readNumber(parsed.frontmatter["ss_seed"]) ?? readNumber(imageOptions["seed"]);
+  const seed = seedRaw === null ? null : Math.max(0, Math.floor(seedRaw));
 
   return {
     ok: true,
     config: {
       kind: "prompt",
-      backend: "replicate",
-      replicateModelSlug,
-      replicateVersionId,
-      replicatePromptKey,
-      replicateImageKey,
-      replicateInput,
+      backend: "openrouter",
+      imageModelId,
       imageCount,
+      aspectRatio,
+      seed,
     },
     frontmatter: parsed.frontmatter,
     frontmatterText: parsed.frontmatterText,
@@ -159,7 +150,6 @@ export function replaceMarkdownFrontmatterAndBody(
   nextFrontmatter: Record<string, unknown>,
   nextBody: string
 ): string {
-  const src = String(markdown ?? "");
   const body = String(nextBody ?? "");
 
   const yamlText = String(YAML.stringify(nextFrontmatter) || "").trimEnd();
