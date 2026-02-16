@@ -26,7 +26,9 @@ SETTINGS_JSON="${SYSTEMSCULPT_E2E_SETTINGS_JSON:-}"
 PRIVATE_VAULT_FALLBACK="${SYSTEMSCULPT_E2E_PRIVATE_VAULT_FALLBACK:-$HOME/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json}"
 DISABLE_PRIVATE_VAULT_FALLBACK="${SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK:-0}"
 SKIP_BUILD="${SYSTEMSCULPT_E2E_SKIP_BUILD:-0}"
+ALLOW_PAID_LIVE_TESTS="${SYSTEMSCULPT_E2E_ALLOW_PAID_LIVE_TESTS:-0}"
 MOCK_SERVER_PID=""
+DEFAULT_LIVE_SERVER_URL="https://api.systemsculpt.com/api/v1"
 
 if [[ "${VAULT}" == "~/"* ]]; then
   VAULT="${HOME}/${VAULT:2}"
@@ -79,6 +81,144 @@ require_e2e_license_key() {
   echo "Missing SYSTEMSCULPT_E2E_LICENSE_KEY." >&2
   echo "Set it in .env.local or provide SYSTEMSCULPT_E2E_SETTINGS_JSON / SYSTEMSCULPT_E2E_VAULT for auto-loading." >&2
   exit 1
+}
+
+require_live_spend_confirmation() {
+  if [[ "${ALLOW_PAID_LIVE_TESTS}" == "1" ]]; then
+    return
+  fi
+  echo "Refusing to run paid live E2E image generation without explicit opt-in." >&2
+  echo "Set SYSTEMSCULPT_E2E_ALLOW_PAID_LIVE_TESTS=1 for an intentional live run." >&2
+  exit 1
+}
+
+ensure_live_server_url() {
+  if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" ]]; then
+    export SYSTEMSCULPT_E2E_SERVER_URL="${DEFAULT_LIVE_SERVER_URL}"
+  fi
+
+  export SYSTEMSCULPT_E2E_SERVER_URL="$(node - <<'NODE'
+const raw = (process.env.SYSTEMSCULPT_E2E_SERVER_URL || "").trim();
+const fallback = "https://api.systemsculpt.com/api/v1";
+if (!raw) {
+  process.stdout.write(fallback);
+  process.exit(0);
+}
+
+const normalizeApiUrl = (input) => {
+  try {
+    const parsed = new URL(input);
+    const trimmedPath = parsed.pathname.replace(/\/+$/, "");
+    if (/\/api\/v1$/i.test(trimmedPath)) {
+      parsed.pathname = trimmedPath || "/api/v1";
+      return parsed.toString();
+    }
+    if (/\/api$/i.test(trimmedPath)) {
+      parsed.pathname = `${trimmedPath}/v1`;
+      return parsed.toString();
+    }
+    const basePath = trimmedPath === "" || trimmedPath === "/" ? "" : trimmedPath;
+    parsed.pathname = `${basePath}/api/v1`.replace(/\/{2,}/g, "/");
+    return parsed.toString();
+  } catch {
+    const withoutTrailing = input.replace(/\/+$/, "");
+    if (withoutTrailing.endsWith("/api/v1")) return withoutTrailing;
+    if (withoutTrailing.endsWith("/api")) return `${withoutTrailing}/v1`;
+    return `${withoutTrailing}/api/v1`;
+  }
+};
+
+try {
+  const normalized = normalizeApiUrl(raw);
+  const parsed = new URL(normalized);
+  if (parsed.hostname === "systemsculpt.com" || parsed.hostname === "www.systemsculpt.com") {
+    parsed.hostname = "api.systemsculpt.com";
+    parsed.port = "";
+    process.stdout.write(parsed.toString());
+    process.exit(0);
+  }
+  process.stdout.write(parsed.toString());
+  process.exit(0);
+} catch {
+  process.stdout.write(fallback);
+  process.exit(0);
+}
+NODE
+)"
+}
+
+preflight_live_image_api() {
+  node - <<'NODE'
+const serverUrlRaw = (process.env.SYSTEMSCULPT_E2E_SERVER_URL || "").trim();
+const licenseKey = (process.env.SYSTEMSCULPT_E2E_LICENSE_KEY || "").trim();
+if (!serverUrlRaw) {
+  console.error("[e2e-live] Missing SYSTEMSCULPT_E2E_SERVER_URL for live API preflight.");
+  process.exit(1);
+}
+if (!licenseKey) {
+  console.error("[e2e-live] Missing SYSTEMSCULPT_E2E_LICENSE_KEY for live API preflight.");
+  process.exit(1);
+}
+
+const normalizeBase = (value) => value.replace(/\/+$/, "");
+const base = normalizeBase(serverUrlRaw);
+const headers = {
+  "x-license-key": licenseKey,
+  "content-type": "application/json",
+  "accept": "application/json",
+};
+
+const readJson = async (response) => {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+};
+
+const fail = (message) => {
+  console.error(`[e2e-live] ${message}`);
+  process.exit(1);
+};
+
+(async () => {
+  const modelsUrl = `${base}/images/models`;
+  const modelsResp = await fetch(modelsUrl, { method: "GET", headers });
+  if (!modelsResp.ok) {
+    const payload = await readJson(modelsResp);
+    fail(`Image models preflight failed (${modelsResp.status}) at ${modelsUrl}. body=${JSON.stringify(payload)}`);
+  }
+
+  const jobsUrl = `${base}/images/generations/jobs`;
+  const invalidPayloadResp = await fetch(jobsUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({}),
+  });
+  if (invalidPayloadResp.status === 404) {
+    const payload = await readJson(invalidPayloadResp);
+    fail(`Image jobs endpoint returned 404 at ${jobsUrl}. This usually means image generation is disabled/unavailable on the target API. body=${JSON.stringify(payload)}`);
+  }
+  if (invalidPayloadResp.status === 401 || invalidPayloadResp.status === 403) {
+    const payload = await readJson(invalidPayloadResp);
+    fail(`Image jobs endpoint auth failed (${invalidPayloadResp.status}) at ${jobsUrl}. body=${JSON.stringify(payload)}`);
+  }
+  if (invalidPayloadResp.status >= 500) {
+    const payload = await readJson(invalidPayloadResp);
+    fail(`Image jobs endpoint server error (${invalidPayloadResp.status}) at ${jobsUrl}. body=${JSON.stringify(payload)}`);
+  }
+
+  // Expected success for this request is a validation error (400/422), which proves the route exists
+  // and authentication reached request validation without charging credits.
+  if (!(invalidPayloadResp.status === 400 || invalidPayloadResp.status === 422)) {
+    const payload = await readJson(invalidPayloadResp);
+    fail(`Image jobs route preflight returned unexpected status ${invalidPayloadResp.status} at ${jobsUrl}. body=${JSON.stringify(payload)}`);
+  }
+
+  console.log(`[e2e-live] API preflight passed for ${base}`);
+})();
+NODE
 }
 
 run_build_if_needed() {
@@ -134,8 +274,11 @@ NODE
 
 case "$MODE" in
   live)
+    require_live_spend_confirmation
     hydrate_e2e_env_from_settings_json
     require_e2e_license_key
+    ensure_live_server_url
+    preflight_live_image_api
 
     run_build_if_needed
     if [[ -n "$SPEC" ]]; then
@@ -145,8 +288,11 @@ case "$MODE" in
     fi
     ;;
   emu)
+    require_live_spend_confirmation
     hydrate_e2e_env_from_settings_json
     require_e2e_license_key
+    ensure_live_server_url
+    preflight_live_image_api
 
     run_build_if_needed
     if [[ -n "$SPEC" ]]; then
@@ -159,7 +305,9 @@ case "$MODE" in
     start_mock_server
     hydrate_e2e_env_from_settings_json
     require_e2e_license_key
-    if [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" ]]; then
+    if [[ "${SYSTEMSCULPT_E2E_ALLOW_EXTERNAL_SERVER_IN_MOCK:-0}" != "1" ]]; then
+      export SYSTEMSCULPT_E2E_SERVER_URL="http://127.0.0.1:${SYSTEMSCULPT_E2E_MOCK_PORT}/api/v1"
+    elif [[ -z "${SYSTEMSCULPT_E2E_SERVER_URL:-}" ]]; then
       export SYSTEMSCULPT_E2E_SERVER_URL="http://127.0.0.1:${SYSTEMSCULPT_E2E_MOCK_PORT}/api/v1"
     fi
     if [[ -z "${SYSTEMSCULPT_E2E_MODEL_ID:-}" ]]; then

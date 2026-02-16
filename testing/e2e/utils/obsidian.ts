@@ -65,11 +65,13 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
     }
 
     if (typeof pluginsApi.enablePluginAndSave === "function") {
-      await pluginsApi.enablePluginAndSave(id);
+      // Some Obsidian builds resolve this promise only after plugin startup.
+      // Fire-and-poll is more reliable than awaiting directly.
+      void pluginsApi.enablePluginAndSave(id);
       return;
     }
     if (typeof pluginsApi.enablePlugin === "function") {
-      await pluginsApi.enablePlugin(id);
+      void pluginsApi.enablePlugin(id);
       return;
     }
 

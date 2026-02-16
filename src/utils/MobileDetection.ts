@@ -136,23 +136,6 @@ export class MobileDetection {
                     platform.os === 'Android' ||
                     mobileUserAgent;
 
-    try {
-      console.debug('[SystemSculpt][MobileDetection] detectDeviceInfo result', {
-        platformSignals,
-        platformFlags: {
-          isMobileApp: Platform?.isMobileApp,
-          isAndroidApp: Platform?.isAndroidApp,
-          isIosApp: Platform?.isIosApp,
-          isMobile: Platform?.isMobile,
-          isDesktopApp: Platform?.isDesktopApp,
-        },
-        deviceType: device.type,
-        os: platform.os,
-        uaSnippet: userAgent.slice(0, 120),
-        isMobile
-      });
-    } catch {}
-
     return {
       isMobile,
       platform,

@@ -1374,7 +1374,8 @@ export class EmbeddingsManager {
       return new SystemSculptProvider(
         this.plugin.settings.licenseKey,
         baseUrl,
-        DEFAULT_EMBEDDING_MODEL
+        DEFAULT_EMBEDDING_MODEL,
+        this.plugin.manifest?.version ?? ''
       );
     }
 

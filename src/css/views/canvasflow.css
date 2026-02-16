@@ -147,6 +147,12 @@
   color: var(--text-muted);
 }
 
+.ss-canvasflow-field-hint {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-faint);
+}
+
 .ss-canvasflow-field-input {
   width: 100%;
   border-radius: 10px;

@@ -28,6 +28,7 @@ export class SystemSculptProvider implements EmbeddingsProvider {
   public lastModelChanged: boolean = false;
   private readonly baseUrl: string;
   private readonly embeddingsEndpoint = SYSTEMSCULPT_API_ENDPOINTS.EMBEDDINGS.GENERATE;
+  private readonly pluginVersion: string;
   private static readonly FORBIDDEN_LOG_WINDOW_MS = 60 * 1000;
 
   public expectedDimension: number | undefined;
@@ -37,9 +38,11 @@ export class SystemSculptProvider implements EmbeddingsProvider {
   constructor(
     private licenseKey: string,
     baseUrl: string = API_BASE_URL,
-    public model?: string
+    public model?: string,
+    pluginVersion: string = ''
   ) {
     this.baseUrl = resolveSystemSculptApiBaseUrl(baseUrl);
+    this.pluginVersion = String(pluginVersion || '').trim();
     // Use the server-selected default so namespaces stay consistent
     this.model = DEFAULT_EMBEDDING_MODEL;
   }
@@ -529,6 +532,7 @@ export class SystemSculptProvider implements EmbeddingsProvider {
       try {
         const requestHeaders = {
           ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
+          ...(this.pluginVersion ? { 'x-plugin-version': this.pluginVersion } : {}),
           'Idempotency-Key': this.buildIdempotencyKey(
             payloadTexts,
             this.model || this.defaultModel,

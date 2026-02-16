@@ -227,7 +227,8 @@ export class DocumentProcessingService {
           const jobsUploader = new DocumentUploadJobsService(
             this.app,
             this.sculptService.baseUrl,
-            this.plugin.settings.licenseKey || ""
+            this.plugin.settings.licenseKey || "",
+            this.plugin.manifest?.version ?? "0.0.0"
           );
 
           const reservedStart = 15;
@@ -431,6 +432,7 @@ export class DocumentProcessingService {
               method: "GET",
               headers: {
                 "x-license-key": this.plugin.settings.licenseKey || "",
+                "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
               },
             });
 
@@ -568,6 +570,7 @@ export class DocumentProcessingService {
           headers: {
             "Content-Type": "application/json",
             "x-license-key": this.plugin.settings.licenseKey || "",
+            "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
           },
         });
 
@@ -839,6 +842,7 @@ export class DocumentProcessingService {
         headers: {
           "Content-Type": "application/json",
           "x-license-key": this.plugin.settings.licenseKey || "",
+          "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
         },
       });
 

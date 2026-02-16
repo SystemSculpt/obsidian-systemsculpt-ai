@@ -7,6 +7,7 @@ import {
   IMAGE_GENERATION_PRICING_SNAPSHOT_DATE,
   formatCuratedImageModelOptionText,
   getCuratedImageGenerationModelGroups,
+  type ImageGenerationServerCatalogModel,
 } from "../services/canvasflow/ImageGenerationModelCatalog";
 import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
 
@@ -59,7 +60,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
   modelSetting.addExtraButton((button) => {
     button
       .setIcon("search")
-      .setTooltip("Browse curated image models")
+      .setTooltip("Browse image models")
       .onClick(async () => {
         await openImageModelBrowser(tabInstance);
       });
@@ -67,7 +68,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   new Setting(containerEl)
     .setName("Output folder")
-    .setDesc("Vault folder where generated images will be saved.")
+    .setDesc("Vault folder where generated images will be saved (safely scoped under SystemSculpt/Attachments/Generations).")
     .addText((text) => {
       text
         .setPlaceholder("SystemSculpt/Attachments/Generations")
@@ -80,17 +81,18 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   new Setting(containerEl)
     .setName("Job poll interval (ms)")
-    .setDesc("How often SystemSculpt canvas generation checks image job status updates.")
+    .setDesc("Base polling interval for image job status (adaptive backoff still applies).")
     .addText((text) => {
       text
-        .setPlaceholder("1000")
+        .setPlaceholder("1000 (250-10000)")
         .setValue(String(plugin.settings.imageGenerationPollIntervalMs ?? 1000))
         .onChange(async (value) => {
           const parsed = Number.parseInt(value, 10);
-          if (!Number.isFinite(parsed) || parsed <= 0) {
+          if (!Number.isFinite(parsed)) {
             return;
           }
-          await plugin.getSettingsManager().updateSettings({ imageGenerationPollIntervalMs: parsed });
+          const next = Math.max(250, Math.min(10_000, parsed));
+          await plugin.getSettingsManager().updateSettings({ imageGenerationPollIntervalMs: next });
         });
       text.inputEl.inputMode = "numeric";
     });
@@ -125,19 +127,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
 async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab): Promise<void> {
   const { plugin } = tabInstance;
-  const licenseKey = String(plugin.settings.licenseKey || "").trim();
-  if (!licenseKey) {
-    new Notice("Set and validate your license key first.");
-    return;
-  }
-
-  const service = new SystemSculptImageGenerationService({
-    baseUrl: plugin.settings.serverUrl,
-    licenseKey,
-  });
-
-  const response = await service.listModels();
-  const models = response.models || [];
+  const models = await syncImageGenerationModelCatalog(tabInstance);
   if (models.length === 0) {
     throw new Error("No image generation models were returned by the server.");
   }
@@ -157,7 +147,8 @@ async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab
 async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promise<void> {
   const { plugin } = tabInstance;
   const currentDefault = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
-  const groups = getCuratedImageGenerationModelGroups();
+  const serverModels = await syncImageGenerationModelCatalog(tabInstance, { silent: true });
+  const groups = getCuratedImageGenerationModelGroups(serverModels);
   const items: ListItem[] = [];
 
   for (const group of groups) {
@@ -175,8 +166,8 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
   }
 
   const modal = new ListSelectionModal(tabInstance.app, items, {
-    title: "Image models (curated)",
-    description: `Costs are estimated from SystemSculpt image model metadata as of ${IMAGE_GENERATION_PRICING_SNAPSHOT_DATE}.`,
+    title: "Image models",
+    description: `Merged from live SystemSculpt API catalog and curated defaults. Curated cost estimates are as of ${IMAGE_GENERATION_PRICING_SNAPSHOT_DATE}.`,
     withSearch: true,
     size: "large",
     customContent: (el) => {
@@ -200,4 +191,74 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
 
   new Notice(`Default image model set to ${modelId}.`);
   tabInstance.display();
+}
+
+function getCachedServerImageModels(tabInstance: SystemSculptSettingTab): ImageGenerationServerCatalogModel[] {
+  const models = tabInstance.plugin.settings.imageGenerationModelCatalogCache?.models;
+  if (!Array.isArray(models)) return [];
+  return models
+    .map((model) => ({
+      id: String((model as any)?.id || "").trim(),
+      name: String((model as any)?.name || "").trim() || undefined,
+      provider: String((model as any)?.provider || "").trim() || undefined,
+      input_modalities: Array.isArray((model as any)?.input_modalities)
+        ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
+        : undefined,
+      output_modalities: Array.isArray((model as any)?.output_modalities)
+        ? (model as any).output_modalities.map((value: unknown) => String(value || ""))
+        : undefined,
+      supports_image_input:
+        typeof (model as any)?.supports_image_input === "boolean"
+          ? (model as any).supports_image_input
+          : undefined,
+      max_images_per_job:
+        typeof (model as any)?.max_images_per_job === "number" && Number.isFinite((model as any).max_images_per_job)
+          ? Math.max(1, Math.floor((model as any).max_images_per_job))
+          : undefined,
+      default_aspect_ratio: String((model as any)?.default_aspect_ratio || "").trim() || undefined,
+      allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
+        ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
+        : undefined,
+    }))
+    .filter((model) => model.id.length > 0);
+}
+
+async function syncImageGenerationModelCatalog(
+  tabInstance: SystemSculptSettingTab,
+  options?: { silent?: boolean }
+): Promise<ImageGenerationServerCatalogModel[]> {
+  const { plugin } = tabInstance;
+  const licenseKey = String(plugin.settings.licenseKey || "").trim();
+  const cached = getCachedServerImageModels(tabInstance);
+  if (!licenseKey) {
+    if (!options?.silent) {
+      new Notice("Set and validate your license key first.");
+    }
+    return cached;
+  }
+
+  const service = new SystemSculptImageGenerationService({
+    baseUrl: plugin.settings.serverUrl,
+    licenseKey,
+  });
+
+  try {
+    const response = await service.listModels();
+    const models = Array.isArray(response.models) ? response.models : [];
+    await plugin.getSettingsManager().updateSettings({
+      imageGenerationModelCatalogCache: {
+        fetchedAt: new Date().toISOString(),
+        models,
+      },
+    });
+    return models;
+  } catch (error: any) {
+    if (!cached.length) {
+      throw error;
+    }
+    if (!options?.silent) {
+      new Notice("Could not refresh image model catalog; using cached model metadata.");
+    }
+    return cached;
+  }
 }

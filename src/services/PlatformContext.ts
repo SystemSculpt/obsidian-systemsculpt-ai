@@ -56,14 +56,6 @@ export class PlatformContext {
     const { endpoint } = options;
     const isMobile = this.isMobile();
     const avoidFetch = this.shouldAvoidDirectFetch(endpoint);
-    try {
-      console.debug('[SystemSculpt][PlatformContext] preferredTransport decision', {
-        endpoint,
-        isMobile,
-        avoidFetch,
-        fetchAvailable: this.fetchAvailable
-      });
-    } catch {}
 
     if (isMobile || avoidFetch) {
       return "requestUrl";
@@ -73,33 +65,14 @@ export class PlatformContext {
 
   public supportsStreaming(options: PlatformTransportOptions = {}): boolean {
     if (!this.fetchAvailable) {
-      try {
-        console.debug('[SystemSculpt][PlatformContext] supportsStreaming=false (fetch unavailable)', {
-          endpoint: options.endpoint,
-          fetchAvailable: this.fetchAvailable
-        });
-      } catch {}
       return false;
     }
     const isMobile = this.isMobile();
     if (isMobile) {
-      try {
-        console.debug('[SystemSculpt][PlatformContext] supportsStreaming=false (mobile)', {
-          endpoint: options.endpoint
-        });
-      } catch {}
       return false;
     }
     const avoidFetch = this.shouldAvoidDirectFetch(options.endpoint);
-    const canStream = !avoidFetch;
-    try {
-      console.debug('[SystemSculpt][PlatformContext] supportsStreaming decision', {
-        endpoint: options.endpoint,
-        avoidFetch,
-        result: canStream
-      });
-    } catch {}
-    return canStream;
+    return !avoidFetch;
   }
 
   public getDeviceInfo() {
@@ -119,11 +92,6 @@ export class PlatformContext {
       const host = new URL(endpoint).host;
       const lcHost = host.toLowerCase();
       const avoid = Array.from(PlatformContext.FETCH_AVOID_SUFFIXES).some((suffix) => lcHost.endsWith(suffix));
-      if (avoid) {
-        try {
-          console.debug('[SystemSculpt][PlatformContext] avoiding direct fetch for host', { host });
-        } catch {}
-      }
       return avoid;
     } catch {
       return false;

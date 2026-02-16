@@ -96,7 +96,13 @@ export class YouTubeTranscriptService {
     }
 
     const endpoint = `${WEBSITE_API_BASE_URL}/youtube/transcripts`;
-    const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
+    const headers = {
+      ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey),
+      ...(this.plugin.manifest?.version ? { "x-plugin-version": this.plugin.manifest.version } : {}),
+    };
+    const idempotencyKey = `youtube-transcript:${videoId}:${Date.now()}:${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
 
     const body = JSON.stringify({
       url: canonicalUrl,
@@ -105,7 +111,7 @@ export class YouTubeTranscriptService {
 
     console.log("[YouTubeTranscriptService] Requesting transcript:", { videoId, lang: options?.lang });
 
-    const response = await this.makeRequest(endpoint, headers, body);
+    const response = await this.makeRequest(endpoint, headers, body, "POST", idempotencyKey);
 
     // Handle async job case
     if (response.status === "processing" && response.jobId) {
@@ -139,7 +145,10 @@ export class YouTubeTranscriptService {
     licenseKey: string
   ): Promise<YouTubeTranscriptResult> {
     const endpoint = `${WEBSITE_API_BASE_URL}/youtube/transcripts/${jobId}`;
-    const headers = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey);
+    const headers = {
+      ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(licenseKey),
+      ...(this.plugin.manifest?.version ? { "x-plugin-version": this.plugin.manifest.version } : {}),
+    };
 
     for (let attempt = 0; attempt < this.MAX_POLL_ATTEMPTS; attempt++) {
       await this.sleep(this.POLL_INTERVAL_MS);
@@ -176,8 +185,13 @@ export class YouTubeTranscriptService {
     endpoint: string,
     headers: Record<string, string>,
     body?: string,
-    method: "GET" | "POST" = "POST"
+    method: "GET" | "POST" = "POST",
+    idempotencyKey?: string
   ): Promise<TranscriptResponse> {
+    const requestHeaders = {
+      ...headers,
+      ...(method === "POST" && idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    };
     const transportOptions = { endpoint };
     const preferredTransport = this.platform.preferredTransport(transportOptions);
 
@@ -188,7 +202,7 @@ export class YouTubeTranscriptService {
         const response = await requestUrl({
           url: endpoint,
           method,
-          headers,
+          headers: requestHeaders,
           body: method === "POST" ? body : undefined,
           throw: false,
         });
@@ -205,7 +219,7 @@ export class YouTubeTranscriptService {
       } else {
         const response = await fetch(endpoint, {
           method,
-          headers,
+          headers: requestHeaders,
           body: method === "POST" ? body : undefined,
         });
 

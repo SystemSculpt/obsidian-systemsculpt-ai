@@ -369,6 +369,8 @@ export interface SystemSculptSettings {
   imageGenerationOutputDir: string;
   /** When enabled, write a JSON sidecar next to each generated image. */
   imageGenerationSaveMetadataSidecar: boolean;
+  /** Cached server model metadata merged into CanvasFlow model pickers. */
+  imageGenerationModelCatalogCache: ImageGenerationModelCatalogCache | null;
 
   /**
    * Embeddings settings for the new embeddings system
@@ -472,6 +474,23 @@ export interface MeetingProcessorOptions {
   risks: boolean;
   questions: boolean;
   transcriptCleanup: boolean;
+}
+
+export interface ImageGenerationModelCatalogCacheModel {
+  id: string;
+  name?: string;
+  provider?: string;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  supports_image_input?: boolean;
+  max_images_per_job?: number;
+  default_aspect_ratio?: string;
+  allowed_aspect_ratios?: string[];
+}
+
+export interface ImageGenerationModelCatalogCache {
+  fetchedAt: string;
+  models: ImageGenerationModelCatalogCacheModel[];
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
@@ -617,6 +636,7 @@ Raw transcript:`,
   imageGenerationPollIntervalMs: 1000,
   imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
   imageGenerationSaveMetadataSidecar: true,
+  imageGenerationModelCatalogCache: null,
 
   /**
    * Embeddings defaults

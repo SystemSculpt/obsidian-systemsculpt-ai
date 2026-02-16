@@ -7,6 +7,7 @@ const __dirname = path.dirname(__filename);
 
 const maxInstances = Number(process.env.SYSTEMSCULPT_E2E_INSTANCES || 3);
 const appVersion = process.env.SYSTEMSCULPT_E2E_APP_VERSION || "1.11.7";
+const mochaTimeoutMs = Number(process.env.SYSTEMSCULPT_E2E_MOCHA_TIMEOUT_MS || 900000);
 
 export const config = {
   runner: "local",
@@ -50,7 +51,7 @@ export const config = {
   framework: "mocha",
   mochaOpts: {
     ui: "bdd",
-    timeout: 180000,
+    timeout: Number.isFinite(mochaTimeoutMs) && mochaTimeoutMs > 0 ? Math.floor(mochaTimeoutMs) : 900000,
   },
 
   autoCompileOpts: {

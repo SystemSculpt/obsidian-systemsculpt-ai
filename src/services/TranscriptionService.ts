@@ -288,6 +288,7 @@ export class TranscriptionService {
     const licenseKey = this.plugin.settings.licenseKey;
     const headers: Record<string, string> = {
       ...(licenseKey ? { "x-license-key": licenseKey } : {}),
+      ...(this.plugin.manifest?.version ? { "x-plugin-version": this.plugin.manifest.version } : {}),
       ...(options.method !== "GET" ? { "content-type": "application/json" } : {}),
       ...(options.headers ?? {}),
     };
@@ -373,6 +374,7 @@ export class TranscriptionService {
     const extension = (file.extension || "").toLowerCase();
     const contentType =
       (MIME_TYPE_MAP as Record<string, string>)[extension] || "application/octet-stream";
+    const createIdempotencyKey = `audio-jobs-create:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     const absolutePath = this.resolveAbsolutePath(file);
     context?.onProgress?.(2, "Preparing upload...");
@@ -380,6 +382,9 @@ export class TranscriptionService {
     const create = await this.requestSystemSculptJson({
       url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs`,
       method: "POST",
+      headers: {
+        "Idempotency-Key": createIdempotencyKey,
+      },
       body: {
         filename: file.name,
         contentType,
@@ -481,6 +486,9 @@ export class TranscriptionService {
     const complete = await this.requestSystemSculptJson({
       url: `${this.sculptService.baseUrl}/audio/transcriptions/jobs/${jobId}/upload/complete`,
       method: "POST",
+      headers: {
+        "Idempotency-Key": `audio-jobs-complete:${jobId}`,
+      },
       body: { parts },
     });
     if (complete.status !== 200 || !complete.json?.success) {
@@ -498,7 +506,13 @@ export class TranscriptionService {
 
     const tryKick = async (): Promise<{ status: number; json: any }> => {
       lastKickAt = Date.now();
-      const kicked = await this.requestSystemSculptJson({ url: startUrl, method: "POST" });
+      const kicked = await this.requestSystemSculptJson({
+        url: startUrl,
+        method: "POST",
+        headers: {
+          "Idempotency-Key": `audio-jobs-start:${jobId}`,
+        },
+      });
       if (kicked.status !== 200 && kicked.status !== 202) {
         throw new Error(this.extractRequestUrlErrorMessage(kicked));
       }
@@ -856,6 +870,8 @@ export class TranscriptionService {
       // Use SystemSculpt server proxy
       headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
       if (this.plugin.settings.licenseKey) headers['x-license-key'] = this.plugin.settings.licenseKey;
+      if (this.plugin.manifest?.version) headers['x-plugin-version'] = this.plugin.manifest.version;
+      headers['Idempotency-Key'] = `audio-direct:${requestId}`;
 
       // Server expects file + optional requestId and timestamped flag
       formFields.push({ name: 'file', value: blob, filename: uploadDescriptor.filename });

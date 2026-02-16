@@ -2,6 +2,7 @@ import {
   addEdge,
   addFileNode,
   findIncomingImageFileForNode,
+  findIncomingImageFilesForNode,
   indexCanvas,
   parseCanvasDocument,
   serializeCanvasDocument,
@@ -33,6 +34,30 @@ describe("CanvasFlowGraph", () => {
     const incoming = findIncomingImageFileForNode(doc, "prompt");
     expect(incoming).not.toBeNull();
     expect(incoming?.imagePath).toBe("imgs/in.png");
+  });
+
+  it("collects all incoming image file nodes in edge order", () => {
+    const raw = JSON.stringify({
+      nodes: [
+        { id: "img-1", type: "file", file: "imgs/a.png", x: 0, y: 0 },
+        { id: "img-2", type: "file", file: "imgs/b.jpg", x: 0, y: 120 },
+        { id: "note", type: "file", file: "notes/readme.md", x: 0, y: 240 },
+        { id: "prompt", type: "file", file: "Prompt.md", x: 400, y: 0 },
+      ],
+      edges: [
+        { id: "e-note", fromNode: "note", toNode: "prompt" },
+        { id: "e-2", fromNode: "img-2", toNode: "prompt" },
+        { id: "e-dup", fromNode: "img-2", toNode: "prompt" },
+        { id: "e-1", fromNode: "img-1", toNode: "prompt" },
+      ],
+    });
+
+    const doc = parseCanvasDocument(raw)!;
+    const incoming = findIncomingImageFilesForNode(doc, "prompt");
+    expect(incoming).toEqual([
+      { fromNodeId: "img-2", imagePath: "imgs/b.jpg", edgeId: "e-2" },
+      { fromNodeId: "img-1", imagePath: "imgs/a.png", edgeId: "e-1" },
+    ]);
   });
 
   it("adds nodes and edges without dropping other keys", () => {
@@ -67,4 +92,3 @@ describe("CanvasFlowGraph", () => {
     expect(idx.edgesByToNode.get("a")?.[0].id).toBe("e");
   });
 });
-

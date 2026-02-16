@@ -155,19 +155,42 @@ export function isImagePath(path: string): boolean {
   return ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "gif" || ext === "bmp" || ext === "tiff";
 }
 
-export function findIncomingImageFileForNode(
+export function findIncomingImageFilesForNode(
   doc: CanvasDocument,
   nodeId: string
-): { fromNodeId: string; imagePath: string } | null {
+): Array<{ fromNodeId: string; imagePath: string; edgeId: string }> {
   const { nodesById, edgesByToNode } = indexCanvas(doc);
   const incoming = edgesByToNode.get(nodeId) || [];
+  const out: Array<{ fromNodeId: string; imagePath: string; edgeId: string }> = [];
+  const seen = new Set<string>();
+
   for (const edge of incoming) {
     const from = nodesById.get(edge.fromNode);
     if (!from || !isCanvasFileNode(from)) continue;
     if (!isImagePath(from.file)) continue;
-    return { fromNodeId: from.id, imagePath: from.file };
+
+    const key = `${from.id}\u0000${from.file}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      fromNodeId: from.id,
+      imagePath: from.file,
+      edgeId: edge.id,
+    });
   }
-  return null;
+
+  return out;
+}
+
+export function findIncomingImageFileForNode(
+  doc: CanvasDocument,
+  nodeId: string
+): { fromNodeId: string; imagePath: string } | null {
+  const incoming = findIncomingImageFilesForNode(doc, nodeId);
+  const first = incoming[0];
+  if (!first) return null;
+  return { fromNodeId: first.fromNodeId, imagePath: first.imagePath };
 }
 
 export function addFileNode(

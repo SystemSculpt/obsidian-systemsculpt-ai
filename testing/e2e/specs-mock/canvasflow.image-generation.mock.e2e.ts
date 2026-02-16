@@ -1,88 +1,119 @@
 import { expect } from "@wdio/globals";
 import { ensurePluginEnabled } from "../utils/obsidian";
 import {
-  configurePluginForLiveChat,
   ensureE2EVault,
   getEnv,
   PLUGIN_ID,
   requireEnv,
   upsertVaultFile,
 } from "../utils/systemsculptChat";
+import {
+  configureCanvasFlowImageDefaults,
+  configureCanvasFlowPluginForE2E,
+  runCanvasFlowPromptToCompletion,
+  writeBinaryImage,
+} from "../utils/canvasflow";
 
-const INPUT_IMAGE_PATH = "E2E/canvasflow-mock-input.png";
+const INPUT_IMAGE_PATH_A = "E2E/canvasflow-mock-input-a.png";
+const INPUT_IMAGE_PATH_B = "E2E/canvasflow-mock-input-b.png";
 const PROMPT_PATH = "E2E/canvasflow-mock-prompt.md";
 const CANVAS_PATH = "E2E/canvasflow-mock.canvas";
-const OUTPUT_PREFIX = "E2E/Generations";
+const OUTPUT_PREFIX = "SystemSculpt/Attachments/Generations/E2E/Generations";
 const PROMPT_NODE_ID = "e2e-canvasflow-mock-prompt-node";
-const INPUT_NODE_ID = "e2e-canvasflow-mock-input-node";
+const INPUT_NODE_ID_A = "e2e-canvasflow-mock-input-node-a";
+const INPUT_NODE_ID_B = "e2e-canvasflow-mock-input-node-b";
 
 const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9slt4d8AAAAASUVORK5CYII=";
 
-async function writeBinaryImage(path: string, base64: string): Promise<void> {
-  await browser.executeObsidian(
-    async ({ app }, { filePath, base64 }) => {
-      const normalized = String(filePath || "").replace(/\\/g, "/");
-      const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
-
-      const parts = normalized.split("/").filter(Boolean);
-      const fileName = parts.pop();
-      if (!fileName) throw new Error("Invalid image path");
-
-      let current = "";
-      for (const part of parts) {
-        current = current ? `${current}/${part}` : part;
-        const exists = await app.vault.adapter.exists(current);
-        if (!exists) await app.vault.createFolder(current);
-      }
-
-      const existing = app.vault.getAbstractFileByPath(normalized);
-      if (existing) {
-        await app.vault.modifyBinary(existing as any, bytes.buffer);
-      } else {
-        await app.vault.createBinary(normalized, bytes.buffer);
-      }
-    },
-    { filePath: path, base64 }
-  );
+async function readMockServerStats(serverUrl: string | null | undefined): Promise<Record<string, unknown>> {
+  const fallback = "http://127.0.0.1:43111/api/v1";
+  const base = String(serverUrl || fallback).trim() || fallback;
+  const parsed = new URL(base);
+  const url = `${parsed.origin}/_e2e/stats`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to read mock stats: HTTP ${response.status}`);
+  }
+  return (await response.json()) as Record<string, unknown>;
 }
 
-async function enableCanvasFlowWithImageDefaults(): Promise<void> {
-  await browser.executeObsidian(async ({ app }, { pluginId }) => {
-    const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
-    if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
+async function readGeneratedArtifacts(): Promise<{
+  imagePath: string;
+  sidecarPath: string;
+  sidecarInputImages: string[];
+  nodeCount: number;
+} | null> {
+  return await browser.executeObsidian(
+    async ({ app }, { canvasPath, outputPrefix }) => {
+      const canvasFile = app.vault.getAbstractFileByPath(canvasPath);
+      if (!canvasFile) return null;
 
-    await plugin.getSettingsManager().updateSettings({
-      canvasFlowEnabled: true,
-      imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
-      imageGenerationOutputDir: "E2E/Generations",
-      imageGenerationPollIntervalMs: 400,
-      imageGenerationSaveMetadataSidecar: true,
-    });
+      const raw = await app.vault.read(canvasFile as any);
+      const parsed = JSON.parse(raw);
+      const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
+      const generated = nodes.find((node: any) => {
+        if (!node || typeof node !== "object") return false;
+        const file = typeof node.file === "string" ? node.file : "";
+        return file.startsWith(`${outputPrefix}/`) && /\.(png|jpg|jpeg|webp|gif)$/i.test(file);
+      });
 
-    if (typeof plugin.syncCanvasFlowEnhancerFromSettings === "function") {
-      await plugin.syncCanvasFlowEnhancerFromSettings();
+      if (!generated || typeof generated.file !== "string") {
+        return null;
+      }
+
+      const imagePath = generated.file;
+      const imageAbs = app.vault.getAbstractFileByPath(imagePath);
+      if (!imageAbs) return null;
+
+      const sidecarPath = `${imagePath}.systemsculpt.json`;
+      const sidecarAbs = app.vault.getAbstractFileByPath(sidecarPath);
+      if (!sidecarAbs) return null;
+
+      const sidecarRaw = await app.vault.read(sidecarAbs as any);
+      const sidecarJson = JSON.parse(sidecarRaw);
+      const sidecarInputImages = Array.isArray(sidecarJson?.input_images) ? sidecarJson.input_images : [];
+
+      return {
+        imagePath,
+        sidecarPath,
+        sidecarInputImages,
+        nodeCount: nodes.length,
+      };
+    },
+    {
+      canvasPath: CANVAS_PATH,
+      outputPrefix: OUTPUT_PREFIX,
     }
-  }, { pluginId: PLUGIN_ID });
+  );
 }
 
 describe("CanvasFlow image generation (mock API)", () => {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
-  const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
+  const mockPort = getEnv("SYSTEMSCULPT_E2E_MOCK_PORT") ?? "43111";
+  const serverUrl = `http://127.0.0.1:${mockPort}/api/v1`;
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
 
   before(async () => {
     const vaultPath = await ensureE2EVault();
     await ensurePluginEnabled(PLUGIN_ID, vaultPath);
-    await configurePluginForLiveChat({
+    await configureCanvasFlowPluginForE2E({
+      pluginId: PLUGIN_ID,
       licenseKey,
       serverUrl,
       selectedModelId,
     });
 
-    await enableCanvasFlowWithImageDefaults();
+    await configureCanvasFlowImageDefaults({
+      pluginId: PLUGIN_ID,
+      outputDir: OUTPUT_PREFIX,
+      pollIntervalMs: 400,
+      modelId: "openai/gpt-5-image-mini",
+      saveMetadataSidecar: true,
+    });
 
-    await writeBinaryImage(INPUT_IMAGE_PATH, TINY_PNG_BASE64);
+    await writeBinaryImage(INPUT_IMAGE_PATH_A, TINY_PNG_BASE64);
+    await writeBinaryImage(INPUT_IMAGE_PATH_B, TINY_PNG_BASE64);
     await upsertVaultFile(
       PROMPT_PATH,
       [
@@ -104,11 +135,20 @@ describe("CanvasFlow image generation (mock API)", () => {
         {
           nodes: [
             {
-              id: INPUT_NODE_ID,
+              id: INPUT_NODE_ID_A,
               type: "file",
-              file: INPUT_IMAGE_PATH,
+              file: INPUT_IMAGE_PATH_A,
               x: 0,
               y: 0,
+              width: 320,
+              height: 320,
+            },
+            {
+              id: INPUT_NODE_ID_B,
+              type: "file",
+              file: INPUT_IMAGE_PATH_B,
+              x: 0,
+              y: 360,
               width: 320,
               height: 320,
             },
@@ -124,8 +164,13 @@ describe("CanvasFlow image generation (mock API)", () => {
           ],
           edges: [
             {
-              id: "mock-edge-input-to-prompt",
-              fromNode: INPUT_NODE_ID,
+              id: "mock-edge-input-a-to-prompt",
+              fromNode: INPUT_NODE_ID_A,
+              toNode: PROMPT_NODE_ID,
+            },
+            {
+              id: "mock-edge-input-b-to-prompt",
+              fromNode: INPUT_NODE_ID_B,
               toNode: PROMPT_NODE_ID,
             },
           ],
@@ -139,66 +184,38 @@ describe("CanvasFlow image generation (mock API)", () => {
   it("runs CanvasFlow runner and writes generated image node + sidecar", async function () {
     this.timeout(120000);
 
-    const result = await browser.executeObsidian(
-      async ({ app }, { pluginId, canvasPath, promptNodeId, outputPrefix }) => {
-        const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
-        if (!plugin) throw new Error("Plugin missing");
+    await runCanvasFlowPromptToCompletion({
+      pluginId: PLUGIN_ID,
+      canvasPath: CANVAS_PATH,
+      promptNodeId: PROMPT_NODE_ID,
+    });
 
-        const canvasFile = app.vault.getAbstractFileByPath(canvasPath);
-        if (!canvasFile) throw new Error(`Canvas file not found: ${canvasPath}`);
-
-        const enhancer: any = plugin.canvasFlowEnhancer;
-        const runner: any = enhancer?.runner;
-        if (!runner || typeof runner.runPromptNode !== "function") {
-          throw new Error("CanvasFlow runner unavailable");
-        }
-
-        await runner.runPromptNode({
-          canvasFile,
-          promptNodeId,
-        });
-
-        const raw = await app.vault.read(canvasFile as any);
-        const parsed = JSON.parse(raw);
-        const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
-        const generated = nodes.find((node: any) => {
-          if (!node || typeof node !== "object") return false;
-          const file = typeof node.file === "string" ? node.file : "";
-          return file.startsWith(`${outputPrefix}/`) && /\.(png|jpg|jpeg|webp|gif)$/i.test(file);
-        });
-
-        if (!generated || typeof generated.file !== "string") {
-          throw new Error("Generated image node not found in canvas document.");
-        }
-
-        const imagePath = generated.file;
-        const imageAbs = app.vault.getAbstractFileByPath(imagePath);
-        if (!imageAbs) {
-          throw new Error(`Generated image file missing: ${imagePath}`);
-        }
-
-        const sidecarPath = `${imagePath}.systemsculpt.json`;
-        const sidecarAbs = app.vault.getAbstractFileByPath(sidecarPath);
-        if (!sidecarAbs) {
-          throw new Error(`Sidecar missing: ${sidecarPath}`);
-        }
-
-        return {
-          imagePath,
-          sidecarPath,
-          nodeCount: nodes.length,
-        };
+    await browser.waitUntil(
+      async () => {
+        const artifacts = await readGeneratedArtifacts();
+        if (artifacts) return true;
+        return false;
       },
       {
-        pluginId: PLUGIN_ID,
-        canvasPath: CANVAS_PATH,
-        promptNodeId: PROMPT_NODE_ID,
-        outputPrefix: OUTPUT_PREFIX,
+        timeout: 15000,
+        interval: 1000,
+        timeoutMsg: "CanvasFlow mock run completed but generated artifacts were not found in time.",
       }
     );
 
+    const result = await readGeneratedArtifacts();
+    if (!result) {
+      throw new Error("Generated artifacts missing after successful wait.");
+    }
+
+    const stats = await readMockServerStats(serverUrl);
+
     expect(result.imagePath).toContain(`${OUTPUT_PREFIX}/`);
     expect(result.sidecarPath).toContain(".systemsculpt.json");
+    expect(result.sidecarInputImages).toContain(INPUT_IMAGE_PATH_A);
+    expect(result.sidecarInputImages).toContain(INPUT_IMAGE_PATH_B);
+    expect(result.sidecarInputImages.length).toBe(2);
     expect(result.nodeCount).toBeGreaterThanOrEqual(3);
+    expect(Number(stats.imageJobLastInputImagesCount || 0)).toBe(2);
   });
 });

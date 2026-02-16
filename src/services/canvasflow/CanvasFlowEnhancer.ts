@@ -5,7 +5,6 @@ import {
   findCanvasNodeContentHost,
   findCanvasNodeElements,
   findCanvasNodeElementsFromInternalCanvas,
-  getCanvasNodeId,
   trySetInternalCanvasNodeSize,
 } from "./CanvasDomAdapter";
 import {
@@ -35,10 +34,21 @@ import {
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   formatCuratedImageModelOptionText,
+  getDefaultImageAspectRatio,
   getCuratedImageGenerationModel,
   getCuratedImageGenerationModelGroups,
+  type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
 import { tryCopyImageFileToClipboard } from "../../utils/clipboard";
+import {
+  findCanvasSelectionMenu,
+  getSelectedNodeIdsFromDom,
+  getSelectedNodeIdsFromInternalCanvas,
+} from "./CanvasFlowSelectionMenuHelpers";
+import {
+  deriveCanvasFlowPromptUiDefaults,
+  syncCanvasFlowAspectRatioPresetControls,
+} from "./CanvasFlowPromptNodeState";
 
 type PromptCacheEntry = {
   mtime: number;
@@ -52,6 +62,7 @@ type LeafController = {
   observer: MutationObserver;
   updating: boolean;
   pending: boolean;
+  selectionMenuUpdateQueued: boolean;
   canvasFilePath: string | null;
   canvasFileMtime: number;
   cachedCanvasDoc: ReturnType<typeof parseCanvasDocument> | null;
@@ -61,7 +72,7 @@ type LeafController = {
   pendingFocusAttempts: number;
 };
 
-const CANVASFLOW_PROMPT_UI_VERSION = "3";
+const CANVASFLOW_PROMPT_UI_VERSION = "4";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -78,13 +89,16 @@ function stopPropagationOnly(e: Event): void {
   e.stopPropagation();
 }
 
-function formatImageModelBadge(modelId: string): { text: string; title: string } {
+function formatImageModelBadge(
+  modelId: string,
+  serverModels?: readonly ImageGenerationServerCatalogModel[]
+): { text: string; title: string } {
   const id = String(modelId || "").trim();
   if (!id) {
     return { text: "(no model)", title: "" };
   }
 
-  const curated = getCuratedImageGenerationModel(id);
+  const curated = getCuratedImageGenerationModel(id, serverModels);
   if (!curated) {
     return { text: id, title: id };
   }
@@ -149,6 +163,16 @@ export class CanvasFlowEnhancer {
     this.controllers.clear();
     this.runningNodeKeys = new Set();
     this.creatingFromImageKeys = new Set();
+    this.copyingImageKeys = new Set();
+  }
+
+  async runPromptNode(options: {
+    canvasFile: TFile;
+    promptNodeId: string;
+    status?: (status: string) => void;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    await this.runner.runPromptNode(options);
   }
 
   private attachAllCanvasLeaves(): void {
@@ -170,11 +194,19 @@ export class CanvasFlowEnhancer {
 
     const controller: LeafController = {
       leaf,
-      observer: new MutationObserver(() => {
+      observer: new MutationObserver((records) => {
+        if (this.isSelectionOnlyMutation(records)) {
+          this.scheduleSelectionMenuUpdate(controller);
+          return;
+        }
+        if (!this.shouldScheduleUpdateFromMutations(records)) {
+          return;
+        }
         this.scheduleUpdate(controller);
       }),
       updating: false,
       pending: false,
+      selectionMenuUpdateQueued: false,
       canvasFilePath: null,
       canvasFileMtime: 0,
       cachedCanvasDoc: null,
@@ -214,7 +246,167 @@ export class CanvasFlowEnhancer {
           this.scheduleUpdate(controller);
         }
       });
+    }, 100);
+  }
+
+  private isSelectionOnlyMutation(records: MutationRecord[]): boolean {
+    if (!records.length) return false;
+    for (const record of records) {
+      if (record.type !== "attributes" || record.attributeName !== "class") {
+        return false;
+      }
+      const targetEl = this.nodeToElement(record.target);
+      if (!targetEl) {
+        return false;
+      }
+      const isCanvasSelectionClassToggle =
+        targetEl.classList.contains("canvas-node") ||
+        targetEl.classList.contains("canvas-node-container") ||
+        targetEl.closest(".canvas-node, .canvas-node-container") !== null;
+      if (!isCanvasSelectionClassToggle) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private scheduleSelectionMenuUpdate(controller: LeafController): void {
+    if (controller.selectionMenuUpdateQueued) return;
+    controller.selectionMenuUpdateQueued = true;
+    window.setTimeout(() => {
+      controller.selectionMenuUpdateQueued = false;
+      void this.updateSelectionMenuButtonsOnly(controller);
     }, 0);
+  }
+
+  private async updateSelectionMenuButtonsOnly(controller: LeafController): Promise<void> {
+    if (this.plugin.settings.canvasFlowEnabled !== true) {
+      return;
+    }
+
+    const root = (controller.leaf.view as any)?.containerEl as HTMLElement | null;
+    if (!root) return;
+
+    const canvasFile = ((controller.leaf.view as any)?.file as TFile | undefined) || null;
+    if (!canvasFile) return;
+
+    const canvasMtime = canvasFile.stat?.mtime ?? 0;
+    const pathChanged = controller.canvasFilePath !== canvasFile.path;
+    if (pathChanged || controller.canvasFileMtime !== canvasMtime || !controller.cachedCanvasDoc) {
+      this.scheduleUpdate(controller);
+      return;
+    }
+
+    const { nodesById } = indexCanvas(controller.cachedCanvasDoc);
+    await this.ensureSelectionMenuButtons({
+      controller,
+      root,
+      canvasFile,
+      nodesById,
+    });
+  }
+
+  private shouldScheduleUpdateFromMutations(records: MutationRecord[]): boolean {
+    if (!records.length) return false;
+    for (const record of records) {
+      if (this.isMutationInsideCanvasFlowOwnedUi(record)) continue;
+      if (this.isRelevantCanvasMutation(record)) return true;
+    }
+    return false;
+  }
+
+  private isRelevantCanvasMutation(record: MutationRecord): boolean {
+    if (record.type === "attributes") {
+      const targetEl = this.nodeToElement(record.target);
+      if (!targetEl) return false;
+      return this.isCanvasMutationRelevantElement(targetEl);
+    }
+
+    if (record.type === "childList") {
+      const targetEl = this.nodeToElement(record.target);
+      if (targetEl && this.isCanvasMutationRelevantElement(targetEl)) {
+        return true;
+      }
+
+      for (const node of Array.from(record.addedNodes)) {
+        if (this.isRelevantCanvasMutationNode(node)) return true;
+      }
+      for (const node of Array.from(record.removedNodes)) {
+        if (this.isRelevantCanvasMutationNode(node)) return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isRelevantCanvasMutationNode(node: Node): boolean {
+    const el = this.nodeToElement(node);
+    if (!el) return false;
+    if (this.isCanvasMutationRelevantElement(el)) return true;
+    try {
+      return !!el.querySelector?.(".canvas-node, .canvas-menu, .canvas-menu-container");
+    } catch {
+      return false;
+    }
+  }
+
+  private isCanvasMutationRelevantElement(el: HTMLElement): boolean {
+    if (
+      el.classList?.contains("canvas-node") ||
+      el.classList?.contains("canvas-node-content") ||
+      el.classList?.contains("canvas-node-container") ||
+      el.classList?.contains("canvas-menu") ||
+      el.classList?.contains("canvas-menu-container")
+    ) {
+      return true;
+    }
+    return !!el.closest(".canvas-node, .canvas-menu, .canvas-menu-container");
+  }
+
+  private isMutationInsideCanvasFlowOwnedUi(record: MutationRecord): boolean {
+    if (record.type === "attributes") {
+      return this.isCanvasFlowOwnedNode(record.target);
+    }
+
+    if (record.type === "childList") {
+      const changedNodes = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
+      if (changedNodes.length === 0) {
+        return this.isCanvasFlowOwnedNode(record.target);
+      }
+      return changedNodes.every((node) => this.isCanvasFlowOwnedNode(node));
+    }
+
+    return false;
+  }
+
+  private isCanvasFlowOwnedNode(node: Node | null): boolean {
+    const el = this.nodeToElement(node);
+    if (!el) return false;
+
+    if (el.classList?.contains("ss-canvasflow-controls")) return true;
+    if (el.closest(".ss-canvasflow-controls")) return true;
+    if (el.classList?.contains("ss-canvasflow-menu-run")) return true;
+    if (el.classList?.contains("ss-canvasflow-menu-copy-image")) return true;
+    if (el.classList?.contains("ss-canvasflow-menu-new-prompt")) return true;
+    if (el.closest(".ss-canvasflow-menu-run, .ss-canvasflow-menu-copy-image, .ss-canvasflow-menu-new-prompt")) return true;
+
+    return false;
+  }
+
+  private nodeToElement(node: Node | null): HTMLElement | null {
+    if (!node) return null;
+    const anyNode = node as any;
+    if (anyNode.nodeType === 1) {
+      return anyNode as HTMLElement;
+    }
+    return (anyNode.parentElement as HTMLElement | null) || null;
+  }
+
+  private isControlFocused(el: HTMLElement | null | undefined): boolean {
+    if (!el) return false;
+    const doc = el.ownerDocument;
+    if (!doc) return false;
+    return doc.activeElement === el;
   }
 
   private removeInjectedControls(leaf: WorkspaceLeaf): void {
@@ -370,6 +562,36 @@ export class CanvasFlowEnhancer {
     return { body, frontmatter: parsed.frontmatter, config: parsed.config };
   }
 
+  private getCachedImageGenerationModels(): ImageGenerationServerCatalogModel[] {
+    const raw = this.plugin.settings.imageGenerationModelCatalogCache?.models;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((model) => ({
+        id: String((model as any)?.id || "").trim(),
+        name: String((model as any)?.name || "").trim() || undefined,
+        provider: String((model as any)?.provider || "").trim() || undefined,
+        input_modalities: Array.isArray((model as any)?.input_modalities)
+          ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
+          : undefined,
+        output_modalities: Array.isArray((model as any)?.output_modalities)
+          ? (model as any).output_modalities.map((value: unknown) => String(value || ""))
+          : undefined,
+        supports_image_input:
+          typeof (model as any)?.supports_image_input === "boolean"
+            ? (model as any).supports_image_input
+            : undefined,
+        max_images_per_job:
+          typeof (model as any)?.max_images_per_job === "number" && Number.isFinite((model as any).max_images_per_job)
+            ? Math.max(1, Math.floor((model as any).max_images_per_job))
+            : undefined,
+        default_aspect_ratio: String((model as any)?.default_aspect_ratio || "").trim() || undefined,
+        allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
+          ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
+          : undefined,
+      }))
+      .filter((model) => model.id.length > 0);
+  }
+
   private renderModelSelect(
     select: HTMLSelectElement,
     options: {
@@ -387,7 +609,8 @@ export class CanvasFlowEnhancer {
     if (keepSelected) extras.add(keepSelected);
     if (modelFromNote) extras.add(modelFromNote);
 
-    const groups = getCuratedImageGenerationModelGroups();
+    const serverModels = this.getCachedImageGenerationModels();
+    const groups = getCuratedImageGenerationModelGroups(serverModels);
     const curatedSlugs = new Set<string>();
     for (const group of groups) {
       for (const model of group.models) {
@@ -401,7 +624,7 @@ export class CanvasFlowEnhancer {
       .sort((a, b) => a.localeCompare(b));
 
     select.empty();
-    const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug) : null;
+    const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug, serverModels) : null;
     const defaultLabel = defaultEntry
       ? `(Default: ${defaultEntry.label} (${defaultEntry.id})  ${defaultEntry.pricing.summary})`
       : settingsModelSlug
@@ -460,19 +683,17 @@ export class CanvasFlowEnhancer {
         ? String(options.promptConfig.seed)
         : "";
     const effectiveModelSlug = modelFromNote || settingsModelSlug;
+    const serverModels = this.getCachedImageGenerationModels();
 
-    const imageOptionsRaw = readRecord(options.promptFrontmatter["ss_image_options"]);
-    const imageCount = Math.max(1, Math.min(4, Math.floor(options.promptConfig.imageCount || 1)));
-    const widthFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_width"]);
-    const heightFromFrontmatter = readNumber(options.promptFrontmatter["ss_image_height"]);
-    const width = widthFromFrontmatter ?? readNumber(imageOptionsRaw["width"]);
-    const height = heightFromFrontmatter ?? readNumber(imageOptionsRaw["height"]);
-    const nanoDefaults = {
-      aspect_ratio: readString(imageOptionsRaw["aspect_ratio"]) || "match_input_image",
-      resolution: readString(imageOptionsRaw["resolution"]) || "4K",
-      output_format: readString(imageOptionsRaw["output_format"]) || "jpg",
-      safety_filter_level: readString(imageOptionsRaw["safety_filter_level"]) || "block_only_high",
-    };
+    const promptUiDefaults = deriveCanvasFlowPromptUiDefaults({
+      frontmatter: options.promptFrontmatter,
+      promptConfig: options.promptConfig,
+    });
+    const imageCount = promptUiDefaults.imageCount;
+    const width = promptUiDefaults.width;
+    const height = promptUiDefaults.height;
+    const nanoDefaults = promptUiDefaults.nanoDefaults;
+    const preferredAspectRatio = promptUiDefaults.preferredAspectRatio;
 
     let existing = host.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${CSS.escape(options.nodeId)}"]`);
     if (existing && existing.dataset.ssCanvasflowUiVersion !== CANVASFLOW_PROMPT_UI_VERSION) {
@@ -493,16 +714,24 @@ export class CanvasFlowEnhancer {
       const modelSelect = existing.querySelector<HTMLSelectElement>("select.ss-canvasflow-model");
       if (modelSelect) {
         const anySelect = modelSelect as any;
-        if (anySelect.__ssCanvasflowModelInit !== true) {
-          anySelect.__ssCanvasflowModelInit = true;
-          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
-        } else if ((modelSelect.dataset.ssCanvasflowSettingsModelSlug || "") !== settingsModelSlug) {
-          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
-        } else if ((modelSelect.dataset.ssCanvasflowNoteModelSlug || "") !== modelFromNote) {
-          this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+        const modelSelectFocused = this.isControlFocused(modelSelect);
+        const shouldPopulateModelSelect =
+          anySelect.__ssCanvasflowModelInit !== true ||
+          (modelSelect.dataset.ssCanvasflowSettingsModelSlug || "") !== settingsModelSlug ||
+          (modelSelect.dataset.ssCanvasflowNoteModelSlug || "") !== modelFromNote ||
+          modelSelect.dataset.ssCanvasflowNeedsPopulate === "true";
+
+        if (shouldPopulateModelSelect) {
+          if (modelSelectFocused) {
+            modelSelect.dataset.ssCanvasflowNeedsPopulate = "true";
+          } else {
+            anySelect.__ssCanvasflowModelInit = true;
+            this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+            delete modelSelect.dataset.ssCanvasflowNeedsPopulate;
+          }
         }
 
-        if (modelSelect.value !== modelFromNote && modelSelect !== document.activeElement) {
+        if (modelSelect.value !== modelFromNote && !modelSelectFocused) {
           modelSelect.value = modelFromNote;
         }
       }
@@ -514,7 +743,7 @@ export class CanvasFlowEnhancer {
 
       const modelBadge = existing.querySelector<HTMLElement>("[data-ss-canvasflow-model-badge]");
       if (modelBadge) {
-        const badge = formatImageModelBadge(effectiveModelSlug);
+        const badge = formatImageModelBadge(effectiveModelSlug, serverModels);
         modelBadge.setText(badge.text);
         modelBadge.title = badge.title;
       }
@@ -523,6 +752,21 @@ export class CanvasFlowEnhancer {
       if (imageCountSelect && imageCountSelect.value !== String(imageCount) && imageCountSelect !== document.activeElement) {
         imageCountSelect.value = String(imageCount);
         imageCountSelect.dataset.ssCanvasflowInitial = imageCountSelect.value;
+      }
+
+      const ratioSelect = existing.querySelector<HTMLSelectElement>("select.ss-canvasflow-aspect-ratio-preset");
+      const ratioHelp = existing.querySelector<HTMLElement>(".ss-canvasflow-aspect-ratio-help");
+      const ratioSelectFocused = this.isControlFocused(ratioSelect);
+      const selectedRatio = syncCanvasFlowAspectRatioPresetControls({
+        select: ratioSelect,
+        modelId: effectiveModelSlug || DEFAULT_IMAGE_GENERATION_MODEL_ID,
+        preferred: preferredAspectRatio,
+        helpEl: ratioHelp,
+        serverModels,
+        deferWhileFocused: true,
+      });
+      if (ratioSelect && selectedRatio && ratioSelect.value !== selectedRatio && !ratioSelectFocused) {
+        ratioSelect.value = selectedRatio;
       }
 
       const widthInput = existing.querySelector<HTMLInputElement>("input.ss-canvasflow-width");
@@ -540,7 +784,13 @@ export class CanvasFlowEnhancer {
       }
 
       const isNano = effectiveModelSlug === "google/nano-banana-pro";
+      const ratioField = existing.querySelector<HTMLElement>(".ss-canvasflow-field-aspect-ratio-preset");
+      const widthField = existing.querySelector<HTMLElement>(".ss-canvasflow-field-width");
+      const heightField = existing.querySelector<HTMLElement>(".ss-canvasflow-field-height");
       const nanoWrap = existing.querySelector<HTMLElement>(".ss-canvasflow-nano-config");
+      if (ratioField) ratioField.style.display = isNano ? "none" : "";
+      if (widthField) widthField.style.display = isNano ? "none" : "";
+      if (heightField) heightField.style.display = isNano ? "none" : "";
       if (nanoWrap) {
         nanoWrap.style.display = isNano ? "" : "none";
       }
@@ -619,26 +869,12 @@ export class CanvasFlowEnhancer {
     header.createDiv({ text: "SystemSculpt Prompt", cls: "ss-canvasflow-node-title" });
     const badges = header.createDiv({ cls: "ss-canvasflow-node-badges" });
     badges.createEl("code", { text: options.promptFile.basename, cls: "ss-canvasflow-node-badge" });
-    const modelBadgeData = formatImageModelBadge(effectiveModelSlug);
+    const modelBadgeData = formatImageModelBadge(effectiveModelSlug, serverModels);
     const modelBadge = badges.createEl("code", { text: modelBadgeData.text, cls: "ss-canvasflow-node-badge" });
     modelBadge.title = modelBadgeData.title;
     modelBadge.dataset.ssCanvasflowModelBadge = "true";
 
     const fields = controls.createDiv({ cls: "ss-canvasflow-fields" });
-
-    const inferAspectRatioPreset = (w: number | null, h: number | null): string => {
-      if (w === null || h === null) return "";
-      if (w <= 0 || h <= 0) return "";
-
-      const ratio = w / h;
-      const closeTo = (target: number) => Math.abs(ratio - target) <= 0.01;
-      if (closeTo(1)) return "1:1";
-      if (closeTo(4 / 3)) return "4:3";
-      if (closeTo(3 / 4)) return "3:4";
-      if (closeTo(16 / 9)) return "16:9";
-      if (closeTo(9 / 16)) return "9:16";
-      return "";
-    };
 
     const readPositiveInt = (value: string): number | null => {
       const raw = String(value || "").trim();
@@ -677,16 +913,20 @@ export class CanvasFlowEnhancer {
     imageCountSelect.value = String(imageCount);
     imageCountSelect.dataset.ssCanvasflowInitial = imageCountSelect.value;
 
-    const aspectRatioField = fields.createDiv({ cls: "ss-canvasflow-field" });
-    aspectRatioField.createDiv({ text: "Aspect ratio preset", cls: "ss-canvasflow-field-label" });
+    const aspectRatioField = fields.createDiv({ cls: "ss-canvasflow-field ss-canvasflow-field-aspect-ratio-preset" });
+    aspectRatioField.createDiv({ text: "Aspect ratio", cls: "ss-canvasflow-field-label" });
     const aspectRatioPresetSelect = aspectRatioField.createEl("select", { cls: "ss-canvasflow-aspect-ratio-preset" });
-    aspectRatioPresetSelect.createEl("option", { value: "", text: "(custom)" });
-    for (const ratio of ["1:1", "4:3", "3:4", "16:9", "9:16"]) {
-      aspectRatioPresetSelect.createEl("option", { value: ratio, text: ratio });
-    }
-    aspectRatioPresetSelect.value = inferAspectRatioPreset(width, height);
+    const aspectRatioHelp = aspectRatioField.createDiv({ cls: "ss-canvasflow-field-hint ss-canvasflow-aspect-ratio-help" });
+    syncCanvasFlowAspectRatioPresetControls({
+      select: aspectRatioPresetSelect,
+      modelId: effectiveModelSlug || DEFAULT_IMAGE_GENERATION_MODEL_ID,
+      preferred: preferredAspectRatio,
+      helpEl: aspectRatioHelp,
+      serverModels,
+      deferWhileFocused: true,
+    });
 
-    const widthField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    const widthField = fields.createDiv({ cls: "ss-canvasflow-field ss-canvasflow-field-width" });
     widthField.createDiv({ text: "Width", cls: "ss-canvasflow-field-label" });
     const widthInput = widthField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-width" });
     widthInput.type = "number";
@@ -695,7 +935,7 @@ export class CanvasFlowEnhancer {
     widthInput.value = width !== null ? String(Math.max(1, Math.floor(width))) : "";
     widthInput.dataset.ssCanvasflowInitial = widthInput.value;
 
-    const heightField = fields.createDiv({ cls: "ss-canvasflow-field" });
+    const heightField = fields.createDiv({ cls: "ss-canvasflow-field ss-canvasflow-field-height" });
     heightField.createDiv({ text: "Height", cls: "ss-canvasflow-field-label" });
     const heightInput = heightField.createEl("input", { cls: "ss-canvasflow-field-input ss-canvasflow-height" });
     heightInput.type = "number";
@@ -787,10 +1027,28 @@ export class CanvasFlowEnhancer {
 
     const updateModelBadgeAndVisibility = () => {
       const effective = getEffectiveModel();
-      const badge = formatImageModelBadge(effective);
+      const badge = formatImageModelBadge(effective, serverModels);
       modelBadge.setText(badge.text);
       modelBadge.title = badge.title;
-      nanoWrap.style.display = effective === "google/nano-banana-pro" ? "" : "none";
+      const isNano = effective === "google/nano-banana-pro";
+      nanoWrap.style.display = isNano ? "" : "none";
+      aspectRatioField.style.display = isNano ? "none" : "";
+      widthField.style.display = isNano ? "none" : "";
+      heightField.style.display = isNano ? "none" : "";
+      if (isNano) {
+        aspectRatioHelp.setText("");
+        return;
+      }
+
+      const preferred = String(aspectRatioPresetSelect.value || "").trim() || preferredAspectRatio;
+      syncCanvasFlowAspectRatioPresetControls({
+        select: aspectRatioPresetSelect,
+        modelId: effective || DEFAULT_IMAGE_GENERATION_MODEL_ID,
+        preferred,
+        helpEl: aspectRatioHelp,
+        serverModels,
+        deferWhileFocused: true,
+      });
     };
 
     const saveAll = async (reason: string): Promise<void> => {
@@ -882,13 +1140,12 @@ export class CanvasFlowEnhancer {
         }
 
         nextFrontmatter["ss_image_options"] = nextInput;
-        const explicitAspectRatio = String(aspectRatioPresetSelect.value || "").trim();
-        const inferredAspectRatio =
-          explicitAspectRatio || inferAspectRatioPreset(nextWidth, nextHeight) || inferAspectRatioPreset(readPositiveInt(widthInput.value), readPositiveInt(heightInput.value));
-        if (inferredAspectRatio) {
-          nextFrontmatter["ss_image_aspect_ratio"] = inferredAspectRatio;
-        } else {
+        if (effectiveModel === "google/nano-banana-pro") {
           delete nextFrontmatter["ss_image_aspect_ratio"];
+        } else {
+          const selectedAspectRatio = String(aspectRatioPresetSelect.value || "").trim();
+          const fallbackAspectRatio = getDefaultImageAspectRatio(effectiveModel);
+          nextFrontmatter["ss_image_aspect_ratio"] = selectedAspectRatio || fallbackAspectRatio;
         }
 
         const updated = replaceMarkdownFrontmatterAndBody(raw, nextFrontmatter, textarea.value);
@@ -956,6 +1213,8 @@ export class CanvasFlowEnhancer {
       heightInput.value = String(nextH);
     };
 
+    updateModelBadgeAndVisibility();
+
     textarea.addEventListener("input", () => {
       scheduleSave("auto");
     });
@@ -967,6 +1226,12 @@ export class CanvasFlowEnhancer {
     modelSelect.addEventListener("change", () => {
       updateModelBadgeAndVisibility();
       scheduleSave("model");
+    });
+    modelSelect.addEventListener("blur", () => {
+      if (modelSelect.dataset.ssCanvasflowNeedsPopulate !== "true") return;
+      this.populateModelSelect(modelSelect, { settingsModelSlug, modelFromNote });
+      delete modelSelect.dataset.ssCanvasflowNeedsPopulate;
+      updateModelBadgeAndVisibility();
     });
 
     versionInput.addEventListener("input", () => {
@@ -980,6 +1245,18 @@ export class CanvasFlowEnhancer {
     aspectRatioPresetSelect.addEventListener("change", () => {
       applyAspectRatioPreset(aspectRatioPresetSelect.value);
       scheduleSave("size");
+    });
+    aspectRatioPresetSelect.addEventListener("blur", () => {
+      if (aspectRatioPresetSelect.dataset.ssCanvasflowAspectSyncDeferred !== "true") return;
+      const preferred = String(aspectRatioPresetSelect.value || "").trim() || preferredAspectRatio;
+      syncCanvasFlowAspectRatioPresetControls({
+        select: aspectRatioPresetSelect,
+        modelId: getEffectiveModel() || DEFAULT_IMAGE_GENERATION_MODEL_ID,
+        preferred,
+        helpEl: aspectRatioHelp,
+        serverModels,
+        deferWhileFocused: true,
+      });
     });
 
     widthInput.addEventListener("input", () => scheduleSave("size"));
@@ -1163,96 +1440,6 @@ export class CanvasFlowEnhancer {
     return `${canvasPath}::${nodeId}`;
   }
 
-  private getSelectedNodeIdsInternal(leaf: WorkspaceLeaf): string[] | null {
-    const viewAny = (leaf.view as any) || null;
-    const canvas = viewAny?.canvas || null;
-    if (!canvas) {
-      return null;
-    }
-
-    const tryExtract = (value: any): string[] | null => {
-      if (!value) return null;
-
-      // Some builds may wrap selection in an object.
-      const nested = value?.nodes ?? value?.items ?? value?.selected ?? value?.selection ?? null;
-      if (nested && nested !== value) {
-        const inner = tryExtract(nested);
-        if (inner) return inner;
-      }
-
-      const ids: string[] = [];
-      const pushMaybeId = (item: any) => {
-        const id = String(item?.id || item?.node?.id || "").trim();
-        if (id) ids.push(id);
-      };
-
-      try {
-        if (typeof value?.[Symbol.iterator] === "function") {
-          for (const item of value as any) {
-            pushMaybeId(item);
-          }
-        } else if (typeof value?.forEach === "function") {
-          value.forEach((item: any) => pushMaybeId(item));
-        } else if (Array.isArray(value)) {
-          value.forEach((item) => pushMaybeId(item));
-        }
-      } catch {
-        // Ignore and fall back.
-      }
-
-      const deduped = dedupeStable(ids);
-      return deduped.length ? deduped : null;
-    };
-
-    return (
-      tryExtract(canvas.selection) ||
-      tryExtract(canvas.selectionManager?.selection) ||
-      tryExtract(canvas.selectionManager?.selected) ||
-      tryExtract(canvas.selectionManager?.selectedNodes) ||
-      null
-    );
-  }
-
-  private getSelectedNodeIds(root: HTMLElement): string[] {
-    // Obsidian Canvas uses `.canvas-node.is-selected` for selected items.
-    const selectedEls = Array.from(root.querySelectorAll<HTMLElement>(".canvas-node.is-selected"));
-    const ids = selectedEls.map(getCanvasNodeId).filter(Boolean) as string[];
-    return dedupeStable(ids);
-  }
-
-  private findCanvasSelectionMenu(root: HTMLElement): HTMLElement | null {
-    // This is the floating selection menu you see when selecting a node: trash, palette, zoom-to-selection, edit.
-    const doc = root.ownerDocument || document;
-
-    const inRoot =
-      root.querySelector<HTMLElement>(".canvas-menu-container .canvas-menu") ||
-      root.querySelector<HTMLElement>(".canvas-menu");
-    if (inRoot) return inRoot;
-
-    const leafEl = root.closest<HTMLElement>(".workspace-leaf");
-    if (leafEl) {
-      const inLeaf =
-        leafEl.querySelector<HTMLElement>(".canvas-menu-container .canvas-menu") ||
-        leafEl.querySelector<HTMLElement>(".canvas-menu");
-      if (inLeaf) return inLeaf;
-    }
-
-    // Fallback: look globally. Prefer a visible menu.
-    const all = Array.from(doc.querySelectorAll<HTMLElement>(".canvas-menu"));
-    const win = doc.defaultView || window;
-    for (const el of all) {
-      try {
-        const style = win.getComputedStyle(el);
-        if (style.display === "none" || style.visibility === "hidden") continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          return el;
-        }
-      } catch {}
-    }
-    return all[0] || null;
-  }
-
   private ensureMenuRunButton(menuEl: HTMLElement): HTMLButtonElement {
     const existing = menuEl.querySelector<HTMLButtonElement>("button.ss-canvasflow-menu-run");
     if (existing) {
@@ -1336,32 +1523,35 @@ export class CanvasFlowEnhancer {
     setIcon(btn, iconName);
   }
 
+  private clearSelectionMenuButtons(menuEl: HTMLElement): void {
+    this.removeMenuRunButton(menuEl);
+    this.removeMenuCopyImageButton(menuEl);
+    this.removeMenuNewPromptButton(menuEl);
+  }
+
   private async ensureSelectionMenuButtons(options: {
     controller: LeafController;
     root: HTMLElement;
     canvasFile: TFile;
     nodesById: Map<string, any>;
   }): Promise<void> {
-    const menuEl = this.findCanvasSelectionMenu(options.root);
+    const menuEl = findCanvasSelectionMenu(options.root);
     if (!menuEl) {
       return;
     }
 
-    const internalSelection = this.getSelectedNodeIdsInternal(options.controller.leaf);
-    const selectedIds = internalSelection !== null ? internalSelection : this.getSelectedNodeIds(options.root);
+    const viewAny = (options.controller.leaf.view as any) || null;
+    const internalSelection = getSelectedNodeIdsFromInternalCanvas(viewAny?.canvas || null);
+    const selectedIds = internalSelection !== null ? internalSelection : getSelectedNodeIdsFromDom(options.root);
     if (selectedIds.length !== 1) {
-      this.removeMenuRunButton(menuEl);
-      this.removeMenuCopyImageButton(menuEl);
-      this.removeMenuNewPromptButton(menuEl);
+      this.clearSelectionMenuButtons(menuEl);
       return;
     }
 
     const selectedNodeId = selectedIds[0];
     const node = options.nodesById.get(selectedNodeId);
     if (!node || !isCanvasFileNode(node)) {
-      this.removeMenuRunButton(menuEl);
-      this.removeMenuCopyImageButton(menuEl);
-      this.removeMenuNewPromptButton(menuEl);
+      this.clearSelectionMenuButtons(menuEl);
       return;
     }
 
@@ -1492,9 +1682,7 @@ export class CanvasFlowEnhancer {
     }
 
     // Default: neither prompt nor image.
-    this.removeMenuRunButton(menuEl);
-    this.removeMenuCopyImageButton(menuEl);
-    this.removeMenuNewPromptButton(menuEl);
+    this.clearSelectionMenuButtons(menuEl);
   }
 
   private getCreateKey(canvasPath: string, imageNodeId: string): string {
@@ -1662,6 +1850,7 @@ export class CanvasFlowEnhancer {
               safety_filter_level: "block_only_high",
             }
           : {};
+      const promptAspectRatio = modelId === "google/nano-banana-pro" ? null : getDefaultImageAspectRatio(modelId);
 
       const created = await this.createPromptNodeConnectedToImage({
         canvasFile: canvasAbs,
@@ -1669,6 +1858,7 @@ export class CanvasFlowEnhancer {
         imageNodeId,
         imageNode,
         modelId,
+        aspectRatio: promptAspectRatio,
         promptText: "",
         imageOptions,
       });
@@ -1698,6 +1888,7 @@ export class CanvasFlowEnhancer {
     imageNodeId: string;
     imageNode: any;
     modelId: string;
+    aspectRatio: string | null;
     promptText: string;
     imageOptions: Record<string, unknown>;
   }): Promise<{ promptNodeId: string; promptFile: TFile }> {
@@ -1711,6 +1902,7 @@ export class CanvasFlowEnhancer {
       "ss_flow_kind: prompt",
       "ss_flow_backend: openrouter",
       `ss_image_model: ${options.modelId}`,
+      options.aspectRatio ? `ss_image_aspect_ratio: ${options.aspectRatio}` : "",
       ...inputLines,
       "---",
       "",
@@ -1811,32 +2003,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function readNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
 function readRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? (value as Record<string, unknown>) : {};
-}
-
-function dedupeStable(values: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of values) {
-    const s = String(v || "").trim();
-    if (!s) continue;
-    if (seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-  return out;
 }

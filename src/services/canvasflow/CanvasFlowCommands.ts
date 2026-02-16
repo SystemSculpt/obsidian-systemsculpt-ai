@@ -3,7 +3,11 @@ import type SystemSculptPlugin from "../../main";
 import { addFileNode, computeNewNodePositionNearRightEdge, parseCanvasDocument, serializeCanvasDocument } from "./CanvasFlowGraph";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 import { CANVASFLOW_PROMPT_NODE_HEIGHT_PX, CANVASFLOW_PROMPT_NODE_WIDTH_PX } from "./CanvasFlowUiConstants";
-import { DEFAULT_IMAGE_GENERATION_MODEL_ID } from "./ImageGenerationModelCatalog";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  getDefaultImageAspectRatio,
+  type ImageGenerationServerCatalogModel,
+} from "./ImageGenerationModelCatalog";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -47,6 +51,36 @@ async function getAvailableNotePath(app: App, folderPath: string, baseName: stri
   return normalizePath(`${folderPath}/${safeBase}-${Date.now().toString(16)}.md`);
 }
 
+function getCachedImageGenerationModels(plugin: SystemSculptPlugin): ImageGenerationServerCatalogModel[] {
+  const raw = plugin.settings.imageGenerationModelCatalogCache?.models;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((model) => ({
+      id: String((model as any)?.id || "").trim(),
+      name: String((model as any)?.name || "").trim() || undefined,
+      provider: String((model as any)?.provider || "").trim() || undefined,
+      input_modalities: Array.isArray((model as any)?.input_modalities)
+        ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
+        : undefined,
+      output_modalities: Array.isArray((model as any)?.output_modalities)
+        ? (model as any).output_modalities.map((value: unknown) => String(value || ""))
+        : undefined,
+      supports_image_input:
+        typeof (model as any)?.supports_image_input === "boolean"
+          ? (model as any).supports_image_input
+          : undefined,
+      max_images_per_job:
+        typeof (model as any)?.max_images_per_job === "number" && Number.isFinite((model as any).max_images_per_job)
+          ? Math.max(1, Math.floor((model as any).max_images_per_job))
+          : undefined,
+      default_aspect_ratio: String((model as any)?.default_aspect_ratio || "").trim() || undefined,
+      allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
+        ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
+        : undefined,
+    }))
+    .filter((model) => model.id.length > 0);
+}
+
 export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin: SystemSculptPlugin): Promise<void> {
   if (!Platform.isDesktopApp) {
     new Notice("SystemSculpt canvas tools are desktop-only.");
@@ -77,12 +111,15 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
 
   const modelId = String(plugin.settings.imageGenerationDefaultModelId || "").trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
   const modelLine = modelId ? `ss_image_model: ${modelId}\n` : "";
+  const aspectRatio = getDefaultImageAspectRatio(modelId, getCachedImageGenerationModels(plugin));
+  const aspectRatioLine = aspectRatio ? `ss_image_aspect_ratio: ${aspectRatio}\n` : "";
 
   const template = [
     "---",
     "ss_flow_kind: prompt",
     "ss_flow_backend: openrouter",
     modelLine.trimEnd(),
+    aspectRatioLine.trimEnd(),
     "ss_image_count: 1",
     "---",
     "",

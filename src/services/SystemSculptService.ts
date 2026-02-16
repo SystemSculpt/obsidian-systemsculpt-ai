@@ -645,7 +645,12 @@ export class SystemSculptService {
     this.licenseService = new LicenseService(plugin, this.baseUrl);
     this.modelManagementService = new ModelManagementService(plugin, this.baseUrl);
     this.contextFileService = new ContextFileService(plugin.app);
-    this.documentUploadService = new DocumentUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
+    this.documentUploadService = new DocumentUploadService(
+      plugin.app,
+      this.baseUrl,
+      this.settings.licenseKey,
+      this.plugin.manifest?.version ?? "0.0.0"
+    );
     this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
     this.agentSessionClient = new AgentSessionClient({
       baseUrl: this.baseUrl,
@@ -732,7 +737,11 @@ export class SystemSculptService {
     // Update specialized services with new configuration
     this.licenseService.updateBaseUrl(this.baseUrl);
     this.modelManagementService.updateBaseUrl(this.baseUrl);
-    this.documentUploadService.updateConfig(this.baseUrl, this.settings.licenseKey);
+    this.documentUploadService.updateConfig(
+      this.baseUrl,
+      this.settings.licenseKey,
+      this.plugin.manifest?.version ?? "0.0.0"
+    );
     this.audioUploadService.updateConfig(this.baseUrl, this.settings.licenseKey);
     this.agentSessionClient.updateConfig({
       baseUrl: this.baseUrl,

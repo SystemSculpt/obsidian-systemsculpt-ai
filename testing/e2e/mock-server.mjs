@@ -106,6 +106,8 @@ const requestStats = {
   imageModels: 0,
   imageJobsCreated: 0,
   imageJobPolls: 0,
+  imageJobLastInputImagesCount: 0,
+  imageJobLastModel: "",
 };
 
 app.get(`${LEGACY_API_PREFIX}/license/validate`, (req, res) => {
@@ -176,6 +178,9 @@ app.post(`${LEGACY_API_PREFIX}/images/generations/jobs`, (req, res) => {
   const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "openai/gpt-5-image-mini";
   const countRaw = body.options && typeof body.options === "object" ? Number(body.options.count || 1) : 1;
   const count = Number.isFinite(countRaw) ? Math.max(1, Math.min(4, Math.floor(countRaw))) : 1;
+  const inputImages = Array.isArray(body.input_images) ? body.input_images : [];
+  requestStats.imageJobLastInputImagesCount = inputImages.length;
+  requestStats.imageJobLastModel = model;
 
   const jobId = `imgjob_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const createdAt = new Date().toISOString();

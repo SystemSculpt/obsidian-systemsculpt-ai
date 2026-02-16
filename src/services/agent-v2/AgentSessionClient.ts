@@ -128,11 +128,15 @@ export class AgentSessionClient {
     const pluginVersion = this.normalizePluginVersion(args.pluginVersion);
     const session = await this.ensureSession(args.chatId, args.modelId, pluginVersion);
     const sessionId = session.sessionId;
+    const idempotencyKey = this.buildTurnIdempotencyKey(args, sessionId);
 
     const turnResponse = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS(sessionId)),
       method: "POST",
-      headers: { "x-plugin-version": pluginVersion },
+      headers: {
+        "x-plugin-version": pluginVersion,
+        "Idempotency-Key": idempotencyKey,
+      },
       body: {
         modelId: args.modelId,
         context: this.buildPiContext(args.messages, args.tools || [], args.modelId),
@@ -154,7 +158,10 @@ export class AgentSessionClient {
     const response = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS),
       method: "POST",
-      headers: { "x-plugin-version": pluginVersion },
+      headers: {
+        "x-plugin-version": pluginVersion,
+        "Idempotency-Key": `pi-session:${chatId}:${modelId}`,
+      },
       body: {
         modelId,
         client: {
@@ -455,6 +462,22 @@ export class AgentSessionClient {
   private normalizePluginVersion(raw: string | undefined): string {
     const pluginVersion = asString(raw).trim();
     return pluginVersion || "0.0.0";
+  }
+
+  private buildTurnIdempotencyKey(args: StartOrContinueArgs, sessionId: string): string {
+    const payload = JSON.stringify({
+      chatId: args.chatId,
+      modelId: args.modelId,
+      messages: args.messages,
+      tools: normalizePiTools(args.tools || []),
+    });
+
+    let hash = 2166136261;
+    for (let i = 0; i < payload.length; i += 1) {
+      hash ^= payload.charCodeAt(i);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return `pi-turn:${sessionId}:${(hash >>> 0).toString(36)}`;
   }
 
   private endpoint(path: string): string {

@@ -65,6 +65,7 @@ import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { ReadwiseService } from "./services/readwise";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
+import type { CanvasFlowEnhancer as CanvasFlowEnhancerType } from "./services/canvasflow/CanvasFlowEnhancer";
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
@@ -114,7 +115,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
-  private canvasFlowEnhancer: { start: () => void; stop: () => void } | null = null;
+  private canvasFlowEnhancer: CanvasFlowEnhancerType | null = null;
   // Removed complex settings callback system - embeddings are now completely on-demand
 
   // Daily vault system services
@@ -341,6 +342,27 @@ export default class SystemSculptPlugin extends Plugin {
       return;
     }
     await this.syncCanvasFlowEnhancerFromSettings();
+  }
+
+  public async runCanvasFlowPromptNode(options: {
+    canvasFile: TFile;
+    promptNodeId: string;
+    status?: (status: string) => void;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.settings.canvasFlowEnabled !== true) {
+      throw new Error("CanvasFlow is disabled. Enable CanvasFlow in Settings before running prompt nodes.");
+    }
+
+    if (!this.canvasFlowEnhancer) {
+      await this.syncCanvasFlowEnhancerFromSettings();
+    }
+
+    if (!this.canvasFlowEnhancer) {
+      throw new Error("CanvasFlow enhancer is unavailable.");
+    }
+
+    await this.canvasFlowEnhancer.runPromptNode(options);
   }
 
   private async syncCanvasFlowEnhancerFromSettings(): Promise<void> {

@@ -1,20 +1,27 @@
 import { expect } from "@wdio/globals";
 import { ensurePluginEnabled } from "../utils/obsidian";
 import {
-  configurePluginForLiveChat,
   ensureE2EVault,
   getEnv,
   PLUGIN_ID,
   requireEnv,
   upsertVaultFile,
 } from "../utils/systemsculptChat";
+import {
+  configureCanvasFlowImageDefaults,
+  configureCanvasFlowPluginForE2E,
+  runCanvasFlowPromptToCompletion,
+  writeBinaryImage,
+} from "../utils/canvasflow";
 
-const INPUT_IMAGE_PATH = "E2E/canvasflow-input.png";
+const INPUT_IMAGE_PATH_A = "E2E/canvasflow-input-a.png";
+const INPUT_IMAGE_PATH_B = "E2E/canvasflow-input-b.png";
 const PROMPT_PATH = "E2E/canvasflow-imagegen-prompt.md";
 const CANVAS_PATH = "E2E/canvasflow-imagegen.canvas";
-const OUTPUT_PREFIX = "E2E/Generations";
+const OUTPUT_PREFIX = "SystemSculpt/Attachments/Generations/E2E/Generations";
 
-const INPUT_NODE_ID = "e2e-canvasflow-input-node";
+const INPUT_NODE_ID_A = "e2e-canvasflow-input-node-a";
+const INPUT_NODE_ID_B = "e2e-canvasflow-input-node-b";
 const PROMPT_NODE_ID = "e2e-canvasflow-prompt-node";
 
 const TINY_PNG_BASE64 =
@@ -33,53 +40,6 @@ async function ensureCorePluginEnabled(pluginId: string): Promise<void> {
       return;
     }
   }, { pluginId });
-}
-
-async function writeBinaryImage(path: string, base64: string): Promise<void> {
-  await browser.executeObsidian(async ({ app }, { filePath, base64 }) => {
-    const normalized = String(filePath || "").replace(/\\/g, "/");
-    if (!normalized) throw new Error("Missing image path");
-
-    const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
-    const parts = normalized.split("/").filter(Boolean);
-    const fileName = parts.pop();
-    if (!fileName) throw new Error("Invalid image path");
-
-    let current = "";
-    for (const part of parts) {
-      current = current ? `${current}/${part}` : part;
-      const exists = await app.vault.adapter.exists(current);
-      if (!exists) {
-        await app.vault.createFolder(current);
-      }
-    }
-
-    const existing = app.vault.getAbstractFileByPath(normalized);
-    if (existing) {
-      await app.vault.modifyBinary(existing as any, bytes.buffer);
-    } else {
-      await app.vault.createBinary(normalized, bytes.buffer);
-    }
-  }, { filePath: path, base64 });
-}
-
-async function enableCanvasFlowEnhancementsWithImageDefaults(): Promise<void> {
-  await browser.executeObsidian(async ({ app }, { pluginId }) => {
-    const plugin: any = (app as any)?.plugins?.getPlugin?.(pluginId);
-    if (!plugin) throw new Error(`Plugin not loaded: ${pluginId}`);
-
-    await plugin.getSettingsManager().updateSettings({
-      canvasFlowEnabled: true,
-      imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
-      imageGenerationOutputDir: "E2E/Generations",
-      imageGenerationPollIntervalMs: 1500,
-      imageGenerationSaveMetadataSidecar: true,
-    });
-
-    if (typeof plugin.syncCanvasFlowEnhancerFromSettings === "function") {
-      await plugin.syncCanvasFlowEnhancerFromSettings();
-    }
-  }, { pluginId: PLUGIN_ID });
 }
 
 async function openCanvasFile(path: string): Promise<void> {
@@ -101,42 +61,18 @@ async function openCanvasFile(path: string): Promise<void> {
   );
 }
 
-async function clickRunOnPromptNode(nodeId: string): Promise<void> {
-  await browser.waitUntil(
-    async () =>
-      await browser.execute((targetNodeId) => {
-        const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${targetNodeId}"]`);
-        const runButton = controls?.querySelector<HTMLButtonElement>("button.ss-canvasflow-btn-primary");
-        return !!runButton;
-      }, nodeId),
-    { timeout: 30000, timeoutMsg: "CanvasFlow Run button not found for prompt node." }
-  );
-
-  await browser.execute((targetNodeId) => {
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${targetNodeId}"]`);
-    const runButton = controls?.querySelector<HTMLButtonElement>("button.ss-canvasflow-btn-primary");
-    if (!runButton) {
-      throw new Error("Run button missing");
-    }
-    runButton.click();
-  }, nodeId);
-}
-
-async function readPromptNodeStatus(nodeId: string): Promise<string> {
-  return await browser.execute((targetNodeId) => {
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${targetNodeId}"]`);
-    const statusEl = controls?.querySelector<HTMLElement>(".ss-canvasflow-status");
-    return String(statusEl?.textContent || "").trim();
-  }, nodeId);
-}
-
-async function readGeneratedArtifacts(): Promise<{ imagePath: string; sidecarPath: string | null; nodeCount: number } | null> {
+async function readGeneratedArtifacts(): Promise<{
+  imagePath: string;
+  sidecarPath: string | null;
+  sidecarInputImages: string[];
+  nodeCount: number;
+} | null> {
   return await browser.executeObsidian(
     async ({ app }, args) => {
-      const { canvasPath, outputPrefix, inputNodeId, promptNodeId } = args as {
+      const { canvasPath, outputPrefix, inputNodeIds, promptNodeId } = args as {
         canvasPath: string;
         outputPrefix: string;
-        inputNodeId: string;
+        inputNodeIds: string[];
         promptNodeId: string;
       };
 
@@ -160,7 +96,7 @@ async function readGeneratedArtifacts(): Promise<{ imagePath: string; sidecarPat
       const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
       const generated = nodes.find((node: any) => {
         if (!node || typeof node !== "object") return false;
-        if (node.id === inputNodeId || node.id === promptNodeId) return false;
+        if (inputNodeIds.includes(node.id) || node.id === promptNodeId) return false;
         const filePath = typeof node.file === "string" ? node.file : "";
         if (!filePath.startsWith(outputPrefix)) return false;
         return /\.(png|jpg|jpeg|webp|gif)$/i.test(filePath);
@@ -176,17 +112,28 @@ async function readGeneratedArtifacts(): Promise<{ imagePath: string; sidecarPat
 
       const sidecarPath = `${imagePath}.systemsculpt.json`;
       const sidecarAbs = app.vault.getAbstractFileByPath(sidecarPath);
+      let sidecarInputImages: string[] = [];
+      if (sidecarAbs) {
+        try {
+          const sidecarRaw = await app.vault.read(sidecarAbs as any);
+          const sidecarJson = JSON.parse(sidecarRaw);
+          sidecarInputImages = Array.isArray(sidecarJson?.input_images)
+            ? sidecarJson.input_images.map((v: unknown) => String(v))
+            : [];
+        } catch {}
+      }
 
       return {
         imagePath,
         sidecarPath: sidecarAbs ? sidecarPath : null,
+        sidecarInputImages,
         nodeCount: nodes.length,
       };
     },
     {
       canvasPath: CANVAS_PATH,
       outputPrefix: OUTPUT_PREFIX,
-      inputNodeId: INPUT_NODE_ID,
+      inputNodeIds: [INPUT_NODE_ID_A, INPUT_NODE_ID_B],
       promptNodeId: PROMPT_NODE_ID,
     }
   );
@@ -194,22 +141,30 @@ async function readGeneratedArtifacts(): Promise<{ imagePath: string; sidecarPat
 
 describe("CanvasFlow (live) image generation via SystemSculpt API", () => {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
-  const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
+  const serverUrl = requireEnv("SYSTEMSCULPT_E2E_SERVER_URL");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
 
   before(async () => {
     const vaultPath = await ensureE2EVault();
     await ensurePluginEnabled(PLUGIN_ID, vaultPath);
-    await configurePluginForLiveChat({
+    await configureCanvasFlowPluginForE2E({
+      pluginId: PLUGIN_ID,
       licenseKey,
       serverUrl,
       selectedModelId,
     });
 
     await ensureCorePluginEnabled("canvas");
-    await enableCanvasFlowEnhancementsWithImageDefaults();
+    await configureCanvasFlowImageDefaults({
+      pluginId: PLUGIN_ID,
+      outputDir: OUTPUT_PREFIX,
+      pollIntervalMs: 1500,
+      modelId: "openai/gpt-5-image-mini",
+      saveMetadataSidecar: true,
+    });
 
-    await writeBinaryImage(INPUT_IMAGE_PATH, TINY_PNG_BASE64);
+    await writeBinaryImage(INPUT_IMAGE_PATH_A, TINY_PNG_BASE64);
+    await writeBinaryImage(INPUT_IMAGE_PATH_B, TINY_PNG_BASE64);
     await upsertVaultFile(
       PROMPT_PATH,
       [
@@ -231,11 +186,20 @@ describe("CanvasFlow (live) image generation via SystemSculpt API", () => {
         {
           nodes: [
             {
-              id: INPUT_NODE_ID,
+              id: INPUT_NODE_ID_A,
               type: "file",
-              file: INPUT_IMAGE_PATH,
+              file: INPUT_IMAGE_PATH_A,
               x: -420,
               y: 0,
+              width: 320,
+              height: 320,
+            },
+            {
+              id: INPUT_NODE_ID_B,
+              type: "file",
+              file: INPUT_IMAGE_PATH_B,
+              x: -420,
+              y: 360,
               width: 320,
               height: 320,
             },
@@ -249,13 +213,7 @@ describe("CanvasFlow (live) image generation via SystemSculpt API", () => {
               height: 720,
             },
           ],
-          edges: [
-            {
-              id: "edge-input-to-prompt",
-              fromNode: INPUT_NODE_ID,
-              toNode: PROMPT_NODE_ID,
-            },
-          ],
+          edges: [],
         },
         null,
         2
@@ -265,36 +223,26 @@ describe("CanvasFlow (live) image generation via SystemSculpt API", () => {
 
   it("generates an image using API job polling and writes output + sidecar", async function () {
     this.timeout(10 * 60_000);
+    await browser.setTimeout({ script: 10 * 60_000 });
 
     await openCanvasFile(CANVAS_PATH);
-    await clickRunOnPromptNode(PROMPT_NODE_ID);
+    await runCanvasFlowPromptToCompletion({
+      pluginId: PLUGIN_ID,
+      canvasPath: CANVAS_PATH,
+      promptNodeId: PROMPT_NODE_ID,
+      timeoutMs: 10 * 60_000,
+      pollIntervalMs: 1_000,
+    });
 
-    let lastStatus = "";
     await browser.waitUntil(
       async () => {
         const artifacts = await readGeneratedArtifacts();
-        if (artifacts) return true;
-
-        const status = await readPromptNodeStatus(PROMPT_NODE_ID);
-        if (status) {
-          lastStatus = status;
-          const lower = status.toLowerCase();
-          if (
-            lower.includes("failed") ||
-            lower.includes("error") ||
-            lower.includes("not enabled") ||
-            lower.includes("insufficient")
-          ) {
-            throw new Error(`CanvasFlow run failed: ${status}`);
-          }
-        }
-
-        return false;
+        return !!artifacts;
       },
       {
-        timeout: 8 * 60_000,
-        interval: 2000,
-        timeoutMsg: `CanvasFlow did not produce a generated output node within the timeout. last_status=${lastStatus || "(empty)"}`,
+        timeout: 20000,
+        interval: 1000,
+        timeoutMsg: "CanvasFlow run completed but generated output node was not found in time.",
       }
     );
 
@@ -306,5 +254,6 @@ describe("CanvasFlow (live) image generation via SystemSculpt API", () => {
     expect(artifacts.imagePath).toContain(`${OUTPUT_PREFIX}/`);
     expect(artifacts.nodeCount).toBeGreaterThanOrEqual(3);
     expect(artifacts.sidecarPath).not.toBeNull();
+    expect(artifacts.sidecarInputImages.length).toBe(0);
   });
 });

@@ -5,8 +5,10 @@ import { resolveSystemSculptApiBaseUrl } from "../../utils/urlHelpers";
 import {
   addEdge,
   addFileNode,
+  type CanvasDocument,
+  type CanvasNode,
   computeNextNodePosition,
-  findIncomingImageFileForNode,
+  findIncomingImageFilesForNode,
   indexCanvas,
   isCanvasFileNode,
   parseCanvasDocument,
@@ -16,15 +18,51 @@ import { parseCanvasFlowPromptNote } from "./PromptNote";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   getCuratedImageGenerationModel,
+  type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
 import {
-  SystemSculptImageGenerationService,
   type SystemSculptGenerationJobResponse,
   type SystemSculptImageGenerationOutput,
 } from "./SystemSculptImageGenerationService";
-import { sanitizeChatTitle } from "../../utils/titleUtils";
+import {
+  createDefaultCanvasFlowImageGenerationClient,
+  type CanvasFlowImageGenerationClient,
+  type CanvasFlowImageGenerationClientFactory,
+} from "./CanvasFlowImageGenerationClient";
+import {
+  DEFAULT_CANVASFLOW_OUTPUT_DIR,
+  resolveCanvasFlowOutputDirectory,
+  resolveCanvasFlowSafeFileStem,
+} from "./CanvasFlowStoragePaths";
 
 type RunStatusUpdater = (status: string) => void;
+const MAX_CANVASFLOW_INPUT_IMAGES = 8;
+
+type CanvasFlowResolvedPromptRunContext = {
+  baseUrl: string;
+  canvasDoc: CanvasDocument;
+  promptNode: CanvasNode & { file: string };
+  promptFile: TFile;
+  promptText: string;
+  modelId: string;
+  modelDisplayName: string;
+  imageCount: number;
+  aspectRatio?: string;
+  seed: number | null;
+};
+
+type CanvasFlowCollectedInputImages = {
+  inputImages: Array<{ type: "data_url"; data_url: string }>;
+  inputImagePaths: string[];
+  connectedImageCount: number;
+  missingInputImageCount: number;
+  ignoredInputImageCount: number;
+};
+
+type CanvasFlowSavedOutput = {
+  output: SystemSculptImageGenerationOutput;
+  imagePath: string;
+};
 
 function isHttpUrl(value: string): boolean {
   const trimmed = value.trim();
@@ -77,15 +115,21 @@ function nowStamp(): { iso: string; compact: string } {
   return { iso: d.toISOString(), compact };
 }
 
-function formatImageModelDisplayName(modelId: string): string {
+function formatImageModelDisplayName(
+  modelId: string,
+  serverModels?: readonly ImageGenerationServerCatalogModel[]
+): string {
   const id = String(modelId || "").trim();
-  const entry = getCuratedImageGenerationModel(id);
+  const entry = getCuratedImageGenerationModel(id, serverModels);
   return entry?.label || id || "OpenRouter";
 }
 
-function formatImageModelFileBase(modelId: string): string {
+function formatImageModelFileBase(
+  modelId: string,
+  serverModels?: readonly ImageGenerationServerCatalogModel[]
+): string {
   const id = String(modelId || "").trim();
-  const entry = getCuratedImageGenerationModel(id);
+  const entry = getCuratedImageGenerationModel(id, serverModels);
   if (entry?.label) return entry.label;
   return id.replace(/[\\/]+/g, "-") || "generation";
 }
@@ -107,7 +151,7 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 }
 
 async function getAvailableFilePath(app: App, folderPath: string, baseName: string, ext: string): Promise<string> {
-  const safeBase = sanitizeChatTitle(baseName).trim() || "generation";
+  const safeBase = resolveCanvasFlowSafeFileStem(baseName);
   let attempt = 0;
   while (attempt < 1000) {
     const suffix = attempt === 0 ? "" : ` (${attempt})`;
@@ -125,8 +169,72 @@ function base64FromArrayBuffer(arrayBuffer: ArrayBuffer): string {
   return buffer.toString("base64");
 }
 
+function stableSerialize(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    const parts: string[] = [];
+    for (const key of keys) {
+      parts.push(`${JSON.stringify(key)}:${stableSerialize(obj[key])}`);
+    }
+    return `{${parts.join(",")}}`;
+  }
+  return JSON.stringify(String(value));
+}
+
+function hashFnv1a(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 export class CanvasFlowRunner {
-  constructor(private readonly app: App, private readonly plugin: SystemSculptPlugin) {}
+  private readonly imageClientFactory: CanvasFlowImageGenerationClientFactory;
+
+  constructor(
+    private readonly app: App,
+    private readonly plugin: SystemSculptPlugin,
+    options?: { imageClientFactory?: CanvasFlowImageGenerationClientFactory }
+  ) {
+    this.imageClientFactory = options?.imageClientFactory || createDefaultCanvasFlowImageGenerationClient;
+  }
+
+  private getCachedImageGenerationModels(): ImageGenerationServerCatalogModel[] {
+    const raw = this.plugin.settings.imageGenerationModelCatalogCache?.models;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((model) => ({
+        id: String((model as any)?.id || "").trim(),
+        name: String((model as any)?.name || "").trim() || undefined,
+        provider: String((model as any)?.provider || "").trim() || undefined,
+        input_modalities: Array.isArray((model as any)?.input_modalities)
+          ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
+          : undefined,
+        output_modalities: Array.isArray((model as any)?.output_modalities)
+          ? (model as any).output_modalities.map((value: unknown) => String(value || ""))
+          : undefined,
+        supports_image_input:
+          typeof (model as any)?.supports_image_input === "boolean"
+            ? (model as any).supports_image_input
+            : undefined,
+        max_images_per_job:
+          typeof (model as any)?.max_images_per_job === "number" && Number.isFinite((model as any).max_images_per_job)
+            ? Math.max(1, Math.floor((model as any).max_images_per_job))
+            : undefined,
+        default_aspect_ratio: String((model as any)?.default_aspect_ratio || "").trim() || undefined,
+        allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
+          ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
+          : undefined,
+      }))
+      .filter((model) => model.id.length > 0);
+  }
 
   async runPromptNode(options: {
     canvasFile: TFile;
@@ -135,21 +243,103 @@ export class CanvasFlowRunner {
     signal?: AbortSignal;
   }): Promise<void> {
     const setStatus = options.status || (() => {});
-
     const licenseKey = String(this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
       throw new Error("License key is not configured. Validate your license in Settings -> Setup.");
     }
 
     const baseUrl = resolveSystemSculptApiBaseUrl(String(this.plugin.settings.serverUrl || API_BASE_URL));
+    const context = await this.resolvePromptRunContext({
+      canvasFile: options.canvasFile,
+      promptNodeId: options.promptNodeId,
+      baseUrl,
+    });
 
+    const client = this.imageClientFactory({
+      baseUrl: context.baseUrl,
+      licenseKey,
+      pluginVersion: this.plugin.manifest?.version ?? "0.0.0",
+    });
+
+    const collectedInputs = await this.collectInputImages({
+      canvasDoc: context.canvasDoc,
+      promptNodeId: options.promptNodeId,
+      status: setStatus,
+      signal: options.signal,
+    });
+
+    if (collectedInputs.ignoredInputImageCount > 0) {
+      new Notice(
+        `SystemSculpt CanvasFlow: using ${collectedInputs.inputImages.length} input images (ignored ${collectedInputs.ignoredInputImageCount} beyond limit ${MAX_CANVASFLOW_INPUT_IMAGES}).`
+      );
+    }
+    if (collectedInputs.connectedImageCount > 0 && collectedInputs.inputImages.length === 0) {
+      setStatus("Input images missing; running prompt without image input.");
+    } else if (collectedInputs.missingInputImageCount > 0) {
+      setStatus(
+        `Missing ${collectedInputs.missingInputImageCount} input image(s); continuing with ${collectedInputs.inputImages.length} image(s).`
+      );
+    }
+
+    const finalJob = await this.submitAndAwaitGeneration({
+      runScopeKey: `${options.canvasFile.path}::${options.promptNodeId}`,
+      client,
+      modelId: context.modelId,
+      promptText: context.promptText,
+      inputImages: collectedInputs.inputImages,
+      imageCount: context.imageCount,
+      aspectRatio: context.aspectRatio,
+      seed: context.seed,
+      status: setStatus,
+      signal: options.signal,
+    });
+
+    const outputs = finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
+    if (outputs.length === 0) {
+      throw new Error("Image generation completed, but no output URLs were returned.");
+    }
+
+    const savedOutputs = await this.saveGeneratedOutputs({
+      client,
+      outputs,
+      modelId: context.modelId,
+      promptFile: context.promptFile,
+      promptText: context.promptText,
+      inputImagePaths: collectedInputs.inputImagePaths,
+      job: finalJob,
+      status: setStatus,
+      signal: options.signal,
+    });
+
+    await this.attachGeneratedOutputsToCanvas({
+      canvasFile: options.canvasFile,
+      canvasDoc: context.canvasDoc,
+      promptNode: context.promptNode,
+      promptNodeId: options.promptNodeId,
+      savedOutputs,
+      status: setStatus,
+    });
+
+    setStatus("Done.");
+    if (savedOutputs.length === 1) {
+      new Notice(`SystemSculpt: generated ${savedOutputs[0].imagePath} (${context.modelDisplayName})`);
+    } else {
+      new Notice(`SystemSculpt: generated ${savedOutputs.length} images (${context.modelDisplayName})`);
+    }
+  }
+
+  private async resolvePromptRunContext(options: {
+    canvasFile: TFile;
+    promptNodeId: string;
+    baseUrl: string;
+  }): Promise<CanvasFlowResolvedPromptRunContext> {
     const canvasRaw = await this.app.vault.read(options.canvasFile);
-    const doc = parseCanvasDocument(canvasRaw);
-    if (!doc) {
+    const canvasDoc = parseCanvasDocument(canvasRaw);
+    if (!canvasDoc) {
       throw new Error("Failed to parse .canvas JSON.");
     }
 
-    const { nodesById } = indexCanvas(doc);
+    const { nodesById } = indexCanvas(canvasDoc);
     const promptNode = nodesById.get(options.promptNodeId);
     if (!promptNode || !isCanvasFileNode(promptNode)) {
       throw new Error("Prompt node not found (or not a file node).");
@@ -181,117 +371,227 @@ export class CanvasFlowRunner {
       String(this.plugin.settings.imageGenerationDefaultModelId || "").trim() ||
       DEFAULT_IMAGE_GENERATION_MODEL_ID;
     if (!modelId) {
-      throw new Error("No image model set. Choose a default model in Settings -> Image Generation, or set ss_image_model in the prompt note.");
+      throw new Error(
+        "No image model set. Choose a default model in Settings -> Image Generation, or set ss_image_model in the prompt note."
+      );
     }
 
-    const modelDisplayName = formatImageModelDisplayName(modelId);
-    const imageCount = Math.max(1, Math.min(4, Math.floor(promptParsed.config.imageCount || 1)));
-    const aspectRatio = String(promptParsed.config.aspectRatio || "").trim() || undefined;
-    const seed = promptParsed.config.seed;
+    const cachedServerModels = this.getCachedImageGenerationModels();
+    return {
+      baseUrl: options.baseUrl,
+      canvasDoc,
+      promptNode,
+      promptFile: promptAbstract,
+      promptText,
+      modelId,
+      modelDisplayName: formatImageModelDisplayName(modelId, cachedServerModels),
+      imageCount: Math.max(1, Math.min(4, Math.floor(promptParsed.config.imageCount || 1))),
+      aspectRatio: String(promptParsed.config.aspectRatio || "").trim() || undefined,
+      seed: promptParsed.config.seed,
+    };
+  }
 
-    const service = new SystemSculptImageGenerationService({
-      baseUrl,
-      licenseKey,
-    });
-
+  private async collectInputImages(options: {
+    canvasDoc: CanvasDocument;
+    promptNodeId: string;
+    status: RunStatusUpdater;
+    signal?: AbortSignal;
+  }): Promise<CanvasFlowCollectedInputImages> {
+    const connectedImages = findIncomingImageFilesForNode(options.canvasDoc, options.promptNodeId);
     const inputImages: Array<{ type: "data_url"; data_url: string }> = [];
-    const incomingImage = findIncomingImageFileForNode(doc, options.promptNodeId);
-    if (incomingImage) {
-      const imageAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
-      if (imageAbs instanceof TFile) {
-        setStatus("Reading input image...");
-        const imgBytes = await this.app.vault.readBinary(imageAbs);
-        const ext = String(imageAbs.extension || "").toLowerCase();
-        const mime = mimeFromExtension(ext);
-        const b64 = base64FromArrayBuffer(imgBytes);
-        inputImages.push({
-          type: "data_url",
-          data_url: `data:${mime};base64,${b64}`,
-        });
-      } else {
-        setStatus("Input image missing; running prompt without image.");
+    const inputImagePaths: string[] = [];
+    let missingInputImageCount = 0;
+    let ignoredInputImageCount = 0;
+
+    for (const [idx, incomingImage] of connectedImages.entries()) {
+      if (options.signal?.aborted) {
+        throw new Error("Aborted");
       }
+
+      options.status(
+        connectedImages.length > 1
+          ? `Reading input images (${idx + 1}/${connectedImages.length})...`
+          : "Reading input image..."
+      );
+
+      const imageAbs = this.app.vault.getAbstractFileByPath(incomingImage.imagePath);
+      if (!(imageAbs instanceof TFile)) {
+        missingInputImageCount += 1;
+        continue;
+      }
+      if (inputImages.length >= MAX_CANVASFLOW_INPUT_IMAGES) {
+        ignoredInputImageCount += 1;
+        continue;
+      }
+
+      const imgBytes = await this.app.vault.readBinary(imageAbs);
+      const ext = String(imageAbs.extension || "").toLowerCase();
+      const mime = mimeFromExtension(ext);
+      const b64 = base64FromArrayBuffer(imgBytes);
+      inputImages.push({
+        type: "data_url",
+        data_url: `data:${mime};base64,${b64}`,
+      });
+      inputImagePaths.push(incomingImage.imagePath);
     }
 
-    setStatus("Submitting generation job...");
-    const job = await service.createGenerationJob({
-      model: modelId,
-      prompt: promptText,
-      input_images: inputImages,
+    return {
+      inputImages,
+      inputImagePaths,
+      connectedImageCount: connectedImages.length,
+      missingInputImageCount,
+      ignoredInputImageCount,
+    };
+  }
+
+  private async submitAndAwaitGeneration(options: {
+    runScopeKey: string;
+    client: CanvasFlowImageGenerationClient;
+    modelId: string;
+    promptText: string;
+    inputImages: Array<{ type: "data_url"; data_url: string }>;
+    imageCount: number;
+    aspectRatio?: string;
+    seed: number | null;
+    status: RunStatusUpdater;
+    signal?: AbortSignal;
+  }): Promise<SystemSculptGenerationJobResponse> {
+    options.status("Submitting generation job...");
+    const runAttemptId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const payloadSignature = stableSerialize({
+      model: options.modelId,
+      prompt: options.promptText,
       options: {
-        count: imageCount,
-        ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
-        ...(seed !== null && Number.isFinite(seed) ? { seed } : {}),
+        count: options.imageCount,
+        aspect_ratio: options.aspectRatio || null,
+        seed: options.seed,
       },
+      input_images: options.inputImages.map((input) => ({
+        type: input.type,
+        digest: hashFnv1a(input.data_url),
+      })),
     });
+    const idempotencyKey = `images-job:${hashFnv1a(options.runScopeKey)}:${hashFnv1a(payloadSignature)}:${runAttemptId}`;
+    const job = await options.client.createGenerationJob({
+      model: options.modelId,
+      prompt: options.promptText,
+      input_images: options.inputImages,
+      options: {
+        count: options.imageCount,
+        ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+        ...(options.seed !== null && Number.isFinite(options.seed) ? { seed: options.seed } : {}),
+      },
+    }, { idempotencyKey });
 
     const jobId = String(job.job?.id || "").trim();
     if (!jobId) {
       throw new Error("Image generation API did not return a job id.");
     }
 
-    setStatus("Waiting for image generation...");
-    const finalJob = await service.waitForGenerationJob(jobId, {
+    const pollUrl = String(job.poll_url || "").trim() || undefined;
+    options.status("Starting generation...");
+    return await options.client.waitForGenerationJob(jobId, {
       pollIntervalMs: this.plugin.settings.imageGenerationPollIntervalMs ?? 1000,
+      pollUrl,
+      initialPollDelayMs: 600,
       signal: options.signal,
       onUpdate: (status) => {
         const s = String(status.job?.status || "").trim();
-        if (s === "queued" || s === "processing") {
-          setStatus(imageCount > 1 ? `Generation (${s})...` : `Generation: ${s}...`);
+        if (s === "queued") {
+          options.status("Starting generation...");
+        } else if (s === "processing") {
+          options.status(options.imageCount > 1 ? "Generating images..." : "Generating image...");
         }
       },
     });
+  }
 
-    const outputs = finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
-    if (outputs.length === 0) {
-      throw new Error("Image generation completed, but no output URLs were returned.");
+  private async saveGeneratedOutputs(options: {
+    client: CanvasFlowImageGenerationClient;
+    outputs: SystemSculptImageGenerationOutput[];
+    modelId: string;
+    promptFile: TFile;
+    promptText: string;
+    inputImagePaths: string[];
+    job: SystemSculptGenerationJobResponse;
+    status: RunStatusUpdater;
+    signal?: AbortSignal;
+  }): Promise<CanvasFlowSavedOutput[]> {
+    const configuredOutputDir =
+      String(this.plugin.settings.imageGenerationOutputDir || "").trim() || DEFAULT_CANVASFLOW_OUTPUT_DIR;
+    const outputDir = resolveCanvasFlowOutputDirectory(configuredOutputDir);
+    if (normalizePath(configuredOutputDir) !== outputDir) {
+      options.status(`Output directory adjusted to safe path: ${outputDir}`);
     }
-
-    const outputDir = String(this.plugin.settings.imageGenerationOutputDir || "").trim() || "SystemSculpt/Attachments/Generations";
     await ensureFolder(this.app, outputDir);
 
     const stamp = nowStamp();
-    const generatorBaseName = formatImageModelFileBase(modelId);
-    const generatedImagePaths: string[] = [];
+    const generatorBaseName = formatImageModelFileBase(options.modelId, this.getCachedImageGenerationModels());
+    const saved: CanvasFlowSavedOutput[] = [];
 
-    for (const [idx, output] of outputs.entries()) {
+    for (const [idx, output] of options.outputs.entries()) {
       if (options.signal?.aborted) {
         throw new Error("Aborted");
       }
 
       const imageOrdinal = idx + 1;
-      setStatus(outputs.length > 1 ? `Downloading generated image (${imageOrdinal}/${outputs.length})...` : "Downloading generated image...");
-      const download = await service.downloadImage(output.url);
-      const ext = extensionFromContentType(download.contentType) || extensionFromMimeType(output.mime_type) || extensionFromUrl(output.url) || "png";
+      options.status(
+        options.outputs.length > 1
+          ? `Downloading generated image (${imageOrdinal}/${options.outputs.length})...`
+          : "Downloading generated image..."
+      );
+      const download = await options.client.downloadImage(output.url);
+      const ext =
+        extensionFromContentType(download.contentType) ||
+        extensionFromMimeType(output.mime_type) ||
+        extensionFromUrl(output.url) ||
+        "png";
 
-      const indexSuffix = outputs.length > 1 ? `-${String(imageOrdinal).padStart(2, "0")}` : "";
-      const imagePath = await getAvailableFilePath(this.app, outputDir, `${generatorBaseName}-${stamp.compact}${indexSuffix}`, ext);
+      const indexSuffix = options.outputs.length > 1 ? `-${String(imageOrdinal).padStart(2, "0")}` : "";
+      const imagePath = await getAvailableFilePath(
+        this.app,
+        outputDir,
+        `${generatorBaseName}-${stamp.compact}${indexSuffix}`,
+        ext
+      );
       await this.app.vault.createBinary(imagePath, download.arrayBuffer);
-      generatedImagePaths.push(imagePath);
+      saved.push({ output, imagePath });
 
       if (this.plugin.settings.imageGenerationSaveMetadataSidecar !== false) {
         await this.writeSidecar({
           imagePath,
           stampIso: stamp.iso,
-          promptFilePath: promptAbstract.path,
-          promptText,
-          modelId,
-          job: finalJob,
+          promptFilePath: options.promptFile.path,
+          promptText: options.promptText,
+          modelId: options.modelId,
+          job: options.job,
           output,
-          inputImagePath: incomingImage?.imagePath || null,
+          inputImagePaths: options.inputImagePaths,
         });
       }
     }
 
-    setStatus("Updating canvas...");
-    const placed = computeNextNodePosition(promptNode, { dx: 80, defaultWidth: 320, defaultHeight: 320 });
-    let updatedDoc = doc;
+    return saved;
+  }
+
+  private async attachGeneratedOutputsToCanvas(options: {
+    canvasFile: TFile;
+    canvasDoc: CanvasDocument;
+    promptNode: CanvasNode;
+    promptNodeId: string;
+    savedOutputs: CanvasFlowSavedOutput[];
+    status: RunStatusUpdater;
+  }): Promise<void> {
+    options.status("Updating canvas...");
+    const placed = computeNextNodePosition(options.promptNode, { dx: 80, defaultWidth: 320, defaultHeight: 320 });
+    let updatedDoc = options.canvasDoc;
     const gapX = 80;
-    for (const [idx, imagePath] of generatedImagePaths.entries()) {
+
+    for (const [idx, saved] of options.savedOutputs.entries()) {
       const x = placed.x + idx * (placed.width + gapX);
       const y = placed.y;
       const added = addFileNode(updatedDoc, {
-        filePath: imagePath,
+        filePath: saved.imagePath,
         x,
         y,
         width: placed.width,
@@ -302,13 +602,6 @@ export class CanvasFlowRunner {
     }
 
     await this.app.vault.modify(options.canvasFile, serializeCanvasDocument(updatedDoc));
-
-    setStatus("Done.");
-    if (generatedImagePaths.length === 1) {
-      new Notice(`SystemSculpt: generated ${generatedImagePaths[0]} (${modelDisplayName})`);
-    } else {
-      new Notice(`SystemSculpt: generated ${generatedImagePaths.length} images (${modelDisplayName})`);
-    }
   }
 
   private async writeSidecar(options: {
@@ -319,11 +612,11 @@ export class CanvasFlowRunner {
     modelId: string;
     job: SystemSculptGenerationJobResponse;
     output: SystemSculptImageGenerationOutput;
-    inputImagePath: string | null;
+    inputImagePaths: string[];
   }): Promise<void> {
     try {
       const sidecarPath = normalizePath(`${options.imagePath}.systemsculpt.json`);
-      const curated = getCuratedImageGenerationModel(options.modelId);
+      const curated = getCuratedImageGenerationModel(options.modelId, this.getCachedImageGenerationModels());
       const payload = {
         kind: "canvasflow_generation",
         created_at: options.stampIso,
@@ -352,7 +645,8 @@ export class CanvasFlowRunner {
           height: options.output.height,
         },
         usage: options.job.usage ?? null,
-        input_image: options.inputImagePath,
+        input_images: options.inputImagePaths,
+        input_images_count: options.inputImagePaths.length,
       };
 
       const json = JSON.stringify(payload, null, 2);

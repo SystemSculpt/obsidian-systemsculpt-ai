@@ -78,6 +78,7 @@ export type SystemSculptGenerationJobResponse = {
   job: SystemSculptImageGenerationJob;
   outputs: SystemSculptImageGenerationOutput[];
   usage?: SystemSculptImageGenerationUsage;
+  poll_after_ms?: number;
 };
 
 type JsonRequestOptions = {
@@ -92,6 +93,39 @@ type ArrayBufferRequestOptions = {
 };
 
 const SYSTEMSCULPT_IMAGE_REQUEST_TIMEOUT_MS = 60_000;
+const SYSTEMSCULPT_IMAGE_POLL_TIMEOUT_MS = 8 * 60_000;
+const SYSTEMSCULPT_IMAGE_POLL_MAX_INTERVAL_MS = 5_000;
+const SYSTEMSCULPT_IMAGE_POLL_MAX_CONSECUTIVE_ERRORS = 3;
+const SYSTEMSCULPT_IMAGE_POLL_MAX_FLAPS = 8;
+const SYSTEMSCULPT_IMAGE_POLL_MIN_FLAP_WINDOW_MS = 30_000;
+const SYSTEMSCULPT_IMAGE_POLL_NON_TERMINAL_ERROR_POLLS = 2;
+const SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS = 250;
+const SYSTEMSCULPT_IMAGE_DEFAULT_INITIAL_POLL_DELAY_MS = 600;
+const TRUSTED_CROSS_ORIGIN_DOWNLOAD_HOST_SUFFIXES = [
+  "systemsculpt.com",
+  "systemsculpt.ai",
+  "openaiusercontent.com",
+  "googleusercontent.com",
+  "storage.googleapis.com",
+  "blob.core.windows.net",
+  "openrouter.ai",
+  "r2.cloudflarestorage.com",
+] as const;
+const TRANSPORT_REQUEST_ERROR_CODE = "transport_request_failed";
+const SIGNED_DOWNLOAD_QUERY_KEYS = [
+  "signature",
+  "sig",
+  "token",
+  "x-amz-signature",
+  "x-amz-security-token",
+  "x-amz-algorithm",
+  "expires",
+  "x-goog-signature",
+  "x-goog-expires",
+  "se",
+  "sp",
+  "sv",
+] as const;
 
 function safeJsonParse(text: string | undefined): any {
   if (!text) return null;
@@ -126,6 +160,50 @@ function assertOk(status: number, body: any, fallbackMessage: string): void {
   error.status = status;
   error.data = body;
   throw error;
+}
+
+function markTransportFailure(error: unknown, message: string): Error & { code: string; cause?: unknown } {
+  const wrapped = new Error(message) as Error & { code: string; cause?: unknown };
+  wrapped.code = TRANSPORT_REQUEST_ERROR_CODE;
+  wrapped.cause = error;
+  return wrapped;
+}
+
+function isTransportFailure(error: unknown): boolean {
+  return (error as any)?.code === TRANSPORT_REQUEST_ERROR_CODE;
+}
+
+function parseRetryAfterMs(value: string | undefined): number | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(0, Math.floor(seconds * 1000));
+  }
+
+  const asDate = Date.parse(raw);
+  if (!Number.isFinite(asDate)) return null;
+  return Math.max(0, asDate - Date.now());
+}
+
+function parsePollAfterMs(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return null;
+}
+
+function clampPollMs(ms: number, minMs: number, maxMs: number): number {
+  const min = Math.max(SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS, Math.floor(minMs));
+  const max = Math.max(min, Math.floor(maxMs));
+  return Math.max(min, Math.min(max, Math.floor(ms)));
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -214,15 +292,57 @@ function normalizeOutputs(raw: unknown): SystemSculptImageGenerationOutput[] {
 export class SystemSculptImageGenerationService {
   private readonly baseUrl: string;
   private readonly licenseKey: string;
+  private readonly pluginVersion: string;
+  private readonly trustedCrossOriginDownloadHostSuffixes: string[];
 
-  constructor(options: { baseUrl?: string; licenseKey: string }) {
+  constructor(options: {
+    baseUrl?: string;
+    licenseKey: string;
+    pluginVersion?: string;
+    trustedCrossOriginDownloadHostSuffixes?: string[];
+  }) {
     this.baseUrl = resolveSystemSculptApiBaseUrl(options.baseUrl || API_BASE_URL);
     this.licenseKey = String(options.licenseKey || "").trim();
+    this.pluginVersion = String(options.pluginVersion || "").trim();
+    const extraSuffixes = Array.isArray(options.trustedCrossOriginDownloadHostSuffixes)
+      ? options.trustedCrossOriginDownloadHostSuffixes.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
+      : [];
+    this.trustedCrossOriginDownloadHostSuffixes = Array.from(
+      new Set([...TRUSTED_CROSS_ORIGIN_DOWNLOAD_HOST_SUFFIXES, ...extraSuffixes])
+    );
   }
 
   private endpoint(path: string): string {
     const normalizedPath = String(path || "").startsWith("/") ? path : `/${path}`;
     return `${this.baseUrl}${normalizedPath}`;
+  }
+
+  private resolvePollUrl(jobId: string, pollUrl?: string): string {
+    const trimmed = String(pollUrl || "").trim();
+    if (!trimmed) {
+      return this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.GENERATION_JOB(jobId));
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed;
+    }
+    const base = new URL(this.baseUrl);
+    const basePath = base.pathname.replace(/\/+$/, "");
+
+    if (trimmed.startsWith("/")) {
+      if (
+        (basePath && (trimmed === basePath || trimmed.startsWith(`${basePath}/`))) ||
+        /^\/api\/v\d+\//i.test(trimmed)
+      ) {
+        return `${base.origin}${trimmed}`;
+      }
+      return this.endpoint(trimmed);
+    }
+
+    if (/^api\/v\d+\//i.test(trimmed)) {
+      return `${base.origin}/${trimmed}`;
+    }
+    return this.endpoint(`/${trimmed}`);
   }
 
   private shouldAttachAuthHeaders(targetUrl: string): boolean {
@@ -235,9 +355,58 @@ export class SystemSculptImageGenerationService {
     }
   }
 
+  private isPrivateOrLocalHost(hostname: string): boolean {
+    const host = String(hostname || "").trim().toLowerCase();
+    if (!host) return true;
+    if (host === "localhost" || host.endsWith(".localhost")) return true;
+    if (host === "127.0.0.1" || host === "::1") return true;
+    if (host.endsWith(".local") || host.endsWith(".internal")) return true;
+
+    const ipv4Match = host.match(/^(\d{1,3})(\.\d{1,3}){3}$/);
+    if (!ipv4Match) return false;
+    const parts = host.split(".").map((value) => Number(value));
+    if (parts.some((value) => !Number.isFinite(value) || value < 0 || value > 255)) return true;
+
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
+  }
+
+  private isSignedDownloadUrl(url: URL): boolean {
+    const keys = Array.from(url.searchParams.keys()).map((key) => key.toLowerCase());
+    return keys.some((key) => SIGNED_DOWNLOAD_QUERY_KEYS.some((known) => known === key));
+  }
+
+  private isTrustedCrossOriginDownloadHost(hostname: string): boolean {
+    const host = String(hostname || "").trim().toLowerCase();
+    if (!host) return false;
+    return this.trustedCrossOriginDownloadHostSuffixes.some(
+      (suffix) => host === suffix || host.endsWith(`.${suffix}`)
+    );
+  }
+
+  private isTrustedDownloadTarget(targetUrl: string): boolean {
+    try {
+      const target = new URL(targetUrl);
+      const base = new URL(this.baseUrl);
+      if (target.origin === base.origin) return true;
+      if (target.protocol !== "https:") return false;
+      if (this.isPrivateOrLocalHost(target.hostname)) return false;
+      if (!this.isTrustedCrossOriginDownloadHost(target.hostname)) return false;
+      return this.isSignedDownloadUrl(target);
+    } catch {
+      return false;
+    }
+  }
+
   private authHeaders(extra?: Record<string, string>): Record<string, string> {
     return {
       ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
+      ...(this.pluginVersion ? { "x-plugin-version": this.pluginVersion } : {}),
       ...(extra || {}),
     };
   }
@@ -263,7 +432,10 @@ export class SystemSculptImageGenerationService {
         } as RequestInit);
       } catch (error) {
         const aborted = error instanceof Error && error.name === "AbortError";
-        throw new Error(aborted ? "Image generation API request timed out." : "Image generation API request failed.");
+        throw markTransportFailure(
+          error,
+          aborted ? "Image generation API request timed out." : "Image generation API request failed."
+        );
       } finally {
         clearTimeout(timeout);
       }
@@ -311,7 +483,10 @@ export class SystemSculptImageGenerationService {
     if (preferred === "fetch") {
       try {
         return await viaFetch();
-      } catch {
+      } catch (error) {
+        if (!isTransportFailure(error)) {
+          throw error;
+        }
         return await viaRequestUrl();
       }
     }
@@ -334,7 +509,7 @@ export class SystemSculptImageGenerationService {
         response = await fetch(url, { method: options.method, headers, signal: controller.signal } as RequestInit);
       } catch (error) {
         const aborted = error instanceof Error && error.name === "AbortError";
-        throw new Error(aborted ? "Image download timed out." : "Image download request failed.");
+        throw markTransportFailure(error, aborted ? "Image download timed out." : "Image download request failed.");
       } finally {
         clearTimeout(timeout);
       }
@@ -399,7 +574,10 @@ export class SystemSculptImageGenerationService {
     if (preferred === "fetch") {
       try {
         return await viaFetch();
-      } catch {
+      } catch (error) {
+        if (!isTransportFailure(error)) {
+          throw error;
+        }
         return await viaRequestUrl();
       }
     }
@@ -503,16 +681,16 @@ export class SystemSculptImageGenerationService {
     };
   }
 
-  async getGenerationJob(jobId: string): Promise<SystemSculptGenerationJobResponse> {
+  async getGenerationJob(jobId: string, options?: { pollUrl?: string }): Promise<SystemSculptGenerationJobResponse> {
     const id = String(jobId || "").trim();
     if (!id) {
       throw new Error("Missing generation job id.");
     }
 
-    const url = this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.GENERATION_JOB(id));
-    const { json } = await this.requestJson(url, {
+    const url = this.resolvePollUrl(id, options?.pollUrl);
+    const { json, headers } = await this.requestJson(url, {
       method: "GET",
-      headers: this.authHeaders(),
+      headers: this.shouldAttachAuthHeaders(url) ? this.authHeaders() : {},
     });
 
     const job = json?.job as SystemSculptImageGenerationJob | undefined;
@@ -533,11 +711,13 @@ export class SystemSculptImageGenerationService {
             estimated: (usageRaw as any).estimated === true,
           } satisfies SystemSculptImageGenerationUsage)
         : undefined;
+    const pollAfterMs = parsePollAfterMs(json?.poll_after_ms) ?? parseRetryAfterMs(headers["retry-after"]);
 
     return {
       job,
       outputs: normalizeOutputs(json?.outputs),
       usage,
+      ...(pollAfterMs !== null ? { poll_after_ms: pollAfterMs } : {}),
     };
   }
 
@@ -545,20 +725,117 @@ export class SystemSculptImageGenerationService {
     jobId: string,
     options?: {
       pollIntervalMs?: number;
+      maxPollIntervalMs?: number;
+      maxWaitMs?: number;
+      pollUrl?: string;
+      initialPollDelayMs?: number;
       signal?: AbortSignal;
       onUpdate?: (job: SystemSculptGenerationJobResponse) => void;
     }
   ): Promise<SystemSculptGenerationJobResponse> {
-    const pollMs = Math.max(250, Math.floor(options?.pollIntervalMs ?? 1000));
+    const basePollMs = Math.max(SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS, Math.floor(options?.pollIntervalMs ?? 1000));
+    const maxPollIntervalMs = Math.max(basePollMs, Math.floor(options?.maxPollIntervalMs ?? SYSTEMSCULPT_IMAGE_POLL_MAX_INTERVAL_MS));
+    const minPollIntervalMs = Math.min(basePollMs, maxPollIntervalMs);
+    const maxWaitMs = Math.max(1_000, Math.floor(options?.maxWaitMs ?? SYSTEMSCULPT_IMAGE_POLL_TIMEOUT_MS));
     const signal = options?.signal;
+    const startedAt = Date.now();
+    const pollUrl = String(options?.pollUrl || "").trim() || undefined;
+    let consecutiveErrors = 0;
+    let previousNonTerminalStatus: "queued" | "processing" | null = null;
+    let nonTerminalStatusFlaps = 0;
+    let lastNonTerminalError = "";
+    let repeatedNonTerminalErrorCount = 0;
+    let pollMs = basePollMs;
+    let firstPoll = true;
+    const initialPollDelayMs = clampPollMs(
+      options?.initialPollDelayMs ?? SYSTEMSCULPT_IMAGE_DEFAULT_INITIAL_POLL_DELAY_MS,
+      minPollIntervalMs,
+      maxPollIntervalMs
+    );
 
     while (true) {
       if (signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
 
-      const status = await this.getGenerationJob(jobId);
+      if (Date.now() - startedAt > maxWaitMs) {
+        throw new Error(`Image generation timed out after ${Math.ceil(maxWaitMs / 1000)}s.`);
+      }
+
+      const elapsedBeforeWait = Date.now() - startedAt;
+      const remainingBeforeWait = maxWaitMs - elapsedBeforeWait;
+      if (!firstPoll) {
+        await sleep(
+          Math.min(clampPollMs(pollMs, minPollIntervalMs, maxPollIntervalMs), Math.max(SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS, remainingBeforeWait)),
+          signal
+        );
+      } else if (initialPollDelayMs > 0) {
+        await sleep(
+          Math.min(initialPollDelayMs, Math.max(SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS, remainingBeforeWait)),
+          signal
+        );
+      }
+      firstPoll = false;
+
+      let status: SystemSculptGenerationJobResponse;
+      try {
+        status = await this.getGenerationJob(jobId, { pollUrl });
+        consecutiveErrors = 0;
+      } catch (error: any) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= SYSTEMSCULPT_IMAGE_POLL_MAX_CONSECUTIVE_ERRORS) {
+          const message = String(error?.message || "").trim() || "unknown error";
+          throw new Error(`Image generation polling failed after ${consecutiveErrors} retries: ${message}`);
+        }
+        pollMs = clampPollMs(Math.floor(pollMs * 1.35), minPollIntervalMs, maxPollIntervalMs);
+        continue;
+      }
+
       options?.onUpdate?.(status);
+
+      const normalizedStatus = String(status.job.status || "").trim().toLowerCase();
+      const nonTerminalStatus =
+        normalizedStatus === "queued" || normalizedStatus === "processing"
+          ? (normalizedStatus as "queued" | "processing")
+          : null;
+      const nonTerminalError = String(status.job.error_message || "").trim();
+
+      if (nonTerminalStatus) {
+        if (previousNonTerminalStatus && previousNonTerminalStatus !== nonTerminalStatus) {
+          nonTerminalStatusFlaps += 1;
+        }
+        previousNonTerminalStatus = nonTerminalStatus;
+
+        if (nonTerminalError) {
+          if (nonTerminalError === lastNonTerminalError) {
+            repeatedNonTerminalErrorCount += 1;
+          } else {
+            lastNonTerminalError = nonTerminalError;
+            repeatedNonTerminalErrorCount = 1;
+          }
+
+          if (repeatedNonTerminalErrorCount >= SYSTEMSCULPT_IMAGE_POLL_NON_TERMINAL_ERROR_POLLS) {
+            throw new Error(`Image generation stalled: ${nonTerminalError}`);
+          }
+        } else {
+          lastNonTerminalError = "";
+          repeatedNonTerminalErrorCount = 0;
+        }
+
+        const elapsedMs = Date.now() - startedAt;
+        if (
+          elapsedMs >= SYSTEMSCULPT_IMAGE_POLL_MIN_FLAP_WINDOW_MS &&
+          nonTerminalStatusFlaps >= SYSTEMSCULPT_IMAGE_POLL_MAX_FLAPS
+        ) {
+          throw new Error(
+            "Image generation job appears unstable (status oscillation between queued and processing). Please retry with a different model or inputs."
+          );
+        }
+      } else {
+        previousNonTerminalStatus = null;
+        lastNonTerminalError = "";
+        repeatedNonTerminalErrorCount = 0;
+      }
 
       if (status.job.status === "succeeded") {
         return status;
@@ -569,7 +846,22 @@ export class SystemSculptImageGenerationService {
         throw new Error(message);
       }
 
-      await sleep(pollMs, signal);
+      if (typeof status.poll_after_ms === "number" && Number.isFinite(status.poll_after_ms) && status.poll_after_ms >= 0) {
+        pollMs = clampPollMs(status.poll_after_ms, minPollIntervalMs, maxPollIntervalMs);
+        continue;
+      }
+
+      if (nonTerminalStatus === "queued") {
+        pollMs = clampPollMs(Math.max(1_200, Math.floor(pollMs * 1.4)), minPollIntervalMs, maxPollIntervalMs);
+        continue;
+      }
+
+      if (nonTerminalStatus === "processing") {
+        pollMs = clampPollMs(Math.max(800, Math.floor(pollMs * 1.15)), minPollIntervalMs, maxPollIntervalMs);
+        continue;
+      }
+
+      pollMs = clampPollMs(Math.floor(pollMs * 1.2), minPollIntervalMs, maxPollIntervalMs);
     }
   }
 
@@ -580,6 +872,9 @@ export class SystemSculptImageGenerationService {
     }
 
     const target = /^https?:\/\//i.test(rawTarget) ? rawTarget : this.endpoint(rawTarget);
+    if (!this.isTrustedDownloadTarget(target)) {
+      throw new Error("Image download blocked: untrusted host or unsigned URL.");
+    }
     const headersIn = this.shouldAttachAuthHeaders(target) ? this.authHeaders() : {};
 
     const { arrayBuffer, headers } = await this.requestArrayBuffer(target, {

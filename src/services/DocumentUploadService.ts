@@ -14,19 +14,22 @@ export class DocumentUploadService {
   private app: App;
   private baseUrl: string;
   private licenseKey: string;
+  private pluginVersion: string;
 
-  constructor(app: App, baseUrl: string, licenseKey: string) {
+  constructor(app: App, baseUrl: string, licenseKey: string, pluginVersion = "0.0.0") {
     this.app = app;
     this.baseUrl = baseUrl;
     this.licenseKey = licenseKey;
+    this.pluginVersion = pluginVersion;
   }
 
   /**
    * Update the base URL and license key
    */
-  public updateConfig(baseUrl: string, licenseKey: string): void {
+  public updateConfig(baseUrl: string, licenseKey: string, pluginVersion = this.pluginVersion): void {
     this.baseUrl = baseUrl;
     this.licenseKey = licenseKey;
+    this.pluginVersion = pluginVersion;
   }
 
   /**
@@ -99,6 +102,7 @@ export class DocumentUploadService {
 
       // Construct the URL properly
       const url = `${this.baseUrl}/documents/process`;
+      const idempotencyKey = `doc-upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
       // Make request using requestUrl instead of fetch for mobile compatibility
       const response = await requestUrl({
@@ -107,6 +111,8 @@ export class DocumentUploadService {
         headers: {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
           'x-license-key': this.licenseKey,
+          'x-plugin-version': this.pluginVersion,
+          'Idempotency-Key': idempotencyKey,
         },
         body: formDataArray.buffer,
         throw: false,

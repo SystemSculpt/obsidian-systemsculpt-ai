@@ -24,16 +24,19 @@ export class DocumentUploadJobsService {
   private app: App;
   private baseUrl: string;
   private licenseKey: string;
+  private pluginVersion: string;
 
-  constructor(app: App, baseUrl: string, licenseKey: string) {
+  constructor(app: App, baseUrl: string, licenseKey: string, pluginVersion = "0.0.0") {
     this.app = app;
     this.baseUrl = baseUrl;
     this.licenseKey = licenseKey;
+    this.pluginVersion = pluginVersion;
   }
 
-  public updateConfig(baseUrl: string, licenseKey: string): void {
+  public updateConfig(baseUrl: string, licenseKey: string, pluginVersion = this.pluginVersion): void {
     this.baseUrl = baseUrl;
     this.licenseKey = licenseKey;
+    this.pluginVersion = pluginVersion;
   }
 
   public async uploadDocumentViaJobs(
@@ -67,10 +70,12 @@ export class DocumentUploadJobsService {
       progress: 0,
       label: "Preparing multipart upload…",
     });
+    const operationNonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     const create = await this.requestSystemSculptJson({
       url: `${this.baseUrl}/documents/jobs`,
       method: "POST",
+      idempotencyKey: `documents-jobs-create:${operationNonce}`,
       body: {
         filename: file.name,
         contentType: resolvedContentType,
@@ -214,6 +219,7 @@ export class DocumentUploadJobsService {
     const complete = await this.requestSystemSculptJson({
       url: `${this.baseUrl}/documents/jobs/${documentId}/upload/complete`,
       method: "POST",
+      idempotencyKey: `documents-jobs-complete:${documentId}`,
       body: { parts },
     });
 
@@ -231,6 +237,7 @@ export class DocumentUploadJobsService {
     await this.requestSystemSculptJson({
       url: `${this.baseUrl}/documents/jobs/${documentId}/start`,
       method: "POST",
+      idempotencyKey: `documents-jobs-start:${documentId}`,
       body: {},
     }).catch(() => {});
 
@@ -262,11 +269,15 @@ export class DocumentUploadJobsService {
     method: "GET" | "POST";
     body?: any;
     headers?: Record<string, string>;
+    idempotencyKey?: string;
   }): Promise<JsonResult> {
     const licenseKey = this.licenseKey?.trim();
+    const idempotencyKey = options.idempotencyKey?.trim();
     const headers: Record<string, string> = {
       ...(licenseKey ? { "x-license-key": licenseKey } : {}),
+      ...(this.pluginVersion ? { "x-plugin-version": this.pluginVersion } : {}),
       ...(options.method !== "GET" ? { "content-type": "application/json" } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       ...(options.headers ?? {}),
     };
 
@@ -321,4 +332,3 @@ export class DocumentUploadJobsService {
     return new SystemSculptError(message, ERROR_CODES.PROCESSING_ERROR, statusCode || 500);
   }
 }
-

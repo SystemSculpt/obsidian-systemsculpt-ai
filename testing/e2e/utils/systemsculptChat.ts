@@ -204,18 +204,29 @@ export async function configurePluginForLiveChat(params: {
   fallbackModelId?: string;
   settingsOverride?: Record<string, unknown>;
   settingsSeed?: Record<string, unknown>;
+  skipModelWarmup?: boolean;
 }): Promise<void> {
   const validationKey = `${params.licenseKey}::${params.serverUrl ?? ""}`;
   const shouldValidate = lastValidatedKey !== validationKey;
   const fallbackModelId = params.fallbackModelId ?? "systemsculpt@@systemsculpt/ai-agent";
   const settingsSeed = params.settingsSeed ?? await loadLiveSettingsSeed();
   const settingsOverride = params.settingsOverride ?? {};
+  const skipModelWarmup = params.skipModelWarmup === true;
 
   const attemptConfigure = async (selectedModelId: string) => {
     await browser.executeObsidian(
       async (
         { app },
-        { pluginId, licenseKey, serverUrl, selectedModelId, settingsOverride, settingsSeed, shouldValidate }
+        {
+          pluginId,
+          licenseKey,
+          serverUrl,
+          selectedModelId,
+          settingsOverride,
+          settingsSeed,
+          shouldValidate,
+          skipModelWarmup,
+        }
       ) => {
         const pluginsApi: any = (app as any).plugins;
         const plugin = pluginsApi?.getPlugin?.(pluginId);
@@ -245,17 +256,19 @@ export async function configurePluginForLiveChat(params: {
           }
         }
 
-        let models: any[] = [];
-        try {
-          models = await plugin.modelService.getModels();
-        } catch (_) {}
-        if (!models || models.length === 0) {
-          throw new Error("No models available after preload.");
-        }
+        if (!skipModelWarmup) {
+          let models: any[] = [];
+          try {
+            models = await plugin.modelService.getModels();
+          } catch (_) {}
+          if (!models || models.length === 0) {
+            throw new Error("No models available after preload.");
+          }
 
-        try {
-          await plugin.modelService.validateSelectedModel(models);
-        } catch (_) {}
+          try {
+            await plugin.modelService.validateSelectedModel(models);
+          } catch (_) {}
+        }
       },
       {
         pluginId: PLUGIN_ID,
@@ -265,6 +278,7 @@ export async function configurePluginForLiveChat(params: {
         settingsOverride,
         settingsSeed,
         shouldValidate,
+        skipModelWarmup,
       }
     );
   };
