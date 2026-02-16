@@ -364,6 +364,12 @@ export interface SystemSculptSettings {
    * Used by CanvasFlow.
    */
   imageGenerationDefaultModelId: string;
+  /** Last model explicitly chosen in CanvasFlow prompt controls. */
+  imageGenerationLastUsedModelId: string;
+  /** Last image count explicitly chosen in CanvasFlow prompt controls. */
+  imageGenerationLastUsedCount: number;
+  /** Last aspect ratio explicitly chosen in CanvasFlow prompt controls. */
+  imageGenerationLastUsedAspectRatio: string;
   imageGenerationPollIntervalMs: number;
   /** Folder path inside the vault where generated images are saved. */
   imageGenerationOutputDir: string;
@@ -480,12 +486,17 @@ export interface ImageGenerationModelCatalogCacheModel {
   id: string;
   name?: string;
   provider?: string;
+  supports_generation?: boolean;
   input_modalities?: string[];
   output_modalities?: string[];
   supports_image_input?: boolean;
   max_images_per_job?: number;
   default_aspect_ratio?: string;
   allowed_aspect_ratios?: string[];
+  estimated_cost_per_image_usd?: number;
+  estimated_cost_per_image_low_usd?: number;
+  estimated_cost_per_image_high_usd?: number;
+  pricing_source?: string;
 }
 
 export interface ImageGenerationModelCatalogCache {
@@ -633,6 +644,9 @@ Raw transcript:`,
   canvasFlowEnabled: false,
 
   imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+  imageGenerationLastUsedModelId: "",
+  imageGenerationLastUsedCount: 1,
+  imageGenerationLastUsedAspectRatio: "",
   imageGenerationPollIntervalMs: 1000,
   imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
   imageGenerationSaveMetadataSidecar: true,

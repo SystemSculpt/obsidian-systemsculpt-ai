@@ -468,6 +468,25 @@ export class SettingsManager {
       validatedSettings.openAiApiKey = '';
     }
 
+    if (typeof validatedSettings.imageGenerationDefaultModelId !== "string") {
+      validatedSettings.imageGenerationDefaultModelId = defaultSettings.imageGenerationDefaultModelId;
+    }
+
+    if (typeof validatedSettings.imageGenerationLastUsedModelId !== "string") {
+      validatedSettings.imageGenerationLastUsedModelId = defaultSettings.imageGenerationLastUsedModelId;
+    }
+
+    if (typeof validatedSettings.imageGenerationLastUsedAspectRatio !== "string") {
+      validatedSettings.imageGenerationLastUsedAspectRatio = defaultSettings.imageGenerationLastUsedAspectRatio;
+    }
+
+    const lastUsedCount = Number(validatedSettings.imageGenerationLastUsedCount);
+    if (!Number.isFinite(lastUsedCount)) {
+      validatedSettings.imageGenerationLastUsedCount = defaultSettings.imageGenerationLastUsedCount;
+    } else {
+      validatedSettings.imageGenerationLastUsedCount = Math.max(1, Math.min(4, Math.floor(lastUsedCount)));
+    }
+
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
     }

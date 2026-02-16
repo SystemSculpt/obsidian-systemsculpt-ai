@@ -15,12 +15,17 @@ export type SystemSculptImageGenerationModel = {
   id: string;
   name: string;
   provider: string;
+  supports_generation?: boolean;
   input_modalities?: string[];
   output_modalities?: string[];
   supports_image_input?: boolean;
   max_images_per_job?: number;
   default_aspect_ratio?: string;
   allowed_aspect_ratios?: string[];
+  estimated_cost_per_image_usd?: number;
+  estimated_cost_per_image_low_usd?: number;
+  estimated_cost_per_image_high_usd?: number;
+  pricing_source?: string;
 };
 
 export type SystemSculptImageGenerationJob = {
@@ -129,6 +134,169 @@ const SIGNED_DOWNLOAD_QUERY_KEYS = [
   "sp",
   "sv",
 ] as const;
+const OPENROUTER_FRONTEND_IMAGE_MODELS_URL = "https://openrouter.ai/api/frontend/models/find?output_modalities=image";
+const EXCLUDED_IMAGE_MODEL_IDS = new Set(["openrouter/auto"]);
+const OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL: Record<string, number> = {
+  "openai/gpt-5-image-mini": 0.02,
+  "openai/gpt-5-image": 0.04,
+  "google/gemini-2.5-flash-image": 0.015,
+};
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function summarizeUsdCandidates(values: number[]): { average: number; low: number; high: number } | null {
+  const positives = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (positives.length === 0) return null;
+  const low = Math.min(...positives);
+  const high = Math.max(...positives);
+  const sum = positives.reduce((acc, value) => acc + value, 0);
+  const average = sum / positives.length;
+  return { average, low, high };
+}
+
+function normalizeOpenRouterPricingEstimate(options: {
+  modelId: string;
+  endpoint: Record<string, unknown> | null;
+  allOpenRouterModels: Map<string, Record<string, unknown>>;
+}): {
+  estimated_cost_per_image_usd?: number;
+  estimated_cost_per_image_low_usd?: number;
+  estimated_cost_per_image_high_usd?: number;
+  pricing_source?: string;
+} {
+  const pricingJsonRaw =
+    options.endpoint && options.endpoint.pricing_json && typeof options.endpoint.pricing_json === "object"
+      ? (options.endpoint.pricing_json as Record<string, unknown>)
+      : {};
+  const candidatesUsd: number[] = [];
+  const candidateSources: string[] = [];
+
+  for (const [key, rawValue] of Object.entries(pricingJsonRaw)) {
+    const value = asFiniteNumber(rawValue);
+    if (value === null || value <= 0) continue;
+    const normalizedKey = key.trim().toLowerCase();
+    if (/(^|:)cents_per_(?:\d+k_)?image_output$/.test(normalizedKey)) {
+      candidatesUsd.push(value / 100);
+      candidateSources.push(normalizedKey);
+      continue;
+    }
+    if (/(^|:)informational_output_megapixels$/.test(normalizedKey)) {
+      candidatesUsd.push(value);
+      candidateSources.push(normalizedKey);
+      continue;
+    }
+  }
+
+  const summary = summarizeUsdCandidates(candidatesUsd);
+  if (summary) {
+    return {
+      estimated_cost_per_image_usd: summary.average,
+      estimated_cost_per_image_low_usd: summary.low,
+      estimated_cost_per_image_high_usd: summary.high,
+      pricing_source: `openrouter_pricing_json:${candidateSources.join(",")}`,
+    };
+  }
+
+  const fallbackUsd = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL[options.modelId];
+  if (Number.isFinite(fallbackUsd) && fallbackUsd > 0) {
+    return {
+      estimated_cost_per_image_usd: fallbackUsd,
+      estimated_cost_per_image_low_usd: fallbackUsd,
+      estimated_cost_per_image_high_usd: fallbackUsd,
+      pricing_source: "openrouter_fallback:known_model_baseline",
+    };
+  }
+
+  if (options.modelId.endsWith("-preview")) {
+    const baseModelId = options.modelId.replace(/-preview$/i, "");
+    if (baseModelId && baseModelId !== options.modelId) {
+      const baseFallbackUsd = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL[baseModelId];
+      if (Number.isFinite(baseFallbackUsd) && baseFallbackUsd > 0) {
+        return {
+          estimated_cost_per_image_usd: baseFallbackUsd,
+          estimated_cost_per_image_low_usd: baseFallbackUsd,
+          estimated_cost_per_image_high_usd: baseFallbackUsd,
+          pricing_source: "openrouter_fallback:preview_uses_base_model_baseline",
+        };
+      }
+
+      const baseModel = options.allOpenRouterModels.get(baseModelId);
+      const baseEndpoint =
+        baseModel && baseModel.endpoint && typeof baseModel.endpoint === "object"
+          ? (baseModel.endpoint as Record<string, unknown>)
+          : null;
+      if (baseModel && baseEndpoint) {
+        const baseEstimate = normalizeOpenRouterPricingEstimate({
+          modelId: baseModelId,
+          endpoint: baseEndpoint,
+          allOpenRouterModels: options.allOpenRouterModels,
+        });
+        if (typeof baseEstimate.estimated_cost_per_image_usd === "number" && baseEstimate.estimated_cost_per_image_usd > 0) {
+          const usd = baseEstimate.estimated_cost_per_image_usd;
+          const low = baseEstimate.estimated_cost_per_image_low_usd ?? usd;
+          const high = baseEstimate.estimated_cost_per_image_high_usd ?? usd;
+          return {
+            estimated_cost_per_image_usd: usd,
+            estimated_cost_per_image_low_usd: low,
+            estimated_cost_per_image_high_usd: high,
+            pricing_source: "openrouter_fallback:preview_uses_base_model_estimate",
+          };
+        }
+      }
+    }
+  }
+
+  const marketPriceRaw =
+    options.endpoint && options.endpoint.pricing && typeof options.endpoint.pricing === "object"
+      ? (options.endpoint.pricing as Record<string, unknown>)
+      : null;
+  const geminiImageOutputTokenPrice = asFiniteNumber(pricingJsonRaw["gemini:image_output_tokens"]);
+  if (geminiImageOutputTokenPrice !== null && geminiImageOutputTokenPrice > 0) {
+    const baselineModel = options.allOpenRouterModels.get("google/gemini-2.5-flash-image");
+    const baselineEndpoint =
+      baselineModel && baselineModel.endpoint && typeof baselineModel.endpoint === "object"
+        ? (baselineModel.endpoint as Record<string, unknown>)
+        : null;
+    const baselinePricingJson =
+      baselineEndpoint && baselineEndpoint.pricing_json && typeof baselineEndpoint.pricing_json === "object"
+        ? (baselineEndpoint.pricing_json as Record<string, unknown>)
+        : {};
+    const baselineTokenPrice = asFiniteNumber(baselinePricingJson["gemini:image_output_tokens"]) ?? 0.00003;
+    const baselineUsdPerImage = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL["google/gemini-2.5-flash-image"] ?? 0.015;
+    if (baselineTokenPrice > 0 && baselineUsdPerImage > 0) {
+      const derivedUsd = geminiImageOutputTokenPrice * (baselineUsdPerImage / baselineTokenPrice);
+      return {
+        estimated_cost_per_image_usd: derivedUsd,
+        estimated_cost_per_image_low_usd: derivedUsd,
+        estimated_cost_per_image_high_usd: derivedUsd,
+        pricing_source: "openrouter_fallback:gemini_image_output_tokens_x_gemini25_baseline",
+      };
+    }
+  }
+
+  const tokenPrice = marketPriceRaw ? asFiniteNumber(marketPriceRaw.image_output) : null;
+  if (tokenPrice !== null && tokenPrice > 0) {
+    // Fallback conversion only when no explicit per-image metadata is available.
+    // 4,176 is the observed output-token baseline used by multiple providers in
+    // OpenRouter's image catalog metadata.
+    const derivedUsd = tokenPrice * 4176;
+    return {
+      estimated_cost_per_image_usd: derivedUsd,
+      estimated_cost_per_image_low_usd: derivedUsd,
+      estimated_cost_per_image_high_usd: derivedUsd,
+      pricing_source: "openrouter_fallback:image_output_token_price_x_4176",
+    };
+  }
+
+  return {};
+}
 
 function safeJsonParse(text: string | undefined): any {
   if (!text) return null;
@@ -639,11 +807,13 @@ export class SystemSculptImageGenerationService {
       const id = typeof model.id === "string" ? model.id.trim() : "";
       const name = typeof model.name === "string" ? model.name.trim() : "";
       if (!id || !name) continue;
+      if (EXCLUDED_IMAGE_MODEL_IDS.has(id.toLowerCase())) continue;
 
       models.push({
         id,
         name,
         provider: typeof model.provider === "string" ? model.provider : "openrouter",
+        supports_generation: typeof model.supports_generation === "boolean" ? model.supports_generation : undefined,
         input_modalities: Array.isArray(model.input_modalities) ? model.input_modalities.map(String) : undefined,
         output_modalities: Array.isArray(model.output_modalities) ? model.output_modalities.map(String) : undefined,
         supports_image_input: typeof model.supports_image_input === "boolean" ? model.supports_image_input : undefined,
@@ -655,6 +825,10 @@ export class SystemSculptImageGenerationService {
         allowed_aspect_ratios: Array.isArray(model.allowed_aspect_ratios)
           ? model.allowed_aspect_ratios.map(String)
           : undefined,
+        estimated_cost_per_image_usd: asFiniteNumber(model.estimated_cost_per_image_usd) ?? undefined,
+        estimated_cost_per_image_low_usd: asFiniteNumber(model.estimated_cost_per_image_low_usd) ?? undefined,
+        estimated_cost_per_image_high_usd: asFiniteNumber(model.estimated_cost_per_image_high_usd) ?? undefined,
+        pricing_source: typeof model.pricing_source === "string" ? model.pricing_source : undefined,
       });
     }
 
@@ -663,6 +837,86 @@ export class SystemSculptImageGenerationService {
       provider: typeof json?.provider === "string" ? json.provider : undefined,
       models,
     };
+  }
+
+  async listOpenRouterMarketplaceImageModels(): Promise<SystemSculptImageGenerationModel[]> {
+    const { json } = await this.requestJson(OPENROUTER_FRONTEND_IMAGE_MODELS_URL, {
+      method: "GET",
+    });
+
+    const modelsRaw = Array.isArray(json?.data?.models) ? (json.data.models as unknown[]) : [];
+    const allOpenRouterModelsById = new Map<string, Record<string, unknown>>();
+    for (const item of modelsRaw) {
+      const model = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+      if (!model) continue;
+      const id =
+        typeof model.slug === "string"
+          ? model.slug.trim()
+          : typeof model.id === "string"
+            ? model.id.trim()
+            : "";
+      if (!id) continue;
+      allOpenRouterModelsById.set(id, model);
+    }
+
+    const byId = new Map<string, SystemSculptImageGenerationModel>();
+
+    for (const item of modelsRaw) {
+      const model = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+      if (!model) continue;
+
+      const id =
+        typeof model.slug === "string"
+          ? model.slug.trim()
+          : typeof model.id === "string"
+            ? model.id.trim()
+            : "";
+      if (!id) continue;
+      if (EXCLUDED_IMAGE_MODEL_IDS.has(id.toLowerCase())) continue;
+
+      const inputModalities = Array.isArray(model.input_modalities)
+        ? model.input_modalities.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      const outputModalities = Array.isArray(model.output_modalities)
+        ? model.output_modalities.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      if (outputModalities.length > 0 && !outputModalities.some((value) => value.toLowerCase() === "image")) {
+        continue;
+      }
+
+      const endpoint =
+        model.endpoint && typeof model.endpoint === "object" ? (model.endpoint as Record<string, unknown>) : null;
+      const providerRaw =
+        (endpoint && typeof endpoint.provider_display_name === "string" ? endpoint.provider_display_name : "") ||
+        (endpoint && typeof endpoint.provider_name === "string" ? endpoint.provider_name : "") ||
+        (typeof model.author === "string" ? model.author : "") ||
+        "openrouter";
+      const nameRaw =
+        (typeof model.name === "string" ? model.name : "") ||
+        (typeof model.short_name === "string" ? model.short_name : "") ||
+        id;
+      const supportsImageInput =
+        typeof model.supports_image_input === "boolean"
+          ? model.supports_image_input
+          : inputModalities.some((value) => value.toLowerCase() === "image");
+      const pricingEstimate = normalizeOpenRouterPricingEstimate({
+        modelId: id,
+        endpoint,
+        allOpenRouterModels: allOpenRouterModelsById,
+      });
+
+      byId.set(id, {
+        id,
+        name: String(nameRaw).trim() || id,
+        provider: String(providerRaw).trim() || "openrouter",
+        input_modalities: inputModalities.length > 0 ? inputModalities : undefined,
+        output_modalities: outputModalities.length > 0 ? outputModalities : undefined,
+        supports_image_input: supportsImageInput,
+        ...pricingEstimate,
+      });
+    }
+
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async createGenerationJob(

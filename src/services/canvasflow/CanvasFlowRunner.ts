@@ -322,6 +322,10 @@ export class CanvasFlowRunner {
         id: String((model as any)?.id || "").trim(),
         name: String((model as any)?.name || "").trim() || undefined,
         provider: String((model as any)?.provider || "").trim() || undefined,
+        supports_generation:
+          typeof (model as any)?.supports_generation === "boolean"
+            ? (model as any).supports_generation
+            : undefined,
         input_modalities: Array.isArray((model as any)?.input_modalities)
           ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
           : undefined,
@@ -340,6 +344,22 @@ export class CanvasFlowRunner {
         allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
           ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
           : undefined,
+        estimated_cost_per_image_usd:
+          typeof (model as any)?.estimated_cost_per_image_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_usd)
+            ? (model as any).estimated_cost_per_image_usd
+            : undefined,
+        estimated_cost_per_image_low_usd:
+          typeof (model as any)?.estimated_cost_per_image_low_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_low_usd)
+            ? (model as any).estimated_cost_per_image_low_usd
+            : undefined,
+        estimated_cost_per_image_high_usd:
+          typeof (model as any)?.estimated_cost_per_image_high_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_high_usd)
+            ? (model as any).estimated_cost_per_image_high_usd
+            : undefined,
+        pricing_source: String((model as any)?.pricing_source || "").trim() || undefined,
       }))
       .filter((model) => model.id.length > 0);
   }
@@ -349,6 +369,33 @@ export class CanvasFlowRunner {
     const raw = Number(curated?.maxImagesPerJob);
     if (!Number.isFinite(raw)) return 1;
     return Math.max(1, Math.floor(raw));
+  }
+
+  private assertModelIsSupportedByBackend(modelId: string, serverModels: readonly ImageGenerationServerCatalogModel[]): void {
+    const id = String(modelId || "").trim();
+    if (!id) return;
+    const selectedCatalogModel = getCuratedImageGenerationModel(id, serverModels);
+    if (selectedCatalogModel && selectedCatalogModel.supportsGeneration === false) {
+      throw new Error(
+        `Model "${id}" is not currently supported by the SystemSculpt image backend. Choose a supported model in Settings -> Image Generation.`
+      );
+    }
+
+    const hasSupportMetadata = serverModels.some((model) => typeof model.supports_generation === "boolean");
+    if (!hasSupportMetadata) return;
+
+    const supportedModels = serverModels.filter((model) => model.supports_generation === true);
+    if (supportedModels.some((model) => model.id === id)) return;
+
+    const examples = supportedModels
+      .slice(0, 3)
+      .map((model) => model.id)
+      .filter(Boolean)
+      .join(", ");
+    const guidance = examples
+      ? ` Supported models currently include: ${examples}.`
+      : " Sync the model catalog in Settings -> Image Generation -> Test and select a supported model.";
+    throw new Error(`Model "${id}" is not currently supported by the SystemSculpt image backend.${guidance}`);
   }
 
   async runPromptNode(options: {
@@ -792,6 +839,7 @@ export class CanvasFlowRunner {
     }
 
     const cachedServerModels = this.getCachedImageGenerationModels();
+    this.assertModelIsSupportedByBackend(modelId, cachedServerModels);
     return {
       baseUrl: options.baseUrl,
       canvasDoc,

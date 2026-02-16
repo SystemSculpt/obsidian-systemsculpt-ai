@@ -4,12 +4,13 @@ import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
-  IMAGE_GENERATION_PRICING_SNAPSHOT_DATE,
   formatCuratedImageModelOptionText,
   getCuratedImageGenerationModelGroups,
+  mergeImageGenerationServerCatalogModels,
   type ImageGenerationServerCatalogModel,
 } from "../services/canvasflow/ImageGenerationModelCatalog";
 import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
+import { queueCanvasFlowLastUsedPatch } from "../services/canvasflow/CanvasFlowPromptDefaults";
 
 export async function displayImageGenerationTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -50,10 +51,11 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
       .setPlaceholder(DEFAULT_IMAGE_GENERATION_MODEL_ID)
       .setValue(plugin.settings.imageGenerationDefaultModelId || DEFAULT_IMAGE_GENERATION_MODEL_ID)
       .onChange(async (value) => {
-        const trimmed = value.trim();
+        const nextModel = value.trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+        void queueCanvasFlowLastUsedPatch(plugin, { modelId: nextModel });
         await plugin
           .getSettingsManager()
-          .updateSettings({ imageGenerationDefaultModelId: trimmed || DEFAULT_IMAGE_GENERATION_MODEL_ID });
+          .updateSettings({ imageGenerationDefaultModelId: nextModel });
       });
   });
 
@@ -128,17 +130,19 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab): Promise<void> {
   const { plugin } = tabInstance;
   const models = await syncImageGenerationModelCatalog(tabInstance);
-  if (models.length === 0) {
+  const supportedModels = models.filter((model) => model.supports_generation !== false);
+  if (supportedModels.length === 0) {
     throw new Error("No image generation models were returned by the server.");
   }
 
   const configured = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
-  const fallback = models[0]?.id || DEFAULT_IMAGE_GENERATION_MODEL_ID;
-  const nextModel = configured || fallback;
+  const fallback = supportedModels[0]?.id || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+  const nextModel = configured && supportedModels.some((model) => model.id === configured) ? configured : fallback;
 
   await plugin.getSettingsManager().updateSettings({
     imageGenerationDefaultModelId: nextModel,
   });
+  void queueCanvasFlowLastUsedPatch(plugin, { modelId: nextModel });
 
   new Notice(`Image generation API connection OK (${models.length} model${models.length === 1 ? "" : "s"}).`);
   tabInstance.display();
@@ -153,21 +157,24 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
 
   for (const group of groups) {
     for (const model of group.models) {
+      const supportLabel = model.supportsGeneration ? "Runnable in SystemSculpt backend." : "Visible for pricing only (not yet runnable).";
       items.push({
         id: model.id,
-        title: formatCuratedImageModelOptionText(model),
-        description: model.pricing.lines.join(" | "),
+        title: model.supportsGeneration
+          ? formatCuratedImageModelOptionText(model)
+          : `${formatCuratedImageModelOptionText(model)} (Not supported yet)`,
+        description: `${supportLabel} ${model.pricing.lines.join(" | ")}`.trim(),
         icon: "image",
         badge: model.pricing.summary,
         selected: model.id === currentDefault,
-        metadata: { id: model.id, provider: group.provider },
+        metadata: { id: model.id, provider: group.provider, supportsGeneration: model.supportsGeneration === true },
       });
     }
   }
 
   const modal = new ListSelectionModal(tabInstance.app, items, {
     title: "Image models",
-    description: `Merged from live SystemSculpt API catalog and curated defaults. Curated cost estimates are as of ${IMAGE_GENERATION_PRICING_SNAPSHOT_DATE}.`,
+    description: "Merged from the live SystemSculpt API catalog and OpenRouter marketplace image catalog. Shows provider USD and estimated SystemSculpt credits per image.",
     withSearch: true,
     size: "large",
     customContent: (el) => {
@@ -181,15 +188,21 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
 
   const [selection] = await modal.openAndGetSelection();
   const modelId = String(selection?.metadata?.id || "").trim();
+  const supportsGeneration = selection?.metadata?.supportsGeneration === true;
   if (!modelId) {
+    return;
+  }
+  if (!supportsGeneration) {
+    new Notice("That model is not currently supported by the SystemSculpt image backend. Pick a runnable model.");
     return;
   }
 
   await plugin.getSettingsManager().updateSettings({
     imageGenerationDefaultModelId: modelId,
   });
+  void queueCanvasFlowLastUsedPatch(plugin, { modelId });
 
-  new Notice(`Default image model set to ${modelId}.`);
+  new Notice("Default image model updated.");
   tabInstance.display();
 }
 
@@ -201,6 +214,10 @@ function getCachedServerImageModels(tabInstance: SystemSculptSettingTab): ImageG
       id: String((model as any)?.id || "").trim(),
       name: String((model as any)?.name || "").trim() || undefined,
       provider: String((model as any)?.provider || "").trim() || undefined,
+      supports_generation:
+        typeof (model as any)?.supports_generation === "boolean"
+          ? (model as any).supports_generation
+          : undefined,
       input_modalities: Array.isArray((model as any)?.input_modalities)
         ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
         : undefined,
@@ -219,6 +236,22 @@ function getCachedServerImageModels(tabInstance: SystemSculptSettingTab): ImageG
       allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
         ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
         : undefined,
+      estimated_cost_per_image_usd:
+        typeof (model as any)?.estimated_cost_per_image_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_usd)
+          ? (model as any).estimated_cost_per_image_usd
+          : undefined,
+      estimated_cost_per_image_low_usd:
+        typeof (model as any)?.estimated_cost_per_image_low_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_low_usd)
+          ? (model as any).estimated_cost_per_image_low_usd
+          : undefined,
+      estimated_cost_per_image_high_usd:
+        typeof (model as any)?.estimated_cost_per_image_high_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_high_usd)
+          ? (model as any).estimated_cost_per_image_high_usd
+          : undefined,
+      pricing_source: String((model as any)?.pricing_source || "").trim() || undefined,
     }))
     .filter((model) => model.id.length > 0);
 }
@@ -244,7 +277,15 @@ async function syncImageGenerationModelCatalog(
 
   try {
     const response = await service.listModels();
-    const models = Array.isArray(response.models) ? response.models : [];
+    const supportedModels = Array.isArray(response.models) ? response.models : [];
+    if (supportedModels.length === 0) {
+      throw new Error("No supported image models were returned by /images/models.");
+    }
+    const openRouterModels = await service.listOpenRouterMarketplaceImageModels().catch(() => []);
+    const models = mergeImageGenerationServerCatalogModels(
+      supportedModels,
+      openRouterModels
+    );
     await plugin.getSettingsManager().updateSettings({
       imageGenerationModelCatalogCache: {
         fetchedAt: new Date().toISOString(),

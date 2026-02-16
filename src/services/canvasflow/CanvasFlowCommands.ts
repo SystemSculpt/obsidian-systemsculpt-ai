@@ -5,9 +5,9 @@ import { sanitizeChatTitle } from "../../utils/titleUtils";
 import { CANVASFLOW_PROMPT_NODE_HEIGHT_PX, CANVASFLOW_PROMPT_NODE_WIDTH_PX } from "./CanvasFlowUiConstants";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
-  getDefaultImageAspectRatio,
   type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
+import { resolveCanvasFlowPromptDefaults } from "./CanvasFlowPromptDefaults";
 
 function isCanvasLeaf(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf {
   if (!leaf) return false;
@@ -59,6 +59,10 @@ function getCachedImageGenerationModels(plugin: SystemSculptPlugin): ImageGenera
       id: String((model as any)?.id || "").trim(),
       name: String((model as any)?.name || "").trim() || undefined,
       provider: String((model as any)?.provider || "").trim() || undefined,
+      supports_generation:
+        typeof (model as any)?.supports_generation === "boolean"
+          ? (model as any).supports_generation
+          : undefined,
       input_modalities: Array.isArray((model as any)?.input_modalities)
         ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
         : undefined,
@@ -77,6 +81,22 @@ function getCachedImageGenerationModels(plugin: SystemSculptPlugin): ImageGenera
       allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
         ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
         : undefined,
+      estimated_cost_per_image_usd:
+        typeof (model as any)?.estimated_cost_per_image_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_usd)
+          ? (model as any).estimated_cost_per_image_usd
+          : undefined,
+      estimated_cost_per_image_low_usd:
+        typeof (model as any)?.estimated_cost_per_image_low_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_low_usd)
+          ? (model as any).estimated_cost_per_image_low_usd
+          : undefined,
+      estimated_cost_per_image_high_usd:
+        typeof (model as any)?.estimated_cost_per_image_high_usd === "number" &&
+        Number.isFinite((model as any).estimated_cost_per_image_high_usd)
+          ? (model as any).estimated_cost_per_image_high_usd
+          : undefined,
+      pricing_source: String((model as any)?.pricing_source || "").trim() || undefined,
     }))
     .filter((model) => model.id.length > 0);
 }
@@ -109,18 +129,22 @@ export async function createCanvasFlowPromptNodeInActiveCanvas(app: App, plugin:
   const promptsDir = "SystemSculpt/CanvasFlow/Prompts";
   await ensureFolder(app, promptsDir);
 
-  const modelId = String(plugin.settings.imageGenerationDefaultModelId || "").trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
-  const modelLine = modelId ? `ss_image_model: ${modelId}\n` : "";
-  const aspectRatio = getDefaultImageAspectRatio(modelId, getCachedImageGenerationModels(plugin));
-  const aspectRatioLine = aspectRatio ? `ss_image_aspect_ratio: ${aspectRatio}\n` : "";
+  const defaults = resolveCanvasFlowPromptDefaults({
+    settings: plugin.settings,
+    serverModels: getCachedImageGenerationModels(plugin),
+    source: "command",
+  });
+  const modelLine = `ss_image_model: ${defaults.modelId}`;
+  const aspectRatioLine = `ss_image_aspect_ratio: ${defaults.aspectRatio}`;
+  const imageCountLine = `ss_image_count: ${defaults.imageCount}`;
 
   const template = [
     "---",
     "ss_flow_kind: prompt",
     "ss_flow_backend: openrouter",
-    modelLine.trimEnd(),
-    aspectRatioLine.trimEnd(),
-    "ss_image_count: 1",
+    modelLine,
+    aspectRatioLine,
+    imageCountLine,
     "---",
     "",
     "Describe your prompt here.",

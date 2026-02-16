@@ -21,6 +21,16 @@ describe("SystemSculptImageGenerationService", () => {
             name: "OpenAI GPT-5 Image Mini",
             provider: "openrouter",
             supports_image_input: true,
+            estimated_cost_per_image_usd: 0.02,
+            estimated_cost_per_image_low_usd: 0.02,
+            estimated_cost_per_image_high_usd: 0.02,
+            pricing_source: "system_catalog:test",
+          },
+          {
+            id: "openrouter/auto",
+            name: "Auto Router",
+            provider: "openrouter",
+            supports_image_input: true,
           },
         ],
       },
@@ -34,11 +44,135 @@ describe("SystemSculptImageGenerationService", () => {
 
     const response = await service.listModels();
     expect(response.contract).toBe("systemsculpt-image-v1");
+    expect(response.models).toHaveLength(1);
     expect(response.models[0]?.id).toBe("openai/gpt-5-image-mini");
+    expect(response.models[0]?.estimated_cost_per_image_usd).toBe(0.02);
+    expect(response.models[0]?.estimated_cost_per_image_low_usd).toBe(0.02);
+    expect(response.models[0]?.estimated_cost_per_image_high_usd).toBe(0.02);
+    expect(response.models[0]?.pricing_source).toBe("system_catalog:test");
 
     const call = requestUrlMock.mock.calls[0]?.[0];
     expect(String(call?.url || "")).toContain("/images/models");
     expect(call?.headers?.["x-license-key"]).toBe("license_test");
+  });
+
+  it("lists OpenRouter marketplace image models from the frontend catalog", async () => {
+    requestUrlMock.mockResolvedValue({
+      status: 200,
+      json: {
+        data: {
+          models: [
+            {
+              slug: "sourceful/riverflow-v2-fast",
+              name: "Sourceful: Riverflow V2 Fast",
+              author: "sourceful",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+              endpoint: {
+                provider_display_name: "Sourceful",
+                pricing_json: {
+                  "sourceful:cents_per_image_output": "2",
+                  "sourceful:cents_per_2k_image_output": "4",
+                },
+              },
+            },
+            {
+              slug: "openai/gpt-5-image-mini",
+              name: "OpenAI GPT-5 Image Mini",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+              endpoint: {
+                provider_display_name: "OpenAI",
+                pricing: {
+                  image_output: "0.000008",
+                },
+                pricing_json: {},
+              },
+            },
+            {
+              slug: "google/gemini-2.5-flash-image",
+              name: "Google Gemini 2.5 Flash Image",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+              endpoint: {
+                provider_display_name: "Google",
+                pricing_json: {
+                  "gemini:image_output_tokens": 0.00003,
+                },
+              },
+            },
+            {
+              slug: "google/gemini-2.5-flash-image-preview",
+              name: "Google Gemini 2.5 Flash Image Preview",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+              endpoint: {
+                provider_display_name: "Google",
+                pricing_json: {},
+              },
+            },
+            {
+              slug: "google/gemini-3-pro-image-preview",
+              name: "Google Gemini 3 Pro Image Preview",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+              endpoint: {
+                provider_display_name: "Google",
+                pricing_json: {
+                  "gemini:image_output_tokens": 0.00012,
+                },
+              },
+            },
+            {
+              slug: "openrouter/auto",
+              name: "Auto Router",
+              input_modalities: ["text", "image"],
+              output_modalities: ["image"],
+            },
+            {
+              slug: "openai/gpt-5",
+              name: "OpenAI GPT-5",
+              input_modalities: ["text"],
+              output_modalities: ["text"],
+            },
+          ],
+        },
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    const models = await service.listOpenRouterMarketplaceImageModels();
+    expect(models).toHaveLength(5);
+
+    const riverflow = models.find((model) => model.id === "sourceful/riverflow-v2-fast");
+    expect(riverflow?.provider).toBe("Sourceful");
+    expect(riverflow?.supports_image_input).toBe(true);
+    expect(riverflow?.estimated_cost_per_image_low_usd).toBeCloseTo(0.02, 8);
+    expect(riverflow?.estimated_cost_per_image_high_usd).toBeCloseTo(0.04, 8);
+    expect(riverflow?.estimated_cost_per_image_usd).toBeCloseTo(0.03, 8);
+    expect(String(riverflow?.pricing_source || "")).toContain("cents_per_image_output");
+
+    const gpt5Mini = models.find((model) => model.id === "openai/gpt-5-image-mini");
+    expect(gpt5Mini?.estimated_cost_per_image_usd).toBeCloseTo(0.02, 8);
+    expect(gpt5Mini?.pricing_source).toBe("openrouter_fallback:known_model_baseline");
+
+    const geminiPreview = models.find((model) => model.id === "google/gemini-2.5-flash-image-preview");
+    expect(geminiPreview?.estimated_cost_per_image_usd).toBeCloseTo(0.015, 8);
+    expect(geminiPreview?.pricing_source).toBe("openrouter_fallback:preview_uses_base_model_baseline");
+
+    const gemini3 = models.find((model) => model.id === "google/gemini-3-pro-image-preview");
+    expect(gemini3?.estimated_cost_per_image_usd).toBeCloseTo(0.06, 8);
+    expect(gemini3?.pricing_source).toBe("openrouter_fallback:gemini_image_output_tokens_x_gemini25_baseline");
+    expect(models.some((model) => model.id === "openrouter/auto")).toBe(false);
+
+    const call = requestUrlMock.mock.calls[0]?.[0];
+    expect(String(call?.url || "")).toBe("https://openrouter.ai/api/frontend/models/find?output_modalities=image");
+    expect(call?.headers?.["x-license-key"]).toBeUndefined();
   });
 
   it("creates a generation job", async () => {

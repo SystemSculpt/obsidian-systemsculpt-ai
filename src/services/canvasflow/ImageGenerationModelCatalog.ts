@@ -1,11 +1,56 @@
-export const IMAGE_GENERATION_PRICING_SNAPSHOT_DATE = "2026-02-16" as const;
-
 export const DEFAULT_IMAGE_GENERATION_MODEL_ID = "openai/gpt-5-image-mini" as const;
 
 export const COMMON_IMAGE_ASPECT_RATIOS = ["16:9", "1:1", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
 export const RECOMMENDED_IMAGE_ASPECT_RATIOS = ["16:9", "1:1", "9:16"] as const;
 
+export const IMAGE_GENERATION_BILLING_FORMULA_VERSION = "raw_usd_x_markup_x_credits_per_usd.ceil.v1" as const;
+export const IMAGE_GENERATION_BILLING_MARKUP_MULTIPLIER = 1.5 as const;
+export const IMAGE_GENERATION_BILLING_CREDITS_PER_USD = 800 as const;
+export const IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD =
+  IMAGE_GENERATION_BILLING_MARKUP_MULTIPLIER * IMAGE_GENERATION_BILLING_CREDITS_PER_USD;
+
+type ImagePricing = {
+  summary: string;
+  lines: string[];
+  usdPerImageAverage: number | null;
+  usdPerImageLow: number | null;
+  usdPerImageHigh: number | null;
+  creditsPerImageAverage: number | null;
+  creditsPerImageLow: number | null;
+  creditsPerImageHigh: number | null;
+  source: string;
+};
+
 export type ImageGenerationCuratedModel = {
+  id: string;
+  label: string;
+  provider: string;
+  supportsGeneration: boolean;
+  supportsImageInput: boolean;
+  maxImagesPerJob: number;
+  defaultAspectRatio: string;
+  allowedAspectRatios: readonly string[];
+  pricing: ImagePricing;
+};
+
+export type ImageGenerationServerCatalogModel = {
+  id: string;
+  name?: string;
+  provider?: string;
+  supports_generation?: boolean;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  supports_image_input?: boolean;
+  max_images_per_job?: number;
+  default_aspect_ratio?: string;
+  allowed_aspect_ratios?: string[];
+  estimated_cost_per_image_usd?: number;
+  estimated_cost_per_image_low_usd?: number;
+  estimated_cost_per_image_high_usd?: number;
+  pricing_source?: string;
+};
+
+type CuratedImageGenerationModelSeed = {
   id: string;
   label: string;
   provider: string;
@@ -13,25 +58,12 @@ export type ImageGenerationCuratedModel = {
   maxImagesPerJob: number;
   defaultAspectRatio: string;
   allowedAspectRatios: readonly string[];
-  pricing: {
-    summary: string;
-    lines: string[];
-  };
+  fallbackUsdPerImage?: number;
 };
 
-export type ImageGenerationServerCatalogModel = {
-  id: string;
-  name?: string;
-  provider?: string;
-  input_modalities?: string[];
-  output_modalities?: string[];
-  supports_image_input?: boolean;
-  max_images_per_job?: number;
-  default_aspect_ratio?: string;
-  allowed_aspect_ratios?: string[];
-};
+const EXCLUDED_MODEL_IDS = new Set(["openrouter/auto"]);
 
-export const CURATED_IMAGE_GENERATION_MODELS: readonly ImageGenerationCuratedModel[] = [
+const CURATED_IMAGE_GENERATION_MODELS_SEED: readonly CuratedImageGenerationModelSeed[] = [
   {
     id: "openai/gpt-5-image-mini",
     label: "OpenAI GPT-5 Image Mini",
@@ -40,10 +72,7 @@ export const CURATED_IMAGE_GENERATION_MODELS: readonly ImageGenerationCuratedMod
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    pricing: {
-      summary: "~$0.02/img",
-      lines: ["Estimated provider cost from SystemSculpt API catalog: $0.02 per output image."],
-    },
+    fallbackUsdPerImage: 0.02,
   },
   {
     id: "openai/gpt-5-image",
@@ -53,10 +82,7 @@ export const CURATED_IMAGE_GENERATION_MODELS: readonly ImageGenerationCuratedMod
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    pricing: {
-      summary: "~$0.04/img",
-      lines: ["Estimated provider cost from SystemSculpt API catalog: $0.04 per output image."],
-    },
+    fallbackUsdPerImage: 0.04,
   },
   {
     id: "google/gemini-2.5-flash-image",
@@ -66,10 +92,7 @@ export const CURATED_IMAGE_GENERATION_MODELS: readonly ImageGenerationCuratedMod
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    pricing: {
-      summary: "~$0.015/img",
-      lines: ["Estimated provider cost from SystemSculpt API catalog: $0.015 per output image."],
-    },
+    fallbackUsdPerImage: 0.015,
   },
 ] as const;
 
@@ -86,6 +109,15 @@ function dedupeAspectRatios(values: readonly string[]): string[] {
   return out;
 }
 
+function asFinitePositiveNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
 function normalizeServerModels(models: readonly ImageGenerationServerCatalogModel[] | undefined): ImageGenerationServerCatalogModel[] {
   if (!Array.isArray(models)) return [];
   const out: ImageGenerationServerCatalogModel[] = [];
@@ -93,10 +125,12 @@ function normalizeServerModels(models: readonly ImageGenerationServerCatalogMode
     if (!model || typeof model !== "object") continue;
     const id = String(model.id || "").trim();
     if (!id) continue;
+    if (EXCLUDED_MODEL_IDS.has(id.toLowerCase())) continue;
     out.push({
       id,
       name: String(model.name || "").trim() || undefined,
       provider: String(model.provider || "").trim() || undefined,
+      supports_generation: typeof model.supports_generation === "boolean" ? model.supports_generation : undefined,
       input_modalities: Array.isArray(model.input_modalities)
         ? model.input_modalities.map((value: string) => String(value || "").trim()).filter(Boolean)
         : undefined,
@@ -112,9 +146,83 @@ function normalizeServerModels(models: readonly ImageGenerationServerCatalogMode
       allowed_aspect_ratios: Array.isArray(model.allowed_aspect_ratios)
         ? model.allowed_aspect_ratios.map((value: string) => String(value || "").trim()).filter(Boolean)
         : undefined,
+      estimated_cost_per_image_usd: asFinitePositiveNumber(model.estimated_cost_per_image_usd) ?? undefined,
+      estimated_cost_per_image_low_usd: asFinitePositiveNumber(model.estimated_cost_per_image_low_usd) ?? undefined,
+      estimated_cost_per_image_high_usd: asFinitePositiveNumber(model.estimated_cost_per_image_high_usd) ?? undefined,
+      pricing_source: String(model.pricing_source || "").trim() || undefined,
     });
   }
   return out;
+}
+
+function mergeStringArrays(preferred?: readonly string[], fallback?: readonly string[]): string[] | undefined {
+  const merged = dedupeAspectRatios([...(preferred || []), ...(fallback || [])]);
+  return merged.length > 0 ? merged : undefined;
+}
+
+function mergeServerCatalogModel(
+  preferred: ImageGenerationServerCatalogModel,
+  fallback: ImageGenerationServerCatalogModel
+): ImageGenerationServerCatalogModel {
+  const preferredMax =
+    typeof preferred.max_images_per_job === "number" && Number.isFinite(preferred.max_images_per_job)
+      ? Math.max(1, Math.floor(preferred.max_images_per_job))
+      : undefined;
+  const fallbackMax =
+    typeof fallback.max_images_per_job === "number" && Number.isFinite(fallback.max_images_per_job)
+      ? Math.max(1, Math.floor(fallback.max_images_per_job))
+      : undefined;
+
+  return {
+    id: preferred.id,
+    name: preferred.name || fallback.name,
+    provider: preferred.provider || fallback.provider,
+    supports_generation:
+      typeof preferred.supports_generation === "boolean"
+        ? preferred.supports_generation
+        : typeof fallback.supports_generation === "boolean"
+          ? fallback.supports_generation
+          : undefined,
+    input_modalities: mergeStringArrays(preferred.input_modalities, fallback.input_modalities),
+    output_modalities: mergeStringArrays(preferred.output_modalities, fallback.output_modalities),
+    supports_image_input:
+      typeof preferred.supports_image_input === "boolean"
+        ? preferred.supports_image_input
+        : typeof fallback.supports_image_input === "boolean"
+          ? fallback.supports_image_input
+          : undefined,
+    max_images_per_job: preferredMax ?? fallbackMax,
+    default_aspect_ratio: preferred.default_aspect_ratio || fallback.default_aspect_ratio,
+    allowed_aspect_ratios: mergeStringArrays(preferred.allowed_aspect_ratios, fallback.allowed_aspect_ratios),
+    estimated_cost_per_image_usd:
+      asFinitePositiveNumber(preferred.estimated_cost_per_image_usd) ??
+      asFinitePositiveNumber(fallback.estimated_cost_per_image_usd) ??
+      undefined,
+    estimated_cost_per_image_low_usd:
+      asFinitePositiveNumber(preferred.estimated_cost_per_image_low_usd) ??
+      asFinitePositiveNumber(fallback.estimated_cost_per_image_low_usd) ??
+      undefined,
+    estimated_cost_per_image_high_usd:
+      asFinitePositiveNumber(preferred.estimated_cost_per_image_high_usd) ??
+      asFinitePositiveNumber(fallback.estimated_cost_per_image_high_usd) ??
+      undefined,
+    pricing_source: preferred.pricing_source || fallback.pricing_source,
+  };
+}
+
+function formatUsd(value: number): string {
+  const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (safe >= 1) return safe.toFixed(2);
+  if (safe >= 0.1) return safe.toFixed(3);
+  if (safe >= 0.01) return safe.toFixed(3);
+  return safe.toFixed(4);
+}
+
+function formatCredits(value: number): string {
+  const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (safe >= 100) return String(Math.round(safe));
+  if (safe >= 10) return safe.toFixed(1).replace(/\.0$/, "");
+  return safe.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function supportsImageInput(serverModel: ImageGenerationServerCatalogModel): boolean {
@@ -123,6 +231,96 @@ function supportsImageInput(serverModel: ImageGenerationServerCatalogModel): boo
   }
   const modalities = Array.isArray(serverModel.input_modalities) ? serverModel.input_modalities : [];
   return modalities.some((value) => String(value || "").trim().toLowerCase() === "image");
+}
+
+function buildImagePricing(
+  serverModel?: ImageGenerationServerCatalogModel,
+  curatedFallbackUsdPerImage?: number
+): ImagePricing {
+  const lowUsd =
+    asFinitePositiveNumber(serverModel?.estimated_cost_per_image_low_usd) ??
+    asFinitePositiveNumber(serverModel?.estimated_cost_per_image_usd) ??
+    asFinitePositiveNumber(curatedFallbackUsdPerImage);
+  const highUsd =
+    asFinitePositiveNumber(serverModel?.estimated_cost_per_image_high_usd) ??
+    asFinitePositiveNumber(serverModel?.estimated_cost_per_image_usd) ??
+    asFinitePositiveNumber(curatedFallbackUsdPerImage);
+  if (lowUsd === null || highUsd === null) {
+    return {
+      summary: "Pricing unavailable",
+      lines: ["Could not derive a per-image provider price from current catalog metadata."],
+      usdPerImageAverage: null,
+      usdPerImageLow: null,
+      usdPerImageHigh: null,
+      creditsPerImageAverage: null,
+      creditsPerImageLow: null,
+      creditsPerImageHigh: null,
+      source: String(serverModel?.pricing_source || "missing_price_metadata"),
+    };
+  }
+
+  const avgUsd = (lowUsd + highUsd) / 2;
+  const lowCredits = lowUsd * IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD;
+  const highCredits = highUsd * IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD;
+  const avgCredits = avgUsd * IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD;
+  const isRange = Math.abs(highUsd - lowUsd) > 1e-12;
+  const usdSummary = isRange
+    ? `$${formatUsd(lowUsd)}-$${formatUsd(highUsd)}/img`
+    : `$${formatUsd(avgUsd)}/img`;
+  const creditsSummary = isRange
+    ? `${formatCredits(lowCredits)}-${formatCredits(highCredits)} cr/img`
+    : `${formatCredits(avgCredits)} cr/img`;
+  const source = String(serverModel?.pricing_source || "curated_fallback").trim() || "curated_fallback";
+  const rangeLine = isRange
+    ? `Provider price range: $${formatUsd(lowUsd)}-$${formatUsd(highUsd)} per output image (avg $${formatUsd(avgUsd)}).`
+    : `Provider price: $${formatUsd(avgUsd)} per output image.`;
+
+  return {
+    summary: `${usdSummary} • ${creditsSummary}`,
+    lines: [
+      rangeLine,
+      `Estimated SystemSculpt credits: ${formatCredits(avgCredits)} credits/image on average.`,
+      `Formula: raw_usd × ${IMAGE_GENERATION_BILLING_MARKUP_MULTIPLIER} × ${IMAGE_GENERATION_BILLING_CREDITS_PER_USD} (= ${IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD} credits/USD).`,
+      `Price source: ${source}.`,
+    ],
+    usdPerImageAverage: avgUsd,
+    usdPerImageLow: lowUsd,
+    usdPerImageHigh: highUsd,
+    creditsPerImageAverage: avgCredits,
+    creditsPerImageLow: lowCredits,
+    creditsPerImageHigh: highCredits,
+    source,
+  };
+}
+
+function toCuratedModel(
+  seed: CuratedImageGenerationModelSeed,
+  serverModel: ImageGenerationServerCatalogModel | undefined,
+  catalogHasServerData: boolean
+): ImageGenerationCuratedModel {
+  const mergedAllowed = dedupeAspectRatios([
+    ...(Array.isArray(serverModel?.allowed_aspect_ratios) ? serverModel!.allowed_aspect_ratios! : []),
+    ...seed.allowedAspectRatios,
+  ]);
+  const defaultAspectCandidate = String(serverModel?.default_aspect_ratio || "").trim() || seed.defaultAspectRatio;
+  const defaultAspectRatio = mergedAllowed.includes(defaultAspectCandidate) ? defaultAspectCandidate : seed.defaultAspectRatio;
+
+  return {
+    id: seed.id,
+    label: seed.label,
+    provider: String(serverModel?.provider || "").trim() || seed.provider,
+    supportsGeneration: catalogHasServerData
+      ? Boolean(serverModel && (serverModel.supports_generation !== false))
+      : true,
+    supportsImageInput: (serverModel ? supportsImageInput(serverModel) : false) || seed.supportsImageInput,
+    maxImagesPerJob:
+      typeof serverModel?.max_images_per_job === "number" && Number.isFinite(serverModel.max_images_per_job)
+        ? Math.max(1, Math.floor(serverModel.max_images_per_job))
+        : seed.maxImagesPerJob,
+    defaultAspectRatio,
+    allowedAspectRatios: mergedAllowed.length > 0 ? mergedAllowed : seed.allowedAspectRatios,
+    pricing: buildImagePricing(serverModel, seed.fallbackUsdPerImage),
+  };
 }
 
 function toServerOnlyModel(serverModel: ImageGenerationServerCatalogModel): ImageGenerationCuratedModel {
@@ -135,53 +333,62 @@ function toServerOnlyModel(serverModel: ImageGenerationServerCatalogModel): Imag
     id: serverModel.id,
     label: String(serverModel.name || "").trim() || serverModel.id,
     provider,
+    supportsGeneration: serverModel.supports_generation === true,
     supportsImageInput: supportsImageInput(serverModel),
     maxImagesPerJob: Math.max(1, Math.floor(serverModel.max_images_per_job || 1)),
     defaultAspectRatio,
     allowedAspectRatios: allowedAspectRatios.length > 0 ? allowedAspectRatios : [...COMMON_IMAGE_ASPECT_RATIOS],
-    pricing: {
-      summary: "Server-priced",
-      lines: ["Pricing is managed by the SystemSculpt API provider catalog."],
-    },
+    pricing: buildImagePricing(serverModel),
   };
+}
+
+export function mergeImageGenerationServerCatalogModels(
+  preferredModels?: readonly ImageGenerationServerCatalogModel[],
+  supplementalModels?: readonly ImageGenerationServerCatalogModel[]
+): ImageGenerationServerCatalogModel[] {
+  const preferred = normalizeServerModels(preferredModels).map((model) => ({
+    ...model,
+    supports_generation: model.supports_generation !== false,
+  }));
+  const supplemental = normalizeServerModels(supplementalModels).map((model) => ({
+    ...model,
+    supports_generation: model.supports_generation === true,
+  }));
+  const byId = new Map<string, ImageGenerationServerCatalogModel>();
+
+  for (const model of supplemental) {
+    byId.set(model.id, model);
+  }
+
+  for (const model of preferred) {
+    const existing = byId.get(model.id);
+    if (!existing) {
+      byId.set(model.id, model);
+      continue;
+    }
+    byId.set(model.id, mergeServerCatalogModel(model, existing));
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const aLabel = String(a.name || a.id);
+    const bLabel = String(b.name || b.id);
+    return aLabel.localeCompare(bLabel);
+  });
 }
 
 export function resolveImageGenerationModelCatalog(
   serverModels?: readonly ImageGenerationServerCatalogModel[]
 ): ImageGenerationCuratedModel[] {
   const normalizedServer = normalizeServerModels(serverModels);
+  const hasServerData = normalizedServer.length > 0;
   const byServerId = new Map<string, ImageGenerationServerCatalogModel>();
   for (const model of normalizedServer) {
     byServerId.set(model.id, model);
   }
 
-  const mergedCurated = CURATED_IMAGE_GENERATION_MODELS.map((curated) => {
-    const server = byServerId.get(curated.id);
-    if (!server) return curated;
-
-    const mergedAllowed = dedupeAspectRatios([
-      ...(Array.isArray(server.allowed_aspect_ratios) ? server.allowed_aspect_ratios : []),
-      ...curated.allowedAspectRatios,
-    ]);
-
-    const defaultAspectCandidate = String(server.default_aspect_ratio || "").trim() || curated.defaultAspectRatio;
-    const defaultAspectRatio = mergedAllowed.includes(defaultAspectCandidate)
-      ? defaultAspectCandidate
-      : curated.defaultAspectRatio;
-
-    return {
-      ...curated,
-      provider: String(server.provider || "").trim() || curated.provider,
-      supportsImageInput: supportsImageInput(server) || curated.supportsImageInput,
-      maxImagesPerJob:
-        typeof server.max_images_per_job === "number" && Number.isFinite(server.max_images_per_job)
-          ? Math.max(1, Math.floor(server.max_images_per_job))
-          : curated.maxImagesPerJob,
-      defaultAspectRatio,
-      allowedAspectRatios: mergedAllowed.length > 0 ? mergedAllowed : curated.allowedAspectRatios,
-    } satisfies ImageGenerationCuratedModel;
-  });
-
+  const mergedCurated = CURATED_IMAGE_GENERATION_MODELS_SEED.map((seed) =>
+    toCuratedModel(seed, byServerId.get(seed.id), hasServerData)
+  );
   const curatedIds = new Set(mergedCurated.map((model) => model.id));
   const serverOnly = normalizedServer
     .filter((model) => !curatedIds.has(model.id))
@@ -190,6 +397,8 @@ export function resolveImageGenerationModelCatalog(
 
   return [...mergedCurated, ...serverOnly];
 }
+
+export const CURATED_IMAGE_GENERATION_MODELS: readonly ImageGenerationCuratedModel[] = resolveImageGenerationModelCatalog();
 
 export function getCuratedImageGenerationModel(
   id: string,
@@ -220,7 +429,7 @@ export function getCuratedImageGenerationModelGroups(
 
 export function formatCuratedImageModelOptionText(model: ImageGenerationCuratedModel): string {
   const summary = String(model.pricing?.summary || "").trim();
-  return summary ? `${model.label} (${model.id})  ${summary}` : `${model.label} (${model.id})`;
+  return summary ? `${model.label}  ${summary}` : model.label;
 }
 
 export function formatImageAspectRatioLabel(ratio: string): string {

@@ -33,11 +33,16 @@ import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   formatImageAspectRatioLabel,
   formatCuratedImageModelOptionText,
-  getDefaultImageAspectRatio,
   getCuratedImageGenerationModel,
   getCuratedImageGenerationModelGroups,
+  mergeImageGenerationServerCatalogModels,
   type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
+import {
+  queueCanvasFlowLastUsedPatch,
+  resolveCanvasFlowPromptDefaults,
+} from "./CanvasFlowPromptDefaults";
+import { SystemSculptImageGenerationService } from "./SystemSculptImageGenerationService";
 import { tryCopyImageFileToClipboard } from "../../utils/clipboard";
 import { findCanvasSelectionMenu } from "./CanvasFlowSelectionMenuHelpers";
 import { CanvasFlowCanvasAdapter } from "./CanvasFlowCanvasAdapter";
@@ -179,6 +184,8 @@ class CanvasFlowPromptInspectorModal extends Modal {
 }
 
 export class CanvasFlowEnhancer {
+  private static readonly IMAGE_MODEL_CATALOG_REFRESH_INTERVAL_MS = 5 * 60_000;
+
   private readonly controllers = new Map<WorkspaceLeaf, LeafController>();
   private readonly runner: CanvasFlowRunner;
   private readonly canvasAdapter = new CanvasFlowCanvasAdapter();
@@ -186,6 +193,8 @@ export class CanvasFlowEnhancer {
   private creatingFromImageKeys = new Set<string>();
   private copyingImageKeys = new Set<string>();
   private workspaceEventRefs: any[] = [];
+  private imageModelCatalogRefreshInFlight: Promise<boolean> | null = null;
+  private lastImageModelCatalogRefreshAt = 0;
 
   constructor(
     private readonly app: App,
@@ -628,6 +637,10 @@ export class CanvasFlowEnhancer {
         id: String((model as any)?.id || "").trim(),
         name: String((model as any)?.name || "").trim() || undefined,
         provider: String((model as any)?.provider || "").trim() || undefined,
+        supports_generation:
+          typeof (model as any)?.supports_generation === "boolean"
+            ? (model as any).supports_generation
+            : undefined,
         input_modalities: Array.isArray((model as any)?.input_modalities)
           ? (model as any).input_modalities.map((value: unknown) => String(value || ""))
           : undefined,
@@ -646,6 +659,22 @@ export class CanvasFlowEnhancer {
         allowed_aspect_ratios: Array.isArray((model as any)?.allowed_aspect_ratios)
           ? (model as any).allowed_aspect_ratios.map((value: unknown) => String(value || ""))
           : undefined,
+        estimated_cost_per_image_usd:
+          typeof (model as any)?.estimated_cost_per_image_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_usd)
+            ? (model as any).estimated_cost_per_image_usd
+            : undefined,
+        estimated_cost_per_image_low_usd:
+          typeof (model as any)?.estimated_cost_per_image_low_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_low_usd)
+            ? (model as any).estimated_cost_per_image_low_usd
+            : undefined,
+        estimated_cost_per_image_high_usd:
+          typeof (model as any)?.estimated_cost_per_image_high_usd === "number" &&
+          Number.isFinite((model as any).estimated_cost_per_image_high_usd)
+            ? (model as any).estimated_cost_per_image_high_usd
+            : undefined,
+        pricing_source: String((model as any)?.pricing_source || "").trim() || undefined,
       }))
       .filter((model) => model.id.length > 0);
   }
@@ -669,24 +698,29 @@ export class CanvasFlowEnhancer {
 
     const serverModels = this.getCachedImageGenerationModels();
     const groups = getCuratedImageGenerationModelGroups(serverModels);
+    const hasSupportMetadata =
+      serverModels.some((model) => typeof model.supports_generation === "boolean") ||
+      groups.some((group) => group.models.some((model) => model.supportsGeneration === false));
     const curatedSlugs = new Set<string>();
+    const curatedSupportBySlug = new Map<string, boolean>();
     for (const group of groups) {
       for (const model of group.models) {
         curatedSlugs.add(model.id);
+        curatedSupportBySlug.set(model.id, model.supportsGeneration);
       }
     }
 
     const extraSlugs = Array.from(extras.values())
       .map((s) => String(s || "").trim())
-      .filter((s) => s && !curatedSlugs.has(s))
+      .filter((s) => s && s !== "openrouter/auto" && !curatedSlugs.has(s))
       .sort((a, b) => a.localeCompare(b));
 
     select.empty();
     const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug, serverModels) : null;
     const defaultLabel = defaultEntry
-      ? `(Default: ${defaultEntry.label} (${defaultEntry.id})  ${defaultEntry.pricing.summary})`
+      ? `(Default: ${defaultEntry.label}  ${defaultEntry.pricing.summary})`
       : settingsModelSlug
-        ? `(Default: ${settingsModelSlug})`
+        ? "(Default: configured model)"
         : "(Default model)";
     select.createEl("option", { value: "", text: defaultLabel });
 
@@ -694,7 +728,12 @@ export class CanvasFlowEnhancer {
       const optgroup = select.createEl("optgroup");
       optgroup.label = group.provider;
       for (const model of group.models) {
-        optgroup.createEl("option", { value: model.id, text: formatCuratedImageModelOptionText(model) });
+        const isSupported = hasSupportMetadata ? model.supportsGeneration === true : true;
+        const option = optgroup.createEl("option", {
+          value: model.id,
+          text: isSupported ? formatCuratedImageModelOptionText(model) : `${formatCuratedImageModelOptionText(model)} (Not supported yet)`,
+        });
+        option.disabled = !isSupported;
       }
     }
 
@@ -702,7 +741,12 @@ export class CanvasFlowEnhancer {
       const optgroup = select.createEl("optgroup");
       optgroup.label = "Custom";
       for (const slug of extraSlugs) {
-        optgroup.createEl("option", { value: slug, text: slug });
+        const isSupported = hasSupportMetadata ? curatedSupportBySlug.get(slug) === true : true;
+        const option = optgroup.createEl("option", {
+          value: slug,
+          text: isSupported ? slug : `${slug} (Not supported yet)`,
+        });
+        option.disabled = !isSupported;
       }
     }
 
@@ -1357,7 +1401,12 @@ export class CanvasFlowEnhancer {
       });
     };
 
-    modelSelect.addEventListener("change", onDraftInput);
+    modelSelect.addEventListener("change", () => {
+      void queueCanvasFlowLastUsedPatch(this.plugin, {
+        modelId: String(modelSelect.value || "").trim(),
+      });
+      onDraftInput();
+    });
     bindBlurSave(modelSelect);
 
     for (const btn of imageCountButtons) {
@@ -1365,6 +1414,9 @@ export class CanvasFlowEnhancer {
         stopEvent(e);
         if (inspector.suppressDraftEvents) return;
         this.setActiveChoiceButtons(imageCountButtons, String(btn.dataset.value || "1"));
+        void queueCanvasFlowLastUsedPatch(this.plugin, {
+          imageCount: Number(btn.dataset.value || "1"),
+        });
         onDraftInput();
         this.queueInspectorDraftSave(controller, inspector, "choice");
       });
@@ -1375,6 +1427,9 @@ export class CanvasFlowEnhancer {
         stopEvent(e);
         if (inspector.suppressDraftEvents) return;
         this.setActiveChoiceButtons(aspectRatioButtons, String(btn.dataset.value || DEFAULT_SIMPLE_ASPECT_RATIO));
+        void queueCanvasFlowLastUsedPatch(this.plugin, {
+          aspectRatio: String(btn.dataset.value || DEFAULT_SIMPLE_ASPECT_RATIO),
+        });
         onDraftInput();
         this.queueInspectorDraftSave(controller, inspector, "choice");
       });
@@ -1568,6 +1623,144 @@ export class CanvasFlowEnhancer {
           inspector.promptTextarea.setSelectionRange(end, end);
         } catch {}
       }, 0);
+    }
+
+    void this.refreshInspectorModelSelect(controller, inspector, state.nodeId);
+  }
+
+  private async refreshInspectorModelSelect(
+    controller: LeafController,
+    inspector: PromptInspectorState,
+    nodeId: string
+  ): Promise<void> {
+    const updated = await this.refreshImageGenerationModelCatalogCache();
+    if (!updated) return;
+    if (!inspector.isOpen || inspector.boundNodeId !== nodeId) return;
+
+    const state = controller.latestPromptStates.get(nodeId);
+    if (!state) return;
+
+    const entry = this.getPromptDraftEntry(controller, state);
+    const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
+    const existingSelection = String(inspector.modelSelect.value || "").trim();
+    this.renderModelSelect(inspector.modelSelect, {
+      settingsModelSlug,
+      modelFromNote: entry.draft.explicitModel || String(state.promptConfig.imageModelId || "").trim(),
+      selectedValue: existingSelection || entry.draft.explicitModel,
+    });
+    inspector.modelSelect.value = existingSelection || String(entry.draft.explicitModel || "").trim();
+    this.refreshPromptNodeCard(controller, nodeId);
+  }
+
+  private imageModelCatalogSignature(models: readonly ImageGenerationServerCatalogModel[]): string {
+    return models
+      .map((model) => ({
+        id: String(model.id || "").trim(),
+        name: String(model.name || "").trim(),
+        provider: String(model.provider || "").trim(),
+        supports_generation: typeof model.supports_generation === "boolean" ? model.supports_generation : false,
+        supports_image_input: model.supports_image_input === true,
+        max_images_per_job:
+          typeof model.max_images_per_job === "number" && Number.isFinite(model.max_images_per_job)
+            ? Math.max(1, Math.floor(model.max_images_per_job))
+            : 0,
+        default_aspect_ratio: String(model.default_aspect_ratio || "").trim(),
+        estimated_cost_per_image_usd:
+          typeof model.estimated_cost_per_image_usd === "number" && Number.isFinite(model.estimated_cost_per_image_usd)
+            ? model.estimated_cost_per_image_usd
+            : 0,
+        estimated_cost_per_image_low_usd:
+          typeof model.estimated_cost_per_image_low_usd === "number" &&
+          Number.isFinite(model.estimated_cost_per_image_low_usd)
+            ? model.estimated_cost_per_image_low_usd
+            : 0,
+        estimated_cost_per_image_high_usd:
+          typeof model.estimated_cost_per_image_high_usd === "number" &&
+          Number.isFinite(model.estimated_cost_per_image_high_usd)
+            ? model.estimated_cost_per_image_high_usd
+            : 0,
+        pricing_source: String(model.pricing_source || "").trim(),
+        input_modalities: Array.isArray(model.input_modalities)
+          ? model.input_modalities.map((value) => String(value || "").trim()).filter(Boolean).sort()
+          : [],
+        output_modalities: Array.isArray(model.output_modalities)
+          ? model.output_modalities.map((value) => String(value || "").trim()).filter(Boolean).sort()
+          : [],
+        allowed_aspect_ratios: Array.isArray(model.allowed_aspect_ratios)
+          ? model.allowed_aspect_ratios.map((value) => String(value || "").trim()).filter(Boolean).sort()
+          : [],
+      }))
+      .filter((model) => model.id.length > 0)
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((model) => JSON.stringify(model))
+      .join("|");
+  }
+
+  private async refreshImageGenerationModelCatalogCache(options?: { force?: boolean }): Promise<boolean> {
+    const now = Date.now();
+    if (
+      options?.force !== true &&
+      now - this.lastImageModelCatalogRefreshAt < CanvasFlowEnhancer.IMAGE_MODEL_CATALOG_REFRESH_INTERVAL_MS
+    ) {
+      return false;
+    }
+
+    if (this.imageModelCatalogRefreshInFlight) {
+      return await this.imageModelCatalogRefreshInFlight;
+    }
+
+    const licenseKey = String(this.plugin.settings.licenseKey || "").trim();
+    if (!licenseKey) {
+      return false;
+    }
+
+    this.imageModelCatalogRefreshInFlight = (async () => {
+      try {
+        const current = this.getCachedImageGenerationModels();
+        const service = new SystemSculptImageGenerationService({
+          baseUrl: this.plugin.settings.serverUrl,
+          licenseKey,
+        });
+
+        const systemCatalog = await service.listModels();
+        const supportedModels = Array.isArray(systemCatalog.models) ? systemCatalog.models : [];
+        if (supportedModels.length === 0) {
+          return false;
+        }
+        const openRouterCatalog = await service.listOpenRouterMarketplaceImageModels().catch(() => []);
+        const merged = mergeImageGenerationServerCatalogModels(
+          supportedModels,
+          openRouterCatalog
+        );
+        if (merged.length === 0) {
+          return false;
+        }
+
+        const currentSig = this.imageModelCatalogSignature(current);
+        const nextSig = this.imageModelCatalogSignature(merged);
+        if (currentSig === nextSig) {
+          return false;
+        }
+
+        await this.plugin.getSettingsManager().updateSettings({
+          imageGenerationModelCatalogCache: {
+            fetchedAt: new Date().toISOString(),
+            models: merged,
+          },
+        });
+        return true;
+      } catch (error) {
+        console.warn("[CanvasFlow] Failed to refresh image model catalog for inspector dropdown.", error);
+        return false;
+      } finally {
+        this.lastImageModelCatalogRefreshAt = Date.now();
+      }
+    })();
+
+    try {
+      return await this.imageModelCatalogRefreshInFlight;
+    } finally {
+      this.imageModelCatalogRefreshInFlight = null;
     }
   }
 
@@ -2329,7 +2522,14 @@ export class CanvasFlowEnhancer {
         return;
       }
 
-      const modelId = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+      const defaults = resolveCanvasFlowPromptDefaults({
+        settings: this.plugin.settings,
+        serverModels: this.getCachedImageGenerationModels(),
+        source: "image-node",
+      });
+      const modelId = defaults.modelId;
+      const promptImageCount = defaults.imageCount;
+      const promptAspectRatio = defaults.aspectRatio;
 
       btn.classList.add("ss-canvasflow-is-loading");
       this.setMenuButtonIcon(btn, "loader");
@@ -2338,13 +2538,12 @@ export class CanvasFlowEnhancer {
       const imageOptions: Record<string, unknown> =
         modelId === "google/nano-banana-pro"
           ? {
-              aspect_ratio: "match_input_image",
+              aspect_ratio: promptAspectRatio || "match_input_image",
               resolution: "4K",
               output_format: "jpg",
               safety_filter_level: "block_only_high",
             }
           : {};
-      const promptAspectRatio = modelId === "google/nano-banana-pro" ? null : getDefaultImageAspectRatio(modelId);
 
       const created = await this.createPromptNodeConnectedToImage({
         canvasFile: canvasAbs,
@@ -2352,6 +2551,7 @@ export class CanvasFlowEnhancer {
         imageNodeId,
         imageNode,
         modelId,
+        imageCount: promptImageCount,
         aspectRatio: promptAspectRatio,
         promptText: "",
         imageOptions,
@@ -2382,7 +2582,8 @@ export class CanvasFlowEnhancer {
     imageNodeId: string;
     imageNode: any;
     modelId: string;
-    aspectRatio: string | null;
+    imageCount: number;
+    aspectRatio: string;
     promptText: string;
     imageOptions: Record<string, unknown>;
   }): Promise<{ promptNodeId: string; promptFile: TFile }> {
@@ -2396,7 +2597,8 @@ export class CanvasFlowEnhancer {
       "ss_flow_kind: prompt",
       "ss_flow_backend: openrouter",
       `ss_image_model: ${options.modelId}`,
-      options.aspectRatio ? `ss_image_aspect_ratio: ${options.aspectRatio}` : "",
+      `ss_image_count: ${Math.max(1, Math.min(4, Math.floor(options.imageCount || 1)))}`,
+      `ss_image_aspect_ratio: ${String(options.aspectRatio || "").trim() || "1:1"}`,
       ...inputLines,
       "---",
       "",
