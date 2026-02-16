@@ -45,6 +45,29 @@ describe("CanvasFlowEnhancer mutation filtering", () => {
     expect(enhancer.shouldScheduleUpdateFromMutations([ownedMutation])).toBe(false);
   });
 
+  it("ignores mutations from lightweight node cards and inspector UI", () => {
+    const nodeCard = document.createElement("div");
+    nodeCard.className = "ss-canvasflow-node-card";
+    const inspector = document.createElement("div");
+    inspector.className = "ss-canvasflow-inspector";
+
+    const cardMutation = {
+      type: "childList",
+      target: nodeCard,
+      addedNodes: [],
+      removedNodes: [],
+    } as any as MutationRecord;
+    const inspectorMutation = {
+      type: "attributes",
+      target: inspector,
+      attributeName: "class",
+      oldValue: "ss-canvasflow-inspector old",
+    } as any as MutationRecord;
+
+    expect(enhancer.shouldScheduleUpdateFromMutations([cardMutation])).toBe(false);
+    expect(enhancer.shouldScheduleUpdateFromMutations([inspectorMutation])).toBe(false);
+  });
+
   it("ignores non-canvas class mutations", () => {
     const unrelated = document.createElement("div");
     unrelated.className = "theme-dark";

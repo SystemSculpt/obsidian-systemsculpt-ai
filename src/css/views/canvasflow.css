@@ -58,7 +58,7 @@
 }
 
 /* Hide everything in the content host except our injected UI. (Canvas DOM varies across builds.) */
-.canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) > :not(.ss-canvasflow-controls) {
+.canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) > :not(.ss-canvasflow-controls):not(.ss-canvasflow-node-card) {
   display: none !important;
 }
 
@@ -75,6 +75,196 @@
     radial-gradient(900px 360px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 22%, transparent), transparent 60%),
     radial-gradient(700px 320px at 100% 10%, color-mix(in srgb, var(--text-accent) 14%, transparent), transparent 65%),
     linear-gradient(180deg, var(--background-secondary), var(--background-primary));
+}
+
+.canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-node-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 0;
+  border-top: none;
+  padding: 12px 12px 12px 18px;
+  border-radius: 0;
+  height: 100%;
+  position: relative;
+  background:
+    radial-gradient(900px 360px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 20%, transparent), transparent 60%),
+    radial-gradient(700px 320px at 100% 10%, color-mix(in srgb, var(--text-accent) 10%, transparent), transparent 65%),
+    linear-gradient(180deg, var(--background-secondary), var(--background-primary));
+}
+
+.canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-node-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(180deg, var(--interactive-accent), color-mix(in srgb, var(--interactive-accent) 55%, transparent));
+  opacity: 0.9;
+}
+
+.ss-canvasflow-node-card.is-selected::before {
+  opacity: 1;
+}
+
+.ss-canvasflow-node-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ss-canvasflow-node-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+}
+
+.ss-canvasflow-node-card-model {
+  font-size: 11px;
+  opacity: 0.92;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 55%, transparent);
+}
+
+.ss-canvasflow-node-card-meta {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-faint);
+  border: 1px dashed color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
+  border-radius: 8px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-canvasflow-node-card-path {
+  font-size: 10px;
+  color: var(--text-faint);
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-canvasflow-node-card.is-dirty .ss-canvasflow-node-card-meta {
+  color: color-mix(in srgb, var(--text-warning, #facc15) 84%, var(--text-normal));
+}
+
+.ss-canvasflow-node-card-excerpt {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--background-primary) 72%, black);
+  min-height: 58px;
+}
+
+.ss-canvasflow-node-card-hint {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+
+.ss-canvasflow-node-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ss-canvasflow-node-card-status {
+  margin-top: auto;
+}
+
+.ss-canvasflow-inspector {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: min(430px, 38vw);
+  max-height: calc(100% - 28px);
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+  background:
+    radial-gradient(1000px 420px at 0% 0%, color-mix(in srgb, var(--interactive-accent) 20%, transparent), transparent 58%),
+    linear-gradient(180deg, var(--background-secondary), var(--background-primary));
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.42);
+  z-index: 35;
+}
+
+.ss-canvasflow-inspector.is-collapsed {
+  display: none;
+}
+
+.ss-canvasflow-inspector.is-unselected {
+  border-color: color-mix(in srgb, var(--text-muted) 45%, var(--background-modifier-border));
+  opacity: 0.92;
+}
+
+.ss-canvasflow-inspector-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 14px;
+}
+
+.ss-canvasflow-inspector-content {
+  padding: 12px;
+}
+
+.ss-canvasflow-inspector-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.ss-canvasflow-inspector-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+}
+
+.ss-canvasflow-inspector-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.ss-canvasflow-inspector-fields {
+  margin-top: 0;
+}
+
+.ss-canvasflow-inspector .ss-canvasflow-prompt {
+  min-height: 190px;
+}
+
+.ss-canvasflow-inspector-actions {
+  margin-top: 10px;
+}
+
+@media (max-width: 1200px) {
+  .ss-canvasflow-inspector {
+    width: min(380px, 44vw);
+  }
+}
+
+@media (max-width: 960px) {
+  .ss-canvasflow-inspector {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 10px;
+  }
 }
 
 .canvas-node.ss-canvasflow-prompt-node .ss-canvasflow-controls::before {

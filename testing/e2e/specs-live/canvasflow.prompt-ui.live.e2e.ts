@@ -83,8 +83,9 @@ async function openCanvasFile(path: string): Promise<void> {
 async function getPromptNodeUiState(nodeId: string): Promise<{
   found: boolean;
   hasPromptClass: boolean;
-  hasControls: boolean;
-  controlsVisible: boolean;
+  hasCard: boolean;
+  cardVisible: boolean;
+  hasLegacyControls: boolean;
   contentHostCount: number;
   debug: Record<string, any>;
 }> {
@@ -101,11 +102,12 @@ async function getPromptNodeUiState(nodeId: string): Promise<{
       return value.replaceAll('"', '\\"');
     };
 
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${esc(nodeId)}"]`);
-    const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+    const card = document.querySelector<HTMLElement>(`.ss-canvasflow-node-card[data-ss-node-id="${esc(nodeId)}"]`);
+    const nodeEl = card?.closest?.(".canvas-node") as HTMLElement | null;
+    const legacyControls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${esc(nodeId)}"]`);
 
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node"));
-    if (!controls || !nodeEl) {
+    if (!card || !nodeEl) {
       const sample = nodes[0] || null;
       const sampleAttrs: Record<string, string> = {};
       const sampleContentAttrs: Record<string, string> = {};
@@ -128,14 +130,16 @@ async function getPromptNodeUiState(nodeId: string): Promise<{
       return {
         found: false,
         hasPromptClass: false,
-        hasControls: false,
-        controlsVisible: false,
+        hasCard: false,
+        cardVisible: false,
+        hasLegacyControls: !!legacyControls,
         contentHostCount: 0,
         debug: {
           nodeCount: nodes.length,
-          controlsSelector: `.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`,
-          controlsFound: !!controls,
+          cardSelector: `.ss-canvasflow-node-card[data-ss-node-id="${nodeId}"]`,
+          cardFound: !!card,
           nodeElFound: !!nodeEl,
+          legacyControlsFound: !!legacyControls,
           activeLeafType: (app.workspace as any)?.activeLeaf?.view?.getViewType?.() ?? "unknown",
           canvasLeafCount: Array.isArray(canvasLeaves) ? canvasLeaves.length : 0,
           pluginCanvasFlowEnabled: plugin?.settings?.canvasFlowEnabled === true,
@@ -150,19 +154,20 @@ async function getPromptNodeUiState(nodeId: string): Promise<{
       };
     }
 
-    const hasControls = !!controls;
+    const hasCard = !!card;
     const win = nodeEl.ownerDocument?.defaultView || window;
-    const controlsVisible =
-      !!controls &&
-      win.getComputedStyle(controls).display !== "none" &&
-      controls.getBoundingClientRect().width > 0 &&
-      controls.getBoundingClientRect().height > 0;
+    const cardVisible =
+      !!card &&
+      win.getComputedStyle(card).display !== "none" &&
+      card.getBoundingClientRect().width > 0 &&
+      card.getBoundingClientRect().height > 0;
     const contentHostCount = nodeEl.querySelectorAll(".canvas-node-content, .canvas-node-container").length;
     return {
       found: true,
       hasPromptClass: nodeEl.classList.contains("ss-canvasflow-prompt-node"),
-      hasControls,
-      controlsVisible,
+      hasCard,
+      cardVisible,
+      hasLegacyControls: !!legacyControls,
       contentHostCount,
       debug: {
         className: nodeEl.className,
@@ -178,8 +183,8 @@ async function getPromptNodeUiState(nodeId: string): Promise<{
 
 async function getPromptNodeRect(nodeId: string): Promise<{ left: number; top: number; width: number; height: number } | null> {
   return await browser.execute((nodeId) => {
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
-    let nodeEl = (controls?.closest?.(".canvas-node") as HTMLElement | null) || null;
+    const card = document.querySelector<HTMLElement>(`.ss-canvasflow-node-card[data-ss-node-id="${nodeId}"]`);
+    let nodeEl = (card?.closest?.(".canvas-node") as HTMLElement | null) || null;
     if (!nodeEl) {
       const candidates = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node.ss-canvasflow-prompt-node"));
       if (candidates.length === 1) {
@@ -194,8 +199,8 @@ async function getPromptNodeRect(nodeId: string): Promise<{ left: number; top: n
 
 async function getPromptNodeComputedSize(nodeId: string): Promise<{ width: number; height: number } | null> {
   return await browser.execute((nodeId) => {
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
-    let nodeEl = (controls?.closest?.(".canvas-node") as HTMLElement | null) || null;
+    const card = document.querySelector<HTMLElement>(`.ss-canvasflow-node-card[data-ss-node-id="${nodeId}"]`);
+    let nodeEl = (card?.closest?.(".canvas-node") as HTMLElement | null) || null;
     if (!nodeEl) {
       const candidates = Array.from(document.querySelectorAll<HTMLElement>(".canvas-node.ss-canvasflow-prompt-node"));
       if (candidates.length === 1) nodeEl = candidates[0];
@@ -209,12 +214,12 @@ async function getPromptNodeComputedSize(nodeId: string): Promise<{ width: numbe
   }, nodeId);
 }
 
-async function dispatchWheelOnPromptControls(nodeId: string, deltaY: number): Promise<void> {
+async function dispatchWheelOnPromptCard(nodeId: string, deltaY: number): Promise<void> {
   await browser.execute((args) => {
     const { nodeId, deltaY } = args as { nodeId: string; deltaY: number };
-    const controls = document.querySelector<HTMLElement>(`.ss-canvasflow-controls[data-ss-node-id="${nodeId}"]`);
-    if (!controls) return;
-    const rect = controls.getBoundingClientRect();
+    const card = document.querySelector<HTMLElement>(`.ss-canvasflow-node-card[data-ss-node-id="${nodeId}"]`);
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
     const event = new WheelEvent("wheel", {
       deltaY,
       bubbles: true,
@@ -222,7 +227,7 @@ async function dispatchWheelOnPromptControls(nodeId: string, deltaY: number): Pr
       clientX: rect.left + rect.width / 2,
       clientY: rect.top + rect.height / 2,
     });
-    controls.dispatchEvent(event);
+    card.dispatchEvent(event);
   }, { nodeId, deltaY });
 }
 
@@ -297,7 +302,7 @@ describe("CanvasFlow (live) prompt node UI", () => {
     );
   });
 
-  it("injects custom prompt controls and keeps them stable after selection changes", async function () {
+  it("injects custom prompt cards and keeps them stable after selection changes", async function () {
     this.timeout(180000);
 
     await openCanvasFile(canvasPath);
@@ -307,15 +312,15 @@ describe("CanvasFlow (live) prompt node UI", () => {
     while (Date.now() < deadline) {
       // eslint-disable-next-line no-await-in-loop
       lastState = await getPromptNodeUiState(nodeId);
-      if (lastState.found && lastState.hasPromptClass && lastState.hasControls && lastState.controlsVisible) {
+      if (lastState.found && lastState.hasPromptClass && lastState.hasCard && lastState.cardVisible && !lastState.hasLegacyControls) {
         break;
       }
       // eslint-disable-next-line no-await-in-loop
       await browser.pause(250);
     }
 
-    if (!lastState || !lastState.found || !lastState.hasPromptClass || !lastState.hasControls || !lastState.controlsVisible) {
-      throw new Error(`Prompt node controls were not injected or not visible. state=${JSON.stringify(lastState)}`);
+    if (!lastState || !lastState.found || !lastState.hasPromptClass || !lastState.hasCard || !lastState.cardVisible || lastState.hasLegacyControls) {
+      throw new Error(`Prompt node card was not injected/visible or legacy controls still exist. state=${JSON.stringify(lastState)}`);
     }
 
     // Fixed sizing: prompt nodes should clamp to the canonical dimensions.
@@ -341,7 +346,7 @@ describe("CanvasFlow (live) prompt node UI", () => {
     if (!beforePan) {
       throw new Error("Failed to read prompt node rect before pan.");
     }
-    await dispatchWheelOnPromptControls(nodeId, 220);
+    await dispatchWheelOnPromptCard(nodeId, 220);
     await browser.pause(350);
     const afterPan = await getPromptNodeRect(nodeId);
     if (!afterPan) {
@@ -354,27 +359,28 @@ describe("CanvasFlow (live) prompt node UI", () => {
 
     // Click the node (selection changes can trigger Canvas re-rendering).
     await browser.execute(() => {
-      const controls = document.querySelector<HTMLElement>('.ss-canvasflow-controls[data-ss-node-id="e2e-prompt-node"]');
-      const nodeEl = controls?.closest?.(".canvas-node") as HTMLElement | null;
+      const card = document.querySelector<HTMLElement>('.ss-canvasflow-node-card[data-ss-node-id="e2e-prompt-node"]');
+      const nodeEl = card?.closest?.(".canvas-node") as HTMLElement | null;
       nodeEl?.click?.();
     });
 
     // Sample for a short window to catch the "flash then disappear" bug.
-    const samples: Array<{ hasControls: boolean; hasPromptClass: boolean; controlsVisible: boolean }> = [];
+    const samples: Array<{ hasCard: boolean; hasPromptClass: boolean; cardVisible: boolean; hasLegacyControls: boolean }> = [];
     for (let i = 0; i < 12; i += 1) {
       // eslint-disable-next-line no-await-in-loop
       await browser.pause(250);
       // eslint-disable-next-line no-await-in-loop
       const state = await getPromptNodeUiState(nodeId);
       samples.push({
-        hasControls: state.hasControls,
+        hasCard: state.hasCard,
         hasPromptClass: state.hasPromptClass,
-        controlsVisible: state.controlsVisible,
+        cardVisible: state.cardVisible,
+        hasLegacyControls: state.hasLegacyControls,
       });
     }
 
     const last = samples.slice(-4);
-    const stable = last.every((s) => s.hasControls && s.hasPromptClass && s.controlsVisible);
+    const stable = last.every((s) => s.hasCard && s.hasPromptClass && s.cardVisible && !s.hasLegacyControls);
     if (!stable) {
       const debugState = await getPromptNodeUiState(nodeId);
       throw new Error(`CanvasFlow prompt UI not stable after selection changes. samples=${JSON.stringify(samples)} debug=${JSON.stringify(debugState.debug)}`);

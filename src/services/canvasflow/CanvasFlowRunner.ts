@@ -64,6 +64,12 @@ type CanvasFlowSavedOutput = {
   imagePath: string;
 };
 
+type CanvasFlowGenerationRunResult = {
+  jobId: string;
+  pollUrl?: string;
+  finalJob: SystemSculptGenerationJobResponse;
+};
+
 function isHttpUrl(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.startsWith("http://") || trimmed.startsWith("https://");
@@ -106,6 +112,11 @@ function extensionFromUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function isRetryableDownloadStatus(status: number): boolean {
+  if (!Number.isFinite(status)) return false;
+  return status === 404 || status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 function nowStamp(): { iso: string; compact: string } {
@@ -281,7 +292,7 @@ export class CanvasFlowRunner {
       );
     }
 
-    const finalJob = await this.submitAndAwaitGeneration({
+    const generationRun = await this.submitAndAwaitGeneration({
       runScopeKey: `${options.canvasFile.path}::${options.promptNodeId}`,
       client,
       modelId: context.modelId,
@@ -294,7 +305,7 @@ export class CanvasFlowRunner {
       signal: options.signal,
     });
 
-    const outputs = finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
+    const outputs = generationRun.finalJob.outputs.filter((output) => isHttpUrl(String(output.url || "")));
     if (outputs.length === 0) {
       throw new Error("Image generation completed, but no output URLs were returned.");
     }
@@ -302,11 +313,13 @@ export class CanvasFlowRunner {
     const savedOutputs = await this.saveGeneratedOutputs({
       client,
       outputs,
+      generationJobId: generationRun.jobId,
+      pollUrl: generationRun.pollUrl,
       modelId: context.modelId,
       promptFile: context.promptFile,
       promptText: context.promptText,
       inputImagePaths: collectedInputs.inputImagePaths,
-      job: finalJob,
+      job: generationRun.finalJob,
       status: setStatus,
       signal: options.signal,
     });
@@ -455,7 +468,7 @@ export class CanvasFlowRunner {
     seed: number | null;
     status: RunStatusUpdater;
     signal?: AbortSignal;
-  }): Promise<SystemSculptGenerationJobResponse> {
+  }): Promise<CanvasFlowGenerationRunResult> {
     options.status("Submitting generation job...");
     const runAttemptId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const payloadSignature = stableSerialize({
@@ -490,7 +503,7 @@ export class CanvasFlowRunner {
 
     const pollUrl = String(job.poll_url || "").trim() || undefined;
     options.status("Starting generation...");
-    return await options.client.waitForGenerationJob(jobId, {
+    const finalJob = await options.client.waitForGenerationJob(jobId, {
       pollIntervalMs: this.plugin.settings.imageGenerationPollIntervalMs ?? 1000,
       pollUrl,
       initialPollDelayMs: 600,
@@ -504,11 +517,19 @@ export class CanvasFlowRunner {
         }
       },
     });
+
+    return {
+      jobId,
+      pollUrl,
+      finalJob,
+    };
   }
 
   private async saveGeneratedOutputs(options: {
     client: CanvasFlowImageGenerationClient;
     outputs: SystemSculptImageGenerationOutput[];
+    generationJobId: string;
+    pollUrl?: string;
     modelId: string;
     promptFile: TFile;
     promptText: string;
@@ -540,11 +561,65 @@ export class CanvasFlowRunner {
           ? `Downloading generated image (${imageOrdinal}/${options.outputs.length})...`
           : "Downloading generated image..."
       );
-      const download = await options.client.downloadImage(output.url);
+      let outputToDownload = output;
+      let download: { arrayBuffer: ArrayBuffer; contentType?: string } | null = null;
+      let refreshedUrlTried = false;
+
+      while (!download) {
+        try {
+          download = await options.client.downloadImage(outputToDownload.url);
+        } catch (error: any) {
+          const status = Number(error?.status);
+          const canRefreshAndRetry =
+            !refreshedUrlTried &&
+            isRetryableDownloadStatus(status) &&
+            String(options.generationJobId || "").trim().length > 0;
+
+          if (!canRefreshAndRetry) {
+            throw error;
+          }
+
+          refreshedUrlTried = true;
+          options.status(
+            options.outputs.length > 1
+              ? `Refreshing output URL (${imageOrdinal}/${options.outputs.length})...`
+              : "Refreshing output URL..."
+          );
+          const refreshedOutput = await this.refreshOutputUrlFromGenerationJob({
+            client: options.client,
+            generationJobId: options.generationJobId,
+            pollUrl: options.pollUrl,
+            originalOutput: output,
+            outputOrdinal: imageOrdinal,
+            status: options.status,
+            signal: options.signal,
+          });
+          if (!refreshedOutput || !isHttpUrl(String(refreshedOutput.url || ""))) {
+            throw error;
+          }
+
+          const previousUrl = String(outputToDownload.url || "").trim();
+          const nextUrl = String(refreshedOutput.url || "").trim();
+          if (!nextUrl || nextUrl === previousUrl) {
+            throw error;
+          }
+
+          outputToDownload = refreshedOutput;
+          options.status(
+            options.outputs.length > 1
+              ? `Retrying download (${imageOrdinal}/${options.outputs.length})...`
+              : "Retrying download..."
+          );
+        }
+      }
+      if (!download) {
+        throw new Error("Image download failed: empty result.");
+      }
+
       const ext =
         extensionFromContentType(download.contentType) ||
-        extensionFromMimeType(output.mime_type) ||
-        extensionFromUrl(output.url) ||
+        extensionFromMimeType(outputToDownload.mime_type) ||
+        extensionFromUrl(outputToDownload.url) ||
         "png";
 
       const indexSuffix = options.outputs.length > 1 ? `-${String(imageOrdinal).padStart(2, "0")}` : "";
@@ -555,7 +630,7 @@ export class CanvasFlowRunner {
         ext
       );
       await this.app.vault.createBinary(imagePath, download.arrayBuffer);
-      saved.push({ output, imagePath });
+      saved.push({ output: outputToDownload, imagePath });
 
       if (this.plugin.settings.imageGenerationSaveMetadataSidecar !== false) {
         await this.writeSidecar({
@@ -565,13 +640,55 @@ export class CanvasFlowRunner {
           promptText: options.promptText,
           modelId: options.modelId,
           job: options.job,
-          output,
+          output: outputToDownload,
           inputImagePaths: options.inputImagePaths,
         });
       }
     }
 
     return saved;
+  }
+
+  private async refreshOutputUrlFromGenerationJob(options: {
+    client: CanvasFlowImageGenerationClient;
+    generationJobId: string;
+    pollUrl?: string;
+    originalOutput: SystemSculptImageGenerationOutput;
+    outputOrdinal: number;
+    status: RunStatusUpdater;
+    signal?: AbortSignal;
+  }): Promise<SystemSculptImageGenerationOutput | null> {
+    const jobId = String(options.generationJobId || "").trim();
+    if (!jobId) return null;
+
+    const refreshed = await options.client.waitForGenerationJob(jobId, {
+      pollUrl: options.pollUrl,
+      pollIntervalMs: 600,
+      maxPollIntervalMs: 1200,
+      maxWaitMs: 20_000,
+      initialPollDelayMs: 0,
+      signal: options.signal,
+      onUpdate: (job) => {
+        const normalized = String(job.job?.status || "").trim().toLowerCase();
+        if (normalized === "queued" || normalized === "processing") {
+          options.status("Waiting for refreshed output URL...");
+        }
+      },
+    });
+
+    const outputs = refreshed.outputs.filter((item) => isHttpUrl(String(item.url || "")));
+    if (!outputs.length) {
+      return null;
+    }
+
+    const targetIndex = Number(options.originalOutput.index);
+    if (Number.isFinite(targetIndex)) {
+      const byIndex = outputs.find((item) => item.index === targetIndex);
+      if (byIndex) return byIndex;
+    }
+
+    const fallback = outputs[options.outputOrdinal - 1];
+    return fallback || outputs[0] || null;
   }
 
   private async attachGeneratedOutputsToCanvas(options: {

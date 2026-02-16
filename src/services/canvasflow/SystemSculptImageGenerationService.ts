@@ -101,6 +101,9 @@ const SYSTEMSCULPT_IMAGE_POLL_MIN_FLAP_WINDOW_MS = 30_000;
 const SYSTEMSCULPT_IMAGE_POLL_NON_TERMINAL_ERROR_POLLS = 2;
 const SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS = 250;
 const SYSTEMSCULPT_IMAGE_DEFAULT_INITIAL_POLL_DELAY_MS = 600;
+const SYSTEMSCULPT_IMAGE_DOWNLOAD_MAX_RETRIES = 10;
+const SYSTEMSCULPT_IMAGE_DOWNLOAD_INITIAL_BACKOFF_MS = 300;
+const SYSTEMSCULPT_IMAGE_DOWNLOAD_MAX_BACKOFF_MS = 3_000;
 const TRUSTED_CROSS_ORIGIN_DOWNLOAD_HOST_SUFFIXES = [
   "systemsculpt.com",
   "systemsculpt.ai",
@@ -204,6 +207,11 @@ function clampPollMs(ms: number, minMs: number, maxMs: number): number {
   const min = Math.max(SYSTEMSCULPT_IMAGE_MIN_POLL_INTERVAL_MS, Math.floor(minMs));
   const max = Math.max(min, Math.floor(maxMs));
   return Math.max(min, Math.min(max, Math.floor(ms)));
+}
+
+function isTransientImageDownloadStatus(status: number): boolean {
+  if (!Number.isFinite(status)) return false;
+  return status === 404 || status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -317,6 +325,36 @@ export class SystemSculptImageGenerationService {
     return `${this.baseUrl}${normalizedPath}`;
   }
 
+  private normalizeSameOriginAbsoluteApiUrl(url: string): string {
+    const raw = String(url || "").trim();
+    if (!raw) return raw;
+    try {
+      const target = new URL(raw);
+      const base = new URL(this.baseUrl);
+      if (target.origin !== base.origin) {
+        return raw;
+      }
+
+      const basePath = base.pathname.replace(/\/+$/, "");
+      if (!basePath || basePath === "/") {
+        return raw;
+      }
+
+      const targetPath = target.pathname || "/";
+      if (targetPath === basePath || targetPath.startsWith(`${basePath}/`)) {
+        return raw;
+      }
+      if (/^\/api\/v\d+(?:\/|$)/i.test(targetPath)) {
+        return raw;
+      }
+
+      target.pathname = `${basePath}${targetPath.startsWith("/") ? targetPath : `/${targetPath}`}`.replace(/\/{2,}/g, "/");
+      return target.toString();
+    } catch {
+      return raw;
+    }
+  }
+
   private resolvePollUrl(jobId: string, pollUrl?: string): string {
     const trimmed = String(pollUrl || "").trim();
     if (!trimmed) {
@@ -324,7 +362,7 @@ export class SystemSculptImageGenerationService {
     }
 
     if (/^https?:\/\//i.test(trimmed)) {
-      return trimmed;
+      return this.normalizeSameOriginAbsoluteApiUrl(trimmed);
     }
     const base = new URL(this.baseUrl);
     const basePath = base.pathname.replace(/\/+$/, "");
@@ -875,14 +913,69 @@ export class SystemSculptImageGenerationService {
     if (!this.isTrustedDownloadTarget(target)) {
       throw new Error("Image download blocked: untrusted host or unsigned URL.");
     }
+
+    let retryableTarget = false;
+    try {
+      retryableTarget = this.isSignedDownloadUrl(new URL(target));
+    } catch {
+      retryableTarget = false;
+    }
+    if (this.shouldAttachAuthHeaders(target)) {
+      retryableTarget = true;
+    }
+
+    const maxAttempts = retryableTarget ? 1 + SYSTEMSCULPT_IMAGE_DOWNLOAD_MAX_RETRIES : 1;
     const headersIn = this.shouldAttachAuthHeaders(target) ? this.authHeaders() : {};
+    let backoffMs = SYSTEMSCULPT_IMAGE_DOWNLOAD_INITIAL_BACKOFF_MS;
+    let lastError: any = null;
 
-    const { arrayBuffer, headers } = await this.requestArrayBuffer(target, {
-      method: "GET",
-      headers: headersIn,
-    });
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const { arrayBuffer, headers } = await this.requestArrayBuffer(target, {
+          method: "GET",
+          headers: headersIn,
+        });
+        const contentType = typeof headers["content-type"] === "string" ? headers["content-type"] : undefined;
+        return { arrayBuffer, contentType };
+      } catch (error: any) {
+        lastError = error;
+        const status = Number(error?.status);
+        const transientStatus = isTransientImageDownloadStatus(status);
+        const canRetry = attempt < maxAttempts && transientStatus;
+        if (!canRetry) {
+          // Exhausted retry budget for a transient status (especially 404 on signed output URLs):
+          // break and let the classifier below produce a clearer, actionable error.
+          if (transientStatus && attempt >= maxAttempts) {
+            break;
+          }
+          throw error;
+        }
 
-    const contentType = typeof headers["content-type"] === "string" ? headers["content-type"] : undefined;
-    return { arrayBuffer, contentType };
+        await sleep(backoffMs);
+        backoffMs = Math.min(SYSTEMSCULPT_IMAGE_DOWNLOAD_MAX_BACKOFF_MS, Math.floor(backoffMs * 1.8));
+      }
+    }
+
+    const lastStatus = Number(lastError?.status);
+    if (lastStatus === 404) {
+      const host = (() => {
+        try {
+          return new URL(target).host || "unknown-host";
+        } catch {
+          return "unknown-host";
+        }
+      })();
+      const classified: any = new Error(
+        `Image output URL was unavailable (HTTP 404) after retries. This indicates a backend storage/signing issue for ${host}.`
+      );
+      classified.status = 404;
+      classified.code = "output_url_unavailable";
+      throw classified;
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+    throw new Error("Image download failed after retries.");
   }
 }

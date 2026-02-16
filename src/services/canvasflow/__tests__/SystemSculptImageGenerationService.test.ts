@@ -185,6 +185,34 @@ describe("SystemSculptImageGenerationService", () => {
     expect(String(call?.url || "")).toBe("https://api.systemsculpt.com/api/v1/images/generations/jobs/job_123");
   });
 
+  it("normalizes absolute same-origin poll_url values that omit the API base path", async () => {
+    requestUrlMock.mockResolvedValue({
+      status: 200,
+      json: {
+        job: {
+          id: "job_123",
+          status: "processing",
+          model: "openai/gpt-5-image-mini",
+          created_at: "2026-02-16T00:00:00.000Z",
+        },
+        outputs: [],
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    await service.getGenerationJob("job_123", {
+      pollUrl: "https://api.systemsculpt.com/images/generations/jobs/job_123",
+    });
+
+    const call = requestUrlMock.mock.calls[0]?.[0];
+    expect(String(call?.url || "")).toBe("https://api.systemsculpt.com/api/v1/images/generations/jobs/job_123");
+  });
+
   it("waits for job completion and returns outputs", async () => {
     requestUrlMock
       .mockResolvedValueOnce({
@@ -307,6 +335,46 @@ describe("SystemSculptImageGenerationService", () => {
     const call = requestUrlMock.mock.calls[0]?.[0];
     expect(call?.headers?.["x-license-key"]).toBeUndefined();
   });
+
+  it("retries transient signed-url download errors and succeeds", async () => {
+    requestUrlMock
+      .mockResolvedValueOnce({
+        status: 404,
+        text: "not found",
+        headers: { "content-type": "text/plain" },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        arrayBuffer: new Uint8Array([1, 2, 3]).buffer,
+        headers: { "content-type": "image/png" },
+      });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    const result = await service.downloadImage("https://cdn.systemsculpt.com/generated/image.png?signature=abc123");
+    expect(result.arrayBuffer).toBeInstanceOf(ArrayBuffer);
+    expect(requestUrlMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies persistent signed-url 404 as backend output-url issue", async () => {
+    requestUrlMock.mockResolvedValue({
+      status: 404,
+      text: "not found",
+      headers: { "content-type": "text/plain" },
+    });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    await expect(
+      service.downloadImage("https://cdn.systemsculpt.com/generated/image.png?signature=abc123")
+    ).rejects.toThrow("backend storage/signing issue");
+  }, 30000);
 
   it("allows signed Cloudflare R2 output URLs", async () => {
     requestUrlMock.mockResolvedValue({
