@@ -118,7 +118,7 @@ describe("DocumentProcessingService", () => {
     const service = new DocumentProcessingService(plugin.app, plugin);
     uploadDocument.mockResolvedValue({ documentId: "doc-2", cached: false });
 
-    jest
+    const pollSpy = jest
       .spyOn(service as any, "pollUntilComplete")
       .mockResolvedValue({ completed: true });
     jest
@@ -133,6 +133,26 @@ describe("DocumentProcessingService", () => {
     });
 
     expect(result).toBe("SystemSculpt/Extractions/doc-2.md");
+    expect(pollSpy).toHaveBeenCalledTimes(1);
+    expect(pollSpy.mock.calls[0]?.[4]).toBe(180);
+  });
+
+  it("uses actionable timeout fallback when polling is incomplete without explicit error", async () => {
+    const plugin = createPlugin();
+    const service = new DocumentProcessingService(plugin.app, plugin);
+    uploadDocument.mockResolvedValue({ documentId: "doc-timeout", cached: false });
+
+    jest
+      .spyOn(service as any, "pollUntilComplete")
+      .mockResolvedValue({ completed: false, status: "processing" });
+
+    await expect(
+      service.processDocument(new TFile({ path: "slow.pdf", name: "slow.pdf" }), {
+        showNotices: false,
+      })
+    ).rejects.toThrow(
+      "Document is still processing on SystemSculpt. Please retry in about a minute."
+    );
   });
 
   it("rejects when license validation fails", async () => {

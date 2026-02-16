@@ -19,6 +19,10 @@ const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   error: "x-circle",
 };
 
+const DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE =
+  "Document is still processing on SystemSculpt. Please retry in about a minute.";
+const DEFAULT_DOCUMENT_POLL_ATTEMPTS = 180;
+
 type ProgressMeta = Partial<
   Pick<DocumentProcessingLogEntry, "filePath" | "fileName" | "durationMs" | "attempt" | "source">
 > & {
@@ -367,12 +371,7 @@ export class DocumentProcessingService {
       }
 
       lastStage = "processing";
-      const platform = PlatformContext.get();
-      const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
-      const maxPollAttempts =
-        !platform.isMobile() && Number.isFinite(fileSize) && fileSize > DOCUMENT_UPLOAD_MAX_BYTES
-          ? 180
-          : 30;
+      const maxPollAttempts = DEFAULT_DOCUMENT_POLL_ATTEMPTS;
       const pollResult = await this.pollUntilComplete(
         documentId,
         progressHandler,
@@ -383,7 +382,7 @@ export class DocumentProcessingService {
 
       if (!pollResult.completed) {
         throw new Error(
-          pollResult.error || "Document processing failed or timed out"
+          pollResult.error || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE
         );
       }
 
@@ -755,10 +754,10 @@ export class DocumentProcessingService {
       {
         stage: "error",
         progress: 0,
-        label: "Document processing is taking longer than expected. Please try again later.",
+        label: DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
         icon: "clock",
         documentId,
-        error: lastError || "Document processing timed out",
+        error: lastError || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
       },
       pollMeta,
       flow
@@ -767,7 +766,7 @@ export class DocumentProcessingService {
     return {
       completed: false,
       status: lastStatus,
-      error: lastError || "Document processing timed out",
+      error: lastError || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
     };
   }
 
