@@ -43,7 +43,7 @@ export class RecorderService {
     this.app = app;
     this.plugin = plugin;
     this.platform = PlatformContext.get();
-    this.ui = new RecorderUIManager({ app, plugin, platform: this.platform });
+    this.ui = new RecorderUIManager({ app, plugin, platform: this.platform, recorderType: "audio" });
     this.transcriptionCoordinator = new TranscriptionCoordinator(app, plugin, this.platform);
 
     this.onTranscriptionDone = options.onTranscriptionComplete ?? null;

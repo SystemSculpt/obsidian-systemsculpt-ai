@@ -75,6 +75,7 @@
 @import 'modals/embeddings-status-modal.css';  /* Embeddings status modal */
 @import 'modals/credits-balance-modal.css';  /* Credits and usage modal */
 @import 'modals/bulk-automation-modal.css';  /* Bulk automation confirmation and progress widgets */
+@import 'modals/recorder-advanced-modal.css';  /* Recorder advanced controls modal */
 
 
 /* View-specific styles */

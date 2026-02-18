@@ -1,6 +1,7 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { MobileDetection } from "../utils/MobileDetection";
+import { createHoverShell, type HoverShellHandle } from "./HoverShell";
 
 export interface FloatingWidgetOptions {
   title: string;
@@ -14,6 +15,7 @@ export interface FloatingWidgetOptions {
   };
   width?: string;
   draggable?: boolean;
+  positionKey?: string;
 }
 
 /**
@@ -29,6 +31,7 @@ export abstract class FloatingWidget {
   protected widgetEl: HTMLElement | null = null;
   protected titleBarEl: HTMLElement | null = null;
   protected contentEl: HTMLElement | null = null;
+  protected hoverShell: HoverShellHandle | null = null;
   
   // Configuration
   protected options: FloatingWidgetOptions;
@@ -67,19 +70,12 @@ export abstract class FloatingWidget {
    * Hide the floating widget
    */
   hide(): void {
-    if (this.widgetEl) {
-      // Animate out
-      this.widgetEl.classList.remove("visible");
-      
-      // Remove from DOM after animation
-      setTimeout(() => {
-        if (this.widgetEl && this.widgetEl.parentNode) {
-          this.widgetEl.parentNode.removeChild(this.widgetEl);
-        }
-        this.widgetEl = null;
-        this.titleBarEl = null;
-        this.contentEl = null;
-      }, 300);
+    if (this.hoverShell) {
+      this.hoverShell.destroy();
+      this.hoverShell = null;
+      this.widgetEl = null;
+      this.titleBarEl = null;
+      this.contentEl = null;
     }
   }
 
@@ -87,114 +83,37 @@ export abstract class FloatingWidget {
    * Check if the widget is currently visible
    */
   isVisible(): boolean {
-    return this.widgetEl !== null && this.widgetEl.parentNode !== null;
+    return this.hoverShell !== null && this.hoverShell.root.parentNode !== null;
   }
 
   /**
    * Show desktop floating widget
    */
   private showDesktopWidget(): void {
-    // Create widget container
-    this.widgetEl = document.createElement("div");
-    this.widgetEl.className = `systemsculpt-floating-widget ${this.options.className || ""}`;
-    
-    // Apply positioning and sizing
-    if (this.options.position?.top) this.widgetEl.style.top = this.options.position.top;
-    if (this.options.position?.right) this.widgetEl.style.right = this.options.position.right;
-    if (this.options.position?.bottom) this.widgetEl.style.bottom = this.options.position.bottom;
-    if (this.options.position?.left) this.widgetEl.style.left = this.options.position.left;
-    if (this.options.width) this.widgetEl.style.width = this.options.width;
+    const positionKey =
+      this.options.positionKey ??
+      `floating:${(this.options.className || this.options.title).toLowerCase().replace(/\s+/g, "-")}`;
 
-    this.createDesktopUI();
+    this.hoverShell = createHoverShell({
+      title: this.options.title,
+      icon: this.options.icon,
+      className: this.options.className,
+      width: this.options.width,
+      layout: "desktop",
+      draggable: this.options.draggable !== false,
+      defaultPosition: this.options.position,
+      positionKey,
+      useFloatingLegacyClass: true,
+      showStatusRow: false,
+    });
 
-    // Add to DOM
-    document.body.appendChild(this.widgetEl);
-
-    // Animate in
-    setTimeout(() => {
-      if (this.widgetEl) {
-        this.widgetEl.classList.add("visible");
-      }
-    }, 10);
-  }
-
-  /**
-   * Create desktop UI elements
-   */
-  private createDesktopUI(): void {
-    if (!this.widgetEl) return;
-
-    // Create title bar (draggable handle)
-    this.titleBarEl = document.createElement("div");
-    this.titleBarEl.className = "systemsculpt-floating-widget-title";
-    
-    if (this.options.icon) {
-      this.titleBarEl.innerHTML = `
-        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
-             stroke-linecap="round" stroke-linejoin="round">
-          ${this.options.icon}
-        </svg>
-        ${this.options.title}
-      `;
-    } else {
-      this.titleBarEl.textContent = this.options.title;
-    }
-
-    // Make the widget draggable if enabled
-    if (this.options.draggable) {
-      this.makeDraggable(this.widgetEl, this.titleBarEl);
-    }
-    
-    this.widgetEl.appendChild(this.titleBarEl);
-
-    // Create content area
-    this.contentEl = document.createElement("div");
-    this.contentEl.className = "systemsculpt-floating-widget-content";
-    this.widgetEl.appendChild(this.contentEl);
-
-    // Let subclasses populate the content
+    this.widgetEl = this.hoverShell.root;
+    this.titleBarEl = this.hoverShell.dragHandleEl;
+    this.contentEl = this.hoverShell.contentEl;
+    this.titleBarEl.classList.add("systemsculpt-floating-widget-title");
+    this.contentEl.classList.add("systemsculpt-floating-widget-content");
     this.createContent(this.contentEl);
-  }
-
-  /**
-   * Make the widget draggable
-   */
-  private makeDraggable(element: HTMLElement, handle: HTMLElement): void {
-    let isDragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      offsetX = e.clientX - element.offsetLeft;
-      offsetY = e.clientY - element.offsetTop;
-      
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-      
-      // Prevent text selection while dragging
-      e.preventDefault();
-    };
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-
-      const x = Math.max(0, Math.min(e.clientX - offsetX, window.innerWidth - element.offsetWidth));
-      const y = Math.max(0, Math.min(e.clientY - offsetY, window.innerHeight - element.offsetHeight));
-
-      element.style.left = `${x}px`;
-      element.style.top = `${y}px`;
-      element.style.right = "auto";
-      element.style.bottom = "auto";
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-
-    handle.addEventListener("mousedown", onMouseDown);
+    this.hoverShell.show();
   }
 
   /**
@@ -214,18 +133,8 @@ export abstract class FloatingWidget {
    * Update the widget title
    */
   protected updateTitle(title: string): void {
-    if (this.titleBarEl) {
-      if (this.options.icon) {
-        this.titleBarEl.innerHTML = `
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
-               stroke-linecap="round" stroke-linejoin="round">
-            ${this.options.icon}
-          </svg>
-          ${title}
-        `;
-      } else {
-        this.titleBarEl.textContent = title;
-      }
+    if (this.hoverShell) {
+      this.hoverShell.setTitle(title);
     }
   }
 

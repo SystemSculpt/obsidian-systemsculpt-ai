@@ -1,129 +1,172 @@
-/* SystemSculpt Floating Widget Base Styling */
-
+.ss-hover-shell,
 .systemsculpt-floating-widget {
   position: fixed;
-  z-index: 1000;
-  background-color: var(--background-primary);
-  color: var(--text-normal);
-  padding: 0;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px color-mix(in srgb, rgb(0, 0, 0) 15%, var(--ss-layer-base));
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--background-modifier-border);
-  transition: transform 0.3s ease, opacity 0.3s ease;
-  transform: translateY(-10px);
-  opacity: 0;
-  min-width: 250px;
-  max-width: 500px;
-}
-
-.systemsculpt-floating-widget.visible {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.systemsculpt-floating-widget-title {
-  font-size: 16px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: move;
-  user-select: none;
-  padding: 12px 15px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  border-radius: 8px 8px 0 0;
-}
-
-.systemsculpt-floating-widget-title svg {
-  color: var(--text-accent);
-  flex-shrink: 0;
-}
-
-.systemsculpt-floating-widget-content {
-  padding: 15px;
+  z-index: 1100;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: min(340px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 12px);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: var(--shadow-s, 0 10px 28px rgba(0, 0, 0, 0.24));
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 130ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.ss-hover-shell.is-visible,
+.systemsculpt-floating-widget.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ss-hover-shell[data-layout="mobile"] {
+  left: 12px !important;
+  right: 12px !important;
+  bottom: 16px !important;
+  top: auto !important;
+  width: auto;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.ss-hover-shell__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ss-hover-shell__drag-handle {
   flex: 1;
-  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: move;
+  user-select: none;
 }
 
-/* Hover effects */
-.systemsculpt-floating-widget:hover {
-  box-shadow: 0 6px 25px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
+.ss-hover-shell[data-layout="mobile"] .ss-hover-shell__drag-handle {
+  cursor: default;
 }
 
-.systemsculpt-floating-widget-title:hover {
-  background-color: var(--background-modifier-hover);
+.ss-hover-shell.is-dragging {
+  box-shadow: var(--shadow-l, 0 16px 34px rgba(0, 0, 0, 0.3));
 }
 
-/* Active state when dragging */
-.systemsculpt-floating-widget-title:active {
-  cursor: grabbing;
-  background-color: var(--background-modifier-active);
+.ss-hover-shell__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  margin-top: 1px;
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .systemsculpt-floating-widget {
-    max-width: calc(100vw - 40px);
-    min-width: calc(100vw - 40px);
-  }
+.ss-hover-shell__icon[hidden] {
+  display: none;
 }
 
-/* Animation keyframes */
-@keyframes float-in {
-  from {
-    transform: translateY(-20px) scale(0.95);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
+.ss-hover-shell__title-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-@keyframes float-out {
-  from {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
-  to {
-    transform: translateY(-20px) scale(0.95);
-    opacity: 0;
-  }
+.ss-hover-shell__title {
+  font-size: var(--font-ui-small, 13px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--text-normal);
+  line-height: 1.25;
 }
 
-/* Specific positioning classes */
-.systemsculpt-floating-widget--top-right {
-  top: 50px;
-  right: 20px;
+.ss-hover-shell__subtitle {
+  font-size: var(--font-ui-smaller, 11px);
+  color: var(--text-muted);
+  line-height: 1.25;
 }
 
-.systemsculpt-floating-widget--bottom-right {
-  bottom: 20px;
-  right: 20px;
+.ss-hover-shell__subtitle[hidden] {
+  display: none;
 }
 
-.systemsculpt-floating-widget--top-left {
-  top: 50px;
-  left: 20px;
+.ss-hover-shell__header-actions {
+  display: inline-flex;
+  gap: 6px;
 }
 
-.systemsculpt-floating-widget--bottom-left {
-  bottom: 20px;
-  left: 20px;
+.ss-hover-shell__status {
+  font-size: var(--font-ui-smaller, 11px);
+  color: var(--text-muted);
+  margin-top: -2px;
 }
 
-.systemsculpt-floating-widget--center {
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+.ss-hover-shell__status[hidden] {
+  display: none;
 }
 
-.systemsculpt-floating-widget--center.visible {
-  transform: translate(-50%, -50%);
+.ss-hover-shell__content,
+.systemsculpt-floating-widget-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ss-hover-shell__footer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.ss-hover-shell__footer-actions[hidden],
+.ss-hover-shell__header-actions[hidden] {
+  display: none;
+}
+
+.ss-hover-shell__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 8px);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller, 11px);
+  line-height: 1.2;
+  padding: 5px 10px;
+}
+
+.ss-hover-shell__action:not(:disabled):hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-hover-shell__action:disabled {
+  opacity: 0.6;
+}
+
+.ss-hover-shell__action.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ss-hover-shell__action.mod-cta:not(:disabled):hover {
+  background: var(--interactive-accent-hover);
+  border-color: var(--interactive-accent-hover);
+}
+
+.ss-hover-shell__action-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

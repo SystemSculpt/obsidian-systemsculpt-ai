@@ -1,29 +1,36 @@
 import type { App } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { createRecorderWidget, RecorderWidgetHandles } from "../../components/RecorderWidget";
+import { createHoverShell, type HoverShellHandle, type HoverShellLayout } from "../../components/HoverShell";
+import { openRecorderAdvancedModal } from "../../modals/RecorderAdvancedModal";
 import { PlatformContext } from "../PlatformContext";
 
 export interface RecorderUIManagerOptions {
   app: App;
   plugin: SystemSculptPlugin;
   platform?: PlatformContext;
+  recorderType?: "audio" | "video";
 }
 
 /**
- * Handles recorder UI (desktop widget + mobile modal), timers, and visualizer.
+ * Handles recorder hover UI (shared shell for audio/video), timers, and optional visualization.
  */
 export class RecorderUIManager {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
   private readonly platform: PlatformContext;
+  private readonly recorderType: "audio" | "video";
 
-  private recordingModal: HTMLElement | null = null;
-  private handles: RecorderWidgetHandles | null = null;
+  private hoverShell: HoverShellHandle | null = null;
+  private statusTextEl: HTMLElement | null = null;
+  private timerValueEl: HTMLElement | null = null;
+  private liveBadgeEl: HTMLElement | null = null;
+  private visualizerCanvas: HTMLCanvasElement | null = null;
+  private stopCallback: (() => void) | null = null;
+  private stopRequested = false;
 
   private timerInterval: number | null = null;
   private recordingStartTime = 0;
 
-  private visualizerCanvas: HTMLCanvasElement | null = null;
   private visualizerCtx: CanvasRenderingContext2D | null = null;
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -36,27 +43,34 @@ export class RecorderUIManager {
     this.app = options.app;
     this.plugin = options.plugin;
     this.platform = options.platform ?? PlatformContext.get();
+    this.recorderType = options.recorderType ?? "audio";
   }
 
   public open(onStop: () => void): void {
     this.close();
     this.clearCloseTimer();
+    this.stopRequested = false;
+    this.stopCallback = onStop;
+
     const variant = this.platform.uiVariant();
-    this.showFloatingRecorder(variant, onStop);
+    this.createHover(variant);
     this.visible = true;
   }
 
   public close(): void {
     this.clearCloseTimer();
-    this.stopVisualization();
     this.stopTimer();
+    this.stopVisualization();
 
-    if (this.recordingModal) {
-      this.recordingModal.remove();
-      this.recordingModal = null;
-    }
-
-    this.bindHandles(null);
+    this.hoverShell?.destroy();
+    this.hoverShell = null;
+    this.statusTextEl = null;
+    this.timerValueEl = null;
+    this.liveBadgeEl = null;
+    this.visualizerCanvas = null;
+    this.visualizerCtx = null;
+    this.stopCallback = null;
+    this.stopRequested = false;
     this.visible = false;
   }
 
@@ -65,7 +79,7 @@ export class RecorderUIManager {
   }
 
   /**
-   * Keep the recorder visible a bit longer to surface status instead of spamming notices.
+   * Keep the recorder visible briefly to surface completion state.
    */
   public linger(status: string, delayMs: number = 2200): void {
     this.setStatus(status);
@@ -73,17 +87,16 @@ export class RecorderUIManager {
   }
 
   public setStatus(status: string): void {
-    if (this.handles?.statusTextEl) {
-      this.handles.statusTextEl.textContent = status;
+    if (this.statusTextEl) {
+      this.statusTextEl.textContent = status;
     }
+    this.hoverShell?.setStatus(status);
   }
 
   public setRecordingState(recording: boolean): void {
-    if (this.handles?.root) {
-      this.handles.root.dataset.state = recording ? "recording" : "idle";
-    }
-    if (this.handles?.liveBadgeEl) {
-      this.handles.liveBadgeEl.textContent = recording ? "Listening live" : "Recorder idle";
+    this.hoverShell?.setState(recording ? "recording" : "idle");
+    if (this.liveBadgeEl) {
+      this.liveBadgeEl.textContent = recording ? "Recording live" : "Recorder idle";
     }
   }
 
@@ -92,13 +105,11 @@ export class RecorderUIManager {
     this.stopTimer();
 
     this.timerInterval = window.setInterval(() => {
-      if (!this.handles?.timerValueEl) return;
-
+      if (!this.timerValueEl) return;
       const elapsed = Math.floor((Date.now() - this.recordingStartTime) / 1000);
       const minutes = Math.floor(elapsed / 60);
       const seconds = elapsed % 60;
-
-      this.handles.timerValueEl.textContent = `${minutes.toString().padStart(2, "0")}:${seconds
+      this.timerValueEl.textContent = `${minutes.toString().padStart(2, "0")}:${seconds
         .toString()
         .padStart(2, "0")}`;
     }, 1000);
@@ -117,19 +128,15 @@ export class RecorderUIManager {
   }
 
   public async attachStream(stream: MediaStream | null): Promise<void> {
-    if (!stream) {
+    if (!stream || !this.visualizerCanvas || !this.visualizerCtx) {
       this.stopVisualization();
-      return;
-    }
-
-    if (!this.visualizerCanvas || !this.visualizerCtx) {
       return;
     }
 
     try {
       await this.startVisualization(stream);
     } catch {
-      // Ignore visualization failures to avoid interrupting recording
+      // Visualization failures should never block recording.
     }
   }
 
@@ -137,93 +144,90 @@ export class RecorderUIManager {
     this.stopVisualization();
   }
 
-  private showFloatingRecorder(variant: string, onStop: () => void): void {
-    this.recordingModal = document.createElement("div");
-    this.recordingModal.className = "ss-recorder-panel-host";
-    this.recordingModal.classList.add(`platform-ui-${variant}`);
-    document.body.appendChild(this.recordingModal);
+  private createHover(variant: HoverShellLayout): void {
+    const title = this.recorderType === "video" ? "Video Recorder" : "Audio Recorder";
+    const icon = this.recorderType === "video" ? "video" : "mic";
 
-    const handles = createRecorderWidget({
-      host: this.recordingModal,
-      plugin: this.plugin,
-      variant: "desktop",
-      onStop,
-      useHostAsRoot: true
+    this.hoverShell = createHoverShell({
+      title,
+      subtitle: "In progress",
+      icon,
+      statusText: "Preparing recorder...",
+      className: "ss-recorder-hover",
+      width: variant === "mobile" ? "min(420px, calc(100vw - 24px))" : "300px",
+      layout: variant,
+      draggable: variant === "desktop",
+      defaultPosition: variant === "desktop" ? { top: "72px", right: "24px" } : { bottom: "18px", left: "12px" },
+      positionKey: `recorder-hover:${this.recorderType}`,
+      showStatusRow: true,
     });
 
-    this.bindHandles(handles);
-    if (handles?.dragHandleEl) {
-      this.makeDraggable(this.recordingModal, handles.dragHandleEl);
-    }
-
-    requestAnimationFrame(() => {
-      if (this.recordingModal) {
-        this.recordingModal.classList.add("ss-recorder-panel--visible");
-      }
-    });
+    this.statusTextEl = this.hoverShell.statusEl;
+    this.buildContent(this.hoverShell.contentEl);
+    this.renderActions();
+    this.hoverShell.show();
   }
 
-  private bindHandles(handles: RecorderWidgetHandles | null): void {
-    this.handles = handles;
-    this.visualizerCanvas = handles?.canvasEl ?? null;
-    this.visualizerCtx = this.visualizerCanvas ? this.visualizerCanvas.getContext("2d") : null;
+  private buildContent(contentEl: HTMLElement): void {
+    contentEl.replaceChildren();
 
-    if (this.visualizerCtx && this.visualizerCanvas) {
-      try {
-        const bg = getComputedStyle(document.body).getPropertyValue("--background-secondary") || "#1f1f1f";
-        this.visualizerCtx.fillStyle = bg;
-        this.visualizerCtx.fillRect(0, 0, this.visualizerCanvas.width, this.visualizerCanvas.height);
-      } catch {
-        this.visualizerCtx.fillStyle = "#1f1f1f";
-        this.visualizerCtx.fillRect(0, 0, this.visualizerCanvas.width, this.visualizerCanvas.height);
+    const badgeRow = contentEl.createDiv("ss-recorder-hover__badge-row");
+    const liveBadge = badgeRow.createSpan("ss-recorder-hover__live");
+    liveBadge.textContent = "Recorder idle";
+    this.liveBadgeEl = liveBadge;
+
+    const timer = contentEl.createDiv("ss-recorder-hover__timer");
+    timer.createSpan({ cls: "ss-recorder-hover__timer-label", text: "Live" });
+    const timerValue = timer.createSpan({ cls: "ss-recorder-hover__timer-value", text: "00:00" });
+    this.timerValueEl = timerValue;
+
+    if (this.recorderType === "audio") {
+      const visualizerWrap = contentEl.createDiv("ss-recorder-hover__visualizer-wrap");
+      const canvas = visualizerWrap.createEl("canvas", {
+        cls: "ss-recorder-hover__visualizer",
+        attr: { width: "260", height: "52" },
+      });
+      this.visualizerCanvas = canvas;
+      this.visualizerCtx = canvas.getContext("2d");
+      if (this.visualizerCtx) {
+        this.visualizerCtx.fillStyle = getComputedStyle(document.body).getPropertyValue("--background-secondary");
+        this.visualizerCtx.fillRect(0, 0, canvas.width, canvas.height);
       }
+    } else {
+      this.visualizerCanvas = null;
+      this.visualizerCtx = null;
     }
   }
 
-  private makeDraggable(element: HTMLElement, handle: HTMLElement): void {
-    let isDragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
+  private renderActions(): void {
+    if (!this.hoverShell) return;
+    const stopLabel = this.stopRequested ? "Stopping..." : "Stop";
 
-    const startDrag = (clientX: number, clientY: number) => {
-      isDragging = true;
-      const rect = element.getBoundingClientRect();
-      offsetX = clientX - rect.left;
-      offsetY = clientY - rect.top;
-    };
+    this.hoverShell.setFooterActions([
+      {
+        id: "advanced",
+        label: "Advanced",
+        icon: "sliders-horizontal",
+        onClick: () => {
+          openRecorderAdvancedModal(this.app, this.plugin, { context: this.recorderType });
+        },
+      },
+      {
+        id: "stop",
+        label: stopLabel,
+        icon: "square",
+        variant: "primary",
+        disabled: this.stopRequested,
+        onClick: () => this.requestStop(),
+      },
+    ]);
+  }
 
-    const updatePosition = (clientX: number, clientY: number) => {
-      if (!isDragging) return;
-      const x = Math.max(0, Math.min(clientX - offsetX, window.innerWidth - element.offsetWidth));
-      const y = Math.max(0, Math.min(clientY - offsetY, window.innerHeight - element.offsetHeight));
-      element.style.left = `${x}px`;
-      element.style.top = `${y}px`;
-    };
-
-    const endDrag = () => {
-      isDragging = false;
-    };
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 && event.pointerType === "mouse") return;
-      handle.setPointerCapture(event.pointerId);
-      startDrag(event.clientX, event.clientY);
-    };
-
-    const onPointerMove = (event: PointerEvent) => {
-      if (!isDragging) return;
-      updatePosition(event.clientX, event.clientY);
-    };
-
-    const onPointerUp = (event: PointerEvent) => {
-      handle.releasePointerCapture(event.pointerId);
-      endDrag();
-    };
-
-    handle.addEventListener("pointerdown", onPointerDown);
-    handle.addEventListener("pointermove", onPointerMove);
-    handle.addEventListener("pointerup", onPointerUp);
-    handle.addEventListener("pointercancel", onPointerUp);
+  private requestStop(): void {
+    if (this.stopRequested) return;
+    this.stopRequested = true;
+    this.renderActions();
+    this.stopCallback?.();
   }
 
   private async startVisualization(stream: MediaStream): Promise<void> {
@@ -240,7 +244,6 @@ export class RecorderUIManager {
 
     const source = this.audioContext.createMediaStreamSource(stream);
     source.connect(this.analyser);
-
     this.renderVisualization();
   }
 
@@ -257,7 +260,7 @@ export class RecorderUIManager {
     this.visualizerCtx.fillStyle = background;
     this.visualizerCtx.fillRect(0, 0, this.visualizerCanvas.width, this.visualizerCanvas.height);
 
-    const barWidth = (this.visualizerCanvas.width / bufferLength) * 2.5;
+    const barWidth = (this.visualizerCanvas.width / bufferLength) * 2.2;
     const barSpacing = 1;
     let x = 0;
 
@@ -266,15 +269,18 @@ export class RecorderUIManager {
 
     for (let i = 0; i < bufferLength; i++) {
       const barHeight = (dataArray[i] / 255) * this.visualizerCanvas.height * 0.8;
-      const gradient = this.visualizerCtx.createLinearGradient(0, this.visualizerCanvas.height - barHeight, 0, this.visualizerCanvas.height);
+      const gradient = this.visualizerCtx.createLinearGradient(
+        0,
+        this.visualizerCanvas.height - barHeight,
+        0,
+        this.visualizerCanvas.height
+      );
       gradient.addColorStop(0, accentColor);
       gradient.addColorStop(1, mutedAccent);
       this.visualizerCtx.fillStyle = gradient;
       this.visualizerCtx.fillRect(x, this.visualizerCanvas.height - barHeight, barWidth - barSpacing, barHeight);
       x += barWidth;
-      if (x > this.visualizerCanvas.width) {
-        break;
-      }
+      if (x > this.visualizerCanvas.width) break;
     }
 
     this.animationId = requestAnimationFrame(() => this.renderVisualization());

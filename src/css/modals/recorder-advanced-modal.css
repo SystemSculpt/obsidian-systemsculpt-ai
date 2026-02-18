@@ -1,0 +1,24 @@
+.ss-recorder-advanced-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ss-recorder-advanced-modal h2 {
+  margin: 0 0 2px;
+}
+
+.ss-recorder-advanced-modal h3 {
+  margin: 12px 0 2px;
+}
+
+.ss-recorder-advanced-modal .setting-item {
+  margin: 0;
+  padding: 8px 0;
+}
+
+.ss-recorder-advanced-modal__inline-note {
+  margin-top: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}

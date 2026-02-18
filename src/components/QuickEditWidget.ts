@@ -62,7 +62,7 @@ export class QuickEditWidget extends FloatingWidget {
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app, plugin, {
       title: "Quick Edit",
-      icon: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="m18.5 2.5-8.5 8.5v3h3l8.5-8.5"></path><path d="m16 4 2 2"></path>',
+      icon: "pencil",
       className: "systemsculpt-quick-edit-widget",
       position: { bottom: "20px", right: "20px" },
       width: "360px",
