@@ -39,6 +39,9 @@ npm test
 - Live E2E must use a real local `SYSTEMSCULPT_E2E_LICENSE_KEY` (from local env/private settings), never mocked keys.
 - `npm run check:e2e` is TypeScript validation only; it does not execute browser E2E flows.
 - Treat image-generation E2E as valid only after API preflight for `/images/models` and `/images/generations/jobs`.
+- Marketing/demo media must come from real plugin captures from the Obsidian app window, not Remotion/composited mock scenes.
+- Prefer app-window recording over fullscreen; use fullscreen only when explicitly required for fallback/debug.
+- Run loop-video recording captures serially; no parallel recordings against one Obsidian window/session.
 
 ## Memory Hygiene
 

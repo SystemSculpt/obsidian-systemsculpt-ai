@@ -51,7 +51,7 @@ npm run e2e:live
 
 Note: `npm run e2e:live` runs the full live suite in parallel (multiple Obsidian instances) for speed.
 
-FYI: Obsidian is a real Electron app during E2E runs, so it may still steal focus during WebDriver interactions. The harness now keeps the Obsidian window visible (no force-hide/offscreen behavior), which is required for reliable window-targeted GIF capture.
+FYI: Obsidian is a real Electron app during E2E runs, so it may still steal focus during WebDriver interactions. For capture runs, prefer `SYSTEMSCULPT_E2E_WINDOW_MODE=space-capture` when recording in a dedicated macOS Space/Desktop.
 
 Required:
 - `SYSTEMSCULPT_E2E_LICENSE_KEY`
@@ -61,7 +61,14 @@ Optional:
 - `SYSTEMSCULPT_E2E_MODEL_ID` (defaults to `systemsculpt@@systemsculpt/ai-agent` in the specs)
 - `SYSTEMSCULPT_E2E_SETTINGS_JSON` (override the settings file used to seed live settings)
  - `SYSTEMSCULPT_E2E_VAULT_NAME` (default: `SystemSculpt Studio`; display name used for temp vault folder/title)
- - `SYSTEMSCULPT_E2E_WINDOW_MODE` (`capture` pins the Obsidian window visible + always-on-top for recording; `background` re-enables offscreen focus-avoid mode; default: no window manipulation)
+ - `SYSTEMSCULPT_E2E_WINDOW_MODE`
+   - `capture`: legacy capture posture (always-on-top + visible-on-all-workspaces + auto-reposition by default).
+   - `space-capture`: dedicated-space capture posture (keeps window capture-ready without forcing always-on-top/all-workspaces/reposition by default).
+   - `background`: offscreen focus-avoid mode.
+   - default: no window manipulation.
+ - `SYSTEMSCULPT_E2E_WINDOW_ALWAYS_ON_TOP` (optional bool override for capture modes).
+ - `SYSTEMSCULPT_E2E_WINDOW_VISIBLE_ON_ALL_WORKSPACES` (optional bool override for capture modes).
+ - `SYSTEMSCULPT_E2E_WINDOW_AUTO_REPOSITION` (optional bool override for capture modes).
  - `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
  - `SYSTEMSCULPT_E2E_SKIP_BUILD` (`1` skips `npm run build` inside the runner)
 
