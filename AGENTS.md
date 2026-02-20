@@ -10,7 +10,7 @@ Assume multiple agents (and humans) may work in parallel.
 ## Scope & Invariants
 
 - This repo is the canonical SystemSculpt Obsidian plugin codebase.
-- Plugin API backend for `/api/plugin/**` lives in sibling repo `../systemsculpt-website` (`/Users/user/gits/systemsculpt-website`).
+- Plugin API backend for `/api/plugin/**` lives in sibling repo `../systemsculpt-website` (`/Users/systemsculpt/gits/systemsculpt-website`).
 - Prefer clean modular architecture over backward-compat layering.
 - Fail loudly on invalid config/provider states.
 
