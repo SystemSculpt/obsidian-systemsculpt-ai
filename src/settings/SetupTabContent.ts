@@ -288,17 +288,47 @@ function renderAccountSection(root: HTMLElement, tabInstance: SystemSculptSettin
       }
     };
 
+    const formatUsd = (cents: number): string => {
+      const normalizedCents = Number.isFinite(cents) ? Math.max(0, Math.floor(cents)) : 0;
+      try {
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(normalizedCents / 100);
+      } catch {
+        return `$${(normalizedCents / 100).toFixed(2)}`;
+      }
+    };
+
     let purchaseUrl: string | null = null;
+    let annualUpgradeOffer: { amountSavedCents: number; percentSaved: number; checkoutUrl: string } | null = null;
+    let refreshAnnualUpgradeButton: (() => void) | null = null;
 
     const syncCredits = async () => {
       try {
         creditsSetting.setDesc('Fetching credits balance…');
         const balance = await aiService.getCreditsBalance();
         purchaseUrl = balance.purchaseUrl;
+        annualUpgradeOffer =
+          balance.billingCycle === "monthly" &&
+          balance.annualUpgradeOffer &&
+          Number.isFinite(balance.annualUpgradeOffer.amountSavedCents) &&
+          balance.annualUpgradeOffer.amountSavedCents > 0 &&
+          typeof balance.annualUpgradeOffer.checkoutUrl === "string" &&
+          balance.annualUpgradeOffer.checkoutUrl.trim().length > 0
+            ? {
+                amountSavedCents: Math.floor(balance.annualUpgradeOffer.amountSavedCents),
+                percentSaved: Math.max(0, Math.floor(balance.annualUpgradeOffer.percentSaved)),
+                checkoutUrl: balance.annualUpgradeOffer.checkoutUrl.trim(),
+              }
+            : null;
+        const annualSavingsSuffix = annualUpgradeOffer
+          ? ` Switch to annual to save ${formatUsd(annualUpgradeOffer.amountSavedCents)} per year${annualUpgradeOffer.percentSaved > 0 ? ` (${annualUpgradeOffer.percentSaved}%)` : ''}.`
+          : '';
         creditsSetting.setDesc(
-          `Remaining: ${formatCredits(balance.totalRemaining)} credits (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.`
+          `Remaining: ${formatCredits(balance.totalRemaining)} credits (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.${annualSavingsSuffix}`
         );
+        refreshAnnualUpgradeButton?.();
       } catch (error: any) {
+        annualUpgradeOffer = null;
+        refreshAnnualUpgradeButton?.();
         const message = error?.message || String(error);
         creditsSetting.setDesc(`Unable to fetch credits balance. (${message})`);
       }
@@ -320,6 +350,30 @@ function renderAccountSection(root: HTMLElement, tabInstance: SystemSculptSettin
         .onClick(async () => {
           await syncCredits();
         });
+    });
+
+    creditsSetting.addButton((button) => {
+      const applyState = () => {
+        const enabled = !!annualUpgradeOffer?.checkoutUrl;
+        button.buttonEl.style.display = enabled ? '' : 'none';
+        button.setDisabled(!enabled);
+        if (enabled && annualUpgradeOffer) {
+          button.setTooltip(`Save ${formatUsd(annualUpgradeOffer.amountSavedCents)} per year`);
+        } else {
+          button.setTooltip('Available for monthly subscriptions');
+        }
+      };
+      refreshAnnualUpgradeButton = applyState;
+      button
+        .setButtonText('Switch to annual')
+        .onClick(() => {
+          if (!annualUpgradeOffer?.checkoutUrl) {
+            new Notice('Annual upgrade offer is currently unavailable for this account.');
+            return;
+          }
+          window.open(annualUpgradeOffer.checkoutUrl, '_blank');
+        });
+      applyState();
     });
 
     creditsSetting.addExtraButton((button) => {

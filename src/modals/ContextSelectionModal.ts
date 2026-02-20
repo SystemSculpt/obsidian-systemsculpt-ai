@@ -4,7 +4,7 @@ import SystemSculptPlugin from "../main";
 const FILE_TYPES = {
   text: { extensions: ["md", "txt"], icon: "file-text", label: "Text" },
   documents: { extensions: ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx"], icon: "file", label: "Documents" },
-  images: { extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp"], icon: "image", label: "Images" },
+  images: { extensions: ["png", "jpg", "jpeg", "svg", "webp"], icon: "image", label: "Images" },
   audio: { extensions: ["mp3", "wav", "m4a", "ogg", "webm"], icon: "headphones", label: "Audio" }
 };
 

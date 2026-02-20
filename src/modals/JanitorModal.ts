@@ -621,7 +621,7 @@ class ConfirmationModal extends StandardModal {
   private getFileIcon(file: TFile): string {
     const extension = file.extension.toLowerCase();
     if (["md", "txt", "markdown"].includes(extension)) return "file-text";
-    if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(extension)) return "image";
+    if (["jpg", "jpeg", "png", "webp", "svg"].includes(extension)) return "image";
     if (["mp3", "wav", "ogg", "m4a"].includes(extension)) return "audio-lines";
     if (["pdf"].includes(extension)) return "file-text";
     return "file";

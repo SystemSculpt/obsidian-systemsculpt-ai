@@ -405,7 +405,7 @@ export class AtMentionMenu extends Component {
 
   private iconForFile(file: TFile): string {
     const ext = (file.extension || "").toLowerCase();
-    if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "image";
+    if (["png", "jpg", "jpeg", "webp", "svg"].includes(ext)) return "image";
     if (["mp3", "wav", "ogg", "m4a", "webm"].includes(ext)) return "file-audio";
     return "file-text";
   }

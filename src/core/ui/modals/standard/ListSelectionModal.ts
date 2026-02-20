@@ -503,7 +503,7 @@ export class ListSelectionModal extends StandardModal {
    * Check if file type is an image type
    */
   private isImageType(fileType: string): boolean {
-    const imageTypes = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+    const imageTypes = ['png', 'jpg', 'jpeg', 'svg', 'webp'];
     return imageTypes.includes(fileType.toLowerCase());
   }
 

@@ -1,9 +1,10 @@
 
-import { App, Setting, Notice, DropdownComponent } from "obsidian";
+import { App, Setting, Notice, DropdownComponent, Platform } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { MobileDetection } from "../utils/MobileDetection";
 import { AI_PROVIDERS, LOCAL_SERVICES } from '../constants/externalServices';
+import { openVideoRecordingPermissionModal } from "../modals/VideoRecordingPermissionModal";
 
 export async function displayRecorderTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -17,6 +18,73 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
   containerEl.createEl('h3', { text: 'Recording' });
 
   await renderMicrophoneSetting(containerEl, tabInstance);
+
+  if (Platform.isDesktopApp) {
+    new Setting(containerEl)
+      .setName('Show video record button in chat')
+      .setDesc('Adds a quick toggle to record Obsidian window workflows (requires Pro).')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(plugin.settings.showVideoRecordButtonInChat ?? true)
+          .onChange(async (value) => {
+            await plugin.getSettingsManager().updateSettings({ showVideoRecordButtonInChat: value });
+          });
+      });
+
+    new Setting(containerEl)
+      .setName('Include system audio in video recordings')
+      .setDesc('Capture desktop/system audio when the recording runtime supports it.')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(plugin.settings.videoCaptureSystemAudio ?? false)
+          .onChange(async (value) => {
+            await plugin.getSettingsManager().updateSettings({ videoCaptureSystemAudio: value });
+          });
+      });
+
+    new Setting(containerEl)
+      .setName('Include microphone audio in video recordings')
+      .setDesc('Capture microphone/input audio in video recordings (uses your preferred microphone setting).')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(plugin.settings.videoCaptureMicrophoneAudio ?? false)
+          .onChange(async (value) => {
+            await plugin.getSettingsManager().updateSettings({ videoCaptureMicrophoneAudio: value });
+          });
+      });
+
+    containerEl.createEl("p", {
+      text: "Tip: Enable both toggles to capture system audio + microphone together when supported by your Obsidian/Electron runtime.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(containerEl)
+      .setName('Show video permission reminder')
+      .setDesc('Show a pre-recording popup explaining Screen & System Audio Recording access and direct-capture requests.')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(plugin.settings.showVideoRecordingPermissionPopup !== false)
+          .onChange(async (value) => {
+            await plugin.getSettingsManager().updateSettings({ showVideoRecordingPermissionPopup: value });
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText('Preview popup')
+          .onClick(async () => {
+            const result = await openVideoRecordingPermissionModal(app);
+            if (result.dontShowAgain) {
+              await plugin.getSettingsManager().updateSettings({ showVideoRecordingPermissionPopup: false });
+              new Notice('Video permission reminder disabled.');
+              tabInstance.display();
+              return;
+            }
+            if (!result.confirmed) {
+              new Notice('Permission popup closed.');
+            }
+          });
+      });
+  }
 
   new Setting(containerEl)
     .setName('Auto-transcribe recordings')

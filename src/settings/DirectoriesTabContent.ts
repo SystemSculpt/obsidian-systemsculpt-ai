@@ -19,6 +19,7 @@ async function handleDirectoryChange(
     settingKey:
         | "attachmentsDirectory"
         | "recordingsDirectory"
+        | "videoRecordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
         | "systemPromptsDirectory"
@@ -57,6 +58,7 @@ function createDirectorySetting(
     settingKey:
         | "attachmentsDirectory"
         | "recordingsDirectory"
+        | "videoRecordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
         | "systemPromptsDirectory"
@@ -154,6 +156,15 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         "Select the directory for your recordings",
         "recordingsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Recordings)"
+    );
+
+    createDirectorySetting(
+        containerEl,
+        tabInstance,
+        "Video Recordings Directory",
+        "Select the directory for Obsidian window recordings",
+        "videoRecordingsDirectory",
+        "Path relative to vault root (empty = SystemSculpt/Video Recordings)"
     );
 
     createDirectorySetting(

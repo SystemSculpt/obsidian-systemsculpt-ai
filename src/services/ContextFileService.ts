@@ -145,7 +145,7 @@ export class ContextFileService {
       );
 
       if (resolvedFile instanceof TFile) {
-        if (resolvedFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) {
+        if (resolvedFile.extension.match(/^(jpg|jpeg|png|webp)$/i)) {
           const base64 = await ImageProcessor.processImage(
             resolvedFile,
             this.app
@@ -162,7 +162,7 @@ export class ContextFileService {
         const allFiles = this.app.vault.getFiles();
         const matchingFile = allFiles.find((f) => f.name === fileName);
         if (matchingFile) {
-          if (matchingFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) {
+          if (matchingFile.extension.match(/^(jpg|jpeg|png|webp)$/i)) {
             const base64 = await ImageProcessor.processImage(
               matchingFile,
               this.app
@@ -191,7 +191,7 @@ export class ContextFileService {
       const linkText = filePath.replace(/^\[\[(.*?)\]\]$/, "$1");
       const cleanPath = linkText.replace(/\$begin:math:display\$\[(.*?)\$end:math:display\$]/g, "$1");
       const ext = (cleanPath.split(".").pop() || "").toLowerCase();
-      if (ext && ["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) {
+      if (ext && ["jpg", "jpeg", "png", "webp"].includes(ext)) {
         return null;
       }
 
@@ -200,7 +200,7 @@ export class ContextFileService {
         this.app.vault.getAbstractFileByPath(cleanPath);
       if (
         resolved instanceof TFile &&
-        ["jpg", "jpeg", "png", "gif", "webp"].includes((resolved.extension || "").toLowerCase())
+        ["jpg", "jpeg", "png", "webp"].includes((resolved.extension || "").toLowerCase())
       ) {
         return null;
       }
@@ -239,7 +239,6 @@ export class ContextFileService {
                       const lower = displayName.toLowerCase();
                       const ext = lower.includes('.') ? lower.split('.').pop() || '' : '';
                       const media = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-                                   : ext === 'gif' ? 'image/gif'
                                    : ext === 'webp' ? 'image/webp'
                                    : 'image/png';
                       return `data:${media};base64,${content.base64}`;

@@ -152,7 +152,7 @@ export function isCanvasFileNode(node: CanvasNode): node is CanvasNode & { file:
 
 export function isImagePath(path: string): boolean {
   const ext = String(path.split(".").pop() || "").toLowerCase();
-  return ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "gif" || ext === "bmp" || ext === "tiff";
+  return ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "bmp" || ext === "tiff";
 }
 
 export function findIncomingImageFilesForNode(

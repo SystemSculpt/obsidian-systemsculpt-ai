@@ -56,6 +56,12 @@
   display: none !important;
 }
 
+/* Pending prompt nodes: mask native node host immediately while enhancer resolves prompt metadata.
+   This removes brief raw prompt/property flashes during Canvas mount/reconcile. */
+.canvas-node.ss-canvasflow-prompt-node-pending :is(.canvas-node-content, .canvas-node-container) {
+  visibility: hidden !important;
+}
+
 /* Hide everything in the content host except our injected UI. (Canvas DOM varies across builds.) */
 .canvas-node.ss-canvasflow-prompt-node :is(.canvas-node-content, .canvas-node-container) > :not(.ss-canvasflow-controls):not(.ss-canvasflow-node-card) {
   display: none !important;
@@ -171,6 +177,8 @@
   font-size: 11px;
   line-height: 1.3;
   color: var(--text-faint);
+  /* Reserve vertical space so hint/status text changes don't resize the node and jitter edges/arrows. */
+  min-height: 30px;
 }
 
 .ss-canvasflow-node-card-actions {
@@ -181,6 +189,8 @@
 
 .ss-canvasflow-node-card-status {
   margin-top: 6px;
+  /* Keep a stable layout even when status is empty/updates during runs. */
+  min-height: 18px;
 }
 
 .ss-canvasflow-inspector-modal {

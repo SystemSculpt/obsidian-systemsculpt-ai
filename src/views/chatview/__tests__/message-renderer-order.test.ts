@@ -7,26 +7,36 @@ import type { MessagePart } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { App } from "obsidian";
 
-const createToolCall = (id: string, timestamp: number): ToolCall => ({
+const createToolCall = (
+  id: string,
+  timestamp: number,
+  functionName: string = "mcp-filesystem_search",
+  functionArgs: Record<string, unknown> = { query: id }
+): ToolCall => ({
   id,
   messageId: "message-1",
   request: {
     id,
     type: "function",
     function: {
-      name: "mcp-filesystem_search",
-      arguments: JSON.stringify({ query: id }),
+      name: functionName,
+      arguments: JSON.stringify(functionArgs),
     },
   },
   state: "completed",
   timestamp,
 });
 
-const createToolCallPart = (id: string, timestamp: number): MessagePart => ({
+const createToolCallPart = (
+  id: string,
+  timestamp: number,
+  functionName: string = "mcp-filesystem_search",
+  functionArgs: Record<string, unknown> = { query: id }
+): MessagePart => ({
   id: `part-${id}`,
   type: "tool_call",
   timestamp,
-  data: createToolCall(id, timestamp),
+  data: createToolCall(id, timestamp, functionName, functionArgs),
 });
 
 describe("MessageRenderer tool call ordering", () => {
@@ -81,6 +91,39 @@ describe("MessageRenderer tool call ordering", () => {
       "Searched 2",
       "Searched 3",
     ]);
+
+    renderer.unload();
+  });
+
+  test("renders web_search with an explicit Web Search label", () => {
+    const app = new App();
+    class TestMessageRenderer extends MessageRenderer {
+      register(_callback: () => void): void {}
+    }
+
+    const renderer = new TestMessageRenderer(app as any);
+    const messageEl = document.createElement("div");
+    messageEl.classList.add("systemsculpt-message");
+    messageEl.dataset.messageId = "message-web-search";
+
+    const contentContainer = document.createElement("div");
+    contentContainer.classList.add("systemsculpt-message-content");
+    messageEl.appendChild(contentContainer);
+
+    const webSearchPart = createToolCallPart(
+      "web-1",
+      1,
+      "web_search",
+      { query: "systemsculpt pricing" }
+    );
+
+    renderer.renderUnifiedMessageParts(messageEl, [webSearchPart], false);
+
+    const title = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-collapsible-title");
+    expect(title?.textContent).toBe("Web Search");
+
+    const summary = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-tool-summary");
+    expect(summary?.textContent?.trim()).toBe("Searched systemsculpt pricing");
 
     renderer.unload();
   });

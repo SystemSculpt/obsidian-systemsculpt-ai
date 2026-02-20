@@ -25,6 +25,7 @@ export class CommandManager {
 
   registerCommands() {
     this.registerToggleAudioRecorder();
+    this.registerToggleVideoRecorder();
     this.registerOpenChat();
     this.registerOpenChatHistory();
     this.registerOpenJanitor();
@@ -93,6 +94,48 @@ export class CommandManager {
         }
       },
       hotkeys: [{ modifiers: ["Mod"], key: "r" }],
+    });
+  }
+
+  private registerToggleVideoRecorder() {
+    this.plugin.addCommand({
+      id: "toggle-obsidian-window-video-recorder",
+      name: "Toggle Obsidian Window Video Recorder",
+      callback: async () => {
+        const alreadyInitialized = this.plugin.hasVideoRecorderService();
+        const logger = this.plugin.getLogger();
+
+        logger.debug("Toggle video recorder command received", {
+          source: "CommandManager",
+          method: "toggleVideoRecorder",
+          metadata: {
+            alreadyInitialized,
+          },
+        });
+
+        try {
+          const recorderService = this.plugin.getVideoRecorderService();
+          await recorderService.toggleRecording();
+
+          logger.info("Video recorder toggled", {
+            source: "CommandManager",
+            method: "toggleVideoRecorder",
+            metadata: {
+              alreadyInitialized,
+            },
+          });
+        } catch (error) {
+          logger.error("Failed to toggle video recorder", error, {
+            source: "CommandManager",
+            method: "toggleVideoRecorder",
+            metadata: {
+              alreadyInitialized,
+            },
+          });
+
+          new Notice("Unable to toggle the Obsidian window video recorder.", 8000);
+        }
+      },
     });
   }
 
@@ -285,7 +328,6 @@ export class CommandManager {
           "jpg",
           "jpeg",
           "png",
-          "gif",
           "webp",
           "svg",
         ];

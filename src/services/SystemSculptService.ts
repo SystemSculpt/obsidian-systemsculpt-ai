@@ -21,6 +21,7 @@ import { Notice } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
+import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
 // Import the new service classes
 import { StreamingService } from "./StreamingService";
@@ -75,6 +76,14 @@ export type CreditsBalanceSnapshot = {
   cycleAnchorAt: string;
   turnInFlightUntil: string | null;
   purchaseUrl: string | null;
+  billingCycle?: "monthly" | "annual" | "unknown";
+  annualUpgradeOffer?: {
+    amountSavedCents: number;
+    percentSaved: number;
+    annualPriceCents: number;
+    monthlyEquivalentAnnualCents: number;
+    checkoutUrl: string;
+  } | null;
 };
 
 export type CreditsUsageSnapshot = {
@@ -711,7 +720,7 @@ export class SystemSculptService {
       const linkText = entry.replace(/^\[\[(.*?)\]\]$/, "$1");
       const cleanPath = linkText.replace(/\$begin:math:display\$\[(.*?)\$end:math:display\$]/g, "$1");
       const ext = (cleanPath.split(".").pop() || "").toLowerCase();
-      if (ext && ["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) {
+      if (ext && ["jpg", "jpeg", "png", "webp"].includes(ext)) {
         count++;
         continue;
       }
@@ -721,7 +730,7 @@ export class SystemSculptService {
         this.plugin.app.vault.getAbstractFileByPath(cleanPath);
       if (
         resolved instanceof TFile &&
-        ["jpg", "jpeg", "png", "gif", "webp"].includes((resolved.extension || "").toLowerCase())
+        ["jpg", "jpeg", "png", "webp"].includes((resolved.extension || "").toLowerCase())
       ) {
         count++;
       }
@@ -916,6 +925,62 @@ export class SystemSculptService {
       return 0;
     };
     const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+    const resolveBillingCycle = (value: unknown): "monthly" | "annual" | "unknown" => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (normalized === "monthly" || normalized === "annual") {
+        return normalized;
+      }
+      return "unknown";
+    };
+    const resolveCheckoutUrl = (value: unknown): string | null => {
+      if (typeof value !== "string") return null;
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+      }
+      if (!trimmed.startsWith("/")) {
+        return null;
+      }
+      try {
+        return new URL(trimmed, SYSTEMSCULPT_WEBSITE.BASE_URL).toString();
+      } catch {
+        return null;
+      }
+    };
+    const resolveAnnualUpgradeOffer = (value: unknown): CreditsBalanceSnapshot["annualUpgradeOffer"] => {
+      if (!value || typeof value !== "object") {
+        return null;
+      }
+
+      const payloadValue = value as Record<string, unknown>;
+      const amountSavedCents = Math.floor(asNumber(payloadValue.amount_saved_cents));
+      const percentSaved = Math.floor(asNumber(payloadValue.percent_saved));
+      const annualPriceCents = Math.floor(asNumber(payloadValue.annual_price_cents));
+      const monthlyEquivalentAnnualCents = Math.floor(asNumber(payloadValue.monthly_equivalent_annual_cents));
+      const checkoutUrl = resolveCheckoutUrl(payloadValue.checkout_path);
+
+      if (
+        amountSavedCents <= 0 ||
+        percentSaved <= 0 ||
+        annualPriceCents <= 0 ||
+        monthlyEquivalentAnnualCents <= annualPriceCents ||
+        !checkoutUrl
+      ) {
+        return null;
+      }
+
+      return {
+        amountSavedCents,
+        percentSaved,
+        annualPriceCents,
+        monthlyEquivalentAnnualCents,
+        checkoutUrl,
+      };
+    };
+
+    const billingCycle = resolveBillingCycle(payload?.billing_cycle);
+    const annualUpgradeOffer = resolveAnnualUpgradeOffer(payload?.annual_upgrade_offer);
 
     return {
       includedRemaining: asNumber(payload?.included_remaining),
@@ -930,6 +995,8 @@ export class SystemSculptService {
         typeof payload?.purchase_url === "string" && payload.purchase_url.trim().length > 0
           ? payload.purchase_url.trim()
           : null,
+      billingCycle,
+      annualUpgradeOffer,
     };
   }
 

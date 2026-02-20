@@ -103,7 +103,6 @@ function mimeFromExtension(ext: string): string {
   if (e === "png") return "image/png";
   if (e === "jpg" || e === "jpeg") return "image/jpeg";
   if (e === "webp") return "image/webp";
-  if (e === "gif") return "image/gif";
   return "application/octet-stream";
 }
 
@@ -113,7 +112,6 @@ function extensionFromContentType(contentType: string | undefined): string | nul
   if (ct.includes("image/png")) return "png";
   if (ct.includes("image/jpeg")) return "jpg";
   if (ct.includes("image/webp")) return "webp";
-  if (ct.includes("image/gif")) return "gif";
   return null;
 }
 
@@ -128,7 +126,7 @@ function extensionFromUrl(url: string): string | null {
     const last = path.split("/").pop() || "";
     const ext = last.includes(".") ? last.split(".").pop() || "" : "";
     const clean = ext.toLowerCase();
-    if (clean === "png" || clean === "jpg" || clean === "jpeg" || clean === "webp" || clean === "gif") {
+    if (clean === "png" || clean === "jpg" || clean === "jpeg" || clean === "webp") {
       return clean === "jpeg" ? "jpg" : clean;
     }
     return null;

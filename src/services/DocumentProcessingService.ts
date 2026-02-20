@@ -1291,7 +1291,7 @@ Extracted with SystemSculpt
    */
   private base64ToArrayBuffer(base64: string): ArrayBuffer {
     // Remove data URL prefix if present
-    const base64Data = base64.replace(/^data:image\/(png|jpeg|jpg|gif);base64,/, "");
+    const base64Data = base64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
     // Convert base64 to binary string
     const binaryString = window.atob(base64Data);

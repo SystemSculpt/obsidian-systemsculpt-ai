@@ -63,11 +63,13 @@ const createPluginStub = () => {
 
 describe("Setup tab native layout", () => {
   let app: App;
+  let windowOpenSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
     app = new App();
+    windowOpenSpy = jest.spyOn(window, "open").mockImplementation(() => null);
     getCreditsBalanceMock.mockResolvedValue({
       totalRemaining: 2500,
       includedRemaining: 1200,
@@ -76,7 +78,19 @@ describe("Setup tab native layout", () => {
       cycleStartedAt: "2026-02-01T00:00:00.000Z",
       cycleEndsAt: "2026-03-01T00:00:00.000Z",
       purchaseUrl: "https://systemsculpt.com/resources?tab=license",
+      billingCycle: "monthly",
+      annualUpgradeOffer: {
+        amountSavedCents: 12900,
+        percentSaved: 57,
+        annualPriceCents: 9900,
+        monthlyEquivalentAnnualCents: 22800,
+        checkoutUrl: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+      },
     });
+  });
+
+  afterEach(() => {
+    windowOpenSpy.mockRestore();
   });
 
   it("renders only native setting items", () => {
@@ -110,5 +124,28 @@ describe("Setup tab native layout", () => {
     (detailsButton as HTMLButtonElement).click();
 
     expect(plugin.openCreditsBalanceModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens annual checkout upsell when monthly savings is available", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-test";
+
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await Promise.resolve();
+
+    const annualSwitchButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Switch to annual");
+
+    expect(annualSwitchButton).toBeTruthy();
+    (annualSwitchButton as HTMLButtonElement).click();
+
+    expect(window.open).toHaveBeenCalledWith(
+      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+      "_blank"
+    );
   });
 });

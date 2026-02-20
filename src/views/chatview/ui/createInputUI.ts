@@ -14,6 +14,9 @@ export interface ChatComposerDeps {
   onInput: () => void;
   onPaste: (e: ClipboardEvent) => void | Promise<void>;
   handleMicClick: () => void;
+  handleVideoClick: () => void;
+  showVideoButton: () => boolean;
+  canUseVideoRecording: () => boolean;
   hasProLicense: () => boolean;
 }
 
@@ -29,6 +32,7 @@ export interface ChatComposerElements {
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
   micButton: ButtonComponent;
+  videoButton: ButtonComponent;
 }
 
 export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps): ChatComposerElements {
@@ -85,6 +89,16 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .onClick(() => deps.handleMicClick());
   micButton.buttonEl.setAttribute("aria-label", "Record audio message");
   micButton.buttonEl.classList.add("systemsculpt-chat-composer-action", "mod-mic");
+
+  const videoButton = new ButtonComponent(actions)
+    .setIcon("video")
+    .setTooltip("Record Obsidian window workflow")
+    .setClass("clickable-icon")
+    .setDisabled(!deps.canUseVideoRecording())
+    .onClick(() => deps.handleVideoClick());
+  videoButton.buttonEl.setAttribute("aria-label", "Record Obsidian window workflow");
+  videoButton.buttonEl.classList.add("systemsculpt-chat-composer-action", "mod-video");
+  videoButton.buttonEl.style.display = deps.showVideoButton() ? "flex" : "none";
 
   const stopButton = new ButtonComponent(actions)
     .setIcon("square")
@@ -143,5 +157,6 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     sendButton,
     stopButton,
     micButton,
+    videoButton,
   };
 }

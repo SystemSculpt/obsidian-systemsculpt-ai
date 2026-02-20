@@ -29,6 +29,26 @@ class TFolder {
 
 class MarkdownView {}
 
+class FileSystemAdapter {
+  constructor(basePath = "/") {
+    this.basePath = basePath;
+  }
+
+  getFullPath(path) {
+    if (!path) return this.basePath;
+    if (path.startsWith("/")) return path;
+    return `${this.basePath.replace(/\/$/, "")}/${path}`;
+  }
+
+  async exists() {
+    return false;
+  }
+
+  async readBinary() {
+    return new ArrayBuffer(0);
+  }
+}
+
 class Component {
   constructor() {
     this.children = [];
@@ -671,6 +691,7 @@ module.exports = {
   },
   TFile,
   TFolder,
+  FileSystemAdapter,
   MarkdownView,
   WorkspaceLeaf,
   ItemView,

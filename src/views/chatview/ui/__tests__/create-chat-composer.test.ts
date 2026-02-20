@@ -82,6 +82,9 @@ describe("createChatComposer", () => {
       onInput: jest.fn(),
       onPaste: jest.fn(),
       handleMicClick: jest.fn(),
+      handleVideoClick: jest.fn(),
+      showVideoButton: () => true,
+      canUseVideoRecording: () => true,
       hasProLicense: () => true,
     });
 
@@ -91,6 +94,7 @@ describe("createChatComposer", () => {
     expect(composer.attachButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.settingsButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.micButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.videoButton.buttonEl.tagName).toBe("BUTTON");
 
     // Send button starts disabled until the host enables it.
     expect(composer.sendButton.buttonEl.disabled).toBe(true);
@@ -110,6 +114,9 @@ describe("createChatComposer", () => {
       onInput,
       onPaste: jest.fn(),
       handleMicClick: jest.fn(),
+      handleVideoClick: jest.fn(),
+      showVideoButton: () => true,
+      canUseVideoRecording: () => true,
       hasProLicense: () => true,
     });
 
@@ -132,6 +139,7 @@ describe("createChatComposer", () => {
     const onSend = jest.fn();
     const onStop = jest.fn();
     const handleMicClick = jest.fn();
+    const handleVideoClick = jest.fn();
 
     const composer = createChatComposer(root, {
       onEditSystemPrompt,
@@ -143,6 +151,9 @@ describe("createChatComposer", () => {
       onInput: jest.fn(),
       onPaste: jest.fn(),
       handleMicClick,
+      handleVideoClick,
+      showVideoButton: () => true,
+      canUseVideoRecording: () => true,
       hasProLicense: () => true,
     });
 
@@ -161,5 +172,8 @@ describe("createChatComposer", () => {
 
     composer.micButton.buttonEl.click();
     expect(handleMicClick).toHaveBeenCalled();
+
+    composer.videoButton.buttonEl.click();
+    expect(handleVideoClick).toHaveBeenCalled();
   });
 });

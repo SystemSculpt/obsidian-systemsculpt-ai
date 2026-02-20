@@ -254,7 +254,7 @@ export class ChatExportService {
 
   private isBinaryFile(file: TFile): boolean {
     const extension = file.extension?.toLowerCase();
-    return /^(png|jpe?g|gif|webp|bmp|svg|mp3|wav|flac|ogg|mp4|m4a|mov|pdf|zip|tar|gz)$/i.test(extension);
+    return /^(png|jpe?g|webp|bmp|svg|mp3|wav|flac|ogg|mp4|m4a|mov|pdf|zip|tar|gz)$/i.test(extension);
   }
 
   private capitalize(value: string): string {

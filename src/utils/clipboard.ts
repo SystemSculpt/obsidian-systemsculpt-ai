@@ -5,7 +5,6 @@ function imageMimeTypeFromExtension(extension: string): string | null {
   if (!ext) return null;
   if (ext === "png") return "image/png";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (ext === "gif") return "image/gif";
   if (ext === "webp") return "image/webp";
   if (ext === "bmp") return "image/bmp";
   if (ext === "tiff" || ext === "tif") return "image/tiff";

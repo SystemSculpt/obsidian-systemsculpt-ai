@@ -319,6 +319,46 @@ describe("SystemSculptService", () => {
     );
   });
 
+  it("parses annual upgrade savings details from credits balance", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const response = new Response(
+      JSON.stringify({
+        included_remaining: 9000,
+        add_on_remaining: 0,
+        total_remaining: 9000,
+        included_per_month: 10000,
+        cycle_anchor_at: "2026-02-01T00:00:00.000Z",
+        cycle_started_at: "2026-02-01T00:00:00.000Z",
+        cycle_ends_at: "2026-03-01T00:00:00.000Z",
+        turn_in_flight_until: null,
+        purchase_url: null,
+        billing_cycle: "monthly",
+        annual_upgrade_offer: {
+          amount_saved_cents: 12900,
+          percent_saved: 57,
+          annual_price_cents: 9900,
+          monthly_equivalent_annual_cents: 22800,
+          checkout_path: "/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+    global.fetch = jest.fn().mockResolvedValue(response) as any;
+
+    const balance = await service.getCreditsBalance();
+
+    expect(balance.billingCycle).toBe("monthly");
+    expect(balance.annualUpgradeOffer).toEqual({
+      amountSavedCents: 12900,
+      percentSaved: 57,
+      annualPriceCents: 9900,
+      monthlyEquivalentAnnualCents: 22800,
+      checkoutUrl: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+    });
+  });
+
   it("fetches credits usage history from the SystemSculpt API", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

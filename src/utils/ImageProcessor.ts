@@ -7,7 +7,6 @@ export class ImageProcessor {
     "jpg",
     "jpeg",
     "png",
-    "gif",
     "webp",
   ]);
 

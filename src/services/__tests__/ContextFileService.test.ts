@@ -143,15 +143,6 @@ describe("ContextFileService", () => {
       expect(result).toEqual({ type: "image", base64: "base64encodedimage" });
     });
 
-    it("handles gif images", async () => {
-      const mockFile = new TFile({ path: "images/anim.gif", extension: "gif" });
-      (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);
-
-      const result = await service.getContextFileContents("[[images/anim.gif]]");
-
-      expect(result).toEqual({ type: "image", base64: "base64encodedimage" });
-    });
-
     it("handles webp images", async () => {
       const mockFile = new TFile({ path: "images/photo.webp", extension: "webp" });
       (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);

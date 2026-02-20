@@ -245,8 +245,7 @@ export class DocumentContextManager {
         // Check if it's an image file
         return filePath.endsWith('.png') ||
                filePath.endsWith('.jpg') ||
-               filePath.endsWith('.jpeg') ||
-               filePath.endsWith('.gif');
+               filePath.endsWith('.jpeg');
       });
       
       // Add all found images to context

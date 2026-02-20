@@ -12,6 +12,7 @@ import {
   serializeCanvasDocument,
 } from "./CanvasFlowGraph";
 import {
+  isCanvasFlowPromptFrontmatter,
   parseCanvasFlowPromptNote,
   parseMarkdownFrontmatter,
   replaceMarkdownFrontmatterAndBody,
@@ -124,6 +125,7 @@ type LeafController = {
   canvasFileMtime: number;
   cachedCanvasDoc: ReturnType<typeof parseCanvasDocument> | null;
   promptFileCache: Map<string, PromptCacheEntry>;
+  nonPromptFileCache: Map<string, number>;
   pendingFocusNodeId: string | null;
   pendingFocusAttempts: number;
   promptNodeControllers: Map<string, PromptNodeControllerState>;
@@ -244,6 +246,7 @@ export class CanvasFlowEnhancer {
       controller.promptNodeControllers.clear();
       controller.promptDrafts.clear();
       controller.latestPromptStates.clear();
+      controller.nonPromptFileCache.clear();
       this.hidePromptInspector(controller);
       controller.selectedPromptNodeId = null;
     }
@@ -289,6 +292,8 @@ export class CanvasFlowEnhancer {
         if (!this.shouldScheduleUpdateFromMutations(records)) {
           return;
         }
+        // First-pass guard for newly mounted markdown file nodes (before async prompt parsing).
+        this.maskMarkdownEmbedNodes(root);
         this.scheduleUpdate(controller);
       }),
       updating: false,
@@ -298,6 +303,7 @@ export class CanvasFlowEnhancer {
       canvasFileMtime: 0,
       cachedCanvasDoc: null,
       promptFileCache: new Map(),
+      nonPromptFileCache: new Map(),
       pendingFocusNodeId: null,
       pendingFocusAttempts: 0,
       promptNodeControllers: new Map(),
@@ -318,8 +324,39 @@ export class CanvasFlowEnhancer {
     });
     this.controllers.set(leaf, controller);
 
+    // First-frame guard: immediately mask native markdown/file embeds before async reconciliation.
+    this.maskMarkdownEmbedNodes(root);
+
     // Initial pass.
     this.scheduleUpdate(controller);
+  }
+
+  private maskMarkdownEmbedNodes(root: HTMLElement): void {
+    const markdownSelectors = [
+      ".markdown-embed",
+      ".markdown-preview-view",
+      ".markdown-source-view",
+      ".cm-editor",
+      ".metadata-container",
+      ".metadata-properties",
+    ].join(", ");
+
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>(".canvas-node"));
+    for (const nodeEl of nodes) {
+      // Once the node is already reconciled into our custom prompt UI, never re-mask it.
+      // Reapplying the pending mask later would hide the injected card and cause visible flicker.
+      if (nodeEl.classList.contains("ss-canvasflow-prompt-node")) continue;
+      if (nodeEl.querySelector(".ss-canvasflow-node-card, .ss-canvasflow-controls")) continue;
+
+      const host =
+        nodeEl.querySelector<HTMLElement>(".canvas-node-content, .canvas-node-container") ||
+        (nodeEl as HTMLElement | null);
+      if (!host) continue;
+      const hasMarkdownEmbed =
+        host.matches(markdownSelectors) || !!host.querySelector(markdownSelectors);
+      if (!hasMarkdownEmbed) continue;
+      nodeEl.classList.add("ss-canvasflow-prompt-node-pending");
+    }
   }
 
   private scheduleUpdate(controller: LeafController): void {
@@ -506,6 +543,9 @@ export class CanvasFlowEnhancer {
     root.querySelectorAll(".ss-canvasflow-node-card").forEach((el) => el.remove());
     root.querySelectorAll(".ss-canvasflow-inspector").forEach((el) => el.remove());
     root.querySelectorAll(".canvas-node.ss-canvasflow-prompt-node").forEach((el) => el.classList.remove("ss-canvasflow-prompt-node"));
+    root
+      .querySelectorAll(".canvas-node.ss-canvasflow-prompt-node-pending")
+      .forEach((el) => el.classList.remove("ss-canvasflow-prompt-node-pending"));
     // The selection menu may not be a descendant of the leaf's containerEl (some Obsidian builds append it
     // higher up in the DOM), so remove from both the view root and the document.
     root.querySelectorAll(".ss-canvasflow-menu-run").forEach((el) => el.remove());
@@ -540,6 +580,8 @@ export class CanvasFlowEnhancer {
     const canvasMtime = canvasFile.stat?.mtime ?? 0;
     const pathChanged = controller.canvasFilePath !== canvasFile.path;
     if (pathChanged || controller.canvasFileMtime !== canvasMtime) {
+      // Path/mtime refresh requires async vault read; keep native markdown masked until reconcile finishes.
+      this.maskMarkdownEmbedNodes(root);
       controller.canvasFilePath = canvasFile.path;
       controller.canvasFileMtime = canvasMtime;
       const raw = await this.app.vault.read(canvasFile);
@@ -555,20 +597,54 @@ export class CanvasFlowEnhancer {
     const nodeEls = this.canvasAdapter.listNodeElements(leaf, root);
     for (const { el: nodeEl, nodeId } of nodeEls) {
       const node = nodesById.get(nodeId);
-      if (!node || !isCanvasFileNode(node)) continue;
+      if (!node || !isCanvasFileNode(node)) {
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
+        continue;
+      }
 
       const filePath = node.file;
-      if (!filePath.toLowerCase().endsWith(".md")) continue;
+      if (!filePath.toLowerCase().endsWith(".md")) {
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
+        continue;
+      }
 
       const promptFile = this.app.vault.getAbstractFileByPath(filePath);
-      if (!(promptFile instanceof TFile)) continue;
-
-      const promptInfo = await this.getPromptNoteCached(controller, promptFile);
-      if (!promptInfo) {
+      if (!(promptFile instanceof TFile)) {
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
         continue;
       }
 
       const promptMtime = promptFile.stat?.mtime ?? 0;
+      const knownNonPromptMtime = controller.nonPromptFileCache.get(promptFile.path);
+      if (knownNonPromptMtime === promptMtime) {
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
+        nodeEl.classList.remove("ss-canvasflow-prompt-node");
+        continue;
+      }
+
+      // Prevent default markdown/embed flash: if prompt status is unknown or likely prompt,
+      // mask native content immediately while async prompt parsing completes.
+      const cachedEntry = controller.promptFileCache.get(promptFile.path);
+      const cacheSuggestsPrompt = !!cachedEntry && cachedEntry.mtime === promptMtime;
+      const fileCache = this.app.metadataCache.getFileCache(promptFile);
+      const metadataFrontmatter = fileCache?.frontmatter as Record<string, unknown> | null | undefined;
+      const metadataSuggestsPrompt = !!metadataFrontmatter && isCanvasFlowPromptFrontmatter(metadataFrontmatter);
+      const metadataKnownNonPrompt = !!metadataFrontmatter && !metadataSuggestsPrompt;
+      if (cacheSuggestsPrompt || metadataSuggestsPrompt || !metadataKnownNonPrompt) {
+        nodeEl.classList.add("ss-canvasflow-prompt-node-pending");
+      } else {
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
+      }
+
+      const promptInfo = await this.getPromptNoteCached(controller, promptFile);
+      if (!promptInfo) {
+        controller.nonPromptFileCache.set(promptFile.path, promptMtime);
+        nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
+        nodeEl.classList.remove("ss-canvasflow-prompt-node");
+        continue;
+      }
+      controller.nonPromptFileCache.delete(promptFile.path);
+
       const state: PromptNodeRenderState = {
         nodeId,
         nodeEl,
@@ -620,6 +696,7 @@ export class CanvasFlowEnhancer {
     const raw = await this.app.vault.read(file);
     const parsed = parseCanvasFlowPromptNote(raw);
     if (!parsed.ok) {
+      controller.promptFileCache.delete(file.path);
       return null;
     }
 
@@ -789,6 +866,12 @@ export class CanvasFlowEnhancer {
     try {
       const state = controller.latestPromptStates.get(nodeId);
       state?.nodeEl?.classList?.remove?.("ss-canvasflow-prompt-node");
+      state?.nodeEl?.classList?.remove?.("ss-canvasflow-prompt-node-pending");
+    } catch {}
+    try {
+      const nodeEl = existing.host.closest?.(".canvas-node") as HTMLElement | null;
+      nodeEl?.classList?.remove?.("ss-canvasflow-prompt-node");
+      nodeEl?.classList?.remove?.("ss-canvasflow-prompt-node-pending");
     } catch {}
 
     controller.promptNodeControllers.delete(nodeId);
@@ -916,6 +999,7 @@ export class CanvasFlowEnhancer {
 
     for (const state of promptStates.values()) {
       state.nodeEl.classList.add("ss-canvasflow-prompt-node");
+      state.nodeEl.classList.remove("ss-canvasflow-prompt-node-pending");
       const host = this.canvasAdapter.findNodeContentHost(state.nodeEl);
 
       // Remove any legacy full-node control UIs if they still exist from an older build.
@@ -2693,6 +2777,7 @@ export class CanvasFlowEnhancer {
 function controllerSafeUpdateCache(controller: LeafController | undefined, promptPath: string): void {
   if (!controller) return;
   controller.promptFileCache.delete(promptPath);
+  controller.nonPromptFileCache.delete(promptPath);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

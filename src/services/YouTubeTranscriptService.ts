@@ -198,7 +198,7 @@ export class YouTubeTranscriptService {
     console.log("[YouTubeTranscriptService] Making request:", { endpoint, method, transport: preferredTransport });
 
     try {
-      if (preferredTransport === "requestUrl") {
+      const requestViaRequestUrl = async (): Promise<TranscriptResponse> => {
         const response = await requestUrl({
           url: endpoint,
           method,
@@ -216,7 +216,13 @@ export class YouTubeTranscriptService {
         }
 
         return response.json as TranscriptResponse;
-      } else {
+      };
+
+      if (preferredTransport === "requestUrl") {
+        return await requestViaRequestUrl();
+      }
+
+      try {
         const response = await fetch(endpoint, {
           method,
           headers: requestHeaders,
@@ -232,6 +238,12 @@ export class YouTubeTranscriptService {
         }
 
         return (await response.json()) as TranscriptResponse;
+      } catch (fetchError) {
+        console.warn("[YouTubeTranscriptService] Fetch request failed; retrying via requestUrl", {
+          endpoint,
+          message: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        });
+        return await requestViaRequestUrl();
       }
     } catch (error) {
       console.error("[YouTubeTranscriptService] Request failed:", error);

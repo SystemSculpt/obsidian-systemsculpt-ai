@@ -111,4 +111,18 @@ describe("CanvasFlowEnhancer mutation filtering", () => {
 
     expect(enhancer.shouldScheduleUpdateFromMutations([childMutation])).toBe(true);
   });
+
+  it("marks pending when canvas node host is itself a markdown embed", () => {
+    const root = document.createElement("div");
+    const node = document.createElement("div");
+    node.className = "canvas-node";
+    const host = document.createElement("div");
+    host.className = "canvas-node-content markdown-embed";
+    node.appendChild(host);
+    root.appendChild(node);
+
+    enhancer.maskMarkdownEmbedNodes(root);
+
+    expect(node.classList.contains("ss-canvasflow-prompt-node-pending")).toBe(true);
+  });
 });

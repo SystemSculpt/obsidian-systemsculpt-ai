@@ -24,7 +24,7 @@ describe("RibbonManager", () => {
     manager.initialize();
 
     const ribbons = (plugin as any)._ribbons;
-    expect(ribbons).toHaveLength(7);
+    expect(ribbons).toHaveLength(8);
 
     const handles = [...ribbons];
     manager.cleanup();
@@ -42,7 +42,7 @@ describe("RibbonManager", () => {
     manager.initialize();
     manager.initialize();
 
-    expect((plugin as any)._ribbons).toHaveLength(7);
+    expect((plugin as any)._ribbons).toHaveLength(8);
   });
 
   it("prevents re-registering after cleanup", () => {

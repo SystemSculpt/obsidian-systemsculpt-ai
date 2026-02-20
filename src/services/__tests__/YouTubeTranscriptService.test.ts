@@ -92,6 +92,23 @@ describe("YouTubeTranscriptService", () => {
     expect(parsedBody.url).toBe("https://www.youtube.com/watch?v=nDLb8_wgX50");
   });
 
+  it("falls back to requestUrl when fetch transport throws", async () => {
+    (globalThis.fetch as jest.Mock).mockRejectedValue(new TypeError("Failed to fetch"));
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      json: { text: "fallback transcript", lang: "en" },
+    });
+
+    const service = YouTubeTranscriptService.getInstance(buildPluginStub());
+    const response = await service.getTranscript(testUrl);
+
+    expect(response.text).toBe("fallback transcript");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    const requestArgs = (requestUrl as jest.Mock).mock.calls[0][0];
+    expect(requestArgs.headers["Idempotency-Key"]).toMatch(/^youtube-transcript:nDLb8_wgX50:/);
+  });
+
   it("polls async transcript jobs to completion", async () => {
     (globalThis.fetch as jest.Mock)
       .mockResolvedValueOnce({

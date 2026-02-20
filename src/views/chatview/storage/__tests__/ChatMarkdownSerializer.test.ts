@@ -444,5 +444,59 @@ ${serialized}`;
       expect(parsed?.messages[0].tool_calls).toHaveLength(1);
       expect(parsed?.messages[0].tool_calls?.[0].id).toBe("call-1");
     });
+
+    it("preserves web_search tool metadata for reload rendering", () => {
+      const webSearchToolCall = {
+        id: "call-web-1",
+        messageId: "asst-1",
+        request: {
+          id: "call-web-1",
+          type: "function",
+          function: {
+            name: "web_search",
+            arguments: JSON.stringify({ query: "systemsculpt pricing" }),
+          },
+        },
+        state: "completed",
+        timestamp: 1,
+        result: {
+          success: true,
+          data: {
+            query: "systemsculpt pricing",
+            results: [{ title: "SystemSculpt", url: "https://systemsculpt.com" }],
+          },
+        },
+      };
+
+      const originalMessages: ChatMessage[] = [
+        {
+          role: "assistant",
+          content: "",
+          message_id: "asst-1",
+          messageParts: [
+            {
+              id: "tool_call_part-call-web-1",
+              type: "tool_call",
+              data: webSearchToolCall,
+              timestamp: 1,
+            },
+          ],
+        },
+      ];
+
+      const serialized = ChatMarkdownSerializer.serializeMessages(originalMessages);
+      const markdown = `---
+id: test-chat
+---
+
+${serialized}`;
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+      const restoredToolCall = parsed?.messages[0].tool_calls?.[0] as any;
+      expect(restoredToolCall?.request?.function?.name).toBe("web_search");
+      expect(JSON.parse(restoredToolCall?.request?.function?.arguments ?? "{}")).toEqual({
+        query: "systemsculpt pricing",
+      });
+    });
   });
 });

@@ -46,6 +46,12 @@ jest.mock("../../../types", () => ({
     selectedModelProviders: [],
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
+    recordingsDirectory: "SystemSculpt/Recordings",
+    videoRecordingsDirectory: "SystemSculpt/Video Recordings",
+    videoCaptureSystemAudio: false,
+    videoCaptureMicrophoneAudio: false,
+    showVideoRecordButtonInChat: true,
+    showVideoRecordingPermissionPopup: true,
     defaultAgentBudget: 10,
     agentDefaultAction: "approve",
     agentLoopBehavior: "manual",
@@ -358,6 +364,24 @@ describe("SettingsManager", () => {
         expect(result.favoriteModels).toEqual([]);
       });
 
+    });
+
+    it("defaults invalid video permission popup setting", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        showVideoRecordingPermissionPopup: "invalid",
+      });
+      expect(result.showVideoRecordingPermissionPopup).toBe(true);
+    });
+
+    it("defaults invalid video audio source settings", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        videoCaptureSystemAudio: "invalid",
+        videoCaptureMicrophoneAudio: "invalid",
+      });
+      expect(result.videoCaptureSystemAudio).toBe(false);
+      expect(result.videoCaptureMicrophoneAudio).toBe(false);
     });
   });
 

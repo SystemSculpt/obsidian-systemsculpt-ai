@@ -347,6 +347,10 @@ export class SettingsManager {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
 
+    if (typeof validatedSettings.videoRecordingsDirectory !== 'string') {
+      validatedSettings.videoRecordingsDirectory = defaultSettings.videoRecordingsDirectory;
+    }
+
     if (typeof validatedSettings.attachmentsDirectory !== 'string') {
       validatedSettings.attachmentsDirectory = defaultSettings.attachmentsDirectory;
     }
@@ -396,6 +400,25 @@ export class SettingsManager {
 
     if (typeof validatedSettings.cleanTranscriptionOutput !== 'boolean') {
       validatedSettings.cleanTranscriptionOutput = defaultSettings.cleanTranscriptionOutput;
+    }
+
+    if (typeof validatedSettings.showVideoRecordButtonInChat !== 'boolean') {
+      validatedSettings.showVideoRecordButtonInChat = defaultSettings.showVideoRecordButtonInChat;
+    }
+
+    if (typeof validatedSettings.videoCaptureSystemAudio !== 'boolean') {
+      const legacySystemAudio = (validatedSettings as any).recordSystemAudio;
+      validatedSettings.videoCaptureSystemAudio = typeof legacySystemAudio === "boolean"
+        ? legacySystemAudio
+        : defaultSettings.videoCaptureSystemAudio;
+    }
+
+    if (typeof validatedSettings.videoCaptureMicrophoneAudio !== 'boolean') {
+      validatedSettings.videoCaptureMicrophoneAudio = defaultSettings.videoCaptureMicrophoneAudio;
+    }
+
+    if (typeof validatedSettings.showVideoRecordingPermissionPopup !== 'boolean') {
+      validatedSettings.showVideoRecordingPermissionPopup = defaultSettings.showVideoRecordingPermissionPopup ?? true;
     }
 
     if (typeof validatedSettings.skipEmptyNoteWarning !== 'boolean') {

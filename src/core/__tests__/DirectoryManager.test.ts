@@ -22,6 +22,7 @@ describe("DirectoryManager", () => {
         chatsDirectory: "SystemSculpt/Chats",
         savedChatsDirectory: "SystemSculpt/SavedChats",
         recordingsDirectory: "SystemSculpt/Recordings",
+        videoRecordingsDirectory: "SystemSculpt/Video Recordings",
         systemPromptsDirectory: "SystemSculpt/Prompts",
         attachmentsDirectory: "SystemSculpt/Attachments",
         extractionsDirectory: "SystemSculpt/Extractions",

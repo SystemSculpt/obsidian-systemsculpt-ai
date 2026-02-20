@@ -637,8 +637,34 @@
   animation: recording-dot 1.5s ease-in-out infinite;
 }
 
+.systemsculpt-chat-composer-actions .mod-video.ss-active {
+  position: relative;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.systemsculpt-chat-composer-actions .mod-video.ss-active:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-chat-composer-actions .mod-video.ss-active::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-on-accent);
+  animation: recording-dot 1.5s ease-in-out infinite;
+}
+
 /* Reduce clutter: mic is shown primarily when the input is empty */
 .systemsculpt-chat-composer-input.has-value .systemsculpt-chat-composer-actions .mod-mic {
+  display: none;
+}
+
+.systemsculpt-chat-composer-input.has-value .systemsculpt-chat-composer-actions .mod-video {
   display: none;
 }
 

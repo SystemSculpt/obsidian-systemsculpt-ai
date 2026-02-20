@@ -3,7 +3,7 @@ import type SystemSculptPlugin from "../../../main";
 import { validateBrowserFileSize } from "../../../utils/FileValidator";
 import { LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../../constants/largeText";
 
-const IMAGE_PASTE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
+const IMAGE_PASTE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 
 const isClipboardImageFile = (file: File): boolean => {
   if (!file) return false;

@@ -124,8 +124,8 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
       ],
       anchor: {
-        title: "Audio Recording, Microphone, Transcription, Whisper, Groq, OpenAI, Resampling",
-        desc: "Preferred microphone, auto-transcribe, clean output, auto-submit, post-processing, custom transcription endpoint and API key, model selection, presets.",
+        title: "Audio/Video Recording, Microphone, Transcription, Whisper, Groq, OpenAI, Resampling",
+        desc: "Preferred microphone, chat video record button, auto-transcribe, clean output, auto-submit, post-processing, custom transcription endpoint and API key, model selection, presets.",
       },
     },
     {
@@ -156,7 +156,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "Directories, Folders, Attachments, Saved Chats, Extractions, Backups, Restore",
-        desc: "Configure directories for chats, saved chats, recordings, system prompts, attachments, extractions; verify/repair; automatic backups; manual backup & restore.",
+        desc: "Configure directories for chats, saved chats, recordings, video recordings, system prompts, attachments, extractions; verify/repair; automatic backups; manual backup & restore.",
       },
     },
     {

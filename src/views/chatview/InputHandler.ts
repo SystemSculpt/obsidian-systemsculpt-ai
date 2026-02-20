@@ -1,4 +1,4 @@
-import { App, TFile, setIcon, Component, Notice, Modal, Setting, ButtonComponent } from "obsidian";
+import { App, TFile, setIcon, Component, Notice, Modal, Setting, ButtonComponent, Platform } from "obsidian";
 import {
   ChatMessage,
   SystemPromptInfo,
@@ -12,6 +12,8 @@ import { SystemSculptError } from "../../utils/errors";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { MessageRenderer } from "../chatview/MessageRenderer";
 import { RecorderService } from "../../services/RecorderService";
+import { VideoRecorderService } from "../../services/VideoRecorderService";
+import { hasMacWindowShellRecordingSupport } from "../../services/video/MacShellVideoSupport";
 import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
 import { ToolCallManager } from "./ToolCallManager";
@@ -102,9 +104,11 @@ export class InputHandler extends Component {
 
   // getValue/setValue are implemented later in the class near input helpers
   private recorderService: RecorderService;
+  private videoRecorderService: VideoRecorderService;
   private plugin: SystemSculptPlugin;
   private recorderVisualizer: HTMLElement | null = null;
   private isRecording = false;
+  private isVideoRecording = false;
   private updateGeneratingState: () => void;
   private stopButton: ButtonComponent | null = null;
   private getChatMarkdown: () => Promise<string>;
@@ -115,6 +119,7 @@ export class InputHandler extends Component {
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
   private micButton: ButtonComponent;
+  private videoButton: ButtonComponent | null = null;
   private sendButton: ButtonComponent;
   private chatStorage: any; // ChatStorageService
   private getChatId: () => string;
@@ -125,6 +130,8 @@ export class InputHandler extends Component {
   private agentSelectionMenu?: AgentSelectionMenu;
   private liveRegionEl: HTMLElement | null = null;
   private hasPromptedAgentModeForBases = false;
+  private recorderToggleUnsubscribe: (() => void) | null = null;
+  private videoRecorderToggleUnsubscribe: (() => void) | null = null;
 
   /* ------------------------------------------------------------------
    * Batching of tool-call state-changed events to avoid excessive DOM
@@ -190,6 +197,7 @@ export class InputHandler extends Component {
         }
       },
     });
+    this.videoRecorderService = VideoRecorderService.getInstance(this.app, this.plugin);
 
     // Simplify message handlers
     const originalMessageSubmit = options.onMessageSubmit;
@@ -393,6 +401,9 @@ export class InputHandler extends Component {
       onInput: () => this.handleInputChange(),
       onPaste: (e) => this.handlePaste(e),
       handleMicClick: () => this.handleMicClick(),
+      handleVideoClick: () => this.handleVideoClick(),
+      showVideoButton: () => this.shouldShowVideoButton(),
+      canUseVideoRecording: () => this.canUseVideoRecording(),
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
     });
 
@@ -400,6 +411,7 @@ export class InputHandler extends Component {
     this.inputWrapper = composer.inputWrap;
     this.attachmentsEl = composer.attachments;
     this.micButton = composer.micButton;
+    this.videoButton = composer.videoButton;
     this.sendButton = composer.sendButton;
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
@@ -420,7 +432,8 @@ export class InputHandler extends Component {
     });
 
     // Recorder handling with visual feedback
-    this.recorderService.onToggle((isRecording: boolean) => {
+    this.recorderToggleUnsubscribe?.();
+    this.recorderToggleUnsubscribe = this.recorderService.onToggle((isRecording: boolean) => {
       this.isRecording = isRecording;
 
       // Update the mic button state
@@ -437,6 +450,20 @@ export class InputHandler extends Component {
       }
     });
 
+    this.videoRecorderToggleUnsubscribe?.();
+    this.videoRecorderToggleUnsubscribe = this.videoRecorderService.onToggle((isRecording: boolean) => {
+      this.isVideoRecording = isRecording;
+      if (this.videoButton && this.videoButton.buttonEl) {
+        this.videoButton.buttonEl.classList.toggle("ss-active", isRecording);
+        this.videoButton.setTooltip(
+          isRecording
+            ? "Video recording in progress (click to stop)"
+            : "Record Obsidian window workflow"
+        );
+      }
+      this.updateGeneratingState?.();
+    });
+
     // Update UI when generating state changes
     this.updateGeneratingState = () => {
       // Keep input enabled to allow typing next message
@@ -446,6 +473,10 @@ export class InputHandler extends Component {
       this.settingsButton.setDisabled(false); // Settings changes only affect next message
       this.attachButton.setDisabled(false); // Users can add context for their next message
       this.micButton.setDisabled(!this.hasProLicense()); // Voice input just adds text to input field
+      if (this.videoButton) {
+        this.videoButton.buttonEl.style.display = this.shouldShowVideoButton() ? "flex" : "none";
+        this.videoButton.setDisabled(!this.canUseVideoRecording());
+      }
       // Note: Save As Note functionality moved to slash command menu
       
       if (this.stopButton) {
@@ -465,6 +496,12 @@ export class InputHandler extends Component {
       this.updateSendButtonState();
       this.scrollManager.setGenerating(this.isGenerating);
     };
+
+    this.registerEvent(
+      this.app.workspace.on("systemsculpt:settings-updated", () => {
+        this.updateGeneratingState();
+      })
+    );
   }
 
   private initializeSlashCommands(): void {
@@ -612,6 +649,10 @@ export class InputHandler extends Component {
     this.toggleRecording();
   }
 
+  private handleVideoClick(): void {
+    this.toggleVideoRecording();
+  }
+
   private async toggleRecording(): Promise<void> {
     await this.recorderService.toggleRecording();
 
@@ -619,6 +660,11 @@ export class InputHandler extends Component {
     // so we don't need to manually update the button state here
 
     // Keep focus/cursor in chat
+    this.input.focus();
+  }
+
+  private async toggleVideoRecording(): Promise<void> {
+    await this.videoRecorderService.toggleRecording();
     this.input.focus();
   }
 
@@ -697,6 +743,56 @@ export class InputHandler extends Component {
 
   private hasProLicense(): boolean {
     return !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid);
+  }
+
+  private shouldShowVideoButton(): boolean {
+    return this.plugin.settings.showVideoRecordButtonInChat !== false;
+  }
+
+  private hasVideoCaptureRuntimeSupport(): boolean {
+    if (typeof MediaRecorder === "undefined" || typeof navigator === "undefined") {
+      return false;
+    }
+
+    const hasDisplayMedia = typeof (navigator.mediaDevices as any)?.getDisplayMedia === "function";
+    if (hasDisplayMedia) {
+      return true;
+    }
+
+    const hasLegacyMediaDevices = !!navigator.mediaDevices;
+    if (!hasLegacyMediaDevices) {
+      return hasMacWindowShellRecordingSupport();
+    }
+
+    const candidates = [
+      (globalThis as any)?.require,
+      (globalThis as any)?.window?.require,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== "function") continue;
+      try {
+        const electron = candidate("electron") as { desktopCapturer?: { getSources?: Function } };
+        if (electron?.desktopCapturer?.getSources) {
+          return true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return hasMacWindowShellRecordingSupport();
+  }
+
+  private canUseVideoRecording(): boolean {
+    if (!this.shouldShowVideoButton()) {
+      return false;
+    }
+    if (this.isVideoRecording) {
+      return true;
+    }
+    return Platform.isDesktopApp
+      && this.hasProLicense()
+      && this.hasVideoCaptureRuntimeSupport()
+      && this.videoRecorderService.isRuntimeSupported();
   }
 
   private updateSendButtonState(): void {
@@ -787,7 +883,7 @@ export class InputHandler extends Component {
         const iconEl = pill.createSpan({ cls: "systemsculpt-attachment-pill-icon" });
         const ext = item.file.extension?.toLowerCase?.() || "";
         const iconName =
-          ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)
+          ["png", "jpg", "jpeg", "webp", "svg"].includes(ext)
             ? "image"
             : ["mp3", "wav", "ogg", "m4a", "webm"].includes(ext)
               ? "file-audio"
@@ -823,7 +919,7 @@ export class InputHandler extends Component {
         const iconEl = pill.createSpan({ cls: "systemsculpt-attachment-pill-icon" });
         const iconName =
           resolved instanceof TFile
-            ? ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(resolved.extension.toLowerCase())
+            ? ["png", "jpg", "jpeg", "webp", "svg"].includes(resolved.extension.toLowerCase())
               ? "image"
               : ["mp3", "wav", "ogg", "m4a", "webm"].includes(resolved.extension.toLowerCase())
                 ? "file-audio"
@@ -928,16 +1024,23 @@ export class InputHandler extends Component {
         display: string | null;
         classList: string[];
 	      } | null;
-	      mic: {
+		      mic: {
+		        text: string;
+		        tooltip: string | null;
+		        disabled: boolean;
+	        display: string | null;
+	        classList: string[];
+	      } | null;
+	      video: {
 	        text: string;
 	        tooltip: string | null;
 	        disabled: boolean;
-        display: string | null;
-        classList: string[];
-      } | null;
-      attach: {
-        text: string;
-        tooltip: string | null;
+	        display: string | null;
+	        classList: string[];
+	      } | null;
+	      attach: {
+	        text: string;
+	        tooltip: string | null;
         disabled: boolean;
         display: string | null;
         classList: string[];
@@ -955,10 +1058,11 @@ export class InputHandler extends Component {
       atMentionMenuOpen: boolean | null;
       agentSelectionMenuOpen: boolean | null;
     };
-    recorder: {
-      isRecording: boolean;
-    };
-  } {
+	    recorder: {
+	      isRecording: boolean;
+        isVideoRecording: boolean;
+	    };
+	  } {
     const describeButton = (button: ButtonComponent | null | undefined) => {
       const el = button?.buttonEl;
       if (!el) return null;
@@ -999,22 +1103,24 @@ export class InputHandler extends Component {
       attachmentsHtml: this.attachmentsEl?.innerHTML ?? null,
       inputWrapperHtml: this.inputWrapper?.innerHTML ?? null,
       inputHtml: this.input?.outerHTML ?? "",
-	      buttons: {
-	        send: describeButton(this.sendButton),
-	        stop: describeButton(this.stopButton),
-	        mic: describeButton(this.micButton),
-	        attach: describeButton(this.attachButton),
-	        settings: describeButton(this.settingsButton),
-	      },
+		      buttons: {
+		        send: describeButton(this.sendButton),
+		        stop: describeButton(this.stopButton),
+		        mic: describeButton(this.micButton),
+		        video: describeButton(this.videoButton),
+		        attach: describeButton(this.attachButton),
+		        settings: describeButton(this.settingsButton),
+		      },
       menus: {
         slashCommandMenuOpen: this.slashCommandMenu?.isOpen?.() ?? null,
         atMentionMenuOpen: this.atMentionMenu?.isOpen?.() ?? null,
         agentSelectionMenuOpen: this.agentSelectionMenu?.isOpen?.() ?? null,
       },
-      recorder: {
-        isRecording: this.isRecording,
-      },
-    };
+	      recorder: {
+	        isRecording: this.isRecording,
+        isVideoRecording: this.isVideoRecording,
+	      },
+	    };
   }
 
   public getValue(): string {
@@ -1059,12 +1165,10 @@ export class InputHandler extends Component {
       this.recorderVisualizer = null;
     }
 
-    // Unregister any event listeners from the recorder service
-    if (this.recorderService) {
-      // This only removes our listener, but doesn't unload the service itself
-      // as other components might still be using it
-      this.recorderService.onToggle(() => {});
-    }
+    this.recorderToggleUnsubscribe?.();
+    this.recorderToggleUnsubscribe = null;
+    this.videoRecorderToggleUnsubscribe?.();
+    this.videoRecorderToggleUnsubscribe = null;
 
     // Clean up slash command menu
     if (this.slashCommandMenu) {

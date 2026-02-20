@@ -184,30 +184,6 @@ describe("ImageProcessor", () => {
       expect(result).toBe("data:image/png;base64,test");
     });
 
-    it("accepts gif extension", async () => {
-      const mockFile = {
-        stat: { size: 1000 },
-        extension: "gif",
-      } as unknown as TFile;
-
-      const mockArrayBuffer = new ArrayBuffer(8);
-      (mockApp.vault.readBinary as jest.Mock).mockResolvedValue(mockArrayBuffer);
-
-      const mockFileReader = {
-        onload: null as any,
-        onerror: null as any,
-        result: "data:image/gif;base64,test",
-        readAsDataURL: jest.fn(function(this: any) {
-          setTimeout(() => this.onload?.(), 0);
-        }),
-      };
-      global.FileReader = jest.fn(() => mockFileReader) as any;
-
-      const result = await ImageProcessor.processImage(mockFile, mockApp);
-
-      expect(result).toBe("data:image/gif;base64,test");
-    });
-
     it("accepts webp extension", async () => {
       const mockFile = {
         stat: { size: 1000 },
