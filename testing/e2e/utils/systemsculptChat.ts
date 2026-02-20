@@ -112,12 +112,52 @@ function getE2EVaultDisplayName(): string {
   return cleaned.length > 0 ? cleaned : "SystemSculpt Studio";
 }
 
-function getE2EWindowMode(): "none" | "capture" | "background" {
+type E2EWindowMode = "none" | "capture" | "space-capture" | "background";
+
+type E2EWindowPolicy = {
+  mode: "capture" | "background";
+  captureAlwaysOnTop: boolean;
+  captureVisibleOnAllWorkspaces: boolean;
+  captureAutoReposition: boolean;
+};
+
+function parseBooleanEnv(name: string, defaultValue: boolean): boolean {
+  const value = getEnv(name);
+  if (!value) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+  return defaultValue;
+}
+
+function getE2EWindowMode(): E2EWindowMode {
   const mode = String(process.env.SYSTEMSCULPT_E2E_WINDOW_MODE || "")
     .trim()
     .toLowerCase();
-  if (mode === "capture" || mode === "background") return mode;
+  if (mode === "capture" || mode === "space-capture" || mode === "background") return mode as E2EWindowMode;
   return "none";
+}
+
+function getE2EWindowPolicy(): E2EWindowPolicy | null {
+  const mode = getE2EWindowMode();
+  if (mode === "none") return null;
+  if (mode === "background") {
+    return {
+      mode,
+      captureAlwaysOnTop: false,
+      captureVisibleOnAllWorkspaces: false,
+      captureAutoReposition: false,
+    };
+  }
+
+  // "capture" keeps legacy behavior by default. "space-capture" disables intrusive flags by default.
+  const intrusiveDefaults = mode === "capture";
+  return {
+    mode: "capture",
+    captureAlwaysOnTop: parseBooleanEnv("SYSTEMSCULPT_E2E_WINDOW_ALWAYS_ON_TOP", intrusiveDefaults),
+    captureVisibleOnAllWorkspaces: parseBooleanEnv("SYSTEMSCULPT_E2E_WINDOW_VISIBLE_ON_ALL_WORKSPACES", intrusiveDefaults),
+    captureAutoReposition: parseBooleanEnv("SYSTEMSCULPT_E2E_WINDOW_AUTO_REPOSITION", intrusiveDefaults),
+  };
 }
 
 async function seedBelievableVaultContent(vaultPath: string): Promise<void> {
@@ -137,7 +177,7 @@ async function seedBelievableVaultContent(vaultPath: string): Promise<void> {
         "# Email Campaign Plan",
         "",
         "- Goal: improve click-through without sounding promotional.",
-        "- Demo asset needed: short workflow GIF inside Obsidian.",
+        "- Demo asset needed: short workflow loop video inside Obsidian.",
       ].join("\n"),
     },
     {
@@ -181,7 +221,7 @@ async function seedBelievableVaultContent(vaultPath: string): Promise<void> {
       content: [
         "# 2026-02-12",
         "",
-        "- Build a realistic GIF showcase flow for monetization email.",
+        "- Build a realistic loop-video showcase flow for monetization email.",
       ].join("\n"),
     },
   ];
@@ -447,16 +487,17 @@ export async function openFreshChatView(): Promise<void> {
 }
 
 export async function tryBackgroundObsidianWindow(): Promise<void> {
-  const windowMode = getE2EWindowMode();
-  if (windowMode === "none") return;
+  const windowPolicy = getE2EWindowPolicy();
+  if (!windowPolicy) return;
 
   try {
-    await browser.execute((mode: "capture" | "background") => {
+    await browser.execute((policy: E2EWindowPolicy) => {
       try {
         const remote = (window as any)?.electron?.remote;
         const win = remote?.getCurrentWindow?.();
         if (!win) return;
 
+        const mode = policy.mode;
         if (mode === "capture") {
           if (typeof win.isMinimized === "function" && win.isMinimized() && typeof win.restore === "function") {
             win.restore();
@@ -464,25 +505,35 @@ export async function tryBackgroundObsidianWindow(): Promise<void> {
           if (typeof win.setSkipTaskbar === "function") win.setSkipTaskbar(false);
           if (typeof win.setFocusable === "function") win.setFocusable(true);
           if (typeof win.setVisibleOnAllWorkspaces === "function") {
-            win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+            try {
+              win.setVisibleOnAllWorkspaces(policy.captureVisibleOnAllWorkspaces, {
+                visibleOnFullScreen: policy.captureVisibleOnAllWorkspaces,
+              });
+            } catch (_) {}
           }
           if (typeof win.setAlwaysOnTop === "function") {
-            try {
-              win.setAlwaysOnTop(true, "floating", 1);
-            } catch (_) {
-              win.setAlwaysOnTop(true);
+            if (policy.captureAlwaysOnTop) {
+              try {
+                win.setAlwaysOnTop(true, "floating", 1);
+              } catch (_) {
+                win.setAlwaysOnTop(true);
+              }
+            } else {
+              win.setAlwaysOnTop(false);
             }
           }
 
-          const screen = remote?.screen;
-          const display = screen?.getPrimaryDisplay?.();
-          const workArea = display?.workArea;
-          if (workArea && typeof win.setBounds === "function") {
-            const targetWidth = Math.max(980, Math.min(1600, Math.floor(workArea.width * 0.78)));
-            const targetHeight = Math.max(720, Math.min(1280, Math.floor(workArea.height * 0.86)));
-            const targetX = Math.floor(workArea.x + (workArea.width - targetWidth) / 2);
-            const targetY = Math.floor(workArea.y + Math.max(24, (workArea.height - targetHeight) / 2));
-            win.setBounds({ x: targetX, y: targetY, width: targetWidth, height: targetHeight }, false);
+          if (policy.captureAutoReposition) {
+            const screen = remote?.screen;
+            const display = screen?.getPrimaryDisplay?.();
+            const workArea = display?.workArea;
+            if (workArea && typeof win.setBounds === "function") {
+              const targetWidth = Math.max(980, Math.min(1600, Math.floor(workArea.width * 0.78)));
+              const targetHeight = Math.max(720, Math.min(1280, Math.floor(workArea.height * 0.86)));
+              const targetX = Math.floor(workArea.x + (workArea.width - targetWidth) / 2);
+              const targetY = Math.floor(workArea.y + Math.max(24, (workArea.height - targetHeight) / 2));
+              win.setBounds({ x: targetX, y: targetY, width: targetWidth, height: targetHeight }, false);
+            }
           }
 
           if (typeof win.moveTop === "function") win.moveTop();
@@ -495,7 +546,9 @@ export async function tryBackgroundObsidianWindow(): Promise<void> {
         if (typeof win.setFocusable === "function") win.setFocusable(false);
         if (typeof win.setAlwaysOnTop === "function") win.setAlwaysOnTop(false);
         if (typeof win.setVisibleOnAllWorkspaces === "function") {
-          win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+          try {
+            win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: false });
+          } catch (_) {}
         }
         if (typeof win.setPosition === "function") win.setPosition(-10000, -10000, false);
         if (typeof win.blur === "function") win.blur();
@@ -505,7 +558,7 @@ export async function tryBackgroundObsidianWindow(): Promise<void> {
           app.dock.hide();
         }
       } catch (_) {}
-    }, windowMode);
+    }, windowPolicy);
   } catch (_) {}
 }
 

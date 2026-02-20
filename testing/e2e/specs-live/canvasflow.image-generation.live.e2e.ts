@@ -99,7 +99,7 @@ async function readGeneratedArtifacts(): Promise<{
         if (inputNodeIds.includes(node.id) || node.id === promptNodeId) return false;
         const filePath = typeof node.file === "string" ? node.file : "";
         if (!filePath.startsWith(outputPrefix)) return false;
-        return /\.(png|jpg|jpeg|webp|gif)$/i.test(filePath);
+        return /\.(png|jpg|jpeg|webp)$/i.test(filePath);
       });
 
       if (!generated || typeof generated.file !== "string") {

@@ -1,6 +1,10 @@
 import express from "express";
 import cors from "cors";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEGACY_API_PREFIX = "/api/v1";
 const AGENT_API_PREFIX = "/api/v2/agent";
 const DEFAULT_PORT = 43111;
@@ -9,6 +13,52 @@ const TINY_PNG_BUFFER = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9slt4d8AAAAASUVORK5CYII=",
   "base64"
 );
+const FIXTURE_OUTPUT_WIDTH = 768;
+const FIXTURE_OUTPUT_HEIGHT = 1344;
+const FIXTURE_OUTPUT_IMAGES = loadFixtureOutputImages();
+
+function loadFixtureOutputImages() {
+  const fixtureDir = path.resolve(__dirname, "fixtures/canvasflow");
+  const fixturePaths = [
+    path.join(fixtureDir, "logo-sweater-seed-1.png"),
+    path.join(fixtureDir, "logo-sweater-seed-2.png"),
+  ];
+
+  const loaded = fixturePaths
+    .map((fixturePath) => {
+      try {
+        if (!fs.existsSync(fixturePath)) return null;
+        const buffer = fs.readFileSync(fixturePath);
+        if (!buffer || buffer.byteLength === 0) return null;
+        return {
+          mimeType: "image/png",
+          width: FIXTURE_OUTPUT_WIDTH,
+          height: FIXTURE_OUTPUT_HEIGHT,
+          buffer,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  if (loaded.length > 0) return loaded;
+
+  return [
+    {
+      mimeType: "image/png",
+      width: 1,
+      height: 1,
+      buffer: TINY_PNG_BUFFER,
+    },
+  ];
+}
+
+function getFixtureOutputImage(index) {
+  const safeIndex = Number.isFinite(Number(index)) ? Math.max(0, Math.floor(Number(index))) : 0;
+  const selected = FIXTURE_OUTPUT_IMAGES[safeIndex % FIXTURE_OUTPUT_IMAGES.length];
+  return selected || FIXTURE_OUTPUT_IMAGES[0];
+}
 
 function getPort() {
   const raw = process.env.SYSTEMSCULPT_E2E_MOCK_PORT || process.env.PORT || "";
@@ -159,6 +209,17 @@ app.get(`${LEGACY_API_PREFIX}/images/models`, (req, res) => {
         default_aspect_ratio: "1:1",
         allowed_aspect_ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
       },
+      {
+        id: "google/nano-banana-pro",
+        name: "Google Nano Banana Pro (Gemini Flash 2.5 Image)",
+        provider: "openrouter",
+        input_modalities: ["text", "image"],
+        output_modalities: ["image"],
+        supports_image_input: true,
+        max_images_per_job: 4,
+        default_aspect_ratio: "9:16",
+        allowed_aspect_ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+      },
     ],
   });
 });
@@ -222,15 +283,18 @@ app.get(`${LEGACY_API_PREFIX}/images/generations/jobs/:jobId`, (req, res) => {
   const done = Date.now() >= job.readyAt;
   const status = done ? "succeeded" : "queued";
   const outputs = done
-    ? Array.from({ length: job.count }).map((_, index) => ({
-        index,
-        mime_type: "image/png",
-        size_bytes: TINY_PNG_BUFFER.byteLength,
-        width: 1,
-        height: 1,
-        url: `http://127.0.0.1:${getPort()}/mock/images/${job.id}/${index}.png`,
-        url_expires_in_seconds: 1800,
-      }))
+    ? Array.from({ length: job.count }).map((_, index) => {
+        const fixture = getFixtureOutputImage(index);
+        return {
+          index,
+          mime_type: fixture.mimeType,
+          size_bytes: fixture.buffer.byteLength,
+          width: fixture.width,
+          height: fixture.height,
+          url: `http://127.0.0.1:${getPort()}/mock/images/${job.id}/${index}.png`,
+          url_expires_in_seconds: 1800,
+        };
+      })
     : [];
 
   res.status(200).json({
@@ -256,9 +320,11 @@ app.get(`${LEGACY_API_PREFIX}/images/generations/jobs/:jobId`, (req, res) => {
   });
 });
 
-app.get("/mock/images/:jobId/:index.png", (_req, res) => {
-  res.setHeader("Content-Type", "image/png");
-  res.status(200).send(TINY_PNG_BUFFER);
+app.get("/mock/images/:jobId/:index.png", (req, res) => {
+  const { index } = req.params || {};
+  const fixture = getFixtureOutputImage(index);
+  res.setHeader("Content-Type", fixture.mimeType);
+  res.status(200).send(fixture.buffer);
 });
 
 app.post(`${AGENT_API_PREFIX}/sessions`, (req, res) => {
