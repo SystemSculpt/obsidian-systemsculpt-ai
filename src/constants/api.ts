@@ -43,6 +43,7 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
   },
   IMAGES: {
     MODELS: "/images/models",
+    INPUTS_PREPARE: "/images/inputs/prepare",
     GENERATION_JOBS: "/images/generations/jobs",
     GENERATION_JOB: (jobId: string) => `/images/generations/jobs/${encodeURIComponent(jobId)}`,
   },

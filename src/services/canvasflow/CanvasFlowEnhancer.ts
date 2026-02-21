@@ -36,7 +36,6 @@ import {
   formatCuratedImageModelOptionText,
   getCuratedImageGenerationModel,
   getCuratedImageGenerationModelGroups,
-  mergeImageGenerationServerCatalogModels,
   type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
 import {
@@ -98,7 +97,9 @@ type PromptInspectorState = {
   rootEl: HTMLElement;
   titleEl: HTMLElement;
   pathEl: HTMLElement;
-  modelSelect: HTMLSelectElement;
+  modelPickerEl: HTMLElement;
+  modelButtonsById: Map<string, HTMLButtonElement>;
+  selectedModelId: string;
   imageCountButtons: HTMLButtonElement[];
   aspectRatioButtons: HTMLButtonElement[];
   promptTextarea: HTMLTextAreaElement;
@@ -110,6 +111,29 @@ type PromptInspectorState = {
   suppressDraftEvents: boolean;
   saveTimer: number | null;
   saveChain: Promise<void>;
+  lastBoundFingerprint: string;
+  interactionLockUntilMs: number;
+  pendingRebindTimer: number | null;
+};
+
+type InspectorModelButtonSpec = {
+  id: string;
+  label: string;
+  title: string;
+  provider: string;
+  legacyUnsupported: boolean;
+};
+
+type InspectorModelButtonGroup = {
+  provider: string;
+  models: InspectorModelButtonSpec[];
+};
+
+type InspectorModelButtonLayout = {
+  selectedValue: string;
+  defaultTitle: string;
+  groups: InspectorModelButtonGroup[];
+  legacyUnsupported: InspectorModelButtonSpec | null;
 };
 
 const SIMPLE_ASPECT_RATIO_OPTIONS = ["16:9", "1:1", "9:16"] as const;
@@ -187,6 +211,8 @@ class CanvasFlowPromptInspectorModal extends Modal {
 
 export class CanvasFlowEnhancer {
   private static readonly IMAGE_MODEL_CATALOG_REFRESH_INTERVAL_MS = 5 * 60_000;
+  private static readonly SELECTION_UI_UPDATE_DEBOUNCE_MS = 48;
+  private static readonly INSPECTOR_INTERACTION_LOCK_MS = 500;
 
   private readonly controllers = new Map<WorkspaceLeaf, LeafController>();
   private readonly runner: CanvasFlowRunner;
@@ -404,7 +430,7 @@ export class CanvasFlowEnhancer {
     window.setTimeout(() => {
       controller.selectionMenuUpdateQueued = false;
       void this.updateSelectionUiOnly(controller);
-    }, 0);
+    }, CanvasFlowEnhancer.SELECTION_UI_UPDATE_DEBOUNCE_MS);
   }
 
   private async updateSelectionUiOnly(controller: LeafController): Promise<void> {
@@ -756,90 +782,229 @@ export class CanvasFlowEnhancer {
       .filter((model) => model.id.length > 0);
   }
 
-  private renderModelSelect(
-    select: HTMLSelectElement,
+  private getInspectorModelButtonLayout(options: {
+    settingsModelSlug: string;
+    modelFromNote: string;
+    selectedValue?: string;
+  }): InspectorModelButtonLayout {
+    const settingsModelSlug = String(options.settingsModelSlug || "").trim();
+    const modelFromNote = String(options.modelFromNote || "").trim();
+    const selectedValue = String(options.selectedValue ?? "").trim();
+    const keepSelected = selectedValue || modelFromNote;
+
+    const serverModels = this.getCachedImageGenerationModels();
+    const allGroups = getCuratedImageGenerationModelGroups(serverModels);
+    const hasSupportMetadata =
+      serverModels.some((model) => typeof model.supports_generation === "boolean") ||
+      allGroups.some((group) => group.models.some((model) => model.supportsGeneration === false));
+    const knownById = new Map<
+      string,
+      {
+        label: string;
+        title: string;
+        provider: string;
+        supported: boolean;
+      }
+    >();
+    const groups: InspectorModelButtonGroup[] = [];
+
+    for (const group of allGroups) {
+      const supportedModels: InspectorModelButtonSpec[] = [];
+      for (const model of group.models) {
+        const supported = hasSupportMetadata ? model.supportsGeneration === true : true;
+        knownById.set(model.id, {
+          label: model.label,
+          title: formatCuratedImageModelOptionText(model),
+          provider: group.provider,
+          supported,
+        });
+        if (!supported) continue;
+        supportedModels.push({
+          id: model.id,
+          label: model.label,
+          title: formatCuratedImageModelOptionText(model),
+          provider: group.provider,
+          legacyUnsupported: false,
+        });
+      }
+      if (supportedModels.length > 0) {
+        groups.push({
+          provider: group.provider,
+          models: supportedModels,
+        });
+      }
+    }
+
+    const selectedKnown = keepSelected ? knownById.get(keepSelected) || null : null;
+    const legacyUnsupported =
+      keepSelected && (!selectedKnown || selectedKnown.supported !== true)
+        ? {
+            id: keepSelected,
+            label: selectedKnown?.label || keepSelected,
+            title: selectedKnown?.title || keepSelected,
+            provider: selectedKnown?.provider || "Saved",
+            legacyUnsupported: true,
+          }
+        : null;
+
+    const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug, serverModels) : null;
+    const fallbackDefault = settingsModelSlug || DEFAULT_IMAGE_GENERATION_MODEL_ID;
+    const defaultTitle = defaultEntry
+      ? `Use global default model (${defaultEntry.label}).`
+      : `Use global default model (${fallbackDefault}).`;
+
+    return {
+      selectedValue: keepSelected,
+      defaultTitle,
+      groups,
+      legacyUnsupported,
+    };
+  }
+
+  private touchInspectorInteraction(inspector: PromptInspectorState): void {
+    inspector.interactionLockUntilMs = Date.now() + CanvasFlowEnhancer.INSPECTOR_INTERACTION_LOCK_MS;
+  }
+
+  private isInspectorInteractionLocked(inspector: PromptInspectorState): boolean {
+    return Date.now() < inspector.interactionLockUntilMs;
+  }
+
+  private shouldRebindInspector(inspector: PromptInspectorState, nextFingerprint: string): boolean {
+    if (inspector.lastBoundFingerprint === nextFingerprint) {
+      return false;
+    }
+    if (this.isInspectorInteractionLocked(inspector)) {
+      return false;
+    }
+    return true;
+  }
+
+  private renderInspectorModelButtons(
+    controller: LeafController,
+    inspector: PromptInspectorState,
     options: {
       settingsModelSlug: string;
       modelFromNote: string;
       selectedValue?: string;
     }
   ): void {
-    const settingsModelSlug = String(options.settingsModelSlug || "").trim();
-    const modelFromNote = String(options.modelFromNote || "").trim();
-    const selectedValue = String(options.selectedValue ?? "").trim();
+    const layout = this.getInspectorModelButtonLayout(options);
+    inspector.modelPickerEl.empty();
+    inspector.modelButtonsById = new Map();
 
-    const keepSelected = selectedValue || modelFromNote;
-    const extras = new Set<string>();
-    if (keepSelected) extras.add(keepSelected);
-    if (modelFromNote) extras.add(modelFromNote);
-
-    const serverModels = this.getCachedImageGenerationModels();
-    const groups = getCuratedImageGenerationModelGroups(serverModels);
-    const hasSupportMetadata =
-      serverModels.some((model) => typeof model.supports_generation === "boolean") ||
-      groups.some((group) => group.models.some((model) => model.supportsGeneration === false));
-    const curatedSlugs = new Set<string>();
-    const curatedSupportBySlug = new Map<string, boolean>();
-    for (const group of groups) {
-      for (const model of group.models) {
-        curatedSlugs.add(model.id);
-        curatedSupportBySlug.set(model.id, model.supportsGeneration);
+    const createModelButton = (
+      parent: HTMLElement,
+      spec: {
+        id: string;
+        label: string;
+        title: string;
+        disabled?: boolean;
+        classes?: string;
       }
-    }
-
-    const extraSlugs = Array.from(extras.values())
-      .map((s) => String(s || "").trim())
-      .filter((s) => s && s !== "openrouter/auto" && !curatedSlugs.has(s))
-      .sort((a, b) => a.localeCompare(b));
-
-    select.empty();
-    const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug, serverModels) : null;
-    const defaultLabel = defaultEntry
-      ? `(Default: ${defaultEntry.label}  ${defaultEntry.pricing.summary})`
-      : settingsModelSlug
-        ? "(Default: configured model)"
-        : "(Default model)";
-    select.createEl("option", { value: "", text: defaultLabel });
-
-    for (const group of groups) {
-      const optgroup = select.createEl("optgroup");
-      optgroup.label = group.provider;
-      for (const model of group.models) {
-        const isSupported = hasSupportMetadata ? model.supportsGeneration === true : true;
-        const option = optgroup.createEl("option", {
-          value: model.id,
-          text: isSupported ? formatCuratedImageModelOptionText(model) : `${formatCuratedImageModelOptionText(model)} (Not supported yet)`,
+    ): HTMLButtonElement => {
+      const btn = parent.createEl("button", {
+        text: spec.label,
+        cls: `ss-canvasflow-choice-btn ss-canvasflow-model-btn${spec.classes ? ` ${spec.classes}` : ""}`,
+      });
+      btn.type = "button";
+      btn.dataset.value = spec.id;
+      btn.title = spec.title;
+      btn.setAttribute("aria-pressed", "false");
+      const disabled = spec.disabled === true;
+      if (disabled) {
+        btn.disabled = true;
+      } else {
+        btn.addEventListener("click", (e) => {
+          stopEvent(e);
+          this.touchInspectorInteraction(inspector);
+          this.onInspectorModelButtonPicked(controller, inspector, spec.id);
         });
-        option.disabled = !isSupported;
+      }
+      inspector.modelButtonsById.set(spec.id, btn);
+      return btn;
+    };
+
+    const defaultRow = inspector.modelPickerEl.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-model-row" });
+    createModelButton(defaultRow, {
+      id: "",
+      label: "Default",
+      title: layout.defaultTitle,
+      classes: "ss-canvasflow-model-btn-default",
+    });
+
+    for (const group of layout.groups) {
+      const groupEl = inspector.modelPickerEl.createDiv({ cls: "ss-canvasflow-model-group" });
+      groupEl.createDiv({ text: group.provider, cls: "ss-canvasflow-model-provider" });
+      const row = groupEl.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-model-row" });
+      for (const spec of group.models) {
+        createModelButton(row, spec);
       }
     }
 
-    if (extraSlugs.length) {
-      const optgroup = select.createEl("optgroup");
-      optgroup.label = "Custom";
-      for (const slug of extraSlugs) {
-        const isSupported = hasSupportMetadata ? curatedSupportBySlug.get(slug) === true : true;
-        const option = optgroup.createEl("option", {
-          value: slug,
-          text: isSupported ? slug : `${slug} (Not supported yet)`,
-        });
-        option.disabled = !isSupported;
-      }
+    if (layout.legacyUnsupported) {
+      const legacyGroup = inspector.modelPickerEl.createDiv({
+        cls: "ss-canvasflow-model-group ss-canvasflow-model-group-legacy",
+      });
+      legacyGroup.createDiv({
+        text: "Saved Model (Unsupported)",
+        cls: "ss-canvasflow-model-provider ss-canvasflow-model-provider-legacy",
+      });
+      const row = legacyGroup.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-model-row" });
+      createModelButton(row, {
+        id: layout.legacyUnsupported.id,
+        label: layout.legacyUnsupported.label,
+        title: `${layout.legacyUnsupported.title} (not runnable right now)`,
+        disabled: true,
+        classes: "is-legacy-unsupported",
+      });
     }
 
-    // Ensure selection sticks even if the chosen model isn't in the latest list.
-    select.value = keepSelected || "";
+    this.setInspectorSelectedModel(inspector, layout.selectedValue);
   }
 
-  private populateModelSelect(select: HTMLSelectElement, options: { settingsModelSlug: string; modelFromNote: string }): void {
-    select.dataset.ssCanvasflowSettingsModelSlug = String(options.settingsModelSlug || "").trim();
-    select.dataset.ssCanvasflowNoteModelSlug = String(options.modelFromNote || "").trim();
+  private setInspectorSelectedModel(inspector: PromptInspectorState, modelId: string): void {
+    const normalized = String(modelId || "").trim();
+    const hasModel = normalized.length > 0 && inspector.modelButtonsById.has(normalized);
+    const nextSelection = hasModel ? normalized : "";
+    inspector.selectedModelId = nextSelection;
 
-    this.renderModelSelect(select, {
-      settingsModelSlug: options.settingsModelSlug,
-      modelFromNote: options.modelFromNote,
-      selectedValue: select.value,
-    });
+    for (const [id, btn] of inspector.modelButtonsById.entries()) {
+      const active = id === nextSelection;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+
+  private onInspectorModelButtonPicked(
+    controller: LeafController,
+    inspector: PromptInspectorState,
+    modelId: string
+  ): void {
+    if (inspector.suppressDraftEvents) return;
+    this.setInspectorSelectedModel(inspector, modelId);
+    void queueCanvasFlowLastUsedPatch(this.plugin, { modelId: String(modelId || "").trim() });
+    const nodeId = this.updateDraftFromInspectorFields(controller, inspector);
+    if (!nodeId) return;
+    this.refreshPromptNodeCard(controller, nodeId);
+    this.queueInspectorDraftSave(controller, inspector, "model");
+  }
+
+  private getInspectorBindingFingerprint(options: {
+    state: PromptNodeRenderState;
+    entry: CanvasFlowPromptDraftEntry;
+  }): string {
+    const body = String(options.entry.draft.body || "");
+    const head = body.length > 200 ? body.slice(0, 200) : body;
+    return [
+      String(options.state.nodeId || ""),
+      String(options.state.promptFile.path || ""),
+      String(options.state.promptMtime || 0),
+      options.entry.dirty ? "dirty" : "clean",
+      String(options.entry.draft.explicitModel || ""),
+      String(clampImageCount(options.entry.draft.imageCount)),
+      String(options.entry.draft.aspectRatioPreset || options.entry.draft.nano?.aspect_ratio || ""),
+      head,
+    ].join("||");
   }
 
   private teardownPromptNodeControllers(controller: LeafController): void {
@@ -1379,6 +1544,14 @@ export class CanvasFlowEnhancer {
         const closedProgrammatically = inspector.closingProgrammatically;
         inspector.closingProgrammatically = false;
         inspector.boundNodeId = null;
+        inspector.selectedModelId = "";
+        inspector.modelButtonsById.clear();
+        inspector.lastBoundFingerprint = "";
+        inspector.interactionLockUntilMs = 0;
+        if (inspector.pendingRebindTimer !== null) {
+          window.clearTimeout(inspector.pendingRebindTimer);
+          inspector.pendingRebindTimer = null;
+        }
         if (inspector.saveTimer !== null) {
           window.clearTimeout(inspector.saveTimer);
           inspector.saveTimer = null;
@@ -1409,7 +1582,7 @@ export class CanvasFlowEnhancer {
     };
 
     const modelField = createField("Model (optional)");
-    const modelSelect = modelField.createEl("select", { cls: "ss-canvasflow-model" });
+    const modelPickerEl = modelField.createDiv({ cls: "ss-canvasflow-model-picker" });
 
     const imageCountField = createField("Images");
     const imageCountButtonsWrap = imageCountField.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-image-count-row" });
@@ -1458,7 +1631,9 @@ export class CanvasFlowEnhancer {
       rootEl: inspectorRoot,
       titleEl,
       pathEl,
-      modelSelect,
+      modelPickerEl,
+      modelButtonsById: new Map(),
+      selectedModelId: "",
       imageCountButtons,
       aspectRatioButtons,
       promptTextarea,
@@ -1470,8 +1645,18 @@ export class CanvasFlowEnhancer {
       suppressDraftEvents: false,
       saveTimer: null,
       saveChain: Promise.resolve(),
+      lastBoundFingerprint: "",
+      interactionLockUntilMs: 0,
+      pendingRebindTimer: null,
     };
     inspectorRef = inspector;
+
+    inspectorRoot.addEventListener("pointerdown", () => {
+      this.touchInspectorInteraction(inspector);
+    });
+    inspectorRoot.addEventListener("keydown", () => {
+      this.touchInspectorInteraction(inspector);
+    });
 
     const onDraftInput = () => {
       const nodeId = this.updateDraftFromInspectorFields(controller, inspector);
@@ -1485,17 +1670,10 @@ export class CanvasFlowEnhancer {
       });
     };
 
-    modelSelect.addEventListener("change", () => {
-      void queueCanvasFlowLastUsedPatch(this.plugin, {
-        modelId: String(modelSelect.value || "").trim(),
-      });
-      onDraftInput();
-    });
-    bindBlurSave(modelSelect);
-
     for (const btn of imageCountButtons) {
       btn.addEventListener("click", (e) => {
         stopEvent(e);
+        this.touchInspectorInteraction(inspector);
         if (inspector.suppressDraftEvents) return;
         this.setActiveChoiceButtons(imageCountButtons, String(btn.dataset.value || "1"));
         void queueCanvasFlowLastUsedPatch(this.plugin, {
@@ -1509,6 +1687,7 @@ export class CanvasFlowEnhancer {
     for (const btn of aspectRatioButtons) {
       btn.addEventListener("click", (e) => {
         stopEvent(e);
+        this.touchInspectorInteraction(inspector);
         if (inspector.suppressDraftEvents) return;
         this.setActiveChoiceButtons(aspectRatioButtons, String(btn.dataset.value || DEFAULT_SIMPLE_ASPECT_RATIO));
         void queueCanvasFlowLastUsedPatch(this.plugin, {
@@ -1523,6 +1702,7 @@ export class CanvasFlowEnhancer {
     bindBlurSave(promptTextarea);
 
     promptTextarea.addEventListener("keydown", (e) => {
+      this.touchInspectorInteraction(inspector);
       const isModEnter = (e.key === "Enter" || e.code === "Enter") && (e.ctrlKey || e.metaKey);
       if (!isModEnter) return;
       e.preventDefault();
@@ -1596,6 +1776,10 @@ export class CanvasFlowEnhancer {
   private hidePromptInspector(controller: LeafController): void {
     const inspector = controller.inspector;
     if (!inspector) return;
+    if (inspector.pendingRebindTimer !== null) {
+      window.clearTimeout(inspector.pendingRebindTimer);
+      inspector.pendingRebindTimer = null;
+    }
     if (inspector.saveTimer !== null) {
       window.clearTimeout(inspector.saveTimer);
       inspector.saveTimer = null;
@@ -1655,14 +1839,36 @@ export class CanvasFlowEnhancer {
       return;
     }
 
-    this.bindInspectorToPromptNode(controller, inspector, state, false);
+    const fingerprint = this.getInspectorBindingFingerprint({ state, entry });
+    if (inspector.lastBoundFingerprint === fingerprint) {
+      return;
+    }
+    if (this.isInspectorInteractionLocked(inspector)) {
+      if (inspector.pendingRebindTimer === null) {
+        const remaining = Math.max(16, inspector.interactionLockUntilMs - Date.now() + 20);
+        inspector.pendingRebindTimer = window.setTimeout(() => {
+          inspector.pendingRebindTimer = null;
+          this.scheduleSelectionUiUpdate(controller);
+        }, remaining);
+      }
+      return;
+    }
+    if (inspector.pendingRebindTimer !== null) {
+      window.clearTimeout(inspector.pendingRebindTimer);
+      inspector.pendingRebindTimer = null;
+    }
+    if (!this.shouldRebindInspector(inspector, fingerprint)) {
+      return;
+    }
+    this.bindInspectorToPromptNode(controller, inspector, state, false, fingerprint);
   }
 
   private bindInspectorToPromptNode(
     controller: LeafController,
     inspector: PromptInspectorState,
     state: PromptNodeRenderState,
-    focusPrompt: boolean
+    focusPrompt: boolean,
+    fingerprint?: string
   ): void {
     const draftEntry = this.getPromptDraftEntry(controller, state);
     const draft = cloneCanvasFlowPromptDraft(draftEntry.draft);
@@ -1682,15 +1888,15 @@ export class CanvasFlowEnhancer {
     inspector.titleEl.setText(state.promptFile.basename);
     inspector.pathEl.setText(state.promptFile.path);
 
-    this.renderModelSelect(inspector.modelSelect, {
+    this.renderInspectorModelButtons(controller, inspector, {
       settingsModelSlug,
       modelFromNote: draft.explicitModel || String(state.promptConfig.imageModelId || "").trim(),
       selectedValue: draft.explicitModel,
     });
-    inspector.modelSelect.value = draft.explicitModel;
     this.setActiveChoiceButtons(inspector.imageCountButtons, String(clampImageCount(draft.imageCount)));
     this.setActiveChoiceButtons(inspector.aspectRatioButtons, preferredAspect);
     inspector.promptTextarea.value = draft.body;
+    inspector.lastBoundFingerprint = fingerprint || this.getInspectorBindingFingerprint({ state, entry: draftEntry });
 
     inspector.suppressDraftEvents = false;
     if (draftEntry.dirty) {
@@ -1726,14 +1932,25 @@ export class CanvasFlowEnhancer {
 
     const entry = this.getPromptDraftEntry(controller, state);
     const settingsModelSlug = String(this.plugin.settings.imageGenerationDefaultModelId || "").trim();
-    const existingSelection = String(inspector.modelSelect.value || "").trim();
-    this.renderModelSelect(inspector.modelSelect, {
-      settingsModelSlug,
-      modelFromNote: entry.draft.explicitModel || String(state.promptConfig.imageModelId || "").trim(),
-      selectedValue: existingSelection || entry.draft.explicitModel,
-    });
-    inspector.modelSelect.value = existingSelection || String(entry.draft.explicitModel || "").trim();
-    this.refreshPromptNodeCard(controller, nodeId);
+    const existingSelection = String(inspector.selectedModelId || "").trim();
+    const render = () => {
+      this.renderInspectorModelButtons(controller, inspector, {
+        settingsModelSlug,
+        modelFromNote: entry.draft.explicitModel || String(state.promptConfig.imageModelId || "").trim(),
+        selectedValue: existingSelection || entry.draft.explicitModel,
+      });
+      this.refreshPromptNodeCard(controller, nodeId);
+    };
+    if (this.isInspectorInteractionLocked(inspector)) {
+      window.setTimeout(() => {
+        const currentInspector = controller.inspector;
+        if (!currentInspector || currentInspector !== inspector) return;
+        if (!currentInspector.isOpen || currentInspector.boundNodeId !== nodeId) return;
+        render();
+      }, CanvasFlowEnhancer.INSPECTOR_INTERACTION_LOCK_MS + 20);
+      return;
+    }
+    render();
   }
 
   private imageModelCatalogSignature(models: readonly ImageGenerationServerCatalogModel[]): string {
@@ -1811,11 +2028,7 @@ export class CanvasFlowEnhancer {
         if (supportedModels.length === 0) {
           return false;
         }
-        const openRouterCatalog = await service.listOpenRouterMarketplaceImageModels().catch(() => []);
-        const merged = mergeImageGenerationServerCatalogModels(
-          supportedModels,
-          openRouterCatalog
-        );
+        const merged = supportedModels;
         if (merged.length === 0) {
           return false;
         }
@@ -1834,7 +2047,7 @@ export class CanvasFlowEnhancer {
         });
         return true;
       } catch (error) {
-        console.warn("[CanvasFlow] Failed to refresh image model catalog for inspector dropdown.", error);
+        console.warn("[CanvasFlow] Failed to refresh image model catalog for inspector model picker.", error);
         return false;
       } finally {
         this.lastImageModelCatalogRefreshAt = Date.now();
@@ -1866,7 +2079,7 @@ export class CanvasFlowEnhancer {
     const entry = this.getPromptDraftEntry(controller, state);
     const nextDraft: CanvasFlowPromptDraft = cloneCanvasFlowPromptDraft(entry.draft);
     nextDraft.body = inspector.promptTextarea.value;
-    nextDraft.explicitModel = String(inspector.modelSelect.value || "").trim();
+    nextDraft.explicitModel = String(inspector.selectedModelId || "").trim();
     nextDraft.seedText = "";
     nextDraft.imageCount = clampImageCount(Number(this.getActiveChoiceValue(inspector.imageCountButtons, "1")));
     nextDraft.aspectRatioPreset = this.getActiveChoiceValue(inspector.aspectRatioButtons, DEFAULT_SIMPLE_ASPECT_RATIO);

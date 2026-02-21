@@ -60,7 +60,32 @@ export type SystemSculptImageGenerationUsage = {
 
 export type SystemSculptImageInput =
   | { type: "url"; url: string }
-  | { type: "data_url"; data_url: string };
+  | {
+      type: "uploaded";
+      key: string;
+      mime_type: string;
+      size_bytes: number;
+      sha256: string;
+    };
+
+export type SystemSculptPrepareInputImageUploadItem = {
+  index: number;
+  upload: {
+    method: "PUT";
+    url: string;
+    headers?: Record<string, string>;
+    expires_in_seconds?: number;
+    expires_at?: string;
+  };
+  input_image: Extract<SystemSculptImageInput, { type: "uploaded" }>;
+};
+
+export type SystemSculptPrepareInputImageUploadsResponse = {
+  contract?: string;
+  upload_id?: string;
+  expires_at?: string;
+  input_uploads: SystemSculptPrepareInputImageUploadItem[];
+};
 
 export type SystemSculptCreateGenerationJobRequest = {
   model?: string;
@@ -95,6 +120,12 @@ type JsonRequestOptions = {
 type ArrayBufferRequestOptions = {
   method: "GET";
   headers?: Record<string, string>;
+};
+
+type BinaryUploadRequestOptions = {
+  method: "PUT";
+  headers?: Record<string, string>;
+  body: ArrayBuffer;
 };
 
 const SYSTEMSCULPT_IMAGE_REQUEST_TIMEOUT_MS = 60_000;
@@ -134,13 +165,7 @@ const SIGNED_DOWNLOAD_QUERY_KEYS = [
   "sp",
   "sv",
 ] as const;
-const OPENROUTER_FRONTEND_IMAGE_MODELS_URL = "https://openrouter.ai/api/frontend/models/find?output_modalities=image";
 const EXCLUDED_IMAGE_MODEL_IDS = new Set(["openrouter/auto"]);
-const OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL: Record<string, number> = {
-  "openai/gpt-5-image-mini": 0.02,
-  "openai/gpt-5-image": 0.04,
-  "google/gemini-2.5-flash-image": 0.015,
-};
 
 function asFiniteNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -149,153 +174,6 @@ function asFiniteNumber(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
-}
-
-function summarizeUsdCandidates(values: number[]): { average: number; low: number; high: number } | null {
-  const positives = values.filter((value) => Number.isFinite(value) && value > 0);
-  if (positives.length === 0) return null;
-  const low = Math.min(...positives);
-  const high = Math.max(...positives);
-  const sum = positives.reduce((acc, value) => acc + value, 0);
-  const average = sum / positives.length;
-  return { average, low, high };
-}
-
-function normalizeOpenRouterPricingEstimate(options: {
-  modelId: string;
-  endpoint: Record<string, unknown> | null;
-  allOpenRouterModels: Map<string, Record<string, unknown>>;
-}): {
-  estimated_cost_per_image_usd?: number;
-  estimated_cost_per_image_low_usd?: number;
-  estimated_cost_per_image_high_usd?: number;
-  pricing_source?: string;
-} {
-  const pricingJsonRaw =
-    options.endpoint && options.endpoint.pricing_json && typeof options.endpoint.pricing_json === "object"
-      ? (options.endpoint.pricing_json as Record<string, unknown>)
-      : {};
-  const candidatesUsd: number[] = [];
-  const candidateSources: string[] = [];
-
-  for (const [key, rawValue] of Object.entries(pricingJsonRaw)) {
-    const value = asFiniteNumber(rawValue);
-    if (value === null || value <= 0) continue;
-    const normalizedKey = key.trim().toLowerCase();
-    if (/(^|:)cents_per_(?:\d+k_)?image_output$/.test(normalizedKey)) {
-      candidatesUsd.push(value / 100);
-      candidateSources.push(normalizedKey);
-      continue;
-    }
-    if (/(^|:)informational_output_megapixels$/.test(normalizedKey)) {
-      candidatesUsd.push(value);
-      candidateSources.push(normalizedKey);
-      continue;
-    }
-  }
-
-  const summary = summarizeUsdCandidates(candidatesUsd);
-  if (summary) {
-    return {
-      estimated_cost_per_image_usd: summary.average,
-      estimated_cost_per_image_low_usd: summary.low,
-      estimated_cost_per_image_high_usd: summary.high,
-      pricing_source: `openrouter_pricing_json:${candidateSources.join(",")}`,
-    };
-  }
-
-  const fallbackUsd = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL[options.modelId];
-  if (Number.isFinite(fallbackUsd) && fallbackUsd > 0) {
-    return {
-      estimated_cost_per_image_usd: fallbackUsd,
-      estimated_cost_per_image_low_usd: fallbackUsd,
-      estimated_cost_per_image_high_usd: fallbackUsd,
-      pricing_source: "openrouter_fallback:known_model_baseline",
-    };
-  }
-
-  if (options.modelId.endsWith("-preview")) {
-    const baseModelId = options.modelId.replace(/-preview$/i, "");
-    if (baseModelId && baseModelId !== options.modelId) {
-      const baseFallbackUsd = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL[baseModelId];
-      if (Number.isFinite(baseFallbackUsd) && baseFallbackUsd > 0) {
-        return {
-          estimated_cost_per_image_usd: baseFallbackUsd,
-          estimated_cost_per_image_low_usd: baseFallbackUsd,
-          estimated_cost_per_image_high_usd: baseFallbackUsd,
-          pricing_source: "openrouter_fallback:preview_uses_base_model_baseline",
-        };
-      }
-
-      const baseModel = options.allOpenRouterModels.get(baseModelId);
-      const baseEndpoint =
-        baseModel && baseModel.endpoint && typeof baseModel.endpoint === "object"
-          ? (baseModel.endpoint as Record<string, unknown>)
-          : null;
-      if (baseModel && baseEndpoint) {
-        const baseEstimate = normalizeOpenRouterPricingEstimate({
-          modelId: baseModelId,
-          endpoint: baseEndpoint,
-          allOpenRouterModels: options.allOpenRouterModels,
-        });
-        if (typeof baseEstimate.estimated_cost_per_image_usd === "number" && baseEstimate.estimated_cost_per_image_usd > 0) {
-          const usd = baseEstimate.estimated_cost_per_image_usd;
-          const low = baseEstimate.estimated_cost_per_image_low_usd ?? usd;
-          const high = baseEstimate.estimated_cost_per_image_high_usd ?? usd;
-          return {
-            estimated_cost_per_image_usd: usd,
-            estimated_cost_per_image_low_usd: low,
-            estimated_cost_per_image_high_usd: high,
-            pricing_source: "openrouter_fallback:preview_uses_base_model_estimate",
-          };
-        }
-      }
-    }
-  }
-
-  const marketPriceRaw =
-    options.endpoint && options.endpoint.pricing && typeof options.endpoint.pricing === "object"
-      ? (options.endpoint.pricing as Record<string, unknown>)
-      : null;
-  const geminiImageOutputTokenPrice = asFiniteNumber(pricingJsonRaw["gemini:image_output_tokens"]);
-  if (geminiImageOutputTokenPrice !== null && geminiImageOutputTokenPrice > 0) {
-    const baselineModel = options.allOpenRouterModels.get("google/gemini-2.5-flash-image");
-    const baselineEndpoint =
-      baselineModel && baselineModel.endpoint && typeof baselineModel.endpoint === "object"
-        ? (baselineModel.endpoint as Record<string, unknown>)
-        : null;
-    const baselinePricingJson =
-      baselineEndpoint && baselineEndpoint.pricing_json && typeof baselineEndpoint.pricing_json === "object"
-        ? (baselineEndpoint.pricing_json as Record<string, unknown>)
-        : {};
-    const baselineTokenPrice = asFiniteNumber(baselinePricingJson["gemini:image_output_tokens"]) ?? 0.00003;
-    const baselineUsdPerImage = OPENROUTER_IMAGE_USD_PER_IMAGE_FALLBACK_BY_MODEL["google/gemini-2.5-flash-image"] ?? 0.015;
-    if (baselineTokenPrice > 0 && baselineUsdPerImage > 0) {
-      const derivedUsd = geminiImageOutputTokenPrice * (baselineUsdPerImage / baselineTokenPrice);
-      return {
-        estimated_cost_per_image_usd: derivedUsd,
-        estimated_cost_per_image_low_usd: derivedUsd,
-        estimated_cost_per_image_high_usd: derivedUsd,
-        pricing_source: "openrouter_fallback:gemini_image_output_tokens_x_gemini25_baseline",
-      };
-    }
-  }
-
-  const tokenPrice = marketPriceRaw ? asFiniteNumber(marketPriceRaw.image_output) : null;
-  if (tokenPrice !== null && tokenPrice > 0) {
-    // Fallback conversion only when no explicit per-image metadata is available.
-    // 4,176 is the observed output-token baseline used by multiple providers in
-    // OpenRouter's image catalog metadata.
-    const derivedUsd = tokenPrice * 4176;
-    return {
-      estimated_cost_per_image_usd: derivedUsd,
-      estimated_cost_per_image_low_usd: derivedUsd,
-      estimated_cost_per_image_high_usd: derivedUsd,
-      pricing_source: "openrouter_fallback:image_output_token_price_x_4176",
-    };
-  }
-
-  return {};
 }
 
 function safeJsonParse(text: string | undefined): any {
@@ -791,6 +669,94 @@ export class SystemSculptImageGenerationService {
     return await viaRequestUrl();
   }
 
+  private async requestBinaryUpload(
+    url: string,
+    options: BinaryUploadRequestOptions
+  ): Promise<{ status: number; headers: Record<string, string> }> {
+    const headers: Record<string, string> = { ...(options.headers || {}) };
+
+    const viaRequestUrl = async (): Promise<{ status: number; headers: Record<string, string> }> => {
+      let response: any;
+      try {
+        response = await withTimeout(
+          requestUrl({
+            url,
+            method: options.method,
+            headers,
+            body: options.body,
+            throw: false,
+          }),
+          SYSTEMSCULPT_IMAGE_REQUEST_TIMEOUT_MS,
+          "Image upload request timed out."
+        );
+      } catch (error) {
+        const maybeTimeout =
+          (error instanceof Error && error.name === "AbortError") ||
+          (error instanceof Error && /timed out/i.test(error.message));
+        throw markTransportFailure(
+          error,
+          maybeTimeout ? "Image upload request timed out." : "Image upload request failed."
+        );
+      }
+
+      const status = response.status || 0;
+      const headersOut: Record<string, string> = {};
+      if (response.headers) {
+        for (const [key, value] of Object.entries(response.headers)) {
+          if (typeof value === "string") {
+            headersOut[key.toLowerCase()] = value;
+          }
+        }
+      }
+
+      if (status < 200 || status >= 300) {
+        const body = safeJsonParse(response.text) ?? response.text ?? null;
+        assertOk(status, body, `Image upload failed: HTTP ${status || 0}`);
+      }
+
+      return { status, headers: headersOut };
+    };
+
+    const viaFetch = async (): Promise<{ status: number; headers: Record<string, string> }> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), SYSTEMSCULPT_IMAGE_REQUEST_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: options.method,
+          headers,
+          body: options.body,
+          signal: controller.signal,
+        } as RequestInit);
+      } catch (error) {
+        const aborted = error instanceof Error && error.name === "AbortError";
+        throw markTransportFailure(error, aborted ? "Image upload timed out." : "Image upload request failed.");
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const text = await response.text().catch(() => "");
+      const json = safeJsonParse(text) ?? text;
+      const headersOut: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headersOut[key.toLowerCase()] = value;
+      });
+
+      assertOk(response.status, json, `Image upload failed: HTTP ${response.status}`);
+      return { status: response.status, headers: headersOut };
+    };
+
+    try {
+      return await viaRequestUrl();
+    } catch (error) {
+      if (!isTransportFailure(error)) {
+        throw error;
+      }
+      return await viaFetch();
+    }
+  }
+
   async listModels(): Promise<{ contract?: string; provider?: string; models: SystemSculptImageGenerationModel[] }> {
     const url = this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.MODELS);
     const { json } = await this.requestJson(url, {
@@ -839,84 +805,106 @@ export class SystemSculptImageGenerationService {
     };
   }
 
-  async listOpenRouterMarketplaceImageModels(): Promise<SystemSculptImageGenerationModel[]> {
-    const { json } = await this.requestJson(OPENROUTER_FRONTEND_IMAGE_MODELS_URL, {
-      method: "GET",
+  async prepareInputImageUploads(inputImages: Array<{
+    mime_type: string;
+    size_bytes: number;
+    sha256: string;
+  }>): Promise<SystemSculptPrepareInputImageUploadsResponse> {
+    const url = this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.IMAGES.INPUTS_PREPARE);
+    const payload = {
+      input_images: inputImages.map((input) => ({
+        mime_type: String(input.mime_type || "").trim().toLowerCase(),
+        size_bytes: Math.max(1, Math.floor(Number(input.size_bytes) || 0)),
+        sha256: String(input.sha256 || "").trim().toLowerCase(),
+      })),
+    };
+
+    const { json } = await this.requestJson(url, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: JSON.stringify(payload),
     });
 
-    const modelsRaw = Array.isArray(json?.data?.models) ? (json.data.models as unknown[]) : [];
-    const allOpenRouterModelsById = new Map<string, Record<string, unknown>>();
-    for (const item of modelsRaw) {
-      const model = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
-      if (!model) continue;
-      const id =
-        typeof model.slug === "string"
-          ? model.slug.trim()
-          : typeof model.id === "string"
-            ? model.id.trim()
-            : "";
-      if (!id) continue;
-      allOpenRouterModelsById.set(id, model);
-    }
+    const uploadsRaw = Array.isArray(json?.input_uploads) ? (json.input_uploads as unknown[]) : [];
+    const inputUploads: SystemSculptPrepareInputImageUploadItem[] = [];
+    for (const item of uploadsRaw) {
+      const obj = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+      if (!obj) continue;
+      const upload = obj.upload && typeof obj.upload === "object" ? (obj.upload as Record<string, unknown>) : null;
+      const inputImage =
+        obj.input_image && typeof obj.input_image === "object"
+          ? (obj.input_image as Record<string, unknown>)
+          : null;
 
-    const byId = new Map<string, SystemSculptImageGenerationModel>();
-
-    for (const item of modelsRaw) {
-      const model = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
-      if (!model) continue;
-
-      const id =
-        typeof model.slug === "string"
-          ? model.slug.trim()
-          : typeof model.id === "string"
-            ? model.id.trim()
-            : "";
-      if (!id) continue;
-      if (EXCLUDED_IMAGE_MODEL_IDS.has(id.toLowerCase())) continue;
-
-      const inputModalities = Array.isArray(model.input_modalities)
-        ? model.input_modalities.map((value) => String(value || "").trim()).filter(Boolean)
-        : [];
-      const outputModalities = Array.isArray(model.output_modalities)
-        ? model.output_modalities.map((value) => String(value || "").trim()).filter(Boolean)
-        : [];
-      if (outputModalities.length > 0 && !outputModalities.some((value) => value.toLowerCase() === "image")) {
+      const uploadMethod = typeof upload?.method === "string" ? upload.method.toUpperCase() : "";
+      const uploadUrl = typeof upload?.url === "string" ? upload.url.trim() : "";
+      const inputType = typeof inputImage?.type === "string" ? inputImage.type.trim() : "";
+      const key = typeof inputImage?.key === "string" ? inputImage.key.trim() : "";
+      const mimeType = typeof inputImage?.mime_type === "string" ? inputImage.mime_type.trim() : "";
+      const sizeBytes =
+        typeof inputImage?.size_bytes === "number" && Number.isFinite(inputImage.size_bytes)
+          ? Math.max(1, Math.floor(inputImage.size_bytes))
+          : 0;
+      const sha256 = typeof inputImage?.sha256 === "string" ? inputImage.sha256.trim().toLowerCase() : "";
+      if (uploadMethod !== "PUT" || !uploadUrl || inputType !== "uploaded" || !key || !mimeType || !sizeBytes || !sha256) {
         continue;
       }
 
-      const endpoint =
-        model.endpoint && typeof model.endpoint === "object" ? (model.endpoint as Record<string, unknown>) : null;
-      const providerRaw =
-        (endpoint && typeof endpoint.provider_display_name === "string" ? endpoint.provider_display_name : "") ||
-        (endpoint && typeof endpoint.provider_name === "string" ? endpoint.provider_name : "") ||
-        (typeof model.author === "string" ? model.author : "") ||
-        "openrouter";
-      const nameRaw =
-        (typeof model.name === "string" ? model.name : "") ||
-        (typeof model.short_name === "string" ? model.short_name : "") ||
-        id;
-      const supportsImageInput =
-        typeof model.supports_image_input === "boolean"
-          ? model.supports_image_input
-          : inputModalities.some((value) => value.toLowerCase() === "image");
-      const pricingEstimate = normalizeOpenRouterPricingEstimate({
-        modelId: id,
-        endpoint,
-        allOpenRouterModels: allOpenRouterModelsById,
-      });
-
-      byId.set(id, {
-        id,
-        name: String(nameRaw).trim() || id,
-        provider: String(providerRaw).trim() || "openrouter",
-        input_modalities: inputModalities.length > 0 ? inputModalities : undefined,
-        output_modalities: outputModalities.length > 0 ? outputModalities : undefined,
-        supports_image_input: supportsImageInput,
-        ...pricingEstimate,
+      const uploadHeaders = upload?.headers && typeof upload.headers === "object" ? (upload.headers as Record<string, string>) : undefined;
+      inputUploads.push({
+        index:
+          typeof obj.index === "number" && Number.isFinite(obj.index) ? Math.max(0, Math.floor(obj.index)) : inputUploads.length,
+        upload: {
+          method: "PUT",
+          url: uploadUrl,
+          headers: uploadHeaders,
+          expires_in_seconds:
+            typeof upload?.expires_in_seconds === "number" && Number.isFinite(upload.expires_in_seconds)
+              ? Math.max(0, Math.floor(upload.expires_in_seconds))
+              : undefined,
+          expires_at: typeof upload?.expires_at === "string" ? upload.expires_at : undefined,
+        },
+        input_image: {
+          type: "uploaded",
+          key,
+          mime_type: mimeType,
+          size_bytes: sizeBytes,
+          sha256,
+        },
       });
     }
 
-    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return {
+      contract: typeof json?.contract === "string" ? json.contract : undefined,
+      upload_id: typeof json?.upload_id === "string" ? json.upload_id : undefined,
+      expires_at: typeof json?.expires_at === "string" ? json.expires_at : undefined,
+      input_uploads: inputUploads.sort((a, b) => a.index - b.index),
+    };
+  }
+
+  async uploadPreparedInputImage(options: {
+    uploadUrl: string;
+    mimeType: string;
+    bytes: ArrayBuffer;
+    extraHeaders?: Record<string, string>;
+  }): Promise<void> {
+    const targetUrl = String(options.uploadUrl || "").trim();
+    if (!targetUrl) {
+      throw new Error("Missing prepared input upload URL.");
+    }
+    if (!this.isTrustedDownloadTarget(targetUrl)) {
+      throw new Error("Image upload blocked: untrusted host or unsigned URL.");
+    }
+
+    const headers: Record<string, string> = {
+      "content-type": String(options.mimeType || "").trim() || "application/octet-stream",
+      ...(options.extraHeaders || {}),
+    };
+    await this.requestBinaryUpload(targetUrl, {
+      method: "PUT",
+      headers,
+      body: options.bytes,
+    });
   }
 
   async createGenerationJob(

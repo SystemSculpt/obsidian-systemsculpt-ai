@@ -368,15 +368,63 @@
   padding: 6px 8px;
 }
 
-.ss-canvasflow-controls select {
-  border-radius: 10px;
-  border: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--background-primary) 78%, black);
-  color: var(--text-normal);
-  padding: 6px 8px;
+.ss-canvasflow-model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
-.ss-canvasflow-controls :is(input, textarea, select):focus {
+.ss-canvasflow-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-canvasflow-model-provider {
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ss-canvasflow-model-provider-legacy {
+  color: color-mix(in srgb, var(--text-warning, #facc15) 82%, var(--text-faint));
+}
+
+.ss-canvasflow-model-row {
+  align-items: center;
+}
+
+.ss-canvasflow-model-btn {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-canvasflow-model-btn-default {
+  font-weight: 600;
+}
+
+.ss-canvasflow-model-btn.is-legacy-unsupported {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.ss-canvasflow-model-btn:disabled {
+  cursor: not-allowed;
+}
+
+.ss-canvasflow-controls :is(input, textarea):focus {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.ss-canvasflow-model-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
 }

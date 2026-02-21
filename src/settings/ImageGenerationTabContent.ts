@@ -6,7 +6,6 @@ import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   formatCuratedImageModelOptionText,
   getCuratedImageGenerationModelGroups,
-  mergeImageGenerationServerCatalogModels,
   type ImageGenerationServerCatalogModel,
 } from "../services/canvasflow/ImageGenerationModelCatalog";
 import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
@@ -174,7 +173,7 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
 
   const modal = new ListSelectionModal(tabInstance.app, items, {
     title: "Image models",
-    description: "Merged from the live SystemSculpt API catalog and OpenRouter marketplace image catalog. Shows provider USD and estimated SystemSculpt credits per image.",
+    description: "Loaded from the live SystemSculpt API catalog. Shows provider USD and estimated SystemSculpt credits per image.",
     withSearch: true,
     size: "large",
     customContent: (el) => {
@@ -281,11 +280,7 @@ async function syncImageGenerationModelCatalog(
     if (supportedModels.length === 0) {
       throw new Error("No supported image models were returned by /images/models.");
     }
-    const openRouterModels = await service.listOpenRouterMarketplaceImageModels().catch(() => []);
-    const models = mergeImageGenerationServerCatalogModels(
-      supportedModels,
-      openRouterModels
-    );
+    const models = supportedModels;
     await plugin.getSettingsManager().updateSettings({
       imageGenerationModelCatalogCache: {
         fetchedAt: new Date().toISOString(),

@@ -56,125 +56,6 @@ describe("SystemSculptImageGenerationService", () => {
     expect(call?.headers?.["x-license-key"]).toBe("license_test");
   });
 
-  it("lists OpenRouter marketplace image models from the frontend catalog", async () => {
-    requestUrlMock.mockResolvedValue({
-      status: 200,
-      json: {
-        data: {
-          models: [
-            {
-              slug: "sourceful/riverflow-v2-fast",
-              name: "Sourceful: Riverflow V2 Fast",
-              author: "sourceful",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-              endpoint: {
-                provider_display_name: "Sourceful",
-                pricing_json: {
-                  "sourceful:cents_per_image_output": "2",
-                  "sourceful:cents_per_2k_image_output": "4",
-                },
-              },
-            },
-            {
-              slug: "openai/gpt-5-image-mini",
-              name: "OpenAI GPT-5 Image Mini",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-              endpoint: {
-                provider_display_name: "OpenAI",
-                pricing: {
-                  image_output: "0.000008",
-                },
-                pricing_json: {},
-              },
-            },
-            {
-              slug: "google/gemini-2.5-flash-image",
-              name: "Google Gemini 2.5 Flash Image",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-              endpoint: {
-                provider_display_name: "Google",
-                pricing_json: {
-                  "gemini:image_output_tokens": 0.00003,
-                },
-              },
-            },
-            {
-              slug: "google/gemini-2.5-flash-image-preview",
-              name: "Google Gemini 2.5 Flash Image Preview",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-              endpoint: {
-                provider_display_name: "Google",
-                pricing_json: {},
-              },
-            },
-            {
-              slug: "google/gemini-3-pro-image-preview",
-              name: "Google Gemini 3 Pro Image Preview",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-              endpoint: {
-                provider_display_name: "Google",
-                pricing_json: {
-                  "gemini:image_output_tokens": 0.00012,
-                },
-              },
-            },
-            {
-              slug: "openrouter/auto",
-              name: "Auto Router",
-              input_modalities: ["text", "image"],
-              output_modalities: ["image"],
-            },
-            {
-              slug: "openai/gpt-5",
-              name: "OpenAI GPT-5",
-              input_modalities: ["text"],
-              output_modalities: ["text"],
-            },
-          ],
-        },
-      },
-      headers: { "content-type": "application/json" },
-    });
-
-    const service = new SystemSculptImageGenerationService({
-      baseUrl: "https://api.systemsculpt.com/api/v1",
-      licenseKey: "license_test",
-    });
-
-    const models = await service.listOpenRouterMarketplaceImageModels();
-    expect(models).toHaveLength(5);
-
-    const riverflow = models.find((model) => model.id === "sourceful/riverflow-v2-fast");
-    expect(riverflow?.provider).toBe("Sourceful");
-    expect(riverflow?.supports_image_input).toBe(true);
-    expect(riverflow?.estimated_cost_per_image_low_usd).toBeCloseTo(0.02, 8);
-    expect(riverflow?.estimated_cost_per_image_high_usd).toBeCloseTo(0.04, 8);
-    expect(riverflow?.estimated_cost_per_image_usd).toBeCloseTo(0.03, 8);
-    expect(String(riverflow?.pricing_source || "")).toContain("cents_per_image_output");
-
-    const gpt5Mini = models.find((model) => model.id === "openai/gpt-5-image-mini");
-    expect(gpt5Mini?.estimated_cost_per_image_usd).toBeCloseTo(0.02, 8);
-    expect(gpt5Mini?.pricing_source).toBe("openrouter_fallback:known_model_baseline");
-
-    const geminiPreview = models.find((model) => model.id === "google/gemini-2.5-flash-image-preview");
-    expect(geminiPreview?.estimated_cost_per_image_usd).toBeCloseTo(0.015, 8);
-    expect(geminiPreview?.pricing_source).toBe("openrouter_fallback:preview_uses_base_model_baseline");
-
-    const gemini3 = models.find((model) => model.id === "google/gemini-3-pro-image-preview");
-    expect(gemini3?.estimated_cost_per_image_usd).toBeCloseTo(0.06, 8);
-    expect(gemini3?.pricing_source).toBe("openrouter_fallback:gemini_image_output_tokens_x_gemini25_baseline");
-    expect(models.some((model) => model.id === "openrouter/auto")).toBe(false);
-
-    const call = requestUrlMock.mock.calls[0]?.[0];
-    expect(String(call?.url || "")).toBe("https://openrouter.ai/api/frontend/models/find?output_modalities=image");
-    expect(call?.headers?.["x-license-key"]).toBeUndefined();
-  });
-
   it("creates a generation job", async () => {
     requestUrlMock.mockResolvedValue({
       status: 202,
@@ -211,6 +92,113 @@ describe("SystemSculptImageGenerationService", () => {
     expect(String(call?.url || "")).toContain("/images/generations/jobs");
     expect(call?.method).toBe("POST");
     expect(String(call?.body || "")).toContain("A tiny robot");
+  });
+
+  it("prepares signed input image upload URLs", async () => {
+    requestUrlMock.mockResolvedValue({
+      status: 200,
+      json: {
+        contract: "systemsculpt-image-input-upload-v1",
+        upload_id: "upload_123",
+        input_uploads: [
+          {
+            index: 0,
+            upload: {
+              method: "PUT",
+              url: "https://assets.r2.cloudflarestorage.com/upload/input-0000.png?X-Amz-Signature=abc123",
+              headers: {
+                "content-type": "image/png",
+              },
+            },
+            input_image: {
+              type: "uploaded",
+              key: "uploads/image-generations/prepared/scope/upload_123/input-0000.png",
+              mime_type: "image/png",
+              size_bytes: 1024,
+              sha256: "a".repeat(64),
+            },
+          },
+        ],
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    const prepared = await service.prepareInputImageUploads([
+      {
+        mime_type: "image/png",
+        size_bytes: 1024,
+        sha256: "a".repeat(64),
+      },
+    ]);
+
+    expect(prepared.contract).toBe("systemsculpt-image-input-upload-v1");
+    expect(prepared.upload_id).toBe("upload_123");
+    expect(prepared.input_uploads).toHaveLength(1);
+    expect(prepared.input_uploads[0]?.input_image.type).toBe("uploaded");
+
+    const call = requestUrlMock.mock.calls[0]?.[0];
+    expect(String(call?.url || "")).toContain("/images/inputs/prepare");
+    expect(call?.method).toBe("POST");
+    expect(String(call?.body || "")).toContain("input_images");
+  });
+
+  it("uploads prepared input bytes to signed URLs", async () => {
+    requestUrlMock.mockResolvedValue({
+      status: 200,
+      text: "",
+      headers: { "content-type": "application/json" },
+    });
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    await service.uploadPreparedInputImage({
+      uploadUrl:
+        "https://systemsculpt-assets.f7fef583e37a84651a069a44fedc24e2.r2.cloudflarestorage.com/uploads/image-generations/prepared/input-0000.png?X-Amz-Signature=abc123&X-Amz-Algorithm=AWS4-HMAC-SHA256",
+      mimeType: "image/png",
+      bytes: new Uint8Array([1, 2, 3, 4]).buffer,
+    });
+
+    const call = requestUrlMock.mock.calls[0]?.[0];
+    expect(call?.method).toBe("PUT");
+    expect(call?.headers?.["content-type"]).toBe("image/png");
+    expect(call?.headers?.["x-license-key"]).toBeUndefined();
+    expect(call?.body).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it("falls back to fetch when requestUrl upload transport fails", async () => {
+    requestUrlMock.mockRejectedValue(new Error("socket closed"));
+    const fetchMock = jest.fn().mockResolvedValue(
+      new Response("", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    (globalThis as any).fetch = fetchMock;
+
+    const service = new SystemSculptImageGenerationService({
+      baseUrl: "https://api.systemsculpt.com/api/v1",
+      licenseKey: "license_test",
+    });
+
+    await service.uploadPreparedInputImage({
+      uploadUrl:
+        "https://systemsculpt-assets.f7fef583e37a84651a069a44fedc24e2.r2.cloudflarestorage.com/uploads/image-generations/prepared/input-0001.png?X-Amz-Signature=abc123&X-Amz-Algorithm=AWS4-HMAC-SHA256",
+      mimeType: "image/png",
+      bytes: new Uint8Array([7, 8, 9]).buffer,
+    });
+
+    expect(requestUrlMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const fetchCall = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(fetchCall?.method).toBe("PUT");
   });
 
   it("falls back to requestUrl only for transport failures", async () => {

@@ -38,6 +38,12 @@ import {
 
 type RunStatusUpdater = (status: string) => void;
 const MAX_CANVASFLOW_INPUT_IMAGES = 8;
+const CANVASFLOW_INPUT_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
+const CANVASFLOW_INPUT_MAX_DIMENSION_PX = 2048;
+const CANVASFLOW_INPUT_SCALE_STEPS = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.33, 0.25] as const;
+const CANVASFLOW_INPUT_JPEG_QUALITIES = [0.9, 0.84, 0.78, 0.72, 0.66, 0.58] as const;
+const CANVASFLOW_INPUT_WEBP_QUALITIES = [0.92, 0.86, 0.8, 0.74, 0.68] as const;
+const CANVASFLOW_SUPPORTED_INPUT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 type CanvasFlowResolvedPromptRunContext = {
   baseUrl: string;
@@ -52,8 +58,15 @@ type CanvasFlowResolvedPromptRunContext = {
   seed: number | null;
 };
 
+type CanvasFlowPreparedInputImage = {
+  bytes: ArrayBuffer;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  sizeBytes: number;
+  sha256: string;
+};
+
 type CanvasFlowCollectedInputImages = {
-  inputImages: Array<{ type: "data_url"; data_url: string }>;
+  inputImages: CanvasFlowPreparedInputImage[];
   inputImagePaths: string[];
   connectedImageCount: number;
   missingInputImageCount: number;
@@ -196,9 +209,242 @@ async function getAvailableFilePath(app: App, folderPath: string, baseName: stri
   return normalizePath(`${folderPath}/${safeBase}-${Date.now().toString(16)}.${ext}`);
 }
 
-function base64FromArrayBuffer(arrayBuffer: ArrayBuffer): string {
-  const buffer = Buffer.from(new Uint8Array(arrayBuffer));
-  return buffer.toString("base64");
+function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (normalized === "image/png") return "image/png";
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
+  if (normalized === "image/webp") return "image/webp";
+  return null;
+}
+
+function supportsCanvasImageTranscode(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    typeof URL !== "undefined" &&
+    typeof URL.createObjectURL === "function" &&
+    typeof Blob !== "undefined"
+  );
+}
+
+function createCanvas(width: number, height: number): HTMLCanvasElement {
+  if (typeof document === "undefined") {
+    throw new Error("Image preprocessing requires a browser canvas environment.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(width));
+  canvas.height = Math.max(1, Math.floor(height));
+  return canvas;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Failed to encode canvas image."));
+          return;
+        }
+        resolve(blob);
+      },
+      mimeType,
+      quality
+    );
+  });
+}
+
+async function sha256HexFromArrayBuffer(arrayBuffer: ArrayBuffer): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Crypto digest API is unavailable for input image hashing.");
+  }
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer.slice(0));
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function detectAlphaChannel(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): boolean {
+  const sampleColumns = Math.min(80, Math.max(1, width));
+  const sampleRows = Math.min(80, Math.max(1, height));
+  const stepX = Math.max(1, Math.floor(width / sampleColumns));
+  const stepY = Math.max(1, Math.floor(height / sampleRows));
+
+  for (let y = 0; y < height; y += stepY) {
+    for (let x = 0; x < width; x += stepX) {
+      const pixel = ctx.getImageData(x, y, 1, 1).data;
+      if (pixel[3] < 255) return true;
+    }
+  }
+  return false;
+}
+
+function fitWithinMaxDimension(
+  width: number,
+  height: number,
+  maxDimension: number
+): { width: number; height: number } {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const safeHeight = Math.max(1, Math.floor(height));
+  const largest = Math.max(safeWidth, safeHeight);
+  if (largest <= maxDimension) {
+    return { width: safeWidth, height: safeHeight };
+  }
+  const scale = maxDimension / largest;
+  return {
+    width: Math.max(1, Math.floor(safeWidth * scale)),
+    height: Math.max(1, Math.floor(safeHeight * scale)),
+  };
+}
+
+async function loadImageFromBytes(options: {
+  bytes: ArrayBuffer;
+  mimeType: string;
+}): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }> {
+  const blob = new Blob([options.bytes], { type: options.mimeType });
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => {
+        try {
+          bitmap.close();
+        } catch {}
+      },
+    };
+  }
+
+  if (typeof Image === "undefined") {
+    throw new Error("Image preprocessing is unavailable in this environment.");
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to decode input image."));
+      img.src = objectUrl;
+    });
+
+    return {
+      source: image,
+      width: image.naturalWidth || image.width || 1,
+      height: image.naturalHeight || image.height || 1,
+      cleanup: () => {
+        URL.revokeObjectURL(objectUrl);
+      },
+    };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+async function preprocessCanvasFlowInputImage(options: {
+  bytes: ArrayBuffer;
+  mimeType: string;
+}): Promise<CanvasFlowPreparedInputImage> {
+  const normalizedMime = normalizeInputMimeType(options.mimeType);
+  if (!normalizedMime || !CANVASFLOW_SUPPORTED_INPUT_MIME_TYPES.has(normalizedMime)) {
+    throw new Error("CanvasFlow input image format is unsupported. Use PNG, JPEG, or WEBP inputs.");
+  }
+
+  const originalSize = options.bytes.byteLength;
+  if (!supportsCanvasImageTranscode()) {
+    if (originalSize > CANVASFLOW_INPUT_UPLOAD_MAX_BYTES) {
+      throw new Error(
+        `Input image is too large (${Math.ceil(originalSize / (1024 * 1024))}MB). Canvas preprocessing is unavailable in this environment.`
+      );
+    }
+    return {
+      bytes: options.bytes,
+      mimeType: normalizedMime,
+      sizeBytes: originalSize,
+      sha256: await sha256HexFromArrayBuffer(options.bytes),
+    };
+  }
+
+  const decoded = await loadImageFromBytes({
+    bytes: options.bytes,
+    mimeType: normalizedMime,
+  });
+
+  try {
+    const fitted = fitWithinMaxDimension(decoded.width, decoded.height, CANVASFLOW_INPUT_MAX_DIMENSION_PX);
+    const alphaProbeCanvas = createCanvas(fitted.width, fitted.height);
+    const alphaProbeCtx = alphaProbeCanvas.getContext("2d");
+    if (!alphaProbeCtx) {
+      throw new Error("Could not initialize canvas context for input image processing.");
+    }
+    alphaProbeCtx.clearRect(0, 0, fitted.width, fitted.height);
+    alphaProbeCtx.drawImage(decoded.source, 0, 0, fitted.width, fitted.height);
+    const hasAlpha = normalizedMime !== "image/jpeg" && detectAlphaChannel(alphaProbeCtx, fitted.width, fitted.height);
+
+    const preferredFormats: Array<{
+      mimeType: "image/png" | "image/jpeg" | "image/webp";
+      qualities: readonly number[] | null;
+    }> = hasAlpha
+      ? [
+          { mimeType: "image/webp", qualities: CANVASFLOW_INPUT_WEBP_QUALITIES },
+          { mimeType: "image/png", qualities: null },
+        ]
+      : [
+          { mimeType: "image/jpeg", qualities: CANVASFLOW_INPUT_JPEG_QUALITIES },
+          { mimeType: "image/webp", qualities: CANVASFLOW_INPUT_WEBP_QUALITIES },
+          { mimeType: "image/png", qualities: null },
+        ];
+
+    for (const scaleFactor of CANVASFLOW_INPUT_SCALE_STEPS) {
+      const targetWidth = Math.max(1, Math.floor(fitted.width * scaleFactor));
+      const targetHeight = Math.max(1, Math.floor(fitted.height * scaleFactor));
+      const canvas = createCanvas(targetWidth, targetHeight);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.drawImage(decoded.source, 0, 0, targetWidth, targetHeight);
+
+      for (const format of preferredFormats) {
+        if (!format.qualities) {
+          const blob = await canvasToBlob(canvas, format.mimeType);
+          if (blob.size <= CANVASFLOW_INPUT_UPLOAD_MAX_BYTES) {
+            const bytes = await blob.arrayBuffer();
+            return {
+              bytes,
+              mimeType: format.mimeType,
+              sizeBytes: bytes.byteLength,
+              sha256: await sha256HexFromArrayBuffer(bytes),
+            };
+          }
+          continue;
+        }
+
+        for (const quality of format.qualities) {
+          const blob = await canvasToBlob(canvas, format.mimeType, quality);
+          if (blob.size <= CANVASFLOW_INPUT_UPLOAD_MAX_BYTES) {
+            const bytes = await blob.arrayBuffer();
+            return {
+              bytes,
+              mimeType: format.mimeType,
+              sizeBytes: bytes.byteLength,
+              sha256: await sha256HexFromArrayBuffer(bytes),
+            };
+          }
+        }
+      }
+    }
+
+    throw new Error(
+      `Input image remains too large after automatic compression/downscaling (> ${Math.ceil(CANVASFLOW_INPUT_UPLOAD_MAX_BYTES / (1024 * 1024))}MB).`
+    );
+  } finally {
+    decoded.cleanup();
+  }
 }
 
 function stableSerialize(value: unknown): string {
@@ -273,6 +519,8 @@ function normalizePlaceholderPhase(phase: string): string {
 
   const lower = compact.toLowerCase();
   if (lower.includes("reading input image")) return "Preparing input images...";
+  if (lower.includes("preparing input upload")) return "Preparing input uploads...";
+  if (lower.includes("uploading input image")) return "Uploading input images...";
   if (lower.includes("submitting generation job")) return "Submitting generation job...";
   if (lower.includes("starting generation")) return "Queued for generation...";
   if (lower.includes("generating image")) return "Generating images...";
@@ -859,7 +1107,7 @@ export class CanvasFlowRunner {
     signal?: AbortSignal;
   }): Promise<CanvasFlowCollectedInputImages> {
     const connectedImages = findIncomingImageFilesForNode(options.canvasDoc, options.promptNodeId);
-    const inputImages: Array<{ type: "data_url"; data_url: string }> = [];
+    const inputImages: CanvasFlowPreparedInputImage[] = [];
     const inputImagePaths: string[] = [];
     let missingInputImageCount = 0;
     let ignoredInputImageCount = 0;
@@ -888,11 +1136,17 @@ export class CanvasFlowRunner {
       const imgBytes = await this.app.vault.readBinary(imageAbs);
       const ext = String(imageAbs.extension || "").toLowerCase();
       const mime = mimeFromExtension(ext);
-      const b64 = base64FromArrayBuffer(imgBytes);
-      inputImages.push({
-        type: "data_url",
-        data_url: `data:${mime};base64,${b64}`,
+      const normalizedMime = normalizeInputMimeType(mime);
+      if (!normalizedMime) {
+        throw new Error(
+          `Unsupported input image format for "${incomingImage.imagePath}". Use PNG, JPEG, or WEBP images.`
+        );
+      }
+      const prepared = await preprocessCanvasFlowInputImage({
+        bytes: imgBytes,
+        mimeType: normalizedMime,
       });
+      inputImages.push(prepared);
       inputImagePaths.push(incomingImage.imagePath);
     }
 
@@ -910,13 +1164,72 @@ export class CanvasFlowRunner {
     client: CanvasFlowImageGenerationClient;
     modelId: string;
     promptText: string;
-    inputImages: Array<{ type: "data_url"; data_url: string }>;
+    inputImages: CanvasFlowPreparedInputImage[];
     imageCount: number;
     aspectRatio?: string;
     seed: number | null;
     status: RunStatusUpdater;
     signal?: AbortSignal;
   }): Promise<CanvasFlowGenerationRunResult> {
+    let uploadedInputRefs: Array<{
+      type: "uploaded";
+      key: string;
+      mime_type: string;
+      size_bytes: number;
+      sha256: string;
+    }> = [];
+    if (options.inputImages.length > 0) {
+      options.status("Preparing input uploads...");
+      const preparedUploads = await options.client.prepareInputImageUploads(
+        options.inputImages.map((input) => ({
+          mime_type: input.mimeType,
+          size_bytes: input.sizeBytes,
+          sha256: input.sha256,
+        }))
+      );
+
+      const uploadByIndex = new Map(preparedUploads.input_uploads.map((item) => [item.index, item]));
+      uploadedInputRefs = [];
+
+      for (let idx = 0; idx < options.inputImages.length; idx += 1) {
+        const localInput = options.inputImages[idx];
+        const upload = uploadByIndex.get(idx);
+        if (!upload) {
+          throw new Error(`Image upload preparation failed for input index ${idx}.`);
+        }
+        if (!upload.upload?.url || upload.upload?.method !== "PUT") {
+          throw new Error(`Input upload URL missing or invalid for index ${idx}.`);
+        }
+        if (!upload.input_image || upload.input_image.type !== "uploaded") {
+          throw new Error(`Input upload metadata missing for index ${idx}.`);
+        }
+
+        const remoteInput = upload.input_image;
+        if (remoteInput.sha256 !== localInput.sha256) {
+          throw new Error(`Input upload digest mismatch for index ${idx}.`);
+        }
+        if (remoteInput.size_bytes !== localInput.sizeBytes) {
+          throw new Error(`Input upload size mismatch for index ${idx}.`);
+        }
+        if (normalizeInputMimeType(remoteInput.mime_type) !== localInput.mimeType) {
+          throw new Error(`Input upload mime type mismatch for index ${idx}.`);
+        }
+
+        options.status(
+          options.inputImages.length > 1
+            ? `Uploading input images (${idx + 1}/${options.inputImages.length})...`
+            : "Uploading input image..."
+        );
+        await options.client.uploadPreparedInputImage({
+          uploadUrl: upload.upload.url,
+          mimeType: localInput.mimeType,
+          bytes: localInput.bytes,
+          extraHeaders: upload.upload.headers,
+        });
+        uploadedInputRefs.push(remoteInput);
+      }
+    }
+
     options.status("Submitting generation job...");
     const runAttemptId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const payloadSignature = stableSerialize({
@@ -927,16 +1240,19 @@ export class CanvasFlowRunner {
         aspect_ratio: options.aspectRatio || null,
         seed: options.seed,
       },
-      input_images: options.inputImages.map((input) => ({
+      input_images: uploadedInputRefs.map((input) => ({
         type: input.type,
-        digest: hashFnv1a(input.data_url),
+        key: input.key,
+        mime_type: input.mime_type,
+        size_bytes: input.size_bytes,
+        sha256: input.sha256,
       })),
     });
     const idempotencyKey = `images-job:${hashFnv1a(options.runScopeKey)}:${hashFnv1a(payloadSignature)}:${runAttemptId}`;
     const job = await options.client.createGenerationJob({
       model: options.modelId,
       prompt: options.promptText,
-      input_images: options.inputImages,
+      input_images: uploadedInputRefs,
       options: {
         count: options.imageCount,
         ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),

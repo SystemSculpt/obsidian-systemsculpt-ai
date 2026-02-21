@@ -125,4 +125,71 @@ describe("CanvasFlowEnhancer mutation filtering", () => {
 
     expect(node.classList.contains("ss-canvasflow-prompt-node-pending")).toBe(true);
   });
+
+  it("hides unsupported models from picker groups and exposes saved unsupported model as legacy chip", () => {
+    enhancer.plugin.settings.imageGenerationModelCatalogCache = {
+      models: [
+        {
+          id: "openai/gpt-5-image-mini",
+          name: "OpenAI GPT-5 Image Mini",
+          provider: "OpenAI",
+          supports_generation: true,
+          estimated_cost_per_image_usd: 0.02,
+        },
+        {
+          id: "openrouter/legacy-image-model",
+          name: "Legacy Image Model",
+          provider: "OpenRouter",
+          supports_generation: false,
+          estimated_cost_per_image_usd: 0.05,
+        },
+      ],
+    };
+
+    const layout = enhancer.getInspectorModelButtonLayout({
+      settingsModelSlug: "openai/gpt-5-image-mini",
+      modelFromNote: "openrouter/legacy-image-model",
+      selectedValue: "openrouter/legacy-image-model",
+    });
+    const renderedIds = layout.groups.flatMap((group: any) => group.models.map((model: any) => model.id));
+
+    expect(renderedIds).toContain("openai/gpt-5-image-mini");
+    expect(renderedIds).not.toContain("openrouter/legacy-image-model");
+    expect(layout.legacyUnsupported?.id).toBe("openrouter/legacy-image-model");
+  });
+
+  it("does not expose a legacy chip when selected model is runnable", () => {
+    enhancer.plugin.settings.imageGenerationModelCatalogCache = {
+      models: [
+        {
+          id: "openai/gpt-5-image-mini",
+          name: "OpenAI GPT-5 Image Mini",
+          provider: "OpenAI",
+          supports_generation: true,
+          estimated_cost_per_image_usd: 0.02,
+        },
+      ],
+    };
+
+    const layout = enhancer.getInspectorModelButtonLayout({
+      settingsModelSlug: "openai/gpt-5-image-mini",
+      modelFromNote: "openai/gpt-5-image-mini",
+      selectedValue: "openai/gpt-5-image-mini",
+    });
+
+    expect(layout.legacyUnsupported).toBeNull();
+  });
+
+  it("suppresses inspector rebind when unchanged or while interaction lock is active", () => {
+    const inspector = {
+      lastBoundFingerprint: "same",
+      interactionLockUntilMs: 0,
+    } as any;
+
+    expect(enhancer.shouldRebindInspector(inspector, "same")).toBe(false);
+    expect(enhancer.shouldRebindInspector(inspector, "next")).toBe(true);
+
+    inspector.interactionLockUntilMs = Date.now() + 500;
+    expect(enhancer.shouldRebindInspector(inspector, "another")).toBe(false);
+  });
 });

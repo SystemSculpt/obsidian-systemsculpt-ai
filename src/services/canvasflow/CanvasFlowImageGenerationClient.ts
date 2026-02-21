@@ -1,4 +1,5 @@
 import {
+  type SystemSculptPrepareInputImageUploadsResponse,
   SystemSculptImageGenerationService,
   type SystemSculptCreateGenerationJobRequest,
   type SystemSculptCreateGenerationJobResponse,
@@ -10,6 +11,17 @@ export type CanvasFlowImageGenerationClient = {
     request: SystemSculptCreateGenerationJobRequest,
     options?: { idempotencyKey?: string }
   ) => Promise<SystemSculptCreateGenerationJobResponse>;
+  prepareInputImageUploads: (inputImages: Array<{
+    mime_type: string;
+    size_bytes: number;
+    sha256: string;
+  }>) => Promise<SystemSculptPrepareInputImageUploadsResponse>;
+  uploadPreparedInputImage: (options: {
+    uploadUrl: string;
+    mimeType: string;
+    bytes: ArrayBuffer;
+    extraHeaders?: Record<string, string>;
+  }) => Promise<void>;
   waitForGenerationJob: (
     jobId: string,
     options?: {
