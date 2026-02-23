@@ -20,6 +20,21 @@ function createViewport(): HTMLElement {
 }
 
 describe("StudioGraphSelectionController wheel behavior", () => {
+  it("filters unknown node IDs when setting explicit selection", () => {
+    const host = createHost();
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [{ id: "node-a" }, { id: "node-b" }],
+        },
+      } as any);
+    const controller = new StudioGraphSelectionController(host);
+
+    controller.setSelectedNodeIds(["node-a", "missing", "node-b", "node-a", ""]);
+
+    expect(controller.getSelectedNodeIds()).toEqual(["node-a", "node-b"]);
+  });
+
   it("keeps native scrolling for wheel events inside inspector overlays", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();

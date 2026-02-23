@@ -73,6 +73,10 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getSelectedNodeIds();
   }
 
+  setSelectedNodeIds(nodeIds: string[]): void {
+    this.selectionController.setSelectedNodeIds(nodeIds);
+  }
+
   getSingleSelectedNodeId(): string | null {
     return this.selectionController.getSingleSelectedNodeId();
   }

@@ -71,6 +71,22 @@ export class StudioGraphSelectionController {
     return Array.from(this.selectedNodeIds);
   }
 
+  setSelectedNodeIds(nodeIds: string[]): void {
+    const project = this.host.getCurrentProject();
+    const allowedNodeIds = project
+      ? new Set(project.graph.nodes.map((node) => node.id))
+      : null;
+    const nextSelection = new Set(
+      nodeIds
+        .map((nodeId) => String(nodeId || "").trim())
+        .filter((nodeId) => nodeId.length > 0)
+        .filter((nodeId) => (allowedNodeIds ? allowedNodeIds.has(nodeId) : true))
+    );
+    this.selectedNodeIds = nextSelection;
+    this.refreshNodeSelectionClasses();
+    this.notifySelectionChanged();
+  }
+
   getSingleSelectedNodeId(): string | null {
     if (this.selectedNodeIds.size !== 1) {
       return null;

@@ -13,7 +13,9 @@ import {
 import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
+  StudioEdge,
   StudioNodeDefinition,
+  StudioNodeGroup,
   StudioNodeInstance,
   StudioNodeOutputMap,
   StudioProjectV1,
@@ -84,6 +86,7 @@ import {
   removePendingManagedOutputNodes,
 } from "./StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
+import { tryCopyToClipboard } from "../../utils/clipboard";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -94,6 +97,26 @@ const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
   height: 460,
 };
 const GROUP_DISCONNECT_OFFSET_X = 36;
+const STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS = 120;
+const STUDIO_GRAPH_CLIPBOARD_SCHEMA = "systemsculpt.studio.clipboard.v1" as const;
+
+type StudioGraphClipboardPayload = {
+  schema: typeof STUDIO_GRAPH_CLIPBOARD_SCHEMA;
+  createdAt: string;
+  nodes: StudioNodeInstance[];
+  edges: StudioEdge[];
+  groups: StudioNodeGroup[];
+  selectedNodeIds: string[];
+  anchor: {
+    x: number;
+    y: number;
+  };
+};
+
+type StudioGraphHistorySnapshot = {
+  project: StudioProjectV1;
+  selectedNodeIds: string[];
+};
 
 type SystemSculptStudioViewState = {
   inspectorLayout?: unknown;
@@ -130,6 +153,12 @@ export class SystemSculptStudioView extends ItemView {
   private vaultEventRefs: EventRef[] = [];
   private notePathByNodeId = new Map<string, string>();
   private noteWriteTimersByNodeId = new Map<string, number>();
+  private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
+  private graphClipboardPasteCount = 0;
+  private historyCurrentSnapshot: StudioGraphHistorySnapshot | null = null;
+  private historyCurrentSerialized = "";
+  private historyUndoSnapshots: StudioGraphHistorySnapshot[] = [];
+  private historyRedoSnapshots: StudioGraphHistorySnapshot[] = [];
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
     this.handleWindowKeyDown(event);
   };
@@ -224,6 +253,9 @@ export class SystemSculptStudioView extends ItemView {
     this.unbindVaultEvents();
     this.clearAllNoteWriteTimers();
     this.notePathByNodeId.clear();
+    this.graphClipboardPayload = null;
+    this.graphClipboardPasteCount = 0;
+    this.resetProjectHistory(null);
     this.captureGraphViewportState();
     this.app.workspace.requestSaveLayout();
     this.clearSaveTimer();
@@ -281,25 +313,478 @@ export class SystemSculptStudioView extends ItemView {
     return isStudioGraphEditableTarget(target);
   }
 
+  private isActiveStudioView(): boolean {
+    return this.app.workspace.getActiveViewOfType(SystemSculptStudioView) === this;
+  }
+
+  private normalizeNodeIdList(nodeIds: string[]): string[] {
+    return Array.from(
+      new Set(
+        nodeIds
+          .map((nodeId) => String(nodeId || "").trim())
+          .filter((nodeId) => nodeId.length > 0)
+      )
+    );
+  }
+
+  private cloneProjectSnapshot(project: StudioProjectV1): StudioProjectV1 {
+    return JSON.parse(JSON.stringify(project)) as StudioProjectV1;
+  }
+
+  private serializeProjectSnapshot(project: StudioProjectV1): string {
+    return JSON.stringify(project);
+  }
+
+  private cloneHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
+    return {
+      project: this.cloneProjectSnapshot(snapshot.project),
+      selectedNodeIds: [...snapshot.selectedNodeIds],
+    };
+  }
+
+  private setHistoryCurrentSnapshot(project: StudioProjectV1, selectedNodeIds: string[]): void {
+    this.historyCurrentSnapshot = {
+      project: this.cloneProjectSnapshot(project),
+      selectedNodeIds: this.normalizeNodeIdList(selectedNodeIds),
+    };
+    this.historyCurrentSerialized = this.serializeProjectSnapshot(project);
+  }
+
+  private resetProjectHistory(project: StudioProjectV1 | null, options?: { selectedNodeIds?: string[] }): void {
+    this.historyUndoSnapshots = [];
+    this.historyRedoSnapshots = [];
+    if (!project) {
+      this.historyCurrentSnapshot = null;
+      this.historyCurrentSerialized = "";
+      return;
+    }
+    this.setHistoryCurrentSnapshot(project, options?.selectedNodeIds || []);
+  }
+
+  private trimHistorySnapshots(snapshots: StudioGraphHistorySnapshot[]): void {
+    while (snapshots.length > STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS) {
+      snapshots.shift();
+    }
+  }
+
+  private captureProjectHistoryCheckpoint(): void {
+    if (!this.currentProject) {
+      return;
+    }
+
+    const serialized = this.serializeProjectSnapshot(this.currentProject);
+    if (!this.historyCurrentSnapshot) {
+      this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
+      return;
+    }
+    if (serialized === this.historyCurrentSerialized) {
+      return;
+    }
+
+    this.historyUndoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
+    this.trimHistorySnapshots(this.historyUndoSnapshots);
+    this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
+    this.historyRedoSnapshots = [];
+  }
+
+  private applyHistorySnapshot(snapshot: StudioGraphHistorySnapshot): void {
+    if (!this.currentProjectPath) {
+      return;
+    }
+
+    const nextProject = this.cloneProjectSnapshot(snapshot.project);
+    const nextNodeIdSet = new Set(nextProject.graph.nodes.map((node) => node.id));
+    const nextSelection = this.normalizeNodeIdList(snapshot.selectedNodeIds).filter((nodeId) =>
+      nextNodeIdSet.has(nodeId)
+    );
+
+    this.currentProject = nextProject;
+    this.clearAllNoteWriteTimers();
+    this.notePathByNodeId.clear();
+    this.rebuildNotePathIndex(nextProject);
+    this.transientFieldErrorsByNodeId.clear();
+    this.runPresentation.reset();
+    this.editingLabelNodeIds.clear();
+    this.pendingLabelAutofocusNodeId = null;
+    this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
+    this.graphInteraction.clearPendingConnection({ requestRender: false });
+    this.graphInteraction.clearProjectState();
+    this.recomputeEntryNodes(nextProject);
+    this.setHistoryCurrentSnapshot(nextProject, nextSelection);
+    this.scheduleProjectSave({ captureHistory: false });
+    this.render();
+    this.graphInteraction.setSelectedNodeIds(nextSelection);
+  }
+
+  private undoGraphHistory(): boolean {
+    if (this.busy || !this.currentProject || !this.historyCurrentSnapshot) {
+      return false;
+    }
+    const targetSnapshot = this.historyUndoSnapshots.pop();
+    if (!targetSnapshot) {
+      return false;
+    }
+
+    this.historyRedoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
+    this.trimHistorySnapshots(this.historyRedoSnapshots);
+    this.applyHistorySnapshot(targetSnapshot);
+    return true;
+  }
+
+  private redoGraphHistory(): boolean {
+    if (this.busy || !this.currentProject || !this.historyCurrentSnapshot) {
+      return false;
+    }
+    const targetSnapshot = this.historyRedoSnapshots.pop();
+    if (!targetSnapshot) {
+      return false;
+    }
+
+    this.historyUndoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
+    this.trimHistorySnapshots(this.historyUndoSnapshots);
+    this.applyHistorySnapshot(targetSnapshot);
+    return true;
+  }
+
+  private resolveClipboardAnchor(nodes: StudioNodeInstance[]): { x: number; y: number } {
+    if (nodes.length === 0) {
+      return { x: 0, y: 0 };
+    }
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    for (const node of nodes) {
+      minX = Math.min(minX, Number(node.position?.x) || 0);
+      minY = Math.min(minY, Number(node.position?.y) || 0);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return { x: 0, y: 0 };
+    }
+    return {
+      x: minX,
+      y: minY,
+    };
+  }
+
+  private buildGraphClipboardPayload(selectedNodeIds: string[]): StudioGraphClipboardPayload | null {
+    if (!this.currentProject) {
+      return null;
+    }
+
+    const project = this.currentProject;
+    const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
+    const normalizedSelection = this.normalizeNodeIdList(selectedNodeIds).filter((nodeId) =>
+      nodeById.has(nodeId)
+    );
+    if (normalizedSelection.length === 0) {
+      return null;
+    }
+
+    const selectedNodeIdSet = new Set(normalizedSelection);
+    const nodes = normalizedSelection
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter((node): node is StudioNodeInstance => Boolean(node))
+      .map((node) => JSON.parse(JSON.stringify(node)) as StudioNodeInstance);
+    if (nodes.length === 0) {
+      return null;
+    }
+
+    const edges = project.graph.edges
+      .filter(
+        (edge) =>
+          selectedNodeIdSet.has(edge.fromNodeId) &&
+          selectedNodeIdSet.has(edge.toNodeId)
+      )
+      .map((edge) => ({ ...edge }));
+
+    const groups = (project.graph.groups || [])
+      .map((group) => {
+        const groupNodeIds = this.normalizeNodeIdList(group.nodeIds || []).filter((nodeId) =>
+          selectedNodeIdSet.has(nodeId)
+        );
+        if (groupNodeIds.length < 2) {
+          return null;
+        }
+        const groupName = String(group.name || "").trim();
+        const groupId = String(group.id || "").trim();
+        if (!groupName || !groupId) {
+          return null;
+        }
+        const groupColor = String(group.color || "").trim();
+        return {
+          id: groupId,
+          name: groupName,
+          ...(groupColor ? { color: groupColor } : {}),
+          nodeIds: groupNodeIds,
+        } satisfies StudioNodeGroup;
+      })
+      .filter((group): group is StudioNodeGroup => Boolean(group));
+
+    return {
+      schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
+      createdAt: new Date().toISOString(),
+      nodes,
+      edges,
+      groups,
+      selectedNodeIds: normalizedSelection,
+      anchor: this.resolveClipboardAnchor(nodes),
+    };
+  }
+
+  private async syncGraphClipboardToSystemClipboard(payload: StudioGraphClipboardPayload): Promise<void> {
+    try {
+      const serialized = JSON.stringify(payload);
+      await tryCopyToClipboard(serialized);
+    } catch {
+      // Best-effort clipboard mirroring only.
+    }
+  }
+
+  private parseGraphClipboardPayload(raw: string): StudioGraphClipboardPayload | null {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    const payload = parsed as Partial<StudioGraphClipboardPayload>;
+    if (payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA) {
+      return null;
+    }
+    if (!Array.isArray(payload.nodes) || payload.nodes.length === 0) {
+      return null;
+    }
+
+    return {
+      schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
+      createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
+      nodes: payload.nodes as StudioNodeInstance[],
+      edges: Array.isArray(payload.edges) ? (payload.edges as StudioEdge[]) : [],
+      groups: Array.isArray(payload.groups) ? (payload.groups as StudioNodeGroup[]) : [],
+      selectedNodeIds: Array.isArray(payload.selectedNodeIds)
+        ? this.normalizeNodeIdList(payload.selectedNodeIds as string[])
+        : [],
+      anchor: {
+        x:
+          payload.anchor && Number.isFinite(Number(payload.anchor.x))
+            ? Number(payload.anchor.x)
+            : 0,
+        y:
+          payload.anchor && Number.isFinite(Number(payload.anchor.y))
+            ? Number(payload.anchor.y)
+            : 0,
+      },
+    };
+  }
+
+  private copySelectedGraphNodesToClipboard(options?: { showNotice?: boolean }): boolean {
+    if (this.busy || !this.currentProject) {
+      return false;
+    }
+    const payload = this.buildGraphClipboardPayload(this.graphInteraction.getSelectedNodeIds());
+    if (!payload) {
+      return false;
+    }
+    this.graphClipboardPayload = payload;
+    this.graphClipboardPasteCount = 0;
+    void this.syncGraphClipboardToSystemClipboard(payload);
+    if (options?.showNotice !== false) {
+      new Notice(payload.nodes.length === 1 ? "Copied 1 node." : `Copied ${payload.nodes.length} nodes.`);
+    }
+    return true;
+  }
+
+  private cutSelectedGraphNodesToClipboard(): boolean {
+    if (this.busy || !this.currentProject) {
+      return false;
+    }
+    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+    if (selectedNodeIds.length === 0) {
+      return false;
+    }
+    if (!this.copySelectedGraphNodesToClipboard({ showNotice: false })) {
+      return false;
+    }
+    this.removeNodes(selectedNodeIds);
+    new Notice(selectedNodeIds.length === 1 ? "Cut 1 node." : `Cut ${selectedNodeIds.length} nodes.`);
+    return true;
+  }
+
+  private pasteGraphClipboardPayload(payloadOverride?: StudioGraphClipboardPayload): boolean {
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return false;
+    }
+    const payload = payloadOverride || this.graphClipboardPayload;
+    if (!payload) {
+      return false;
+    }
+    if (
+      payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA ||
+      !Array.isArray(payload.nodes) ||
+      payload.nodes.length === 0
+    ) {
+      return false;
+    }
+
+    const project = this.currentProject;
+    const nodeIdMap = new Map<string, string>();
+    const newNodes: StudioNodeInstance[] = [];
+    const anchor = this.resolvePasteAnchorPosition();
+    const repeatedPasteOffset = this.graphClipboardPasteCount * 28;
+    const deltaX = anchor.x + repeatedPasteOffset - payload.anchor.x;
+    const deltaY = anchor.y + repeatedPasteOffset - payload.anchor.y;
+
+    for (const sourceNode of payload.nodes) {
+      const sourceNodeId = String(sourceNode.id || "").trim();
+      if (!sourceNodeId) {
+        continue;
+      }
+      const nextNodeId = randomId("node");
+      nodeIdMap.set(sourceNodeId, nextNodeId);
+      const clonedNode = JSON.parse(JSON.stringify(sourceNode)) as StudioNodeInstance;
+      clonedNode.id = nextNodeId;
+      clonedNode.position = this.normalizeNodePosition({
+        x: Number(clonedNode.position?.x || 0) + deltaX,
+        y: Number(clonedNode.position?.y || 0) + deltaY,
+      });
+      newNodes.push(clonedNode);
+    }
+    if (newNodes.length === 0) {
+      return false;
+    }
+
+    const newEdges: StudioEdge[] = [];
+    for (const sourceEdge of payload.edges || []) {
+      const fromNodeId = nodeIdMap.get(String(sourceEdge.fromNodeId || "").trim());
+      const toNodeId = nodeIdMap.get(String(sourceEdge.toNodeId || "").trim());
+      if (!fromNodeId || !toNodeId) {
+        continue;
+      }
+      const fromPortId = String(sourceEdge.fromPortId || "").trim();
+      const toPortId = String(sourceEdge.toPortId || "").trim();
+      if (!fromPortId || !toPortId) {
+        continue;
+      }
+      newEdges.push({
+        id: randomId("edge"),
+        fromNodeId,
+        fromPortId,
+        toNodeId,
+        toPortId,
+      });
+    }
+
+    const newGroups: StudioNodeGroup[] = [];
+    for (const sourceGroup of payload.groups || []) {
+      const groupNodeIds = this.normalizeNodeIdList(sourceGroup.nodeIds || [])
+        .map((nodeId) => nodeIdMap.get(nodeId) || "")
+        .filter((nodeId) => nodeId.length > 0);
+      if (groupNodeIds.length < 2) {
+        continue;
+      }
+      const groupName = String(sourceGroup.name || "").trim();
+      if (!groupName) {
+        continue;
+      }
+      const groupColor = String(sourceGroup.color || "").trim();
+      newGroups.push({
+        id: randomId("group"),
+        name: groupName,
+        ...(groupColor ? { color: groupColor } : {}),
+        nodeIds: groupNodeIds,
+      });
+    }
+
+    project.graph.nodes.push(...newNodes);
+    if (newEdges.length > 0) {
+      project.graph.edges.push(...newEdges);
+    }
+    if (newGroups.length > 0) {
+      if (!Array.isArray(project.graph.groups)) {
+        project.graph.groups = [];
+      }
+      project.graph.groups.push(...newGroups);
+    }
+
+    const nextSelection = this.normalizeNodeIdList(payload.selectedNodeIds || [])
+      .map((nodeId) => nodeIdMap.get(nodeId) || "")
+      .filter((nodeId) => nodeId.length > 0);
+    if (nextSelection.length === 0) {
+      nextSelection.push(...newNodes.map((node) => node.id));
+    }
+
+    this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
+    this.graphInteraction.clearPendingConnection({ requestRender: false });
+    this.graphInteraction.setSelectedNodeIds(nextSelection);
+    for (const node of newNodes) {
+      if (node.kind !== "studio.note") {
+        continue;
+      }
+      const notePath = this.readNotePathFromConfig(node);
+      if (notePath) {
+        this.notePathByNodeId.set(node.id, normalizePath(notePath));
+      }
+    }
+    this.recomputeEntryNodes(project);
+    this.scheduleProjectSave();
+    this.render();
+    this.graphClipboardPasteCount += 1;
+    new Notice(newNodes.length === 1 ? "Pasted 1 node." : `Pasted ${newNodes.length} nodes.`);
+    return true;
+  }
+
   private handleWindowKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) {
       return;
     }
-    if (event.metaKey || event.ctrlKey || event.altKey) {
+    if (!this.isActiveStudioView()) {
       return;
     }
-    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+    const normalizedKey = String(event.key || "").toLowerCase();
+    const editableTarget = this.isEditableKeyboardTarget(event.target);
+    const primaryModifierPressed = (event.metaKey || event.ctrlKey) && !event.altKey;
+
+    if (primaryModifierPressed) {
+      let handled = false;
+      if (!editableTarget) {
+        if (normalizedKey === "c" && !event.shiftKey) {
+          handled = this.copySelectedGraphNodesToClipboard();
+        } else if (normalizedKey === "x" && !event.shiftKey) {
+          handled = this.cutSelectedGraphNodesToClipboard();
+        } else if (normalizedKey === "z") {
+          handled = event.shiftKey ? this.redoGraphHistory() : this.undoGraphHistory();
+        } else if (normalizedKey === "y") {
+          handled = this.redoGraphHistory();
+        }
+      }
+
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    if (event.metaKey || event.ctrlKey || event.altKey) {
       return;
     }
     if (this.busy || !this.currentProject) {
       return;
     }
-
-    const key = String(event.key || "");
-    if (key !== "Delete" && key !== "Backspace") {
+    if (normalizedKey !== "delete" && normalizedKey !== "backspace") {
       return;
     }
-    if (this.isEditableKeyboardTarget(event.target)) {
+    if (editableTarget) {
       return;
     }
 
@@ -395,30 +880,164 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private stripEnclosingReferenceWrappers(reference: string): string {
+    let next = String(reference || "").trim();
+    while (next.startsWith("<") && next.endsWith(">") && next.length > 1) {
+      next = next.slice(1, -1).trim();
+    }
+    if (
+      (next.startsWith("\"") && next.endsWith("\"") && next.length > 1) ||
+      (next.startsWith("'") && next.endsWith("'") && next.length > 1) ||
+      (next.startsWith("`") && next.endsWith("`") && next.length > 1)
+    ) {
+      next = next.slice(1, -1).trim();
+    }
+    return next;
+  }
+
+  private normalizeObsidianLinkTarget(reference: string): string {
+    let next = this.stripEnclosingReferenceWrappers(reference);
+    if (!next) {
+      return "";
+    }
+    if (next.startsWith("!")) {
+      next = next.slice(1).trim();
+    }
+    const aliasIndex = next.indexOf("|");
+    if (aliasIndex >= 0) {
+      next = next.slice(0, aliasIndex).trim();
+    }
+    const headingIndex = next.indexOf("#");
+    if (headingIndex >= 0) {
+      next = next.slice(0, headingIndex).trim();
+    }
+    const blockIndex = next.indexOf("^");
+    if (blockIndex >= 0) {
+      next = next.slice(0, blockIndex).trim();
+    }
+    return next.trim();
+  }
+
+  private parseObsidianWikiLinkTarget(reference: string): string | null {
+    const raw = this.stripEnclosingReferenceWrappers(reference);
+    const match = raw.match(/^!?\[\[([\s\S]+?)\]\]$/);
+    if (!match) {
+      return null;
+    }
+    const target = this.normalizeObsidianLinkTarget(match[1]);
+    return target || null;
+  }
+
+  private parseMarkdownLinkTarget(reference: string): string | null {
+    const raw = this.stripEnclosingReferenceWrappers(reference);
+    const match = raw.match(/^!?\[[^\]]*]\((.+)\)$/);
+    if (!match) {
+      return null;
+    }
+    let target = String(match[1] || "").trim();
+    if (!target) {
+      return null;
+    }
+    if (target.startsWith("<") && target.endsWith(">") && target.length > 1) {
+      target = target.slice(1, -1).trim();
+    } else {
+      const firstToken = target.split(/\s+/)[0];
+      target = firstToken || target;
+    }
+    try {
+      target = decodeURIComponent(target);
+    } catch {
+      // Keep the original text when URL decoding fails.
+    }
+    const normalized = this.normalizeObsidianLinkTarget(target);
+    return normalized || null;
+  }
+
+  private resolveVaultPathFromFileUri(reference: string): string | null {
+    const raw = this.stripEnclosingReferenceWrappers(reference);
+    if (!raw.toLowerCase().startsWith("file://")) {
+      return null;
+    }
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "file:") {
+        return null;
+      }
+      let absolutePath = decodeURIComponent(url.pathname || "").trim();
+      if (/^\/[a-zA-Z]:\//.test(absolutePath)) {
+        absolutePath = absolutePath.slice(1);
+      }
+      return this.resolveVaultPathFromAbsoluteFilePath(absolutePath);
+    } catch {
+      return null;
+    }
+  }
+
   private resolveVaultItemFromReference(reference: string): TAbstractFile | null {
-    const raw = String(reference || "").trim();
+    const raw = this.stripEnclosingReferenceWrappers(reference);
     if (!raw) {
       return null;
     }
 
-    const parsedUriPath = this.parseObsidianOpenFilePath(raw);
-    const primaryPath = parsedUriPath || normalizePath(raw);
-    if (!primaryPath) {
-      return null;
-    }
+    const candidatePaths = new Set<string>();
+    const pushCandidate = (value: string | null | undefined): void => {
+      const next = String(value || "").trim();
+      if (!next) {
+        return;
+      }
+      candidatePaths.add(next);
+    };
 
-    const direct = this.app.vault.getAbstractFileByPath(primaryPath);
-    if (direct) {
-      return direct;
+    pushCandidate(this.parseObsidianOpenFilePath(raw));
+    pushCandidate(this.parseObsidianWikiLinkTarget(raw));
+    pushCandidate(this.parseMarkdownLinkTarget(raw));
+    pushCandidate(this.resolveVaultPathFromFileUri(raw));
+    if (this.isAbsoluteFilesystemPath(raw)) {
+      pushCandidate(this.resolveVaultPathFromAbsoluteFilePath(raw));
     }
+    pushCandidate(this.normalizeObsidianLinkTarget(raw));
+    pushCandidate(raw);
 
-    if (!primaryPath.includes(".")) {
-      const markdownFallback = this.app.vault.getAbstractFileByPath(`${primaryPath}.md`);
-      if (markdownFallback) {
-        return markdownFallback;
+    for (const candidate of candidatePaths) {
+      const normalizedCandidate = normalizePath(candidate.replace(/\\/g, "/"));
+      if (!normalizedCandidate) {
+        continue;
+      }
+      const direct = this.app.vault.getAbstractFileByPath(normalizedCandidate);
+      if (direct) {
+        return direct;
+      }
+      if (!normalizedCandidate.includes(".")) {
+        const markdownFallback = this.app.vault.getAbstractFileByPath(`${normalizedCandidate}.md`);
+        if (markdownFallback) {
+          return markdownFallback;
+        }
       }
     }
+
     return null;
+  }
+
+  private collectInlinePathReferencesFromText(raw: string, push: (value: string) => void): void {
+    const text = String(raw || "");
+    if (!text.trim()) {
+      return;
+    }
+
+    for (const match of text.matchAll(/obsidian:\/\/open[^\s)]+/gi)) {
+      push(match[0]);
+    }
+    for (const match of text.matchAll(/file:\/\/[^\s)]+/gi)) {
+      push(match[0]);
+    }
+    for (const match of text.matchAll(/!?\[\[([\s\S]+?)\]\]/g)) {
+      push(match[0]);
+      push(match[1]);
+    }
+    for (const match of text.matchAll(/!?\[[^\]]*]\(([^)]+)\)/g)) {
+      push(match[0]);
+      push(match[1]);
+    }
   }
 
   private parsePathReferencesFromText(raw: string): string[] {
@@ -443,6 +1062,9 @@ export class SystemSculptStudioView extends ItemView {
         if (typeof record.path === "string") {
           push(record.path);
         }
+        if (typeof record.file === "string") {
+          push(record.file);
+        }
         if (Array.isArray(record.results)) {
           for (const result of record.results) {
             if (result && typeof result === "object" && typeof (result as Record<string, unknown>).path === "string") {
@@ -450,13 +1072,25 @@ export class SystemSculptStudioView extends ItemView {
             }
           }
         }
+      } else if (Array.isArray(parsed)) {
+        for (const value of parsed) {
+          if (typeof value === "string") {
+            push(value);
+          }
+        }
       }
     } catch {
       // Continue with line parsing.
     }
 
+    this.collectInlinePathReferencesFromText(normalized, push);
     for (const line of normalized.split(/\r?\n/)) {
-      push(line);
+      const trimmedLine = line.trim();
+      if (!trimmedLine) {
+        continue;
+      }
+      push(trimmedLine);
+      push(trimmedLine.replace(/^[-*]\s+/, ""));
     }
 
     return Array.from(references);
@@ -507,13 +1141,31 @@ export class SystemSculptStudioView extends ItemView {
     if (event.defaultPrevented) {
       return;
     }
-    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+    if (!this.isActiveStudioView()) {
       return;
     }
     if (this.busy || !this.currentProject || !this.currentProjectPath) {
       return;
     }
     if (this.isEditableKeyboardTarget(event.target)) {
+      return;
+    }
+
+    const pastedText = this.extractClipboardText(event);
+    const graphClipboardPayload = this.parseGraphClipboardPayload(pastedText);
+    if (graphClipboardPayload) {
+      const previousCreatedAt = this.graphClipboardPayload?.createdAt || "";
+      this.graphClipboardPayload = graphClipboardPayload;
+      if (previousCreatedAt !== graphClipboardPayload.createdAt) {
+        this.graphClipboardPasteCount = 0;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        this.pasteGraphClipboardPayload(graphClipboardPayload);
+      } catch (error) {
+        this.setError(error);
+      }
       return;
     }
 
@@ -529,7 +1181,6 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const pastedText = this.extractClipboardText(event);
     if (!pastedText || pastedText.trim().length === 0) {
       return;
     }
@@ -1007,7 +1658,10 @@ export class SystemSculptStudioView extends ItemView {
     }, 360);
   }
 
-  private scheduleProjectSave(): void {
+  private scheduleProjectSave(options?: { captureHistory?: boolean }): void {
+    if (options?.captureHistory !== false) {
+      this.captureProjectHistoryCheckpoint();
+    }
     this.clearSaveTimer();
     this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
@@ -1065,6 +1719,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!projectPath) {
       this.currentProjectPath = null;
       this.currentProject = null;
+      this.resetProjectHistory(null);
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -1078,6 +1733,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!projectPath.toLowerCase().endsWith(".systemsculpt")) {
       this.currentProjectPath = null;
       this.currentProject = null;
+      this.resetProjectHistory(null);
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -1133,6 +1789,7 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
+      this.resetProjectHistory(project);
       if (
         groupsSanitized ||
         mediaTitlesNormalized ||
@@ -1147,6 +1804,7 @@ export class SystemSculptStudioView extends ItemView {
     } catch (error) {
       this.currentProjectPath = null;
       this.currentProject = null;
+      this.resetProjectHistory(null);
       this.notePathByNodeId.clear();
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
@@ -2411,11 +3069,23 @@ export class SystemSculptStudioView extends ItemView {
     return relative ? normalizePath(relative) : null;
   }
 
-  private collectDroppedVaultItems(dataTransfer: DataTransfer): {
+  private readDataTransferStringItem(item: DataTransferItem): Promise<string> {
+    return new Promise((resolve) => {
+      try {
+        item.getAsString((value) => {
+          resolve(typeof value === "string" ? value : "");
+        });
+      } catch {
+        resolve("");
+      }
+    });
+  }
+
+  private async collectDroppedVaultItems(dataTransfer: DataTransfer): Promise<{
     notePaths: string[];
     folderPaths: string[];
     unsupportedPaths: string[];
-  } {
+  }> {
     const references = new Set<string>();
     const pushReference = (value: string): void => {
       const next = String(value || "").trim();
@@ -2425,12 +3095,49 @@ export class SystemSculptStudioView extends ItemView {
       references.add(next);
     };
 
-    for (const reference of this.parsePathReferencesFromText(dataTransfer.getData("text/plain"))) {
-      pushReference(reference);
+    const payloads = new Set<string>();
+    const pushPayload = (value: string): void => {
+      const next = String(value || "").trim();
+      if (!next) {
+        return;
+      }
+      payloads.add(next);
+    };
+
+    for (const preferredType of ["text/plain", "text/uri-list", "application/json"]) {
+      try {
+        pushPayload(dataTransfer.getData(preferredType));
+      } catch {
+        // Continue through best-effort fallbacks.
+      }
     }
-    for (const reference of this.parsePathReferencesFromText(dataTransfer.getData("text/uri-list"))) {
-      pushReference(reference);
+    for (const type of Array.from(dataTransfer.types || [])) {
+      const normalizedType = String(type || "").toLowerCase();
+      if (
+        !normalizedType.startsWith("text/") &&
+        !normalizedType.includes("json") &&
+        !normalizedType.includes("uri")
+      ) {
+        continue;
+      }
+      try {
+        pushPayload(dataTransfer.getData(type));
+      } catch {
+        // Continue through best-effort fallbacks.
+      }
     }
+    for (const item of Array.from(dataTransfer.items || [])) {
+      if (item.kind !== "string") {
+        continue;
+      }
+      pushPayload(await this.readDataTransferStringItem(item));
+    }
+    for (const payload of payloads) {
+      for (const reference of this.parsePathReferencesFromText(payload)) {
+        pushReference(reference);
+      }
+    }
+
     for (const file of Array.from(dataTransfer.files || [])) {
       const absolutePath =
         typeof (file as unknown as { path?: unknown }).path === "string"
@@ -2470,42 +3177,41 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphViewportDragOver(event: DragEvent): void {
-    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
-      return;
-    }
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
     if (!event.dataTransfer) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
     event.dataTransfer.dropEffect = "copy";
   }
 
   private async handleGraphViewportDrop(event: DragEvent): Promise<void> {
-    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
-      return;
-    }
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
     if (!event.dataTransfer) {
       return;
     }
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
 
-    const dropped = this.collectDroppedVaultItems(event.dataTransfer);
+    const dropped = await this.collectDroppedVaultItems(event.dataTransfer);
     if (
       dropped.notePaths.length === 0 &&
       dropped.folderPaths.length === 0 &&
       dropped.unsupportedPaths.length === 0
     ) {
+      const hasPayload =
+        (event.dataTransfer.types?.length || 0) > 0 || (event.dataTransfer.files?.length || 0) > 0;
+      if (hasPayload) {
+        new Notice("Drop a markdown note from your vault to create a Note node.");
+      }
       return;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
     if (dropped.folderPaths.length > 0) {
       new Notice("Dropping folders into Studio is not supported yet.");
     }
