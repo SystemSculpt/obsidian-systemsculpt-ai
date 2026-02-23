@@ -12,10 +12,7 @@ export const textGenerationNode: StudioNodeDefinition = {
   capabilityClass: "api",
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "prompt", type: "text", required: true }],
-  outputPorts: [
-    { id: "text", type: "text" },
-    { id: "model", type: "text" },
-  ],
+  outputPorts: [{ id: "text", type: "text" }],
   configDefaults: {
     systemPrompt: "",
     modelId: "",
@@ -61,7 +58,6 @@ export const textGenerationNode: StudioNodeDefinition = {
     return {
       outputs: {
         text: result.text,
-        model: result.modelId,
       },
     };
   },

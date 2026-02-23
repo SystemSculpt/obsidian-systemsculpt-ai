@@ -78,6 +78,9 @@ export function resolveStudioGraphNodeWidth(node: Pick<StudioNodeInstance, "kind
   if (isStudioLabelNode(node)) {
     return resolveStudioLabelWidth(node);
   }
+  if (String(node.kind || "").trim() === "studio.dataset") {
+    return STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH;
+  }
   if (isStudioExpandedTextNodeKind(node.kind)) {
     return STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH;
   }

@@ -16,6 +16,11 @@ type RenderStudioNodeInlineEditorOptions = {
 };
 
 const INLINE_EDITOR_NODE_KINDS = new Set<string>([
+  "studio.input",
+  "studio.label",
+  "studio.cli_command",
+  "studio.dataset",
+  "studio.http_request",
   "studio.image_generation",
   "studio.media_ingest",
   "studio.audio_extract",
@@ -28,6 +33,7 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
 const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.image_generation",
   "studio.media_ingest",
+  "studio.dataset",
   "studio.note",
   "studio.text",
   "studio.text_generation",
@@ -132,10 +138,40 @@ function buildVisibleFieldList(options: {
 }
 
 function isInlineConfigFieldFullWidth(field: StudioNodeConfigFieldDefinition): boolean {
-  if (field.type === "textarea" || field.type === "media_path") {
+  if (
+    field.type === "textarea" ||
+    field.type === "media_path" ||
+    field.type === "directory_path" ||
+    field.type === "string_list"
+  ) {
     return true;
   }
   return false;
+}
+
+function renderDatasetOutputPreview(options: {
+  nodeEl: HTMLElement;
+  node: StudioNodeInstance;
+  nodeRunState: StudioNodeRunDisplayState;
+}): void {
+  const { nodeEl, node, nodeRunState } = options;
+  const outputText = typeof nodeRunState.outputs?.text === "string" ? nodeRunState.outputs.text : "";
+  const outputWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-inline-output-preview" });
+  outputWrapEl.createDiv({
+    cls: "ss-studio-node-inline-output-preview-label",
+    text: "LATEST RESULT",
+  });
+  const outputEditorEl = outputWrapEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-output-preview-text",
+    attr: {
+      "aria-label": `${node.title || "Dataset"} latest result`,
+      readonly: "readonly",
+    },
+  });
+  outputEditorEl.readOnly = true;
+  outputEditorEl.value = outputText.trim()
+    ? outputText
+    : "Run this dataset node to preview the latest dataset result.";
 }
 
 function renderInlineConfigSelectField(options: {
@@ -291,6 +327,101 @@ function renderInlineConfigTextareaField(options: {
   textAreaEl.value = readConfigString(node.config[field.key]);
   textAreaEl.addEventListener("input", () => {
     node.config[field.key] = textAreaEl.value;
+    onNodeConfigMutated(node);
+  });
+}
+
+function renderInlineConfigBooleanField(options: {
+  node: StudioNodeInstance;
+  field: StudioNodeConfigFieldDefinition;
+  fieldEl: HTMLElement;
+  interactionLocked: boolean;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+}): void {
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-checkbox-row" });
+  const checkboxEl = rowEl.createEl("input", {
+    cls: "ss-studio-node-inline-config-checkbox",
+    type: "checkbox",
+    attr: {
+      "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
+    },
+  });
+  checkboxEl.checked = node.config[field.key] === true;
+  checkboxEl.disabled = interactionLocked;
+  checkboxEl.addEventListener("change", () => {
+    node.config[field.key] = checkboxEl.checked;
+    onNodeConfigMutated(node);
+  });
+}
+
+function renderInlineConfigJsonObjectField(options: {
+  node: StudioNodeInstance;
+  field: StudioNodeConfigFieldDefinition;
+  fieldEl: HTMLElement;
+  interactionLocked: boolean;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+}): void {
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const textAreaEl = fieldEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-config-textarea",
+    attr: {
+      placeholder: field.placeholder || "{\n  \"key\": \"value\"\n}",
+      "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
+    },
+  });
+  textAreaEl.disabled = interactionLocked;
+  const initial = node.config[field.key];
+  textAreaEl.value =
+    initial && typeof initial === "object" && !Array.isArray(initial)
+      ? JSON.stringify(initial, null, 2)
+      : "{}";
+
+  const commit = (): void => {
+    const raw = textAreaEl.value.trim();
+    if (!raw) {
+      node.config[field.key] = {};
+      onNodeConfigMutated(node);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return;
+      }
+      node.config[field.key] = parsed as any;
+      onNodeConfigMutated(node);
+    } catch {
+      // Keep local text for user correction; validation will fail loudly on run.
+    }
+  };
+
+  textAreaEl.addEventListener("blur", commit);
+}
+
+function renderInlineConfigStringListField(options: {
+  node: StudioNodeInstance;
+  field: StudioNodeConfigFieldDefinition;
+  fieldEl: HTMLElement;
+  interactionLocked: boolean;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+}): void {
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const textAreaEl = fieldEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-config-textarea",
+    attr: {
+      placeholder: field.placeholder || "One value per line",
+      "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
+    },
+  });
+  textAreaEl.disabled = interactionLocked;
+  const current = Array.isArray(node.config[field.key]) ? (node.config[field.key] as unknown[]) : [];
+  textAreaEl.value = current.map((entry) => String(entry ?? "")).join("\n");
+  textAreaEl.addEventListener("input", () => {
+    node.config[field.key] = textAreaEl.value
+      .split(/\r?\n/g)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0) as any;
     onNodeConfigMutated(node);
   });
 }
@@ -475,6 +606,39 @@ function renderInlineConfigPanel(options: {
         onNodeConfigMutated,
       });
       renderedAnyField = true;
+      continue;
+    }
+    if (field.type === "boolean") {
+      renderInlineConfigBooleanField({
+        node,
+        field,
+        fieldEl,
+        interactionLocked,
+        onNodeConfigMutated,
+      });
+      renderedAnyField = true;
+      continue;
+    }
+    if (field.type === "json_object") {
+      renderInlineConfigJsonObjectField({
+        node,
+        field,
+        fieldEl,
+        interactionLocked,
+        onNodeConfigMutated,
+      });
+      renderedAnyField = true;
+      continue;
+    }
+    if (field.type === "string_list") {
+      renderInlineConfigStringListField({
+        node,
+        field,
+        fieldEl,
+        interactionLocked,
+        onNodeConfigMutated,
+      });
+      renderedAnyField = true;
     }
   }
 
@@ -535,7 +699,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
 }
 
 function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOptions): boolean {
-  const { node, nodeEl, definition, interactionLocked, onNodeConfigMutated } = options;
+  const { node, nodeEl, nodeRunState, definition, interactionLocked, onNodeConfigMutated } = options;
   const kind = normalizeNodeKind(node.kind);
 
   if (kind === "studio.image_generation") {
@@ -593,7 +757,78 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     });
   }
 
-  return false;
+  if (kind === "studio.dataset") {
+    const rendered = renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: [
+        "workingDirectory",
+        "customQuery",
+        "adapterCommand",
+        "adapterArgs",
+        "refreshHours",
+        "timeoutMs",
+        "maxOutputBytes",
+      ],
+      interactionLocked,
+      onNodeConfigMutated,
+    });
+    if (rendered) {
+      renderDatasetOutputPreview({
+        nodeEl,
+        node,
+        nodeRunState,
+      });
+    }
+    return rendered;
+  }
+
+  if (kind === "studio.http_request") {
+    return renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: ["method", "url", "headers"],
+      interactionLocked,
+      onNodeConfigMutated,
+    });
+  }
+
+  if (kind === "studio.cli_command") {
+    return renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: ["command", "args", "cwd", "timeoutMs", "maxOutputBytes"],
+      interactionLocked,
+      onNodeConfigMutated,
+    });
+  }
+
+  if (kind === "studio.input") {
+    return renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: ["value"],
+      interactionLocked,
+      onNodeConfigMutated,
+    });
+  }
+
+  if (isInlineTextNodeKind(kind)) {
+    return false;
+  }
+
+  return renderInlineConfigPanel({
+    nodeEl,
+    node,
+    definition,
+    orderedFieldKeys: definition.configSchema.fields.map((field) => field.key),
+    interactionLocked,
+    onNodeConfigMutated,
+  });
 }
 
 export function renderStudioNodeInlineEditor(options: RenderStudioNodeInlineEditorOptions): boolean {

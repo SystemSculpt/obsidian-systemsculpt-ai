@@ -33,7 +33,7 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/views/studio/graph-v3/StudioGraphMediaPreviewModal.ts`: vault resource resolution + modal preview rendering.
 - `src/views/studio/graph-v3/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
 - `src/views/studio/graph-v3/StudioGraphViewStateStore.ts`: graph viewport state normalization/persistence helpers.
-- `src/views/studio/StudioNodeInspectorOverlay.ts`: in-canvas floating node config inspector.
+- `src/views/studio/StudioNodeInspectorOverlay.ts`: legacy inspector shell (config editing is inline on node cards).
 - `src/views/studio/StudioViewHelpers.ts`: shared Studio view helpers.
 
 ## File System Layout
@@ -60,6 +60,16 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Node output cache keyed by node config + resolved input fingerprint.
 - Scoped node run can force selected-node recompute while reusing valid upstream/downstream cache.
 - Retention pruning by per-project max run count.
+
+## Node Editing & Output Contracts
+- Node configuration is edited inline on node cards (no click-to-config inspector workflow).
+- Nodes should expose only immediately reusable output ports to keep graph wiring unambiguous.
+- Metadata/debug details belong in runtime logs or snapshots, not as default output ports.
+- `studio.text_generation` exposes only `text` as its output.
+- `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), and exposes only `text` as its output (cached internally with TTL).
+- `studio.dataset` resolves data through a user-configurable adapter command + argument list.
+- `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.
+- `studio.dataset` inline card includes a read-only latest-result preview so operators can verify fetched data after runs.
 
 ## Grouping Contracts
 - Grouping is graph-native metadata (`project.graph.groups`) persisted in `.systemsculpt`.

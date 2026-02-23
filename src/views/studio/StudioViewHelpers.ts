@@ -14,6 +14,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",
   "studio.transcription": "Transcribes audio media into text.",
+  "studio.dataset": "Runs a custom query through a configurable adapter, caches results, and outputs text.",
   "studio.http_request": "Fetches remote HTTP data for downstream nodes.",
   "studio.cli_command": "Runs a local shell command and captures output.",
 };

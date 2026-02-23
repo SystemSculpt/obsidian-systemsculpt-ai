@@ -110,16 +110,16 @@ function projectWithBranchMerge(): StudioProjectV1 {
 }
 
 describe("StudioRuntime scoped run projection", () => {
-  it("keeps downstream path and required upstream dependencies when running from a node", () => {
+  it("keeps only required upstream dependencies when running from a node", () => {
     const project = projectWithBranchMerge();
-    const scoped = scopeProjectForRun(project, ["a"]);
+    const scoped = scopeProjectForRun(project, ["c"]);
 
     const nodeIds = scoped.graph.nodes.map((node) => node.id).sort();
     const edgeIds = scoped.graph.edges.map((edge) => edge.id).sort();
     const entryIds = [...scoped.graph.entryNodeIds].sort();
 
-    expect(nodeIds).toEqual(["a", "b", "c", "d"]);
-    expect(edgeIds).toEqual(["e1", "e2", "e3"]);
+    expect(nodeIds).toEqual(["a", "b", "c"]);
+    expect(edgeIds).toEqual(["e1", "e2"]);
     expect(entryIds).toEqual(["a", "b"]);
   });
 

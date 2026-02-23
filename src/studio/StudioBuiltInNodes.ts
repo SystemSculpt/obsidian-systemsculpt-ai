@@ -1,6 +1,7 @@
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { audioExtractNode } from "./nodes/audioExtractNode";
 import { cliCommandNode } from "./nodes/cliCommandNode";
+import { datasetNode } from "./nodes/datasetNode";
 import { httpRequestNode } from "./nodes/httpRequestNode";
 import { imageGenerationNode } from "./nodes/imageGenerationNode";
 import { inputNode } from "./nodes/inputNode";
@@ -21,6 +22,7 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(mediaIngestNode);
   registry.register(audioExtractNode);
   registry.register(transcriptionNode);
+  registry.register(datasetNode);
   registry.register(httpRequestNode);
   registry.register(cliCommandNode);
 }

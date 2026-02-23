@@ -69,31 +69,15 @@ export function scopeProjectForRun(
     }
   }
 
-  const outboundByNode = new Map<string, StudioEdge[]>();
   const inboundByNode = new Map<string, StudioEdge[]>();
   for (const edge of executableProject.graph.edges) {
-    const outbound = outboundByNode.get(edge.fromNodeId) || [];
-    outbound.push(edge);
-    outboundByNode.set(edge.fromNodeId, outbound);
-
     const inbound = inboundByNode.get(edge.toNodeId) || [];
     inbound.push(edge);
     inboundByNode.set(edge.toNodeId, inbound);
   }
 
-  const keepNodeIds = new Set<string>();
-  const downstreamQueue = [...scopedEntries];
-  while (downstreamQueue.length > 0) {
-    const nodeId = downstreamQueue.shift()!;
-    if (keepNodeIds.has(nodeId)) continue;
-    keepNodeIds.add(nodeId);
-    const outbound = outboundByNode.get(nodeId) || [];
-    for (const edge of outbound) {
-      downstreamQueue.push(edge.toNodeId);
-    }
-  }
-
-  const upstreamQueue = Array.from(keepNodeIds);
+  const keepNodeIds = new Set<string>(scopedEntries);
+  const upstreamQueue = [...scopedEntries];
   while (upstreamQueue.length > 0) {
     const nodeId = upstreamQueue.shift()!;
     const inbound = inboundByNode.get(nodeId) || [];

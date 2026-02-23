@@ -61,6 +61,10 @@ export class StudioSandboxRunner {
         env: mergedEnv,
         shell: false,
       });
+      // runCli is non-interactive; close stdin so adapters that probe stdin can continue immediately.
+      try {
+        child.stdin?.end();
+      } catch {}
 
       const truncate = (value: string): string => {
         if (value.length <= maxOutputBytes) {

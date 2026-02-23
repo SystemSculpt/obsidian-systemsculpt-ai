@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import type { StudioNodeExecutionContext, StudioJsonValue } from "../types";
@@ -563,5 +566,105 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.preview_path).toBe("");
     expect(String(result.outputs.preview_error || "")).toContain("greater than 2 GiB");
     expect(context.services.storeAsset).not.toHaveBeenCalled();
+  });
+
+  it("dataset node caches outputs and skips re-running the adapter command while fresh", async () => {
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).toBeDefined();
+    const tempRoot = await mkdtemp(join(tmpdir(), "studio-dataset-cache-"));
+    const runCliMock = jest
+      .fn()
+      .mockResolvedValue({ exitCode: 0, stdout: "{\"rows\":[{\"email\":\"a@example.com\"}]}", stderr: "", timedOut: false });
+
+    try {
+      const firstContext = createContext({
+        nodeId: "dataset-node",
+        kind: "studio.dataset",
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "SELECT 1;",
+          refreshHours: 6,
+          timeoutMs: 60_000,
+          maxOutputBytes: 512 * 1024,
+        },
+        runCliMock,
+      });
+      firstContext.services.resolveAbsolutePath = (path) => join(tempRoot, path);
+      firstContext.services.assertFilesystemPath = jest.fn();
+
+      const firstResult = await definition!.execute(firstContext);
+      expect(runCliMock).toHaveBeenCalledTimes(1);
+      expect(firstResult.outputs.text).toBe("{\"rows\":[{\"email\":\"a@example.com\"}]}");
+      expect(runCliMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "node",
+          args: ["scripts/db-query.js", "SELECT 1;"],
+        })
+      );
+
+      const secondContext = createContext({
+        nodeId: "dataset-node",
+        kind: "studio.dataset",
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "SELECT 1;",
+          refreshHours: 6,
+          timeoutMs: 60_000,
+          maxOutputBytes: 512 * 1024,
+        },
+        runCliMock,
+      });
+      secondContext.services.resolveAbsolutePath = (path) => join(tempRoot, path);
+      secondContext.services.assertFilesystemPath = jest.fn();
+
+      const secondResult = await definition!.execute(secondContext);
+      expect(runCliMock).toHaveBeenCalledTimes(1);
+      expect(secondResult.outputs.text).toBe("{\"rows\":[{\"email\":\"a@example.com\"}]}");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("dataset node supports custom adapter args and always exposes query in env", async () => {
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).toBeDefined();
+    const tempRoot = await mkdtemp(join(tmpdir(), "studio-dataset-adapter-"));
+    const runCliMock = jest
+      .fn()
+      .mockResolvedValue({ exitCode: 0, stdout: "{\"ok\":true}", stderr: "", timedOut: false });
+
+    try {
+      const context = createContext({
+        nodeId: "dataset-node",
+        kind: "studio.dataset",
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "SELECT email FROM users LIMIT 5;",
+          adapterCommand: "node",
+          adapterArgs: ["scripts/custom-adapter.js", "--query", "{{query}}"],
+          refreshHours: 6,
+          timeoutMs: 60_000,
+          maxOutputBytes: 512 * 1024,
+        },
+        runCliMock,
+      });
+      context.services.resolveAbsolutePath = (path) => join(tempRoot, path);
+      context.services.assertFilesystemPath = jest.fn();
+
+      const result = await definition!.execute(context);
+
+      expect(result.outputs.text).toBe("{\"ok\":true}");
+      expect(runCliMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "node",
+          args: ["scripts/custom-adapter.js", "--query", "SELECT email FROM users LIMIT 5;"],
+          env: expect.objectContaining({
+            STUDIO_DATASET_QUERY: "SELECT email FROM users LIMIT 5;",
+          }),
+        })
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

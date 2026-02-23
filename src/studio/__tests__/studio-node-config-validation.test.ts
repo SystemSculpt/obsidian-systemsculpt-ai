@@ -159,4 +159,59 @@ describe("Studio node config validation", () => {
     });
     expect(withCustomPath.isValid).toBe(true);
   });
+
+  it("flags required dataset node fields when missing", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      workingDirectory: "",
+      customQuery: "",
+      refreshHours: 6,
+      timeoutMs: 60_000,
+      maxOutputBytes: 512 * 1024,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "workingDirectory")).toBe(true);
+    expect(result.errors.some((error) => error.fieldKey === "customQuery")).toBe(true);
+  });
+
+  it("passes valid custom-query dataset config values", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+      customQuery: "SELECT 1;",
+      adapterCommand: "node",
+      adapterArgs: ["scripts/db-query.js", "{{query}}"],
+      refreshHours: 6,
+      timeoutMs: 60_000,
+      maxOutputBytes: 512 * 1024,
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("flags dataset adapter command when explicitly blank", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+      customQuery: "SELECT 1;",
+      adapterCommand: "",
+      refreshHours: 6,
+      timeoutMs: 60_000,
+      maxOutputBytes: 512 * 1024,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "adapterCommand")).toBe(true);
+  });
 });

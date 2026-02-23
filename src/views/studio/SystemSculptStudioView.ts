@@ -55,7 +55,6 @@ import {
   STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
   STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
 } from "./graph-v3/StudioGraphNodeGeometry";
-import { hasStudioNodeInlineEditor } from "./graph-v3/StudioGraphNodeInlineEditors";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
@@ -2335,39 +2334,8 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private syncInspectorSelection(): void {
-    if (!this.inspectorOverlay || !this.currentProject || !this.graphViewportEl) {
-      return;
-    }
-
-    if (this.nodeDragInProgress) {
-      this.inspectorOverlay.hide();
-      return;
-    }
-
-    const nodeId = this.graphInteraction.getSingleSelectedNodeId();
-    if (!nodeId) {
-      this.inspectorOverlay.hide();
-      return;
-    }
-
-    const node = this.findNode(this.currentProject, nodeId);
-    if (!node) {
-      this.inspectorOverlay.hide();
-      return;
-    }
-
-    const definition = this.findNodeDefinition(node);
-    if (!definition) {
-      this.inspectorOverlay.hide();
-      return;
-    }
-    if (hasStudioNodeInlineEditor(node.kind)) {
-      this.inspectorOverlay.hide();
-      return;
-    }
-
-    const anchorEl = this.graphInteraction.getNodeElement(node.id);
-    this.inspectorOverlay.showNode(node, definition, { anchorEl });
+    // Studio config editing is now inline-only on node cards.
+    this.inspectorOverlay?.hide();
   }
 
   private collectRunScope(options?: { fromNodeId?: string }): {
@@ -3425,13 +3393,11 @@ export class SystemSculptStudioView extends ItemView {
       void this.handleGraphViewportDrop(event);
     });
     this.restoreGraphViewportState(this.graphViewportEl);
-    const inspector = this.ensureInspectorOverlay();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
-    inspector.setGraphZoom(this.graphInteraction.getGraphZoom());
+    this.inspectorOverlay?.hide();
     contextMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     nodeActionMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
-    inspector.mount(this.graphViewportEl);
     contextMenu.mount(this.graphViewportEl);
     nodeActionMenu.mount(this.graphViewportEl);
     this.syncInspectorSelection();
