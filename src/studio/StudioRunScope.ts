@@ -1,26 +1,77 @@
 import type { StudioEdge, StudioProjectV1 } from "./types";
+import { isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
+
+function projectHasVisualOnlyNodes(project: StudioProjectV1): boolean {
+  return project.graph.nodes.some((node) => isStudioVisualOnlyNodeKind(node.kind));
+}
+
+function filterVisualOnlyNodesFromProject(project: StudioProjectV1): StudioProjectV1 {
+  const keepNodeIds = new Set(
+    project.graph.nodes
+      .filter((node) => !isStudioVisualOnlyNodeKind(node.kind))
+      .map((node) => node.id)
+  );
+  const nodes = project.graph.nodes.filter((node) => keepNodeIds.has(node.id));
+  const edges = project.graph.edges.filter(
+    (edge) => keepNodeIds.has(edge.fromNodeId) && keepNodeIds.has(edge.toNodeId)
+  );
+  const inboundCounts = new Map<string, number>();
+  for (const node of nodes) {
+    inboundCounts.set(node.id, 0);
+  }
+  for (const edge of edges) {
+    inboundCounts.set(edge.toNodeId, (inboundCounts.get(edge.toNodeId) || 0) + 1);
+  }
+  const entryNodeIds = nodes
+    .filter((node) => (inboundCounts.get(node.id) || 0) === 0)
+    .map((node) => node.id);
+  const groups = (project.graph.groups || [])
+    .map((group) => ({
+      ...group,
+      nodeIds: group.nodeIds.filter((nodeId) => keepNodeIds.has(nodeId)),
+    }))
+    .filter((group) => group.nodeIds.length > 0);
+
+  return {
+    ...project,
+    graph: {
+      ...project.graph,
+      nodes,
+      edges,
+      entryNodeIds,
+      groups,
+    },
+  };
+}
 
 export function scopeProjectForRun(
   project: StudioProjectV1,
   entryNodeIds?: string[]
 ): StudioProjectV1 {
+  const executableProject = projectHasVisualOnlyNodes(project)
+    ? filterVisualOnlyNodesFromProject(project)
+    : project;
   const scopedEntries = Array.from(
     new Set((entryNodeIds || []).map((id) => String(id || "").trim()).filter(Boolean))
   );
   if (scopedEntries.length === 0) {
-    return project;
+    return executableProject;
   }
 
   const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
   for (const nodeId of scopedEntries) {
-    if (!nodeById.has(nodeId)) {
+    const node = nodeById.get(nodeId);
+    if (!node) {
       throw new Error(`Cannot run from node "${nodeId}" because it does not exist in this graph.`);
+    }
+    if (isStudioVisualOnlyNodeKind(node.kind)) {
+      throw new Error(`Cannot run from node "${nodeId}" because "${node.kind}" is visual-only.`);
     }
   }
 
   const outboundByNode = new Map<string, StudioEdge[]>();
   const inboundByNode = new Map<string, StudioEdge[]>();
-  for (const edge of project.graph.edges) {
+  for (const edge of executableProject.graph.edges) {
     const outbound = outboundByNode.get(edge.fromNodeId) || [];
     outbound.push(edge);
     outboundByNode.set(edge.fromNodeId, outbound);
@@ -53,8 +104,8 @@ export function scopeProjectForRun(
     }
   }
 
-  const scopedNodes = project.graph.nodes.filter((node) => keepNodeIds.has(node.id));
-  const scopedEdges = project.graph.edges.filter(
+  const scopedNodes = executableProject.graph.nodes.filter((node) => keepNodeIds.has(node.id));
+  const scopedEdges = executableProject.graph.edges.filter(
     (edge) => keepNodeIds.has(edge.fromNodeId) && keepNodeIds.has(edge.toNodeId)
   );
   const scopedInbound = new Map<string, number>();
@@ -68,7 +119,7 @@ export function scopeProjectForRun(
     .filter((node) => (scopedInbound.get(node.id) || 0) === 0)
     .map((node) => node.id);
   const scopedNodeIds = new Set(scopedNodes.map((node) => node.id));
-  const scopedGroups = (project.graph.groups || [])
+  const scopedGroups = (executableProject.graph.groups || [])
     .map((group) => ({
       ...group,
       nodeIds: group.nodeIds.filter((nodeId) => scopedNodeIds.has(nodeId)),
@@ -76,9 +127,9 @@ export function scopeProjectForRun(
     .filter((group) => group.nodeIds.length > 0);
 
   return {
-    ...project,
+    ...executableProject,
     graph: {
-      ...project.graph,
+      ...executableProject.graph,
       nodes: scopedNodes,
       edges: scopedEdges,
       entryNodeIds: scopedEntryNodeIds,

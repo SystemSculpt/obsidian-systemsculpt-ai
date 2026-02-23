@@ -429,7 +429,9 @@ describe("Studio built-in text/image node execution", () => {
       kind: "studio.image_generation",
       config: {
         provider: "local_macos_image_generation",
-        aspectRatio: "16:9",
+        localAspectRatio: "16:9",
+        localQuality: "high",
+        localReferenceInfluence: "strong",
       },
       inputs: {
         prompt: "Generate locally",
@@ -452,7 +454,11 @@ describe("Studio built-in text/image node execution", () => {
       })
     );
     const request = JSON.parse(capturedRequestPayload);
-    expect(request.aspectRatio).toBe("1:1");
+    expect(request.aspectRatio).toBe("16:9");
+    expect(request.localOptions).toEqual({
+      quality: "high",
+      referenceInfluence: "strong",
+    });
     expect(storeAssetMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), "image/png");
     expect(deleteLocalFileMock).toHaveBeenCalledWith("/tmp/studio-local-request.json");
     expect(result.outputs.images).toEqual([
@@ -463,6 +469,81 @@ describe("Studio built-in text/image node execution", () => {
         path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/cc/local-generated.png",
       },
     ]);
+  });
+
+  it("passes only the first reference image to local provider command", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const runCliMock = jest.fn(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        schema: "studio.local-image-generation.response.v1",
+        modelId: "local/macos-coreml",
+        images: [
+          {
+            mimeType: "image/png",
+            base64: Buffer.from(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])).toString("base64"),
+          },
+        ],
+      }),
+      stderr: "",
+      timedOut: false,
+    }));
+    const readAssetMock = jest.fn(async () => new ArrayBuffer(4));
+    const writeTempFileCalls: { options?: { prefix?: string; extension?: string } }[] = [];
+    let capturedRequestPayload = "";
+    const writeTempFileMock = jest.fn(async (bytes, options) => {
+      writeTempFileCalls.push({ options });
+      if (String(options?.prefix || "").includes("studio-local-image-request")) {
+        capturedRequestPayload = Buffer.from(bytes).toString("utf8");
+      }
+      return `/tmp/${String(options?.prefix || "tmp")}.json`;
+    });
+
+    const context = createContext({
+      nodeId: "image-node",
+      kind: "studio.image_generation",
+      config: {
+        provider: "local_macos_image_generation",
+      },
+      inputs: {
+        prompt: "Generate locally from references",
+        images: [
+          {
+            path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/ref-a.png",
+            mimeType: "image/png",
+            hash: "hash-ref-a",
+            sizeBytes: 100,
+          },
+          {
+            path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/bb/ref-b.png",
+            mimeType: "image/png",
+            hash: "hash-ref-b",
+            sizeBytes: 120,
+          },
+        ],
+      },
+      runCliMock,
+      readAssetMock,
+      writeTempFileMock,
+      storeAssetMock: jest.fn(async () => ({
+        hash: "local-generated-hash",
+        mimeType: "image/png",
+        sizeBytes: 8,
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/cc/local-generated.png",
+      })),
+      deleteLocalFileMock: jest.fn(async () => {}),
+    });
+
+    await definition!.execute(context);
+
+    expect(readAssetMock).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(capturedRequestPayload);
+    expect(Array.isArray(request.inputImages)).toBe(true);
+    expect(request.inputImages).toHaveLength(1);
+    expect(writeTempFileCalls.some((call) => String(call.options?.prefix || "").includes("studio-local-image-input-2"))).toBe(
+      false
+    );
   });
 
   it("fails loudly when local macOS provider command exits non-zero", async () => {

@@ -5,11 +5,18 @@ import type {
   StudioNodeOutputMap,
   StudioProjectV1,
 } from "../../studio/types";
+import {
+  resolveStudioGraphNodeWidth,
+  STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT,
+} from "./graph-v3/StudioGraphNodeGeometry";
 
 export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
 export const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
 export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
 export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
+export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
+export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
+export const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
 
 export const MANAGED_TEXT_OWNER_KEY = "__studio_managed_by";
 export const MANAGED_TEXT_OWNER = "studio.text_generation_output.v1";
@@ -21,10 +28,9 @@ const GENERATED_MEDIA_EDGE_FROM_PORT = "images";
 const GENERATED_MEDIA_EDGE_TO_PORT = "media";
 const GENERATED_TEXT_EDGE_FROM_PORT = "text";
 const GENERATED_TEXT_EDGE_TO_PORT = "text";
-const MEDIA_NODE_X_OFFSET = 360;
-const MEDIA_NODE_Y_GAP = 220;
-const TEXT_NODE_X_OFFSET = 360;
-const TEXT_NODE_Y_GAP = 220;
+const MANAGED_OUTPUT_NODE_HORIZONTAL_GAP = 96;
+const MEDIA_NODE_Y_GAP = 240;
+const TEXT_NODE_Y_GAP = STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT + 72;
 
 type MaterializeImageOutputsOptions = {
   project: StudioProjectV1;
@@ -42,11 +48,41 @@ type MaterializeTextOutputsOptions = {
   createEdgeId: () => string;
 };
 
+type MaterializePendingImageOutputPlaceholdersOptions = {
+  project: StudioProjectV1;
+  sourceNode: StudioNodeInstance;
+  runId: string;
+  createdAt?: string;
+  createNodeId: () => string;
+  createEdgeId: () => string;
+};
+
+type MaterializePendingTextOutputPlaceholderOptions = {
+  project: StudioProjectV1;
+  sourceNode: StudioNodeInstance;
+  runId: string;
+  createdAt?: string;
+  createNodeId: () => string;
+  createEdgeId: () => string;
+};
+
+type RemovePendingManagedOutputNodesOptions = {
+  project: StudioProjectV1;
+  sourceNodeId?: string;
+  runId?: string;
+};
+
 export type MaterializeManagedOutputsResult = {
   changed: boolean;
   createdNodeIds: string[];
   updatedNodeIds: string[];
   createdEdgeIds: string[];
+};
+
+export type RemovePendingManagedOutputNodesResult = {
+  changed: boolean;
+  removedNodeIds: string[];
+  removedEdgeIds: string[];
 };
 
 function emptyMaterializeResult(): MaterializeManagedOutputsResult {
@@ -58,11 +94,77 @@ function emptyMaterializeResult(): MaterializeManagedOutputsResult {
   };
 }
 
+function emptyRemovePendingResult(): RemovePendingManagedOutputNodesResult {
+  return {
+    changed: false,
+    removedNodeIds: [],
+    removedEdgeIds: [],
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function isManagedMediaNode(node: StudioNodeInstance): boolean {
+  if (node.kind !== "studio.media_ingest") {
+    return false;
+  }
+  const config = asRecord(node.config);
+  if (!config) {
+    return false;
+  }
+  return String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() === MANAGED_MEDIA_OWNER;
+}
+
+function isManagedTextNode(node: StudioNodeInstance): boolean {
+  if (node.kind !== "studio.text") {
+    return false;
+  }
+  const config = asRecord(node.config);
+  if (!config) {
+    return false;
+  }
+  return String(config[MANAGED_TEXT_OWNER_KEY] || "").trim() === MANAGED_TEXT_OWNER;
+}
+
+function isManagedOutputNode(node: StudioNodeInstance): boolean {
+  return isManagedMediaNode(node) || isManagedTextNode(node);
+}
+
+function readManagedOutputPendingFlag(node: StudioNodeInstance): boolean {
+  if (!isManagedOutputNode(node)) {
+    return false;
+  }
+  const config = asRecord(node.config);
+  if (!config) {
+    return false;
+  }
+  return config[MANAGED_OUTPUT_PENDING_KEY] === true;
+}
+
+function readManagedOutputPendingRunId(node: StudioNodeInstance): string {
+  if (!isManagedOutputNode(node)) {
+    return "";
+  }
+  const config = asRecord(node.config);
+  if (!config) {
+    return "";
+  }
+  return String(config[MANAGED_OUTPUT_PENDING_RUN_ID_KEY] || "").trim();
+}
+
+function stripManagedPendingFields(
+  config: Record<string, StudioJsonValue>
+): Record<string, StudioJsonValue> {
+  const next = { ...config };
+  delete next[MANAGED_OUTPUT_PENDING_KEY];
+  delete next[MANAGED_OUTPUT_PENDING_RUN_ID_KEY];
+  delete next[MANAGED_OUTPUT_PENDING_AT_KEY];
+  return next;
 }
 
 function hashFnv1aHex(value: string): string {
@@ -214,12 +316,33 @@ function buildManagedTextTitle(sourceNode: StudioNodeInstance, slotIndex: number
   return `${baseTitle} Text ${slotIndex + 1}`;
 }
 
+function resolveManagedOutputTargetX(sourceNode: StudioNodeInstance): number {
+  return sourceNode.position.x + resolveStudioGraphNodeWidth(sourceNode) + MANAGED_OUTPUT_NODE_HORIZONTAL_GAP;
+}
+
 function createManagedMediaConfig(sourceNodeId: string, slotIndex: number, sourcePath: string): Record<string, StudioJsonValue> {
   return {
     sourcePath,
     [MANAGED_MEDIA_OWNER_KEY]: MANAGED_MEDIA_OWNER,
     [MANAGED_MEDIA_SOURCE_NODE_ID_KEY]: sourceNodeId,
     [MANAGED_MEDIA_SLOT_INDEX_KEY]: slotIndex,
+  };
+}
+
+function createPendingManagedMediaConfig(
+  sourceNodeId: string,
+  slotIndex: number,
+  runId: string,
+  createdAt: string
+): Record<string, StudioJsonValue> {
+  return {
+    sourcePath: "",
+    [MANAGED_MEDIA_OWNER_KEY]: MANAGED_MEDIA_OWNER,
+    [MANAGED_MEDIA_SOURCE_NODE_ID_KEY]: sourceNodeId,
+    [MANAGED_MEDIA_SLOT_INDEX_KEY]: slotIndex,
+    [MANAGED_OUTPUT_PENDING_KEY]: true,
+    [MANAGED_OUTPUT_PENDING_RUN_ID_KEY]: runId,
+    [MANAGED_OUTPUT_PENDING_AT_KEY]: createdAt,
   };
 }
 
@@ -236,6 +359,33 @@ function createManagedTextConfig(
     [MANAGED_TEXT_SLOT_INDEX_KEY]: slotIndex,
     [MANAGED_TEXT_OUTPUT_HASH_KEY]: outputHash,
   };
+}
+
+function createPendingManagedTextConfig(
+  sourceNodeId: string,
+  slotIndex: number,
+  runId: string,
+  createdAt: string
+): Record<string, StudioJsonValue> {
+  return {
+    value: "",
+    [MANAGED_TEXT_OWNER_KEY]: MANAGED_TEXT_OWNER,
+    [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: sourceNodeId,
+    [MANAGED_TEXT_SLOT_INDEX_KEY]: slotIndex,
+    [MANAGED_TEXT_OUTPUT_HASH_KEY]: "",
+    [MANAGED_OUTPUT_PENDING_KEY]: true,
+    [MANAGED_OUTPUT_PENDING_RUN_ID_KEY]: runId,
+    [MANAGED_OUTPUT_PENDING_AT_KEY]: createdAt,
+  };
+}
+
+function readExpectedImageCount(sourceNode: StudioNodeInstance): number {
+  const config = asRecord(sourceNode.config) || {};
+  const countRaw = Number(config.count);
+  if (!Number.isFinite(countRaw) || countRaw <= 0) {
+    return 1;
+  }
+  return Math.max(1, Math.min(8, Math.floor(countRaw)));
 }
 
 function hasEdge(
@@ -359,6 +509,30 @@ function findConnectedMediaNodeByPath(options: {
   return undefined;
 }
 
+function nextManagedMediaSlotIndex(project: StudioProjectV1, sourceNodeId: string): number {
+  let next = 0;
+  for (const node of project.graph.nodes) {
+    const managed = readManagedMediaSlot(node);
+    if (!managed || managed.sourceNodeId !== sourceNodeId) {
+      continue;
+    }
+    next = Math.max(next, managed.slotIndex + 1);
+  }
+  return next;
+}
+
+function nextManagedTextSlotIndex(project: StudioProjectV1, sourceNodeId: string): number {
+  let next = 0;
+  for (const node of project.graph.nodes) {
+    const managed = readManagedTextSlot(node);
+    if (!managed || managed.sourceNodeId !== sourceNodeId) {
+      continue;
+    }
+    next = Math.max(next, managed.slotIndex + 1);
+  }
+  return next;
+}
+
 function findConnectedTextNodeByHash(options: {
   project: StudioProjectV1;
   sourceNodeId: string;
@@ -407,6 +581,285 @@ function findConnectedTextNodeByHash(options: {
   }
 
   return undefined;
+}
+
+export function isManagedOutputPlaceholderNode(node: StudioNodeInstance): boolean {
+  return readManagedOutputPendingFlag(node);
+}
+
+export function removePendingManagedOutputNodes(
+  options: RemovePendingManagedOutputNodesOptions
+): RemovePendingManagedOutputNodesResult {
+  const sourceNodeId = String(options.sourceNodeId || "").trim();
+  const runId = String(options.runId || "").trim();
+  const removalCandidates = new Set<string>();
+
+  for (const node of options.project.graph.nodes) {
+    if (!readManagedOutputPendingFlag(node)) {
+      continue;
+    }
+    const nodeSourceId = readManagedMediaSourceNodeId(node) || readManagedTextSourceNodeId(node);
+    if (sourceNodeId && nodeSourceId !== sourceNodeId) {
+      continue;
+    }
+    const pendingRunId = readManagedOutputPendingRunId(node);
+    if (runId && pendingRunId !== runId) {
+      continue;
+    }
+    removalCandidates.add(node.id);
+  }
+
+  if (removalCandidates.size === 0) {
+    return emptyRemovePendingResult();
+  }
+
+  const previousNodeCount = options.project.graph.nodes.length;
+  const removedEdgeIds = options.project.graph.edges
+    .filter((edge) => removalCandidates.has(edge.fromNodeId) || removalCandidates.has(edge.toNodeId))
+    .map((edge) => edge.id);
+  options.project.graph.nodes = options.project.graph.nodes.filter(
+    (node) => !removalCandidates.has(node.id)
+  );
+  options.project.graph.edges = options.project.graph.edges.filter(
+    (edge) => !removalCandidates.has(edge.fromNodeId) && !removalCandidates.has(edge.toNodeId)
+  );
+
+  for (const group of options.project.graph.groups || []) {
+    const nodeIds = Array.isArray(group.nodeIds) ? group.nodeIds : [];
+    group.nodeIds = nodeIds.filter((nodeId) => !removalCandidates.has(nodeId));
+  }
+  if (Array.isArray(options.project.graph.groups)) {
+    options.project.graph.groups = options.project.graph.groups.filter(
+      (group) => Array.isArray(group.nodeIds) && group.nodeIds.length > 0
+    );
+  }
+
+  const removedNodeIds = Array.from(removalCandidates);
+
+  return {
+    changed: options.project.graph.nodes.length !== previousNodeCount || removedEdgeIds.length > 0,
+    removedNodeIds,
+    removedEdgeIds,
+  };
+}
+
+export function cleanupStaleManagedOutputPlaceholders(
+  project: StudioProjectV1
+): RemovePendingManagedOutputNodesResult {
+  return removePendingManagedOutputNodes({ project });
+}
+
+export function materializePendingImageOutputPlaceholders(
+  options: MaterializePendingImageOutputPlaceholdersOptions
+): MaterializeManagedOutputsResult {
+  const sourceNodeId = String(options.sourceNode.id || "").trim();
+  const runId = String(options.runId || "").trim();
+  if (!sourceNodeId || !runId) {
+    return emptyMaterializeResult();
+  }
+
+  const expectedCount = readExpectedImageCount(options.sourceNode);
+  const createdAt = String(options.createdAt || "").trim() || new Date().toISOString();
+  const createdNodeIds: string[] = [];
+  const createdEdgeIds: string[] = [];
+  let changed = false;
+  const existingPendingNodes = options.project.graph.nodes.filter((node) => {
+    if (!readManagedOutputPendingFlag(node)) {
+      return false;
+    }
+    const managed = readManagedMediaSlot(node);
+    if (!managed) {
+      return false;
+    }
+    return (
+      managed.sourceNodeId === sourceNodeId &&
+      readManagedOutputPendingRunId(node) === runId
+    );
+  });
+  for (const existingNode of existingPendingNodes) {
+    if (
+      ensureEdge({
+        project: options.project,
+        sourceNodeId,
+        sourcePortId: GENERATED_MEDIA_EDGE_FROM_PORT,
+        targetNodeId: existingNode.id,
+        targetPortId: GENERATED_MEDIA_EDGE_TO_PORT,
+        createEdgeId: options.createEdgeId,
+        createdEdgeIds,
+      })
+    ) {
+      changed = true;
+    }
+    if (
+      ensureNodeInSourceGroups({
+        project: options.project,
+        sourceNodeId,
+        targetNodeId: existingNode.id,
+      })
+    ) {
+      changed = true;
+    }
+  }
+  if (existingPendingNodes.length >= expectedCount) {
+    return {
+      changed,
+      createdNodeIds,
+      updatedNodeIds: [],
+      createdEdgeIds,
+    };
+  }
+
+  let nextSlotIndex = nextManagedMediaSlotIndex(options.project, sourceNodeId);
+  for (let outputIndex = existingPendingNodes.length; outputIndex < expectedCount; outputIndex += 1) {
+    const slotIndex = nextSlotIndex++;
+    const nodeId = options.createNodeId();
+    const newNode: StudioNodeInstance = {
+      id: nodeId,
+      kind: "studio.media_ingest",
+      version: "1.0.0",
+      title: buildManagedMediaTitle(options.sourceNode, slotIndex, slotIndex + 1),
+      position: {
+        x: resolveManagedOutputTargetX(options.sourceNode),
+        y: options.sourceNode.position.y + slotIndex * MEDIA_NODE_Y_GAP,
+      },
+      config: createPendingManagedMediaConfig(sourceNodeId, slotIndex, runId, createdAt),
+      continueOnError: false,
+      disabled: true,
+    };
+    options.project.graph.nodes.push(newNode);
+    createdNodeIds.push(nodeId);
+    changed = true;
+    if (
+      ensureEdge({
+        project: options.project,
+        sourceNodeId,
+        sourcePortId: GENERATED_MEDIA_EDGE_FROM_PORT,
+        targetNodeId: nodeId,
+        targetPortId: GENERATED_MEDIA_EDGE_TO_PORT,
+        createEdgeId: options.createEdgeId,
+        createdEdgeIds,
+      })
+    ) {
+      changed = true;
+    }
+    if (
+      ensureNodeInSourceGroups({
+        project: options.project,
+        sourceNodeId,
+        targetNodeId: nodeId,
+      })
+    ) {
+      changed = true;
+    }
+  }
+
+  return {
+    changed,
+    createdNodeIds,
+    updatedNodeIds: [],
+    createdEdgeIds,
+  };
+}
+
+export function materializePendingTextOutputPlaceholder(
+  options: MaterializePendingTextOutputPlaceholderOptions
+): MaterializeManagedOutputsResult {
+  const sourceNodeId = String(options.sourceNode.id || "").trim();
+  const runId = String(options.runId || "").trim();
+  if (!sourceNodeId || !runId) {
+    return emptyMaterializeResult();
+  }
+
+  const createdAt = String(options.createdAt || "").trim() || new Date().toISOString();
+  const existingNode = options.project.graph.nodes.find((node) => {
+    if (!readManagedOutputPendingFlag(node)) {
+      return false;
+    }
+    const managed = readManagedTextSlot(node);
+    if (!managed) {
+      return false;
+    }
+    return managed.sourceNodeId === sourceNodeId && readManagedOutputPendingRunId(node) === runId;
+  });
+
+  const createdEdgeIds: string[] = [];
+  if (existingNode) {
+    let changed = false;
+    if (
+      ensureEdge({
+        project: options.project,
+        sourceNodeId,
+        sourcePortId: GENERATED_TEXT_EDGE_FROM_PORT,
+        targetNodeId: existingNode.id,
+        targetPortId: GENERATED_TEXT_EDGE_TO_PORT,
+        createEdgeId: options.createEdgeId,
+        createdEdgeIds,
+      })
+    ) {
+      changed = true;
+    }
+    if (
+      ensureNodeInSourceGroups({
+        project: options.project,
+        sourceNodeId,
+        targetNodeId: existingNode.id,
+      })
+    ) {
+      changed = true;
+    }
+    return {
+      changed,
+      createdNodeIds: [],
+      updatedNodeIds: [],
+      createdEdgeIds,
+    };
+  }
+
+  const slotIndex = nextManagedTextSlotIndex(options.project, sourceNodeId);
+  const nodeId = options.createNodeId();
+  const newNode: StudioNodeInstance = {
+    id: nodeId,
+    kind: "studio.text",
+    version: "1.0.0",
+    title: buildManagedTextTitle(options.sourceNode, slotIndex, slotIndex + 1),
+    position: {
+      x: resolveManagedOutputTargetX(options.sourceNode),
+      y: options.sourceNode.position.y + slotIndex * TEXT_NODE_Y_GAP,
+    },
+    config: createPendingManagedTextConfig(sourceNodeId, slotIndex, runId, createdAt),
+    continueOnError: false,
+    disabled: true,
+  };
+  options.project.graph.nodes.push(newNode);
+  let changed = true;
+  if (
+    ensureEdge({
+      project: options.project,
+      sourceNodeId,
+      sourcePortId: GENERATED_TEXT_EDGE_FROM_PORT,
+      targetNodeId: nodeId,
+      targetPortId: GENERATED_TEXT_EDGE_TO_PORT,
+      createEdgeId: options.createEdgeId,
+      createdEdgeIds,
+    })
+  ) {
+    changed = true;
+  }
+  if (
+    ensureNodeInSourceGroups({
+      project: options.project,
+      sourceNodeId,
+      targetNodeId: nodeId,
+    })
+  ) {
+    changed = true;
+  }
+  return {
+    changed,
+    createdNodeIds: [nodeId],
+    updatedNodeIds: [],
+    createdEdgeIds,
+  };
 }
 
 export function materializeImageOutputsAsMediaNodes(
@@ -468,8 +921,11 @@ export function materializeImageOutputsAsMediaNodes(
       const existingConfig = asRecord(existingNode.config) || {};
       const existingManaged = readManagedMediaSlot(existingNode);
       const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
+      const baseConfig = stripManagedPendingFields(
+        existingNode.config as Record<string, StudioJsonValue>
+      );
       const nextConfig = {
-        ...(existingNode.config as Record<string, StudioJsonValue>),
+        ...baseConfig,
         sourcePath,
         [MANAGED_MEDIA_OWNER_KEY]: MANAGED_MEDIA_OWNER,
         [MANAGED_MEDIA_SOURCE_NODE_ID_KEY]: sourceNodeId,
@@ -479,6 +935,10 @@ export function materializeImageOutputsAsMediaNodes(
         existingNode.config = nextConfig;
         changed = true;
         updatedNodeIds.push(existingNode.id);
+      }
+      if (existingNode.disabled === true) {
+        existingNode.disabled = false;
+        changed = true;
       }
       if (
         ensureEdge({
@@ -513,7 +973,7 @@ export function materializeImageOutputsAsMediaNodes(
       version: "1.0.0",
       title: buildManagedMediaTitle(options.sourceNode, slotIndex, slotIndex + 1),
       position: {
-        x: options.sourceNode.position.x + MEDIA_NODE_X_OFFSET,
+        x: resolveManagedOutputTargetX(options.sourceNode),
         y: options.sourceNode.position.y + slotIndex * MEDIA_NODE_Y_GAP,
       },
       config: createManagedMediaConfig(sourceNodeId, slotIndex, sourcePath),
@@ -614,8 +1074,11 @@ export function materializeTextOutputsAsTextNodes(
     const existingConfig = asRecord(existingNode.config) || {};
     const existingManaged = readManagedTextSlot(existingNode);
     const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
+    const baseConfig = stripManagedPendingFields(
+      existingNode.config as Record<string, StudioJsonValue>
+    );
     const nextConfig = {
-      ...(existingNode.config as Record<string, StudioJsonValue>),
+      ...baseConfig,
       [MANAGED_TEXT_OWNER_KEY]: MANAGED_TEXT_OWNER,
       [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: sourceNodeId,
       [MANAGED_TEXT_SLOT_INDEX_KEY]: slotIndex,
@@ -625,6 +1088,10 @@ export function materializeTextOutputsAsTextNodes(
       existingNode.config = nextConfig;
       changed = true;
       updatedNodeIds.push(existingNode.id);
+    }
+    if (existingNode.disabled === true) {
+      existingNode.disabled = false;
+      changed = true;
     }
     if (
       ensureEdge({
@@ -665,7 +1132,7 @@ export function materializeTextOutputsAsTextNodes(
     version: "1.0.0",
     title: buildManagedTextTitle(options.sourceNode, slotIndex, slotIndex + 1),
     position: {
-      x: options.sourceNode.position.x + TEXT_NODE_X_OFFSET,
+      x: resolveManagedOutputTargetX(options.sourceNode),
       y: options.sourceNode.position.y + slotIndex * TEXT_NODE_Y_GAP,
     },
     config: createManagedTextConfig(sourceNodeId, slotIndex, outputHash, outputText),

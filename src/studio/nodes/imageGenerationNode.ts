@@ -6,6 +6,12 @@ import type {
 } from "../types";
 import {
   generateImageWithLocalMacProvider,
+  LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO,
+  LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET,
+  LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE,
+  LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS,
+  LOCAL_MAC_IMAGE_SUPPORTED_QUALITY_PRESETS,
+  LOCAL_MAC_IMAGE_SUPPORTED_REFERENCE_INFLUENCE,
   normalizeStudioImageProviderId,
   STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
   STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
@@ -27,7 +33,9 @@ const IMAGE_INPUT_MAX_COUNT = 8;
 const DEFAULT_IMAGE_PROVIDER_ID = STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT;
 const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3-pro-image-preview";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
-const LOCAL_MAC_IMAGE_ASPECT_RATIO = "1:1";
+const DEFAULT_LOCAL_IMAGE_ASPECT_RATIO = LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO;
+const DEFAULT_LOCAL_IMAGE_QUALITY_PRESET = LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET;
+const DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE = LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE;
 
 function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
   const normalized = String(mimeType || "").trim().toLowerCase();
@@ -75,6 +83,18 @@ function compactContextText(text: string, maxChars: number = IMAGE_CONTEXT_MAX_C
     return head;
   }
   return `${head} [...] ${tail}`;
+}
+
+function normalizeAllowedString(
+  value: string,
+  allowed: readonly string[],
+  fallback: string
+): string {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  return allowed.includes(trimmed) ? trimmed : fallback;
 }
 
 async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<{
@@ -218,6 +238,9 @@ export const imageGenerationNode: StudioNodeDefinition = {
     modelId: DEFAULT_IMAGE_MODEL_ID,
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
+    localAspectRatio: DEFAULT_LOCAL_IMAGE_ASPECT_RATIO,
+    localQuality: DEFAULT_LOCAL_IMAGE_QUALITY_PRESET,
+    localReferenceInfluence: DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE,
   },
   configSchema: {
     fields: [
@@ -287,6 +310,56 @@ export const imageGenerationNode: StudioNodeDefinition = {
           { value: "21:9", label: "21:9" },
         ],
       },
+      {
+        key: "localAspectRatio",
+        label: "Local Aspect Ratio",
+        type: "select",
+        required: false,
+        description: "Native ratio preset for local macOS diffusion.",
+        visibleWhen: {
+          key: "provider",
+          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
+        },
+        options: [
+          { value: "1:1", label: "1:1" },
+          { value: "4:3", label: "4:3" },
+          { value: "3:4", label: "3:4" },
+          { value: "16:9", label: "16:9" },
+          { value: "9:16", label: "9:16" },
+        ],
+      },
+      {
+        key: "localQuality",
+        label: "Local Quality",
+        type: "select",
+        required: false,
+        description: "Layman quality preset for local macOS diffusion speed vs detail.",
+        visibleWhen: {
+          key: "provider",
+          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
+        },
+        options: [
+          { value: "fast", label: "Fast" },
+          { value: "balanced", label: "Balanced" },
+          { value: "high", label: "High Detail" },
+        ],
+      },
+      {
+        key: "localReferenceInfluence",
+        label: "Reference Influence",
+        type: "select",
+        required: false,
+        description: "How closely local generation should follow the first connected reference image.",
+        visibleWhen: {
+          key: "provider",
+          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
+        },
+        options: [
+          { value: "subtle", label: "Subtle" },
+          { value: "balanced", label: "Balanced" },
+          { value: "strong", label: "Strong" },
+        ],
+      },
     ],
     allowUnknownKeys: true,
   },
@@ -308,9 +381,31 @@ export const imageGenerationNode: StudioNodeDefinition = {
     const countRaw = Number(context.node.config.count as StudioJsonValue);
     const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
     const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
+    const configuredLocalAspectRatio = getText(
+      context.node.config.localAspectRatio as StudioJsonValue
+    ).trim();
+    const configuredLocalQuality = getText(context.node.config.localQuality as StudioJsonValue).trim();
+    const configuredReferenceInfluence = getText(
+      context.node.config.localReferenceInfluence as StudioJsonValue
+    ).trim();
+    const localAspectRatio = normalizeAllowedString(
+      configuredLocalAspectRatio,
+      LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS,
+      DEFAULT_LOCAL_IMAGE_ASPECT_RATIO
+    );
+    const localQuality = normalizeAllowedString(
+      configuredLocalQuality,
+      LOCAL_MAC_IMAGE_SUPPORTED_QUALITY_PRESETS,
+      DEFAULT_LOCAL_IMAGE_QUALITY_PRESET
+    );
+    const localReferenceInfluence = normalizeAllowedString(
+      configuredReferenceInfluence,
+      LOCAL_MAC_IMAGE_SUPPORTED_REFERENCE_INFLUENCE,
+      DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE
+    );
     const aspectRatio =
       resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
-        ? LOCAL_MAC_IMAGE_ASPECT_RATIO
+        ? localAspectRatio
         : configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
     const result =
       resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
@@ -320,6 +415,8 @@ export const imageGenerationNode: StudioNodeDefinition = {
             aspectRatio,
             inputImages,
             runId: context.runId,
+            qualityPreset: localQuality,
+            referenceInfluence: localReferenceInfluence,
           })
         : await context.services.api.generateImage({
             prompt,

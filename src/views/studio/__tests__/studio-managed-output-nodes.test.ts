@@ -1,5 +1,9 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import {
+  cleanupStaleManagedOutputPlaceholders,
+  isManagedOutputPlaceholderNode,
+  MANAGED_OUTPUT_PENDING_KEY,
+  MANAGED_OUTPUT_PENDING_RUN_ID_KEY,
   MANAGED_MEDIA_OWNER,
   MANAGED_MEDIA_OWNER_KEY,
   MANAGED_MEDIA_SLOT_INDEX_KEY,
@@ -9,8 +13,11 @@ import {
   MANAGED_TEXT_OUTPUT_HASH_KEY,
   MANAGED_TEXT_SLOT_INDEX_KEY,
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
+  materializePendingImageOutputPlaceholders,
+  materializePendingTextOutputPlaceholder,
   materializeImageOutputsAsMediaNodes,
   materializeTextOutputsAsTextNodes,
+  removePendingManagedOutputNodes,
 } from "../StudioManagedOutputNodes";
 
 function createProject(
@@ -549,5 +556,106 @@ describe("StudioManagedOutputNodes text outputs", () => {
 
     expect(result.changed).toBe(true);
     expect(project.graph.groups?.[0]?.nodeIds).toEqual([sourceNode.id, "node_text_0"]);
+  });
+});
+
+describe("StudioManagedOutputNodes pending placeholders", () => {
+  it("materializes pending media placeholders from image count", () => {
+    const sourceNode = createImageSourceNode();
+    sourceNode.config = { count: 2 };
+    const project = createProject(sourceNode);
+    let nodeIndex = 0;
+    let edgeIndex = 0;
+
+    const result = materializePendingImageOutputPlaceholders({
+      project,
+      sourceNode,
+      runId: "run_1",
+      createdAt: "2026-02-23T00:00:00.000Z",
+      createNodeId: () => `pending_media_${nodeIndex++}`,
+      createEdgeId: () => `pending_media_edge_${edgeIndex++}`,
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.createdNodeIds).toEqual(["pending_media_0", "pending_media_1"]);
+    expect(project.graph.nodes).toHaveLength(3);
+    const pendingNodes = project.graph.nodes.filter((node) => node.id.startsWith("pending_media_"));
+    expect(pendingNodes.every((node) => isManagedOutputPlaceholderNode(node))).toBe(true);
+    for (const node of pendingNodes) {
+      expect(node.kind).toBe("studio.media_ingest");
+      expect(node.disabled).toBe(true);
+      expect(node.config[MANAGED_OUTPUT_PENDING_KEY]).toBe(true);
+      expect(node.config[MANAGED_OUTPUT_PENDING_RUN_ID_KEY]).toBe("run_1");
+      expect(node.config.sourcePath).toBe("");
+    }
+  });
+
+  it("materializes one pending text placeholder", () => {
+    const sourceNode = createTextSourceNode();
+    const project = createProject(sourceNode);
+
+    const result = materializePendingTextOutputPlaceholder({
+      project,
+      sourceNode,
+      runId: "run_2",
+      createNodeId: () => "pending_text_0",
+      createEdgeId: () => "pending_text_edge_0",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.createdNodeIds).toEqual(["pending_text_0"]);
+    const pendingText = project.graph.nodes.find((node) => node.id === "pending_text_0");
+    expect(pendingText).toBeDefined();
+    expect(pendingText?.kind).toBe("studio.text");
+    expect(pendingText?.disabled).toBe(true);
+    expect(pendingText?.config[MANAGED_OUTPUT_PENDING_KEY]).toBe(true);
+    expect(pendingText?.config[MANAGED_OUTPUT_PENDING_RUN_ID_KEY]).toBe("run_2");
+    expect(isManagedOutputPlaceholderNode(pendingText!)).toBe(true);
+  });
+
+  it("removes pending placeholders by source + run", () => {
+    const sourceNode = createImageSourceNode();
+    sourceNode.config = { count: 1 };
+    const project = createProject(sourceNode);
+
+    materializePendingImageOutputPlaceholders({
+      project,
+      sourceNode,
+      runId: "run_cleanup",
+      createNodeId: () => "pending_media_0",
+      createEdgeId: () => "pending_media_edge_0",
+    });
+    expect(project.graph.nodes).toHaveLength(2);
+
+    const removed = removePendingManagedOutputNodes({
+      project,
+      sourceNodeId: sourceNode.id,
+      runId: "run_cleanup",
+    });
+
+    expect(removed.changed).toBe(true);
+    expect(removed.removedNodeIds).toEqual(["pending_media_0"]);
+    expect(project.graph.nodes).toHaveLength(1);
+    expect(project.graph.edges).toHaveLength(0);
+  });
+
+  it("cleans up stale placeholders without source/run filters", () => {
+    const sourceNode = createTextSourceNode();
+    const project = createProject(sourceNode);
+
+    materializePendingTextOutputPlaceholder({
+      project,
+      sourceNode,
+      runId: "run_stale",
+      createNodeId: () => "pending_text_0",
+      createEdgeId: () => "pending_text_edge_0",
+    });
+    expect(project.graph.nodes).toHaveLength(2);
+
+    const cleaned = cleanupStaleManagedOutputPlaceholders(project);
+    expect(cleaned.changed).toBe(true);
+    expect(cleaned.removedNodeIds).toEqual(["pending_text_0"]);
+    expect(project.graph.nodes).toHaveLength(1);
+    expect(project.graph.edges).toHaveLength(0);
   });
 });

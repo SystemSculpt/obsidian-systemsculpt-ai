@@ -4,8 +4,24 @@ import type {
   StudioNodeInstance,
 } from "../../../studio/types";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
+import { isManagedOutputPlaceholderNode } from "../StudioManagedOutputNodes";
 import { formatNodeConfigPreview } from "../StudioViewHelpers";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
+import {
+  isStudioExpandedTextNodeKind,
+  resolveStudioGraphNodeMinHeight,
+  resolveStudioGraphNodeWidth,
+  resolveStudioLabelFontSize,
+  resolveStudioLabelHeight,
+  resolveStudioLabelWidth,
+  STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE,
+  STUDIO_GRAPH_LABEL_MAX_FONT_SIZE,
+  STUDIO_GRAPH_LABEL_MAX_HEIGHT,
+  STUDIO_GRAPH_LABEL_MAX_WIDTH,
+  STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
+  STUDIO_GRAPH_LABEL_MIN_HEIGHT,
+  STUDIO_GRAPH_LABEL_MIN_WIDTH,
+} from "./StudioGraphNodeGeometry";
 import {
   formatNodeOutputPreview,
   statusLabelForNode,
@@ -30,6 +46,11 @@ type RenderStudioGraphNodeCardOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  isLabelEditing: (nodeId: string) => boolean;
+  consumeLabelAutoFocus: (nodeId: string) => boolean;
+  onRequestLabelEdit: (nodeId: string) => void;
+  onStopLabelEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
 };
 
@@ -42,6 +63,35 @@ function readTextNodeValue(node: StudioNodeInstance): string {
     return String(value);
   }
   return "";
+}
+
+function readEditableNodeText(node: StudioNodeInstance, nodeRunState: StudioNodeRunDisplayState): string {
+  const configuredValue = readTextNodeValue(node);
+  if (configuredValue.trim().length > 0) {
+    return configuredValue;
+  }
+  const outputText = typeof nodeRunState.outputs?.text === "string"
+    ? nodeRunState.outputs.text
+    : "";
+  return outputText;
+}
+
+function readLabelText(node: StudioNodeInstance): string {
+  const value = node.config.value;
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function clampLabelMetric(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function resolveMediaIngestRevealPath(
@@ -65,6 +115,250 @@ function resolveMediaIngestRevealPath(
   return String(fallbackPath || "").trim();
 }
 
+function renderLabelNodeCard(options: {
+  nodeEl: HTMLElement;
+  node: StudioNodeInstance;
+  busy: boolean;
+  graphInteraction: StudioGraphInteractionEngine;
+  onRemoveNode: (nodeId: string) => void;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  isEditing: boolean;
+  shouldAutoFocus: boolean;
+  onRequestLabelEdit: (nodeId: string) => void;
+  onStopLabelEdit: (nodeId: string) => void;
+}): void {
+  const {
+    nodeEl,
+    node,
+    busy,
+    graphInteraction,
+    onRemoveNode,
+    onNodeConfigMutated,
+    onNodeGeometryMutated,
+    isEditing,
+    shouldAutoFocus,
+    onRequestLabelEdit,
+    onStopLabelEdit,
+  } = options;
+
+  nodeEl.addClass("ss-studio-label-card");
+  const applyDimensions = (): void => {
+    const width = resolveStudioLabelWidth(node);
+    const height = resolveStudioLabelHeight(node);
+    node.config.width = width;
+    node.config.height = height;
+    nodeEl.style.width = `${width}px`;
+    nodeEl.style.height = `${height}px`;
+  };
+  applyDimensions();
+
+  const toolbarEl = nodeEl.createDiv({ cls: "ss-studio-label-toolbar" });
+  const fontControlsEl = toolbarEl.createDiv({ cls: "ss-studio-label-font-controls" });
+
+  const decreaseButton = fontControlsEl.createEl("button", {
+    cls: "ss-studio-label-font-button",
+    text: "A-",
+    attr: {
+      title: "Decrease label text size",
+      "aria-label": "Decrease label text size",
+    },
+  });
+  decreaseButton.type = "button";
+  const increaseButton = fontControlsEl.createEl("button", {
+    cls: "ss-studio-label-font-button",
+    text: "A+",
+    attr: {
+      title: "Increase label text size",
+      "aria-label": "Increase label text size",
+    },
+  });
+  increaseButton.type = "button";
+  const removeButton = toolbarEl.createEl("button", {
+    cls: "ss-studio-label-remove",
+    text: "×",
+    attr: {
+      title: "Delete label",
+      "aria-label": "Delete label",
+    },
+  });
+  removeButton.type = "button";
+
+  decreaseButton.disabled = busy;
+  increaseButton.disabled = busy;
+  removeButton.disabled = busy;
+
+  const getCurrentFontSize = (): number => resolveStudioLabelFontSize(node);
+  let textSurfaceEl: HTMLElement | HTMLTextAreaElement | null = null;
+  const applyFontSize = (fontSize: number): void => {
+    if (textSurfaceEl) {
+      textSurfaceEl.style.fontSize = `${fontSize}px`;
+    }
+  };
+  const commitFontSize = (next: number): void => {
+    const normalized = clampLabelMetric(
+      next,
+      STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
+      STUDIO_GRAPH_LABEL_MAX_FONT_SIZE
+    );
+    node.config.fontSize = normalized;
+    applyFontSize(normalized);
+    onNodeConfigMutated(node);
+  };
+  decreaseButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) {
+      return;
+    }
+    commitFontSize(getCurrentFontSize() - 1);
+  });
+  increaseButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) {
+      return;
+    }
+    commitFontSize(getCurrentFontSize() + 1);
+  });
+  removeButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemoveNode(node.id);
+  });
+
+  const contentEl = nodeEl.createDiv({ cls: "ss-studio-label-content" });
+  const labelText = readLabelText(node);
+  const fontSize = getCurrentFontSize() || STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE;
+
+  if (isEditing) {
+    const textAreaEl = contentEl.createEl("textarea", {
+      cls: "ss-studio-label-editor",
+      attr: {
+        "aria-label": `${node.title || "Label"} content`,
+      },
+    });
+    textAreaEl.value = labelText;
+    textAreaEl.disabled = busy;
+    textSurfaceEl = textAreaEl;
+    applyFontSize(fontSize);
+    textAreaEl.addEventListener("input", (event) => {
+      node.config.value = (event.target as HTMLTextAreaElement).value;
+      onNodeConfigMutated(node);
+    });
+    textAreaEl.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      textAreaEl.blur();
+    });
+    textAreaEl.addEventListener("blur", () => {
+      onStopLabelEdit(node.id);
+    });
+    if (shouldAutoFocus && !busy) {
+      window.requestAnimationFrame(() => {
+        textAreaEl.focus();
+        textAreaEl.select();
+      });
+    }
+  } else {
+    const displayEl = contentEl.createDiv({
+      cls: "ss-studio-label-display",
+      text: labelText.trim().length > 0 ? labelText : "Label",
+    });
+    textSurfaceEl = displayEl;
+    applyFontSize(fontSize);
+    displayEl.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onRequestLabelEdit(node.id);
+    });
+  }
+
+  const resizeHandle = nodeEl.createDiv({
+    cls: "ss-studio-label-resize-handle",
+    attr: {
+      title: "Resize label",
+      "aria-label": "Resize label",
+    },
+  });
+  resizeHandle.addEventListener("pointerdown", (event) => {
+    const pointerEvent = event as PointerEvent;
+    if (busy || pointerEvent.button !== 0) {
+      return;
+    }
+    pointerEvent.preventDefault();
+    pointerEvent.stopPropagation();
+
+    const pointerId = pointerEvent.pointerId;
+    const startWidth = resolveStudioLabelWidth(node);
+    const startHeight = resolveStudioLabelHeight(node);
+    const startX = pointerEvent.clientX;
+    const startY = pointerEvent.clientY;
+    const zoom = graphInteraction.getGraphZoom() || 1;
+
+    if (typeof resizeHandle.setPointerCapture === "function") {
+      try {
+        resizeHandle.setPointerCapture(pointerId);
+      } catch {
+        // Ignore capture errors; window listeners are fallback.
+      }
+    }
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+      const nextWidth = clampLabelMetric(
+        startWidth + (moveEvent.clientX - startX) / zoom,
+        STUDIO_GRAPH_LABEL_MIN_WIDTH,
+        STUDIO_GRAPH_LABEL_MAX_WIDTH
+      );
+      const nextHeight = clampLabelMetric(
+        startHeight + (moveEvent.clientY - startY) / zoom,
+        STUDIO_GRAPH_LABEL_MIN_HEIGHT,
+        STUDIO_GRAPH_LABEL_MAX_HEIGHT
+      );
+      if (
+        Number(node.config.width) === nextWidth &&
+        Number(node.config.height) === nextHeight
+      ) {
+        return;
+      }
+      node.config.width = nextWidth;
+      node.config.height = nextHeight;
+      nodeEl.style.width = `${nextWidth}px`;
+      nodeEl.style.height = `${nextHeight}px`;
+      onNodeGeometryMutated(node);
+    };
+
+    const finishResize = (upEvent: PointerEvent): void => {
+      if (upEvent.pointerId !== pointerId) {
+        return;
+      }
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+      if (typeof resizeHandle.releasePointerCapture === "function") {
+        try {
+          resizeHandle.releasePointerCapture(pointerId);
+        } catch {
+          // Ignore release errors.
+        }
+      }
+      applyDimensions();
+      onNodeConfigMutated(node);
+      onNodeGeometryMutated(node);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+  });
+}
+
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
     layer,
@@ -79,46 +373,29 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onNodeGeometryMutated,
+    isLabelEditing,
+    consumeLabelAutoFocus,
+    onRequestLabelEdit,
+    onStopLabelEdit,
     onRevealPathInFinder,
   } = options;
 
   const definition = findNodeDefinition(node);
+  const isPlaceholder = isManagedOutputPlaceholderNode(node);
+  const interactionLocked = busy || isPlaceholder;
   const nodeEl = layer.createDiv({ cls: "ss-studio-node-card" });
   nodeEl.dataset.nodeId = node.id;
   nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
+  nodeEl.style.width = `${resolveStudioGraphNodeWidth(node)}px`;
+  const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
+  if (resolvedMinHeight > 0) {
+    nodeEl.style.minHeight = `${resolvedMinHeight}px`;
+  }
+  nodeEl.classList.toggle("is-expanded-text-node", isStudioExpandedTextNodeKind(node.kind));
   nodeEl.classList.toggle("is-selected", graphInteraction.isNodeSelected(node.id));
+  nodeEl.classList.toggle("is-managed-pending", isPlaceholder);
   graphInteraction.registerNodeElement(node.id, nodeEl);
-
-  const header = nodeEl.createDiv({ cls: "ss-studio-node-header" });
-  const titleInput = header.createEl("input", {
-    type: "text",
-    cls: "ss-studio-node-title-input",
-  });
-  titleInput.value = node.title;
-  titleInput.disabled = busy;
-  titleInput.addEventListener("input", (event) => {
-    onNodeTitleInput(node, (event.target as HTMLInputElement).value);
-  });
-
-  const runButton = header.createEl("button", {
-    text: "Run",
-    cls: "ss-studio-node-run",
-  });
-  runButton.disabled = busy;
-  runButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onRunNode(node.id);
-  });
-
-  const removeButton = header.createEl("button", {
-    text: "×",
-    cls: "ss-studio-node-remove",
-  });
-  removeButton.disabled = busy;
-  removeButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onRemoveNode(node.id);
-  });
 
   nodeEl.addEventListener("pointerdown", (event) => {
     const pointerEvent = event as PointerEvent;
@@ -126,7 +403,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (!target) {
       return;
     }
-    if (target.closest("input, button, select, textarea, a, .ss-studio-port-pin")) {
+    if (target.closest("input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle")) {
       return;
     }
 
@@ -137,6 +414,54 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     }
 
     graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
+  });
+
+  if (node.kind === "studio.label") {
+    renderLabelNodeCard({
+      nodeEl,
+      node,
+      busy,
+      graphInteraction,
+      onRemoveNode,
+      onNodeConfigMutated,
+      onNodeGeometryMutated,
+      isEditing: isLabelEditing(node.id),
+      shouldAutoFocus: consumeLabelAutoFocus(node.id),
+      onRequestLabelEdit,
+      onStopLabelEdit,
+    });
+    return;
+  }
+
+  const header = nodeEl.createDiv({ cls: "ss-studio-node-header" });
+  const titleInput = header.createEl("input", {
+    type: "text",
+    cls: "ss-studio-node-title-input",
+  });
+  titleInput.value = node.title;
+  titleInput.disabled = interactionLocked;
+  titleInput.addEventListener("input", (event) => {
+    onNodeTitleInput(node, (event.target as HTMLInputElement).value);
+  });
+
+  const runButton = header.createEl("button", {
+    text: "Run",
+    cls: "ss-studio-node-run",
+  });
+  runButton.disabled = interactionLocked;
+  runButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onRunNode(node.id);
+  });
+
+  const removeButton = header.createEl("button", {
+    text: "×",
+    cls: "ss-studio-node-remove",
+  });
+  removeButton.disabled = interactionLocked;
+  removeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onRemoveNode(node.id);
   });
 
   if (node.kind === "studio.media_ingest") {
@@ -167,11 +492,13 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   });
 
   const statusRow = nodeEl.createDiv({ cls: "ss-studio-node-run-status-row" });
+  const statusTone = isPlaceholder ? "pending" : nodeRunState.status;
+  const statusText = isPlaceholder ? "Generating" : statusLabelForNode(nodeRunState.status);
   statusRow.createDiv({
-    cls: `ss-studio-node-run-status is-${nodeRunState.status}`,
-    text: statusLabelForNode(nodeRunState.status),
+    cls: `ss-studio-node-run-status is-${statusTone}`,
+    text: statusText,
   });
-  const statusMessage = nodeRunState.message.trim();
+  const statusMessage = isPlaceholder ? "" : nodeRunState.message.trim();
   if (statusMessage) {
     statusRow.createDiv({
       cls: "ss-studio-node-run-message",
@@ -196,7 +523,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "in";
-      pin.disabled = busy;
+      pin.disabled = interactionLocked;
       row.createEl("span", {
         cls: "ss-studio-port-label",
         text: `${port.id}${port.required ? "*" : ""}`,
@@ -229,7 +556,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "out";
-      pin.disabled = busy;
+      pin.disabled = interactionLocked;
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
       pin.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
@@ -253,26 +580,55 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     return;
   }
 
-  if (node.kind === "studio.text") {
+  if (node.kind === "studio.text" && isPlaceholder) {
+    const pendingPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-pending-preview is-text" });
+    pendingPreviewEl.createDiv({
+      cls: "ss-studio-node-pending-title",
+      text: "Generating text...",
+    });
+    pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line" });
+    pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line" });
+    pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line is-short" });
+  } else if (
+    node.kind === "studio.text" ||
+    node.kind === "studio.text_generation" ||
+    node.kind === "studio.transcription"
+  ) {
+    const editorLabel = node.kind === "studio.transcription"
+      ? "TRANSCRIPT"
+      : node.kind === "studio.text_generation"
+        ? "TEXT"
+        : "TEXT";
     const editorWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-text-editor-wrap" });
     editorWrapEl.createDiv({
       cls: "ss-studio-node-text-editor-label",
-      text: "TEXT",
+      text: editorLabel,
     });
     const textEditorEl = editorWrapEl.createEl("textarea", {
       cls: "ss-studio-node-text-editor",
       attr: {
-        placeholder: "Write or paste text...",
-        "aria-label": `${node.title || "Text"} content`,
+        placeholder:
+          node.kind === "studio.transcription"
+            ? "Transcribed text appears here..."
+            : node.kind === "studio.text_generation"
+              ? "Generated text appears here..."
+              : "Write or paste text...",
+        "aria-label":
+          node.kind === "studio.transcription"
+            ? `${node.title || "Transcription"} transcript`
+            : node.kind === "studio.text_generation"
+              ? `${node.title || "Text Generation"} text`
+              : `${node.title || "Text"} content`,
       },
     });
-    textEditorEl.value = readTextNodeValue(node);
-    textEditorEl.disabled = busy;
+    textEditorEl.value = readEditableNodeText(node, nodeRunState);
+    textEditorEl.disabled = interactionLocked;
+    textEditorEl.style.minHeight = "240px";
     textEditorEl.addEventListener("input", (event) => {
       node.config.value = (event.target as HTMLTextAreaElement).value;
       onNodeConfigMutated(node);
     });
-  } else {
+  } else if (!isPlaceholder) {
     const configPreviewEl = nodeEl.createEl("p", {
       cls: "ss-studio-node-config-preview",
       text: formatNodeConfigPreview(node),
@@ -281,7 +637,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   }
 
   const outputPreview =
-    node.kind === "studio.image_generation" || node.kind === "studio.text"
+    node.kind === "studio.image_generation" ||
+    node.kind === "studio.text" ||
+    node.kind === "studio.text_generation" ||
+    node.kind === "studio.transcription"
       ? ""
       : formatNodeOutputPreview(nodeRunState.outputs);
   if (outputPreview) {
@@ -306,6 +665,16 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       });
       fallbackValueEl.title = outputPreview;
     }
+  }
+
+  if (node.kind === "studio.media_ingest" && isPlaceholder) {
+    const pendingPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-pending-preview is-media" });
+    pendingPreviewEl.createDiv({
+      cls: "ss-studio-node-pending-title",
+      text: "Generating image...",
+    });
+    pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-frame" });
+    return;
   }
 
   const mediaPreview = resolveNodeMediaPreview(

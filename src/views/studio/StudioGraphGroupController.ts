@@ -7,6 +7,7 @@ import {
   STUDIO_GRAPH_GROUP_NODE_WIDTH,
   type StudioGraphGroupBounds,
 } from "./graph-v3/StudioGraphGroupBounds";
+import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
 import {
   assignNodesToGroup,
   nextDefaultGroupName,
@@ -475,17 +476,18 @@ export class StudioGraphGroupController {
       STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
       nodeEl?.offsetHeight || STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT
     );
+    const nodeWidth = Math.max(120, nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node));
     const left = node.position.x;
     const top = node.position.y;
-    const right = left + STUDIO_GRAPH_GROUP_NODE_WIDTH;
+    const right = left + nodeWidth;
     const bottom = top + nodeHeight;
-    const area = STUDIO_GRAPH_GROUP_NODE_WIDTH * nodeHeight;
+    const area = nodeWidth * nodeHeight;
     return {
       left,
       top,
       right,
       bottom,
-      centerX: left + STUDIO_GRAPH_GROUP_NODE_WIDTH / 2,
+      centerX: left + nodeWidth / 2,
       centerY: top + nodeHeight / 2,
       area,
     };
@@ -651,6 +653,14 @@ export class StudioGraphGroupController {
     }
 
     const result = autoAlignGroupNodes(project, groupId, {
+      getNodeWidth: (nodeId) => {
+        const node = this.findNode(project, nodeId);
+        const nodeEl = this.host.getNodeElement(nodeId);
+        if (!node) {
+          return nodeEl ? nodeEl.offsetWidth : null;
+        }
+        return nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node);
+      },
       getNodeHeight: (nodeId) => {
         const nodeEl = this.host.getNodeElement(nodeId);
         if (!nodeEl) {
@@ -799,6 +809,14 @@ export class StudioGraphGroupController {
       return null;
     }
     return computeStudioGraphGroupBounds(project, group, {
+      getNodeWidth: (nodeId) => {
+        const node = this.findNode(project, nodeId);
+        const nodeEl = this.host.getNodeElement(nodeId);
+        if (!node) {
+          return nodeEl ? Math.max(120, nodeEl.offsetWidth || STUDIO_GRAPH_GROUP_NODE_WIDTH) : null;
+        }
+        return Math.max(120, nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node));
+      },
       getNodeHeight: (nodeId) => {
         const nodeEl = this.host.getNodeElement(nodeId);
         return nodeEl ? nodeEl.offsetHeight : null;

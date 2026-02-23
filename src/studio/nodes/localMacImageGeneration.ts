@@ -3,7 +3,7 @@ import type { StudioAssetRef, StudioNodeExecutionContext } from "../types";
 import { isRecord } from "../utils";
 import { inferMimeTypeFromPath } from "./shared";
 
-const LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO = "1:1";
+export const LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO = "1:1";
 const LOCAL_MAC_IMAGE_DEFAULT_MODEL_ID = "local/macos-imagegen";
 const LOCAL_MAC_IMAGE_REQUEST_SCHEMA = "studio.local-image-generation.request.v1";
 const LOCAL_MAC_IMAGE_RESPONSE_SCHEMA = "studio.local-image-generation.response.v1";
@@ -14,6 +14,15 @@ const LOCAL_MAC_IMAGE_COMMAND_CWD = "/";
 export const STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT = "systemsculpt_ai" as const;
 export const STUDIO_IMAGE_PROVIDER_LOCAL_MACOS = "local_macos_image_generation" as const;
 export const STUDIO_LOCAL_MAC_IMAGE_COMMAND = "systemsculpt-local-imagegen";
+export const LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16"] as const;
+export const LOCAL_MAC_IMAGE_SUPPORTED_QUALITY_PRESETS = ["fast", "balanced", "high"] as const;
+export const LOCAL_MAC_IMAGE_SUPPORTED_REFERENCE_INFLUENCE = [
+  "subtle",
+  "balanced",
+  "strong",
+] as const;
+export const LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET = "balanced";
+export const LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE = "balanced";
 
 export type StudioImageProviderId =
   | typeof STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT
@@ -25,6 +34,8 @@ type LocalMacImageGenerationRequest = {
   aspectRatio: string;
   runId: string;
   inputImages: StudioAssetRef[];
+  qualityPreset?: string;
+  referenceInfluence?: string;
 };
 
 type LocalMacImageInputPayload = {
@@ -41,12 +52,17 @@ type LocalMacImageCommandRequest = {
   aspectRatio: string;
   runId: string;
   inputImages: LocalMacImageInputPayload[];
+  localOptions: {
+    quality: string;
+    referenceInfluence: string;
+  };
 };
 
 type LocalMacImageCommandResult = {
   schema: string;
   modelId: string;
   images: StudioAssetRef[];
+  warnings: string[];
 };
 
 function encodeUtf8(value: string): ArrayBuffer {
@@ -72,6 +88,46 @@ function normalizeOutputMimeType(mimeType: string): "image/png" | "image/jpeg" |
   if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
   if (normalized === "image/webp") return "image/webp";
   return null;
+}
+
+function normalizeAspectRatio(raw: string): string {
+  const compact = String(raw || "").trim().replace(/\s+/g, "");
+  if (!compact) {
+    return LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO;
+  }
+  return LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS.includes(
+    compact as (typeof LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS)[number]
+  )
+    ? compact
+    : LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO;
+}
+
+function normalizeQualityPreset(raw: string): string {
+  const normalized = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "");
+  if (normalized === "fast" || normalized === "draft") {
+    return "fast";
+  }
+  if (normalized === "high" || normalized === "highdetail" || normalized === "detail") {
+    return "high";
+  }
+  return LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET;
+}
+
+function normalizeReferenceInfluence(raw: string): string {
+  const normalized = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "");
+  if (normalized === "subtle" || normalized === "low") {
+    return "subtle";
+  }
+  if (normalized === "strong" || normalized === "high") {
+    return "strong";
+  }
+  return LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE;
 }
 
 function decodeBase64ImageBytes(raw: string): ArrayBuffer {
@@ -143,6 +199,7 @@ async function parseLocalCommandImages(
     String(payload.modelId || payload.model_id || "").trim() || LOCAL_MAC_IMAGE_DEFAULT_MODEL_ID;
   const imagesRaw = payload.images;
   const upstreamError = String(payload.error || "").trim();
+  const warningsRaw = payload.warnings;
 
   if (!Array.isArray(imagesRaw) || imagesRaw.length === 0) {
     throw new Error(upstreamError || "Local provider command returned no images.");
@@ -186,10 +243,21 @@ async function parseLocalCommandImages(
     images.push(stored);
   }
 
+  const warnings: string[] = [];
+  if (Array.isArray(warningsRaw)) {
+    for (const entry of warningsRaw) {
+      const warning = String(entry || "").trim();
+      if (warning) {
+        warnings.push(warning);
+      }
+    }
+  }
+
   return {
     schema,
     modelId,
     images,
+    warnings,
   };
 }
 
@@ -230,14 +298,21 @@ export async function generateImageWithLocalMacProvider(
 
   const countRaw = Number(request.count);
   const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
-  const aspectRatio =
-    String(request.aspectRatio || "").trim() || LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO;
+  const aspectRatio = normalizeAspectRatio(String(request.aspectRatio || ""));
+  const qualityPreset = normalizeQualityPreset(String(request.qualityPreset || ""));
+  const referenceInfluence = normalizeReferenceInfluence(String(request.referenceInfluence || ""));
   const tempPaths: string[] = [];
 
   try {
+    const inputImages = Array.isArray(request.inputImages) ? request.inputImages : [];
+    if (inputImages.length > 1) {
+      context.log(
+        `[studio.local_image_generation] Received ${inputImages.length} reference images. Using only the first image for local macOS generation.`
+      );
+    }
     const stagedInputImages = await stageInputImages(
       context,
-      Array.isArray(request.inputImages) ? request.inputImages : [],
+      inputImages.slice(0, 1),
       tempPaths
     );
 
@@ -248,6 +323,10 @@ export async function generateImageWithLocalMacProvider(
       aspectRatio,
       runId: String(request.runId || "").trim(),
       inputImages: stagedInputImages,
+      localOptions: {
+        quality: qualityPreset,
+        referenceInfluence,
+      },
     };
     const requestPath = await context.services.writeTempFile(encodeUtf8(JSON.stringify(commandRequest)), {
       prefix: "studio-local-image-request",
@@ -302,6 +381,11 @@ export async function generateImageWithLocalMacProvider(
     }
 
     const parsed = await parseLocalCommandImages(context, cliResult.stdout);
+    if (parsed.warnings.length > 0) {
+      for (const warning of parsed.warnings) {
+        context.log(`[studio.local_image_generation] ${warning}`);
+      }
+    }
     return {
       images: parsed.images,
       modelId: parsed.modelId,

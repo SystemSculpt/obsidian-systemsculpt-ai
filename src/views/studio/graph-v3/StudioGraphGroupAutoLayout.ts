@@ -1,6 +1,8 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
+import { isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
 
 const NODE_WIDTH = 280;
+const MIN_NODE_WIDTH = 120;
 const DEFAULT_NODE_HEIGHT = 164;
 const DEFAULT_LAYER_GAP_X = 90;
 const DEFAULT_NODE_GAP_Y = 20;
@@ -9,6 +11,7 @@ const EPSILON = 0.5;
 type NodeMeta = {
   id: string;
   node: StudioNodeInstance;
+  width: number;
   height: number;
 };
 
@@ -20,6 +23,7 @@ type LayerLayoutEntry = {
 export type GroupAutoAlignOptions = {
   layerGapX?: number;
   nodeGapY?: number;
+  getNodeWidth?: (nodeId: string) => number | null | undefined;
   getNodeHeight?: (nodeId: string) => number | null | undefined;
 };
 
@@ -33,6 +37,13 @@ function normalizeNodeHeight(value: number | null | undefined): number {
     return DEFAULT_NODE_HEIGHT;
   }
   return Math.max(80, Math.round(Number(value)));
+}
+
+function normalizeNodeWidth(value: number | null | undefined): number {
+  if (!Number.isFinite(value)) {
+    return NODE_WIDTH;
+  }
+  return Math.max(MIN_NODE_WIDTH, Math.round(Number(value)));
 }
 
 function normalizeSpacing(value: number | undefined, fallback: number): number {
@@ -194,14 +205,19 @@ export function autoAlignGroupNodes(
   }
 
   const getNodeHeight = options?.getNodeHeight;
+  const getNodeWidth = options?.getNodeWidth;
   const nodeMetas = groupNodeIds.map((nodeId) => {
     const node = nodeMap.get(nodeId);
     if (!node) {
       return null;
     }
+    if (isStudioVisualOnlyNodeKind(node.kind)) {
+      return null;
+    }
     return {
       id: nodeId,
       node,
+      width: normalizeNodeWidth(getNodeWidth?.(nodeId)),
       height: normalizeNodeHeight(getNodeHeight?.(nodeId)),
     } satisfies NodeMeta;
   }).filter((entry): entry is NodeMeta => entry !== null);
@@ -261,14 +277,27 @@ export function autoAlignGroupNodes(
   const minY = Math.min(...nodeMetas.map((entry) => entry.node.position.y));
   const layerGapX = normalizeSpacing(options?.layerGapX, DEFAULT_LAYER_GAP_X);
   const nodeGapY = normalizeSpacing(options?.nodeGapY, DEFAULT_NODE_GAP_Y);
+  const nodeMetaById = new Map(nodeMetas.map((entry) => [entry.id, entry] as const));
+  const layerWidths = orderedLayers.map((layerNodeIds) => {
+    let width = NODE_WIDTH;
+    for (const nodeId of layerNodeIds) {
+      const meta = nodeMetaById.get(nodeId);
+      if (!meta) {
+        continue;
+      }
+      width = Math.max(width, meta.width);
+    }
+    return width;
+  });
 
   const movedNodeIds: string[] = [];
+  let cursorX = minX;
   for (let layerOffset = 0; layerOffset < orderedLayers.length; layerOffset += 1) {
     const layerNodeIds = orderedLayers[layerOffset] || [];
-    const targetX = Math.round(minX + layerOffset * (NODE_WIDTH + layerGapX));
+    const targetX = Math.round(cursorX);
     let cursorY = minY;
     for (const nodeId of layerNodeIds) {
-      const nodeMeta = nodeMetas.find((entry) => entry.id === nodeId);
+      const nodeMeta = nodeMetaById.get(nodeId);
       if (!nodeMeta) {
         continue;
       }
@@ -285,6 +314,7 @@ export function autoAlignGroupNodes(
         movedNodeIds.push(node.id);
       }
     }
+    cursorX += (layerWidths[layerOffset] || NODE_WIDTH) + layerGapX;
   }
 
   return {

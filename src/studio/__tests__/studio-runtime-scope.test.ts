@@ -134,4 +134,48 @@ describe("StudioRuntime scoped run projection", () => {
     const project = projectWithBranchMerge();
     expect(scopeProjectForRun(project, [])).toBe(project);
   });
+
+  it("filters visual-only label nodes out of full-graph runs", () => {
+    const project = projectWithBranchMerge();
+    project.graph.nodes.push({
+      id: "label_1",
+      kind: "studio.label",
+      version: "1.0.0",
+      title: "Label",
+      position: { x: 20, y: 24 },
+      config: {
+        value: "Section marker",
+      },
+    });
+    project.graph.edges.push({
+      id: "label_edge",
+      fromNodeId: "label_1",
+      fromPortId: "text",
+      toNodeId: "d",
+      toPortId: "prompt",
+    });
+    project.graph.entryNodeIds = [...project.graph.entryNodeIds, "label_1"];
+
+    const scoped = scopeProjectForRun(project, undefined);
+    expect(scoped.graph.nodes.map((node) => node.id)).not.toContain("label_1");
+    expect(scoped.graph.edges.map((edge) => edge.id)).not.toContain("label_edge");
+    expect(scoped.graph.entryNodeIds).not.toContain("label_1");
+  });
+
+  it("throws when running from a visual-only label node", () => {
+    const project = projectWithBranchMerge();
+    project.graph.nodes.push({
+      id: "label_1",
+      kind: "studio.label",
+      version: "1.0.0",
+      title: "Label",
+      position: { x: 20, y: 24 },
+      config: {
+        value: "Section marker",
+      },
+    });
+    expect(() => scopeProjectForRun(project, ["label_1"])).toThrow(
+      'Cannot run from node "label_1" because "studio.label" is visual-only.'
+    );
+  });
 });

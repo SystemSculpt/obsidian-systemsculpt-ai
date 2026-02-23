@@ -6,6 +6,7 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
+  "studio.label": "Adds a visual-only label card for organizing your canvas.",
   "studio.text": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",
@@ -17,6 +18,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
 };
 
 const NODE_DISPLAY_NAME_BY_KIND: Record<string, string> = {
+  "studio.label": "Label",
   "studio.media_ingest": "Media",
 };
 

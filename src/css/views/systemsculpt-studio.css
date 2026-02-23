@@ -400,6 +400,27 @@
     0 0 0 2px color-mix(in srgb, #8de8bc 42%, transparent);
 }
 
+.ss-studio-node-card.is-managed-pending {
+  border-color: color-mix(in srgb, #89d8f5 58%, var(--ss-studio-border) 42%);
+  box-shadow:
+    0 8px 24px color-mix(in srgb, #000 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #89d8f5 26%, transparent);
+}
+
+.ss-studio-node-card.is-managed-pending .ss-studio-node-run-status {
+  animation: ss-studio-pending-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ss-studio-pending-pulse {
+  0%,
+  100% {
+    opacity: 0.92;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .ss-studio-node-header {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -630,6 +651,153 @@
   outline: none;
   border-color: color-mix(in srgb, #8de8bc 66%, var(--ss-studio-border) 34%);
   box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 25%, transparent);
+}
+
+.ss-studio-node-pending-preview {
+  margin: 8px 0 0;
+  border: 1px solid color-mix(in srgb, #89d8f5 24%, var(--ss-studio-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #173649 42%, var(--background-primary));
+  padding: 8px;
+  display: grid;
+  gap: 7px;
+}
+
+.ss-studio-node-pending-title {
+  font-size: 11px;
+  color: color-mix(in srgb, #b8e6ff 80%, var(--text-normal) 20%);
+  font-weight: 700;
+}
+
+.ss-studio-node-pending-line {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #2b5f79 62%, var(--background-primary) 38%) 0%,
+    color-mix(in srgb, #6aa9cd 44%, var(--background-primary) 56%) 50%,
+    color-mix(in srgb, #2b5f79 62%, var(--background-primary) 38%) 100%
+  );
+  background-size: 200% 100%;
+  animation: ss-studio-pending-shimmer 1.25s linear infinite;
+}
+
+.ss-studio-node-pending-line.is-short {
+  width: 70%;
+}
+
+.ss-studio-node-pending-frame {
+  min-height: 120px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, #88d0f2 25%, var(--ss-studio-border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #15384d 74%, var(--background-primary) 26%),
+    color-mix(in srgb, #224a63 66%, var(--background-primary) 34%)
+  );
+  background-size: 220% 220%;
+  animation: ss-studio-pending-shimmer 1.35s linear infinite;
+}
+
+@keyframes ss-studio-pending-shimmer {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 100% 50%;
+  }
+}
+
+.ss-studio-label-card {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--background-primary) 88%, #314047 12%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #90b6cc 16%, transparent),
+    0 8px 24px color-mix(in srgb, #000 20%, transparent);
+}
+
+.ss-studio-label-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ss-studio-label-font-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ss-studio-label-font-button,
+.ss-studio-label-remove {
+  border: 1px solid color-mix(in srgb, #8ab0c8 45%, var(--ss-studio-border) 55%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 92%, #2d4452 8%);
+  color: var(--text-normal);
+  font-size: 11px;
+  font-weight: 700;
+  height: 24px;
+  min-width: 30px;
+  padding: 0 8px;
+}
+
+.ss-studio-label-remove {
+  min-width: 26px;
+  color: color-mix(in srgb, #f2b2a6 88%, var(--text-normal) 12%);
+}
+
+.ss-studio-label-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: calc(100% - 32px);
+}
+
+.ss-studio-label-display,
+.ss-studio-label-editor {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, #8fb5cb 26%, var(--ss-studio-border) 74%);
+  background: color-mix(in srgb, #111d24 74%, var(--background-primary) 26%);
+  color: color-mix(in srgb, #e4eff7 90%, var(--text-normal) 10%);
+  line-height: 1.45;
+}
+
+.ss-studio-label-display {
+  padding: 10px 11px;
+  white-space: pre-wrap;
+  overflow: auto;
+  user-select: text;
+}
+
+.ss-studio-label-editor {
+  resize: none;
+  padding: 10px 11px;
+  font-family: var(--font-text);
+  user-select: text;
+  touch-action: auto;
+}
+
+.ss-studio-label-editor:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #8ec8e6 64%, var(--ss-studio-border) 36%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8ec8e6 20%, transparent);
+}
+
+.ss-studio-label-resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  right: 6px;
+  bottom: 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, #8bb7d2 62%, var(--ss-studio-border) 38%);
+  background: color-mix(in srgb, #335365 52%, var(--background-primary) 48%);
+  cursor: nwse-resize;
+  z-index: 3;
 }
 
 .ss-studio-node-output-preview {

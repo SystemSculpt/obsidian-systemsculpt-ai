@@ -7,6 +7,7 @@ export const STUDIO_GRAPH_CANVAS_MAX_HEIGHT = 20000;
 export const STUDIO_GRAPH_CANVAS_NODE_WIDTH = 280;
 export const STUDIO_GRAPH_CANVAS_FALLBACK_NODE_HEIGHT = 164;
 export const STUDIO_GRAPH_CANVAS_MIN_NODE_HEIGHT = 80;
+export const STUDIO_GRAPH_CANVAS_MIN_NODE_WIDTH = 120;
 export const STUDIO_GRAPH_CANVAS_EXPAND_PADDING_X = 1000;
 export const STUDIO_GRAPH_CANVAS_EXPAND_PADDING_Y = 720;
 
@@ -17,6 +18,7 @@ export type StudioGraphCanvasSize = {
 
 export type ComputeStudioGraphCanvasSizeOptions = {
   getNodeHeight?: (nodeId: string) => number | null | undefined;
+  getNodeWidth?: (nodeId: string) => number | null | undefined;
   minWidth?: number;
   minHeight?: number;
   maxWidth?: number;
@@ -34,6 +36,13 @@ function normalizeNodeHeight(value: number | null | undefined): number {
     return STUDIO_GRAPH_CANVAS_FALLBACK_NODE_HEIGHT;
   }
   return Math.max(STUDIO_GRAPH_CANVAS_MIN_NODE_HEIGHT, Math.round(Number(value)));
+}
+
+function normalizeNodeWidth(value: number | null | undefined): number {
+  if (!Number.isFinite(value)) {
+    return STUDIO_GRAPH_CANVAS_NODE_WIDTH;
+  }
+  return Math.max(STUDIO_GRAPH_CANVAS_MIN_NODE_WIDTH, Math.round(Number(value)));
 }
 
 function normalizeDimension(value: number | undefined, fallback: number): number {
@@ -69,11 +78,12 @@ export function computeStudioGraphCanvasSize(
   }
 
   const getNodeHeight = options?.getNodeHeight;
+  const getNodeWidth = options?.getNodeWidth;
   let farthestRight = 0;
   let farthestBottom = 0;
 
   for (const node of project.graph.nodes) {
-    const nodeRight = Number(node.position?.x) + STUDIO_GRAPH_CANVAS_NODE_WIDTH;
+    const nodeRight = Number(node.position?.x) + normalizeNodeWidth(getNodeWidth?.(node.id));
     const nodeBottom = Number(node.position?.y) + normalizeNodeHeight(getNodeHeight?.(node.id));
     if (Number.isFinite(nodeRight)) {
       farthestRight = Math.max(farthestRight, nodeRight);

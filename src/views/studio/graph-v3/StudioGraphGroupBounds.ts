@@ -21,6 +21,7 @@ export function computeStudioGraphGroupBounds(
   group: StudioNodeGroup,
   options?: {
     getNodeHeight?: (nodeId: string) => number | null;
+    getNodeWidth?: (nodeId: string) => number | null;
   }
 ): StudioGraphGroupBounds | null {
   const nodeMap = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
@@ -35,13 +36,17 @@ export function computeStudioGraphGroupBounds(
       continue;
     }
     const resolvedHeight = options?.getNodeHeight?.(nodeId);
+    const resolvedWidth = options?.getNodeWidth?.(nodeId);
+    const nodeWidth = Number.isFinite(resolvedWidth)
+      ? Math.max(120, Number(resolvedWidth))
+      : STUDIO_GRAPH_GROUP_NODE_WIDTH;
     const nodeHeight = Number.isFinite(resolvedHeight)
       ? Math.max(STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT, Number(resolvedHeight))
       : STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT;
 
     minX = Math.min(minX, node.position.x);
     minY = Math.min(minY, node.position.y);
-    maxX = Math.max(maxX, node.position.x + STUDIO_GRAPH_GROUP_NODE_WIDTH);
+    maxX = Math.max(maxX, node.position.x + nodeWidth);
     maxY = Math.max(maxY, node.position.y + nodeHeight);
   }
 

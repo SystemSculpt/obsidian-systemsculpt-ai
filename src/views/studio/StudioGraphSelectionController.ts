@@ -1,4 +1,5 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
+import { isManagedOutputPlaceholderNode } from "./StudioManagedOutputNodes";
 import {
   STUDIO_GRAPH_CANVAS_HEIGHT,
   STUDIO_GRAPH_CANVAS_WIDTH,
@@ -11,6 +12,7 @@ import {
   STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
   STUDIO_GRAPH_CANVAS_MAX_WIDTH,
 } from "./graph-v3/StudioGraphCanvasBounds";
+import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
 
 type GraphPoint = {
   x: number;
@@ -27,6 +29,7 @@ const NATIVE_WHEEL_SCROLL_SELECTORS = [
   ".ss-studio-simple-context-menu",
   ".ss-studio-group-color-palette",
   ".ss-studio-node-text-editor",
+  ".ss-studio-label-editor",
 ].join(", ");
 
 type StudioGraphSelectionHost = {
@@ -264,9 +267,13 @@ export class StudioGraphSelectionController {
       for (const node of project.graph.nodes) {
         const nodeEl = this.nodeElsById.get(node.id);
         const nodeHeight = Math.max(80, nodeEl?.offsetHeight || 164);
+        const nodeWidth = Math.max(
+          120,
+          nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node)
+        );
         const nodeX1 = node.position.x;
         const nodeY1 = node.position.y;
-        const nodeX2 = nodeX1 + 280;
+        const nodeX2 = nodeX1 + nodeWidth;
         const nodeY2 = nodeY1 + nodeHeight;
         const intersects = nodeX1 <= x2 && nodeX2 >= x1 && nodeY1 <= y2 && nodeY2 >= y1;
         if (intersects) {
@@ -457,7 +464,12 @@ export class StudioGraphSelectionController {
 
   startNodeDrag(nodeId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
     const project = this.host.getCurrentProject();
-    if (this.host.isBusy() || !project) {
+    if (!project) {
+      return;
+    }
+    const dragSourceNode = this.findNode(project, nodeId);
+    const canDragWhileBusy = dragSourceNode ? isManagedOutputPlaceholderNode(dragSourceNode) : false;
+    if (this.host.isBusy() && !canDragWhileBusy) {
       return;
     }
 
@@ -618,6 +630,18 @@ export class StudioGraphSelectionController {
       minHeight: STUDIO_GRAPH_CANVAS_HEIGHT,
       maxWidth: STUDIO_GRAPH_CANVAS_MAX_WIDTH,
       maxHeight: STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
+      getNodeWidth: (nodeId) => {
+        const project = this.host.getCurrentProject();
+        if (!project) {
+          return null;
+        }
+        const node = project.graph.nodes.find((entry) => entry.id === nodeId);
+        const nodeEl = this.nodeElsById.get(nodeId);
+        if (!node) {
+          return nodeEl ? Math.max(120, nodeEl.offsetWidth || 280) : null;
+        }
+        return Math.max(120, nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node));
+      },
       getNodeHeight: (nodeId) => {
         const nodeEl = this.nodeElsById.get(nodeId);
         if (!nodeEl) {

@@ -29,10 +29,16 @@ export type StudioGraphWorkspaceRendererOptions = {
     title: string;
   }) => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
+  onCreateLabelAtPosition: (position: { x: number; y: number }) => void;
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  isLabelEditing: (nodeId: string) => boolean;
+  consumeLabelAutoFocus: (nodeId: string) => boolean;
+  onRequestLabelEdit: (nodeId: string) => void;
+  onStopLabelEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
 };
 
@@ -54,10 +60,16 @@ export function renderStudioGraphWorkspace(
     resolveAssetPreviewSrc,
     onOpenMediaPreview,
     onOpenNodeContextMenu,
+    onCreateLabelAtPosition,
     onRunNode,
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onNodeGeometryMutated,
+    isLabelEditing,
+    consumeLabelAutoFocus,
+    onRequestLabelEdit,
+    onStopLabelEdit,
     onRevealPathInFinder,
   } = options;
 
@@ -113,6 +125,33 @@ export function renderStudioGraphWorkspace(
     }
     graphInteraction.startMarqueeSelection(pointerEvent);
   });
+  viewport.addEventListener("dblclick", (event) => {
+    const dblEvent = event as MouseEvent;
+    const target = dblEvent.target as HTMLElement | null;
+    if (!target) {
+      return;
+    }
+    if (
+      target.closest(
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+      )
+    ) {
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const localX = dblEvent.clientX - rect.left;
+    const localY = dblEvent.clientY - rect.top;
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+      return;
+    }
+    const zoom = graphInteraction.getGraphZoom() || 1;
+    const graphX = (viewport.scrollLeft + localX) / zoom;
+    const graphY = (viewport.scrollTop + localY) / zoom;
+    onCreateLabelAtPosition({
+      x: graphX,
+      y: graphY,
+    });
+  });
 
   const surface = viewport.createDiv({ cls: "ss-studio-graph-surface" });
   graphInteraction.registerSurfaceElement(surface);
@@ -153,6 +192,11 @@ export function renderStudioGraphWorkspace(
       onRemoveNode,
       onNodeTitleInput,
       onNodeConfigMutated,
+      onNodeGeometryMutated,
+      isLabelEditing,
+      consumeLabelAutoFocus,
+      onRequestLabelEdit,
+      onStopLabelEdit,
       onRevealPathInFinder,
     });
   }
