@@ -312,6 +312,7 @@ export interface StudioNodeExecutionServices {
   storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
   resolveAbsolutePath: (path: string) => string;
+  readVaultText: (vaultPath: string) => Promise<string>;
   readVaultBinary: (vaultPath: string) => Promise<ArrayBuffer>;
   readLocalFileBinary: (absolutePath: string) => Promise<ArrayBuffer>;
   writeTempFile: (

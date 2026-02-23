@@ -7,6 +7,7 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
   "studio.label": "Adds a visual-only label card for organizing your canvas.",
+  "studio.note": "Mirrors a markdown note from your vault with live text editing.",
   "studio.text": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",

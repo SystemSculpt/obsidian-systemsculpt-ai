@@ -19,6 +19,7 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.image_generation",
   "studio.media_ingest",
   "studio.audio_extract",
+  "studio.note",
   "studio.text",
   "studio.text_generation",
   "studio.transcription",
@@ -27,6 +28,7 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
 const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.image_generation",
   "studio.media_ingest",
+  "studio.note",
   "studio.text",
   "studio.text_generation",
   "studio.transcription",
@@ -66,6 +68,7 @@ function readEditableNodeText(node: StudioNodeInstance, nodeRunState: StudioNode
 function isInlineTextNodeKind(kind: string): boolean {
   const normalizedKind = normalizeNodeKind(kind);
   return (
+    normalizedKind === "studio.note" ||
     normalizedKind === "studio.text" ||
     normalizedKind === "studio.text_generation" ||
     normalizedKind === "studio.transcription"
@@ -490,6 +493,8 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
 
   const editorLabel = node.kind === "studio.transcription"
     ? "TRANSCRIPT"
+    : node.kind === "studio.note"
+      ? "NOTE"
     : node.kind === "studio.text_generation"
       ? "TEXT"
       : "TEXT";
@@ -504,12 +509,16 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
       placeholder:
         node.kind === "studio.transcription"
           ? "Transcribed text appears here..."
+          : node.kind === "studio.note"
+            ? "Edit note text..."
           : node.kind === "studio.text_generation"
             ? "Generated text appears here..."
             : "Write or paste text...",
       "aria-label":
         node.kind === "studio.transcription"
           ? `${node.title || "Transcription"} transcript`
+          : node.kind === "studio.note"
+            ? `${node.title || "Note"} content`
           : node.kind === "studio.text_generation"
             ? `${node.title || "Text Generation"} text`
             : `${node.title || "Text"} content`,
@@ -557,6 +566,17 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       node,
       definition,
       orderedFieldKeys: ["ffmpegCommand", "outputFormat", "outputPath", "timeoutMs", "maxOutputBytes"],
+      interactionLocked,
+      onNodeConfigMutated,
+    });
+  }
+
+  if (kind === "studio.note") {
+    return renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: ["vaultPath"],
       interactionLocked,
       onNodeConfigMutated,
     });

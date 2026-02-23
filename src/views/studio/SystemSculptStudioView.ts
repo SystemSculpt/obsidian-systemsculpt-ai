@@ -1,4 +1,15 @@
-import { FileSystemAdapter, ItemView, Notice, Platform, WorkspaceLeaf } from "obsidian";
+import {
+  EventRef,
+  FileSystemAdapter,
+  ItemView,
+  Notice,
+  normalizePath,
+  Platform,
+  TAbstractFile,
+  TFile,
+  TFolder,
+  WorkspaceLeaf,
+} from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
@@ -116,6 +127,9 @@ export class SystemSculptStudioView extends ItemView {
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private lastGraphPointerPosition: { x: number; y: number } | null = null;
+  private vaultEventRefs: EventRef[] = [];
+  private notePathByNodeId = new Map<string, string>();
+  private noteWriteTimersByNodeId = new Map<string, number>();
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
     this.handleWindowKeyDown(event);
   };
@@ -198,6 +212,7 @@ export class SystemSculptStudioView extends ItemView {
   async onOpen(): Promise<void> {
     window.addEventListener("keydown", this.onWindowKeyDown, true);
     window.addEventListener("paste", this.onWindowPaste, true);
+    this.bindVaultEvents();
     await this.loadNodeDefinitions();
     this.render();
   }
@@ -205,6 +220,10 @@ export class SystemSculptStudioView extends ItemView {
   async onClose(): Promise<void> {
     window.removeEventListener("keydown", this.onWindowKeyDown, true);
     window.removeEventListener("paste", this.onWindowPaste, true);
+    await this.flushPendingNoteWrites();
+    this.unbindVaultEvents();
+    this.clearAllNoteWriteTimers();
+    this.notePathByNodeId.clear();
     this.captureGraphViewportState();
     this.app.workspace.requestSaveLayout();
     this.clearSaveTimer();
@@ -224,6 +243,38 @@ export class SystemSculptStudioView extends ItemView {
     this.lastGraphPointerPosition = null;
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
+  }
+
+  private bindVaultEvents(): void {
+    if (this.vaultEventRefs.length > 0) {
+      return;
+    }
+    this.vaultEventRefs.push(
+      this.app.vault.on("modify", (file) => {
+        void this.handleVaultItemModified(file);
+      })
+    );
+    this.vaultEventRefs.push(
+      this.app.vault.on("rename", (file, oldPath) => {
+        void this.handleVaultItemRenamed(file, oldPath);
+      })
+    );
+    this.vaultEventRefs.push(
+      this.app.vault.on("delete", (file) => {
+        this.handleVaultItemDeleted(file);
+      })
+    );
+  }
+
+  private unbindVaultEvents(): void {
+    for (const ref of this.vaultEventRefs) {
+      try {
+        this.app.vault.offref(ref);
+      } catch {
+        // Best effort cleanup.
+      }
+    }
+    this.vaultEventRefs = [];
   }
 
   private isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -317,6 +368,116 @@ export class SystemSculptStudioView extends ItemView {
     return files;
   }
 
+  private extractClipboardText(event: ClipboardEvent): string {
+    const clipboard = event.clipboardData;
+    if (!clipboard) {
+      return "";
+    }
+    const text = clipboard.getData("text/plain");
+    return typeof text === "string" ? text : "";
+  }
+
+  private parseObsidianOpenFilePath(reference: string): string | null {
+    const raw = String(reference || "").trim();
+    if (!raw.startsWith("obsidian://open")) {
+      return null;
+    }
+    try {
+      const url = new URL(raw);
+      const filePath = url.searchParams.get("file");
+      if (!filePath) {
+        return null;
+      }
+      const decoded = decodeURIComponent(filePath).trim();
+      return decoded ? normalizePath(decoded) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveVaultItemFromReference(reference: string): TAbstractFile | null {
+    const raw = String(reference || "").trim();
+    if (!raw) {
+      return null;
+    }
+
+    const parsedUriPath = this.parseObsidianOpenFilePath(raw);
+    const primaryPath = parsedUriPath || normalizePath(raw);
+    if (!primaryPath) {
+      return null;
+    }
+
+    const direct = this.app.vault.getAbstractFileByPath(primaryPath);
+    if (direct) {
+      return direct;
+    }
+
+    if (!primaryPath.includes(".")) {
+      const markdownFallback = this.app.vault.getAbstractFileByPath(`${primaryPath}.md`);
+      if (markdownFallback) {
+        return markdownFallback;
+      }
+    }
+    return null;
+  }
+
+  private parsePathReferencesFromText(raw: string): string[] {
+    const normalized = String(raw || "").trim();
+    if (!normalized) {
+      return [];
+    }
+
+    const references = new Set<string>();
+    const push = (value: string): void => {
+      const next = String(value || "").trim();
+      if (!next) {
+        return;
+      }
+      references.add(next);
+    };
+
+    try {
+      const parsed = JSON.parse(normalized) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.path === "string") {
+          push(record.path);
+        }
+        if (Array.isArray(record.results)) {
+          for (const result of record.results) {
+            if (result && typeof result === "object" && typeof (result as Record<string, unknown>).path === "string") {
+              push((result as Record<string, unknown>).path as string);
+            }
+          }
+        }
+      }
+    } catch {
+      // Continue with line parsing.
+    }
+
+    for (const line of normalized.split(/\r?\n/)) {
+      push(line);
+    }
+
+    return Array.from(references);
+  }
+
+  private isMarkdownVaultFile(file: TAbstractFile | null): file is TFile {
+    return file instanceof TFile && file.extension.toLowerCase() === "md";
+  }
+
+  private isVaultFolder(file: TAbstractFile | null): file is TFolder {
+    return file instanceof TFolder;
+  }
+
+  private resolveMarkdownVaultPathFromReference(reference: string): string | null {
+    const item = this.resolveVaultItemFromReference(reference);
+    if (!this.isMarkdownVaultFile(item)) {
+      return null;
+    }
+    return item.path;
+  }
+
   private resolvePasteAnchorPosition(): { x: number; y: number } {
     const pointer = this.lastGraphPointerPosition;
     if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
@@ -357,17 +518,72 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const imageFiles = this.extractClipboardImageFiles(event);
-    if (imageFiles.length === 0) {
+    if (imageFiles.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await this.pasteClipboardImages(imageFiles);
+      } catch (error) {
+        this.setError(error);
+      }
+      return;
+    }
+
+    const pastedText = this.extractClipboardText(event);
+    if (!pastedText || pastedText.trim().length === 0) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
     try {
-      await this.pasteClipboardImages(imageFiles);
+      const notePath =
+        pastedText.includes("\n") || pastedText.includes("\r")
+          ? null
+          : this.resolveMarkdownVaultPathFromReference(pastedText);
+      if (notePath) {
+        await this.insertVaultNoteNodes([notePath], this.resolvePasteAnchorPosition(), {
+          source: "paste",
+        });
+        return;
+      }
+      this.pasteClipboardText(pastedText);
     } catch (error) {
       this.setError(error);
     }
+  }
+
+  private pasteClipboardText(text: string): void {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    const textDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
+    if (!textDefinition) {
+      throw new Error("Text node definition is unavailable.");
+    }
+
+    const project = this.currentProject;
+    const anchor = this.resolvePasteAnchorPosition();
+    const node: StudioNodeInstance = {
+      id: randomId("node"),
+      kind: textDefinition.kind,
+      version: textDefinition.version,
+      title: prettifyNodeKind(textDefinition.kind),
+      position: this.normalizeNodePosition(anchor),
+      config: {
+        ...cloneConfigDefaults(textDefinition),
+        value: text,
+      },
+      continueOnError: false,
+      disabled: false,
+    };
+    project.graph.nodes.push(node);
+    this.graphInteraction.selectOnlyNode(node.id);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(project);
+    this.scheduleProjectSave();
+    this.render();
+    new Notice("Pasted text as a Text node.");
   }
 
   private async pasteClipboardImages(imageFiles: File[]): Promise<void> {
@@ -425,6 +641,104 @@ export class SystemSculptStudioView extends ItemView {
       createdNodeIds.length === 1
         ? "Pasted 1 image as a Media node."
         : `Pasted ${createdNodeIds.length} images as Media nodes.`
+    );
+  }
+
+  private readNotePathFromConfig(node: Pick<StudioNodeInstance, "config">): string {
+    return String(node.config.vaultPath || "").trim();
+  }
+
+  private deriveNoteTitleFromPath(path: string): string {
+    const normalized = String(path || "").trim().replace(/\\/g, "/");
+    if (!normalized) {
+      return "";
+    }
+    const fileName = normalized.split("/").pop() || normalized;
+    if (fileName.toLowerCase().endsWith(".md") && fileName.length > 3) {
+      return fileName.slice(0, -3);
+    }
+    return fileName;
+  }
+
+  private async readVaultMarkdownFile(file: TFile): Promise<string> {
+    const cachedRead = (this.app.vault as any).cachedRead;
+    if (typeof cachedRead === "function") {
+      return cachedRead.call(this.app.vault, file);
+    }
+    return this.app.vault.read(file);
+  }
+
+  private async insertVaultNoteNodes(
+    notePaths: string[],
+    anchor: { x: number; y: number },
+    options?: { source?: "paste" | "drop" }
+  ): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    const noteDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.note");
+    if (!noteDefinition) {
+      throw new Error("Note node definition is unavailable.");
+    }
+
+    const project = this.currentProject;
+    const uniquePaths = Array.from(
+      new Set(notePaths.map((path) => String(path || "").trim()).filter(Boolean))
+    );
+    const createdNodeIds: string[] = [];
+
+    for (let index = 0; index < uniquePaths.length; index += 1) {
+      const notePath = uniquePaths[index];
+      const abstract = this.app.vault.getAbstractFileByPath(notePath);
+      if (!this.isMarkdownVaultFile(abstract)) {
+        continue;
+      }
+      const noteText = await this.readVaultMarkdownFile(abstract);
+      const title = this.deriveNoteTitleFromPath(abstract.path) || prettifyNodeKind(noteDefinition.kind);
+      const node: StudioNodeInstance = {
+        id: randomId("node"),
+        kind: noteDefinition.kind,
+        version: noteDefinition.version,
+        title,
+        position: this.normalizeNodePosition({
+          x: anchor.x + (index % 5) * 38,
+          y: anchor.y + Math.floor(index / 5) * 38,
+        }),
+        config: {
+          ...cloneConfigDefaults(noteDefinition),
+          vaultPath: abstract.path,
+          value: noteText,
+        },
+        continueOnError: false,
+        disabled: false,
+      };
+      project.graph.nodes.push(node);
+      this.notePathByNodeId.set(node.id, abstract.path);
+      createdNodeIds.push(node.id);
+    }
+
+    if (createdNodeIds.length === 0) {
+      return;
+    }
+
+    this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(project);
+    this.scheduleProjectSave();
+    this.render();
+
+    if (options?.source === "drop") {
+      new Notice(
+        createdNodeIds.length === 1
+          ? "Added 1 note as a Note node."
+          : `Added ${createdNodeIds.length} notes as Note nodes.`
+      );
+      return;
+    }
+    new Notice(
+      createdNodeIds.length === 1
+        ? "Pasted 1 note as a Note node."
+        : `Pasted ${createdNodeIds.length} notes as Note nodes.`
     );
   }
 
@@ -656,6 +970,8 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
     for (const nodeId of removed.removedNodeIds) {
+      this.clearNoteWriteTimer(nodeId);
+      this.notePathByNodeId.delete(nodeId);
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
@@ -738,9 +1054,12 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (projectPath !== this.currentProjectPath) {
+      await this.flushPendingNoteWrites();
       this.captureGraphViewportState();
       this.editingLabelNodeIds.clear();
       this.pendingLabelAutofocusNodeId = null;
+      this.notePathByNodeId.clear();
+      this.clearAllNoteWriteTimers();
     }
 
     if (!projectPath) {
@@ -750,6 +1069,7 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.notePathByNodeId.clear();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
       return;
@@ -762,6 +1082,7 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.notePathByNodeId.clear();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
       if (options?.notifyOnError !== false) {
@@ -781,9 +1102,11 @@ export class SystemSculptStudioView extends ItemView {
       const mediaTitlesNormalized = this.normalizeLegacyMediaNodeTitles(project);
       const stalePendingRemoved = cleanupStaleManagedOutputPlaceholders(project).changed;
       const legacyManagedTextRemoved = removeManagedTextOutputNodes({ project }).changed;
+      const noteValuesHydrated = await this.hydrateNoteNodeValuesFromVault(project);
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
+      this.rebuildNotePathIndex(project);
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(savedGraphView?.zoom ?? STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -810,7 +1133,13 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
-      if (groupsSanitized || mediaTitlesNormalized || stalePendingRemoved || legacyManagedTextRemoved) {
+      if (
+        groupsSanitized ||
+        mediaTitlesNormalized ||
+        stalePendingRemoved ||
+        legacyManagedTextRemoved ||
+        noteValuesHydrated
+      ) {
         this.scheduleProjectSave();
       }
       this.lastError = null;
@@ -818,6 +1147,7 @@ export class SystemSculptStudioView extends ItemView {
     } catch (error) {
       this.currentProjectPath = null;
       this.currentProject = null;
+      this.notePathByNodeId.clear();
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -829,6 +1159,369 @@ export class SystemSculptStudioView extends ItemView {
         this.setError(error);
       }
     }
+  }
+
+  private rebuildNotePathIndex(project: StudioProjectV1): void {
+    this.notePathByNodeId.clear();
+    for (const node of project.graph.nodes) {
+      if (node.kind !== "studio.note") {
+        continue;
+      }
+      const vaultPath = this.readNotePathFromConfig(node);
+      if (!vaultPath) {
+        continue;
+      }
+      this.notePathByNodeId.set(node.id, normalizePath(vaultPath));
+    }
+  }
+
+  private async hydrateNoteNodeValuesFromVault(
+    project: StudioProjectV1,
+    options?: {
+      onlyNodeIds?: Set<string>;
+      clearWhenMissing?: boolean;
+    }
+  ): Promise<boolean> {
+    let changed = false;
+    const onlyNodeIds = options?.onlyNodeIds;
+    const clearWhenMissing = options?.clearWhenMissing ?? true;
+
+    for (const node of project.graph.nodes) {
+      if (node.kind !== "studio.note") {
+        continue;
+      }
+      if (onlyNodeIds && !onlyNodeIds.has(node.id)) {
+        continue;
+      }
+
+      const configuredPath = this.readNotePathFromConfig(node);
+      if (!configuredPath) {
+        continue;
+      }
+      const normalizedPath = normalizePath(configuredPath);
+      if (normalizedPath !== configuredPath) {
+        node.config.vaultPath = normalizedPath;
+        changed = true;
+      }
+      this.notePathByNodeId.set(node.id, normalizedPath);
+      if (!normalizedPath.toLowerCase().endsWith(".md")) {
+        continue;
+      }
+
+      const abstract = this.app.vault.getAbstractFileByPath(normalizedPath);
+      if (!this.isMarkdownVaultFile(abstract)) {
+        if (clearWhenMissing && String(node.config.value || "") !== "") {
+          node.config.value = "";
+          changed = true;
+        }
+        continue;
+      }
+
+      try {
+        const text = await this.readVaultMarkdownFile(abstract);
+        if (String(node.config.value || "") !== text) {
+          node.config.value = text;
+          changed = true;
+        }
+      } catch (error) {
+        console.warn("[SystemSculpt Studio] Unable to read note for hydration", {
+          nodeId: node.id,
+          path: normalizedPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return changed;
+  }
+
+  private clearNoteWriteTimer(nodeId: string): void {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return;
+    }
+    const timerId = this.noteWriteTimersByNodeId.get(normalizedNodeId);
+    if (typeof timerId !== "number") {
+      return;
+    }
+    window.clearTimeout(timerId);
+    this.noteWriteTimersByNodeId.delete(normalizedNodeId);
+  }
+
+  private clearAllNoteWriteTimers(): void {
+    for (const timerId of this.noteWriteTimersByNodeId.values()) {
+      window.clearTimeout(timerId);
+    }
+    this.noteWriteTimersByNodeId.clear();
+  }
+
+  private async flushPendingNoteWrites(): Promise<void> {
+    const pendingNodeIds = Array.from(this.noteWriteTimersByNodeId.keys());
+    if (pendingNodeIds.length === 0) {
+      return;
+    }
+    this.clearAllNoteWriteTimers();
+    for (const nodeId of pendingNodeIds) {
+      await this.persistNoteNodeToVault(nodeId);
+    }
+  }
+
+  private scheduleNoteNodeWrite(nodeId: string): void {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return;
+    }
+    this.clearNoteWriteTimer(normalizedNodeId);
+    const timerId = window.setTimeout(() => {
+      this.noteWriteTimersByNodeId.delete(normalizedNodeId);
+      void this.persistNoteNodeToVault(normalizedNodeId);
+    }, 260);
+    this.noteWriteTimersByNodeId.set(normalizedNodeId, timerId);
+  }
+
+  private async ensureFolderPathForVaultFile(filePath: string): Promise<void> {
+    const normalized = normalizePath(String(filePath || "").trim());
+    if (!normalized.includes("/")) {
+      return;
+    }
+    const segments = normalized.split("/");
+    segments.pop();
+    let current = "";
+    for (const segment of segments) {
+      current = current ? `${current}/${segment}` : segment;
+      if (!current) {
+        continue;
+      }
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (!existing) {
+        await this.app.vault.createFolder(current);
+      } else if (!(existing instanceof TFolder)) {
+        throw new Error(`Cannot create folder "${current}" because a file already exists there.`);
+      }
+    }
+  }
+
+  private async persistNoteNodeToVault(nodeId: string): Promise<void> {
+    if (!this.currentProject) {
+      return;
+    }
+    const node = this.findNode(this.currentProject, nodeId);
+    if (!node || node.kind !== "studio.note") {
+      return;
+    }
+
+    const rawPath = this.readNotePathFromConfig(node);
+    if (!rawPath) {
+      return;
+    }
+    const vaultPath = normalizePath(rawPath);
+    if (!vaultPath.toLowerCase().endsWith(".md")) {
+      return;
+    }
+
+    const nextText = String(node.config.value || "");
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(vaultPath);
+      if (this.isMarkdownVaultFile(existing)) {
+        const currentText = await this.readVaultMarkdownFile(existing);
+        if (currentText !== nextText) {
+          await this.app.vault.modify(existing, nextText);
+        }
+        this.notePathByNodeId.set(node.id, existing.path);
+        return;
+      }
+      if (this.isVaultFolder(existing)) {
+        throw new Error(`Cannot write note to "${vaultPath}" because it is a folder.`);
+      }
+
+      await this.ensureFolderPathForVaultFile(vaultPath);
+      await this.app.vault.create(vaultPath, nextText);
+      this.notePathByNodeId.set(node.id, vaultPath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[SystemSculpt Studio] Failed to persist note node to vault", {
+        nodeId,
+        vaultPath,
+        message,
+      });
+      new Notice(`Failed to save note "${vaultPath}": ${message}`);
+    }
+  }
+
+  private async handleVaultItemModified(file: TAbstractFile): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    if (!this.isMarkdownVaultFile(file)) {
+      return;
+    }
+
+    const matchingNodeIds = this.currentProject.graph.nodes
+      .filter((node) => node.kind === "studio.note" && this.readNotePathFromConfig(node) === file.path)
+      .map((node) => node.id);
+    if (matchingNodeIds.length === 0) {
+      return;
+    }
+
+    const changed = await this.hydrateNoteNodeValuesFromVault(this.currentProject, {
+      onlyNodeIds: new Set(matchingNodeIds),
+      clearWhenMissing: false,
+    });
+    if (!changed) {
+      return;
+    }
+    this.scheduleProjectSave();
+    this.render();
+  }
+
+  private async handleVaultItemRenamed(file: TAbstractFile, oldPath: string): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    const previousPath = normalizePath(String(oldPath || "").trim());
+    if (!previousPath) {
+      return;
+    }
+
+    let changed = false;
+    const changedNodeIds = new Set<string>();
+    if (this.isMarkdownVaultFile(file)) {
+      for (const node of this.currentProject.graph.nodes) {
+        if (node.kind !== "studio.note") {
+          continue;
+        }
+        if (this.readNotePathFromConfig(node) !== previousPath) {
+          continue;
+        }
+        node.config.vaultPath = file.path;
+        this.notePathByNodeId.set(node.id, file.path);
+        const previousTitle = this.deriveNoteTitleFromPath(previousPath);
+        if (!node.title || node.title === "Note" || node.title === previousTitle) {
+          node.title = file.basename || node.title;
+        }
+        changed = true;
+        changedNodeIds.add(node.id);
+      }
+    } else if (this.isVaultFolder(file)) {
+      const prefix = `${previousPath}/`;
+      for (const node of this.currentProject.graph.nodes) {
+        if (node.kind !== "studio.note") {
+          continue;
+        }
+        const currentPath = this.readNotePathFromConfig(node);
+        if (!currentPath.startsWith(prefix)) {
+          continue;
+        }
+        const suffix = currentPath.slice(prefix.length);
+        const nextPath = normalizePath(`${file.path}/${suffix}`);
+        node.config.vaultPath = nextPath;
+        this.notePathByNodeId.set(node.id, nextPath);
+        changed = true;
+        changedNodeIds.add(node.id);
+      }
+    }
+
+    if (changedNodeIds.size > 0) {
+      const hydrated = await this.hydrateNoteNodeValuesFromVault(this.currentProject, {
+        onlyNodeIds: changedNodeIds,
+        clearWhenMissing: false,
+      });
+      changed = changed || hydrated;
+    }
+    if (!changed) {
+      return;
+    }
+    this.scheduleProjectSave();
+    this.render();
+  }
+
+  private handleVaultItemDeleted(file: TAbstractFile): void {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    const deletedPath = normalizePath(String(file.path || "").trim());
+    if (!deletedPath) {
+      return;
+    }
+
+    let changed = false;
+    if (this.isMarkdownVaultFile(file)) {
+      for (const node of this.currentProject.graph.nodes) {
+        if (node.kind !== "studio.note") {
+          continue;
+        }
+        if (this.readNotePathFromConfig(node) !== deletedPath) {
+          continue;
+        }
+        if (String(node.config.value || "") !== "") {
+          node.config.value = "";
+          changed = true;
+        }
+      }
+    } else if (this.isVaultFolder(file)) {
+      const prefix = `${deletedPath}/`;
+      for (const node of this.currentProject.graph.nodes) {
+        if (node.kind !== "studio.note") {
+          continue;
+        }
+        const path = this.readNotePathFromConfig(node);
+        if (!path.startsWith(prefix)) {
+          continue;
+        }
+        if (String(node.config.value || "") !== "") {
+          node.config.value = "";
+          changed = true;
+        }
+      }
+    }
+
+    if (!changed) {
+      return;
+    }
+    this.scheduleProjectSave();
+    this.render();
+  }
+
+  private resolveNodeCardBadge(node: StudioNodeInstance): {
+    text: string;
+    tone: "warning";
+    title: string;
+  } | null {
+    if (node.kind !== "studio.note") {
+      return null;
+    }
+    const rawPath = this.readNotePathFromConfig(node);
+    if (!rawPath) {
+      return {
+        text: "Broken link",
+        tone: "warning",
+        title: "Note path is empty. Set a markdown vault path to link this note node.",
+      };
+    }
+    const normalizedPath = normalizePath(rawPath);
+    const abstract = this.app.vault.getAbstractFileByPath(normalizedPath);
+    if (this.isMarkdownVaultFile(abstract)) {
+      return null;
+    }
+    if (this.isVaultFolder(abstract)) {
+      return {
+        text: "Broken link",
+        tone: "warning",
+        title: `Vault path "${normalizedPath}" points to a folder. Note nodes require a markdown file.`,
+      };
+    }
+    if (abstract instanceof TFile) {
+      return {
+        text: "Broken link",
+        tone: "warning",
+        title: `Vault path "${normalizedPath}" is not a markdown file.`,
+      };
+    }
+    return {
+      text: "Broken link",
+      tone: "warning",
+      title: `Vault note "${normalizedPath}" was not found.`,
+    };
   }
 
   private setTransientFieldError(nodeId: string, fieldKey: string, message: string | null): void {
@@ -867,8 +1560,7 @@ export class SystemSculptStudioView extends ItemView {
       {
         isBusy: () => this.busy,
         onConfigMutated: (node) => {
-          this.refreshNodeCardPreview(node);
-          this.scheduleProjectSave();
+          this.handleNodeConfigMutated(node);
         },
         onTransientFieldError: (nodeId, fieldKey, message) => {
           this.setTransientFieldError(nodeId, fieldKey, message);
@@ -899,6 +1591,46 @@ export class SystemSculptStudioView extends ItemView {
 
     this.nodeActionContextMenuOverlay = new StudioSimpleContextMenuOverlay();
     return this.nodeActionContextMenuOverlay;
+  }
+
+  private handleNodeConfigMutated(node: StudioNodeInstance): void {
+    this.refreshNodeCardPreview(node);
+    if (node.kind === "studio.note") {
+      this.handleNoteNodeConfigMutated(node);
+    }
+    this.scheduleProjectSave();
+  }
+
+  private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
+    const rawPath = this.readNotePathFromConfig(node);
+    const normalizedPath = rawPath ? normalizePath(rawPath) : "";
+    if (rawPath && normalizedPath !== rawPath) {
+      node.config.vaultPath = normalizedPath;
+    }
+    const previousPath = this.notePathByNodeId.get(node.id) || "";
+    if (!normalizedPath) {
+      this.notePathByNodeId.delete(node.id);
+      this.clearNoteWriteTimer(node.id);
+      return;
+    }
+    if (previousPath !== normalizedPath) {
+      this.clearNoteWriteTimer(node.id);
+      this.notePathByNodeId.set(node.id, normalizedPath);
+      if (this.currentProject) {
+        void this.hydrateNoteNodeValuesFromVault(this.currentProject, {
+          onlyNodeIds: new Set([node.id]),
+          clearWhenMissing: false,
+        }).then((changed) => {
+          if (!changed) {
+            return;
+          }
+          this.scheduleProjectSave();
+          this.render();
+        });
+      }
+      return;
+    }
+    this.scheduleNoteNodeWrite(node.id);
   }
 
   private refreshNodeCardPreview(node: StudioNodeInstance): void {
@@ -1590,6 +2322,8 @@ export class SystemSculptStudioView extends ItemView {
     removeNodesFromGroups(this.currentProject, Array.from(idsToRemove));
 
     for (const nodeId of idsToRemove) {
+      this.clearNoteWriteTimer(nodeId);
+      this.notePathByNodeId.delete(nodeId);
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
@@ -1638,6 +2372,156 @@ export class SystemSculptStudioView extends ItemView {
       x: (viewport.scrollLeft + localX) / zoom,
       y: (viewport.scrollTop + localY) / zoom,
     };
+  }
+
+  private resolveGraphPositionFromClientPoint(clientX: number, clientY: number): { x: number; y: number } | null {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return null;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+      return null;
+    }
+    const zoom = this.graphInteraction.getGraphZoom() || 1;
+    return {
+      x: (viewport.scrollLeft + localX) / zoom,
+      y: (viewport.scrollTop + localY) / zoom,
+    };
+  }
+
+  private resolveVaultPathFromAbsoluteFilePath(absolutePath: string): string | null {
+    const normalizedAbsolute = normalizePath(String(absolutePath || "").trim().replace(/\\/g, "/"));
+    if (!normalizedAbsolute) {
+      return null;
+    }
+    const adapter = this.app.vault.adapter as any;
+    const basePathRaw =
+      typeof adapter?.basePath === "string" ? String(adapter.basePath).trim().replace(/\\/g, "/") : "";
+    if (!basePathRaw) {
+      return null;
+    }
+    const basePath = normalizePath(basePathRaw);
+    if (!normalizedAbsolute.startsWith(`${basePath}/`)) {
+      return null;
+    }
+    const relative = normalizedAbsolute.slice(basePath.length + 1);
+    return relative ? normalizePath(relative) : null;
+  }
+
+  private collectDroppedVaultItems(dataTransfer: DataTransfer): {
+    notePaths: string[];
+    folderPaths: string[];
+    unsupportedPaths: string[];
+  } {
+    const references = new Set<string>();
+    const pushReference = (value: string): void => {
+      const next = String(value || "").trim();
+      if (!next) {
+        return;
+      }
+      references.add(next);
+    };
+
+    for (const reference of this.parsePathReferencesFromText(dataTransfer.getData("text/plain"))) {
+      pushReference(reference);
+    }
+    for (const reference of this.parsePathReferencesFromText(dataTransfer.getData("text/uri-list"))) {
+      pushReference(reference);
+    }
+    for (const file of Array.from(dataTransfer.files || [])) {
+      const absolutePath =
+        typeof (file as unknown as { path?: unknown }).path === "string"
+          ? String((file as unknown as { path?: string }).path)
+          : "";
+      if (!absolutePath) {
+        continue;
+      }
+      const vaultPath = this.resolveVaultPathFromAbsoluteFilePath(absolutePath);
+      if (vaultPath) {
+        pushReference(vaultPath);
+      }
+    }
+
+    const notePaths = new Set<string>();
+    const folderPaths = new Set<string>();
+    const unsupportedPaths = new Set<string>();
+    for (const reference of references) {
+      const item = this.resolveVaultItemFromReference(reference);
+      if (this.isMarkdownVaultFile(item)) {
+        notePaths.add(item.path);
+        continue;
+      }
+      if (this.isVaultFolder(item)) {
+        folderPaths.add(item.path);
+        continue;
+      }
+      if (item instanceof TFile) {
+        unsupportedPaths.add(item.path);
+      }
+    }
+    return {
+      notePaths: Array.from(notePaths),
+      folderPaths: Array.from(folderPaths),
+      unsupportedPaths: Array.from(unsupportedPaths),
+    };
+  }
+
+  private handleGraphViewportDragOver(event: DragEvent): void {
+    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+      return;
+    }
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    if (!event.dataTransfer) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  private async handleGraphViewportDrop(event: DragEvent): Promise<void> {
+    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+      return;
+    }
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    if (!event.dataTransfer) {
+      return;
+    }
+
+    const dropped = this.collectDroppedVaultItems(event.dataTransfer);
+    if (
+      dropped.notePaths.length === 0 &&
+      dropped.folderPaths.length === 0 &&
+      dropped.unsupportedPaths.length === 0
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (dropped.folderPaths.length > 0) {
+      new Notice("Dropping folders into Studio is not supported yet.");
+    }
+    if (dropped.notePaths.length === 0) {
+      if (dropped.unsupportedPaths.length > 0) {
+        new Notice("Only markdown notes can be dropped into Studio.");
+      }
+      return;
+    }
+
+    const anchor =
+      this.resolveGraphPositionFromClientPoint(event.clientX, event.clientY) ||
+      this.resolvePasteAnchorPosition();
+    await this.insertVaultNoteNodes(dropped.notePaths, anchor, {
+      source: "drop",
+    });
   }
 
   private isAbsoluteFilesystemPath(path: string): boolean {
@@ -1766,8 +2650,7 @@ export class SystemSculptStudioView extends ItemView {
         this.scheduleProjectSave();
       },
       onNodeConfigMutated: (node) => {
-        this.refreshNodeCardPreview(node);
-        this.scheduleProjectSave();
+        this.handleNodeConfigMutated(node);
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
@@ -1780,6 +2663,7 @@ export class SystemSculptStudioView extends ItemView {
       onRevealPathInFinder: (path) => {
         void this.revealPathInFinder(path);
       },
+      resolveNodeBadge: (node) => this.resolveNodeCardBadge(node),
     });
 
     this.graphViewportEl = result.viewportEl;
@@ -1801,6 +2685,12 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl.addEventListener("pointerleave", () => {
       this.lastGraphPointerPosition = null;
     }, { passive: true });
+    this.graphViewportEl.addEventListener("dragover", (event) => {
+      this.handleGraphViewportDragOver(event);
+    });
+    this.graphViewportEl.addEventListener("drop", (event) => {
+      void this.handleGraphViewportDrop(event);
+    });
     this.restoreGraphViewportState(this.graphViewportEl);
     const inspector = this.ensureInspectorOverlay();
     const contextMenu = this.ensureNodeContextMenuOverlay();

@@ -13,6 +13,7 @@ function createContext(options: {
   storeAssetMock?: jest.Mock;
   readAssetMock?: jest.Mock;
   writeTempFileMock?: jest.Mock;
+  readVaultTextMock?: jest.Mock;
   readLocalFileBinaryMock?: jest.Mock;
   deleteLocalFileMock?: jest.Mock;
 }): StudioNodeExecutionContext {
@@ -37,6 +38,7 @@ function createContext(options: {
     }));
   const readAssetMock = options.readAssetMock || jest.fn(async () => new ArrayBuffer(0));
   const writeTempFileMock = options.writeTempFileMock || jest.fn(async () => "/tmp/file.bin");
+  const readVaultTextMock = options.readVaultTextMock || jest.fn(async () => "");
   const readLocalFileBinaryMock =
     options.readLocalFileBinaryMock || jest.fn(async () => new ArrayBuffer(0));
   const deleteLocalFileMock = options.deleteLocalFileMock || jest.fn(async () => {});
@@ -68,6 +70,7 @@ function createContext(options: {
       storeAsset: storeAssetMock,
       readAsset: readAssetMock,
       resolveAbsolutePath: (path) => path,
+      readVaultText: readVaultTextMock,
       readVaultBinary: async () => new ArrayBuffer(0),
       readLocalFileBinary: readLocalFileBinaryMock,
       writeTempFile: writeTempFileMock,
@@ -122,6 +125,46 @@ describe("Studio built-in text/image node execution", () => {
     );
 
     expect(result.outputs.text).toBe("Upstream text");
+  });
+
+  it("note node reads markdown text from the vault and emits text/path/title", async () => {
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).toBeDefined();
+    const readVaultTextMock = jest.fn(async () => "Live note body");
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "note-node",
+        kind: "studio.note",
+        config: {
+          vaultPath: "Inbox/Launch Plan.md",
+          value: "",
+        },
+        readVaultTextMock,
+      })
+    );
+
+    expect(readVaultTextMock).toHaveBeenCalledWith("Inbox/Launch Plan.md");
+    expect(result.outputs.text).toBe("Live note body");
+    expect(result.outputs.path).toBe("Inbox/Launch Plan.md");
+    expect(result.outputs.title).toBe("Launch Plan");
+  });
+
+  it("note node rejects non-markdown paths", async () => {
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).toBeDefined();
+
+    await expect(
+      definition!.execute(
+        createContext({
+          nodeId: "note-node",
+          kind: "studio.note",
+          config: {
+            vaultPath: "Inbox/Audio.m4a",
+          },
+        })
+      )
+    ).rejects.toThrow("only supports markdown files");
   });
 
   it("text generation consumes structured prompt payload and passes system prompt", async () => {

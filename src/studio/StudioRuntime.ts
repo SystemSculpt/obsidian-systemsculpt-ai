@@ -514,6 +514,21 @@ export class StudioRuntime {
                 `Unable to resolve an absolute path for "${vaultPath}". Desktop FileSystemAdapter is required.`
               );
             },
+            readVaultText: async (vaultPath: string) => {
+              permissions.assertFilesystemPath(vaultPath);
+              const file = this.app.vault.getAbstractFileByPath(vaultPath);
+              if (!(file instanceof TFile)) {
+                throw new Error(`Vault file not found: ${vaultPath}`);
+              }
+              if (!file.path.toLowerCase().endsWith(".md")) {
+                throw new Error(`Vault markdown file required: ${vaultPath}`);
+              }
+              const cachedRead = (this.app.vault as any).cachedRead;
+              if (typeof cachedRead === "function") {
+                return cachedRead.call(this.app.vault, file);
+              }
+              return this.app.vault.read(file);
+            },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
               if (!Platform.isDesktopApp) {

@@ -40,6 +40,11 @@ export type StudioGraphWorkspaceRendererOptions = {
   onRequestLabelEdit: (nodeId: string) => void;
   onStopLabelEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
+  resolveNodeBadge?: (node: StudioNodeInstance) => {
+    text: string;
+    tone?: "neutral" | "warning";
+    title?: string;
+  } | null;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
@@ -71,6 +76,7 @@ export function renderStudioGraphWorkspace(
     onRequestLabelEdit,
     onStopLabelEdit,
     onRevealPathInFinder,
+    resolveNodeBadge,
   } = options;
 
   const editor = root.createDiv({ cls: "ss-studio-graph-workspace" });
@@ -198,6 +204,7 @@ export function renderStudioGraphWorkspace(
       onRequestLabelEdit,
       onStopLabelEdit,
       onRevealPathInFinder,
+      resolveNodeBadge,
     });
   }
 

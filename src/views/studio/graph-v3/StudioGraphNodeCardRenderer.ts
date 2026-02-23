@@ -56,6 +56,11 @@ type RenderStudioGraphNodeCardOptions = {
   onRequestLabelEdit: (nodeId: string) => void;
   onStopLabelEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
+  resolveNodeBadge?: (node: StudioNodeInstance) => {
+    text: string;
+    tone?: "neutral" | "warning";
+    title?: string;
+  } | null;
 };
 
 function readLabelText(node: StudioNodeInstance): string {
@@ -361,6 +366,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRequestLabelEdit,
     onStopLabelEdit,
     onRevealPathInFinder,
+    resolveNodeBadge,
   } = options;
 
   const definition = findNodeDefinition(node);
@@ -486,6 +492,18 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       cls: "ss-studio-node-run-message",
       text: statusMessage,
     });
+  }
+  const nodeBadge = resolveNodeBadge?.(node) || null;
+  if (nodeBadge && nodeBadge.text.trim().length > 0) {
+    const badgeEl = statusRow.createDiv({
+      cls: `ss-studio-node-badge is-${nodeBadge.tone || "neutral"}`,
+      text: nodeBadge.text.trim(),
+    });
+    const tooltip = String(nodeBadge.title || "").trim();
+    if (tooltip) {
+      badgeEl.title = tooltip;
+      badgeEl.setAttribute("aria-label", tooltip);
+    }
   }
 
   const ports = nodeEl.createDiv({ cls: "ss-studio-node-ports" });
