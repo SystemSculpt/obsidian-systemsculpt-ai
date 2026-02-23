@@ -986,14 +986,10 @@ export class SystemSculptStudioView extends ItemView {
       currentProjectPath: this.currentProjectPath,
       graphInteraction: this.graphInteraction,
       getNodeRunState: (nodeId) => this.runPresentation.getNodeState(nodeId),
-      runProgress: this.runPresentation.getProgress(),
       findNodeDefinition: (node) => this.findNodeDefinition(node),
       resolveAssetPreviewSrc: (assetPath) => resolveStudioAssetPreviewSrc(this.app, assetPath),
       onOpenMediaPreview: (options) => {
         openStudioMediaPreviewModal(this.app, options);
-      },
-      onRunGraph: () => {
-        void this.runGraph();
       },
       onOpenNodeContextMenu: (event) => {
         this.openNodeContextMenuAtPointer(event);

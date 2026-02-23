@@ -332,15 +332,42 @@ export class StudioGraphSelectionController {
     viewport.scrollTop = graphY * clampedNextZoom - localY;
   }
 
+  private normalizeWheelDelta(delta: number, deltaMode: number, viewport: HTMLElement): number {
+    if (!Number.isFinite(delta) || delta === 0) {
+      return 0;
+    }
+    if (deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      return delta * 16;
+    }
+    if (deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      return delta * Math.max(1, viewport.clientHeight);
+    }
+    return delta;
+  }
+
   handleGraphViewportWheel(event: WheelEvent): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+
     const shouldZoom = event.ctrlKey || event.metaKey;
-    if (!shouldZoom) {
+    if (shouldZoom) {
+      event.preventDefault();
+      const scaleFactor = Math.exp(-event.deltaY * 0.0025);
+      this.zoomGraphAtClientPoint(this.graphZoom * scaleFactor, event.clientX, event.clientY);
+      return;
+    }
+
+    const deltaX = this.normalizeWheelDelta(event.deltaX, event.deltaMode, viewport);
+    const deltaY = this.normalizeWheelDelta(event.deltaY, event.deltaMode, viewport);
+    if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) {
       return;
     }
 
     event.preventDefault();
-    const scaleFactor = Math.exp(-event.deltaY * 0.0025);
-    this.zoomGraphAtClientPoint(this.graphZoom * scaleFactor, event.clientX, event.clientY);
+    viewport.scrollLeft += deltaX;
+    viewport.scrollTop += deltaY;
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioNodeInstance | null {

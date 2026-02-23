@@ -8,10 +8,7 @@ import {
   STUDIO_GRAPH_CANVAS_WIDTH,
   StudioGraphInteractionEngine,
 } from "../StudioGraphInteractionEngine";
-import type {
-  StudioNodeRunDisplayState,
-  StudioRunProgressDisplayState,
-} from "../StudioRunPresentationState";
+import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -23,7 +20,6 @@ export type StudioGraphWorkspaceRendererOptions = {
   currentProjectPath: string | null;
   graphInteraction: StudioGraphInteractionEngine;
   getNodeRunState: (nodeId: string) => StudioNodeRunDisplayState;
-  runProgress: StudioRunProgressDisplayState;
   findNodeDefinition: (node: StudioNodeInstance) => StudioNodeDefinition | null;
   resolveAssetPreviewSrc?: (assetPath: string) => string | null;
   onOpenMediaPreview?: (options: {
@@ -33,7 +29,6 @@ export type StudioGraphWorkspaceRendererOptions = {
     title: string;
   }) => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
-  onRunGraph: () => void;
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
@@ -53,12 +48,10 @@ export function renderStudioGraphWorkspace(
     currentProjectPath,
     graphInteraction,
     getNodeRunState,
-    runProgress,
     findNodeDefinition,
     resolveAssetPreviewSrc,
     onOpenMediaPreview,
     onOpenNodeContextMenu,
-    onRunGraph,
     onRunNode,
     onRemoveNode,
     onNodeTitleInput,
@@ -92,7 +85,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-graph-hud, .ss-studio-graph-hint, .ss-studio-node-inspector, .ss-studio-node-context-menu"
+        ".ss-studio-node-inspector, .ss-studio-node-context-menu"
       )
     ) {
       return;
@@ -109,7 +102,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-graph-hud, .ss-studio-graph-hint, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu"
       )
     ) {
       return;
@@ -124,58 +117,6 @@ export function renderStudioGraphWorkspace(
   canvas.style.width = `${STUDIO_GRAPH_CANVAS_WIDTH}px`;
   canvas.style.height = `${STUDIO_GRAPH_CANVAS_HEIGHT}px`;
   graphInteraction.registerCanvasElement(canvas);
-
-  const hud = viewport.createDiv({ cls: "ss-studio-graph-hud" });
-  const hudActions = hud.createDiv({ cls: "ss-studio-graph-hud-actions" });
-
-  const runGraphButton = hudActions.createEl("button", {
-    text: "Run Graph",
-    cls: "mod-cta ss-studio-graph-hud-run",
-  });
-  runGraphButton.disabled = busy;
-  runGraphButton.addEventListener("click", () => {
-    onRunGraph();
-  });
-
-  const pendingConnection = graphInteraction.getPendingConnection();
-  const linkStatus = hudActions.createEl("button", {
-    text: pendingConnection ? "Cancel Link" : "Link: None",
-    cls: pendingConnection ? "mod-warning" : "ss-studio-graph-hud-link",
-  });
-  linkStatus.disabled = !pendingConnection || busy;
-  linkStatus.addEventListener("click", () => {
-    graphInteraction.clearPendingConnection({ requestRender: true });
-  });
-
-  const zoomLabel = hudActions.createEl("span", {
-    cls: "ss-studio-zoom-label",
-    text: `${Math.round(graphInteraction.getGraphZoom() * 100)}%`,
-  });
-  graphInteraction.registerZoomLabelElement(zoomLabel);
-
-  const progress = hud.createDiv({ cls: "ss-studio-run-progress" });
-  progress.createDiv({
-    cls: "ss-studio-run-progress-label",
-    text:
-      runProgress.total > 0
-        ? `${runProgress.completed}/${runProgress.total} (${runProgress.percent}%)`
-        : "0/0 (0%)",
-  });
-  const progressTrack = progress.createDiv({ cls: "ss-studio-run-progress-track" });
-  const progressFill = progressTrack.createDiv({ cls: "ss-studio-run-progress-fill" });
-  progressFill.style.width = `${Math.max(0, Math.min(100, runProgress.percent))}%`;
-  progress.dataset.status = runProgress.status;
-  if (runProgress.message.trim().length > 0) {
-    progress.setAttribute("title", runProgress.message.trim());
-  }
-
-  const hint = viewport.createEl("p", {
-    cls: "ss-studio-graph-hint",
-    text: pendingConnection
-      ? "Connection mode active: click an input dot to complete, or release on empty space to cancel."
-      : "Right-click to add nodes. Drag cards to move. Hold and drag from an output dot to an input dot to connect. Pinch trackpad (or Cmd/Ctrl + wheel) to zoom. Press Delete to remove selected nodes.",
-  });
-  hint.setAttribute("data-connection-active", pendingConnection ? "true" : "false");
 
   const marquee = viewport.createDiv({ cls: "ss-studio-marquee-select" });
   graphInteraction.registerMarqueeElement(marquee);
