@@ -8,6 +8,10 @@ import { isManagedOutputPlaceholderNode } from "../StudioManagedOutputNodes";
 import { formatNodeConfigPreview } from "../StudioViewHelpers";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 import {
+  renderStudioNodeInlineEditor,
+  shouldSuppressNodeOutputPreview,
+} from "./StudioGraphNodeInlineEditors";
+import {
   isStudioExpandedTextNodeKind,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
@@ -53,28 +57,6 @@ type RenderStudioGraphNodeCardOptions = {
   onStopLabelEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
 };
-
-function readTextNodeValue(node: StudioNodeInstance): string {
-  const value = node.config.value;
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return "";
-}
-
-function readEditableNodeText(node: StudioNodeInstance, nodeRunState: StudioNodeRunDisplayState): string {
-  const configuredValue = readTextNodeValue(node);
-  if (configuredValue.trim().length > 0) {
-    return configuredValue;
-  }
-  const outputText = typeof nodeRunState.outputs?.text === "string"
-    ? nodeRunState.outputs.text
-    : "";
-  return outputText;
-}
 
 function readLabelText(node: StudioNodeInstance): string {
   const value = node.config.value;
@@ -589,46 +571,19 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line" });
     pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line" });
     pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line is-short" });
-  } else if (
-    node.kind === "studio.text" ||
-    node.kind === "studio.text_generation" ||
-    node.kind === "studio.transcription"
-  ) {
-    const editorLabel = node.kind === "studio.transcription"
-      ? "TRANSCRIPT"
-      : node.kind === "studio.text_generation"
-        ? "TEXT"
-        : "TEXT";
-    const editorWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-text-editor-wrap" });
-    editorWrapEl.createDiv({
-      cls: "ss-studio-node-text-editor-label",
-      text: editorLabel,
+  }
+  const renderedInlineEditor =
+    !isPlaceholder &&
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState,
+      definition,
+      interactionLocked,
+      onNodeConfigMutated,
     });
-    const textEditorEl = editorWrapEl.createEl("textarea", {
-      cls: "ss-studio-node-text-editor",
-      attr: {
-        placeholder:
-          node.kind === "studio.transcription"
-            ? "Transcribed text appears here..."
-            : node.kind === "studio.text_generation"
-              ? "Generated text appears here..."
-              : "Write or paste text...",
-        "aria-label":
-          node.kind === "studio.transcription"
-            ? `${node.title || "Transcription"} transcript`
-            : node.kind === "studio.text_generation"
-              ? `${node.title || "Text Generation"} text`
-              : `${node.title || "Text"} content`,
-      },
-    });
-    textEditorEl.value = readEditableNodeText(node, nodeRunState);
-    textEditorEl.disabled = interactionLocked;
-    textEditorEl.style.minHeight = "240px";
-    textEditorEl.addEventListener("input", (event) => {
-      node.config.value = (event.target as HTMLTextAreaElement).value;
-      onNodeConfigMutated(node);
-    });
-  } else if (!isPlaceholder) {
+
+  if (!isPlaceholder && !renderedInlineEditor) {
     const configPreviewEl = nodeEl.createEl("p", {
       cls: "ss-studio-node-config-preview",
       text: formatNodeConfigPreview(node),
@@ -636,13 +591,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     configPreviewEl.setAttribute("data-node-config-preview", node.id);
   }
 
-  const outputPreview =
-    node.kind === "studio.image_generation" ||
-    node.kind === "studio.text" ||
-    node.kind === "studio.text_generation" ||
-    node.kind === "studio.transcription"
-      ? ""
-      : formatNodeOutputPreview(nodeRunState.outputs);
+  const outputPreview = shouldSuppressNodeOutputPreview(node.kind)
+    ? ""
+    : formatNodeOutputPreview(nodeRunState.outputs);
   if (outputPreview) {
     const outputPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-output-preview" });
     const separatorIndex = outputPreview.indexOf(":");

@@ -17,6 +17,7 @@ import {
   materializePendingTextOutputPlaceholder,
   materializeImageOutputsAsMediaNodes,
   materializeTextOutputsAsTextNodes,
+  removeManagedTextOutputNodes,
   removePendingManagedOutputNodes,
 } from "../StudioManagedOutputNodes";
 
@@ -657,5 +658,41 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     expect(cleaned.removedNodeIds).toEqual(["pending_text_0"]);
     expect(project.graph.nodes).toHaveLength(1);
     expect(project.graph.edges).toHaveLength(0);
+  });
+
+  it("removes legacy managed text output nodes", () => {
+    const sourceNode = createTextSourceNode();
+    const project = createProject(sourceNode, {
+      groups: [
+        {
+          id: "group_1",
+          name: "Group 1",
+          nodeIds: [sourceNode.id],
+        },
+      ],
+    });
+
+    materializeTextOutputsAsTextNodes({
+      project,
+      sourceNode,
+      outputs: { text: "Title Option A" },
+      createNodeId: () => "managed_text_0",
+      createEdgeId: () => "managed_text_edge_0",
+    });
+    expect(project.graph.nodes.some((node) => node.id === "managed_text_0")).toBe(true);
+    expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(true);
+    expect(project.graph.groups?.[0]?.nodeIds.includes("managed_text_0")).toBe(true);
+
+    const removed = removeManagedTextOutputNodes({
+      project,
+      sourceNodeId: sourceNode.id,
+    });
+
+    expect(removed.changed).toBe(true);
+    expect(removed.removedNodeIds).toEqual(["managed_text_0"]);
+    expect(removed.removedEdgeIds).toEqual(["managed_text_edge_0"]);
+    expect(project.graph.nodes.some((node) => node.id === "managed_text_0")).toBe(false);
+    expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(false);
+    expect(project.graph.groups?.[0]?.nodeIds.includes("managed_text_0")).toBe(false);
   });
 });

@@ -63,68 +63,31 @@ describe("Studio node config validation", () => {
     expect(result.errors.some((error) => error.fieldKey === "method")).toBe(true);
   });
 
-  it("rejects invalid image-generation provider values", () => {
+  it("rejects invalid image-generation aspect-ratio values", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).not.toBeNull();
 
     const result = validateNodeConfig(definition!, {
-      provider: "unknown-provider",
       modelId: "google/gemini-3-pro-image-preview",
       count: 1,
-      aspectRatio: "16:9",
+      aspectRatio: "bad-ratio",
     });
 
     expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "provider")).toBe(true);
+    expect(result.errors.some((error) => error.fieldKey === "aspectRatio")).toBe(true);
   });
 
-  it("does not validate hidden image model field when local provider is selected", () => {
+  it("accepts legacy provider key as unknown config key during validation", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).not.toBeNull();
 
     const result = validateNodeConfig(definition!, {
-      provider: "local_macos_image_generation",
-      modelId: "totally-invalid-model",
-      count: 1,
-      aspectRatio: "16:9",
-    });
-
-    expect(result.isValid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("validates local-only controls when local provider is selected", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      provider: "local_macos_image_generation",
-      count: 1,
-      localAspectRatio: "not-a-real-ratio",
-      localQuality: "balanced",
-      localReferenceInfluence: "strong",
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "localAspectRatio")).toBe(true);
-  });
-
-  it("does not validate hidden local controls when SystemSculpt provider is selected", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      provider: "systemsculpt_ai",
+      provider: "legacy-provider",
       modelId: "google/gemini-3-pro-image-preview",
       count: 1,
       aspectRatio: "16:9",
-      localAspectRatio: "bad-local-value",
-      localQuality: "bad-local-quality",
-      localReferenceInfluence: "bad-reference-value",
     });
 
     expect(result.isValid).toBe(true);

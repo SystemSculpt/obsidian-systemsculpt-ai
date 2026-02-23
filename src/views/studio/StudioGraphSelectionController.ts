@@ -13,6 +13,7 @@ import {
   STUDIO_GRAPH_CANVAS_MAX_WIDTH,
 } from "./graph-v3/StudioGraphCanvasBounds";
 import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
+import { shouldStudioGraphDeferWheelToNativeScroll } from "./StudioGraphDomTargeting";
 
 type GraphPoint = {
   x: number;
@@ -23,15 +24,6 @@ const WHEEL_DOM_DELTA_LINE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
 const WHEEL_DOM_DELTA_PAGE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
-const NATIVE_WHEEL_SCROLL_SELECTORS = [
-  ".ss-studio-node-inspector",
-  ".ss-studio-node-context-menu",
-  ".ss-studio-simple-context-menu",
-  ".ss-studio-group-color-palette",
-  ".ss-studio-node-text-editor",
-  ".ss-studio-label-editor",
-].join(", ");
-
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
@@ -393,25 +385,8 @@ export class StudioGraphSelectionController {
     return delta;
   }
 
-  private resolveEventElement(target: EventTarget | null): Element | null {
-    if (!target) {
-      return null;
-    }
-    if (typeof (target as { closest?: unknown }).closest === "function") {
-      return target as Element;
-    }
-    if (typeof Node !== "undefined" && target instanceof Node) {
-      return target.parentElement;
-    }
-    return null;
-  }
-
   private shouldDeferWheelToOverlay(event: WheelEvent): boolean {
-    const targetEl = this.resolveEventElement(event.target);
-    if (!targetEl) {
-      return false;
-    }
-    return Boolean(targetEl.closest(NATIVE_WHEEL_SCROLL_SELECTORS));
+    return shouldStudioGraphDeferWheelToNativeScroll(event.target);
   }
 
   handleGraphViewportWheel(event: WheelEvent): void {

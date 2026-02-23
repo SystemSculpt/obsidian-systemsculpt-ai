@@ -5,18 +5,6 @@ import type {
   StudioNodeExecutionContext,
 } from "../types";
 import {
-  generateImageWithLocalMacProvider,
-  LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO,
-  LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET,
-  LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE,
-  LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS,
-  LOCAL_MAC_IMAGE_SUPPORTED_QUALITY_PRESETS,
-  LOCAL_MAC_IMAGE_SUPPORTED_REFERENCE_INFLUENCE,
-  normalizeStudioImageProviderId,
-  STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
-  STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
-} from "./localMacImageGeneration";
-import {
   extractImageInputCandidates,
   getText,
   inferMimeTypeFromPath,
@@ -30,12 +18,13 @@ import {
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
 const IMAGE_CONTEXT_MAX_CHARS = 3_600;
 const IMAGE_INPUT_MAX_COUNT = 8;
-const DEFAULT_IMAGE_PROVIDER_ID = STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT;
 const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3-pro-image-preview";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
-const DEFAULT_LOCAL_IMAGE_ASPECT_RATIO = LOCAL_MAC_IMAGE_DEFAULT_ASPECT_RATIO;
-const DEFAULT_LOCAL_IMAGE_QUALITY_PRESET = LOCAL_MAC_IMAGE_DEFAULT_QUALITY_PRESET;
-const DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE = LOCAL_MAC_IMAGE_DEFAULT_REFERENCE_INFLUENCE;
+const LEGACY_LOCAL_PROVIDER_IDS = new Set([
+  "local_macos_image_generation",
+  "local_macos",
+  "local_macos_image",
+]);
 
 function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
   const normalized = String(mimeType || "").trim().toLowerCase();
@@ -83,18 +72,6 @@ function compactContextText(text: string, maxChars: number = IMAGE_CONTEXT_MAX_C
     return head;
   }
   return `${head} [...] ${tail}`;
-}
-
-function normalizeAllowedString(
-  value: string,
-  allowed: readonly string[],
-  fallback: string
-): string {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return fallback;
-  }
-  return allowed.includes(trimmed) ? trimmed : fallback;
 }
 
 async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<{
@@ -233,29 +210,13 @@ export const imageGenerationNode: StudioNodeDefinition = {
   ],
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
-    provider: DEFAULT_IMAGE_PROVIDER_ID,
     systemPrompt: "",
     modelId: DEFAULT_IMAGE_MODEL_ID,
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
-    localAspectRatio: DEFAULT_LOCAL_IMAGE_ASPECT_RATIO,
-    localQuality: DEFAULT_LOCAL_IMAGE_QUALITY_PRESET,
-    localReferenceInfluence: DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE,
   },
   configSchema: {
     fields: [
-      {
-        key: "provider",
-        label: "Image Provider",
-        description: "Choose SystemSculpt AI or local macOS image generation.",
-        type: "select",
-        required: true,
-        selectPresentation: "button_group",
-        options: [
-          { value: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT, label: "SystemSculpt AI" },
-          { value: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS, label: "Local macOS image generation" },
-        ],
-      },
       {
         key: "systemPrompt",
         label: "System Prompt",
@@ -266,13 +227,9 @@ export const imageGenerationNode: StudioNodeDefinition = {
       {
         key: "modelId",
         label: "Image Model",
-        description: "Used by the SystemSculpt AI provider.",
+        description: "Image model used for SystemSculpt API generation.",
         type: "select",
         required: false,
-        visibleWhen: {
-          key: "provider",
-          equals: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
-        },
         options: [
           { value: "google/gemini-3-pro-image-preview", label: "Gemini Nano Banana Pro" },
           { value: "bytedance-seed/seedream-4.5", label: "ByteDance Seedream 4.5" },
@@ -296,11 +253,7 @@ export const imageGenerationNode: StudioNodeDefinition = {
         label: "Aspect Ratio",
         type: "select",
         required: false,
-        description: "Used by the SystemSculpt AI provider.",
-        visibleWhen: {
-          key: "provider",
-          equals: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
-        },
+        description: "Target output aspect ratio.",
         options: [
           { value: "16:9", label: "16:9 (YouTube)" },
           { value: "1:1", label: "1:1" },
@@ -308,56 +261,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
           { value: "4:3", label: "4:3" },
           { value: "3:4", label: "3:4" },
           { value: "21:9", label: "21:9" },
-        ],
-      },
-      {
-        key: "localAspectRatio",
-        label: "Local Aspect Ratio",
-        type: "select",
-        required: false,
-        description: "Native ratio preset for local macOS diffusion.",
-        visibleWhen: {
-          key: "provider",
-          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
-        },
-        options: [
-          { value: "1:1", label: "1:1" },
-          { value: "4:3", label: "4:3" },
-          { value: "3:4", label: "3:4" },
-          { value: "16:9", label: "16:9" },
-          { value: "9:16", label: "9:16" },
-        ],
-      },
-      {
-        key: "localQuality",
-        label: "Local Quality",
-        type: "select",
-        required: false,
-        description: "Layman quality preset for local macOS diffusion speed vs detail.",
-        visibleWhen: {
-          key: "provider",
-          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
-        },
-        options: [
-          { value: "fast", label: "Fast" },
-          { value: "balanced", label: "Balanced" },
-          { value: "high", label: "High Detail" },
-        ],
-      },
-      {
-        key: "localReferenceInfluence",
-        label: "Reference Influence",
-        type: "select",
-        required: false,
-        description: "How closely local generation should follow the first connected reference image.",
-        visibleWhen: {
-          key: "provider",
-          equals: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
-        },
-        options: [
-          { value: "subtle", label: "Subtle" },
-          { value: "balanced", label: "Balanced" },
-          { value: "strong", label: "Strong" },
         ],
       },
     ],
@@ -370,63 +273,25 @@ export const imageGenerationNode: StudioNodeDefinition = {
     }
     const inputImages = await resolveInputImages(context, structuredInputImages);
     const providerRaw = getText(context.node.config.provider as StudioJsonValue).trim();
-    const provider = normalizeStudioImageProviderId(providerRaw);
-    if (!provider && providerRaw) {
+    if (LEGACY_LOCAL_PROVIDER_IDS.has(providerRaw.toLowerCase())) {
       throw new Error(
-        `Image generation node "${context.node.id}" has unsupported provider "${providerRaw}".`
+        `Image generation node "${context.node.id}" is configured for removed provider "${providerRaw}". Switch this node to SystemSculpt AI and rerun.`
       );
     }
-    const resolvedProvider = provider || DEFAULT_IMAGE_PROVIDER_ID;
     const modelId = getText(context.node.config.modelId as StudioJsonValue).trim() || undefined;
     const countRaw = Number(context.node.config.count as StudioJsonValue);
     const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
     const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
-    const configuredLocalAspectRatio = getText(
-      context.node.config.localAspectRatio as StudioJsonValue
-    ).trim();
-    const configuredLocalQuality = getText(context.node.config.localQuality as StudioJsonValue).trim();
-    const configuredReferenceInfluence = getText(
-      context.node.config.localReferenceInfluence as StudioJsonValue
-    ).trim();
-    const localAspectRatio = normalizeAllowedString(
-      configuredLocalAspectRatio,
-      LOCAL_MAC_IMAGE_SUPPORTED_ASPECT_RATIOS,
-      DEFAULT_LOCAL_IMAGE_ASPECT_RATIO
-    );
-    const localQuality = normalizeAllowedString(
-      configuredLocalQuality,
-      LOCAL_MAC_IMAGE_SUPPORTED_QUALITY_PRESETS,
-      DEFAULT_LOCAL_IMAGE_QUALITY_PRESET
-    );
-    const localReferenceInfluence = normalizeAllowedString(
-      configuredReferenceInfluence,
-      LOCAL_MAC_IMAGE_SUPPORTED_REFERENCE_INFLUENCE,
-      DEFAULT_LOCAL_IMAGE_REFERENCE_INFLUENCE
-    );
-    const aspectRatio =
-      resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
-        ? localAspectRatio
-        : configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
-    const result =
-      resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
-        ? await generateImageWithLocalMacProvider(context, {
-            prompt,
-            count,
-            aspectRatio,
-            inputImages,
-            runId: context.runId,
-            qualityPreset: localQuality,
-            referenceInfluence: localReferenceInfluence,
-          })
-        : await context.services.api.generateImage({
-            prompt,
-            modelId,
-            count,
-            aspectRatio,
-            inputImages,
-            runId: context.runId,
-            projectPath: context.projectPath,
-          });
+    const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
+    const result = await context.services.api.generateImage({
+      prompt,
+      modelId,
+      count,
+      aspectRatio,
+      inputImages,
+      runId: context.runId,
+      projectPath: context.projectPath,
+    });
     return {
       outputs: {
         images: result.images as unknown as StudioJsonValue,

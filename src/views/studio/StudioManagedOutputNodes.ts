@@ -649,6 +649,57 @@ export function cleanupStaleManagedOutputPlaceholders(
   return removePendingManagedOutputNodes({ project });
 }
 
+export function removeManagedTextOutputNodes(options: {
+  project: StudioProjectV1;
+  sourceNodeId?: string;
+}): RemovePendingManagedOutputNodesResult {
+  const sourceNodeId = String(options.sourceNodeId || "").trim();
+  const removalCandidates = new Set<string>();
+  for (const node of options.project.graph.nodes) {
+    if (!isManagedTextNode(node)) {
+      continue;
+    }
+    if (sourceNodeId) {
+      const managedSourceNodeId = readManagedTextSourceNodeId(node);
+      if (managedSourceNodeId !== sourceNodeId) {
+        continue;
+      }
+    }
+    removalCandidates.add(node.id);
+  }
+
+  if (removalCandidates.size === 0) {
+    return emptyRemovePendingResult();
+  }
+
+  const previousNodeCount = options.project.graph.nodes.length;
+  const removedEdgeIds = options.project.graph.edges
+    .filter((edge) => removalCandidates.has(edge.fromNodeId) || removalCandidates.has(edge.toNodeId))
+    .map((edge) => edge.id);
+  options.project.graph.nodes = options.project.graph.nodes.filter(
+    (node) => !removalCandidates.has(node.id)
+  );
+  options.project.graph.edges = options.project.graph.edges.filter(
+    (edge) => !removalCandidates.has(edge.fromNodeId) && !removalCandidates.has(edge.toNodeId)
+  );
+
+  for (const group of options.project.graph.groups || []) {
+    const nodeIds = Array.isArray(group.nodeIds) ? group.nodeIds : [];
+    group.nodeIds = nodeIds.filter((nodeId) => !removalCandidates.has(nodeId));
+  }
+  if (Array.isArray(options.project.graph.groups)) {
+    options.project.graph.groups = options.project.graph.groups.filter(
+      (group) => Array.isArray(group.nodeIds) && group.nodeIds.length > 0
+    );
+  }
+
+  return {
+    changed: options.project.graph.nodes.length !== previousNodeCount || removedEdgeIds.length > 0,
+    removedNodeIds: Array.from(removalCandidates),
+    removedEdgeIds,
+  };
+}
+
 export function materializePendingImageOutputPlaceholders(
   options: MaterializePendingImageOutputPlaceholdersOptions
 ): MaterializeManagedOutputsResult {

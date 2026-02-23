@@ -7,7 +7,6 @@ import { migrateStudioProjectToPathOnlyPorts } from "./StudioGraphMigrations";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { StudioRuntime } from "./StudioRuntime";
-import { STUDIO_LOCAL_MAC_IMAGE_COMMAND } from "./nodes/localMacImageGeneration";
 import { StudioSystemSculptApiAdapter } from "./StudioSystemSculptApiAdapter";
 import { randomId } from "./utils";
 import type {
@@ -177,8 +176,6 @@ export class StudioService {
       "ffprobe",
       "*/ffmpeg",
       "*/ffprobe",
-      STUDIO_LOCAL_MAC_IMAGE_COMMAND,
-      `*/${STUDIO_LOCAL_MAC_IMAGE_COMMAND}`,
     ];
     const cliGrant = policy.grants.find((grant) => grant.capability === "cli");
     if (!cliGrant) {

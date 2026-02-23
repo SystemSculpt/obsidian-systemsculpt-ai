@@ -3,7 +3,6 @@ import type { StudioNodeInstance } from "./types";
 const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.label"]);
 const MANAGED_OUTPUT_PRODUCER_NODE_KINDS = new Set<string>([
   "studio.image_generation",
-  "studio.text_generation",
 ]);
 
 export function isStudioVisualOnlyNodeKind(kind: string): boolean {

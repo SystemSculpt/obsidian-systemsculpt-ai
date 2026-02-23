@@ -23,7 +23,6 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 - [Benchmark](benchmark.md)
 - [Testing coverage map](testing-coverage-map.md)
 - [On-device embeddings PRD (archival draft)](prd-on-device-embeddings.md)
-- [Studio local macOS image generation](studio-local-macos-image-generation.md)
 - [Design notes (snapshot docs)](design/)
 - [Research notes (time-bound snapshots)](research/)
 

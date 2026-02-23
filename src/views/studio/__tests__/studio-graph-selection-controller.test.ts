@@ -75,7 +75,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(282);
   });
 
-  it("keeps native scrolling for wheel events inside text node editors", () => {
+  it("keeps native scrolling for wheel events inside editable form controls", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -84,12 +84,40 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     const event = {
       target: {
         closest: (selector: string) =>
-          selector.includes(".ss-studio-node-text-editor") ? ({} as Element) : null,
+          selector.includes("textarea") ? ({} as Element) : null,
       },
       ctrlKey: false,
       metaKey: false,
       deltaX: 0,
       deltaY: 72,
+      deltaMode: 0,
+      clientX: 0,
+      clientY: 0,
+      preventDefault,
+    } as unknown as WheelEvent;
+
+    controller.handleGraphViewportWheel(event);
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(viewport.scrollLeft).toBe(120);
+    expect(viewport.scrollTop).toBe(240);
+  });
+
+  it("keeps native scrolling for wheel events inside image generation prompt editor", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+
+    const preventDefault = jest.fn();
+    const event = {
+      target: {
+        closest: (selector: string) =>
+          selector.includes("textarea") ? ({} as Element) : null,
+      },
+      ctrlKey: false,
+      metaKey: false,
+      deltaX: 0,
+      deltaY: 96,
       deltaMode: 0,
       clientX: 0,
       clientY: 0,

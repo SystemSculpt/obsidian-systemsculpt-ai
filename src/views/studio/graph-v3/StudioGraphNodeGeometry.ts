@@ -33,6 +33,7 @@ export function isStudioLabelNode(node: Pick<StudioNodeInstance, "kind">): boole
 export function isStudioExpandedTextNodeKind(kind: string): boolean {
   const normalizedKind = String(kind || "").trim();
   return (
+    normalizedKind === "studio.image_generation" ||
     normalizedKind === "studio.text" ||
     normalizedKind === "studio.text_generation" ||
     normalizedKind === "studio.transcription"

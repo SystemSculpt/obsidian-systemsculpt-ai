@@ -42,6 +42,7 @@ import {
   STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
   STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
 } from "./graph-v3/StudioGraphNodeGeometry";
+import { hasStudioNodeInlineEditor } from "./graph-v3/StudioGraphNodeInlineEditors";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
@@ -67,11 +68,11 @@ import {
 import {
   cleanupStaleManagedOutputPlaceholders,
   materializePendingImageOutputPlaceholders,
-  materializePendingTextOutputPlaceholder,
   materializeImageOutputsAsMediaNodes,
-  materializeTextOutputsAsTextNodes,
+  removeManagedTextOutputNodes,
   removePendingManagedOutputNodes,
 } from "./StudioManagedOutputNodes";
+import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -226,19 +227,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private isEditableKeyboardTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-    if (target.closest(".ss-studio-node-context-menu, .ss-studio-simple-context-menu")) {
-      return true;
-    }
-    if (target.isContentEditable) {
-      return true;
-    }
-    if (target.matches("input, textarea, select")) {
-      return true;
-    }
-    return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+    return isStudioGraphEditableTarget(target);
   }
 
   private handleWindowKeyDown(event: KeyboardEvent): void {
@@ -562,17 +551,6 @@ export class SystemSculptStudioView extends ItemView {
       });
       changed = changed || placeholders.changed;
     }
-    if (sourceNode.kind === "studio.text_generation") {
-      const placeholder = materializePendingTextOutputPlaceholder({
-        project: this.currentProject,
-        sourceNode,
-        runId: event.runId,
-        createdAt: event.at,
-        createNodeId: () => randomId("node"),
-        createEdgeId: () => randomId("edge"),
-      });
-      changed = changed || placeholder.changed;
-    }
 
     if (!changed) {
       return;
@@ -607,14 +585,11 @@ export class SystemSculptStudioView extends ItemView {
       changed = changed || materializedMedia.changed;
     }
     if (sourceNode.kind === "studio.text_generation") {
-      const materializedText = materializeTextOutputsAsTextNodes({
+      const removedManagedText = removeManagedTextOutputNodes({
         project: this.currentProject,
-        sourceNode,
-        outputs: event.outputs || null,
-        createNodeId: () => randomId("node"),
-        createEdgeId: () => randomId("edge"),
+        sourceNodeId: sourceNode.id,
       });
-      changed = changed || materializedText.changed;
+      changed = changed || removedManagedText.changed;
     }
 
     if (!changed) {
@@ -652,18 +627,6 @@ export class SystemSculptStudioView extends ItemView {
           createEdgeId: () => randomId("edge"),
         });
         if (materializedMedia.changed) {
-          changed = true;
-        }
-      }
-      if (node.kind === "studio.text_generation") {
-        const materializedText = materializeTextOutputsAsTextNodes({
-          project: this.currentProject,
-          sourceNode: node,
-          outputs: cacheEntry.outputs,
-          createNodeId: () => randomId("node"),
-          createEdgeId: () => randomId("edge"),
-        });
-        if (materializedText.changed) {
           changed = true;
         }
       }
@@ -817,6 +780,7 @@ export class SystemSculptStudioView extends ItemView {
       const groupsSanitized = sanitizeGraphGroups(project);
       const mediaTitlesNormalized = this.normalizeLegacyMediaNodeTitles(project);
       const stalePendingRemoved = cleanupStaleManagedOutputPlaceholders(project).changed;
+      const legacyManagedTextRemoved = removeManagedTextOutputNodes({ project }).changed;
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
@@ -846,7 +810,7 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
-      if (groupsSanitized || mediaTitlesNormalized || stalePendingRemoved) {
+      if (groupsSanitized || mediaTitlesNormalized || stalePendingRemoved || legacyManagedTextRemoved) {
         this.scheduleProjectSave();
       }
       this.lastError = null;
@@ -1004,6 +968,10 @@ export class SystemSculptStudioView extends ItemView {
 
     const definition = this.findNodeDefinition(node);
     if (!definition) {
+      this.inspectorOverlay.hide();
+      return;
+    }
+    if (hasStudioNodeInlineEditor(node.kind)) {
       this.inspectorOverlay.hide();
       return;
     }
