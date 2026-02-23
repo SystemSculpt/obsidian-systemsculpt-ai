@@ -1,4 +1,4 @@
-import { App, MarkdownView, Notice, WorkspaceLeaf, TFile } from "obsidian";
+import { App, MarkdownView, Notice, Platform, WorkspaceLeaf, TFile } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { StandardModelSelectionModal, ModelSelectionResult, ModelSelectionOptions } from "../../modals/StandardModelSelectionModal";
@@ -11,6 +11,7 @@ import { errorLogger } from "../../utils/errorLogger";
 import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowTemplates";
 import { AutomationRunnerModal, AutomationOption } from "../../modals/AutomationRunnerModal";
 import { AutomationBacklogModal } from "../../modals/AutomationBacklogModal";
+import { showConfirm } from "../ui/notifications";
 
 export class CommandManager {
   private plugin: SystemSculptPlugin;
@@ -50,7 +51,7 @@ export class CommandManager {
     this.registerRunAutomationCommand();
     this.registerAutomationBacklogCommand();
     this.registerYouTubeCanvas();
-    this.registerCanvasFlowCommands();
+    this.registerSystemSculptStudioCommands();
   }
 
 
@@ -780,35 +781,68 @@ export class CommandManager {
     });
   }
 
-  private registerCanvasFlowCommands() {
+  private registerSystemSculptStudioCommands() {
     this.plugin.addCommand({
-      id: "canvasflow-create-prompt-node",
-      name: "SystemSculpt - Create Prompt Node (Active Canvas)",
-      checkCallback: (checking: boolean) => {
-        const leaf = this.app.workspace.activeLeaf;
-        const viewType = (leaf?.view as any)?.getViewType?.();
-        if (viewType !== "canvas") return false;
-        if (!checking) {
-          (async () => {
-            try {
-              const { createCanvasFlowPromptNodeInActiveCanvas } = await import("../../services/canvasflow/CanvasFlowCommands");
-              await createCanvasFlowPromptNodeInActiveCanvas(this.app, this.plugin);
-            } catch (error: any) {
-              new Notice(`SystemSculpt canvas action failed: ${error?.message || error}`);
-            }
-          })();
+      id: "open-systemsculpt-studio",
+      name: "Open SystemSculpt Studio",
+      callback: async () => {
+        if (!Platform.isDesktopApp) {
+          new Notice("SystemSculpt Studio is desktop-only.");
+          return;
         }
-        return true;
+
+        try {
+          const activeFile = this.app.workspace.getActiveFile();
+          const activeStudioFile =
+            activeFile && activeFile.extension.toLowerCase() === "systemsculpt" ? activeFile : null;
+
+          const fallbackStudioFile =
+            activeStudioFile ||
+            this.app.vault
+              .getFiles()
+              .find((file) => file.extension.toLowerCase() === "systemsculpt");
+
+          if (!fallbackStudioFile) {
+            new Notice("No .systemsculpt files found. Create one in your vault first.");
+            return;
+          }
+
+          await this.plugin.getViewManager().activateSystemSculptStudioView(fallbackStudioFile.path);
+        } catch (error: any) {
+          new Notice(`Unable to open SystemSculpt Studio: ${error?.message || error}`);
+        }
       },
     });
 
     this.plugin.addCommand({
-      id: "canvasflow-toggle-enhancements",
-      name: "SystemSculpt - Toggle Canvas Enhancements",
+      id: "run-systemsculpt-studio-project",
+      name: "Run Current SystemSculpt Studio Project",
       callback: async () => {
-        const next = !(this.plugin.settings.canvasFlowEnabled === true);
-        await this.plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: next });
-        new Notice(next ? "SystemSculpt canvas enhancements enabled." : "SystemSculpt canvas enhancements disabled.");
+        if (!Platform.isDesktopApp) {
+          new Notice("SystemSculpt Studio is desktop-only.");
+          return;
+        }
+
+        try {
+          const studio = this.plugin.getStudioService();
+          const activeFile = this.app.workspace.getActiveFile();
+          if (activeFile && activeFile.extension.toLowerCase() === "systemsculpt") {
+            await studio.openProject(activeFile.path);
+          }
+
+          if (!studio.getCurrentProjectPath()) {
+            new Notice("Open a .systemsculpt file in the file explorer first.");
+            return;
+          }
+          const result = await studio.runCurrentProject();
+          if (result.status === "success") {
+            new Notice(`Studio run complete: ${result.runId}`);
+          } else {
+            new Notice(`Studio run failed: ${result.error || result.runId}`);
+          }
+        } catch (error: any) {
+          new Notice(`Unable to run Studio project: ${error?.message || error}`);
+        }
       },
     });
   }
@@ -855,16 +889,22 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
         if (!checking) {
           (async () => {
             try {
-              const { Notice } = require('obsidian');
-              // Ask for confirmation
-              const confirmed = confirm('This will delete and rebuild embeddings for the current provider/model/schema only. Continue?');
+              const { confirmed } = await showConfirm(
+                this.app,
+                "This will delete and rebuild embeddings for the current provider/model/schema only.",
+                {
+                  title: "Rebuild Embeddings",
+                  primaryButton: "Rebuild",
+                  secondaryButton: "Cancel",
+                  icon: "alert-triangle",
+                }
+              );
               if (!confirmed) return;
               new Notice('Rebuilding embeddings for current model…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
               new Notice('Embeddings rebuild complete.', 4000);
             } catch (e: any) {
-              const { Notice } = require('obsidian');
               new Notice(`Failed to rebuild embeddings: ${e?.message || e}`, 8000);
             }
           })();

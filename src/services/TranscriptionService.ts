@@ -1839,6 +1839,17 @@ export class TranscriptionService {
       throw new Error(`Unsupported file type: ${extension}`);
     }
 
+    const provider = this.plugin.settings.transcriptionProvider;
+    const isMobile = this.platform.isMobile();
+
+    if (provider === "systemsculpt" && !isMobile && file.stat.size > SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES) {
+      throw new Error(
+        `File too large for SystemSculpt transcription jobs. Maximum supported size is ${Math.floor(
+          SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES / (1024 * 1024)
+        )}MB per audio file.`
+      );
+    }
+
     if (file.stat.size > MAX_FILE_SIZE) {
       throw new Error(`File too large. Maximum allowed size is ${Math.floor(MAX_FILE_SIZE / (1024 * 1024))}MB.`);
     }
@@ -1849,9 +1860,6 @@ export class TranscriptionService {
         size: file.stat.size,
         extension
       });
-
-      const provider = this.plugin.settings.transcriptionProvider;
-      const isMobile = this.platform.isMobile();
 
       if (
         provider === "systemsculpt" &&

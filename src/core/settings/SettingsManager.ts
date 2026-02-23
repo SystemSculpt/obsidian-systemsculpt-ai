@@ -186,6 +186,22 @@ export class SettingsManager {
     if (typeof migratedSettings.defaultChatTag !== "string") {
       migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
     }
+
+    if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
+      migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
+    }
+
+    if (typeof migratedSettings.studioRunRetentionMaxRuns !== "number" || !Number.isFinite(migratedSettings.studioRunRetentionMaxRuns)) {
+      migratedSettings.studioRunRetentionMaxRuns = DEFAULT_SETTINGS.studioRunRetentionMaxRuns;
+    }
+
+    if (typeof migratedSettings.studioRunRetentionMaxArtifactsMb !== "number" || !Number.isFinite(migratedSettings.studioRunRetentionMaxArtifactsMb)) {
+      migratedSettings.studioRunRetentionMaxArtifactsMb = DEFAULT_SETTINGS.studioRunRetentionMaxArtifactsMb;
+    }
+
+    if (typeof migratedSettings.studioTelemetryOptIn !== "boolean") {
+      migratedSettings.studioTelemetryOptIn = DEFAULT_SETTINGS.studioTelemetryOptIn;
+    }
     
     return migratedSettings as SystemSculptSettings;
   }

@@ -348,12 +348,14 @@ export class SystemSculptImageGenerationService {
   private readonly licenseKey: string;
   private readonly pluginVersion: string;
   private readonly trustedCrossOriginDownloadHostSuffixes: string[];
+  private readonly defaultHeaders: Record<string, string>;
 
   constructor(options: {
     baseUrl?: string;
     licenseKey: string;
     pluginVersion?: string;
     trustedCrossOriginDownloadHostSuffixes?: string[];
+    defaultHeaders?: Record<string, string>;
   }) {
     this.baseUrl = resolveSystemSculptApiBaseUrl(options.baseUrl || API_BASE_URL);
     this.licenseKey = String(options.licenseKey || "").trim();
@@ -364,6 +366,7 @@ export class SystemSculptImageGenerationService {
     this.trustedCrossOriginDownloadHostSuffixes = Array.from(
       new Set([...TRUSTED_CROSS_ORIGIN_DOWNLOAD_HOST_SUFFIXES, ...extraSuffixes])
     );
+    this.defaultHeaders = { ...(options.defaultHeaders || {}) };
   }
 
   private endpoint(path: string): string {
@@ -487,10 +490,31 @@ export class SystemSculptImageGenerationService {
     }
   }
 
+  private shouldPreferRequestUrlForBinaryDownload(targetUrl: string): boolean {
+    if (Platform.isMobileApp) {
+      return true;
+    }
+
+    try {
+      const target = new URL(targetUrl);
+      const base = new URL(this.baseUrl);
+      if (target.origin === base.origin) {
+        return false;
+      }
+      if (!this.isTrustedCrossOriginDownloadHost(target.hostname)) {
+        return false;
+      }
+      return this.isSignedDownloadUrl(target);
+    } catch {
+      return false;
+    }
+  }
+
   private authHeaders(extra?: Record<string, string>): Record<string, string> {
     return {
       ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
       ...(this.pluginVersion ? { "x-plugin-version": this.pluginVersion } : {}),
+      ...this.defaultHeaders,
       ...(extra || {}),
     };
   }
@@ -654,7 +678,9 @@ export class SystemSculptImageGenerationService {
       throw new Error("Image download failed: empty body");
     };
 
-    const preferred = Platform.isMobileApp ? "requestUrl" : preferredTransport(url);
+    const preferred = this.shouldPreferRequestUrlForBinaryDownload(url)
+      ? "requestUrl"
+      : preferredTransport(url);
     if (preferred === "fetch") {
       try {
         return await viaFetch();

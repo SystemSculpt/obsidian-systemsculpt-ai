@@ -1,6 +1,7 @@
 import { App, Setting, Notice, moment } from 'obsidian';
 import { DailySettings, DailySettingsService, DEFAULT_DAILY_DIRECTORY_PATH } from '../services/daily/DailySettingsService';
 import { DailyNoteService } from '../services/daily/DailyNoteService';
+import { showConfirm } from '../core/ui/notifications';
 
 export class DailyTabContent {
 	private app: App;
@@ -365,8 +366,17 @@ export class DailyTabContent {
 					.setButtonText('Reset')
 					.setClass('mod-warning')
 					.onClick(async () => {
-						const confirmReset = confirm('Reset all daily settings to defaults? This cannot be undone.');
-						if (!confirmReset) return;
+						const { confirmed } = await showConfirm(
+							this.app,
+							'Reset all daily settings to defaults? This cannot be undone.',
+							{
+								title: 'Reset Daily Settings',
+								primaryButton: 'Reset',
+								secondaryButton: 'Cancel',
+								icon: 'alert-triangle',
+							}
+						);
+						if (!confirmed) return;
 						try {
 							await this.settingsService.resetSettings();
 							await this.display();

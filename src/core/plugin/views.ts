@@ -1,4 +1,4 @@
-import { App, WorkspaceLeaf, Notice, TFile } from "obsidian";
+import { App, WorkspaceLeaf, Notice, TFile, Platform } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { SystemPromptService } from "../../services/SystemPromptService";
@@ -7,6 +7,7 @@ import { ChatState } from "../../types/index";
 import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../../views/EmbeddingsView";
 import { BenchView, BENCH_VIEW_TYPE } from "../../views/benchview/BenchView";
 import { BenchResultsView, BENCH_RESULTS_VIEW_TYPE } from "../../views/benchresults/BenchResultsView";
+import { SystemSculptStudioView, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 
 interface ChatViewState {
@@ -307,6 +308,11 @@ export class ViewManager {
       BENCH_RESULTS_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => new BenchResultsView(leaf, this.plugin)
     );
+
+    this.plugin.registerView(
+      SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+      (leaf: WorkspaceLeaf) => new SystemSculptStudioView(leaf, this.plugin)
+    );
   }
 
 
@@ -375,11 +381,47 @@ export class ViewManager {
     return rightLeaf.view as BenchResultsView;
   }
 
+  async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
+    if (!Platform.isDesktopApp) {
+      throw new Error("SystemSculpt Studio is desktop-only.");
+    }
+
+    const normalizedTarget = String(projectPath || "").trim();
+    if (normalizedTarget) {
+      const existingLeaves = this.app.workspace.getLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+      for (const leaf of existingLeaves) {
+        const state = leaf.getViewState();
+        const file = typeof (state?.state as { file?: unknown })?.file === "string"
+          ? ((state.state as { file?: string }).file || "")
+          : "";
+        if (file === normalizedTarget) {
+          this.app.workspace.revealLeaf(leaf);
+          return leaf.view as SystemSculptStudioView;
+        }
+      }
+    }
+
+    const leaf = this.app.workspace.getLeaf("tab");
+    const viewState: Record<string, unknown> = {};
+    if (normalizedTarget) {
+      viewState.file = normalizedTarget;
+    }
+    await leaf.setViewState({
+      type: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+      active: true,
+      state: viewState,
+    });
+
+    this.app.workspace.revealLeaf(leaf);
+    return leaf.view as SystemSculptStudioView;
+  }
+
   unloadViews() {
     this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EMBEDDINGS_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(BENCH_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(BENCH_RESULTS_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
     this.ribbonManager.cleanup();
   }
 

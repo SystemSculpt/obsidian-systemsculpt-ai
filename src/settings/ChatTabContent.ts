@@ -7,6 +7,7 @@ import { SystemSculptModel } from "../types/llm";
 import { StandardModelSelectionModal } from "../modals/StandardModelSelectionModal";
 import { StandardSystemPromptSelectionModal } from "../modals/StandardSystemPromptSelectionModal";
 import { ensureCanonicalId } from "../utils/modelUtils";
+import { showConfirm } from "../core/ui/notifications";
 async function getCurrentDefaultPresetDisplayName(plugin: SystemSculptPlugin, app: App): Promise<string> {
     const type = plugin.settings.systemPromptType;
     const path = plugin.settings.systemPromptPath;
@@ -246,7 +247,17 @@ favoritesSetting.addExtraButton((button) => {
         return;
       }
 
-      if (!confirm("Remove all favorite models? This cannot be undone.")) {
+      const { confirmed } = await showConfirm(
+        app,
+        "Remove all favorite models? This cannot be undone.",
+        {
+          title: "Clear Favorites",
+          primaryButton: "Remove All",
+          secondaryButton: "Cancel",
+          icon: "trash",
+        }
+      );
+      if (!confirmed) {
         return;
       }
 

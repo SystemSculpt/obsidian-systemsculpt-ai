@@ -103,16 +103,19 @@ export class AgentSessionClient {
   private baseUrl: string;
   private licenseKey: string;
   private readonly requestFn: AgentSessionRequestFn;
+  private readonly defaultHeaders: Record<string, string>;
   private readonly sessionByChatId = new Map<string, ChatSessionState>();
 
   constructor(options: {
     baseUrl: string;
     licenseKey: string;
     request?: AgentSessionRequestFn;
+    defaultHeaders?: Record<string, string>;
   }) {
     this.baseUrl = options.baseUrl;
     this.licenseKey = options.licenseKey;
     this.requestFn = options.request ?? this.defaultRequest.bind(this);
+    this.defaultHeaders = { ...(options.defaultHeaders || {}) };
   }
 
   public updateConfig(next: { baseUrl: string; licenseKey: string }): void {
@@ -134,6 +137,7 @@ export class AgentSessionClient {
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS(sessionId)),
       method: "POST",
       headers: {
+        ...this.defaultHeaders,
         "x-plugin-version": pluginVersion,
         "Idempotency-Key": idempotencyKey,
       },
@@ -159,6 +163,7 @@ export class AgentSessionClient {
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS),
       method: "POST",
       headers: {
+        ...this.defaultHeaders,
         "x-plugin-version": pluginVersion,
         "Idempotency-Key": `pi-session:${chatId}:${modelId}`,
       },

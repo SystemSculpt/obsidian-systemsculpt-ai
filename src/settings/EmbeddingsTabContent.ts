@@ -7,6 +7,7 @@ import { ListSelectionModal, ListItem } from "../core/ui/modals/standard/ListSel
 import type SystemSculptPlugin from "../main";
 import type { CustomProvider } from "../types/llm";
 import { EmbeddingsPendingFilesModal } from "../modals/EmbeddingsPendingFilesModal";
+import { showConfirm } from "../core/ui/notifications";
 
 export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -142,7 +143,17 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
         .setWarning()
         .setButtonText('Clear data')
         .onClick(async () => {
-          if (!confirm('Clear all embeddings data? This cannot be undone.')) return;
+          const { confirmed } = await showConfirm(
+            tabInstance.app,
+            "Clear all embeddings data? This cannot be undone.",
+            {
+              title: "Clear Embeddings Data",
+              primaryButton: "Clear Data",
+              secondaryButton: "Cancel",
+              icon: "alert-triangle",
+            }
+          );
+          if (!confirmed) return;
 
           try {
             const manager = plugin.embeddingsManager;

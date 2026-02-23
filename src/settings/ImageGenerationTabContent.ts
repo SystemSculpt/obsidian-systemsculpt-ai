@@ -1,4 +1,4 @@
-import { Notice, Setting } from "obsidian";
+import { Notice, Platform, Setting } from "obsidian";
 import { ListSelectionModal, type ListItem } from "../core/ui/modals/standard/ListSelectionModal";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
@@ -21,21 +21,89 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   containerEl.createEl("h3", { text: "Image Generation" });
   containerEl.createEl("p", {
-    text: "Configure SystemSculpt Canvas (experimental) and run image generation through the SystemSculpt API with OpenRouter providers.",
+    text: "Configure SystemSculpt Studio (desktop-only) and run image generation through the SystemSculpt API with OpenRouter providers.",
     cls: "setting-item-description",
   });
 
   new Setting(containerEl)
-    .setName("Enable SystemSculpt Canvas enhancements (experimental)")
+    .setName("Open SystemSculpt Studio")
     .setDesc(
-      "Adds SystemSculpt canvas action buttons to the Canvas selection toolbar and injects prompt controls into SystemSculpt prompt nodes. Desktop-only. Expect breakage after Obsidian updates."
+      "Launch the new desktop-only Studio workspace (hard switch from CanvasFlow)."
     )
+    .addButton((button) => {
+      button
+        .setButtonText("Open Studio")
+        .setDisabled(!Platform.isDesktopApp)
+        .onClick(async () => {
+          if (!Platform.isDesktopApp) {
+            new Notice("SystemSculpt Studio is desktop-only.");
+            return;
+          }
+          try {
+            await plugin.getViewManager().activateSystemSculptStudioView();
+          } catch (error: any) {
+            new Notice(`Unable to open SystemSculpt Studio: ${error?.message || error}`);
+          }
+        });
+    });
+
+  new Setting(containerEl)
+    .setName("Studio projects folder")
+    .setDesc("Default vault folder used when creating new `.systemsculpt` projects.")
+    .addText((text) => {
+      text
+        .setPlaceholder("SystemSculpt/Studio")
+        .setValue(plugin.settings.studioDefaultProjectsFolder || "SystemSculpt/Studio")
+        .onChange(async (value) => {
+          await plugin
+            .getSettingsManager()
+            .updateSettings({ studioDefaultProjectsFolder: value.trim() || "SystemSculpt/Studio" });
+        });
+      attachFolderSuggester(text.inputEl, (value) => text.setValue(value), tabInstance.app);
+    });
+
+  new Setting(containerEl)
+    .setName("Studio run retention cap")
+    .setDesc("Maximum number of completed Studio runs stored per project before oldest run data is pruned.")
+    .addText((text) => {
+      text
+        .setPlaceholder("100")
+        .setValue(String(plugin.settings.studioRunRetentionMaxRuns ?? 100))
+        .onChange(async (value) => {
+          const parsed = Number.parseInt(value, 10);
+          if (!Number.isFinite(parsed)) return;
+          await plugin
+            .getSettingsManager()
+            .updateSettings({ studioRunRetentionMaxRuns: Math.max(1, Math.min(5000, parsed)) });
+        });
+      text.inputEl.inputMode = "numeric";
+    });
+
+  new Setting(containerEl)
+    .setName("Studio artifact retention cap (MB)")
+    .setDesc("Target maximum artifact storage per project before Studio starts pruning oldest run assets.")
+    .addText((text) => {
+      text
+        .setPlaceholder("1024")
+        .setValue(String(plugin.settings.studioRunRetentionMaxArtifactsMb ?? 1024))
+        .onChange(async (value) => {
+          const parsed = Number.parseInt(value, 10);
+          if (!Number.isFinite(parsed)) return;
+          await plugin
+            .getSettingsManager()
+            .updateSettings({ studioRunRetentionMaxArtifactsMb: Math.max(1, Math.min(200_000, parsed)) });
+        });
+      text.inputEl.inputMode = "numeric";
+    });
+
+  new Setting(containerEl)
+    .setName("Studio telemetry (remote)")
+    .setDesc("Keep full diagnostics local; enable this only if you want redacted Studio run telemetry sent to SystemSculpt.")
     .addToggle((toggle) => {
       toggle
-        .setValue(plugin.settings.canvasFlowEnabled === true)
+        .setValue(plugin.settings.studioTelemetryOptIn === true)
         .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ canvasFlowEnabled: value });
-          new Notice(value ? "SystemSculpt canvas enhancements enabled." : "SystemSculpt canvas enhancements disabled.");
+          await plugin.getSettingsManager().updateSettings({ studioTelemetryOptIn: value });
         });
     });
 
@@ -43,7 +111,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   const modelSetting = new Setting(containerEl)
     .setName("Default image model")
-    .setDesc("Used when a prompt node doesn't specify ss_image_model. The default is a low-cost OpenAI image model for testing.");
+    .setDesc("Used as the default model for new SystemSculpt Studio image generations.");
 
   modelSetting.addText((text) => {
     text
@@ -178,7 +246,7 @@ async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promi
     size: "large",
     customContent: (el) => {
       const hint = el.createEl("p", {
-        text: "Pick a default model for CanvasFlow prompt nodes.",
+        text: "Pick a default model for SystemSculpt Studio image generations.",
         cls: "setting-item-description",
       });
       hint.style.marginTop = "0";

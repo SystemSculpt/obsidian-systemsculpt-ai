@@ -137,8 +137,8 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
       ],
       anchor: {
-        title: "SystemSculpt Canvas, OpenRouter, Images",
-        desc: "Configure model selection for SystemSculpt canvas image generation (OpenRouter provider) inside Obsidian Canvas.",
+        title: "SystemSculpt Studio, OpenRouter, Images",
+        desc: "Configure model selection for SystemSculpt Studio image generation (OpenRouter provider) in the desktop-only Studio workspace.",
       },
     },
     {

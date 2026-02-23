@@ -7,6 +7,7 @@ import { checkPremiumUserStatus } from "../utils/licenseUtils";
 import { AI_PROVIDERS, LOCAL_SERVICES, SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 import { scanLocalLLMProviders } from "../services/providers/LocalLLMScanner";
 import { ListSelectionModal, ListItem } from "../core/ui/modals/standard/ListSelectionModal";
+import { showConfirm } from "../core/ui/notifications";
 import { createExternalHelpLink } from "./uiHelpers";
 import type { CustomProvider } from "../types/llm";
 import { SystemSculptService } from "../services/SystemSculptService";
@@ -552,7 +553,17 @@ function renderProvidersSection(root: HTMLElement, tabInstance: SystemSculptSett
         .setIcon('trash')
         .setTooltip('Remove provider')
         .onClick(async () => {
-          if (!confirm(`Remove '${provider.name}'?`)) return;
+          const { confirmed } = await showConfirm(
+            tabInstance.app,
+            `Remove '${provider.name}'?`,
+            {
+              title: "Remove Provider",
+              primaryButton: "Remove",
+              secondaryButton: "Cancel",
+              icon: "trash",
+            }
+          );
+          if (!confirmed) return;
           const updated = (plugin.settings.customProviders || []).filter((p) => p.id !== provider.id);
           await plugin.getSettingsManager().updateSettings({ customProviders: updated });
           plugin.customProviderService.clearCache();

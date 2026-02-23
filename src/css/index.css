@@ -89,6 +89,7 @@
 @import 'views/embeddings-view.css';  /* Embeddings view - automatic similar notes panel */
 @import 'views/benchview.css';  /* Benchmark view */
 @import 'views/benchresults.css';  /* Benchmark results leaderboard */
+@import 'views/systemsculpt-studio.css';  /* SystemSculpt Studio custom workspace */
 @import 'views/canvasflow.css';  /* CanvasFlow (experimental) - Canvas node controls */
 
 /* Miscellaneous styles */

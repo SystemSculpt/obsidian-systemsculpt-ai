@@ -514,6 +514,7 @@ describe("SystemSculptImageGenerationService", () => {
       "https://systemsculpt-assets.f7fef583e37a84651a069a44fedc24e2.r2.cloudflarestorage.com/generated/image-generations/job/outputs/output-0000.png?X-Amz-Signature=abc123&X-Amz-Algorithm=AWS4-HMAC-SHA256"
     );
     expect(result.arrayBuffer).toBeInstanceOf(ArrayBuffer);
+    expect((globalThis as any).fetch).not.toHaveBeenCalled();
 
     const call = requestUrlMock.mock.calls[0]?.[0];
     expect(call?.headers?.["x-license-key"]).toBeUndefined();

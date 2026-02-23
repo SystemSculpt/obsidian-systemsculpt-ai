@@ -374,29 +374,37 @@ export interface SystemSculptSettings {
   openAiApiKey: string;
 
   /**
-   * CanvasFlow (experimental): ComfyUI-like prompt + run controls inside Obsidian Canvas.
-   * Desktop-only.
+   * Retired setting kept only for backward migration compatibility.
+   * CanvasFlow is hard-switched off in favor of the desktop-only SystemSculpt Studio view.
    */
   canvasFlowEnabled: boolean;
 
   /**
    * SystemSculpt-hosted image generation (OpenRouter provider).
-   * Used by CanvasFlow.
+   * Used by SystemSculpt Studio.
    */
   imageGenerationDefaultModelId: string;
-  /** Last model explicitly chosen in CanvasFlow prompt controls. */
+  /** Last model explicitly chosen in Studio image controls. */
   imageGenerationLastUsedModelId: string;
-  /** Last image count explicitly chosen in CanvasFlow prompt controls. */
+  /** Last image count explicitly chosen in Studio image controls. */
   imageGenerationLastUsedCount: number;
-  /** Last aspect ratio explicitly chosen in CanvasFlow prompt controls. */
+  /** Last aspect ratio explicitly chosen in Studio image controls. */
   imageGenerationLastUsedAspectRatio: string;
   imageGenerationPollIntervalMs: number;
   /** Folder path inside the vault where generated images are saved. */
   imageGenerationOutputDir: string;
   /** When enabled, write a JSON sidecar next to each generated image. */
   imageGenerationSaveMetadataSidecar: boolean;
-  /** Cached server model metadata merged into CanvasFlow model pickers. */
+  /** Cached server model metadata merged into Studio model pickers. */
   imageGenerationModelCatalogCache: ImageGenerationModelCatalogCache | null;
+
+  /**
+   * Studio project defaults.
+   */
+  studioDefaultProjectsFolder: string;
+  studioRunRetentionMaxRuns: number;
+  studioRunRetentionMaxArtifactsMb: number;
+  studioTelemetryOptIn: boolean;
 
   /**
    * Embeddings settings for the new embeddings system
@@ -676,6 +684,10 @@ Raw transcript:`,
   imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
   imageGenerationSaveMetadataSidecar: true,
   imageGenerationModelCatalogCache: null,
+  studioDefaultProjectsFolder: "SystemSculpt/Studio",
+  studioRunRetentionMaxRuns: 100,
+  studioRunRetentionMaxArtifactsMb: 1024,
+  studioTelemetryOptIn: false,
 
   /**
    * Embeddings defaults

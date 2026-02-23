@@ -829,6 +829,10 @@ export class SystemSculptService {
     });
   }
 
+  public requestAgentSession(input: AgentSessionRequest): Promise<Response> {
+    return this.requestAgentV2(input);
+  }
+
   // DELEGATE TO LICENSE SERVICE
   async validateLicense(forceCheck = false): Promise<boolean> {
     this.refreshSettings(); // Ensure settings are current before validation

@@ -66,7 +66,8 @@ import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { ReadwiseService } from "./services/readwise";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
-import type { CanvasFlowEnhancer as CanvasFlowEnhancerType } from "./services/canvasflow/CanvasFlowEnhancer";
+import { StudioService } from "./studio/StudioService";
+import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./views/studio/SystemSculptStudioView";
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
@@ -117,7 +118,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
-  private canvasFlowEnhancer: CanvasFlowEnhancerType | null = null;
+  private studioService: StudioService | null = null;
   // Removed complex settings callback system - embeddings are now completely on-demand
 
   // Daily vault system services
@@ -332,72 +333,6 @@ export default class SystemSculptPlugin extends Plugin {
     } else {
       service.stopScheduledSync();
     }
-  }
-
-  private async handleCanvasFlowSettingsUpdated(
-    oldSettings: SystemSculptSettings,
-    newSettings: SystemSculptSettings
-  ): Promise<void> {
-    const oldEnabled = oldSettings.canvasFlowEnabled === true;
-    const newEnabled = newSettings.canvasFlowEnabled === true;
-    if (oldEnabled === newEnabled) {
-      return;
-    }
-    await this.syncCanvasFlowEnhancerFromSettings();
-  }
-
-  public async runCanvasFlowPromptNode(options: {
-    canvasFile: TFile;
-    promptNodeId: string;
-    status?: (status: string) => void;
-    signal?: AbortSignal;
-  }): Promise<void> {
-    if (this.settings.canvasFlowEnabled !== true) {
-      throw new Error("CanvasFlow is disabled. Enable CanvasFlow in Settings before running prompt nodes.");
-    }
-
-    if (!this.canvasFlowEnhancer) {
-      await this.syncCanvasFlowEnhancerFromSettings();
-    }
-
-    if (!this.canvasFlowEnhancer) {
-      throw new Error("CanvasFlow enhancer is unavailable.");
-    }
-
-    await this.canvasFlowEnhancer.runPromptNode(options);
-  }
-
-  private async syncCanvasFlowEnhancerFromSettings(): Promise<void> {
-    const enabled = this.settings.canvasFlowEnabled === true;
-
-    if (!enabled) {
-      if (this.canvasFlowEnhancer) {
-        try {
-          this.canvasFlowEnhancer.stop();
-        } catch {}
-        this.canvasFlowEnhancer = null;
-      }
-      return;
-    }
-
-    if (this.canvasFlowEnhancer) {
-      return;
-    }
-
-    // Lazy-load because CanvasFlow depends on Canvas DOM selectors and is experimental.
-    const { CanvasFlowEnhancer } = await import("./services/canvasflow/CanvasFlowEnhancer");
-    const enhancer = new CanvasFlowEnhancer(this.app, this);
-    enhancer.start();
-    this.canvasFlowEnhancer = enhancer;
-
-    this.register(() => {
-      try {
-        enhancer.stop();
-      } catch {}
-      if (this.canvasFlowEnhancer === enhancer) {
-        this.canvasFlowEnhancer = null;
-      }
-    });
   }
 
   private async onDailySettingsUpdated(settings: DailySettings): Promise<void> {
@@ -763,15 +698,6 @@ export default class SystemSculptPlugin extends Plugin {
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Readwise settings sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            }
-
-            try {
-              void this.handleCanvasFlowSettingsUpdated(oldSettings, newSettings);
-            } catch (error) {
-              const logger = this.getLogger();
-              logger.error("CanvasFlow settings sync failed", error, {
                 source: "SystemSculptPlugin",
               });
             }
@@ -1774,9 +1700,6 @@ export default class SystemSculptPlugin extends Plugin {
       wrap("fileContextMenu", "file context menu service", () => {
         this.setupFileContextMenuService();
       }),
-      wrap("canvasFlow", "canvas flow enhancer", async () => {
-        await this.syncCanvasFlowEnhancerFromSettings();
-      }),
       wrap("workflowEngine", "workflow engine service", () => {
         this.ensureWorkflowEngineService();
       }),
@@ -1821,6 +1744,7 @@ export default class SystemSculptPlugin extends Plugin {
       this.resumeChatService = new ResumeChatService(this);
       this.viewManager = new ViewManager(this, this.app);
       this.viewManager.initialize();
+      this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
       this.commandManager = new CommandManager(this, this.app);
       this.commandManager.registerCommands();
 
@@ -1943,6 +1867,10 @@ export default class SystemSculptPlugin extends Plugin {
       if (this.searchEngine) {
         this.searchEngine.destroy();
         this.searchEngine = null;
+      }
+
+      if (this.studioService) {
+        this.studioService = null;
       }
 
       // Cleanup Readwise service
@@ -2365,6 +2293,13 @@ export default class SystemSculptPlugin extends Plugin {
       if (!this.viewManager) {
       }
       return this.viewManager;
+  }
+
+  getStudioService(): StudioService {
+    if (!this.studioService) {
+      this.studioService = new StudioService(this);
+    }
+    return this.studioService;
   }
 
   // --- Command Registration ---
