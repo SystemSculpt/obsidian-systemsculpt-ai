@@ -109,7 +109,7 @@ describe("StudioGeneratedMediaNodes", () => {
     expect(mediaNode?.config[MANAGED_MEDIA_SLOT_INDEX_KEY]).toBe(0);
   });
 
-  it("updates existing managed media nodes instead of creating duplicates", () => {
+  it("appends new media nodes for new output paths instead of replacing prior runs", () => {
     const sourceNode: StudioNodeInstance = {
       id: "image_node",
       kind: "studio.image_generation",
@@ -149,25 +149,73 @@ describe("StudioGeneratedMediaNodes", () => {
           },
         ],
       },
-      createNodeId: () => "should_not_create",
+      createNodeId: () => "media_slot_1",
       createEdgeId: () => "edge_created",
     });
 
     expect(result.changed).toBe(true);
-    expect(result.createdNodeIds).toEqual([]);
-    expect(result.updatedNodeIds).toEqual(["media_slot_0"]);
+    expect(result.createdNodeIds).toEqual(["media_slot_1"]);
+    expect(result.updatedNodeIds).toEqual([]);
     expect(result.createdEdgeIds).toEqual(["edge_created"]);
-    expect(project.graph.nodes).toHaveLength(2);
+    expect(project.graph.nodes).toHaveLength(3);
     expect(project.graph.edges).toEqual([
       {
         id: "edge_created",
         fromNodeId: sourceNode.id,
         fromPortId: "images",
-        toNodeId: existingMediaNode.id,
+        toNodeId: "media_slot_1",
         toPortId: "media",
       },
     ]);
-    expect(existingMediaNode.config.sourcePath).toBe("SystemSculpt/Assets/new.png");
+    expect(existingMediaNode.config.sourcePath).toBe("SystemSculpt/Assets/old.png");
+  });
+
+  it("is append-only across runs and idempotent for already-materialized paths", () => {
+    const project = createProject();
+    const sourceNode = project.graph.nodes[0];
+    let nodeIndex = 0;
+    let edgeIndex = 0;
+
+    const first = materializeImageOutputsAsMediaNodes({
+      project,
+      sourceNode,
+      outputs: {
+        images: [{ path: "SystemSculpt/Assets/a.png", mimeType: "image/png" }],
+      },
+      createNodeId: () => `node_media_${nodeIndex++}`,
+      createEdgeId: () => `edge_media_${edgeIndex++}`,
+    });
+    const second = materializeImageOutputsAsMediaNodes({
+      project,
+      sourceNode,
+      outputs: {
+        images: [{ path: "SystemSculpt/Assets/b.png", mimeType: "image/png" }],
+      },
+      createNodeId: () => `node_media_${nodeIndex++}`,
+      createEdgeId: () => `edge_media_${edgeIndex++}`,
+    });
+    const third = materializeImageOutputsAsMediaNodes({
+      project,
+      sourceNode,
+      outputs: {
+        images: [{ path: "SystemSculpt/Assets/b.png", mimeType: "image/png" }],
+      },
+      createNodeId: () => `node_media_${nodeIndex++}`,
+      createEdgeId: () => `edge_media_${edgeIndex++}`,
+    });
+
+    expect(first.changed).toBe(true);
+    expect(first.createdNodeIds).toEqual(["node_media_0"]);
+    expect(second.changed).toBe(true);
+    expect(second.createdNodeIds).toEqual(["node_media_1"]);
+    expect(third.changed).toBe(false);
+    expect(third.createdNodeIds).toEqual([]);
+    expect(third.updatedNodeIds).toEqual([]);
+    expect(project.graph.nodes).toHaveLength(3);
+    expect(project.graph.edges).toHaveLength(2);
+    expect(
+      project.graph.nodes.filter((node) => node.kind === "studio.media_ingest").map((node) => node.config.sourcePath)
+    ).toEqual(["SystemSculpt/Assets/a.png", "SystemSculpt/Assets/b.png"]);
   });
 
   it("adopts connected media nodes when metadata is missing", () => {

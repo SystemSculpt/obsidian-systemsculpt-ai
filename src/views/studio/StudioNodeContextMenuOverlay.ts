@@ -107,6 +107,7 @@ export class StudioNodeContextMenuOverlay {
   private actions: StudioNodeContextMenuAction[] = [];
   private itemEls: HTMLElement[] = [];
   private activeIndex = -1;
+  private focusRafId: number | null = null;
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.isVisible || !this.rootEl) {
@@ -194,19 +195,30 @@ export class StudioNodeContextMenuOverlay {
     this.renderActions();
     this.applyFilter("");
 
+    this.cancelPendingFocus();
     this.rootEl.style.display = "flex";
+    this.rootEl.removeAttribute("inert");
     this.rootEl.setAttribute("aria-hidden", "false");
     this.isVisible = true;
     this.bindGlobalListeners();
     this.applyLayout();
 
     // Height can change after DOM paints; clamp once more.
-    window.requestAnimationFrame(() => {
-      if (this.searchInputEl) {
+    this.focusRafId = window.requestAnimationFrame(() => {
+      this.focusRafId = null;
+      if (!this.isVisible || !this.searchInputEl) {
+        return;
+      }
+      if (this.rootEl?.getAttribute("aria-hidden") === "true") {
+        return;
+      }
+      try {
+        this.searchInputEl.focus({ preventScroll: true });
+      } catch {
         try {
-          this.searchInputEl.focus({ preventScroll: true });
-        } catch {
           this.searchInputEl.focus();
+        } catch {
+          // Ignore focus failures.
         }
       }
       this.applyLayout();
@@ -214,6 +226,7 @@ export class StudioNodeContextMenuOverlay {
   }
 
   hide(): void {
+    this.cancelPendingFocus();
     this.onSelectDefinition = null;
     this.unbindGlobalListeners();
     this.isVisible = false;
@@ -223,7 +236,12 @@ export class StudioNodeContextMenuOverlay {
     this.itemEls = [];
     this.activeIndex = -1;
     if (this.rootEl) {
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
+        activeElement.blur();
+      }
       this.rootEl.style.display = "none";
+      this.rootEl.setAttribute("inert", "");
       this.rootEl.setAttribute("aria-hidden", "true");
     }
     if (this.searchInputEl) {
@@ -245,6 +263,7 @@ export class StudioNodeContextMenuOverlay {
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-node-context-menu" });
     root.style.display = "none";
+    root.setAttribute("inert", "");
     root.setAttribute("role", "menu");
     root.setAttribute("aria-hidden", "true");
     root.addEventListener("pointerdown", (event) => {
@@ -305,6 +324,14 @@ export class StudioNodeContextMenuOverlay {
     this.listEl = list;
     this.actionsEl = actions;
     this.applyLayout();
+  }
+
+  private cancelPendingFocus(): void {
+    if (this.focusRafId === null) {
+      return;
+    }
+    window.cancelAnimationFrame(this.focusRafId);
+    this.focusRafId = null;
   }
 
   private renderActions(): void {

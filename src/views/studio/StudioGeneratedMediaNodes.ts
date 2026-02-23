@@ -62,22 +62,43 @@ function extractOutputImagePaths(outputs: StudioNodeOutputMap | null | undefined
   return result;
 }
 
-function readManagedMediaSlot(node: StudioNodeInstance): { sourceNodeId: string; slotIndex: number } | null {
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const path of paths) {
+    const normalized = String(path || "").trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    unique.push(normalized);
+  }
+  return unique;
+}
+
+function readManagedMediaSourceNodeId(node: StudioNodeInstance): string {
   if (node.kind !== "studio.media_ingest") {
-    return null;
+    return "";
   }
   const config = asRecord(node.config);
   if (!config) {
-    return null;
+    return "";
   }
   if (String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() !== MANAGED_MEDIA_OWNER) {
+    return "";
+  }
+  return String(config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY] || "").trim();
+}
+
+function readManagedMediaSlot(node: StudioNodeInstance): { sourceNodeId: string; slotIndex: number } | null {
+  const sourceNodeId = readManagedMediaSourceNodeId(node);
+  const config = asRecord(node.config);
+  if (!sourceNodeId || !config) {
     return null;
   }
-
-  const sourceNodeId = String(config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY] || "").trim();
   const slotIndexRaw = Number(config[MANAGED_MEDIA_SLOT_INDEX_KEY]);
   const slotIndex = Number.isInteger(slotIndexRaw) && slotIndexRaw >= 0 ? slotIndexRaw : -1;
-  if (!sourceNodeId || slotIndex < 0) {
+  if (slotIndex < 0) {
     return null;
   }
 
@@ -109,10 +130,10 @@ function findConnectedMediaNodeByPath(options: {
   sourceNodeId: string;
   sourcePath: string;
   usedNodeIds: Set<string>;
-}): StudioNodeInstance | null {
+}): StudioNodeInstance | undefined {
   const sourcePath = String(options.sourcePath || "").trim();
   if (!sourcePath) {
-    return null;
+    return undefined;
   }
 
   const nodeById = new Map(options.project.graph.nodes.map((node) => [node.id, node] as const));
@@ -141,7 +162,7 @@ function findConnectedMediaNodeByPath(options: {
     return candidate;
   }
 
-  return null;
+  return undefined;
 }
 
 function hasManagedEdge(
@@ -200,7 +221,7 @@ export function materializeImageOutputsAsMediaNodes(
     };
   }
 
-  const outputPaths = extractOutputImagePaths(options.outputs);
+  const outputPaths = uniquePaths(extractOutputImagePaths(options.outputs));
   if (outputPaths.length === 0) {
     return {
       changed: false,
@@ -210,17 +231,24 @@ export function materializeImageOutputsAsMediaNodes(
     };
   }
 
-  const managedNodesBySlot = new Map<number, StudioNodeInstance>();
+  const managedNodesByPath = new Map<string, StudioNodeInstance>();
+  let nextManagedSlotIndex = 0;
   for (const node of options.project.graph.nodes) {
-    const managed = readManagedMediaSlot(node);
-    if (!managed || managed.sourceNodeId !== sourceNodeId) {
+    const managedSourceNodeId = readManagedMediaSourceNodeId(node);
+    if (!managedSourceNodeId || managedSourceNodeId !== sourceNodeId) {
       continue;
     }
-    if (!managedNodesBySlot.has(managed.slotIndex)) {
-      managedNodesBySlot.set(managed.slotIndex, node);
+    const config = asRecord(node.config) || {};
+    const sourcePath = String(config.sourcePath || "").trim();
+    if (sourcePath && !managedNodesByPath.has(sourcePath)) {
+      managedNodesByPath.set(sourcePath, node);
+    }
+    const managed = readManagedMediaSlot(node);
+    if (managed) {
+      nextManagedSlotIndex = Math.max(nextManagedSlotIndex, managed.slotIndex + 1);
     }
   }
-  const usedNodeIds = new Set(Array.from(managedNodesBySlot.values()).map((node) => node.id));
+  const usedNodeIds = new Set(Array.from(managedNodesByPath.values()).map((node) => node.id));
 
   const createdNodeIds: string[] = [];
   const updatedNodeIds: string[] = [];
@@ -233,28 +261,29 @@ export function materializeImageOutputsAsMediaNodes(
       continue;
     }
 
-    let existingNode = managedNodesBySlot.get(index);
+    let existingNode = managedNodesByPath.get(sourcePath);
     if (!existingNode) {
-      const connectedNode = findConnectedMediaNodeByPath({
+      existingNode = findConnectedMediaNodeByPath({
         project: options.project,
         sourceNodeId,
         sourcePath,
         usedNodeIds,
       });
-      if (connectedNode) {
-        managedNodesBySlot.set(index, connectedNode);
-        existingNode = connectedNode;
+      if (existingNode) {
+        managedNodesByPath.set(sourcePath, existingNode);
       }
     }
     if (existingNode) {
       usedNodeIds.add(existingNode.id);
       const existingConfig = asRecord(existingNode.config) || {};
+      const existingManaged = readManagedMediaSlot(existingNode);
+      const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
       const nextConfig = {
         ...(existingNode.config as Record<string, StudioJsonValue>),
         sourcePath,
         [MANAGED_MEDIA_OWNER_KEY]: MANAGED_MEDIA_OWNER,
         [MANAGED_MEDIA_SOURCE_NODE_ID_KEY]: sourceNodeId,
-        [MANAGED_MEDIA_SLOT_INDEX_KEY]: index,
+        [MANAGED_MEDIA_SLOT_INDEX_KEY]: slotIndex,
       };
       if (JSON.stringify(existingConfig) !== JSON.stringify(nextConfig)) {
         existingNode.config = nextConfig;
@@ -276,21 +305,23 @@ export function materializeImageOutputsAsMediaNodes(
     }
 
     const nodeId = options.createNodeId();
+    const slotIndex = nextManagedSlotIndex++;
     const newNode: StudioNodeInstance = {
       id: nodeId,
       kind: "studio.media_ingest",
       version: "1.0.0",
-      title: buildManagedMediaTitle(options.sourceNode, index, outputPaths.length),
+      title: buildManagedMediaTitle(options.sourceNode, slotIndex, slotIndex + 1),
       position: {
         x: options.sourceNode.position.x + MEDIA_NODE_X_OFFSET,
-        y: options.sourceNode.position.y + index * MEDIA_NODE_Y_GAP,
+        y: options.sourceNode.position.y + slotIndex * MEDIA_NODE_Y_GAP,
       },
-      config: createManagedMediaConfig(sourceNodeId, index, sourcePath),
+      config: createManagedMediaConfig(sourceNodeId, slotIndex, sourcePath),
       continueOnError: false,
       disabled: false,
     };
 
     options.project.graph.nodes.push(newNode);
+    managedNodesByPath.set(sourcePath, newNode);
     usedNodeIds.add(nodeId);
     changed = true;
     createdNodeIds.push(nodeId);

@@ -2,6 +2,9 @@ import type { StudioJsonValue, StudioNodeDefinition, StudioNodeExecutionContext 
 import { getText } from "./shared";
 import { extname, isAbsolute } from "node:path";
 
+const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
+const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -43,6 +46,11 @@ function resolvePathFromMediaInput(context: StudioNodeExecutionContext): string 
   }
 
   return getText(mediaInput).trim();
+}
+
+function isPinnedGeneratedMediaNode(context: StudioNodeExecutionContext): boolean {
+  const owner = getText(context.node.config[MANAGED_MEDIA_OWNER_KEY] as StudioJsonValue).trim();
+  return owner === MANAGED_MEDIA_OWNER;
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".avif"]);
@@ -125,10 +133,12 @@ export const mediaIngestNode: StudioNodeDefinition = {
   },
   async execute(context) {
     const pathFromInput = resolvePathFromMediaInput(context);
-    const sourcePath =
-      pathFromInput ||
+    const configuredPath =
       getText(context.node.config.sourcePath as StudioJsonValue).trim() ||
       getText(context.node.config.vaultPath as StudioJsonValue).trim();
+    const sourcePath = isPinnedGeneratedMediaNode(context)
+      ? configuredPath || pathFromInput
+      : pathFromInput || configuredPath;
     if (!sourcePath) {
       throw new Error(
         `Media ingest node "${context.node.id}" requires a media input or config.sourcePath.`

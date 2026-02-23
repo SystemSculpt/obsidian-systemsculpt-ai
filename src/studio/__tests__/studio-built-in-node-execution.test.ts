@@ -256,6 +256,30 @@ describe("Studio built-in prompt/text node execution", () => {
     expect(result.outputs.preview_error).toBe("");
   });
 
+  it("media ingest keeps pinned generated-media source paths stable across reruns", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "media-node",
+        kind: "studio.media_ingest",
+        config: {
+          __studio_managed_by: "studio.image_generation_output.v1",
+          __studio_source_output_index: 0,
+          sourcePath: "SystemSculpt/Assets/pinned.png",
+        },
+        inputs: {
+          media: [{ path: "SystemSculpt/Assets/newest.png", mimeType: "image/png" }],
+        },
+      })
+    );
+
+    expect(result.outputs.path).toBe("SystemSculpt/Assets/pinned.png");
+    expect(result.outputs.preview_path).toBe("");
+    expect(result.outputs.preview_error).toBe("");
+  });
+
   it("media ingest stages preview assets for absolute local videos", async () => {
     const definition = registry.get("studio.media_ingest", "1.0.0");
     expect(definition).toBeDefined();
