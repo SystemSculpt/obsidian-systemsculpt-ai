@@ -263,16 +263,18 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
         }
         itemEl.addClass("is-active");
       });
-      itemEl.addEventListener("mousedown", (event) => {
-        // Keep focus within the dropdown while selecting so click is not lost.
+      itemEl.addEventListener("pointerdown", (event) => {
+        // Prevent node-card drag/select handlers from stealing the interaction.
         event.preventDefault();
-      });
-      itemEl.addEventListener("click", (event) => {
-        event.preventDefault();
+        event.stopPropagation();
         currentValue = option.value;
         onValueChange(option.value);
         updateTriggerLabel();
         closePanel();
+      });
+      itemEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
       });
     }
   };
@@ -350,11 +352,16 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
 
   triggerEl.addEventListener("click", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     if (open) {
       closePanel();
       return;
     }
     void openPanel();
+  });
+
+  rootEl.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
   });
 
   rootEl.addEventListener("focusout", () => {
