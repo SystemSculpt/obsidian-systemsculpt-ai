@@ -783,6 +783,30 @@ export class CommandManager {
 
   private registerSystemSculptStudioCommands() {
     this.plugin.addCommand({
+      id: "new-systemsculpt-studio-project",
+      name: "New SystemSculpt Studio Project",
+      callback: async () => {
+        if (!Platform.isDesktopApp) {
+          new Notice("SystemSculpt Studio is desktop-only.");
+          return;
+        }
+
+        try {
+          const studio = this.plugin.getStudioService();
+          const project = await studio.createProject();
+          const projectPath = studio.getCurrentProjectPath();
+          if (!projectPath) {
+            throw new Error("Studio project was created but no project path was returned.");
+          }
+          await this.plugin.getViewManager().activateSystemSculptStudioView(projectPath);
+          new Notice(`Created Studio project: ${project.name}`);
+        } catch (error: any) {
+          new Notice(`Unable to create Studio project: ${error?.message || error}`);
+        }
+      },
+    });
+
+    this.plugin.addCommand({
       id: "open-systemsculpt-studio",
       name: "Open SystemSculpt Studio",
       callback: async () => {
@@ -803,7 +827,7 @@ export class CommandManager {
               .find((file) => file.extension.toLowerCase() === "systemsculpt");
 
           if (!fallbackStudioFile) {
-            new Notice("No .systemsculpt files found. Create one in your vault first.");
+            new Notice('No .systemsculpt files found. Run "New SystemSculpt Studio Project" first.');
             return;
           }
 
