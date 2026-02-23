@@ -565,9 +565,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeDragInProgress = Boolean(isDragging);
     if (this.nodeDragInProgress) {
       this.inspectorOverlay?.hide();
-      return;
     }
-    this.syncInspectorSelection();
   }
 
   private syncInspectorSelection(): void {

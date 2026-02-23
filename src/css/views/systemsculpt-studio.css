@@ -215,7 +215,7 @@
   z-index: 1;
 }
 
-.ss-studio-edge-path {
+.ss-studio-link-path {
   fill: none;
   stroke: color-mix(in srgb, var(--interactive-accent) 75%, #6db892 25%);
   stroke-width: 2.5;
@@ -226,13 +226,13 @@
   transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease;
 }
 
-.ss-studio-edge-path:hover {
+.ss-studio-link-path:hover {
   stroke: color-mix(in srgb, #89e2b5 80%, var(--interactive-accent) 20%);
   stroke-width: 3.5;
   opacity: 1;
 }
 
-.ss-studio-edge-preview {
+.ss-studio-link-preview {
   fill: none;
   stroke: color-mix(in srgb, #9deec8 82%, var(--interactive-accent) 18%);
   stroke-width: 2.2;
@@ -422,25 +422,12 @@
 }
 
 .ss-studio-port-pin {
-  position: relative;
   width: 14px;
   height: 14px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--ss-studio-border) 80%, #80d2a8 20%);
   background: color-mix(in srgb, var(--background-primary) 80%, #2b5f47 20%);
   padding: 0;
-}
-
-.ss-studio-port-pin::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: 13px;
-  height: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #8ee8bf 78%, var(--interactive-accent) 22%);
-  opacity: 0;
-  pointer-events: none;
 }
 
 .ss-studio-port-pin.is-input {
@@ -455,24 +442,12 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, #9effd0 62%, transparent);
 }
 
-.ss-studio-port-pin.is-connected {
+.ss-studio-port-pin.is-linked {
+  border-color: color-mix(in srgb, #9effd0 52%, var(--ss-studio-border) 48%);
   box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #9effd0 34%, transparent),
     0 0 0 1px color-mix(in srgb, #9effd0 35%, transparent),
     0 0 0 3px color-mix(in srgb, #9effd0 18%, transparent);
-}
-
-.ss-studio-port-pin.is-connected-in::after {
-  right: 100%;
-  transform: translateY(-50%) rotate(var(--ss-studio-port-link-angle, 180deg));
-  transform-origin: right center;
-  opacity: 0.95;
-}
-
-.ss-studio-port-pin.is-connected-out::after {
-  left: 100%;
-  transform: translateY(-50%) rotate(var(--ss-studio-port-link-angle, 0deg));
-  transform-origin: left center;
-  opacity: 0.95;
 }
 
 .ss-studio-port-label {

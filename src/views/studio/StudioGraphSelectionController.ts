@@ -176,9 +176,6 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    const viewportRect = viewport.getBoundingClientRect();
-    const anchorLocalX = startEvent.clientX - viewportRect.left;
-    const anchorLocalY = startEvent.clientY - viewportRect.top;
     let lastClientX = startEvent.clientX;
     let lastClientY = startEvent.clientY;
 
@@ -194,20 +191,6 @@ export class StudioGraphSelectionController {
       lastClientX = clientX;
       lastClientY = clientY;
 
-      const rect = viewport.getBoundingClientRect();
-      const localX = clientX - rect.left;
-      const localY = clientY - rect.top;
-      const left = Math.min(anchorLocalX, localX);
-      const top = Math.min(anchorLocalY, localY);
-      const width = Math.abs(localX - anchorLocalX);
-      const height = Math.abs(localY - anchorLocalY);
-
-      marquee.classList.add("is-active");
-      marquee.style.left = `${left}px`;
-      marquee.style.top = `${top}px`;
-      marquee.style.width = `${width}px`;
-      marquee.style.height = `${height}px`;
-
       const currentGraph = this.graphPointFromClient(clientX, clientY);
       if (!currentGraph) {
         return;
@@ -217,6 +200,13 @@ export class StudioGraphSelectionController {
       const y1 = Math.min(startGraph.y, currentGraph.y);
       const x2 = Math.max(startGraph.x, currentGraph.x);
       const y2 = Math.max(startGraph.y, currentGraph.y);
+      const zoom = this.graphZoom || 1;
+
+      marquee.classList.add("is-active");
+      marquee.style.left = `${x1 * zoom}px`;
+      marquee.style.top = `${y1 * zoom}px`;
+      marquee.style.width = `${(x2 - x1) * zoom}px`;
+      marquee.style.height = `${(y2 - y1) * zoom}px`;
 
       const marqueeSelected = new Set<string>();
       const project = this.host.getCurrentProject();
@@ -377,10 +367,11 @@ export class StudioGraphSelectionController {
     }
 
     const shouldDragSelection = this.selectedNodeIds.has(nodeId) && this.selectedNodeIds.size > 0;
+    let selectionChangedOnPointerDown = false;
     if (!shouldDragSelection) {
       this.selectedNodeIds = new Set([nodeId]);
       this.refreshNodeSelectionClasses();
-      this.notifySelectionChanged();
+      selectionChangedOnPointerDown = true;
     }
 
     const dragNodeIds = shouldDragSelection ? Array.from(this.selectedNodeIds) : [nodeId];
@@ -425,6 +416,9 @@ export class StudioGraphSelectionController {
         dragged = true;
         this.host.onNodeDragStateChange?.(true);
       }
+      if (!dragged) {
+        return;
+      }
 
       const deltaX = (moveEvent.clientX - startX) / zoom;
       const deltaY = (moveEvent.clientY - startY) / zoom;
@@ -456,6 +450,11 @@ export class StudioGraphSelectionController {
       if (dragged) {
         this.host.onNodeDragStateChange?.(false);
         this.host.scheduleProjectSave();
+        return;
+      }
+
+      if (selectionChangedOnPointerDown || this.selectedNodeIds.has(nodeId)) {
+        this.notifySelectionChanged();
       }
     };
 

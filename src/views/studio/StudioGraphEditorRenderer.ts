@@ -256,10 +256,7 @@ function renderGraphNode(options: RenderGraphNodeOptions): void {
       return;
     }
 
-    // Preserve multi-selection when dragging any already-selected node.
-    if (!graphInteraction.isNodeSelected(node.id)) {
-      graphInteraction.ensureSingleSelection(node.id);
-    }
+    // Node selection is committed on pointer-up (if no drag), so dragging does not open inspector.
     graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
   });
 
@@ -490,7 +487,7 @@ export function renderStudioGraphEditor(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-graph-controls, .ss-studio-graph-hint, .ss-studio-edge-path, .ss-studio-edge-preview, .ss-studio-node-inspector"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-graph-controls, .ss-studio-graph-hint, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector"
       )
     ) {
       return;

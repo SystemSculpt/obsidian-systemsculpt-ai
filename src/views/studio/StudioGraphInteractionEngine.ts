@@ -1,9 +1,6 @@
-import { StudioGraphConnectionController } from "./StudioGraphConnectionController";
+import { StudioGraphConnectionEngineV2 } from "./connections-v2/StudioGraphConnectionEngineV2";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
-import type {
-  PendingConnection,
-  StudioGraphInteractionHost,
-} from "./StudioGraphInteractionTypes";
+import type { PendingConnection, StudioGraphInteractionHost } from "./StudioGraphInteractionTypes";
 import {
   STUDIO_GRAPH_CANVAS_HEIGHT,
   STUDIO_GRAPH_CANVAS_WIDTH,
@@ -14,18 +11,19 @@ export type { PendingConnection };
 
 export class StudioGraphInteractionEngine {
   private readonly selectionController: StudioGraphSelectionController;
-  private readonly connectionController: StudioGraphConnectionController;
+  private readonly connectionEngine: StudioGraphConnectionEngineV2;
 
   constructor(private readonly host: StudioGraphInteractionHost) {
     this.selectionController = new StudioGraphSelectionController({
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
-      renderEdgeLayer: () => this.connectionController.renderEdgeLayer(),
+      renderEdgeLayer: () => this.connectionEngine.renderEdgeLayer(),
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       onGraphZoomChanged: (zoom) => this.host.onGraphZoomChanged?.(zoom),
     });
-    this.connectionController = new StudioGraphConnectionController({
+
+    this.connectionEngine = new StudioGraphConnectionEngineV2({
       ...this.host,
       getGraphZoom: () => this.selectionController.getGraphZoom(),
     });
@@ -36,7 +34,7 @@ export class StudioGraphInteractionEngine {
   }
 
   getPendingConnection(): PendingConnection | null {
-    return this.connectionController.getPendingConnection();
+    return this.connectionEngine.getPendingConnection();
   }
 
   isNodeSelected(nodeId: string): boolean {
@@ -56,7 +54,7 @@ export class StudioGraphInteractionEngine {
   }
 
   isPendingConnectionSource(nodeId: string, portId: string): boolean {
-    return this.connectionController.isPendingConnectionSource(nodeId, portId);
+    return this.connectionEngine.isPendingConnectionSource(nodeId, portId);
   }
 
   selectOnlyNode(nodeId: string): void {
@@ -65,21 +63,21 @@ export class StudioGraphInteractionEngine {
 
   clearProjectState(): void {
     this.selectionController.clearProjectState();
-    this.connectionController.clearProjectState();
+    this.connectionEngine.clearProjectState();
   }
 
   clearPendingConnection(options?: { requestRender?: boolean }): void {
-    this.connectionController.clearPendingConnection(options);
+    this.connectionEngine.clearPendingConnection(options);
   }
 
   clearRenderBindings(): void {
     this.selectionController.clearRenderBindings();
-    this.connectionController.clearRenderBindings();
+    this.connectionEngine.clearRenderBindings();
   }
 
   onNodeRemoved(nodeId: string): void {
     this.selectionController.onNodeRemoved(nodeId);
-    this.connectionController.onNodeRemoved(nodeId);
+    this.connectionEngine.onNodeRemoved(nodeId);
   }
 
   registerViewportElement(viewport: HTMLElement): void {
@@ -100,16 +98,16 @@ export class StudioGraphInteractionEngine {
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.selectionController.registerCanvasElement(canvas);
-    this.connectionController.registerCanvasElement(canvas);
+    this.connectionEngine.registerCanvasElement(canvas);
   }
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
-    this.connectionController.registerEdgesLayerElement(layer);
+    this.connectionEngine.registerEdgesLayerElement(layer);
   }
 
   clearGraphElementMaps(): void {
     this.selectionController.clearNodeElements();
-    this.connectionController.clearPortElements();
+    this.connectionEngine.clearPortElements();
   }
 
   registerNodeElement(nodeId: string, nodeEl: HTMLElement): void {
@@ -121,7 +119,7 @@ export class StudioGraphInteractionEngine {
   }
 
   registerPortElement(nodeId: string, direction: "in" | "out", portId: string, element: HTMLElement): void {
-    this.connectionController.registerPortElement(nodeId, direction, portId, element);
+    this.connectionEngine.registerPortElement(nodeId, direction, portId, element);
   }
 
   refreshNodeSelectionClasses(): void {
@@ -153,11 +151,11 @@ export class StudioGraphInteractionEngine {
   }
 
   beginConnection(fromNodeId: string, fromPortId: string): void {
-    this.connectionController.beginConnection(fromNodeId, fromPortId);
+    this.connectionEngine.beginConnection(fromNodeId, fromPortId);
   }
 
   completeConnection(toNodeId: string, toPortId: string): void {
-    this.connectionController.completeConnection(toNodeId, toPortId);
+    this.connectionEngine.completeConnection(toNodeId, toPortId);
   }
 
   startConnectionDrag(
@@ -166,11 +164,11 @@ export class StudioGraphInteractionEngine {
     startEvent: PointerEvent,
     sourcePinEl: HTMLElement
   ): void {
-    this.connectionController.startConnectionDrag(fromNodeId, fromPortId, startEvent, sourcePinEl);
+    this.connectionEngine.startConnectionDrag(fromNodeId, fromPortId, startEvent, sourcePinEl);
   }
 
   consumeSuppressedOutputPortClick(nodeId: string, portId: string): boolean {
-    return this.connectionController.consumeSuppressedOutputPortClick(nodeId, portId);
+    return this.connectionEngine.consumeSuppressedOutputPortClick(nodeId, portId);
   }
 
   handleCanvasBackgroundClick(target: HTMLElement): void {
@@ -182,8 +180,8 @@ export class StudioGraphInteractionEngine {
       return;
     }
 
-    if (this.connectionController.getPendingConnection()) {
-      this.connectionController.clearPendingConnection({ requestRender: true });
+    if (this.connectionEngine.getPendingConnection()) {
+      this.connectionEngine.clearPendingConnection({ requestRender: true });
       return;
     }
 
@@ -191,6 +189,6 @@ export class StudioGraphInteractionEngine {
   }
 
   renderEdgeLayer(): void {
-    this.connectionController.renderEdgeLayer();
+    this.connectionEngine.renderEdgeLayer();
   }
 }
