@@ -6,6 +6,8 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
+  "studio.json": "Pass-through JSON preview node for inspecting structured values.",
+  "studio.value": "Generic value preview node for scalar or unknown output types.",
   "studio.label": "Adds a visual-only label card for organizing your canvas.",
   "studio.note": "Mirrors a markdown note from your vault with live text editing.",
   "studio.text": "Stores editable text and outputs it for downstream nodes.",
@@ -14,12 +16,15 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",
   "studio.transcription": "Transcribes audio media into text.",
-  "studio.dataset": "Runs a custom query through a configurable adapter, caches results, and outputs text.",
+  "studio.dataset":
+    "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
   "studio.http_request": "Fetches remote HTTP data for downstream nodes.",
   "studio.cli_command": "Runs a local shell command and captures output.",
 };
 
 const NODE_DISPLAY_NAME_BY_KIND: Record<string, string> = {
+  "studio.json": "JSON",
+  "studio.value": "Value",
   "studio.label": "Label",
   "studio.media_ingest": "Media",
 };

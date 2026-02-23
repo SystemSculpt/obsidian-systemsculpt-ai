@@ -5,7 +5,8 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 ## Scope
 - Studio is desktop-only.
 - Studio projects are machine-managed `.systemsculpt` files.
-- Studio uses SystemSculpt API only.
+- `studio.text_generation` supports two text sources: `SystemSculpt` (default) and `Local (Pi)`.
+- `studio.image_generation` and `studio.transcription` remain SystemSculpt-backed.
 - Native Canvas internals are not used for Studio runtime behavior.
 
 ## Core Paths
@@ -21,7 +22,8 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/studio/StudioNodeConfigValidation.ts`: schema-driven node config validation.
 - `src/studio/StudioNodeResultCacheStore.ts`: persistent per-node output cache + input fingerprinting.
 - `src/studio/StudioRunScope.ts`: reusable run-scope projection for graph/node runs.
-- `src/studio/StudioSystemSculptApiAdapter.ts`: API-only adapter.
+- `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter (SystemSculpt + Local Pi text routing).
+- `src/studio/StudioLocalTextModelCatalog.ts`: dynamic local model catalog resolver for node config UIs.
 - `src/studio/StudioRuntime.ts`: run queue, immutable snapshots, events, retention.
 - `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
 - `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
@@ -29,11 +31,12 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/views/studio/StudioGraphGroupController.ts`: live group-container overlay + rename interactions.
 - `src/views/studio/graph-v3/StudioGraphWorkspaceRenderer.ts`: full-leaf graph workspace renderer.
 - `src/views/studio/graph-v3/StudioGraphNodeCardRenderer.ts`: node card renderer (ports/status/media preview).
+- `src/views/studio/StudioSearchableDropdown.ts`: reusable fuzzy-searchable dropdown control for large option sets.
 - `src/views/studio/graph-v3/StudioGraphMediaPreview.ts`: media preview inference for node outputs.
 - `src/views/studio/graph-v3/StudioGraphMediaPreviewModal.ts`: vault resource resolution + modal preview rendering.
 - `src/views/studio/graph-v3/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
 - `src/views/studio/graph-v3/StudioGraphViewStateStore.ts`: graph viewport state normalization/persistence helpers.
-- `src/views/studio/StudioNodeInspectorOverlay.ts`: legacy inspector shell (config editing is inline on node cards).
+- `src/views/studio/StudioNodeInspectorOverlay.ts`: inspector overlay with visibility-aware field rendering.
 - `src/views/studio/StudioViewHelpers.ts`: shared Studio view helpers.
 
 ## File System Layout
@@ -66,7 +69,9 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Nodes should expose only immediately reusable output ports to keep graph wiring unambiguous.
 - Metadata/debug details belong in runtime logs or snapshots, not as default output ports.
 - `studio.text_generation` exposes only `text` as its output.
-- `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), and exposes only `text` as its output (cached internally with TTL).
+- `studio.text_generation` defaults to `SystemSculpt`; switching to `Local (Pi)` reveals a searchable model picker backed by dynamic provider models.
+- `studio.json` is a lightweight structured-data preview/pass-through node (`json` in, `json` out).
+- `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), always exposes raw `text`, and auto-exposes reusable field outputs from structured adapter results (cached internally with TTL).
 - `studio.dataset` resolves data through a user-configurable adapter command + argument list.
 - `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.
 - `studio.dataset` inline card includes a read-only latest-result preview so operators can verify fetched data after runs.
@@ -82,6 +87,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Clicking a `.systemsculpt` file in the file explorer opens that file directly in `SystemSculptStudioView`.
 - Studio view is file-native (one project file per leaf state) and behaves like other Obsidian file views (similar to canvas semantics).
 - Studio does not use modal-driven project create/open flows.
+- Output-port drag supports preview-node quick-create: pause ~500ms while dragging to see a release hint; releasing without a compatible target can create a typed preview node (for example JSON/Text) and auto-connect it.
 - Runtime source is guarded against browser dialog APIs (`prompt/confirm/alert`) with an automated test gate.
 
 ## Security Contracts

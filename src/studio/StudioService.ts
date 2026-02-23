@@ -7,12 +7,16 @@ import { migrateStudioProjectToPathOnlyPorts } from "./StudioGraphMigrations";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { StudioRuntime } from "./StudioRuntime";
-import { StudioSystemSculptApiAdapter } from "./StudioSystemSculptApiAdapter";
+import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
+import { listStudioLocalTextModelOptions } from "./StudioLocalTextModelCatalog";
 import { randomId } from "./utils";
 import type {
   StudioAssetRef,
   StudioCapability,
   StudioCapabilityGrant,
+  StudioNodeConfigDynamicOptionsSource,
+  StudioNodeConfigSelectOption,
+  StudioNodeInstance,
   StudioNodeCacheSnapshotV1,
   StudioProjectV1,
   StudioRunEventHandler,
@@ -79,14 +83,14 @@ export class StudioService {
   private readonly compiler = new StudioGraphCompiler();
   private readonly projectStore: StudioProjectStore;
   private readonly assetStore: StudioAssetStore;
-  private readonly apiAdapter: StudioSystemSculptApiAdapter;
+  private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
   private currentProjectPath: string | null = null;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
     this.assetStore = new StudioAssetStore(plugin.app);
-    this.apiAdapter = new StudioSystemSculptApiAdapter(plugin, this.assetStore);
+    this.apiAdapter = new StudioApiExecutionAdapter(plugin, this.assetStore);
     this.runtime = new StudioRuntime(
       plugin.app,
       plugin,
@@ -308,5 +312,22 @@ export class StudioService {
 
   listNodeDefinitions() {
     return this.registry.list();
+  }
+
+  async resolveDynamicSelectOptions(
+    source: StudioNodeConfigDynamicOptionsSource,
+    _node: StudioNodeInstance
+  ): Promise<StudioNodeConfigSelectOption[]> {
+    if (source === "studio.local_text_models") {
+      const options = await listStudioLocalTextModelOptions(this.plugin);
+      return options.map((option) => ({
+        value: option.value,
+        label: option.label,
+        description: option.description,
+        badge: option.badge,
+        keywords: option.keywords,
+      }));
+    }
+    return [];
   }
 }

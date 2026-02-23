@@ -55,9 +55,16 @@ export type StudioNodeConfigMediaKind = "image" | "video" | "audio";
 export type StudioNodeConfigSelectOption = {
   value: string;
   label: string;
+  description?: string;
+  badge?: string;
+  keywords?: string[];
 };
 
-export type StudioNodeConfigSelectPresentation = "dropdown" | "button_group";
+export type StudioNodeConfigSelectPresentation =
+  | "dropdown"
+  | "button_group"
+  | "searchable_dropdown";
+export type StudioNodeConfigDynamicOptionsSource = "studio.local_text_models";
 export type StudioNodeConfigFieldVisibilityRule = {
   key: string;
   equals: StudioPrimitiveValue | StudioPrimitiveValue[];
@@ -76,6 +83,7 @@ export type StudioNodeConfigFieldDefinition = {
   integer?: boolean;
   options?: StudioNodeConfigSelectOption[];
   selectPresentation?: StudioNodeConfigSelectPresentation;
+  optionsSource?: StudioNodeConfigDynamicOptionsSource;
   visibleWhen?: StudioNodeConfigFieldVisibilityRule;
   accept?: string;
   mediaKinds?: StudioNodeConfigMediaKind[];
@@ -239,10 +247,14 @@ export type StudioNodeCacheSnapshotV1 = {
   entries: Record<string, StudioNodeCacheEntry>;
 };
 
+export type StudioTextProviderMode = "systemsculpt" | "local_pi";
+
 export type StudioTextGenerationRequest = {
   prompt: string;
   systemPrompt?: string;
+  sourceMode?: StudioTextProviderMode;
   modelId?: string;
+  localModelId?: string;
   runId: string;
   nodeId: string;
   projectPath: string;

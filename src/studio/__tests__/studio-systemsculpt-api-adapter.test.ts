@@ -1,6 +1,21 @@
-import { StudioSystemSculptApiAdapter } from "../StudioSystemSculptApiAdapter";
+import { StudioApiExecutionAdapter } from "../StudioApiExecutionAdapter";
+import * as StudioLocalTextModelCatalog from "../StudioLocalTextModelCatalog";
+
+jest.mock("../StudioLocalTextModelCatalog", () => {
+  const actual = jest.requireActual("../StudioLocalTextModelCatalog");
+  return {
+    ...actual,
+    runStudioLocalPiTextGeneration: jest.fn(actual.runStudioLocalPiTextGeneration),
+  };
+});
 
 function createPluginStub() {
+  const streamMessage = jest.fn(
+    async function* (): AsyncGenerator<{ type: "content"; text: string }> {
+      yield { type: "content", text: "local " };
+      yield { type: "content", text: "result" };
+    }
+  );
   return {
     manifest: {
       version: "4.13.0",
@@ -10,17 +25,34 @@ function createPluginStub() {
       licenseKey: "license_test",
       selectedModelId: "openai/gpt-5-mini",
       imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+      customProviders: [
+        {
+          id: "ollama",
+          name: "Ollama",
+          isEnabled: true,
+        },
+      ],
+    },
+    modelService: {
+      getModels: jest.fn(async () => [
+        {
+          id: "ollama@@llama3.1:8b",
+          name: "Llama 3.1 8B",
+          provider: "ollama",
+        },
+      ]),
     },
     aiService: {
       requestAgentSession: jest.fn(),
       getCreditsBalance: jest.fn(async () => ({ totalRemaining: 100 })),
+      streamMessage,
     },
   } as any;
 }
 
-describe("StudioSystemSculptApiAdapter", () => {
+describe("StudioApiExecutionAdapter", () => {
   it("serializes 3-way fan-out text turns and scopes chat sessions by run + node", async () => {
-    const adapter = new StudioSystemSculptApiAdapter(createPluginStub(), {} as any);
+    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
     const seenChatIds: string[] = [];
     let inFlightTurns = 0;
     let maxInFlightTurns = 0;
@@ -85,7 +117,7 @@ describe("StudioSystemSculptApiAdapter", () => {
   });
 
   it("surfaces lock_until details for turn_in_flight conflicts", async () => {
-    const adapter = new StudioSystemSculptApiAdapter(createPluginStub(), {} as any);
+    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
     (adapter as any).sessionClient = {
       updateConfig: jest.fn(),
       startOrContinueTurn: jest.fn(async () => ({
@@ -113,6 +145,106 @@ describe("StudioSystemSculptApiAdapter", () => {
     ).rejects.toThrow("lock_until=2026-02-23 06:14:32.832+00");
   });
 
+  it("routes local Pi text generation through the pi CLI adapter", async () => {
+    const plugin = createPluginStub();
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+    const localPiMock = StudioLocalTextModelCatalog
+      .runStudioLocalPiTextGeneration as jest.MockedFunction<
+      typeof StudioLocalTextModelCatalog.runStudioLocalPiTextGeneration
+    >;
+    localPiMock.mockResolvedValue({
+      text: "local result",
+      modelId: "google/gemini-2.5-flash",
+    });
+    const startOrContinueTurn = jest.fn(async () => {
+      throw new Error("SystemSculpt session client should not be called in local mode.");
+    });
+    (adapter as any).sessionClient = {
+      updateConfig: jest.fn(),
+      startOrContinueTurn,
+    };
+
+    const result = await adapter.generateText({
+      prompt: "Summarize this transcript.",
+      sourceMode: "local_pi",
+      localModelId: "google/gemini-2.5-flash",
+      runId: "run_local",
+      nodeId: "node_local",
+      projectPath: "Studio/Test.systemsculpt",
+    });
+
+    expect(localPiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plugin,
+        modelId: "google/gemini-2.5-flash",
+        prompt: "Summarize this transcript.",
+      })
+    );
+    expect(plugin.aiService.streamMessage).not.toHaveBeenCalled();
+    expect(startOrContinueTurn).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      text: "local result",
+      modelId: "google/gemini-2.5-flash",
+    });
+    localPiMock.mockReset();
+  });
+
+  it("skips SystemSculpt credit checks when all text nodes run in local Pi mode", async () => {
+    const plugin = createPluginStub();
+    plugin.aiService.getCreditsBalance = jest.fn(async () => ({ totalRemaining: 0 }));
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+
+    const estimate = await adapter.estimateRunCredits({
+      schema: "studio.project.v1",
+      projectId: "proj_test",
+      name: "Test",
+      createdAt: "2026-02-23T00:00:00.000Z",
+      updatedAt: "2026-02-23T00:00:00.000Z",
+      engine: {
+        apiMode: "systemsculpt_only",
+        minPluginVersion: "0.0.0",
+      },
+      graph: {
+        nodes: [
+          {
+            id: "text_local",
+            kind: "studio.text_generation",
+            version: "1.0.0",
+            title: "Local text",
+            position: { x: 0, y: 0 },
+            config: {
+              sourceMode: "local_pi",
+              localModelId: "ollama@@llama3.1:8b",
+            },
+            continueOnError: false,
+            disabled: false,
+          },
+        ],
+        edges: [],
+        entryNodeIds: ["text_local"],
+      },
+      permissionsRef: {
+        policyVersion: 1,
+        policyPath: "Studio/Test.systemsculpt-assets/policy/grants.json",
+      },
+      settings: {
+        runConcurrency: "adaptive",
+        defaultFsScope: "vault",
+        retention: {
+          maxRuns: 100,
+          maxArtifactsMb: 1024,
+        },
+      },
+      migrations: {
+        projectSchemaVersion: "1.0.0",
+        applied: [],
+      },
+    });
+
+    expect(estimate).toEqual({ ok: true });
+    expect(plugin.aiService.getCreditsBalance).not.toHaveBeenCalled();
+  });
+
   it("uploads attached input images before creating a generation job", async () => {
     const assetStore = {
       readArrayBuffer: jest.fn(async () => new Uint8Array([1, 2, 3]).buffer),
@@ -123,7 +255,7 @@ describe("StudioSystemSculptApiAdapter", () => {
         path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/out-hash.png",
       })),
     } as any;
-    const adapter = new StudioSystemSculptApiAdapter(createPluginStub(), assetStore);
+    const adapter = new StudioApiExecutionAdapter(createPluginStub(), assetStore);
     const imageClient = {
       createGenerationJob: jest.fn(async () => ({
         job: { id: "job_123" },

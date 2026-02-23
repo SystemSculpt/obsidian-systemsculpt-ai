@@ -130,6 +130,29 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.text).toBe("Upstream text");
   });
 
+  it("json node passes through structured JSON input", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          json: {
+            emails: ["a@example.com", "b@example.com"],
+            total: 2,
+          },
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      emails: ["a@example.com", "b@example.com"],
+      total: 2,
+    });
+  });
+
   it("note node reads markdown text from the vault and emits text/path/title", async () => {
     const definition = registry.get("studio.note", "1.0.0");
     expect(definition).toBeDefined();
@@ -201,7 +224,9 @@ describe("Studio built-in text/image node execution", () => {
         prompt:
           "Transcript: We built a ComfyUI-like graph in Obsidian and extracted audio first.",
         systemPrompt: "Generate one high-click YouTube title.",
+        sourceMode: "systemsculpt",
         modelId: "openai/gpt-5-mini",
+        localModelId: undefined,
         nodeId: "text-node",
       })
     );
@@ -235,10 +260,47 @@ describe("Studio built-in text/image node execution", () => {
       expect.objectContaining({
         prompt: "Plain user prompt",
         systemPrompt: "Follow these rules for Plain user prompt",
+        sourceMode: "systemsculpt",
         modelId: "openai/gpt-5-mini",
+        localModelId: undefined,
       })
     );
     expect(result.outputs.text).toBe("Generated body");
+  });
+
+  it("routes text generation to Local Pi when source mode is local_pi", async () => {
+    const definition = registry.get("studio.text_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({
+      text: "Local output",
+      modelId: "ollama@@llama3.1:8b",
+    }));
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "text-node",
+        kind: "studio.text_generation",
+        config: {
+          sourceMode: "local_pi",
+          localModelId: "ollama@@llama3.1:8b",
+          modelId: "openai/gpt-5-mini",
+        },
+        inputs: {
+          prompt: "Use local model.",
+        },
+        generateTextMock,
+      })
+    );
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Use local model.",
+        sourceMode: "local_pi",
+        localModelId: "ollama@@llama3.1:8b",
+        modelId: "openai/gpt-5-mini",
+      })
+    );
+    expect(result.outputs.text).toBe("Local output");
   });
 
   it("materializes structured prompts for image generation and enforces prompt budget", async () => {
@@ -595,6 +657,7 @@ describe("Studio built-in text/image node execution", () => {
       const firstResult = await definition!.execute(firstContext);
       expect(runCliMock).toHaveBeenCalledTimes(1);
       expect(firstResult.outputs.text).toBe("{\"rows\":[{\"email\":\"a@example.com\"}]}");
+      expect(firstResult.outputs.email).toEqual(["a@example.com"]);
       expect(runCliMock).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "node",
@@ -620,6 +683,7 @@ describe("Studio built-in text/image node execution", () => {
       const secondResult = await definition!.execute(secondContext);
       expect(runCliMock).toHaveBeenCalledTimes(1);
       expect(secondResult.outputs.text).toBe("{\"rows\":[{\"email\":\"a@example.com\"}]}");
+      expect(secondResult.outputs.email).toEqual(["a@example.com"]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -654,6 +718,7 @@ describe("Studio built-in text/image node execution", () => {
       const result = await definition!.execute(context);
 
       expect(result.outputs.text).toBe("{\"ok\":true}");
+      expect(result.outputs.ok).toEqual([true]);
       expect(runCliMock).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "node",
@@ -663,6 +728,47 @@ describe("Studio built-in text/image node execution", () => {
           }),
         })
       );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("dataset node derives reusable field outputs from console.table stdout", async () => {
+    const definition = registry.get("studio.dataset", "1.0.0");
+    expect(definition).toBeDefined();
+    const tempRoot = await mkdtemp(join(tmpdir(), "studio-dataset-table-"));
+    const runCliMock = jest.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: [
+        "\u2502 (index) \u2502 email \u2502 revenue \u2502",
+        "\u2502 0 \u2502 'a@example.com' \u2502 19900 \u2502",
+        "\u2502 1 \u2502 'b@example.com' \u2502 24900 \u2502",
+        "",
+      ].join("\n"),
+      stderr: "",
+      timedOut: false,
+    });
+
+    try {
+      const context = createContext({
+        nodeId: "dataset-node",
+        kind: "studio.dataset",
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "SELECT email, revenue FROM users LIMIT 2;",
+          refreshHours: 6,
+          timeoutMs: 60_000,
+          maxOutputBytes: 512 * 1024,
+        },
+        runCliMock,
+      });
+      context.services.resolveAbsolutePath = (path) => join(tempRoot, path);
+      context.services.assertFilesystemPath = jest.fn();
+
+      const result = await definition!.execute(context);
+
+      expect(result.outputs.email).toEqual(["a@example.com", "b@example.com"]);
+      expect(result.outputs.revenue).toEqual([19900, 24900]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

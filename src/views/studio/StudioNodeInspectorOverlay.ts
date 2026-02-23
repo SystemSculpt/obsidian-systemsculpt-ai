@@ -1,6 +1,8 @@
 import type {
   StudioJsonValue,
+  StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigFieldDefinition,
+  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioNodeOutputMap,
@@ -18,6 +20,7 @@ import {
   STUDIO_GRAPH_MIN_ZOOM,
 } from "./StudioGraphInteractionTypes";
 import { browseForNodeConfigPath } from "./StudioPathFieldPicker";
+import { renderStudioSearchableDropdown } from "./StudioSearchableDropdown";
 
 const MIN_INSPECTOR_WIDTH = 320;
 const MIN_INSPECTOR_HEIGHT = 280;
@@ -49,6 +52,10 @@ type StudioNodeInspectorOverlayHost = {
   isBusy: () => boolean;
   onConfigMutated: (node: StudioNodeInstance) => void;
   onTransientFieldError: (nodeId: string, fieldKey: string, message: string | null) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
   getRuntimeDetails?: (nodeId: string) => StudioNodeInspectorRuntimeDetails | null;
   onLayoutChanged?: (layout: StudioNodeInspectorLayout) => void;
 };
@@ -768,6 +775,30 @@ export class StudioNodeInspectorOverlay {
     }
 
     if (field.type === "select") {
+      if (field.selectPresentation === "searchable_dropdown") {
+        renderStudioSearchableDropdown({
+          containerEl: wrapper,
+          ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
+          value: typeof initialValue === "string" ? initialValue : "",
+          disabled,
+          placeholder: field.required === true ? "Select model" : "Default",
+          noResultsText: "No matching models.",
+          loadOptions: async (): Promise<StudioNodeConfigSelectOption[]> => {
+            if (field.optionsSource && this.host.resolveDynamicSelectOptions) {
+              const dynamicOptions = await this.host.resolveDynamicSelectOptions(field.optionsSource, node);
+              if (Array.isArray(dynamicOptions) && dynamicOptions.length > 0) {
+                return dynamicOptions;
+              }
+            }
+            return Array.isArray(field.options) ? field.options : [];
+          },
+          onValueChange: (value) => {
+            applyValue(value);
+          },
+        });
+        return;
+      }
+
       if (field.selectPresentation === "button_group" && Array.isArray(field.options) && field.options.length > 0) {
         const row = wrapper.createDiv({ cls: "ss-studio-node-inspector-select-button-group" });
         const selectedValue = typeof initialValue === "string" ? initialValue : "";

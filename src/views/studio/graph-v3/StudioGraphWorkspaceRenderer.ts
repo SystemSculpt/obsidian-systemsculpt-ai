@@ -1,4 +1,6 @@
 import type {
+  StudioNodeConfigDynamicOptionsSource,
+  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioProjectV1,
@@ -35,6 +37,10 @@ export type StudioGraphWorkspaceRendererOptions = {
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
   isLabelEditing: (nodeId: string) => boolean;
   consumeLabelAutoFocus: (nodeId: string) => boolean;
   onRequestLabelEdit: (nodeId: string) => void;
@@ -71,6 +77,7 @@ export function renderStudioGraphWorkspace(
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodeGeometryMutated,
+    resolveDynamicSelectOptions,
     isLabelEditing,
     consumeLabelAutoFocus,
     onRequestLabelEdit,
@@ -199,6 +206,7 @@ export function renderStudioGraphWorkspace(
       onNodeTitleInput,
       onNodeConfigMutated,
       onNodeGeometryMutated,
+      resolveDynamicSelectOptions,
       isLabelEditing,
       consumeLabelAutoFocus,
       onRequestLabelEdit,

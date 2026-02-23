@@ -2,6 +2,8 @@ import { Notice } from "obsidian";
 import type { StudioProjectV1 } from "../../../studio/types";
 import { randomId } from "../../../studio/utils";
 import type {
+  ConnectionAutoCreateDescriptor,
+  ConnectionAutoCreateRequest,
   ConnectionDragState,
   PendingConnection,
   StudioGraphInteractionHost,
@@ -10,6 +12,7 @@ import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverla
 import { buildCubicLinkCurve, type CubicLinkCurve } from "./LinkGeometry";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const CONNECTION_AUTO_CREATE_HINT_DELAY_MS = 500;
 
 type StudioGraphConnectionEngineHost = StudioGraphInteractionHost & {
   getGraphZoom: () => number;
@@ -36,6 +39,9 @@ export class StudioGraphConnectionEngineV2 {
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private portElementsByKey = new Map<string, HTMLElement>();
   private suppressOutputClickKey: string | null = null;
+  private autoCreateHintTimer: number | null = null;
+  private autoCreateHintEl: HTMLElement | null = null;
+  private autoCreateHintVisible = false;
   private readonly edgeContextMenu = new StudioSimpleContextMenuOverlay();
 
   constructor(private readonly host: StudioGraphConnectionEngineHost) {}
@@ -51,6 +57,8 @@ export class StudioGraphConnectionEngineV2 {
   clearProjectState(): void {
     this.pendingConnection = null;
     this.dragState = null;
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
     this.closeEdgeContextMenu();
   }
 
@@ -59,6 +67,8 @@ export class StudioGraphConnectionEngineV2 {
     this.graphEdgesLayerEl = null;
     this.dragState = null;
     this.suppressOutputClickKey = null;
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
     this.closeEdgeContextMenu();
     this.edgeContextMenu.destroy();
     this.resetPortVisualState();
@@ -100,6 +110,8 @@ export class StudioGraphConnectionEngineV2 {
     const hadPending = this.pendingConnection !== null;
     this.pendingConnection = null;
     this.dragState = null;
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
     this.refreshActiveOutputState();
     this.renderEdgeLayer();
     if (hadPending && options?.requestRender) {
@@ -118,6 +130,8 @@ export class StudioGraphConnectionEngineV2 {
           fromPortId,
         };
     this.dragState = null;
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
     this.host.requestRender();
   }
 
@@ -132,6 +146,8 @@ export class StudioGraphConnectionEngineV2 {
     }
 
     startEvent.preventDefault();
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
 
     const pointerId = startEvent.pointerId;
     const sourceKey = this.portKey(fromNodeId, "out", fromPortId);
@@ -165,6 +181,7 @@ export class StudioGraphConnectionEngineV2 {
       };
       this.refreshActiveOutputState();
       this.renderEdgeLayer();
+      this.scheduleAutoCreateHint();
     };
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
@@ -184,6 +201,8 @@ export class StudioGraphConnectionEngineV2 {
       }
 
       if (this.dragState.active) {
+        this.hideAutoCreateHint();
+        this.scheduleAutoCreateHint();
         this.renderEdgeLayer();
       }
     };
@@ -206,7 +225,10 @@ export class StudioGraphConnectionEngineV2 {
       }
 
       const finishedDrag = this.dragState;
+      const shouldAutoCreate = this.autoCreateHintVisible;
       this.dragState = null;
+      this.hideAutoCreateHint();
+      this.clearAutoCreateHintTimer();
 
       if (!finishedDrag.active) {
         return;
@@ -217,6 +239,24 @@ export class StudioGraphConnectionEngineV2 {
       if (target) {
         this.completeConnection(target.nodeId, target.portId);
         return;
+      }
+
+      if (shouldAutoCreate) {
+        const sourceType =
+          this.host.getPortType(finishedDrag.fromNodeId, "out", finishedDrag.fromPortId) || "";
+        const handled = this.requestAutoCreateNode({
+          fromNodeId: finishedDrag.fromNodeId,
+          fromPortId: finishedDrag.fromPortId,
+          sourceType,
+          clientX: endEvent.clientX,
+          clientY: endEvent.clientY,
+        });
+        if (handled) {
+          this.pendingConnection = null;
+          this.refreshActiveOutputState();
+          this.renderEdgeLayer();
+          return;
+        }
       }
 
       this.pendingConnection = null;
@@ -286,15 +326,109 @@ export class StudioGraphConnectionEngineV2 {
     });
 
     this.pendingConnection = null;
+    this.hideAutoCreateHint();
+    this.clearAutoCreateHintTimer();
     this.host.recomputeEntryNodes(project);
     this.host.scheduleProjectSave();
     this.host.requestRender();
+  }
+
+  private requestAutoCreateNode(request: ConnectionAutoCreateRequest): boolean {
+    if (!this.host.onConnectionAutoCreateRequested) {
+      return false;
+    }
+    try {
+      return this.host.onConnectionAutoCreateRequested(request) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private resolveAutoCreateDescriptor(
+    sourceType: string
+  ): ConnectionAutoCreateDescriptor | null {
+    if (!this.host.describeConnectionAutoCreate) {
+      return null;
+    }
+    try {
+      return this.host.describeConnectionAutoCreate(sourceType);
+    } catch {
+      return null;
+    }
+  }
+
+  private scheduleAutoCreateHint(): void {
+    this.clearAutoCreateHintTimer();
+    if (!this.dragState || !this.dragState.active || !this.pendingConnection) {
+      return;
+    }
+    const sourceType =
+      this.host.getPortType(this.pendingConnection.fromNodeId, "out", this.pendingConnection.fromPortId) || "";
+    const descriptor = this.resolveAutoCreateDescriptor(sourceType);
+    if (!descriptor) {
+      return;
+    }
+
+    this.autoCreateHintTimer = window.setTimeout(() => {
+      this.autoCreateHintTimer = null;
+      if (!this.dragState || !this.dragState.active || !this.pendingConnection) {
+        this.hideAutoCreateHint();
+        return;
+      }
+      const target = this.resolveInputPortAtClientPoint(
+        this.dragState.lastClientX,
+        this.dragState.lastClientY
+      );
+      if (target) {
+        this.hideAutoCreateHint();
+        return;
+      }
+      this.showAutoCreateHint(descriptor.label);
+    }, CONNECTION_AUTO_CREATE_HINT_DELAY_MS);
+  }
+
+  private clearAutoCreateHintTimer(): void {
+    if (this.autoCreateHintTimer !== null) {
+      window.clearTimeout(this.autoCreateHintTimer);
+      this.autoCreateHintTimer = null;
+    }
+  }
+
+  private hideAutoCreateHint(): void {
+    this.autoCreateHintVisible = false;
+    if (this.autoCreateHintEl) {
+      this.autoCreateHintEl.remove();
+      this.autoCreateHintEl = null;
+    }
+  }
+
+  private showAutoCreateHint(label: string): void {
+    if (!this.dragState || !this.graphCanvasEl) {
+      return;
+    }
+    const viewport = this.graphCanvasEl.parentElement as HTMLElement | null;
+    if (!viewport) {
+      return;
+    }
+    if (!this.autoCreateHintEl) {
+      this.autoCreateHintEl = document.createElement("div");
+      this.autoCreateHintEl.className = "ss-studio-connection-autocreate-hint";
+      viewport.appendChild(this.autoCreateHintEl);
+    }
+    this.autoCreateHintEl.textContent = `Release to create ${label} node`;
+    const viewportRect = viewport.getBoundingClientRect();
+    const anchorX = viewport.scrollLeft + (this.dragState.lastClientX - viewportRect.left) + 14;
+    const anchorY = viewport.scrollTop + (this.dragState.lastClientY - viewportRect.top) + 12;
+    this.autoCreateHintEl.style.left = `${Math.round(anchorX)}px`;
+    this.autoCreateHintEl.style.top = `${Math.round(anchorY)}px`;
+    this.autoCreateHintVisible = true;
   }
 
   renderEdgeLayer(): void {
     const project = this.host.getCurrentProject();
     if (!project || !this.graphEdgesLayerEl || !this.graphCanvasEl) {
       this.closeEdgeContextMenu();
+      this.hideAutoCreateHint();
       this.resetPortVisualState();
       return;
     }

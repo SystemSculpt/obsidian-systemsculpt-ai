@@ -26,6 +26,18 @@ export type ConnectionDragState = {
   active: boolean;
 };
 
+export type ConnectionAutoCreateDescriptor = {
+  label: string;
+};
+
+export type ConnectionAutoCreateRequest = {
+  fromNodeId: string;
+  fromPortId: string;
+  sourceType: string;
+  clientX: number;
+  clientY: number;
+};
+
 export type StudioGraphInteractionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
@@ -40,4 +52,6 @@ export type StudioGraphInteractionHost = {
   onGraphZoomChanged?: (zoom: number) => void;
   getPortType: (nodeId: string, direction: "in" | "out", portId: string) => string | null;
   portTypeCompatible: (sourceType: string, targetType: string) => boolean;
+  describeConnectionAutoCreate?: (sourceType: string) => ConnectionAutoCreateDescriptor | null;
+  onConnectionAutoCreateRequested?: (request: ConnectionAutoCreateRequest) => boolean;
 };

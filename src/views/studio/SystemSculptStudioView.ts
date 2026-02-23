@@ -14,6 +14,9 @@ import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
   StudioEdge,
+  StudioJsonValue,
+  StudioNodeConfigDynamicOptionsSource,
+  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeGroup,
   StudioNodeInstance,
@@ -27,6 +30,12 @@ import {
 } from "../../studio/StudioNodeKinds";
 import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
+import { resolveNodeDefinitionPorts } from "../../studio/StudioNodePortResolution";
+import {
+  DATASET_OUTPUT_FIELDS_CONFIG_KEY,
+  deriveDatasetOutputFieldsFromOutputs,
+  readDatasetOutputFields,
+} from "../../studio/nodes/datasetNode";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
@@ -58,6 +67,8 @@ import {
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
+  type ConnectionAutoCreateDescriptor,
+  type ConnectionAutoCreateRequest,
 } from "./StudioGraphInteractionTypes";
 import {
   type StudioNodeInspectorRuntimeDetails,
@@ -181,6 +192,8 @@ export class SystemSculptStudioView extends ItemView {
       onGraphZoomChanged: (zoom) => this.handleGraphZoomChanged(zoom),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
+      describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
+      onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
     });
     this.graphInteraction.setSelectionChangeListener(() => {
       this.syncInspectorSelection();
@@ -1437,6 +1450,7 @@ export class SystemSculptStudioView extends ItemView {
     }
     if (event.type === "node.output") {
       this.syncInlineTextOutputToNodeConfig(event);
+      this.syncDatasetOutputFieldsToNodeConfig(event);
       this.materializeManagedOutputNodes(event);
     }
     if (event.type === "node.failed") {
@@ -1488,6 +1502,36 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     sourceNode.config.value = outputText;
+    this.scheduleProjectSave();
+  }
+
+  private syncDatasetOutputFieldsToNodeConfig(
+    event: Extract<StudioRunEvent, { type: "node.output" }>
+  ): void {
+    if (!this.currentProject) {
+      return;
+    }
+    const sourceNode = this.findNode(this.currentProject, event.nodeId);
+    if (!sourceNode || sourceNode.kind !== "studio.dataset") {
+      return;
+    }
+
+    const nextFields = deriveDatasetOutputFieldsFromOutputs(event.outputs);
+    const currentFields = readDatasetOutputFields(
+      sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY] as StudioJsonValue
+    );
+    const unchanged =
+      nextFields.length === currentFields.length &&
+      nextFields.every((field, index) => field === currentFields[index]);
+    if (unchanged) {
+      return;
+    }
+
+    if (nextFields.length === 0) {
+      delete sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY];
+    } else {
+      sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY] = nextFields;
+    }
     this.scheduleProjectSave();
   }
 
@@ -2208,6 +2252,13 @@ export class SystemSculptStudioView extends ItemView {
     this.transientFieldErrorsByNodeId.delete(String(nodeId || "").trim());
   }
 
+  private async resolveDynamicSelectOptionsForNode(
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ): Promise<StudioNodeConfigSelectOption[]> {
+    return this.plugin.getStudioService().resolveDynamicSelectOptions(source, node);
+  }
+
   private ensureInspectorOverlay(): StudioNodeInspectorOverlay {
     if (this.inspectorOverlay) {
       return this.inspectorOverlay;
@@ -2222,6 +2273,8 @@ export class SystemSculptStudioView extends ItemView {
         onTransientFieldError: (nodeId, fieldKey, message) => {
           this.setTransientFieldError(nodeId, fieldKey, message);
         },
+        resolveDynamicSelectOptions: (source, node) =>
+          this.resolveDynamicSelectOptionsForNode(source, node),
         getRuntimeDetails: (nodeId) => this.buildInspectorRuntimeDetails(nodeId),
         onLayoutChanged: (layout) => {
           this.inspectorLayout = { ...layout };
@@ -2502,7 +2555,11 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private findNodeDefinition(node: StudioNodeInstance): StudioNodeDefinition | null {
-    return this.nodeDefinitionsByKey.get(`${node.kind}@${node.version}`) || null;
+    const definition = this.nodeDefinitionsByKey.get(`${node.kind}@${node.version}`) || null;
+    if (!definition) {
+      return null;
+    }
+    return resolveNodeDefinitionPorts(node, definition);
   }
 
   private portTypeCompatible(sourceType: string, targetType: string): boolean {
@@ -2533,6 +2590,217 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     return definition.outputPorts.find((port) => port.id === portId)?.type || null;
+  }
+
+  private resolveConnectionAutoCreateTemplate(sourceType: string): {
+    nodeKind: string;
+    targetPortId: string;
+    label: string;
+  } | null {
+    const normalizedType = String(sourceType || "").trim();
+    if (normalizedType === "text") {
+      return {
+        nodeKind: "studio.text",
+        targetPortId: "text",
+        label: "text preview",
+      };
+    }
+    if (normalizedType === "json" || normalizedType === "any") {
+      return {
+        nodeKind: normalizedType === "json" ? "studio.json" : "studio.value",
+        targetPortId: normalizedType === "json" ? "json" : "value",
+        label: normalizedType === "json" ? "JSON preview" : "value preview",
+      };
+    }
+    if (normalizedType === "number" || normalizedType === "boolean") {
+      return {
+        nodeKind: "studio.value",
+        targetPortId: "value",
+        label: "value preview",
+      };
+    }
+    return null;
+  }
+
+  private cloneJsonValue(value: StudioJsonValue): StudioJsonValue {
+    try {
+      return JSON.parse(JSON.stringify(value)) as StudioJsonValue;
+    } catch {
+      return value;
+    }
+  }
+
+  private normalizeSeededTextValue(value: StudioJsonValue): string {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (value == null) {
+      return "";
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private buildAutoCreatedNodeTitle(nodeKind: string, fromPortId: string): string {
+    const baseTitle = prettifyNodeKind(nodeKind);
+    const sourcePort = String(fromPortId || "").trim();
+    if (!sourcePort) {
+      return baseTitle;
+    }
+    return `${baseTitle} (${sourcePort})`;
+  }
+
+  private resolveSourcePortValue(nodeId: string, portId: string): StudioJsonValue | undefined {
+    const outputs = this.runPresentation.getNodeOutput(nodeId);
+    if (!outputs || !Object.prototype.hasOwnProperty.call(outputs, portId)) {
+      return undefined;
+    }
+    return outputs[portId];
+  }
+
+  private seedAutoCreatedNodeConfig(
+    node: StudioNodeInstance,
+    nodeKind: string,
+    value: StudioJsonValue
+  ): void {
+    if (nodeKind === "studio.text") {
+      node.config.value = this.normalizeSeededTextValue(value);
+      return;
+    }
+    if (nodeKind === "studio.json") {
+      node.config.__studio_seed_json = this.cloneJsonValue(value);
+      return;
+    }
+    if (nodeKind === "studio.value") {
+      node.config.__studio_seed_value = this.cloneJsonValue(value);
+    }
+  }
+
+  private buildSeededPreviewOutputs(
+    nodeKind: string,
+    value: StudioJsonValue
+  ): StudioNodeOutputMap | null {
+    if (nodeKind === "studio.text") {
+      return {
+        text: this.normalizeSeededTextValue(value),
+      };
+    }
+    if (nodeKind === "studio.json") {
+      return {
+        json: this.cloneJsonValue(value),
+      };
+    }
+    if (nodeKind === "studio.value") {
+      return {
+        value: this.cloneJsonValue(value),
+      };
+    }
+    return null;
+  }
+
+  private describeConnectionAutoCreate(sourceType: string): ConnectionAutoCreateDescriptor | null {
+    const template = this.resolveConnectionAutoCreateTemplate(sourceType);
+    if (!template) {
+      return null;
+    }
+    return {
+      label: template.label,
+    };
+  }
+
+  private graphPointFromClientPosition(clientX: number, clientY: number): { x: number; y: number } | null {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return null;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+      return null;
+    }
+    const zoom = this.graphInteraction.getGraphZoom() || 1;
+    return {
+      x: (viewport.scrollLeft + localX) / zoom,
+      y: (viewport.scrollTop + localY) / zoom,
+    };
+  }
+
+  private handleConnectionAutoCreateRequested(request: ConnectionAutoCreateRequest): boolean {
+    if (this.busy || !this.currentProject) {
+      return false;
+    }
+    const template = this.resolveConnectionAutoCreateTemplate(request.sourceType);
+    if (!template) {
+      return false;
+    }
+
+    const sourceNode = this.findNode(this.currentProject, request.fromNodeId);
+    if (!sourceNode) {
+      return false;
+    }
+
+    const sourcePortType = this.getPortType(sourceNode.id, "out", request.fromPortId);
+    if (!sourcePortType) {
+      return false;
+    }
+
+    const definition = this.nodeDefinitions.find((entry) => entry.kind === template.nodeKind);
+    if (!definition) {
+      this.setError(`Missing node definition for "${template.nodeKind}@1.0.0".`);
+      return false;
+    }
+
+    const anchor = this.graphPointFromClientPosition(request.clientX, request.clientY);
+    if (!anchor) {
+      return false;
+    }
+
+    const createdNode = this.createNodeFromDefinition(definition, {
+      position: {
+        x: anchor.x + 48,
+        y: anchor.y + 10,
+      },
+    });
+    if (!createdNode || !this.currentProject) {
+      return false;
+    }
+    createdNode.title = this.buildAutoCreatedNodeTitle(template.nodeKind, request.fromPortId);
+
+    const sourceValue = this.resolveSourcePortValue(sourceNode.id, request.fromPortId);
+    if (typeof sourceValue !== "undefined") {
+      this.seedAutoCreatedNodeConfig(createdNode, template.nodeKind, sourceValue);
+      const previewOutputs = this.buildSeededPreviewOutputs(template.nodeKind, sourceValue);
+      if (previewOutputs) {
+        this.runPresentation.primeNodeOutput(createdNode.id, previewOutputs, {
+          message: `Preview from ${request.fromPortId}`,
+        });
+      }
+    }
+
+    const targetPortType = this.getPortType(createdNode.id, "in", template.targetPortId);
+    if (!targetPortType || !this.portTypeCompatible(sourcePortType, targetPortType)) {
+      return false;
+    }
+
+    this.currentProject.graph.edges.push({
+      id: randomId("edge"),
+      fromNodeId: sourceNode.id,
+      fromPortId: request.fromPortId,
+      toNodeId: createdNode.id,
+      toPortId: template.targetPortId,
+    });
+
+    this.recomputeEntryNodes(this.currentProject);
+    this.scheduleProjectSave();
+    this.render();
+    return true;
   }
 
   private computeDefaultNodePosition(
@@ -3354,6 +3622,8 @@ export class SystemSculptStudioView extends ItemView {
         this.graphInteraction.notifyNodePositionsChanged();
         this.scheduleProjectSave();
       },
+      resolveDynamicSelectOptions: (source, node) =>
+        this.resolveDynamicSelectOptionsForNode(source, node),
       isLabelEditing: (nodeId) => this.isLabelNodeEditing(nodeId),
       consumeLabelAutoFocus: (nodeId) => this.consumeLabelAutoFocus(nodeId),
       onRequestLabelEdit: (nodeId) => this.requestLabelNodeEdit(nodeId, { autoFocus: true }),

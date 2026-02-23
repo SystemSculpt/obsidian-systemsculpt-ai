@@ -145,4 +145,41 @@ describe("StudioGraphCompiler", () => {
 
     expect(() => compiler.compile(project, registry)).toThrow("cycle");
   });
+
+  it("accepts dataset dynamic field outputs saved on node config", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "dataset",
+        kind: "studio.dataset",
+        version: "1.0.0",
+        title: "Dataset",
+        position: { x: 0, y: 0 },
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "SELECT email FROM users LIMIT 5;",
+          outputFields: ["email"],
+        },
+      },
+      {
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 280, y: 0 },
+        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
+      }
+    );
+    project.graph.edges.push({
+      id: "e1",
+      fromNodeId: "dataset",
+      fromPortId: "email",
+      toNodeId: "http",
+      toPortId: "body",
+    });
+
+    const compiled = compiler.compile(project, registry);
+    expect(compiled.executionOrder).toContain("dataset");
+    expect(compiled.executionOrder).toContain("http");
+  });
 });

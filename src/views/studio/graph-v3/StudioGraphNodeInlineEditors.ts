@@ -1,10 +1,17 @@
 import type {
+  StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigFieldDefinition,
+  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
+import {
+  isNodeConfigFieldVisible,
+  mergeNodeConfigWithDefaults,
+} from "../../../studio/StudioNodeConfigValidation";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
+import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
 
 type RenderStudioNodeInlineEditorOptions = {
   nodeEl: HTMLElement;
@@ -13,10 +20,16 @@ type RenderStudioNodeInlineEditorOptions = {
   definition: StudioNodeDefinition;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
 };
 
 const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.input",
+  "studio.json",
+  "studio.value",
   "studio.label",
   "studio.cli_command",
   "studio.dataset",
@@ -32,6 +45,8 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
 
 const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.image_generation",
+  "studio.json",
+  "studio.value",
   "studio.media_ingest",
   "studio.dataset",
   "studio.note",
@@ -86,35 +101,18 @@ function normalizeFieldLabel(field: StudioNodeConfigFieldDefinition): string {
   return raw.toUpperCase();
 }
 
-function isVisibleByRule(
-  field: StudioNodeConfigFieldDefinition,
-  config: Record<string, unknown>
-): boolean {
-  if (!field.visibleWhen) {
-    return true;
-  }
-  const expected = Array.isArray(field.visibleWhen.equals)
-    ? field.visibleWhen.equals
-    : [field.visibleWhen.equals];
-  const current = config[field.visibleWhen.key];
-  return expected.some((value) => value === current);
-}
-
-function buildVisibleFieldList(options: {
-  node: StudioNodeInstance;
+function buildOrderedFieldList(options: {
   definition: StudioNodeDefinition;
   orderedKeys: string[];
 }): StudioNodeConfigFieldDefinition[] {
-  const { node, definition, orderedKeys } = options;
-  const visible = definition.configSchema.fields.filter((field) =>
-    isVisibleByRule(field, node.config as Record<string, unknown>)
-  );
-  if (visible.length === 0) {
+  const { definition, orderedKeys } = options;
+  const fields = definition.configSchema.fields || [];
+  if (fields.length === 0) {
     return [];
   }
 
   const byKey = new Map<string, StudioNodeConfigFieldDefinition>();
-  for (const field of visible) {
+  for (const field of fields) {
     byKey.set(field.key, field);
   }
 
@@ -128,7 +126,7 @@ function buildVisibleFieldList(options: {
     output.push(field);
     seen.add(field.key);
   }
-  for (const field of visible) {
+  for (const field of fields) {
     if (seen.has(field.key)) {
       continue;
     }
@@ -138,6 +136,9 @@ function buildVisibleFieldList(options: {
 }
 
 function isInlineConfigFieldFullWidth(field: StudioNodeConfigFieldDefinition): boolean {
+  if (field.type === "select" && field.selectPresentation === "button_group") {
+    return true;
+  }
   if (
     field.type === "textarea" ||
     field.type === "media_path" ||
@@ -174,14 +175,151 @@ function renderDatasetOutputPreview(options: {
     : "Run this dataset node to preview the latest dataset result.";
 }
 
+function formatJsonPreview(value: unknown): string {
+  if (typeof value === "undefined") {
+    return "";
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function renderJsonOutputPreview(options: {
+  nodeEl: HTMLElement;
+  node: StudioNodeInstance;
+  nodeRunState: StudioNodeRunDisplayState;
+}): void {
+  const { nodeEl, node, nodeRunState } = options;
+  const outputs = nodeRunState.outputs as Record<string, unknown> | null;
+  const seededValue = (node.config as Record<string, unknown>).__studio_seed_json;
+  const outputValue = outputs && Object.prototype.hasOwnProperty.call(outputs, "json")
+    ? outputs.json
+    : seededValue;
+  const previewText = formatJsonPreview(outputValue);
+  const outputWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-inline-output-preview" });
+  outputWrapEl.createDiv({
+    cls: "ss-studio-node-inline-output-preview-label",
+    text: "JSON PREVIEW",
+  });
+  const outputEditorEl = outputWrapEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-output-preview-text",
+    attr: {
+      "aria-label": `${node.title || "JSON"} preview`,
+      readonly: "readonly",
+    },
+  });
+  outputEditorEl.readOnly = true;
+  outputEditorEl.value = previewText.trim()
+    ? previewText
+    : "Connect a JSON output and run this node to inspect the value.";
+}
+
+function renderValueOutputPreview(options: {
+  nodeEl: HTMLElement;
+  node: StudioNodeInstance;
+  nodeRunState: StudioNodeRunDisplayState;
+}): void {
+  const { nodeEl, node, nodeRunState } = options;
+  const outputs = nodeRunState.outputs as Record<string, unknown> | null;
+  const seededValue = (node.config as Record<string, unknown>).__studio_seed_value;
+  const outputValue = outputs && Object.prototype.hasOwnProperty.call(outputs, "value")
+    ? outputs.value
+    : seededValue;
+  const previewText = formatJsonPreview(outputValue);
+  const outputWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-inline-output-preview" });
+  outputWrapEl.createDiv({
+    cls: "ss-studio-node-inline-output-preview-label",
+    text: "VALUE PREVIEW",
+  });
+  const outputEditorEl = outputWrapEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-output-preview-text",
+    attr: {
+      "aria-label": `${node.title || "Value"} preview`,
+      readonly: "readonly",
+    },
+  });
+  outputEditorEl.readOnly = true;
+  outputEditorEl.value = previewText.trim()
+    ? previewText
+    : "Connect an output and run this node to inspect the value.";
+}
+
 function renderInlineConfigSelectField(options: {
   node: StudioNodeInstance;
   field: StudioNodeConfigFieldDefinition;
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const {
+    node,
+    field,
+    fieldEl,
+    interactionLocked,
+    onNodeConfigMutated,
+    resolveDynamicSelectOptions,
+  } = options;
+
+  if (field.selectPresentation === "button_group" && Array.isArray(field.options) && field.options.length > 0) {
+    const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-select-button-group" });
+    const refreshActiveState = (value: string): void => {
+      for (const buttonEl of Array.from(rowEl.children)) {
+        const element = buttonEl as HTMLElement;
+        element.classList.toggle("is-active", element.dataset.optionValue === value);
+      }
+    };
+    const currentValue = readConfigString(node.config[field.key]);
+    for (const option of field.options) {
+      const buttonEl = rowEl.createEl("button", {
+        cls: "ss-studio-node-inline-config-select-button",
+        text: option.label || option.value,
+      });
+      buttonEl.type = "button";
+      buttonEl.dataset.optionValue = option.value;
+      buttonEl.disabled = interactionLocked;
+      buttonEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        node.config[field.key] = option.value;
+        refreshActiveState(option.value);
+        onNodeConfigMutated(node);
+      });
+    }
+    refreshActiveState(currentValue);
+    return;
+  }
+
+  if (field.selectPresentation === "searchable_dropdown") {
+    const loadOptions = async (): Promise<StudioNodeConfigSelectOption[]> => {
+      if (field.optionsSource && resolveDynamicSelectOptions) {
+        const resolved = await resolveDynamicSelectOptions(field.optionsSource, node);
+        if (Array.isArray(resolved) && resolved.length > 0) {
+          return resolved;
+        }
+      }
+      return Array.isArray(field.options) ? field.options : [];
+    };
+    renderStudioSearchableDropdown({
+      containerEl: fieldEl,
+      ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
+      value: readConfigString(node.config[field.key]),
+      disabled: interactionLocked,
+      placeholder: field.required ? "Select model" : "Default",
+      noResultsText: "No matching models.",
+      loadOptions,
+      onValueChange: (value) => {
+        node.config[field.key] = value;
+        onNodeConfigMutated(node);
+      },
+    });
+    return;
+  }
+
   const selectEl = fieldEl.createEl("select", {
     cls: "ss-studio-node-inline-config-select",
     attr: {
@@ -508,6 +646,10 @@ function renderInlineConfigPanel(options: {
   orderedFieldKeys: string[];
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
 }): boolean {
   const {
     nodeEl,
@@ -516,10 +658,10 @@ function renderInlineConfigPanel(options: {
     orderedFieldKeys,
     interactionLocked,
     onNodeConfigMutated,
+    resolveDynamicSelectOptions,
   } = options;
 
-  const fields = buildVisibleFieldList({
-    node,
+  const fields = buildOrderedFieldList({
     definition,
     orderedKeys: orderedFieldKeys,
   });
@@ -529,6 +671,18 @@ function renderInlineConfigPanel(options: {
 
   const panelEl = nodeEl.createDiv({ cls: "ss-studio-node-inline-config" });
   const gridEl = panelEl.createDiv({ cls: "ss-studio-node-inline-config-grid" });
+  const fieldWrappers = new Map<string, { field: StudioNodeConfigFieldDefinition; wrapper: HTMLElement }>();
+  const refreshVisibilityState = (): void => {
+    const mergedConfig = mergeNodeConfigWithDefaults(definition, node.config);
+    for (const entry of fieldWrappers.values()) {
+      const isVisible = isNodeConfigFieldVisible(entry.field, mergedConfig);
+      entry.wrapper.classList.toggle("is-hidden", !isVisible);
+    }
+  };
+  const handleNodeConfigMutated = (mutatedNode: StudioNodeInstance): void => {
+    refreshVisibilityState();
+    onNodeConfigMutated(mutatedNode);
+  };
   let renderedAnyField = false;
 
   for (const field of fields) {
@@ -536,6 +690,7 @@ function renderInlineConfigPanel(options: {
     const fieldEl = gridEl.createDiv({
       cls: `ss-studio-node-inline-config-field${fullWidth ? " is-full" : ""}`,
     });
+    fieldWrappers.set(field.key, { field, wrapper: fieldEl });
     fieldEl.createDiv({
       cls: "ss-studio-node-inline-config-label",
       text: normalizeFieldLabel(field),
@@ -554,7 +709,8 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
+        resolveDynamicSelectOptions,
       });
       renderedAnyField = true;
       continue;
@@ -566,7 +722,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -581,7 +737,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -592,7 +748,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -603,7 +759,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -614,7 +770,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -625,7 +781,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
       continue;
@@ -636,7 +792,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
-        onNodeConfigMutated,
+        onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
     }
@@ -646,6 +802,7 @@ function renderInlineConfigPanel(options: {
     panelEl.remove();
     return false;
   }
+  refreshVisibilityState();
   return true;
 }
 
@@ -699,7 +856,15 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
 }
 
 function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOptions): boolean {
-  const { node, nodeEl, nodeRunState, definition, interactionLocked, onNodeConfigMutated } = options;
+  const {
+    node,
+    nodeEl,
+    nodeRunState,
+    definition,
+    interactionLocked,
+    onNodeConfigMutated,
+    resolveDynamicSelectOptions,
+  } = options;
   const kind = normalizeNodeKind(node.kind);
 
   if (kind === "studio.image_generation") {
@@ -710,6 +875,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["systemPrompt", "modelId", "count", "aspectRatio"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -721,6 +887,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["sourcePath"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -732,6 +899,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["ffmpegCommand", "outputFormat", "outputPath", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -743,6 +911,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["vaultPath"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -751,9 +920,10 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["systemPrompt", "modelId"],
+      orderedFieldKeys: ["sourceMode", "systemPrompt", "modelId", "localModelId"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -773,6 +943,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       ],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
     if (rendered) {
       renderDatasetOutputPreview({
@@ -784,6 +955,24 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     return rendered;
   }
 
+  if (kind === "studio.json") {
+    renderJsonOutputPreview({
+      nodeEl,
+      node,
+      nodeRunState,
+    });
+    return true;
+  }
+
+  if (kind === "studio.value") {
+    renderValueOutputPreview({
+      nodeEl,
+      node,
+      nodeRunState,
+    });
+    return true;
+  }
+
   if (kind === "studio.http_request") {
     return renderInlineConfigPanel({
       nodeEl,
@@ -792,6 +981,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["method", "url", "headers"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -803,6 +993,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["command", "args", "cwd", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -814,6 +1005,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["value"],
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
   }
 
@@ -828,6 +1020,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     orderedFieldKeys: definition.configSchema.fields.map((field) => field.key),
     interactionLocked,
     onNodeConfigMutated,
+    resolveDynamicSelectOptions,
   });
 }
 

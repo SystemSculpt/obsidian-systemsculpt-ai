@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import { validateNodeConfig } from "./StudioNodeConfigValidation";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
+import { resolveNodeDefinitionPorts } from "./StudioNodePortResolution";
 
 export type StudioCompiledNode = {
   node: StudioNodeInstance;
@@ -36,14 +37,14 @@ export class StudioGraphCompiler {
         throw new Error(`Graph compile failed: duplicate node ID "${node.id}".`);
       }
 
-      const definition = registry.get(node.kind, node.version);
-      if (!definition) {
+      const baseDefinition = registry.get(node.kind, node.version);
+      if (!baseDefinition) {
         throw new Error(
           `Graph compile failed: missing node definition for "${node.kind}@${node.version}".`
         );
       }
 
-      const configValidation = validateNodeConfig(definition, node.config);
+      const configValidation = validateNodeConfig(baseDefinition, node.config);
       if (!configValidation.isValid) {
         const firstError = configValidation.errors[0];
         throw new Error(
@@ -51,6 +52,7 @@ export class StudioGraphCompiler {
         );
       }
 
+      const definition = resolveNodeDefinitionPorts(node, baseDefinition);
       nodesById.set(node.id, {
         node,
         definition,

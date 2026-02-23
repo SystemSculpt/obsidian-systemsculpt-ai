@@ -1,5 +1,7 @@
 import { Notice } from "obsidian";
 import type {
+  StudioNodeConfigDynamicOptionsSource,
+  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
@@ -51,6 +53,10 @@ type RenderStudioGraphNodeCardOptions = {
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  resolveDynamicSelectOptions?: (
+    source: StudioNodeConfigDynamicOptionsSource,
+    node: StudioNodeInstance
+  ) => Promise<StudioNodeConfigSelectOption[]>;
   isLabelEditing: (nodeId: string) => boolean;
   consumeLabelAutoFocus: (nodeId: string) => boolean;
   onRequestLabelEdit: (nodeId: string) => void;
@@ -257,9 +263,21 @@ function renderLabelNodeCard(options: {
     });
     textSurfaceEl = displayEl;
     applyFontSize(fontSize);
+    displayEl.addEventListener("click", (event) => {
+      const pointerEvent = event as MouseEvent;
+      if (pointerEvent.button !== 0) {
+        return;
+      }
+      if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
+        graphInteraction.toggleNodeSelection(node.id);
+        return;
+      }
+      graphInteraction.ensureSingleSelection(node.id);
+    });
     displayEl.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      graphInteraction.ensureSingleSelection(node.id);
       onRequestLabelEdit(node.id);
     });
   }
@@ -361,6 +379,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodeGeometryMutated,
+    resolveDynamicSelectOptions,
     isLabelEditing,
     consumeLabelAutoFocus,
     onRequestLabelEdit,
@@ -391,7 +410,11 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (!target) {
       return;
     }
-    if (target.closest("input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle")) {
+    if (
+      target.closest(
+        "input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle, .ss-studio-label-display"
+      )
+    ) {
       return;
     }
 
@@ -599,6 +622,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       definition,
       interactionLocked,
       onNodeConfigMutated,
+      resolveDynamicSelectOptions,
     });
 
   if (!isPlaceholder && !renderedInlineEditor) {

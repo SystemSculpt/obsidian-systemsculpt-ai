@@ -325,6 +325,24 @@ export class StudioRunPresentationState {
     return this.nodeStates.get(nodeId)?.outputs || null;
   }
 
+  primeNodeOutput(
+    nodeId: string,
+    outputs: StudioNodeOutputMap,
+    options?: { message?: string; updatedAt?: string }
+  ): void {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId || !outputs || typeof outputs !== "object") {
+      return;
+    }
+    this.setNodeState(normalizedNodeId, {
+      status: "succeeded",
+      message: String(options?.message || "Preview ready"),
+      updatedAt: String(options?.updatedAt || "").trim() || new Date().toISOString(),
+      outputs: { ...outputs },
+      completeCounted: true,
+    });
+  }
+
   private setNodeState(nodeId: string, next: Partial<InternalNodeRunState>): void {
     const current = this.nodeStates.get(nodeId) || createInternalNodeState();
     this.nodeStates.set(nodeId, {

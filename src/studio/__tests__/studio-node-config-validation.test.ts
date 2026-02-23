@@ -214,4 +214,25 @@ describe("Studio node config validation", () => {
     expect(result.isValid).toBe(false);
     expect(result.errors.some((error) => error.fieldKey === "adapterCommand")).toBe(true);
   });
+
+  it("requires local model ID only when text generation source mode is local_pi", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.text_generation", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const localMissingModel = validateNodeConfig(definition!, {
+      sourceMode: "local_pi",
+      systemPrompt: "You are local",
+      localModelId: "",
+    });
+    expect(localMissingModel.isValid).toBe(false);
+    expect(localMissingModel.errors.some((error) => error.fieldKey === "localModelId")).toBe(true);
+
+    const systemWithoutLocalModel = validateNodeConfig(definition!, {
+      sourceMode: "systemsculpt",
+      modelId: "openai/gpt-5-mini",
+      localModelId: "",
+    });
+    expect(systemWithoutLocalModel.isValid).toBe(true);
+  });
 });

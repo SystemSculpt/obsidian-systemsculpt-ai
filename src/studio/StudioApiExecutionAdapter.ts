@@ -14,16 +14,18 @@ import type {
   StudioProjectV1,
   StudioTextGenerationRequest,
   StudioTextGenerationResult,
+  StudioTextProviderMode,
   StudioTranscriptionRequest,
   StudioTranscriptionResult,
 } from "./types";
 import { StudioAssetStore } from "./StudioAssetStore";
+import {
+  normalizeStudioLocalPiModelId,
+  runStudioLocalPiTextGeneration,
+} from "./StudioLocalTextModelCatalog";
+import { randomId } from "./utils";
 
-const API_NODE_KINDS = new Set([
-  "studio.text_generation",
-  "studio.image_generation",
-  "studio.transcription",
-]);
+const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
 const STUDIO_IMAGE_MODEL_ALIASES: Record<string, string> = {
   "google/nano-banana-pro": "google/gemini-3-pro-image-preview",
   "google/nano-banana": "google/gemini-3-pro-image-preview",
@@ -94,7 +96,7 @@ type VaultBinaryAdapter = {
   remove?: (path: string) => Promise<void>;
 };
 
-export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
+export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private readonly streamer = new StreamingService();
   private readonly sessionClient: AgentSessionClient;
   private imageClient: SystemSculptImageGenerationService | null = null;
@@ -127,13 +129,28 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
       const upstreamModel = upstreamModelRaw.trim();
       if (providerId !== "systemsculpt") {
         throw new Error(
-          `Studio is SystemSculpt API-only. Model "${trimmed}" belongs to non-SystemSculpt provider "${providerIdRaw}".`
+          `Text generation source is set to SystemSculpt, but model "${trimmed}" belongs to provider "${providerIdRaw}". Switch the node source to Local (Pi) for non-SystemSculpt providers.`
         );
       }
       return upstreamModel;
     }
 
     return trimmed;
+  }
+
+  private readTextProviderMode(request: StudioTextGenerationRequest): StudioTextProviderMode {
+    const normalized = String(request.sourceMode || "systemsculpt").trim().toLowerCase();
+    return normalized === "local_pi" ? "local_pi" : "systemsculpt";
+  }
+
+  private async resolveLocalTextModelId(request: StudioTextGenerationRequest): Promise<string> {
+    const rawLocalModelId = String(request.localModelId || "").trim();
+    if (!rawLocalModelId) {
+      throw new Error(
+        'Text generation node is set to Local (Pi), but no model is selected. Choose a Local model and rerun.'
+      );
+    }
+    return normalizeStudioLocalPiModelId(rawLocalModelId);
   }
 
   private normalizeStudioImageModelId(raw: string): string {
@@ -309,9 +326,24 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
     }
   }
 
+  private nodeRequiresSystemSculptCredits(node: StudioProjectV1["graph"]["nodes"][number]): boolean {
+    if (API_NODE_KINDS.has(node.kind)) {
+      return true;
+    }
+    if (node.kind !== "studio.text_generation") {
+      return false;
+    }
+    const sourceMode = String((node.config as Record<string, unknown>)?.sourceMode || "systemsculpt")
+      .trim()
+      .toLowerCase();
+    return sourceMode !== "local_pi";
+  }
+
   async estimateRunCredits(project: StudioProjectV1): Promise<{ ok: boolean; reason?: string }> {
-    const requiresApi = project.graph.nodes.some((node) => API_NODE_KINDS.has(node.kind));
-    if (!requiresApi) {
+    const requiresSystemSculptCredits = project.graph.nodes.some((node) =>
+      this.nodeRequiresSystemSculptCredits(node)
+    );
+    if (!requiresSystemSculptCredits) {
       return { ok: true };
     }
 
@@ -333,6 +365,38 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
   }
 
   async generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult> {
+    const sourceMode = this.readTextProviderMode(request);
+    const systemPrompt = String(request.systemPrompt || "").trim();
+    const messages: Array<{ role: "system" | "user"; content: string; message_id: string }> = [];
+    if (systemPrompt) {
+      messages.push({
+        role: "system" as const,
+        content: systemPrompt,
+        message_id: randomId("msg"),
+      });
+    }
+    messages.push({
+      role: "user" as const,
+      content: request.prompt,
+      message_id: randomId("msg"),
+    });
+
+    if (sourceMode === "local_pi") {
+      const localModelId = await this.resolveLocalTextModelId(request);
+      try {
+        const result = await runStudioLocalPiTextGeneration({
+          plugin: this.plugin,
+          modelId: localModelId,
+          prompt: request.prompt,
+          systemPrompt,
+        });
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Local (Pi) text generation failed: ${message}`);
+      }
+    }
+
     this.refreshSessionConfig();
     const modelId = this.normalizeStudioModelId(
       String(request.modelId || this.plugin.settings.selectedModelId || "")
@@ -340,13 +404,6 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
     if (!modelId) {
       throw new Error("Text generation requires a model ID.");
     }
-
-    const systemPrompt = String(request.systemPrompt || "").trim();
-    const messages: Array<{ role: "system" | "user"; content: string }> = [];
-    if (systemPrompt) {
-      messages.push({ role: "system" as const, content: systemPrompt });
-    }
-    messages.push({ role: "user" as const, content: request.prompt });
 
     // API turn locking is account-scoped server-side, so serialize Studio text turns locally.
     return this.runTextTurnExclusive(async () => {

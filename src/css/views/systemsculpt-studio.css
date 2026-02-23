@@ -286,6 +286,22 @@
   pointer-events: none;
 }
 
+.ss-studio-connection-autocreate-hint {
+  position: absolute;
+  z-index: 18;
+  max-width: 260px;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, #8de8bc 58%, var(--ss-studio-border) 42%);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--background-primary) 93%, #163927 7%);
+  color: color-mix(in srgb, #e1ffe9 92%, var(--text-normal) 8%);
+  box-shadow: 0 10px 22px color-mix(in srgb, #000 34%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 6px 8px;
+}
+
 .ss-studio-simple-context-menu,
 .ss-studio-link-context-menu {
   --ss-studio-simple-context-menu-scale: 1;
@@ -697,6 +713,10 @@
   gap: 5px;
 }
 
+.ss-studio-node-inline-config-field.is-hidden {
+  display: none;
+}
+
 .ss-studio-node-inline-config-field.is-full,
 .ss-studio-node-image-config-field.is-full {
   grid-column: 1 / -1;
@@ -717,6 +737,218 @@
   font-size: 10px;
   line-height: 1.35;
   color: color-mix(in srgb, var(--text-normal) 72%, #8bcfae 28%);
+}
+
+.ss-studio-node-inline-config-select-button-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ss-studio-node-inline-config-select-button {
+  border: 1px solid color-mix(in srgb, #8de8bc 46%, var(--ss-studio-border) 54%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-primary) 90%, #1d4735 10%);
+  color: var(--text-muted);
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  width: 100%;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    transform 90ms ease;
+}
+
+.ss-studio-node-inline-config-select-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #9effd0 64%, var(--ss-studio-border) 36%);
+  background: color-mix(in srgb, var(--background-primary) 82%, #2b5f48 18%);
+  transform: translateY(-1px);
+}
+
+.ss-studio-node-inline-config-select-button.is-active {
+  border-color: color-mix(in srgb, #8de8bc 72%, var(--ss-studio-border) 28%);
+  background: color-mix(in srgb, #2f6b53 50%, var(--background-primary) 50%);
+  color: var(--text-normal);
+}
+
+.ss-studio-node-inline-config-select-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+}
+
+.ss-studio-searchable-select {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+.ss-studio-searchable-select-trigger {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, #7bcda5 34%, var(--ss-studio-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, #0f251b 80%, var(--background-primary));
+  color: #d4f5e2;
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  line-height: 1.35;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-studio-searchable-select-trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #9effd0 58%, var(--ss-studio-border) 42%);
+}
+
+.ss-studio-searchable-select-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #8de8bc 66%, var(--ss-studio-border) 34%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 25%, transparent);
+}
+
+.ss-studio-searchable-select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.ss-studio-searchable-select-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-searchable-select-trigger-chevron {
+  font-size: 10px;
+  color: color-mix(in srgb, #9deec8 74%, var(--text-muted) 26%);
+  transition: transform 120ms ease;
+}
+
+.ss-studio-searchable-select.is-open .ss-studio-searchable-select-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.ss-studio-searchable-select-panel {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+  min-width: 100%;
+  width: max(100%, 520px);
+  max-width: min(760px, calc(100vw - 24px));
+  z-index: 20;
+  border: 1px solid color-mix(in srgb, #8de8bc 48%, var(--ss-studio-border) 52%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 95%, #143728 5%);
+  box-shadow: 0 12px 24px color-mix(in srgb, #000 34%, transparent);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.ss-studio-searchable-select-search {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, #7bcda5 34%, var(--ss-studio-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #0f251b 82%, var(--background-primary));
+  color: #d4f5e2;
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  line-height: 1.35;
+  padding: 6px 8px;
+}
+
+.ss-studio-searchable-select-search:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #8de8bc 66%, var(--ss-studio-border) 34%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 25%, transparent);
+}
+
+.ss-studio-searchable-select-list {
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.ss-studio-searchable-select-item {
+  border: 1px solid color-mix(in srgb, #8de8bc 32%, var(--ss-studio-border) 68%);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--background-primary) 90%, #1b4533 10%);
+  padding: 6px 7px;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.ss-studio-searchable-select-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ss-studio-searchable-select-item-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, #8de8bc 56%, var(--ss-studio-border) 44%);
+  border-radius: 999px;
+  background: color-mix(in srgb, #2f6b53 30%, var(--background-primary) 70%);
+  color: color-mix(in srgb, #cffbe4 92%, var(--text-normal) 8%);
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.ss-studio-searchable-select-item-label {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-studio-searchable-select-item-description {
+  font-size: 10px;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.ss-studio-searchable-select-item.is-active,
+.ss-studio-searchable-select-item:hover {
+  border-color: color-mix(in srgb, #8de8bc 58%, var(--ss-studio-border) 42%);
+  background: color-mix(in srgb, var(--background-primary) 84%, #2a5d46 16%);
+}
+
+.ss-studio-searchable-select-item.is-selected {
+  border-color: color-mix(in srgb, #8de8bc 70%, var(--ss-studio-border) 30%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #8de8bc 28%, transparent);
+}
+
+.ss-studio-searchable-select-empty {
+  border: 1px dashed color-mix(in srgb, #8de8bc 32%, var(--ss-studio-border) 68%);
+  border-radius: 7px;
+  padding: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .ss-studio-node-inline-output-preview {
@@ -1359,8 +1591,8 @@
 }
 
 .ss-studio-node-inspector-select-button-group {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1374,6 +1606,8 @@
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
+  width: 100%;
+  white-space: nowrap;
   cursor: pointer;
 }
 
