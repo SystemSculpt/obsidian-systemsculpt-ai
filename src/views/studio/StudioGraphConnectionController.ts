@@ -13,6 +13,18 @@ type StudioGraphConnectionHost = StudioGraphInteractionHost & {
   getGraphZoom: () => number;
 };
 
+type ConnectionCurve = {
+  path: string;
+  startAngleDeg: number;
+  endAngleDeg: number;
+};
+
+type AngleAccumulator = {
+  x: number;
+  y: number;
+  count: number;
+};
+
 export class StudioGraphConnectionController {
   private pendingConnection: PendingConnection | null = null;
   private connectionDrag: ConnectionDragState | null = null;
@@ -286,36 +298,106 @@ export class StudioGraphConnectionController {
     return true;
   }
 
+  private connectionCurve(startX: number, startY: number, endX: number, endY: number): ConnectionCurve {
+    const direction = endX >= startX ? 1 : -1;
+    const horizontalDistance = Math.abs(endX - startX);
+    const verticalDistance = Math.abs(endY - startY);
+    const handleDistance = Math.min(220, Math.max(44, horizontalDistance * 0.4 + verticalDistance * 0.18));
+    const verticalHandleOffset = (endY - startY) * 0.22;
+    const controlStartX = startX + handleDistance * direction;
+    const controlStartY = startY + verticalHandleOffset;
+    const controlEndX = endX - handleDistance * direction;
+    const controlEndY = endY - verticalHandleOffset;
+    const startAngleDeg = (Math.atan2(controlStartY - startY, controlStartX - startX) * 180) / Math.PI;
+    const endAngleDeg = (Math.atan2(endY - controlEndY, endX - controlEndX) * 180) / Math.PI;
+    return {
+      path: `M ${startX} ${startY} C ${controlStartX} ${controlStartY}, ${controlEndX} ${controlEndY}, ${endX} ${endY}`,
+      startAngleDeg,
+      endAngleDeg,
+    };
+  }
+
+  private accumulateAngle(accumulators: Map<string, AngleAccumulator>, key: string, angleDeg: number): void {
+    const radians = (angleDeg * Math.PI) / 180;
+    const existing = accumulators.get(key) || { x: 0, y: 0, count: 0 };
+    existing.x += Math.cos(radians);
+    existing.y += Math.sin(radians);
+    existing.count += 1;
+    accumulators.set(key, existing);
+  }
+
+  private averageAngleDegrees(accumulators: Map<string, AngleAccumulator>, key: string): number | null {
+    const value = accumulators.get(key);
+    if (!value || value.count <= 0) {
+      return null;
+    }
+    return (Math.atan2(value.y, value.x) * 180) / Math.PI;
+  }
+
+  private refreshConnectedPinState(
+    connectedInputKeys: Set<string>,
+    connectedOutputKeys: Set<string>,
+    inputAngleAccumulators: Map<string, AngleAccumulator>,
+    outputAngleAccumulators: Map<string, AngleAccumulator>
+  ): void {
+    for (const [key, element] of this.portElsByKey.entries()) {
+      const isInputConnected = connectedInputKeys.has(key);
+      const isOutputConnected = connectedOutputKeys.has(key);
+      element.classList.toggle("is-connected", isInputConnected || isOutputConnected);
+      element.classList.toggle("is-connected-in", isInputConnected);
+      element.classList.toggle("is-connected-out", isOutputConnected);
+      const angle = isInputConnected
+        ? this.averageAngleDegrees(inputAngleAccumulators, key)
+        : isOutputConnected
+          ? this.averageAngleDegrees(outputAngleAccumulators, key)
+          : null;
+      if (angle === null || !Number.isFinite(angle)) {
+        element.style.removeProperty("--ss-studio-port-link-angle");
+      } else {
+        element.style.setProperty("--ss-studio-port-link-angle", `${angle.toFixed(3)}deg`);
+      }
+    }
+  }
+
   renderEdgeLayer(): void {
     const project = this.host.getCurrentProject();
     if (!project || !this.graphEdgesLayerEl || !this.graphCanvasEl) {
+      this.refreshConnectedPinState(new Set(), new Set(), new Map(), new Map());
       return;
     }
 
     this.graphEdgesLayerEl.textContent = "";
+    const connectedInputKeys = new Set<string>();
+    const connectedOutputKeys = new Set<string>();
+    const inputAngleAccumulators = new Map<string, AngleAccumulator>();
+    const outputAngleAccumulators = new Map<string, AngleAccumulator>();
 
     for (const edge of project.graph.edges) {
-      const fromPort = this.portElsByKey.get(this.portElementKey(edge.fromNodeId, "out", edge.fromPortId));
-      const toPort = this.portElsByKey.get(this.portElementKey(edge.toNodeId, "in", edge.toPortId));
+      const fromKey = this.portElementKey(edge.fromNodeId, "out", edge.fromPortId);
+      const toKey = this.portElementKey(edge.toNodeId, "in", edge.toPortId);
+      const fromPort = this.portElsByKey.get(fromKey);
+      const toPort = this.portElsByKey.get(toKey);
       if (!fromPort || !toPort) {
         continue;
       }
+      connectedOutputKeys.add(fromKey);
+      connectedInputKeys.add(toKey);
 
       const canvasRect = this.graphCanvasEl.getBoundingClientRect();
       const fromRect = fromPort.getBoundingClientRect();
       const toRect = toPort.getBoundingClientRect();
       const zoom = this.host.getGraphZoom() || 1;
-      const startX = (fromRect.left - canvasRect.left + fromRect.width / 2) / zoom;
+      const startX = (fromRect.left - canvasRect.left + fromRect.width) / zoom;
       const startY = (fromRect.top - canvasRect.top + fromRect.height / 2) / zoom;
-      const endX = (toRect.left - canvasRect.left + toRect.width / 2) / zoom;
+      const endX = (toRect.left - canvasRect.left) / zoom;
       const endY = (toRect.top - canvasRect.top + toRect.height / 2) / zoom;
-      const controlX = Math.max(startX + 70, (startX + endX) / 2);
+      const curve = this.connectionCurve(startX, startY, endX, endY);
+      this.accumulateAngle(outputAngleAccumulators, fromKey, curve.startAngleDeg);
+      // Input bridge points away from the node edge, so use the inverse of incoming tangent.
+      this.accumulateAngle(inputAngleAccumulators, toKey, curve.endAngleDeg + 180);
 
       const path = document.createElementNS(SVG_NS, "path");
-      path.setAttribute(
-        "d",
-        `M ${startX} ${startY} C ${controlX} ${startY}, ${controlX} ${endY}, ${endX} ${endY}`
-      );
+      path.setAttribute("d", curve.path);
       path.setAttribute("class", "ss-studio-edge-path");
       path.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -333,21 +415,25 @@ export class StudioGraphConnectionController {
         const canvasRect = this.graphCanvasEl.getBoundingClientRect();
         const sourceRect = sourcePin.getBoundingClientRect();
         const zoom = this.host.getGraphZoom() || 1;
-        const startX = (sourceRect.left - canvasRect.left + sourceRect.width / 2) / zoom;
+        const startX = (sourceRect.left - canvasRect.left + sourceRect.width) / zoom;
         const startY = (sourceRect.top - canvasRect.top + sourceRect.height / 2) / zoom;
         const endX = (drag.lastClientX - canvasRect.left) / zoom;
         const endY = (drag.lastClientY - canvasRect.top) / zoom;
-        const controlX = Math.max(startX + 70, (startX + endX) / 2);
+        const curve = this.connectionCurve(startX, startY, endX, endY);
 
         const previewPath = document.createElementNS(SVG_NS, "path");
-        previewPath.setAttribute(
-          "d",
-          `M ${startX} ${startY} C ${controlX} ${startY}, ${controlX} ${endY}, ${endX} ${endY}`
-        );
+        previewPath.setAttribute("d", curve.path);
         previewPath.setAttribute("class", "ss-studio-edge-preview");
         this.graphEdgesLayerEl.appendChild(previewPath);
       }
     }
+
+    this.refreshConnectedPinState(
+      connectedInputKeys,
+      connectedOutputKeys,
+      inputAngleAccumulators,
+      outputAngleAccumulators
+    );
   }
 
   private refreshOutputPinActiveState(): void {

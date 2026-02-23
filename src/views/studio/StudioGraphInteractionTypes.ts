@@ -30,6 +30,7 @@ export type StudioGraphInteractionHost = {
   scheduleProjectSave: () => void;
   requestRender: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
+  onGraphZoomChanged?: (zoom: number) => void;
   getPortType: (nodeId: string, direction: "in" | "out", portId: string) => string | null;
   portTypeCompatible: (sourceType: string, targetType: string) => boolean;
 };

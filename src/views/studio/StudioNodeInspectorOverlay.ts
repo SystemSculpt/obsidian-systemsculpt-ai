@@ -17,6 +17,8 @@ const MIN_INSPECTOR_WIDTH = 320;
 const MIN_INSPECTOR_HEIGHT = 280;
 const INSPECTOR_EDGE_PADDING = 8;
 const INSPECTOR_ANCHOR_GAP = 12;
+const MIN_INSPECTOR_SCALE = 0.4;
+const MAX_INSPECTOR_SCALE = 2.4;
 
 type InspectorPlacement = "right" | "left" | "bottom" | "top";
 
@@ -123,25 +125,48 @@ function resolvePickedDirectoryPath(file: File | null, fallbackValue?: string): 
   return result || parentDirectory(filePath);
 }
 
+function normalizeInspectorScale(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(MAX_INSPECTOR_SCALE, Math.max(MIN_INSPECTOR_SCALE, value));
+}
+
 function clampInspectorSize(
   viewportEl: HTMLElement,
-  layout: StudioNodeInspectorLayout
+  layout: StudioNodeInspectorLayout,
+  scale = 1
 ): Pick<StudioNodeInspectorLayout, "width" | "height"> {
-  const maxWidth = Math.max(MIN_INSPECTOR_WIDTH, viewportEl.clientWidth - INSPECTOR_EDGE_PADDING * 2);
-  const maxHeight = Math.max(MIN_INSPECTOR_HEIGHT, viewportEl.clientHeight - INSPECTOR_EDGE_PADDING * 2);
-  const width = Math.min(maxWidth, Math.max(MIN_INSPECTOR_WIDTH, layout.width));
-  const height = Math.min(maxHeight, Math.max(MIN_INSPECTOR_HEIGHT, layout.height));
+  const normalizedScale = normalizeInspectorScale(scale);
+  const viewportWidth = Math.max(0, viewportEl.clientWidth - INSPECTOR_EDGE_PADDING * 2);
+  const viewportHeight = Math.max(0, viewportEl.clientHeight - INSPECTOR_EDGE_PADDING * 2);
+  const maxWidth = Math.max(180, viewportWidth / normalizedScale);
+  const maxHeight = Math.max(160, viewportHeight / normalizedScale);
+  const minWidth = Math.min(MIN_INSPECTOR_WIDTH, maxWidth);
+  const minHeight = Math.min(MIN_INSPECTOR_HEIGHT, maxHeight);
+  const width = Math.min(maxWidth, Math.max(minWidth, layout.width));
+  const height = Math.min(maxHeight, Math.max(minHeight, layout.height));
   return { width, height };
 }
 
 function clampInspectorPosition(
   viewportEl: HTMLElement,
-  layout: StudioNodeInspectorLayout
+  layout: StudioNodeInspectorLayout,
+  scale = 1
 ): Pick<StudioNodeInspectorLayout, "x" | "y"> {
+  const normalizedScale = normalizeInspectorScale(scale);
+  const visualWidth = layout.width * normalizedScale;
+  const visualHeight = layout.height * normalizedScale;
   const minX = viewportEl.scrollLeft + INSPECTOR_EDGE_PADDING;
   const minY = viewportEl.scrollTop + INSPECTOR_EDGE_PADDING;
-  const maxX = viewportEl.scrollLeft + viewportEl.clientWidth - layout.width - INSPECTOR_EDGE_PADDING;
-  const maxY = viewportEl.scrollTop + viewportEl.clientHeight - layout.height - INSPECTOR_EDGE_PADDING;
+  const maxX = Math.max(
+    minX,
+    viewportEl.scrollLeft + viewportEl.clientWidth - visualWidth - INSPECTOR_EDGE_PADDING
+  );
+  const maxY = Math.max(
+    minY,
+    viewportEl.scrollTop + viewportEl.clientHeight - visualHeight - INSPECTOR_EDGE_PADDING
+  );
   return {
     x: Math.min(maxX, Math.max(minX, layout.x)),
     y: Math.min(maxY, Math.max(minY, layout.y)),
@@ -159,6 +184,7 @@ export class StudioNodeInspectorOverlay {
   private transientFieldErrors = new Map<string, string>();
   private layout: StudioNodeInspectorLayout;
   private placement: InspectorPlacement = "right";
+  private graphZoom = 1;
 
   constructor(
     private readonly host: StudioNodeInspectorOverlayHost,
@@ -204,6 +230,15 @@ export class StudioNodeInspectorOverlay {
       width: Number.isFinite(layout.width) ? Number(layout.width) : this.layout.width,
       height: Number.isFinite(layout.height) ? Number(layout.height) : this.layout.height,
     };
+    this.applyLayout();
+  }
+
+  setGraphZoom(zoom: number): void {
+    const nextZoom = normalizeInspectorScale(zoom);
+    if (Math.abs(this.graphZoom - nextZoom) < 0.0001) {
+      return;
+    }
+    this.graphZoom = nextZoom;
     this.applyLayout();
   }
 
@@ -285,14 +320,15 @@ export class StudioNodeInspectorOverlay {
       return;
     }
 
-    const nextSize = clampInspectorSize(this.viewportEl, this.layout);
+    const scale = normalizeInspectorScale(this.graphZoom);
+    const nextSize = clampInspectorSize(this.viewportEl, this.layout, scale);
     this.layout = {
       ...this.layout,
       ...nextSize,
     };
 
     if (options?.clampPosition !== false) {
-      const nextPosition = clampInspectorPosition(this.viewportEl, this.layout);
+      const nextPosition = clampInspectorPosition(this.viewportEl, this.layout, scale);
       this.layout = {
         ...this.layout,
         ...nextPosition,
@@ -303,6 +339,8 @@ export class StudioNodeInspectorOverlay {
     this.rootEl.style.top = `${this.layout.y}px`;
     this.rootEl.style.width = `${this.layout.width}px`;
     this.rootEl.style.height = `${this.layout.height}px`;
+    this.rootEl.style.setProperty("--ss-studio-inspector-scale", String(scale));
+    this.rootEl.style.transformOrigin = "top left";
     this.rootEl.dataset.side = this.placement;
     this.host.onLayoutChanged?.({ ...this.layout });
   }
@@ -313,9 +351,12 @@ export class StudioNodeInspectorOverlay {
       return;
     }
 
-    const size = clampInspectorSize(this.viewportEl, this.layout);
+    const scale = normalizeInspectorScale(this.graphZoom);
+    const size = clampInspectorSize(this.viewportEl, this.layout, scale);
     const width = size.width;
     const height = size.height;
+    const visualWidth = width * scale;
+    const visualHeight = height * scale;
     const viewportRect = this.viewportEl.getBoundingClientRect();
     const nodeRect = anchorEl.getBoundingClientRect();
 
@@ -329,39 +370,41 @@ export class StudioNodeInspectorOverlay {
     const nodeWidth = nodeRect.width;
     const nodeHeight = nodeRect.height;
 
-    const centerY = nodeY + (nodeHeight - height) / 2;
-    const centerX = nodeX + (nodeWidth - width) / 2;
+    const centerY = nodeY + (nodeHeight - visualHeight) / 2;
+    const centerX = nodeX + (nodeWidth - visualWidth) / 2;
 
     const minY = this.viewportEl.scrollTop + INSPECTOR_EDGE_PADDING;
-    const maxY = this.viewportEl.scrollTop + this.viewportEl.clientHeight - height - INSPECTOR_EDGE_PADDING;
+    const maxY = this.viewportEl.scrollTop + this.viewportEl.clientHeight - visualHeight - INSPECTOR_EDGE_PADDING;
     const minX = this.viewportEl.scrollLeft + INSPECTOR_EDGE_PADDING;
-    const maxX = this.viewportEl.scrollLeft + this.viewportEl.clientWidth - width - INSPECTOR_EDGE_PADDING;
+    const maxX = this.viewportEl.scrollLeft + this.viewportEl.clientWidth - visualWidth - INSPECTOR_EDGE_PADDING;
+    const boundedMaxY = Math.max(minY, maxY);
+    const boundedMaxX = Math.max(minX, maxX);
 
     let placement: InspectorPlacement = "right";
     let x = nodeX + nodeWidth + INSPECTOR_ANCHOR_GAP;
-    let y = Math.min(maxY, Math.max(minY, centerY));
+    let y = Math.min(boundedMaxY, Math.max(minY, centerY));
     let clampPosition = true;
 
-    if (rightSpace >= width + INSPECTOR_ANCHOR_GAP) {
+    if (rightSpace >= visualWidth + INSPECTOR_ANCHOR_GAP) {
       placement = "right";
       x = nodeX + nodeWidth + INSPECTOR_ANCHOR_GAP;
-      y = Math.min(maxY, Math.max(minY, centerY));
-    } else if (leftSpace >= width + INSPECTOR_ANCHOR_GAP) {
+      y = Math.min(boundedMaxY, Math.max(minY, centerY));
+    } else if (leftSpace >= visualWidth + INSPECTOR_ANCHOR_GAP) {
       placement = "left";
-      x = nodeX - width - INSPECTOR_ANCHOR_GAP;
-      y = Math.min(maxY, Math.max(minY, centerY));
-    } else if (bottomSpace >= height + INSPECTOR_ANCHOR_GAP) {
+      x = nodeX - visualWidth - INSPECTOR_ANCHOR_GAP;
+      y = Math.min(boundedMaxY, Math.max(minY, centerY));
+    } else if (bottomSpace >= visualHeight + INSPECTOR_ANCHOR_GAP) {
       placement = "bottom";
-      x = Math.min(maxX, Math.max(minX, centerX));
+      x = Math.min(boundedMaxX, Math.max(minX, centerX));
       y = nodeY + nodeHeight + INSPECTOR_ANCHOR_GAP;
-    } else if (topSpace >= height + INSPECTOR_ANCHOR_GAP) {
+    } else if (topSpace >= visualHeight + INSPECTOR_ANCHOR_GAP) {
       placement = "top";
-      x = Math.min(maxX, Math.max(minX, centerX));
-      y = nodeY - height - INSPECTOR_ANCHOR_GAP;
+      x = Math.min(boundedMaxX, Math.max(minX, centerX));
+      y = nodeY - visualHeight - INSPECTOR_ANCHOR_GAP;
     } else {
       placement = "right";
       x = nodeX + nodeWidth + INSPECTOR_ANCHOR_GAP;
-      y = Math.min(maxY, Math.max(minY, centerY));
+      y = Math.min(boundedMaxY, Math.max(minY, centerY));
       clampPosition = false;
     }
 
@@ -438,10 +481,11 @@ export class StudioNodeInspectorOverlay {
         if (moveEvent.pointerId !== pointerId) {
           return;
         }
+        const scale = normalizeInspectorScale(this.graphZoom);
         this.layout = {
           ...startLayout,
-          width: startLayout.width + (moveEvent.clientX - startX),
-          height: startLayout.height + (moveEvent.clientY - startY),
+          width: startLayout.width + (moveEvent.clientX - startX) / scale,
+          height: startLayout.height + (moveEvent.clientY - startY) / scale,
         };
         this.applyLayout();
       };

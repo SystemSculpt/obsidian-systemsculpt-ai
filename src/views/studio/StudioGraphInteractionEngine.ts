@@ -23,6 +23,7 @@ export class StudioGraphInteractionEngine {
       renderEdgeLayer: () => this.connectionController.renderEdgeLayer(),
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
+      onGraphZoomChanged: (zoom) => this.host.onGraphZoomChanged?.(zoom),
     });
     this.connectionController = new StudioGraphConnectionController({
       ...this.host,

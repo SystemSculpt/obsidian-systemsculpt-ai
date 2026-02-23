@@ -374,10 +374,27 @@ function renderGraphNode(options: RenderGraphNodeOptions): void {
   const outputPreview =
     node.kind === "studio.image_generation" ? "" : formatNodeOutputPreview(nodeRunState.outputs);
   if (outputPreview) {
-    nodeEl.createEl("p", {
-      cls: "ss-studio-node-output-preview",
-      text: outputPreview,
-    });
+    const outputPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-output-preview" });
+    const separatorIndex = outputPreview.indexOf(":");
+    if (separatorIndex > 0 && separatorIndex < 48) {
+      const outputLabel = outputPreview.slice(0, separatorIndex).trim();
+      const outputValue = outputPreview.slice(separatorIndex + 1).trim();
+      outputPreviewEl.createDiv({
+        cls: "ss-studio-node-output-label",
+        text: outputLabel || "output",
+      });
+      const valueEl = outputPreviewEl.createEl("code", {
+        cls: "ss-studio-node-output-value",
+        text: outputValue || "—",
+      });
+      valueEl.title = outputValue || outputPreview;
+    } else {
+      const fallbackValueEl = outputPreviewEl.createEl("code", {
+        cls: "ss-studio-node-output-value",
+        text: outputPreview,
+      });
+      fallbackValueEl.title = outputPreview;
+    }
   }
 
   const mediaPreview = resolveNodeMediaPreview(

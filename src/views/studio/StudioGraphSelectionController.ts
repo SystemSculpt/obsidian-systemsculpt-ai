@@ -18,6 +18,7 @@ type StudioGraphSelectionHost = {
   renderEdgeLayer: () => void;
   scheduleProjectSave: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
+  onGraphZoomChanged?: (zoom: number) => void;
 };
 
 export class StudioGraphSelectionController {
@@ -306,6 +307,7 @@ export class StudioGraphSelectionController {
     if (this.graphZoomLabelEl) {
       this.graphZoomLabelEl.setText(`${Math.round(zoom * 100)}%`);
     }
+    this.host.onGraphZoomChanged?.(zoom);
     this.host.renderEdgeLayer();
   }
 

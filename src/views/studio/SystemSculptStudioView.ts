@@ -77,6 +77,7 @@ export class SystemSculptStudioView extends ItemView {
       scheduleProjectSave: () => this.scheduleProjectSave(),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
+      onGraphZoomChanged: (zoom) => this.inspectorOverlay?.setGraphZoom(zoom),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
     });
@@ -885,6 +886,7 @@ export class SystemSculptStudioView extends ItemView {
 
     this.restoreGraphViewportState(this.graphViewportEl);
     const inspector = this.ensureInspectorOverlay();
+    inspector.setGraphZoom(this.graphInteraction.getGraphZoom());
     inspector.mount(this.graphViewportEl);
     this.syncInspectorSelection();
   }
