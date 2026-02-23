@@ -85,7 +85,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-inspector, .ss-studio-node-context-menu"
+        ".ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -102,7 +102,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -151,6 +151,7 @@ export function renderStudioGraphWorkspace(
     });
   }
 
+  graphInteraction.renderGroupLayer();
   graphInteraction.refreshNodeSelectionClasses();
   graphInteraction.applyGraphZoom();
   return { viewportEl: viewport };

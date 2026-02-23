@@ -86,6 +86,7 @@ function starterGraph(project: StudioProjectV1): StudioProjectV1 {
         },
       ],
       entryNodeIds: [inputId],
+      groups: project.graph.groups || [],
     },
   };
 }

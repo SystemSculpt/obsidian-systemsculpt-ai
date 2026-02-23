@@ -3,6 +3,7 @@ import {
   STUDIO_POLICY_SCHEMA_V1,
   STUDIO_PROJECT_SCHEMA_V1,
   type StudioCapabilityGrant,
+  type StudioNodeGroup,
   type StudioPermissionPolicyV1,
   type StudioProjectV1,
 } from "./types";
@@ -10,6 +11,25 @@ import { asNumber, asString, ensureArray, isRecord, nowIso, randomId } from "./u
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
+const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function normalizeHexColor(value: string): string | null {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!HEX_COLOR_PATTERN.test(trimmed)) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.length === 4) {
+    const r = lower.charAt(1);
+    const g = lower.charAt(2);
+    const b = lower.charAt(3);
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return lower;
+}
 
 function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   if (!isRecord(raw)) {
@@ -66,6 +86,38 @@ function readEdge(raw: unknown): StudioProjectV1["graph"]["edges"][number] {
   return { id, fromNodeId, fromPortId, toNodeId, toPortId };
 }
 
+function readGroup(raw: unknown): StudioNodeGroup {
+  if (!isRecord(raw)) {
+    throw new Error("Invalid group entry: expected object.");
+  }
+
+  const id = asString(raw.id).trim();
+  const name = asString(raw.name).trim();
+  const colorRaw = asString(raw.color).trim();
+  const color = normalizeHexColor(colorRaw);
+  const nodeIds = ensureArray<unknown>(raw.nodeIds)
+    .map((value) => asString(value).trim())
+    .filter((value) => value.length > 0)
+    .filter((value, index, array) => array.indexOf(value) === index);
+
+  if (!id) {
+    throw new Error("Invalid group entry: group.id is required.");
+  }
+  if (!name) {
+    throw new Error(`Invalid group "${id}": group.name is required.`);
+  }
+  if (colorRaw && !color) {
+    throw new Error(`Invalid group "${id}": group.color must be a valid hex color.`);
+  }
+
+  return {
+    id,
+    name,
+    ...(color ? { color } : {}),
+    nodeIds,
+  };
+}
+
 function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const schema = asString(raw.schema).trim();
   if (schema !== STUDIO_PROJECT_SCHEMA_V1) {
@@ -88,6 +140,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const nodesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).nodes);
   const edgesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).edges);
   const entryNodeIdsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).entryNodeIds);
+  const groupsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).groups);
 
   const nodes = nodesRaw.map(readNode);
   const nodeIdSet = new Set(nodes.map((node) => node.id));
@@ -105,6 +158,14 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     .map((value) => asString(value).trim())
     .filter((value) => value.length > 0)
     .filter((value, index, arr) => arr.indexOf(value) === index);
+
+  const groups = groupsRaw
+    .map(readGroup)
+    .map((group) => ({
+      ...group,
+      nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)),
+    }))
+    .filter((group) => group.nodeIds.length > 0);
 
   const permissionsRefRaw = isRecord(raw.permissionsRef) ? raw.permissionsRef : {};
   const policyPath = normalizePath(asString(permissionsRefRaw.policyPath).trim());
@@ -141,6 +202,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
       nodes,
       edges,
       entryNodeIds,
+      groups,
     },
     permissionsRef: {
       policyVersion: Math.max(1, Math.floor(policyVersion)),
@@ -234,6 +296,7 @@ function migrateLegacyProject(raw: Record<string, unknown>): StudioProjectV1 | n
       nodes,
       edges,
       entryNodeIds: nodes.length > 0 ? [nodes[0].id] : [],
+      groups: [],
     },
     permissionsRef: {
       policyVersion: 1,
@@ -300,6 +363,7 @@ export function createEmptyStudioProject(options: {
       nodes: [],
       edges: [],
       entryNodeIds: [],
+      groups: [],
     },
     permissionsRef: {
       policyVersion: 1,
@@ -379,4 +443,3 @@ export function parseStudioPolicy(rawText: string): StudioPermissionPolicyV1 {
 export function serializeStudioPolicy(policy: StudioPermissionPolicyV1): string {
   return `${JSON.stringify(policy, null, 2)}\n`;
 }
-

@@ -6,6 +6,11 @@ import {
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
 } from "./StudioGraphInteractionTypes";
+import {
+  computeStudioGraphCanvasSize,
+  STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
+  STUDIO_GRAPH_CANVAS_MAX_WIDTH,
+} from "./graph-v3/StudioGraphCanvasBounds";
 
 type GraphPoint = {
   x: number;
@@ -16,6 +21,7 @@ type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
   renderEdgeLayer: () => void;
+  onNodePositionsChanged?: () => void;
   scheduleProjectSave: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   onGraphZoomChanged?: (zoom: number) => void;
@@ -23,11 +29,14 @@ type StudioGraphSelectionHost = {
 
 export class StudioGraphSelectionController {
   private graphZoom = STUDIO_GRAPH_DEFAULT_ZOOM;
+  private graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
+  private graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
   private graphViewportEl: HTMLElement | null = null;
   private graphSurfaceEl: HTMLElement | null = null;
   private graphMarqueeEl: HTMLElement | null = null;
   private graphZoomLabelEl: HTMLElement | null = null;
   private graphCanvasEl: HTMLElement | null = null;
+  private graphEdgesLayerEl: SVGSVGElement | null = null;
   private nodeElsById = new Map<string, HTMLElement>();
   private selectedNodeIds = new Set<string>();
   private suppressNextCanvasClick = false;
@@ -82,6 +91,9 @@ export class StudioGraphSelectionController {
     this.graphMarqueeEl = null;
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
+    this.graphEdgesLayerEl = null;
+    this.graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
+    this.graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
     this.suppressNextCanvasClick = false;
     this.nodeElsById.clear();
   }
@@ -110,6 +122,20 @@ export class StudioGraphSelectionController {
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.graphCanvasEl = canvas;
+    this.syncCanvasBounds({ force: true });
+  }
+
+  registerEdgesLayerElement(layer: SVGSVGElement): void {
+    this.graphEdgesLayerEl = layer;
+    this.syncCanvasBounds({ force: true });
+  }
+
+  notifyNodePositionsChanged(): void {
+    if (this.syncCanvasBounds()) {
+      this.syncGraphSurfaceSize();
+    }
+    this.host.renderEdgeLayer();
+    this.host.onNodePositionsChanged?.();
   }
 
   clearNodeElements(): void {
@@ -293,13 +319,13 @@ export class StudioGraphSelectionController {
   applyGraphZoom(): void {
     const zoom = this.clampGraphZoom(this.graphZoom);
     this.graphZoom = zoom;
+    this.syncCanvasBounds();
     if (!this.graphCanvasEl || !this.graphSurfaceEl) {
       return;
     }
     this.graphCanvasEl.style.transform = `scale(${zoom})`;
     this.graphCanvasEl.style.transformOrigin = "0 0";
-    this.graphSurfaceEl.style.width = `${Math.round(STUDIO_GRAPH_CANVAS_WIDTH * zoom)}px`;
-    this.graphSurfaceEl.style.height = `${Math.round(STUDIO_GRAPH_CANVAS_HEIGHT * zoom)}px`;
+    this.syncGraphSurfaceSize();
     if (this.graphZoomLabelEl) {
       this.graphZoomLabelEl.setText(`${Math.round(zoom * 100)}%`);
     }
@@ -462,7 +488,7 @@ export class StudioGraphSelectionController {
         dragNode.position.y = Math.max(24, Math.round(origin.y + deltaY));
         this.updateNodePosition(dragNodeId);
       }
-      this.host.renderEdgeLayer();
+      this.notifyNodePositionsChanged();
     };
 
     const finishDrag = (event: PointerEvent): void => {
@@ -520,5 +546,54 @@ export class StudioGraphSelectionController {
     } catch {
       // Selection updates must never break graph interactions.
     }
+  }
+
+  private syncGraphSurfaceSize(): void {
+    if (!this.graphSurfaceEl) {
+      return;
+    }
+    const zoom = this.graphZoom || 1;
+    this.graphSurfaceEl.style.width = `${Math.round(this.graphCanvasWidth * zoom)}px`;
+    this.graphSurfaceEl.style.height = `${Math.round(this.graphCanvasHeight * zoom)}px`;
+  }
+
+  private syncCanvasBounds(options?: { force?: boolean }): boolean {
+    const project = this.host.getCurrentProject();
+    const nextSize = computeStudioGraphCanvasSize(project, {
+      minWidth: STUDIO_GRAPH_CANVAS_WIDTH,
+      minHeight: STUDIO_GRAPH_CANVAS_HEIGHT,
+      maxWidth: STUDIO_GRAPH_CANVAS_MAX_WIDTH,
+      maxHeight: STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
+      getNodeHeight: (nodeId) => {
+        const nodeEl = this.nodeElsById.get(nodeId);
+        if (!nodeEl) {
+          return null;
+        }
+        return Math.max(80, nodeEl.offsetHeight || 164);
+      },
+    });
+
+    const changed =
+      options?.force === true ||
+      this.graphCanvasWidth !== nextSize.width ||
+      this.graphCanvasHeight !== nextSize.height;
+    if (!changed) {
+      return false;
+    }
+
+    this.graphCanvasWidth = nextSize.width;
+    this.graphCanvasHeight = nextSize.height;
+
+    if (this.graphCanvasEl) {
+      this.graphCanvasEl.style.width = `${this.graphCanvasWidth}px`;
+      this.graphCanvasEl.style.height = `${this.graphCanvasHeight}px`;
+    }
+    if (this.graphEdgesLayerEl) {
+      this.graphEdgesLayerEl.setAttribute("viewBox", `0 0 ${this.graphCanvasWidth} ${this.graphCanvasHeight}`);
+      this.graphEdgesLayerEl.setAttribute("width", String(this.graphCanvasWidth));
+      this.graphEdgesLayerEl.setAttribute("height", String(this.graphCanvasHeight));
+    }
+
+    return true;
   }
 }

@@ -108,10 +108,18 @@ export type StudioEdge = {
   toPortId: string;
 };
 
+export type StudioNodeGroup = {
+  id: string;
+  name: string;
+  color?: string;
+  nodeIds: string[];
+};
+
 export type StudioGraph = {
   nodes: StudioNodeInstance[];
   edges: StudioEdge[];
   entryNodeIds: string[];
+  groups?: StudioNodeGroup[];
 };
 
 export type StudioCapabilityGrant = {

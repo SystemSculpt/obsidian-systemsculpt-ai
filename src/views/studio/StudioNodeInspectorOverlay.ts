@@ -12,13 +12,17 @@ import {
   validateNodeConfig,
 } from "../../studio/StudioNodeConfigValidation";
 import { isRecord } from "../../studio/utils";
+import {
+  STUDIO_GRAPH_MAX_ZOOM,
+  STUDIO_GRAPH_MIN_ZOOM,
+} from "./StudioGraphInteractionTypes";
 
 const MIN_INSPECTOR_WIDTH = 320;
 const MIN_INSPECTOR_HEIGHT = 280;
 const INSPECTOR_EDGE_PADDING = 8;
 const INSPECTOR_ANCHOR_GAP = 12;
-const MIN_INSPECTOR_SCALE = 0.4;
-const MAX_INSPECTOR_SCALE = 2.4;
+const MIN_INSPECTOR_SCALE = STUDIO_GRAPH_MIN_ZOOM;
+const MAX_INSPECTOR_SCALE = STUDIO_GRAPH_MAX_ZOOM;
 
 type InspectorPlacement = "right" | "left" | "bottom" | "top";
 

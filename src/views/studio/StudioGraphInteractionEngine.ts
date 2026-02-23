@@ -1,4 +1,5 @@
 import { StudioGraphConnectionEngineV2 } from "./connections-v2/StudioGraphConnectionEngineV2";
+import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
 import type { PendingConnection, StudioGraphInteractionHost } from "./StudioGraphInteractionTypes";
 import {
@@ -12,15 +13,28 @@ export type { PendingConnection };
 export class StudioGraphInteractionEngine {
   private readonly selectionController: StudioGraphSelectionController;
   private readonly connectionEngine: StudioGraphConnectionEngineV2;
+  private readonly groupController: StudioGraphGroupController;
 
   constructor(private readonly host: StudioGraphInteractionHost) {
     this.selectionController = new StudioGraphSelectionController({
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
       renderEdgeLayer: () => this.connectionEngine.renderEdgeLayer(),
+      onNodePositionsChanged: () => this.groupController.refreshGroupBounds(),
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       onGraphZoomChanged: (zoom) => this.host.onGraphZoomChanged?.(zoom),
+    });
+
+    this.groupController = new StudioGraphGroupController({
+      isBusy: () => this.host.isBusy(),
+      getCurrentProject: () => this.host.getCurrentProject(),
+      getGraphZoom: () => this.selectionController.getGraphZoom(),
+      getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
+      notifyNodePositionsChanged: () => this.selectionController.notifyNodePositionsChanged(),
+      onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
+      requestRender: () => this.host.requestRender(),
+      scheduleProjectSave: () => this.host.scheduleProjectSave(),
     });
 
     this.connectionEngine = new StudioGraphConnectionEngineV2({
@@ -77,6 +91,7 @@ export class StudioGraphInteractionEngine {
   clearRenderBindings(): void {
     this.selectionController.clearRenderBindings();
     this.connectionEngine.clearRenderBindings();
+    this.groupController.clearRenderBindings();
   }
 
   onNodeRemoved(nodeId: string): void {
@@ -103,9 +118,11 @@ export class StudioGraphInteractionEngine {
   registerCanvasElement(canvas: HTMLElement): void {
     this.selectionController.registerCanvasElement(canvas);
     this.connectionEngine.registerCanvasElement(canvas);
+    this.groupController.registerCanvasElement(canvas);
   }
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
+    this.selectionController.registerEdgesLayerElement(layer);
     this.connectionEngine.registerEdgesLayerElement(layer);
   }
 
@@ -128,6 +145,18 @@ export class StudioGraphInteractionEngine {
 
   refreshNodeSelectionClasses(): void {
     this.selectionController.refreshNodeSelectionClasses();
+  }
+
+  renderGroupLayer(): void {
+    this.groupController.renderGroupLayer();
+  }
+
+  refreshGroupBounds(): void {
+    this.groupController.refreshGroupBounds();
+  }
+
+  requestGroupNameEdit(groupId: string): void {
+    this.groupController.requestGroupNameEdit(groupId);
   }
 
   startMarqueeSelection(startEvent: PointerEvent): void {
@@ -194,5 +223,9 @@ export class StudioGraphInteractionEngine {
 
   renderEdgeLayer(): void {
     this.connectionEngine.renderEdgeLayer();
+  }
+
+  notifyNodePositionsChanged(): void {
+    this.selectionController.notifyNodePositionsChanged();
   }
 }

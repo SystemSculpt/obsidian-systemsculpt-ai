@@ -1,8 +1,12 @@
 import type { StudioProjectV1 } from "../../studio/types";
+import {
+  STUDIO_GRAPH_CANVAS_BASE_HEIGHT,
+  STUDIO_GRAPH_CANVAS_BASE_WIDTH,
+} from "./graph-v3/StudioGraphCanvasBounds";
 
-export const STUDIO_GRAPH_CANVAS_WIDTH = 5600;
-export const STUDIO_GRAPH_CANVAS_HEIGHT = 3600;
-export const STUDIO_GRAPH_MIN_ZOOM = 0.4;
+export const STUDIO_GRAPH_CANVAS_WIDTH = STUDIO_GRAPH_CANVAS_BASE_WIDTH;
+export const STUDIO_GRAPH_CANVAS_HEIGHT = STUDIO_GRAPH_CANVAS_BASE_HEIGHT;
+export const STUDIO_GRAPH_MIN_ZOOM = 0.25;
 export const STUDIO_GRAPH_MAX_ZOOM = 2.4;
 export const STUDIO_GRAPH_DEFAULT_ZOOM = 1;
 

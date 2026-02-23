@@ -22,6 +22,7 @@ describe("Studio schema", () => {
     expect(parsed.schema).toBe(STUDIO_PROJECT_SCHEMA_V1);
     expect(parsed.name).toBe("Architecture");
     expect(parsed.permissionsRef.policyPath).toContain("policy/grants.json");
+    expect(parsed.graph.groups || []).toEqual([]);
   });
 
   it("migrates legacy canvas-like payloads into v1", () => {
@@ -50,5 +51,51 @@ describe("Studio schema", () => {
     expect(parsed.grants.length).toBe(1);
     expect(parsed.grants[0].scope.allowedDomains).toContain("api.systemsculpt.com");
   });
-});
 
+  it("normalizes valid group colors and rejects invalid group colors", () => {
+    const project = createEmptyStudioProject({
+      name: "Color",
+      policyPath: "SystemSculpt/Studio/Color.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "4.13.0",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "node_1",
+      kind: "studio.input",
+      version: "1.0.0",
+      title: "Input",
+      position: { x: 80, y: 80 },
+      config: {},
+      continueOnError: false,
+      disabled: false,
+    });
+    project.graph.groups = [
+      {
+        id: "group_1",
+        name: "Group 1",
+        color: "#AbC",
+        nodeIds: ["node_1"],
+      },
+    ];
+
+    const parsed = parseStudioProject(serializeStudioProject(project));
+    expect(parsed.graph.groups?.[0]?.color).toBe("#aabbcc");
+
+    const invalidRaw = JSON.stringify({
+      ...parsed,
+      graph: {
+        ...parsed.graph,
+        groups: [
+          {
+            id: "group_1",
+            name: "Group 1",
+            color: "not-a-color",
+            nodeIds: ["node_1"],
+          },
+        ],
+      },
+    });
+    expect(() => parseStudioProject(invalidRaw)).toThrow('group.color must be a valid hex color');
+  });
+});

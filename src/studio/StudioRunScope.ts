@@ -67,6 +67,13 @@ export function scopeProjectForRun(
   const scopedEntryNodeIds = scopedNodes
     .filter((node) => (scopedInbound.get(node.id) || 0) === 0)
     .map((node) => node.id);
+  const scopedNodeIds = new Set(scopedNodes.map((node) => node.id));
+  const scopedGroups = (project.graph.groups || [])
+    .map((group) => ({
+      ...group,
+      nodeIds: group.nodeIds.filter((nodeId) => scopedNodeIds.has(nodeId)),
+    }))
+    .filter((group) => group.nodeIds.length > 0);
 
   return {
     ...project,
@@ -75,6 +82,7 @@ export function scopeProjectForRun(
       nodes: scopedNodes,
       edges: scopedEdges,
       entryNodeIds: scopedEntryNodeIds,
+      groups: scopedGroups,
     },
   };
 }

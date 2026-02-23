@@ -97,6 +97,155 @@
   position: absolute;
   inset: 0;
   z-index: 1;
+  pointer-events: none;
+}
+
+.ss-studio-groups-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+}
+
+.ss-studio-group-tags-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ss-studio-group-frame {
+  --ss-studio-group-accent: #8de8bc;
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--ss-studio-group-accent) 55%, var(--ss-studio-border) 45%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ss-studio-group-accent) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ss-studio-group-accent) 20%, transparent);
+  transition: left 120ms ease, top 120ms ease, width 120ms ease, height 120ms ease;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.ss-studio-group-frame.is-dragging {
+  cursor: grabbing;
+}
+
+.ss-studio-group-tag {
+  position: absolute;
+  transform: translate(-50%, 52%);
+  pointer-events: auto;
+}
+
+.ss-studio-group-tag-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.ss-studio-group-tag-name-slot {
+  min-width: 96px;
+  max-width: 260px;
+}
+
+.ss-studio-group-tag-button,
+.ss-studio-group-tag-input,
+.ss-studio-group-tag-action {
+  border: 1px solid color-mix(in srgb, #8de8bc 58%, var(--ss-studio-border) 42%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-primary) 88%, #1f4a37 12%);
+  color: #d5f4e3;
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 4px 10px;
+  text-align: center;
+  box-shadow: 0 4px 14px color-mix(in srgb, #000 24%, transparent);
+}
+
+.ss-studio-group-tag-button,
+.ss-studio-group-tag-input {
+  width: 100%;
+}
+
+.ss-studio-group-tag-button {
+  cursor: text;
+}
+
+.ss-studio-group-tag-input {
+  outline: none;
+  user-select: text;
+}
+
+.ss-studio-group-tag-input:focus-visible {
+  border-color: color-mix(in srgb, #9effd0 72%, var(--ss-studio-border) 28%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #9effd0 30%, transparent),
+    0 4px 14px color-mix(in srgb, #000 24%, transparent);
+}
+
+.ss-studio-group-tag-action {
+  min-width: 0;
+  cursor: pointer;
+  color: #e0f8eb;
+}
+
+.ss-studio-group-align-button {
+  font-weight: 600;
+}
+
+.ss-studio-group-color-button {
+  width: 28px;
+  height: 24px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-studio-group-color-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #fff 55%, #000 45%);
+  background: var(--ss-studio-group-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 22%, transparent);
+}
+
+.ss-studio-group-color-palette {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: 188px;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, #8de8bc 55%, var(--ss-studio-border) 45%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-primary) 93%, #1f4a37 7%);
+  box-shadow: 0 10px 24px color-mix(in srgb, #000 34%, transparent);
+  pointer-events: auto;
+}
+
+.ss-studio-group-color-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, #fff 34%, #000 66%);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.ss-studio-group-color-swatch:hover {
+  transform: translateY(-1px);
+}
+
+.ss-studio-group-color-swatch.is-active {
+  border-color: color-mix(in srgb, #fff 74%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #fff 45%, transparent),
+    0 4px 10px color-mix(in srgb, #000 24%, transparent);
 }
 
 .ss-studio-link-path {
@@ -105,6 +254,7 @@
   stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+  pointer-events: stroke;
   cursor: pointer;
   opacity: 0.92;
   transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease;
@@ -131,6 +281,7 @@
   position: absolute;
   inset: 0;
   z-index: 2;
+  pointer-events: none;
 }
 
 .ss-studio-node-card {
@@ -144,6 +295,7 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+  pointer-events: auto;
 }
 
 .ss-studio-node-card:active {
@@ -436,6 +588,46 @@
 .ss-studio-node-context-menu-subtitle {
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.ss-studio-node-context-menu-actions {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ss-studio-border) 86%, #8de8bc 14%);
+  background: color-mix(in srgb, var(--background-primary) 92%, #1f4a37 8%);
+}
+
+.ss-studio-node-context-menu-action {
+  border: 1px solid color-mix(in srgb, #8de8bc 58%, var(--ss-studio-border) 42%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 90%, #214b38 10%);
+  color: var(--text-normal);
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-studio-node-context-menu-action:hover {
+  border-color: color-mix(in srgb, #9effd0 68%, var(--ss-studio-border) 32%);
+  background: color-mix(in srgb, var(--background-primary) 84%, #285a42 16%);
+}
+
+.ss-studio-node-context-menu-action-content {
+  display: grid;
+  gap: 2px;
+}
+
+.ss-studio-node-context-menu-action-title {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ss-studio-node-context-menu-action-summary {
+  font-size: 10px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text-muted) 84%, #9deec8 16%);
 }
 
 .ss-studio-node-context-menu-search-wrap {

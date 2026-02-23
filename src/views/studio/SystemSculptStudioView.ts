@@ -12,6 +12,11 @@ import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
 import {
+  createGroupFromSelection as createNodeGroupFromSelection,
+  removeNodesFromGroups,
+  sanitizeGraphGroups,
+} from "./graph-v3/StudioGraphGroupModel";
+import {
   openStudioMediaPreviewModal,
   resolveStudioAssetPreviewSrc,
 } from "./graph-v3/StudioGraphMediaPreviewModal";
@@ -468,6 +473,7 @@ export class SystemSculptStudioView extends ItemView {
     try {
       const studio = this.plugin.getStudioService();
       const project = await studio.openProject(projectPath);
+      const groupsSanitized = sanitizeGraphGroups(project);
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
@@ -496,6 +502,9 @@ export class SystemSculptStudioView extends ItemView {
           projectPath,
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
+      }
+      if (groupsSanitized) {
+        this.scheduleProjectSave();
       }
       this.lastError = null;
       this.syncInspectorSelection();
@@ -901,6 +910,13 @@ export class SystemSculptStudioView extends ItemView {
     const graphY = (viewport.scrollTop + localY) / zoom;
     const menuX = normalizeGraphCoordinate(viewport.scrollLeft + localX);
     const menuY = normalizeGraphCoordinate(viewport.scrollTop + localY);
+    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+    const selectedNodeIdSet = new Set(selectedNodeIds);
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const contextNodeCard = target?.closest<HTMLElement>(".ss-studio-node-card");
+    const contextNodeId = String(contextNodeCard?.dataset.nodeId || "").trim();
+    const canGroupSelection = selectedNodeIds.length > 1 &&
+      (!contextNodeId || selectedNodeIdSet.has(contextNodeId));
     const contextMenuItems = this.nodeDefinitions.map((definition) => ({
       definition,
       title: prettifyNodeKind(definition.kind),
@@ -919,12 +935,42 @@ export class SystemSculptStudioView extends ItemView {
       anchorX: menuX,
       anchorY: menuY,
       items: contextMenuItems,
+      actions: canGroupSelection
+        ? [
+            {
+              id: "group-selected-nodes",
+              title: "Group Selected Nodes",
+              summary: `Create a group around ${selectedNodeIds.length} selected nodes.`,
+              onSelect: () => {
+                this.createGroupFromSelectedNodes(selectedNodeIds);
+              },
+            },
+          ]
+        : [],
       onSelectDefinition: (definition) => {
         this.createNodeFromDefinition(definition, {
           position: { x: graphX, y: graphY },
         });
       },
     });
+  }
+
+  private createGroupFromSelectedNodes(selectedNodeIds: string[]): void {
+    if (this.busy || !this.currentProject) {
+      return;
+    }
+
+    const createdGroup = createNodeGroupFromSelection(this.currentProject, selectedNodeIds, () =>
+      randomId("group")
+    );
+    if (!createdGroup) {
+      new Notice("Select at least two nodes to create a group.");
+      return;
+    }
+
+    this.graphInteraction.requestGroupNameEdit(createdGroup.id);
+    this.scheduleProjectSave();
+    this.render();
   }
 
   private removeNodes(nodeIds: string[]): void {
@@ -951,6 +997,7 @@ export class SystemSculptStudioView extends ItemView {
     this.currentProject.graph.edges = this.currentProject.graph.edges.filter(
       (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
     );
+    removeNodesFromGroups(this.currentProject, Array.from(idsToRemove));
 
     for (const nodeId of idsToRemove) {
       this.clearTransientFieldErrorsForNode(nodeId);

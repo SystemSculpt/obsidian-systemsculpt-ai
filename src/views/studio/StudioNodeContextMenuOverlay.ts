@@ -1,14 +1,25 @@
 import type { StudioNodeDefinition } from "../../studio/types";
+import {
+  STUDIO_GRAPH_MAX_ZOOM,
+  STUDIO_GRAPH_MIN_ZOOM,
+} from "./StudioGraphInteractionTypes";
 
 const CONTEXT_MENU_WIDTH = 360;
 const CONTEXT_MENU_EDGE_PADDING = 8;
-const MIN_CONTEXT_MENU_SCALE = 0.4;
-const MAX_CONTEXT_MENU_SCALE = 2.4;
+const MIN_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MIN_ZOOM;
+const MAX_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MAX_ZOOM;
 
 export type StudioNodeContextMenuItem = {
   definition: StudioNodeDefinition;
   title: string;
   summary: string;
+};
+
+export type StudioNodeContextMenuAction = {
+  id: string;
+  title: string;
+  summary?: string;
+  onSelect: () => void;
 };
 
 function normalizeContextMenuScale(value: number): number {
@@ -85,6 +96,7 @@ export class StudioNodeContextMenuOverlay {
   private rootEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
   private listEl: HTMLElement | null = null;
+  private actionsEl: HTMLElement | null = null;
   private graphZoom = 1;
   private anchorX = 0;
   private anchorY = 0;
@@ -92,6 +104,7 @@ export class StudioNodeContextMenuOverlay {
   private isVisible = false;
   private allItems: StudioNodeContextMenuItem[] = [];
   private filteredItems: StudioNodeContextMenuItem[] = [];
+  private actions: StudioNodeContextMenuAction[] = [];
   private itemEls: HTMLElement[] = [];
   private activeIndex = -1;
 
@@ -149,6 +162,7 @@ export class StudioNodeContextMenuOverlay {
     this.rootEl = null;
     this.searchInputEl = null;
     this.listEl = null;
+    this.actionsEl = null;
   }
 
   setGraphZoom(zoom: number): void {
@@ -164,6 +178,7 @@ export class StudioNodeContextMenuOverlay {
     anchorX: number;
     anchorY: number;
     items: StudioNodeContextMenuItem[];
+    actions?: StudioNodeContextMenuAction[];
     onSelectDefinition: (definition: StudioNodeDefinition) => void;
   }): void {
     if (!this.rootEl || !this.searchInputEl || !this.listEl || !this.viewportEl) {
@@ -174,7 +189,9 @@ export class StudioNodeContextMenuOverlay {
     this.anchorY = Number.isFinite(options.anchorY) ? options.anchorY : 0;
     this.onSelectDefinition = options.onSelectDefinition;
     this.allItems = options.items.slice();
+    this.actions = Array.isArray(options.actions) ? options.actions.slice() : [];
     this.searchInputEl.value = "";
+    this.renderActions();
     this.applyFilter("");
 
     this.rootEl.style.display = "flex";
@@ -202,6 +219,7 @@ export class StudioNodeContextMenuOverlay {
     this.isVisible = false;
     this.allItems = [];
     this.filteredItems = [];
+    this.actions = [];
     this.itemEls = [];
     this.activeIndex = -1;
     if (this.rootEl) {
@@ -213,6 +231,10 @@ export class StudioNodeContextMenuOverlay {
     }
     if (this.listEl) {
       this.listEl.empty();
+    }
+    if (this.actionsEl) {
+      this.actionsEl.empty();
+      this.actionsEl.style.display = "none";
     }
   }
 
@@ -241,6 +263,9 @@ export class StudioNodeContextMenuOverlay {
       cls: "ss-studio-node-context-menu-subtitle",
       text: "Insert at cursor",
     });
+
+    const actions = root.createDiv({ cls: "ss-studio-node-context-menu-actions" });
+    actions.style.display = "none";
 
     const searchWrap = root.createDiv({ cls: "ss-studio-node-context-menu-search-wrap" });
     const searchInput = searchWrap.createEl("input", {
@@ -278,7 +303,51 @@ export class StudioNodeContextMenuOverlay {
     this.rootEl = root;
     this.searchInputEl = searchInput;
     this.listEl = list;
+    this.actionsEl = actions;
     this.applyLayout();
+  }
+
+  private renderActions(): void {
+    if (!this.actionsEl) {
+      return;
+    }
+    this.actionsEl.empty();
+    if (this.actions.length === 0) {
+      this.actionsEl.style.display = "none";
+      return;
+    }
+
+    this.actionsEl.style.display = "grid";
+    for (const action of this.actions) {
+      const button = this.actionsEl.createEl("button", {
+        cls: "ss-studio-node-context-menu-action",
+      });
+      button.type = "button";
+      button.dataset.actionId = action.id;
+      const content = button.createDiv({
+        cls: "ss-studio-node-context-menu-action-content",
+      });
+      content.createDiv({
+        cls: "ss-studio-node-context-menu-action-title",
+        text: action.title,
+      });
+      if (action.summary) {
+        content.createDiv({
+          cls: "ss-studio-node-context-menu-action-summary",
+          text: action.summary,
+        });
+      }
+      button.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const onSelect = action.onSelect;
+        this.hide();
+        onSelect();
+      });
+    }
   }
 
   private applyFilter(query: string): void {

@@ -48,6 +48,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
 
   const definition = findNodeDefinition(node);
   const nodeEl = layer.createDiv({ cls: "ss-studio-node-card" });
+  nodeEl.dataset.nodeId = node.id;
   nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
   nodeEl.classList.toggle("is-selected", graphInteraction.isNodeSelected(node.id));
   graphInteraction.registerNodeElement(node.id, nodeEl);

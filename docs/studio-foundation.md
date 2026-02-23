@@ -26,10 +26,12 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
 - `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
 - `src/views/studio/StudioGraphInteractionEngine.ts`: graph interactions (drag/select/connect/zoom).
-- `src/views/studio/graph-v3/StudioGraphWorkspaceRenderer.ts`: full-leaf graph workspace/HUD renderer.
+- `src/views/studio/StudioGraphGroupController.ts`: live group-container overlay + rename interactions.
+- `src/views/studio/graph-v3/StudioGraphWorkspaceRenderer.ts`: full-leaf graph workspace renderer.
 - `src/views/studio/graph-v3/StudioGraphNodeCardRenderer.ts`: node card renderer (ports/status/media preview).
 - `src/views/studio/graph-v3/StudioGraphMediaPreview.ts`: media preview inference for node outputs.
 - `src/views/studio/graph-v3/StudioGraphMediaPreviewModal.ts`: vault resource resolution + modal preview rendering.
+- `src/views/studio/graph-v3/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
 - `src/views/studio/graph-v3/StudioGraphViewStateStore.ts`: graph viewport state normalization/persistence helpers.
 - `src/views/studio/StudioNodeInspectorOverlay.ts`: in-canvas floating node config inspector.
 - `src/views/studio/StudioViewHelpers.ts`: shared Studio view helpers.
@@ -58,6 +60,12 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Node output cache keyed by node config + resolved input fingerprint.
 - Scoped node run can force selected-node recompute while reusing valid upstream/downstream cache.
 - Retention pruning by per-project max run count.
+
+## Grouping Contracts
+- Grouping is graph-native metadata (`project.graph.groups`) persisted in `.systemsculpt`.
+- Group creation is driven from Studio context menu actions on multi-selection.
+- Group container bounds are derived live from member node geometry and update during drag.
+- Group name defaults to `Group N` and enters inline rename immediately on creation.
 
 ## Interaction Contracts
 - `.systemsculpt` extension is registered to `SYSTEMSCULPT_STUDIO_VIEW_TYPE`.
