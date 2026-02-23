@@ -4,9 +4,12 @@
   --ss-studio-warning: #b85c2f;
 
   min-height: 100%;
-  padding: 20px;
+  height: 100%;
+  width: 100%;
+  padding: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(1200px 500px at 110% -10%, color-mix(in srgb, #79cda3 24%, transparent), transparent 70%),
     radial-gradient(900px 420px at -10% 0%, color-mix(in srgb, #9dddc0 18%, transparent), transparent 75%),
@@ -33,61 +36,66 @@
   color: var(--text-muted);
 }
 
-.ss-studio-graph {
-  border: 1px solid var(--ss-studio-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--background-secondary) 88%, #1f4a37 12%);
-  padding: 10px;
+.ss-studio-graph-workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: calc(100vh - 160px);
 }
 
 .ss-studio-empty-state {
-  border: 1px dashed var(--ss-studio-border);
-  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--ss-studio-border) 85%, #79cda3 15%);
+  border-radius: 0;
   background: color-mix(in srgb, var(--background-primary) 86%, #214b38 14%);
-  min-height: 280px;
+  min-height: 100%;
   display: grid;
   place-items: center;
   text-align: center;
-  padding: 14px;
+  padding: 18px;
 }
 
-.ss-studio-graph-header {
-  position: sticky;
-  top: 0;
+.ss-studio-graph-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
   z-index: 7;
-}
-
-.ss-studio-graph-controls {
-  width: 100%;
-  display: flex;
-  flex-wrap: wrap;
+  min-width: 220px;
+  max-width: min(420px, calc(100% - 24px));
+  display: grid;
   gap: 8px;
-  align-items: center;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--ss-studio-border) 85%, #79cda3 15%);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--background-primary) 82%, #214b38 18%);
+  background: color-mix(in srgb, var(--background-primary) 80%, #214b38 20%);
   backdrop-filter: blur(4px);
 }
 
-.ss-studio-graph-controls button {
+.ss-studio-graph-hud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ss-studio-graph-hud button {
   border: 1px solid var(--ss-studio-border);
   border-radius: 8px;
   padding: 6px 10px;
 }
 
-.ss-studio-graph-controls button.mod-cta {
+.ss-studio-graph-hud button.mod-cta {
   color: #ffffff;
   background: color-mix(in srgb, var(--interactive-accent) 85%, #1f6a49 15%);
 }
 
-.ss-studio-graph-controls button.mod-warning {
+.ss-studio-graph-hud button.mod-warning {
   color: #e9c57a;
   border-color: color-mix(in srgb, #b58f2d 60%, var(--ss-studio-border));
+}
+
+.ss-studio-graph-hud-link {
+  color: var(--text-muted);
 }
 
 .ss-studio-zoom-label {
@@ -179,23 +187,13 @@
   display: block;
 }
 
-.ss-studio-select {
-  min-width: 280px;
-  max-width: min(540px, 100%);
-  border: 1px solid var(--ss-studio-border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: color-mix(in srgb, var(--background-primary) 90%, #1d4c38 10%);
-  color: var(--text-normal);
-}
-
 .ss-studio-graph-viewport {
   position: relative;
-  border: 1px solid var(--ss-studio-border);
-  border-radius: 12px;
+  border: 0;
+  border-radius: 0;
   overflow: auto;
   flex: 1;
-  min-height: 420px;
+  min-height: 0;
   background:
     radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 50%, transparent) 1px, transparent 0) 0 0 / 20px 20px,
     linear-gradient(160deg, color-mix(in srgb, var(--background-primary) 94%, #173c2d 6%), color-mix(in srgb, var(--background-primary) 88%, #214b38 12%));
@@ -943,16 +941,15 @@
 }
 
 @media (max-width: 840px) {
-  .ss-studio-view {
-    padding: 12px;
+  .ss-studio-graph-hud {
+    top: 8px;
+    left: 8px;
+    max-width: min(420px, calc(100% - 16px));
   }
 
-  .ss-studio-graph {
-    min-height: calc(100vh - 130px);
-  }
-
-  .ss-studio-select {
-    min-width: 0;
-    width: min(420px, calc(100vw - 80px));
+  .ss-studio-graph-hint {
+    left: 8px;
+    bottom: 8px;
+    max-width: calc(100% - 16px);
   }
 }
