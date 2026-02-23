@@ -17,6 +17,16 @@ type GraphPoint = {
   y: number;
 };
 
+const WHEEL_DOM_DELTA_LINE =
+  typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
+const WHEEL_DOM_DELTA_PAGE =
+  typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
+const NATIVE_WHEEL_SCROLL_SELECTORS = [
+  ".ss-studio-node-inspector",
+  ".ss-studio-node-context-menu",
+  ".ss-studio-group-color-palette",
+].join(", ");
+
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
@@ -362,18 +372,43 @@ export class StudioGraphSelectionController {
     if (!Number.isFinite(delta) || delta === 0) {
       return 0;
     }
-    if (deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    if (deltaMode === WHEEL_DOM_DELTA_LINE) {
       return delta * 16;
     }
-    if (deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    if (deltaMode === WHEEL_DOM_DELTA_PAGE) {
       return delta * Math.max(1, viewport.clientHeight);
     }
     return delta;
   }
 
+  private resolveEventElement(target: EventTarget | null): Element | null {
+    if (!target) {
+      return null;
+    }
+    if (typeof (target as { closest?: unknown }).closest === "function") {
+      return target as Element;
+    }
+    if (typeof Node !== "undefined" && target instanceof Node) {
+      return target.parentElement;
+    }
+    return null;
+  }
+
+  private shouldDeferWheelToOverlay(event: WheelEvent): boolean {
+    const targetEl = this.resolveEventElement(event.target);
+    if (!targetEl) {
+      return false;
+    }
+    return Boolean(targetEl.closest(NATIVE_WHEEL_SCROLL_SELECTORS));
+  }
+
   handleGraphViewportWheel(event: WheelEvent): void {
     const viewport = this.graphViewportEl;
     if (!viewport) {
+      return;
+    }
+
+    if (this.shouldDeferWheelToOverlay(event)) {
       return;
     }
 

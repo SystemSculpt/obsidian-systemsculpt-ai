@@ -84,6 +84,7 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
   private readonly streamer = new StreamingService();
   private readonly sessionClient: AgentSessionClient;
   private imageClient: SystemSculptImageGenerationService | null = null;
+  private textTurnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -163,6 +164,15 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
       baseUrl: this.apiBaseUrl(),
       licenseKey: this.licenseKey(),
     });
+  }
+
+  private async runTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.textTurnQueue.then(operation, operation);
+    this.textTurnQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private get vaultAdapter(): VaultBinaryAdapter {
@@ -246,36 +256,62 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
     }
     messages.push({ role: "user" as const, content: request.prompt });
 
-    const response = await this.sessionClient.startOrContinueTurn({
-      chatId: `studio:${request.runId}`,
-      modelId,
-      messages,
-      pluginVersion: this.plugin.manifest.version,
-    });
+    // API turn locking is account-scoped server-side, so serialize Studio text turns locally.
+    return this.runTextTurnExclusive(async () => {
+      const response = await this.sessionClient.startOrContinueTurn({
+        chatId: `studio:${request.runId}:${request.nodeId}`,
+        modelId,
+        messages,
+        pluginVersion: this.plugin.manifest.version,
+      });
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `SystemSculpt text generation failed (${response.status}): ${body.slice(0, 240)}`
-      );
-    }
-
-    let text = "";
-    const events = this.streamer.streamResponse(response, {
-      model: modelId,
-      isCustomProvider: false,
-    });
-
-    for await (const event of events) {
-      if (event.type === "content") {
-        text += event.text;
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        if (response.status === 409) {
+          let conflictCode = "";
+          let lockUntil = "";
+          try {
+            const parsed = JSON.parse(body) as {
+              error?: { code?: string; lock_until?: string; message?: string } | string;
+              message?: string;
+            };
+            const errorObject = parsed?.error && typeof parsed.error === "object"
+              ? parsed.error
+              : null;
+            conflictCode = String(errorObject?.code || parsed?.error || "").trim().toLowerCase();
+            lockUntil = String(errorObject?.lock_until || "").trim();
+          } catch {
+            // Fall through to generic error with raw response snippet.
+          }
+          if (conflictCode === "turn_in_flight") {
+            const suffix = lockUntil ? ` lock_until=${lockUntil}` : "";
+            throw new Error(
+              `SystemSculpt text generation failed (409 turn_in_flight): another turn is already running for this account.${suffix}`
+            );
+          }
+        }
+        throw new Error(
+          `SystemSculpt text generation failed (${response.status}): ${body.slice(0, 240)}`
+        );
       }
-    }
 
-    return {
-      text: text.trim(),
-      modelId,
-    };
+      let text = "";
+      const events = this.streamer.streamResponse(response, {
+        model: modelId,
+        isCustomProvider: false,
+      });
+
+      for await (const event of events) {
+        if (event.type === "content") {
+          text += event.text;
+        }
+      }
+
+      return {
+        text: text.trim(),
+        modelId,
+      };
+    });
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {

@@ -56,6 +56,7 @@ async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<
         prompt: compactedUserPrompt,
         systemPrompt: `${systemPrompt}\n\nOutput constraints:\n- Return ONLY the final image prompt text.\n- Keep the final image prompt under ${IMAGE_PROMPT_MAX_CHARS} characters.`,
         runId: context.runId,
+        nodeId: context.node.id,
         projectPath: context.projectPath,
       });
       const compiled = clampImagePromptLength(materialized.text, IMAGE_PROMPT_MAX_CHARS);

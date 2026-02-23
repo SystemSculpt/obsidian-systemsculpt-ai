@@ -236,6 +236,7 @@ export type StudioTextGenerationRequest = {
   systemPrompt?: string;
   modelId?: string;
   runId: string;
+  nodeId: string;
   projectPath: string;
 };
 

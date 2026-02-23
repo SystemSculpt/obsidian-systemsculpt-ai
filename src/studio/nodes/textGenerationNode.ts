@@ -41,6 +41,7 @@ export const textGenerationNode: StudioNodeDefinition = {
       systemPrompt,
       modelId,
       runId: context.runId,
+      nodeId: context.node.id,
       projectPath: context.projectPath,
     });
     return {

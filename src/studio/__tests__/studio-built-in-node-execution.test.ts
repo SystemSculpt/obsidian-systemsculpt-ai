@@ -125,6 +125,7 @@ describe("Studio built-in prompt/text node execution", () => {
           "Transcript: We built a ComfyUI-like graph in Obsidian and extracted audio first.",
         systemPrompt: "Generate one high-click YouTube title.",
         modelId: "openai/gpt-5-mini",
+        nodeId: "text-node",
       })
     );
     expect(result.outputs.text).toBe("Title: Graph Workflow Deep Dive");
@@ -198,6 +199,11 @@ describe("Studio built-in prompt/text node execution", () => {
     );
 
     expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "image-node",
+      })
+    );
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
     expect(typeof imageRequest.prompt).toBe("string");
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
