@@ -3,7 +3,10 @@ import type SystemSculptPlugin from "../main";
 import { resolveSystemSculptApiBaseUrl } from "../utils/urlHelpers";
 import { AgentSessionClient } from "../services/agent-v2/AgentSessionClient";
 import { StreamingService } from "../services/StreamingService";
-import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
+import {
+  SystemSculptImageGenerationService,
+  type SystemSculptImageInput,
+} from "../services/canvasflow/SystemSculptImageGenerationService";
 import type {
   StudioApiAdapter,
   StudioImageGenerationRequest,
@@ -49,8 +52,11 @@ function sanitizeIdempotencyToken(value: string, maxLength: number): string {
 function buildStudioImageIdempotencyKey(request: StudioImageGenerationRequest, modelId: string): string {
   const runToken = sanitizeIdempotencyToken(request.runId, 24);
   const modelToken = sanitizeIdempotencyToken(modelId, 28);
+  const imageSignature = (request.inputImages || [])
+    .map((asset) => `${String(asset.hash || "").toLowerCase()}:${Math.max(0, Number(asset.sizeBytes) || 0)}`)
+    .join("|");
   const payloadSignature = hashFnv1aHex(
-    `${String(request.prompt || "")}|${String(request.aspectRatio || "")}|${String(request.count || "")}`
+    `${String(request.prompt || "")}|${String(request.aspectRatio || "")}|${String(request.count || "")}|${imageSignature}`
   );
   return `studio-image-${runToken}-${modelToken}-${payloadSignature}`;
 }
@@ -71,6 +77,14 @@ function pathExtension(path: string): string {
     return "";
   }
   return normalized.slice(dot + 1);
+}
+
+function normalizeInputImageMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (normalized === "image/png") return "image/png";
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
+  if (normalized === "image/webp") return "image/webp";
+  return null;
 }
 
 type VaultBinaryAdapter = {
@@ -202,6 +216,84 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
     await this.vaultAdapter.writeBinary(path, bytes);
   }
 
+  private async uploadInputImagesForStudioGeneration(
+    imageClient: SystemSculptImageGenerationService,
+    assets: StudioImageGenerationRequest["inputImages"]
+  ): Promise<SystemSculptImageInput[]> {
+    const inputAssets = Array.isArray(assets) ? assets : [];
+    if (inputAssets.length === 0) {
+      return [];
+    }
+
+    const normalizedAssets = inputAssets.map((asset, index) => {
+      const hash = String(asset?.hash || "").trim().toLowerCase();
+      const path = String(asset?.path || "").trim();
+      const normalizedMime = normalizeInputImageMimeType(String(asset?.mimeType || ""));
+      const sizeBytes = Number.isFinite(Number(asset?.sizeBytes)) ? Math.max(1, Math.floor(Number(asset?.sizeBytes))) : 0;
+      if (!hash || !path || !normalizedMime || !sizeBytes) {
+        throw new Error(
+          `Image generation input #${index + 1} is invalid. Provide image assets with hash, path, sizeBytes, and PNG/JPEG/WEBP mimeType.`
+        );
+      }
+      return {
+        hash,
+        path,
+        mimeType: normalizedMime,
+        sizeBytes,
+      };
+    });
+
+    const preparedUploads = await imageClient.prepareInputImageUploads(
+      normalizedAssets.map((asset) => ({
+        mime_type: asset.mimeType,
+        size_bytes: asset.sizeBytes,
+        sha256: asset.hash,
+      }))
+    );
+    const uploadByIndex = new Map(preparedUploads.input_uploads.map((item) => [item.index, item]));
+    const uploadedInputRefs: Extract<SystemSculptImageInput, { type: "uploaded" }>[] = [];
+
+    for (let idx = 0; idx < normalizedAssets.length; idx += 1) {
+      const localAsset = normalizedAssets[idx];
+      const upload = uploadByIndex.get(idx);
+      if (!upload) {
+        throw new Error(`Image generation input upload preparation failed for index ${idx}.`);
+      }
+      if (!upload.upload?.url || upload.upload?.method !== "PUT") {
+        throw new Error(`Image generation input upload URL missing or invalid for index ${idx}.`);
+      }
+      if (!upload.input_image || upload.input_image.type !== "uploaded") {
+        throw new Error(`Image generation input upload metadata missing for index ${idx}.`);
+      }
+      const remoteInput = upload.input_image;
+      if (remoteInput.sha256 !== localAsset.hash) {
+        throw new Error(`Image generation input digest mismatch for index ${idx}.`);
+      }
+      if (remoteInput.size_bytes !== localAsset.sizeBytes) {
+        throw new Error(`Image generation input size mismatch for index ${idx}.`);
+      }
+      if (normalizeInputImageMimeType(remoteInput.mime_type) !== localAsset.mimeType) {
+        throw new Error(`Image generation input mime type mismatch for index ${idx}.`);
+      }
+
+      const bytes = await this.assetStore.readArrayBuffer({
+        hash: localAsset.hash,
+        mimeType: localAsset.mimeType,
+        sizeBytes: localAsset.sizeBytes,
+        path: localAsset.path,
+      });
+      await imageClient.uploadPreparedInputImage({
+        uploadUrl: upload.upload.url,
+        mimeType: localAsset.mimeType,
+        bytes,
+        extraHeaders: upload.upload.headers,
+      });
+      uploadedInputRefs.push(remoteInput);
+    }
+
+    return uploadedInputRefs;
+  }
+
   private async removeTempPath(path: string): Promise<void> {
     try {
       if (typeof this.vaultAdapter.remove === "function") {
@@ -320,12 +412,14 @@ export class StudioSystemSculptApiAdapter implements StudioApiAdapter {
         String(request.modelId || this.plugin.settings.imageGenerationDefaultModelId || "")
       ) || "openai/gpt-5-image-mini";
     const imageClient = this.ensureImageClient();
+    const uploadedInputImages = await this.uploadInputImagesForStudioGeneration(imageClient, request.inputImages);
     let create: Awaited<ReturnType<SystemSculptImageGenerationService["createGenerationJob"]>>;
     try {
       create = await imageClient.createGenerationJob(
         {
           model: modelId,
           prompt: request.prompt,
+          input_images: uploadedInputImages,
           options: {
             count: request.count,
             aspect_ratio: request.aspectRatio,

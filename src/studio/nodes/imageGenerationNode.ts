@@ -1,11 +1,58 @@
-import type { StudioJsonValue, StudioNodeDefinition, StudioNodeExecutionContext } from "../types";
-import { isRecord } from "../utils";
-import { getText, parseStructuredPromptInput } from "./shared";
+import type {
+  StudioAssetRef,
+  StudioJsonValue,
+  StudioNodeDefinition,
+  StudioNodeExecutionContext,
+} from "../types";
+import {
+  generateImageWithLocalMacProvider,
+  normalizeStudioImageProviderId,
+  STUDIO_IMAGE_PROVIDER_LOCAL_MACOS,
+  STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
+} from "./localMacImageGeneration";
+import {
+  extractImageInputCandidates,
+  getText,
+  inferMimeTypeFromPath,
+  isLikelyAbsolutePath,
+  parseStructuredPromptInput,
+  renderTemplate,
+  resolveTemplateVariables,
+  type StudioImageInputCandidate,
+} from "./shared";
 
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
 const IMAGE_CONTEXT_MAX_CHARS = 3_600;
+const IMAGE_INPUT_MAX_COUNT = 8;
+const DEFAULT_IMAGE_PROVIDER_ID = STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT;
 const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3-pro-image-preview";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
+const LOCAL_MAC_IMAGE_ASPECT_RATIO = "1:1";
+
+function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (normalized === "image/png") return "image/png";
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
+  if (normalized === "image/webp") return "image/webp";
+  return null;
+}
+
+function asExistingAssetRef(candidate: StudioImageInputCandidate): StudioAssetRef | null {
+  const hash = String(candidate.hash || "").trim().toLowerCase();
+  const path = String(candidate.path || "").trim();
+  const sizeRaw = Number(candidate.sizeBytes);
+  const sizeBytes = Number.isFinite(sizeRaw) && sizeRaw > 0 ? Math.floor(sizeRaw) : 0;
+  const normalizedMime = normalizeInputMimeType(String(candidate.mimeType || ""));
+  if (!hash || !path || !sizeBytes || !normalizedMime) {
+    return null;
+  }
+  return {
+    hash,
+    mimeType: normalizedMime,
+    sizeBytes,
+    path,
+  };
+}
 
 function clampImagePromptLength(prompt: string, maxChars: number = IMAGE_PROMPT_MAX_CHARS): string {
   const trimmed = String(prompt || "").trim();
@@ -30,26 +77,20 @@ function compactContextText(text: string, maxChars: number = IMAGE_CONTEXT_MAX_C
   return `${head} [...] ${tail}`;
 }
 
-function isStructuredPromptPayload(value: StudioJsonValue | undefined): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const payload = value as Record<string, StudioJsonValue>;
-  return (
-    typeof payload.systemPrompt === "string" ||
-    typeof payload.system_prompt === "string" ||
-    typeof payload.userMessage === "string" ||
-    typeof payload.user_message === "string"
-  );
-}
-
-async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<string> {
+async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<{
+  prompt: string;
+  structuredInputImages: StudioImageInputCandidate[];
+}> {
   const rawPromptInput = context.inputs.prompt;
   const structured = parseStructuredPromptInput(rawPromptInput);
-  const systemPrompt = structured.systemPrompt.trim();
+  const configuredSystemPrompt = renderTemplate(
+    getText(context.node.config.systemPrompt as StudioJsonValue),
+    resolveTemplateVariables(context)
+  ).trim();
+  const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim();
   const userPrompt = structured.prompt.trim();
 
-  if (isStructuredPromptPayload(rawPromptInput) && systemPrompt && userPrompt) {
+  if (systemPrompt && userPrompt) {
     const compactedUserPrompt = compactContextText(userPrompt, IMAGE_CONTEXT_MAX_CHARS);
     try {
       const materialized = await context.services.api.generateText({
@@ -64,7 +105,10 @@ async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<
         context.log(
           `[studio.image_generation] Materialized structured prompt (${compiled.length} chars) before image generation.`
         );
-        return compiled;
+        return {
+          prompt: compiled,
+          structuredInputImages: structured.inputImages,
+        };
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -73,14 +117,89 @@ async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<
       );
     }
 
-    return clampImagePromptLength(`${systemPrompt}\n\n${compactedUserPrompt}`, IMAGE_PROMPT_MAX_CHARS);
+    return {
+      prompt: clampImagePromptLength(`${systemPrompt}\n\n${compactedUserPrompt}`, IMAGE_PROMPT_MAX_CHARS),
+      structuredInputImages: structured.inputImages,
+    };
   }
 
-  if (isRecord(rawPromptInput)) {
-    return clampImagePromptLength(userPrompt || getText(rawPromptInput), IMAGE_PROMPT_MAX_CHARS);
+  if (userPrompt) {
+    return {
+      prompt: clampImagePromptLength(userPrompt, IMAGE_PROMPT_MAX_CHARS),
+      structuredInputImages: structured.inputImages,
+    };
   }
 
-  return clampImagePromptLength(getText(rawPromptInput), IMAGE_PROMPT_MAX_CHARS);
+  return {
+    prompt: clampImagePromptLength(getText(rawPromptInput), IMAGE_PROMPT_MAX_CHARS),
+    structuredInputImages: structured.inputImages,
+  };
+}
+
+async function resolveInputImages(
+  context: StudioNodeExecutionContext,
+  structuredInputImages: StudioImageInputCandidate[]
+): Promise<StudioAssetRef[]> {
+  const merged = [
+    ...structuredInputImages,
+    ...extractImageInputCandidates(context.inputs.images),
+  ];
+  if (merged.length === 0) {
+    return [];
+  }
+
+  const output: StudioAssetRef[] = [];
+  const seen = new Set<string>();
+  let ignoredOverflow = 0;
+  for (const candidate of merged) {
+    if (output.length >= IMAGE_INPUT_MAX_COUNT) {
+      ignoredOverflow += 1;
+      continue;
+    }
+    const sourcePath = String(candidate.path || "").trim();
+    if (!sourcePath) {
+      continue;
+    }
+
+    const existing = asExistingAssetRef(candidate);
+    if (existing) {
+      if (!seen.has(existing.hash)) {
+        seen.add(existing.hash);
+        output.push(existing);
+      }
+      continue;
+    }
+
+    const mimeHint =
+      normalizeInputMimeType(String(candidate.mimeType || "")) ||
+      normalizeInputMimeType(inferMimeTypeFromPath(sourcePath));
+    if (!mimeHint) {
+      throw new Error(
+        `Image generation node "${context.node.id}" received unsupported input image format "${sourcePath}". Use PNG, JPEG, or WEBP.`
+      );
+    }
+
+    let bytes: ArrayBuffer;
+    if (isLikelyAbsolutePath(sourcePath)) {
+      context.services.assertFilesystemPath(sourcePath);
+      bytes = await context.services.readLocalFileBinary(sourcePath);
+    } else {
+      bytes = await context.services.readVaultBinary(sourcePath);
+    }
+    const stored = await context.services.storeAsset(bytes, mimeHint);
+    if (!seen.has(stored.hash)) {
+      seen.add(stored.hash);
+      output.push(stored);
+    }
+  }
+
+  if (ignoredOverflow > 0) {
+    context.log(
+      `[studio.image_generation] Ignored ${ignoredOverflow} input image(s) beyond limit ${IMAGE_INPUT_MAX_COUNT}.`
+    );
+  }
+
+  return output;
 }
 
 export const imageGenerationNode: StudioNodeDefinition = {
@@ -88,9 +207,14 @@ export const imageGenerationNode: StudioNodeDefinition = {
   version: "1.0.0",
   capabilityClass: "api",
   cachePolicy: "by_inputs",
-  inputPorts: [{ id: "prompt", type: "text", required: true }],
+  inputPorts: [
+    { id: "prompt", type: "text", required: true },
+    { id: "images", type: "any", required: false },
+  ],
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
+    provider: DEFAULT_IMAGE_PROVIDER_ID,
+    systemPrompt: "",
     modelId: DEFAULT_IMAGE_MODEL_ID,
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
@@ -98,10 +222,34 @@ export const imageGenerationNode: StudioNodeDefinition = {
   configSchema: {
     fields: [
       {
+        key: "provider",
+        label: "Image Provider",
+        description: "Choose SystemSculpt AI or local macOS image generation.",
+        type: "select",
+        required: true,
+        selectPresentation: "button_group",
+        options: [
+          { value: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT, label: "SystemSculpt AI" },
+          { value: STUDIO_IMAGE_PROVIDER_LOCAL_MACOS, label: "Local macOS image generation" },
+        ],
+      },
+      {
+        key: "systemPrompt",
+        label: "System Prompt",
+        type: "textarea",
+        required: false,
+        placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
+      },
+      {
         key: "modelId",
         label: "Image Model",
+        description: "Used by the SystemSculpt AI provider.",
         type: "select",
         required: false,
+        visibleWhen: {
+          key: "provider",
+          equals: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
+        },
         options: [
           { value: "google/gemini-3-pro-image-preview", label: "Gemini Nano Banana Pro" },
           { value: "bytedance-seed/seedream-4.5", label: "ByteDance Seedream 4.5" },
@@ -125,6 +273,11 @@ export const imageGenerationNode: StudioNodeDefinition = {
         label: "Aspect Ratio",
         type: "select",
         required: false,
+        description: "Used by the SystemSculpt AI provider.",
+        visibleWhen: {
+          key: "provider",
+          equals: STUDIO_IMAGE_PROVIDER_SYSTEMSCULPT,
+        },
         options: [
           { value: "16:9", label: "16:9 (YouTube)" },
           { value: "1:1", label: "1:1" },
@@ -138,23 +291,45 @@ export const imageGenerationNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const prompt = await resolveImagePrompt(context);
+    const { prompt, structuredInputImages } = await resolveImagePrompt(context);
     if (!prompt) {
       throw new Error(`Image generation node "${context.node.id}" requires a prompt input.`);
     }
+    const inputImages = await resolveInputImages(context, structuredInputImages);
+    const providerRaw = getText(context.node.config.provider as StudioJsonValue).trim();
+    const provider = normalizeStudioImageProviderId(providerRaw);
+    if (!provider && providerRaw) {
+      throw new Error(
+        `Image generation node "${context.node.id}" has unsupported provider "${providerRaw}".`
+      );
+    }
+    const resolvedProvider = provider || DEFAULT_IMAGE_PROVIDER_ID;
     const modelId = getText(context.node.config.modelId as StudioJsonValue).trim() || undefined;
     const countRaw = Number(context.node.config.count as StudioJsonValue);
     const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
+    const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
     const aspectRatio =
-      getText(context.node.config.aspectRatio as StudioJsonValue).trim() || DEFAULT_IMAGE_ASPECT_RATIO;
-    const result = await context.services.api.generateImage({
-      prompt,
-      modelId,
-      count,
-      aspectRatio,
-      runId: context.runId,
-      projectPath: context.projectPath,
-    });
+      resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
+        ? LOCAL_MAC_IMAGE_ASPECT_RATIO
+        : configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
+    const result =
+      resolvedProvider === STUDIO_IMAGE_PROVIDER_LOCAL_MACOS
+        ? await generateImageWithLocalMacProvider(context, {
+            prompt,
+            count,
+            aspectRatio,
+            inputImages,
+            runId: context.runId,
+          })
+        : await context.services.api.generateImage({
+            prompt,
+            modelId,
+            count,
+            aspectRatio,
+            inputImages,
+            runId: context.runId,
+            projectPath: context.projectPath,
+          });
     return {
       outputs: {
         images: result.images as unknown as StudioJsonValue,

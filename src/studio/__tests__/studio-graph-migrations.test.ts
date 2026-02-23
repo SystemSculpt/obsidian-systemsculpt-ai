@@ -69,14 +69,6 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         title: "Transcribe",
         position: { x: 500, y: 0 },
         config: {},
-      },
-      {
-        id: "prompt",
-        kind: "studio.prompt_template",
-        version: "1.0.0",
-        title: "Prompt",
-        position: { x: 760, y: 0 },
-        config: {},
       }
     );
 
@@ -108,13 +100,6 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         fromPortId: "asset",
         toNodeId: "transcribe",
         toPortId: "asset",
-      },
-      {
-        id: "e5",
-        fromNodeId: "transcribe",
-        fromPortId: "text",
-        toNodeId: "prompt",
-        toPortId: "text",
       }
     );
 
@@ -132,7 +117,6 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(signature).toEqual([
       "audio:path->transcribe:path",
       "media:path->audio:path",
-      "transcribe:text->prompt:text",
     ]);
 
     expect(
@@ -173,9 +157,25 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrated.project).toBe(project);
   });
 
-  it("remaps legacy prompt-template/text-generation split ports back to single prompt ports", () => {
+  it("inlines prompt-template nodes into downstream generation nodes and rewires inputs", () => {
     const project = baseProject();
     project.graph.nodes.push(
+      {
+        id: "source_text",
+        kind: "studio.input",
+        version: "1.0.0",
+        title: "Source Text",
+        position: { x: -300, y: 0 },
+        config: { value: "Generate from transcript." },
+      },
+      {
+        id: "source_image",
+        kind: "studio.media_ingest",
+        version: "1.0.0",
+        title: "Source Image",
+        position: { x: -300, y: 240 },
+        config: { sourcePath: "SystemSculpt/Assets/reference.png" },
+      },
       {
         id: "prompt",
         kind: "studio.prompt_template",
@@ -189,33 +189,158 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         kind: "studio.text_generation",
         version: "1.0.0",
         title: "Text",
-        position: { x: 220, y: 0 },
+        position: { x: 220, y: -60 },
+        config: {},
+      },
+      {
+        id: "image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image",
+        position: { x: 220, y: 160 },
         config: {},
       }
     );
     project.graph.edges.push(
       {
         id: "e1",
+        fromNodeId: "source_text",
+        fromPortId: "text",
+        toNodeId: "prompt",
+        toPortId: "text",
+      },
+      {
+        id: "e2",
+        fromNodeId: "source_image",
+        fromPortId: "path",
+        toNodeId: "prompt",
+        toPortId: "images",
+      },
+      {
+        id: "e3",
         fromNodeId: "prompt",
         fromPortId: "prompt_text",
         toNodeId: "text",
         toPortId: "prompt",
       },
       {
+        id: "e4",
+        fromNodeId: "prompt",
+        fromPortId: "system_prompt",
+        toNodeId: "image",
+        toPortId: "prompt",
+      },
+    );
+    project.graph.entryNodeIds = ["source_text", "source_image", "prompt"];
+    project.graph.groups = [
+      {
+        id: "group_1",
+        name: "Group",
+        nodeIds: ["source_text", "prompt", "text", "image"],
+      },
+    ];
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+
+    expect(migrated.project.graph.nodes.some((node) => node.id === "prompt")).toBe(false);
+
+    const textNode = migrated.project.graph.nodes.find((node) => node.id === "text");
+    expect(textNode?.config.systemPrompt).toBe("System instruction");
+
+    const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
+    expect(imageNode?.config.systemPrompt).toBe("System instruction");
+
+    const signature = migrated.project.graph.edges
+      .map(
+        (edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`
+      )
+      .sort();
+    expect(signature).toEqual([
+      "source_image:path->image:images",
+      "source_text:text->image:prompt",
+      "source_text:text->text:prompt",
+    ]);
+
+    expect(migrated.project.graph.entryNodeIds).toEqual(["source_text", "source_image"]);
+    expect(migrated.project.graph.groups).toEqual([
+      {
+        id: "group_1",
+        name: "Group",
+        nodeIds: ["source_text", "text", "image"],
+      },
+    ]);
+
+    expect(
+      migrated.project.migrations.applied.some((entry) => entry.id === "studio.inline-prompt-template.v1")
+    ).toBe(true);
+
+    expect(
+      migrated.project.migrations.applied.some((entry) => entry.id === "studio.path-only-ports.v1")
+    ).toBe(true);
+  });
+
+  it("remaps legacy split prompt ports before inlining", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "source_text",
+        kind: "studio.input",
+        version: "1.0.0",
+        title: "Source",
+        position: { x: 0, y: 0 },
+        config: {},
+      },
+      {
+        id: "prompt",
+        kind: "studio.prompt_template",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 220, y: 0 },
+        config: { template: "System instruction" },
+      },
+      {
+        id: "text",
+        kind: "studio.text_generation",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 440, y: 0 },
+        config: {},
+      },
+    );
+    project.graph.edges.push(
+      {
+        id: "e1",
+        fromNodeId: "source_text",
+        fromPortId: "text",
+        toNodeId: "prompt",
+        toPortId: "text",
+      },
+      {
         id: "e2",
+        fromNodeId: "prompt",
+        fromPortId: "prompt_text",
+        toNodeId: "text",
+        toPortId: "prompt",
+      },
+      {
+        id: "e3",
         fromNodeId: "prompt",
         fromPortId: "system_prompt",
         toNodeId: "text",
         toPortId: "system_prompt",
-      }
+      },
     );
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
     expect(migrated.changed).toBe(true);
 
-    const signature = migrated.project.graph.edges.map(
-      (edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`
-    );
-    expect(signature).toEqual(["prompt:prompt->text:prompt"]);
+    const signature = migrated.project.graph.edges
+      .map(
+        (edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`
+      )
+      .sort();
+    expect(signature).toEqual(["source_text:text->text:prompt"]);
+    expect(migrated.project.graph.nodes.some((node) => node.kind === "studio.prompt_template")).toBe(false);
   });
 });

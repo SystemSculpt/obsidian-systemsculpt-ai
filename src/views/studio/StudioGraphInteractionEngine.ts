@@ -23,6 +23,16 @@ export class StudioGraphInteractionEngine {
       onNodePositionsChanged: () => this.groupController.refreshGroupBounds(),
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
+      resolveNodeDragHoverGroup: (draggedNodeIds) =>
+        this.groupController.resolveDropTargetGroupId(draggedNodeIds),
+      onNodeDragHoverGroupChange: (groupId, draggedNodeIds) => {
+        this.groupController.setDropTargetHighlight(groupId);
+        this.host.onNodeDragHoverGroupChange?.(groupId, draggedNodeIds);
+      },
+      onNodeDropToGroup: (groupId, draggedNodeIds) => {
+        this.groupController.handleNodeDropToGroup(groupId, draggedNodeIds);
+        this.host.onNodeDropToGroup?.(groupId, draggedNodeIds);
+      },
       onGraphZoomChanged: (zoom) => this.host.onGraphZoomChanged?.(zoom),
     });
 

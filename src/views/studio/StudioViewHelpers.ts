@@ -6,17 +6,25 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
-  "studio.prompt_template": "Builds structured prompts from templates and variables.",
+  "studio.text": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",
-  "studio.media_ingest": "Ingests media files and outputs a reusable media path.",
+  "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",
   "studio.transcription": "Transcribes audio media into text.",
   "studio.http_request": "Fetches remote HTTP data for downstream nodes.",
   "studio.cli_command": "Runs a local shell command and captures output.",
 };
 
+const NODE_DISPLAY_NAME_BY_KIND: Record<string, string> = {
+  "studio.media_ingest": "Media",
+};
+
 export function prettifyNodeKind(kind: string): string {
+  const mapped = NODE_DISPLAY_NAME_BY_KIND[kind];
+  if (mapped) {
+    return mapped;
+  }
   const leaf = kind.split(".").pop() || kind;
   return leaf
     .split("_")

@@ -63,6 +63,38 @@ describe("Studio node config validation", () => {
     expect(result.errors.some((error) => error.fieldKey === "method")).toBe(true);
   });
 
+  it("rejects invalid image-generation provider values", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      provider: "unknown-provider",
+      modelId: "google/gemini-3-pro-image-preview",
+      count: 1,
+      aspectRatio: "16:9",
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "provider")).toBe(true);
+  });
+
+  it("does not validate hidden image model field when local provider is selected", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      provider: "local_macos_image_generation",
+      modelId: "totally-invalid-model",
+      count: 1,
+      aspectRatio: "16:9",
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
   it("preserves unknown keys while rebuilding config", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.text_generation", "1.0.0");

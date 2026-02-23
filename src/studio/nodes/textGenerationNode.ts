@@ -1,5 +1,10 @@
 import type { StudioJsonValue, StudioNodeDefinition } from "../types";
-import { getText, parseStructuredPromptInput } from "./shared";
+import {
+  getText,
+  parseStructuredPromptInput,
+  renderTemplate,
+  resolveTemplateVariables,
+} from "./shared";
 
 export const textGenerationNode: StudioNodeDefinition = {
   kind: "studio.text_generation",
@@ -12,10 +17,18 @@ export const textGenerationNode: StudioNodeDefinition = {
     { id: "model", type: "text" },
   ],
   configDefaults: {
+    systemPrompt: "",
     modelId: "",
   },
   configSchema: {
     fields: [
+      {
+        key: "systemPrompt",
+        label: "System Prompt",
+        type: "textarea",
+        required: false,
+        placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
+      },
       {
         key: "modelId",
         label: "Model ID",
@@ -29,12 +42,13 @@ export const textGenerationNode: StudioNodeDefinition = {
   async execute(context) {
     const structured = parseStructuredPromptInput(context.inputs.prompt);
     const prompt = structured.prompt.trim();
-    const systemPrompt = structured.systemPrompt.trim();
-    if (!prompt || !systemPrompt) {
-      throw new Error(
-        `Text generation node "${context.node.id}" requires prompt input with both systemPrompt and userMessage.`
-      );
+    if (!prompt) {
+      throw new Error(`Text generation node "${context.node.id}" requires a prompt input.`);
     }
+    const configuredTemplate = getText(context.node.config.systemPrompt as StudioJsonValue);
+    const templateVariables = resolveTemplateVariables(context);
+    const configuredSystemPrompt = renderTemplate(configuredTemplate, templateVariables).trim();
+    const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim() || undefined;
     const modelId = getText(context.node.config.modelId as StudioJsonValue).trim() || undefined;
     const result = await context.services.api.generateText({
       prompt,

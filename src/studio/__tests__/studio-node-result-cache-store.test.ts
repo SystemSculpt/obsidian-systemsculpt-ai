@@ -54,22 +54,20 @@ function createCacheStore() {
 function nodeFixture(config?: StudioNodeInstance["config"]): StudioNodeInstance {
   return {
     id: "node_1",
-    kind: "studio.prompt_template",
+    kind: "studio.text_generation",
     version: "1.0.0",
-    title: "Prompt",
+    title: "Text Generation",
     position: { x: 0, y: 0 },
-    config: config || { template: "{{text}}" },
+    config: config || { systemPrompt: "System instructions", modelId: "openai/gpt-5-mini" },
   };
 }
 
 describe("StudioNodeResultCacheStore", () => {
   it("produces deterministic input fingerprints independent of object key order", async () => {
     const node = nodeFixture({
-      template: "{{text}}",
-      variables: {
-        alpha: "A",
-        beta: "B",
-      },
+      systemPrompt: "Use {{prompt}} and {{alpha}}",
+      alpha: "A",
+      beta: "B",
     });
 
     const fingerprintA = await buildNodeInputFingerprint(node, {
@@ -87,7 +85,7 @@ describe("StudioNodeResultCacheStore", () => {
 
     expect(fingerprintA).toBe(fingerprintB);
 
-    const fingerprintC = await buildNodeInputFingerprint(nodeFixture({ template: "Different" }), {
+    const fingerprintC = await buildNodeInputFingerprint(nodeFixture({ systemPrompt: "Different" }), {
       data: {
         a: 1,
         b: 2,

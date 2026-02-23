@@ -19,10 +19,10 @@ type JsonAdapter = {
 
 const NODE_CACHE_SCHEMA = "studio.node-cache.v1" as const;
 const NODE_FINGERPRINT_SALT_BY_KIND: Record<string, string> = {
-  // Prompt payload contract switched to structured { systemPrompt, userMessage, prompt }.
-  "studio.prompt_template": "prompt-bundle-v2",
-  // Text generation now requires structured prompt payloads and reads system+user from input.
-  "studio.text_generation": "prompt-bundle-v2",
+  // Text generation now supports direct prompt input and optional config-level system prompt templating.
+  "studio.text_generation": "prompt-bundle-v3",
+  // Image generation now supports config-level system prompt templating.
+  "studio.image_generation": "image-prompt-v2",
 };
 
 function stableStringify(value: unknown): string {

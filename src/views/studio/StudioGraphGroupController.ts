@@ -1,21 +1,24 @@
 import type { StudioNodeGroup, StudioProjectV1 } from "../../studio/types";
 import { autoAlignGroupNodes } from "./graph-v3/StudioGraphGroupAutoLayout";
 import {
+  computeStudioGraphGroupBounds,
+  STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT,
+  STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
+  STUDIO_GRAPH_GROUP_NODE_WIDTH,
+  type StudioGraphGroupBounds,
+} from "./graph-v3/StudioGraphGroupBounds";
+import {
+  assignNodesToGroup,
   nextDefaultGroupName,
   normalizeGroupColor,
   renameGroup,
   setGroupColor,
 } from "./graph-v3/StudioGraphGroupModel";
 
-const NODE_WIDTH = 280;
-const FALLBACK_NODE_HEIGHT = 164;
-const MIN_NODE_HEIGHT = 80;
-const GROUP_PADDING_X = 20;
-const GROUP_PADDING_TOP = 18;
-const GROUP_PADDING_BOTTOM = 32;
-const GROUP_MIN_WIDTH = 180;
-const GROUP_MIN_HEIGHT = 120;
 const DEFAULT_GROUP_COLOR = "#8de8bc";
+const GROUP_DROP_TARGET_MIN_OVERLAP_RATIO = 0.08;
+const GROUP_DROP_TARGET_STICKY_MARGIN = 26;
+const GROUP_DROP_TARGET_STICKY_CENTER_SCORE = 0.32;
 const GROUP_COLOR_PALETTE = [
   "#8de8bc",
   "#7be7e6",
@@ -35,11 +38,14 @@ const GROUP_COLOR_PALETTE = [
   "#b0b6c8",
 ] as const;
 
-type GroupBounds = {
+type NodeGeometry = {
   left: number;
   top: number;
-  width: number;
-  height: number;
+  right: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+  area: number;
 };
 
 type GroupElements = {
@@ -82,6 +88,7 @@ export class StudioGraphGroupController {
   private pendingNameEditGroupId: string | null = null;
   private editingGroupId: string | null = null;
   private openColorPaletteGroupId: string | null = null;
+  private dropTargetGroupId: string | null = null;
   private windowListenersBound = false;
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
@@ -122,6 +129,7 @@ export class StudioGraphGroupController {
     this.previewColorByGroupId.clear();
     this.editingGroupId = null;
     this.openColorPaletteGroupId = null;
+    this.dropTargetGroupId = null;
     if (this.frameLayerEl?.parentElement) {
       this.frameLayerEl.parentElement.removeChild(this.frameLayerEl);
     }
@@ -158,11 +166,15 @@ export class StudioGraphGroupController {
       this.openColorPaletteGroupId = null;
       this.previewColorByGroupId.clear();
     }
+    if (this.dropTargetGroupId && !visibleGroupIds.has(this.dropTargetGroupId)) {
+      this.dropTargetGroupId = null;
+    }
 
     for (const group of groups) {
       const frameEl = this.frameLayerEl.createDiv({ cls: "ss-studio-group-frame" });
       frameEl.dataset.groupId = group.id;
       frameEl.style.setProperty("--ss-studio-group-accent", this.resolveDisplayedGroupColor(group));
+      frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       frameEl.addEventListener("pointerdown", (event) => {
         this.startGroupDrag(group.id, event as PointerEvent, frameEl);
       });
@@ -257,13 +269,12 @@ export class StudioGraphGroupController {
       return;
     }
 
-    const nodeMap = buildNodeMap(project);
     for (const group of project.graph.groups || []) {
       const elements = this.groupElsById.get(group.id);
       if (!elements) {
         continue;
       }
-      const bounds = this.computeGroupBounds(group, nodeMap);
+      const bounds = this.computeGroupBounds(group);
       if (!bounds) {
         elements.frameEl.style.display = "none";
         elements.tagEl.style.display = "none";
@@ -271,6 +282,7 @@ export class StudioGraphGroupController {
       }
       elements.frameEl.style.display = "";
       elements.tagEl.style.display = "";
+      elements.frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       elements.frameEl.style.left = `${bounds.left}px`;
       elements.frameEl.style.top = `${bounds.top}px`;
       elements.frameEl.style.width = `${bounds.width}px`;
@@ -296,6 +308,129 @@ export class StudioGraphGroupController {
     this.startGroupNameEdit(normalizedGroupId, { selectText: true });
   }
 
+  resolveDropTargetGroupId(draggedNodeIds: string[]): string | null {
+    const project = this.host.getCurrentProject();
+    if (!project) {
+      return null;
+    }
+
+    const normalizedDraggedNodeIds = Array.from(
+      new Set(
+        draggedNodeIds
+          .map((nodeId) => String(nodeId || "").trim())
+          .filter((nodeId) => nodeId.length > 0)
+      )
+    );
+    if (normalizedDraggedNodeIds.length === 0) {
+      return null;
+    }
+
+    const draggedNodeGeometries = new Map(
+      normalizedDraggedNodeIds
+        .map((nodeId) => [
+          nodeId,
+          this.computeNodeGeometry(this.findNode(project, nodeId), nodeId),
+        ] as const)
+        .filter((entry): entry is readonly [string, NodeGeometry] => Boolean(entry[1]))
+    );
+    if (draggedNodeGeometries.size === 0) {
+      return null;
+    }
+
+    let bestMatch: {
+      groupId: string;
+      coveredNodeCount: number;
+      coverageScore: number;
+      boundsArea: number;
+    } | null = null;
+
+    for (const group of project.graph.groups || []) {
+      const groupNodeIds = new Set(
+        (group.nodeIds || [])
+          .map((nodeId) => String(nodeId || "").trim())
+          .filter((nodeId) => nodeId.length > 0)
+      );
+      if (normalizedDraggedNodeIds.every((nodeId) => groupNodeIds.has(nodeId))) {
+        continue;
+      }
+
+      const bounds = this.computeGroupBounds(group);
+      if (!bounds) {
+        continue;
+      }
+
+      let coveredNodeCount = 0;
+      let coverageScore = 0;
+      for (const geometry of draggedNodeGeometries.values()) {
+        const nodeCoverage = this.computeGroupDropCoverage(bounds, geometry);
+        if (nodeCoverage > 0) {
+          coveredNodeCount += 1;
+          coverageScore += nodeCoverage;
+        }
+      }
+      if (coveredNodeCount === 0) {
+        continue;
+      }
+
+      const boundsArea = bounds.width * bounds.height;
+      if (
+        !bestMatch ||
+        coveredNodeCount > bestMatch.coveredNodeCount ||
+        (coveredNodeCount === bestMatch.coveredNodeCount && coverageScore > bestMatch.coverageScore) ||
+        (coveredNodeCount === bestMatch.coveredNodeCount &&
+          Math.abs(coverageScore - bestMatch.coverageScore) < 0.0001 &&
+          boundsArea < bestMatch.boundsArea)
+      ) {
+        bestMatch = {
+          groupId: group.id,
+          coveredNodeCount,
+          coverageScore,
+          boundsArea,
+        };
+      }
+    }
+
+    return bestMatch?.groupId || null;
+  }
+
+  setDropTargetHighlight(groupId: string | null): void {
+    const computedGroupId = String(groupId || "").trim() || null;
+    if (this.dropTargetGroupId === computedGroupId) {
+      return;
+    }
+
+    const previousGroupId = this.dropTargetGroupId;
+    this.dropTargetGroupId = computedGroupId;
+    if (previousGroupId) {
+      this.groupElsById.get(previousGroupId)?.frameEl.classList.remove("is-drop-target");
+    }
+    if (computedGroupId) {
+      this.groupElsById.get(computedGroupId)?.frameEl.classList.add("is-drop-target");
+    }
+  }
+
+  handleNodeDropToGroup(groupId: string | null, draggedNodeIds: string[]): void {
+    this.setDropTargetHighlight(null);
+
+    const normalizedGroupId = String(groupId || "").trim();
+    if (!normalizedGroupId) {
+      return;
+    }
+
+    const project = this.host.getCurrentProject();
+    if (!project) {
+      return;
+    }
+
+    const changed = assignNodesToGroup(project, normalizedGroupId, draggedNodeIds);
+    if (!changed) {
+      return;
+    }
+
+    this.host.scheduleProjectSave();
+    this.host.requestRender();
+  }
+
   private bindWindowListeners(): void {
     if (this.windowListenersBound) {
       return;
@@ -303,6 +438,90 @@ export class StudioGraphGroupController {
     window.addEventListener("pointerdown", this.onWindowPointerDown);
     window.addEventListener("keydown", this.onWindowKeyDown);
     this.windowListenersBound = true;
+  }
+
+  private boundsContainPoint(bounds: StudioGraphGroupBounds, x: number, y: number): boolean {
+    return (
+      x >= bounds.left &&
+      x <= bounds.left + bounds.width &&
+      y >= bounds.top &&
+      y <= bounds.top + bounds.height
+    );
+  }
+
+  private boundsContainPointWithMargin(
+    bounds: StudioGraphGroupBounds,
+    x: number,
+    y: number,
+    margin: number
+  ): boolean {
+    return (
+      x >= bounds.left - margin &&
+      x <= bounds.left + bounds.width + margin &&
+      y >= bounds.top - margin &&
+      y <= bounds.top + bounds.height + margin
+    );
+  }
+
+  private computeNodeGeometry(
+    node: StudioProjectV1["graph"]["nodes"][number] | null,
+    nodeId: string
+  ): NodeGeometry | null {
+    if (!node) {
+      return null;
+    }
+    const nodeEl = this.host.getNodeElement(nodeId);
+    const nodeHeight = Math.max(
+      STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
+      nodeEl?.offsetHeight || STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT
+    );
+    const left = node.position.x;
+    const top = node.position.y;
+    const right = left + STUDIO_GRAPH_GROUP_NODE_WIDTH;
+    const bottom = top + nodeHeight;
+    const area = STUDIO_GRAPH_GROUP_NODE_WIDTH * nodeHeight;
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      centerX: left + STUDIO_GRAPH_GROUP_NODE_WIDTH / 2,
+      centerY: top + nodeHeight / 2,
+      area,
+    };
+  }
+
+  private computeGroupDropCoverage(bounds: StudioGraphGroupBounds, nodeGeometry: NodeGeometry): number {
+    if (this.boundsContainPoint(bounds, nodeGeometry.centerX, nodeGeometry.centerY)) {
+      return 1;
+    }
+
+    const overlapLeft = Math.max(bounds.left, nodeGeometry.left);
+    const overlapTop = Math.max(bounds.top, nodeGeometry.top);
+    const overlapRight = Math.min(bounds.left + bounds.width, nodeGeometry.right);
+    const overlapBottom = Math.min(bounds.top + bounds.height, nodeGeometry.bottom);
+    const overlapWidth = Math.max(0, overlapRight - overlapLeft);
+    const overlapHeight = Math.max(0, overlapBottom - overlapTop);
+    const overlapArea = overlapWidth * overlapHeight;
+    if (overlapArea > 0 && nodeGeometry.area > 0) {
+      const overlapRatio = overlapArea / nodeGeometry.area;
+      if (overlapRatio >= GROUP_DROP_TARGET_MIN_OVERLAP_RATIO) {
+        return overlapRatio;
+      }
+    }
+
+    if (
+      this.boundsContainPointWithMargin(
+        bounds,
+        nodeGeometry.centerX,
+        nodeGeometry.centerY,
+        GROUP_DROP_TARGET_STICKY_MARGIN
+      )
+    ) {
+      return GROUP_DROP_TARGET_STICKY_CENTER_SCORE;
+    }
+
+    return 0;
   }
 
   private unbindWindowListeners(): void {
@@ -437,7 +656,10 @@ export class StudioGraphGroupController {
         if (!nodeEl) {
           return null;
         }
-        return Math.max(MIN_NODE_HEIGHT, nodeEl.offsetHeight || FALLBACK_NODE_HEIGHT);
+        return Math.max(
+          STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
+          nodeEl.offsetHeight || STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT
+        );
       },
     });
     if (!result.changed) {
@@ -567,39 +789,21 @@ export class StudioGraphGroupController {
     window.addEventListener("pointercancel", finishDrag);
   }
 
-  private computeGroupBounds(
-    group: StudioNodeGroup,
-    nodeMap: Map<string, StudioProjectV1["graph"]["nodes"][number]>
-  ): GroupBounds | null {
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
+  private findNode(project: StudioProjectV1, nodeId: string): StudioProjectV1["graph"]["nodes"][number] | null {
+    return project.graph.nodes.find((node) => node.id === nodeId) || null;
+  }
 
-    for (const nodeId of group.nodeIds) {
-      const node = nodeMap.get(nodeId);
-      if (!node) {
-        continue;
-      }
-      const nodeEl = this.host.getNodeElement(nodeId);
-      const nodeHeight = Math.max(MIN_NODE_HEIGHT, nodeEl?.offsetHeight || FALLBACK_NODE_HEIGHT);
-
-      minX = Math.min(minX, node.position.x);
-      minY = Math.min(minY, node.position.y);
-      maxX = Math.max(maxX, node.position.x + NODE_WIDTH);
-      maxY = Math.max(maxY, node.position.y + nodeHeight);
-    }
-
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+  private computeGroupBounds(group: StudioNodeGroup): StudioGraphGroupBounds | null {
+    const project = this.host.getCurrentProject();
+    if (!project) {
       return null;
     }
-
-    const left = minX - GROUP_PADDING_X;
-    const top = minY - GROUP_PADDING_TOP;
-    const width = Math.max(GROUP_MIN_WIDTH, maxX - minX + GROUP_PADDING_X * 2);
-    const height = Math.max(GROUP_MIN_HEIGHT, maxY - minY + GROUP_PADDING_TOP + GROUP_PADDING_BOTTOM);
-
-    return { left, top, width, height };
+    return computeStudioGraphGroupBounds(project, group, {
+      getNodeHeight: (nodeId) => {
+        const nodeEl = this.host.getNodeElement(nodeId);
+        return nodeEl ? nodeEl.offsetHeight : null;
+      },
+    });
   }
 
   private startGroupNameEdit(groupId: string, options?: { selectText?: boolean }): void {

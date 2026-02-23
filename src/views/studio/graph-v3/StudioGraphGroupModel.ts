@@ -121,6 +121,57 @@ export function createGroupFromSelection(
   return nextGroup;
 }
 
+export function assignNodesToGroup(
+  project: StudioProjectV1,
+  groupId: string,
+  nodeIds: string[]
+): boolean {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (!normalizedGroupId) {
+    return false;
+  }
+
+  const existingNodeIds = new Set(project.graph.nodes.map((node) => node.id));
+  const normalizedNodeIds = normalizeNodeIds(nodeIds).filter((nodeId) => existingNodeIds.has(nodeId));
+  if (normalizedNodeIds.length === 0) {
+    return false;
+  }
+
+  const previousGroups = ensureGraphGroups(project);
+  const targetGroupIndex = previousGroups.findIndex((group) => group.id === normalizedGroupId);
+  if (targetGroupIndex < 0) {
+    return false;
+  }
+
+  const targetGroupNodeIds = normalizeNodeIds(previousGroups[targetGroupIndex].nodeIds || []);
+  const movingIds = new Set(normalizedNodeIds);
+  const nextGroups = previousGroups
+    .map((group, index) => {
+      if (index === targetGroupIndex) {
+        const nextNodeIds = [...targetGroupNodeIds];
+        nextNodeIds.push(...normalizedNodeIds.filter((nodeId) => !nextNodeIds.includes(nodeId)));
+        return {
+          ...group,
+          nodeIds: nextNodeIds,
+        };
+      }
+      const nextNodeIds = normalizeNodeIds(group.nodeIds || []).filter((nodeId) => !movingIds.has(nodeId));
+      return {
+        ...group,
+        nodeIds: nextNodeIds,
+      };
+    })
+    .filter((group, index) => group.nodeIds.length > 0 || index === targetGroupIndex);
+
+  const previousSerialized = JSON.stringify(previousGroups);
+  const nextSerialized = JSON.stringify(nextGroups);
+  if (previousSerialized === nextSerialized) {
+    return false;
+  }
+  project.graph.groups = nextGroups;
+  return true;
+}
+
 export function renameGroup(project: StudioProjectV1, groupId: string, name: string): boolean {
   const normalizedGroupId = String(groupId || "").trim();
   const normalizedName = normalizeGroupName(name);

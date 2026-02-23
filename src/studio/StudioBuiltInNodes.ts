@@ -5,13 +5,13 @@ import { httpRequestNode } from "./nodes/httpRequestNode";
 import { imageGenerationNode } from "./nodes/imageGenerationNode";
 import { inputNode } from "./nodes/inputNode";
 import { mediaIngestNode } from "./nodes/mediaIngestNode";
-import { promptTemplateNode } from "./nodes/promptTemplateNode";
+import { textNode } from "./nodes/textNode";
 import { textGenerationNode } from "./nodes/textGenerationNode";
 import { transcriptionNode } from "./nodes/transcriptionNode";
 
 export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(inputNode);
-  registry.register(promptTemplateNode);
+  registry.register(textNode);
   registry.register(textGenerationNode);
   registry.register(imageGenerationNode);
   registry.register(mediaIngestNode);

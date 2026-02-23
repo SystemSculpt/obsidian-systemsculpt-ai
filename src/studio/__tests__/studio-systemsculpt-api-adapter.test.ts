@@ -112,4 +112,103 @@ describe("StudioSystemSculptApiAdapter", () => {
       })
     ).rejects.toThrow("lock_until=2026-02-23 06:14:32.832+00");
   });
+
+  it("uploads attached input images before creating a generation job", async () => {
+    const assetStore = {
+      readArrayBuffer: jest.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+      storeArrayBuffer: jest.fn(async () => ({
+        hash: "out-hash",
+        mimeType: "image/png",
+        sizeBytes: 3,
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/out-hash.png",
+      })),
+    } as any;
+    const adapter = new StudioSystemSculptApiAdapter(createPluginStub(), assetStore);
+    const imageClient = {
+      createGenerationJob: jest.fn(async () => ({
+        job: { id: "job_123" },
+        poll_url: "/api/v1/images/generations/jobs/job_123",
+      })),
+      waitForGenerationJob: jest.fn(async () => ({
+        job: { id: "job_123", status: "succeeded" },
+        outputs: [
+          {
+            index: 0,
+            mime_type: "image/png",
+            size_bytes: 3,
+            width: 1024,
+            height: 576,
+            url: "https://systemsculpt-assets.example.com/output.png",
+            url_expires_in_seconds: 1800,
+          },
+        ],
+      })),
+      downloadImage: jest.fn(async () => ({
+        arrayBuffer: new Uint8Array([9, 8, 7]).buffer,
+        contentType: "image/png",
+      })),
+      prepareInputImageUploads: jest.fn(async () => ({
+        input_uploads: [
+          {
+            index: 0,
+            upload: { method: "PUT", url: "https://systemsculpt-assets.example.com/input-0" },
+            input_image: {
+              type: "uploaded",
+              key: "input/key/0",
+              mime_type: "image/png",
+              size_bytes: 128,
+              sha256: "input-hash-0",
+            },
+          },
+        ],
+      })),
+      uploadPreparedInputImage: jest.fn(async () => undefined),
+    } as any;
+    (adapter as any).ensureImageClient = jest.fn(() => imageClient);
+
+    await adapter.generateImage({
+      prompt: "Generate image with ref",
+      modelId: "openai/gpt-5-image-mini",
+      count: 1,
+      aspectRatio: "16:9",
+      inputImages: [
+        {
+          hash: "input-hash-0",
+          mimeType: "image/png",
+          sizeBytes: 128,
+          path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/00/input-hash-0.png",
+        },
+      ],
+      runId: "run_test",
+      projectPath: "Studio/Test.systemsculpt",
+    });
+
+    expect(imageClient.prepareInputImageUploads).toHaveBeenCalledWith([
+      {
+        mime_type: "image/png",
+        size_bytes: 128,
+        sha256: "input-hash-0",
+      },
+    ]);
+    expect(imageClient.uploadPreparedInputImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uploadUrl: "https://systemsculpt-assets.example.com/input-0",
+        mimeType: "image/png",
+      })
+    );
+    expect(imageClient.createGenerationJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input_images: [
+          {
+            type: "uploaded",
+            key: "input/key/0",
+            mime_type: "image/png",
+            size_bytes: 128,
+            sha256: "input-hash-0",
+          },
+        ],
+      }),
+      expect.any(Object)
+    );
+  });
 });

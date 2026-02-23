@@ -55,41 +55,24 @@ describe("StudioGraphCompiler", () => {
         config: { value: "hello" },
       },
       {
-        id: "prompt",
-        kind: "studio.prompt_template",
-        version: "1.0.0",
-        title: "Prompt",
-        position: { x: 200, y: 0 },
-        config: { template: "{{text}}" },
-      },
-      {
         id: "text",
         kind: "studio.text_generation",
         version: "1.0.0",
         title: "Text",
-        position: { x: 400, y: 0 },
+        position: { x: 220, y: 0 },
         config: { modelId: "openai/gpt-5-mini" },
       }
     );
-    project.graph.edges.push(
-      {
-        id: "e1",
-        fromNodeId: "input",
-        fromPortId: "text",
-        toNodeId: "prompt",
-        toPortId: "text",
-      },
-      {
-        id: "e2",
-        fromNodeId: "prompt",
-        fromPortId: "prompt",
-        toNodeId: "text",
-        toPortId: "prompt",
-      }
-    );
+    project.graph.edges.push({
+      id: "e1",
+      fromNodeId: "input",
+      fromPortId: "text",
+      toNodeId: "text",
+      toPortId: "prompt",
+    });
 
     const compiled = compiler.compile(project, registry);
-    expect(compiled.executionOrder).toEqual(["input", "prompt", "text"]);
+    expect(compiled.executionOrder).toEqual(["input", "text"]);
   });
 
   it("rejects incompatible port types", () => {
@@ -128,33 +111,33 @@ describe("StudioGraphCompiler", () => {
     project.graph.nodes.push(
       {
         id: "a",
-        kind: "studio.prompt_template",
+        kind: "studio.text",
         version: "1.0.0",
         title: "A",
         position: { x: 0, y: 0 },
-        config: { template: "{{text}}" },
+        config: { value: "A" },
       },
       {
         id: "b",
-        kind: "studio.prompt_template",
+        kind: "studio.text",
         version: "1.0.0",
         title: "B",
         position: { x: 200, y: 0 },
-        config: { template: "{{text}}" },
+        config: { value: "B" },
       }
     );
     project.graph.edges.push(
       {
         id: "e1",
         fromNodeId: "a",
-        fromPortId: "prompt",
+        fromPortId: "text",
         toNodeId: "b",
         toPortId: "text",
       },
       {
         id: "e2",
         fromNodeId: "b",
-        fromPortId: "prompt",
+        fromPortId: "text",
         toNodeId: "a",
         toPortId: "text",
       }

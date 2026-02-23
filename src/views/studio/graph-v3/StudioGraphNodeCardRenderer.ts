@@ -29,7 +29,41 @@ type RenderStudioGraphNodeCardOptions = {
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onRevealPathInFinder: (path: string) => void;
 };
+
+function readTextNodeValue(node: StudioNodeInstance): string {
+  const value = node.config.value;
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function resolveMediaIngestRevealPath(
+  node: StudioNodeInstance,
+  outputs: Record<string, unknown> | null,
+  fallbackPath: string
+): string {
+  if (node.kind !== "studio.media_ingest") {
+    return "";
+  }
+
+  const outputPath = typeof outputs?.path === "string" ? outputs.path.trim() : "";
+  if (outputPath) {
+    return outputPath;
+  }
+  const config = (node.config || {}) as Record<string, unknown>;
+  const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
+  if (configuredPath) {
+    return configuredPath;
+  }
+  return String(fallbackPath || "").trim();
+}
 
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
@@ -44,6 +78,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRunNode,
     onRemoveNode,
     onNodeTitleInput,
+    onNodeConfigMutated,
+    onRevealPathInFinder,
   } = options;
 
   const definition = findNodeDefinition(node);
@@ -102,6 +138,28 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
 
     graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
   });
+
+  if (node.kind === "studio.media_ingest") {
+    nodeEl.addEventListener("dblclick", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+      if (target.closest("input, button, select, textarea, a, .ss-studio-port-pin")) {
+        return;
+      }
+      const revealPath = resolveMediaIngestRevealPath(
+        node,
+        nodeRunState.outputs as Record<string, unknown> | null,
+        ""
+      );
+      if (!revealPath) {
+        return;
+      }
+      event.stopPropagation();
+      onRevealPathInFinder(revealPath);
+    });
+  }
 
   nodeEl.createEl("div", {
     cls: "ss-studio-node-kind",
@@ -195,14 +253,37 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     return;
   }
 
-  const configPreviewEl = nodeEl.createEl("p", {
-    cls: "ss-studio-node-config-preview",
-    text: formatNodeConfigPreview(node),
-  });
-  configPreviewEl.setAttribute("data-node-config-preview", node.id);
+  if (node.kind === "studio.text") {
+    const editorWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-text-editor-wrap" });
+    editorWrapEl.createDiv({
+      cls: "ss-studio-node-text-editor-label",
+      text: "TEXT",
+    });
+    const textEditorEl = editorWrapEl.createEl("textarea", {
+      cls: "ss-studio-node-text-editor",
+      attr: {
+        placeholder: "Write or paste text...",
+        "aria-label": `${node.title || "Text"} content`,
+      },
+    });
+    textEditorEl.value = readTextNodeValue(node);
+    textEditorEl.disabled = busy;
+    textEditorEl.addEventListener("input", (event) => {
+      node.config.value = (event.target as HTMLTextAreaElement).value;
+      onNodeConfigMutated(node);
+    });
+  } else {
+    const configPreviewEl = nodeEl.createEl("p", {
+      cls: "ss-studio-node-config-preview",
+      text: formatNodeConfigPreview(node),
+    });
+    configPreviewEl.setAttribute("data-node-config-preview", node.id);
+  }
 
   const outputPreview =
-    node.kind === "studio.image_generation" ? "" : formatNodeOutputPreview(nodeRunState.outputs);
+    node.kind === "studio.image_generation" || node.kind === "studio.text"
+      ? ""
+      : formatNodeOutputPreview(nodeRunState.outputs);
   if (outputPreview) {
     const outputPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-output-preview" });
     const separatorIndex = outputPreview.indexOf(":");
@@ -235,8 +316,20 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     const previewSrc = resolveAssetPreviewSrc(mediaPreview.path);
     if (previewSrc) {
       const previewEl = nodeEl.createDiv({ cls: "ss-studio-node-media-preview" });
+      if (node.kind === "studio.media_ingest") {
+        previewEl.setAttribute("title", "Double-click to reveal in Finder");
+      }
       previewEl.addEventListener("dblclick", (event) => {
         event.stopPropagation();
+        const revealPath = resolveMediaIngestRevealPath(
+          node,
+          nodeRunState.outputs as Record<string, unknown> | null,
+          mediaPreview.path
+        );
+        if (revealPath) {
+          onRevealPathInFinder(revealPath);
+          return;
+        }
         onOpenMediaPreview?.({
           kind: mediaPreview.kind,
           path: mediaPreview.path,

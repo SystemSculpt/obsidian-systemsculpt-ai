@@ -6,6 +6,7 @@ import type {
   PendingConnection,
   StudioGraphInteractionHost,
 } from "../StudioGraphInteractionTypes";
+import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverlay";
 import { buildCubicLinkCurve, type CubicLinkCurve } from "./LinkGeometry";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -35,6 +36,7 @@ export class StudioGraphConnectionEngineV2 {
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private portElementsByKey = new Map<string, HTMLElement>();
   private suppressOutputClickKey: string | null = null;
+  private readonly edgeContextMenu = new StudioSimpleContextMenuOverlay();
 
   constructor(private readonly host: StudioGraphConnectionEngineHost) {}
 
@@ -49,6 +51,7 @@ export class StudioGraphConnectionEngineV2 {
   clearProjectState(): void {
     this.pendingConnection = null;
     this.dragState = null;
+    this.closeEdgeContextMenu();
   }
 
   clearRenderBindings(): void {
@@ -56,6 +59,8 @@ export class StudioGraphConnectionEngineV2 {
     this.graphEdgesLayerEl = null;
     this.dragState = null;
     this.suppressOutputClickKey = null;
+    this.closeEdgeContextMenu();
+    this.edgeContextMenu.destroy();
     this.resetPortVisualState();
     this.portElementsByKey.clear();
   }
@@ -289,6 +294,7 @@ export class StudioGraphConnectionEngineV2 {
   renderEdgeLayer(): void {
     const project = this.host.getCurrentProject();
     if (!project || !this.graphEdgesLayerEl || !this.graphCanvasEl) {
+      this.closeEdgeContextMenu();
       this.resetPortVisualState();
       return;
     }
@@ -318,9 +324,16 @@ export class StudioGraphConnectionEngineV2 {
       const path = document.createElementNS(SVG_NS, "path");
       path.setAttribute("d", curve.path);
       path.setAttribute("class", "ss-studio-link-path");
-      path.addEventListener("click", (event) => {
+      const onEdgeMenuRequested = (event: MouseEvent): void => {
+        event.preventDefault();
         event.stopPropagation();
-        this.removeEdge(edge.id);
+        this.openEdgeContextMenu(edge.id, event.clientX, event.clientY);
+      };
+      path.addEventListener("click", (event) => {
+        onEdgeMenuRequested(event);
+      });
+      path.addEventListener("contextmenu", (event) => {
+        onEdgeMenuRequested(event);
       });
       this.graphEdgesLayerEl.appendChild(path);
     }
@@ -458,9 +471,45 @@ export class StudioGraphConnectionEngineV2 {
       return;
     }
 
+    this.closeEdgeContextMenu();
     project.graph.edges = project.graph.edges.filter((edge) => edge.id !== edgeId);
     this.host.recomputeEntryNodes(project);
     this.host.scheduleProjectSave();
     this.host.requestRender();
+  }
+
+  private openEdgeContextMenu(edgeId: string, clientX: number, clientY: number): void {
+    const canvas = this.graphCanvasEl;
+    if (!canvas) {
+      return;
+    }
+    const viewport = canvas.parentElement as HTMLElement | null;
+    if (!viewport) {
+      return;
+    }
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const anchorX = Math.round(viewport.scrollLeft + (clientX - viewportRect.left));
+    const anchorY = Math.round(viewport.scrollTop + (clientY - viewportRect.top));
+    this.edgeContextMenu.mount(viewport);
+    this.edgeContextMenu.setGraphZoom(this.host.getGraphZoom());
+    this.edgeContextMenu.open({
+      anchorX,
+      anchorY,
+      width: 210,
+      items: [
+        {
+          id: "remove-connection",
+          title: "Remove connection",
+          onSelect: () => {
+            this.removeEdge(edgeId);
+          },
+        },
+      ],
+    });
+  }
+
+  private closeEdgeContextMenu(): void {
+    this.edgeContextMenu.hide();
   }
 }

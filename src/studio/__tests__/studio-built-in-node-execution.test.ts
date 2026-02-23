@@ -1,5 +1,6 @@
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
+import { STUDIO_LOCAL_MAC_IMAGE_COMMAND } from "../nodes/localMacImageGeneration";
 import type { StudioNodeExecutionContext, StudioJsonValue } from "../types";
 
 function createContext(options: {
@@ -9,6 +10,12 @@ function createContext(options: {
   inputs?: Record<string, StudioJsonValue>;
   generateTextMock?: jest.Mock;
   generateImageMock?: jest.Mock;
+  runCliMock?: jest.Mock;
+  storeAssetMock?: jest.Mock;
+  readAssetMock?: jest.Mock;
+  writeTempFileMock?: jest.Mock;
+  readLocalFileBinaryMock?: jest.Mock;
+  deleteLocalFileMock?: jest.Mock;
 }): StudioNodeExecutionContext {
   const generateTextMock =
     options.generateTextMock ||
@@ -19,6 +26,21 @@ function createContext(options: {
   const generateImageMock =
     options.generateImageMock ||
     jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+  const runCliMock =
+    options.runCliMock || jest.fn(async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }));
+  const storeAssetMock =
+    options.storeAssetMock ||
+    jest.fn(async () => ({
+      hash: "hash",
+      mimeType: "application/octet-stream",
+      sizeBytes: 0,
+      path: "asset.bin",
+    }));
+  const readAssetMock = options.readAssetMock || jest.fn(async () => new ArrayBuffer(0));
+  const writeTempFileMock = options.writeTempFileMock || jest.fn(async () => "/tmp/file.bin");
+  const readLocalFileBinaryMock =
+    options.readLocalFileBinaryMock || jest.fn(async () => new ArrayBuffer(0));
+  const deleteLocalFileMock = options.deleteLocalFileMock || jest.fn(async () => {});
 
   return {
     runId: "run_test",
@@ -44,19 +66,14 @@ function createContext(options: {
         isAvailable: () => false,
         getSecret: async () => "",
       },
-      storeAsset: async () => ({
-        hash: "hash",
-        mimeType: "application/octet-stream",
-        sizeBytes: 0,
-        path: "asset.bin",
-      }),
-      readAsset: async () => new ArrayBuffer(0),
+      storeAsset: storeAssetMock,
+      readAsset: readAssetMock,
       resolveAbsolutePath: (path) => path,
       readVaultBinary: async () => new ArrayBuffer(0),
-      readLocalFileBinary: async () => new ArrayBuffer(0),
-      writeTempFile: async () => "/tmp/file.bin",
-      deleteLocalFile: async () => {},
-      runCli: async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }),
+      readLocalFileBinary: readLocalFileBinaryMock,
+      writeTempFile: writeTempFileMock,
+      deleteLocalFile: deleteLocalFileMock,
+      runCli: runCliMock,
       assertFilesystemPath: () => {},
       assertNetworkUrl: () => {},
     },
@@ -64,33 +81,48 @@ function createContext(options: {
   };
 }
 
-describe("Studio built-in prompt/text node execution", () => {
+describe("Studio built-in text/image node execution", () => {
   const registry = new StudioNodeRegistry();
   registerBuiltInStudioNodes(registry);
 
-  it("prompt template emits structured prompt payload with system+user data", async () => {
-    const definition = registry.get("studio.prompt_template", "1.0.0");
+  it("text node emits configured text for downstream nodes", async () => {
+    const definition = registry.get("studio.text", "1.0.0");
     expect(definition).toBeDefined();
 
     const result = await definition!.execute(
       createContext({
-        nodeId: "prompt-node",
-        kind: "studio.prompt_template",
+        nodeId: "note-node",
+        kind: "studio.text",
         config: {
-          template: "Generate a YouTube title from this transcript.",
+          value: "Edited note text",
         },
         inputs: {
-          text: "Today we reviewed a long tutorial about graph workflows.",
+          text: "Upstream text",
         },
       })
     );
 
-    expect(result.outputs.prompt).toEqual({
-      systemPrompt: "Generate a YouTube title from this transcript.",
-      userMessage: "Today we reviewed a long tutorial about graph workflows.",
-      prompt: "Today we reviewed a long tutorial about graph workflows.",
-      text: "Today we reviewed a long tutorial about graph workflows.",
-    });
+    expect(result.outputs.text).toBe("Edited note text");
+  });
+
+  it("text node falls back to upstream text when config is empty", async () => {
+    const definition = registry.get("studio.text", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "note-node",
+        kind: "studio.text",
+        config: {
+          value: "",
+        },
+        inputs: {
+          text: "Upstream text",
+        },
+      })
+    );
+
+    expect(result.outputs.text).toBe("Upstream text");
   });
 
   it("text generation consumes structured prompt payload and passes system prompt", async () => {
@@ -131,42 +163,37 @@ describe("Studio built-in prompt/text node execution", () => {
     expect(result.outputs.text).toBe("Title: Graph Workflow Deep Dive");
   });
 
-  it("rejects text generation when prompt payload is missing systemPrompt", async () => {
+  it("accepts plain prompt text with system prompt from node config", async () => {
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({
+      text: "Generated body",
+      modelId: "openai/gpt-5-mini",
+    }));
 
-    await expect(
-      definition!.execute(
-        createContext({
-          nodeId: "text-node",
-          kind: "studio.text_generation",
-          config: {
-            modelId: "openai/gpt-5-mini",
-          },
-          inputs: {
-            prompt: "Plain user prompt",
-          },
-        })
-      )
-    ).rejects.toThrow("requires prompt input with both systemPrompt and userMessage");
-  });
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "text-node",
+        kind: "studio.text_generation",
+        config: {
+          modelId: "openai/gpt-5-mini",
+          systemPrompt: "Follow these rules for {{prompt}}",
+        },
+        inputs: {
+          prompt: "Plain user prompt",
+        },
+        generateTextMock,
+      })
+    );
 
-  it("rejects prompt template execution when text input is missing", async () => {
-    const definition = registry.get("studio.prompt_template", "1.0.0");
-    expect(definition).toBeDefined();
-
-    await expect(
-      definition!.execute(
-        createContext({
-          nodeId: "prompt-node",
-          kind: "studio.prompt_template",
-          config: {
-            template: "System instruction",
-          },
-          inputs: {},
-        })
-      )
-    ).rejects.toThrow("requires both a system prompt template result and a text input");
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Plain user prompt",
+        systemPrompt: "Follow these rules for Plain user prompt",
+        modelId: "openai/gpt-5-mini",
+      })
+    );
+    expect(result.outputs.text).toBe("Generated body");
   });
 
   it("materializes structured prompts for image generation and enforces prompt budget", async () => {
@@ -209,6 +236,40 @@ describe("Studio built-in prompt/text node execution", () => {
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
   });
 
+  it("materializes plain image prompts when system prompt is configured on the node", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({
+      text: "Final composed image prompt",
+      modelId: "openai/gpt-5-mini",
+    }));
+    const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        config: {
+          systemPrompt: "Use this style guide for {{prompt}}",
+        },
+        inputs: {
+          prompt: "Make a cinematic frame",
+        },
+        generateTextMock,
+        generateImageMock,
+      })
+    );
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Make a cinematic frame",
+        systemPrompt: expect.stringContaining("Use this style guide for Make a cinematic frame"),
+      })
+    );
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.prompt).toBe("Final composed image prompt");
+  });
+
   it("truncates oversized plain image prompts before API submission", async () => {
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).toBeDefined();
@@ -234,6 +295,225 @@ describe("Studio built-in prompt/text node execution", () => {
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
     expect(typeof imageRequest.prompt).toBe("string");
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
+  });
+
+  it("passes prompt-embedded input images through to image generation API", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        inputs: {
+          prompt: {
+            systemPrompt: "Prompt system",
+            userMessage: "Prompt user",
+            input_images: [
+              {
+                path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/ab/asset-a.png",
+                mimeType: "image/png",
+                hash: "hash-asset-a",
+                sizeBytes: 128,
+              },
+            ],
+          },
+        },
+        generateImageMock,
+      })
+    );
+
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.inputImages).toEqual([
+      {
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/ab/asset-a.png",
+        mimeType: "image/png",
+        hash: "hash-asset-a",
+        sizeBytes: 128,
+      },
+    ]);
+  });
+
+  it("resolves direct image-path inputs into stored image assets before generation", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+    const context = createContext({
+      nodeId: "image-node",
+      kind: "studio.image_generation",
+      inputs: {
+        prompt: "Generate image prompt",
+        images: [
+          "/Users/systemsculpt/Downloads/reference.png",
+          "SystemSculpt/Assets/reference.webp",
+        ],
+      },
+      generateImageMock,
+    });
+    context.services.readLocalFileBinary = jest.fn(async () => new ArrayBuffer(4));
+    context.services.readVaultBinary = jest.fn(async () => new ArrayBuffer(6));
+    context.services.storeAsset = jest
+      .fn()
+      .mockResolvedValueOnce({
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/local.png",
+        mimeType: "image/png",
+        hash: "hash-local",
+        sizeBytes: 4,
+      })
+      .mockResolvedValueOnce({
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/bb/vault.webp",
+        mimeType: "image/webp",
+        hash: "hash-vault",
+        sizeBytes: 6,
+      });
+
+    await definition!.execute(context);
+
+    expect(context.services.readLocalFileBinary).toHaveBeenCalledWith(
+      "/Users/systemsculpt/Downloads/reference.png"
+    );
+    expect(context.services.readVaultBinary).toHaveBeenCalledWith("SystemSculpt/Assets/reference.webp");
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.inputImages).toEqual([
+      {
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/local.png",
+        mimeType: "image/png",
+        hash: "hash-local",
+        sizeBytes: 4,
+      },
+      {
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/bb/vault.webp",
+        mimeType: "image/webp",
+        hash: "hash-vault",
+        sizeBytes: 6,
+      },
+    ]);
+  });
+
+  it("uses local macOS provider command when provider is set to local", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+    const runCliMock = jest.fn(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        schema: "studio.local-image-generation.response.v1",
+        modelId: "local/macos-coreml",
+        images: [
+          {
+            mimeType: "image/png",
+            base64: Buffer.from(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])).toString("base64"),
+          },
+        ],
+      }),
+      stderr: "",
+      timedOut: false,
+    }));
+    const storeAssetMock = jest.fn(async () => ({
+      hash: "local-generated-hash",
+      mimeType: "image/png",
+      sizeBytes: 8,
+      path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/cc/local-generated.png",
+    }));
+    let capturedRequestPayload = "";
+    const writeTempFileMock = jest.fn(async (bytes, options) => {
+      if (String(options?.prefix || "").includes("studio-local-image-request")) {
+        capturedRequestPayload = Buffer.from(bytes).toString("utf8");
+      }
+      return "/tmp/studio-local-request.json";
+    });
+    const deleteLocalFileMock = jest.fn(async () => {});
+    const context = createContext({
+      nodeId: "image-node",
+      kind: "studio.image_generation",
+      config: {
+        provider: "local_macos_image_generation",
+        aspectRatio: "16:9",
+      },
+      inputs: {
+        prompt: "Generate locally",
+      },
+      generateImageMock,
+      runCliMock,
+      storeAssetMock,
+      writeTempFileMock,
+      deleteLocalFileMock,
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(generateImageMock).not.toHaveBeenCalled();
+    expect(runCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: STUDIO_LOCAL_MAC_IMAGE_COMMAND,
+        args: ["--request", "/tmp/studio-local-request.json"],
+        cwd: "/",
+      })
+    );
+    const request = JSON.parse(capturedRequestPayload);
+    expect(request.aspectRatio).toBe("1:1");
+    expect(storeAssetMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), "image/png");
+    expect(deleteLocalFileMock).toHaveBeenCalledWith("/tmp/studio-local-request.json");
+    expect(result.outputs.images).toEqual([
+      {
+        hash: "local-generated-hash",
+        mimeType: "image/png",
+        sizeBytes: 8,
+        path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/cc/local-generated.png",
+      },
+    ]);
+  });
+
+  it("fails loudly when local macOS provider command exits non-zero", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const runCliMock = jest.fn(async () => ({
+      exitCode: 2,
+      stdout: "",
+      stderr: "coreml model not found",
+      timedOut: false,
+    }));
+
+    await expect(
+      definition!.execute(
+        createContext({
+          nodeId: "image-node",
+          kind: "studio.image_generation",
+          config: {
+            provider: "local_macos_image_generation",
+          },
+          inputs: {
+            prompt: "Generate locally",
+          },
+          runCliMock,
+        })
+      )
+    ).rejects.toThrow("Local macOS image generation exited with code 2");
+  });
+
+  it("surfaces actionable error when local command is missing", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const runCliMock = jest.fn(async () => {
+      throw new Error("spawn systemsculpt-local-imagegen ENOENT");
+    });
+
+    await expect(
+      definition!.execute(
+        createContext({
+          nodeId: "image-node",
+          kind: "studio.image_generation",
+          config: {
+            provider: "local_macos_image_generation",
+          },
+          inputs: {
+            prompt: "Generate locally",
+          },
+          runCliMock,
+        })
+      )
+    ).rejects.toThrow("is not installed or not on PATH");
   });
 
   it("media ingest resolves slot-indexed path from image output arrays", async () => {

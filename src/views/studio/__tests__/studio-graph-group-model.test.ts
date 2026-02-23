@@ -1,5 +1,6 @@
 import type { StudioProjectV1 } from "../../../studio/types";
 import {
+  assignNodesToGroup,
   createGroupFromSelection,
   normalizeGroupColor,
   removeNodesFromGroups,
@@ -139,6 +140,53 @@ describe("StudioGraphGroupModel", () => {
         id: "group_1",
         name: "Group 1",
         nodeIds: ["b"],
+      },
+    ]);
+  });
+
+  it("re-homes nodes into an existing group", () => {
+    const project = createProject();
+    project.graph.groups = [
+      {
+        id: "group_1",
+        name: "Group 1",
+        nodeIds: ["a"],
+      },
+      {
+        id: "group_2",
+        name: "Group 2",
+        nodeIds: ["b", "c"],
+      },
+    ];
+
+    const changed = assignNodesToGroup(project, "group_2", ["a", "c"]);
+    expect(changed).toBe(true);
+    expect(project.graph.groups).toEqual([
+      {
+        id: "group_2",
+        name: "Group 2",
+        nodeIds: ["b", "c", "a"],
+      },
+    ]);
+  });
+
+  it("does not update groups when assignment is unchanged", () => {
+    const project = createProject();
+    project.graph.groups = [
+      {
+        id: "group_1",
+        name: "Group 1",
+        nodeIds: ["a", "b"],
+      },
+    ];
+
+    const changed = assignNodesToGroup(project, "group_1", ["a"]);
+    expect(changed).toBe(false);
+    expect(project.graph.groups).toEqual([
+      {
+        id: "group_1",
+        name: "Group 1",
+        nodeIds: ["a", "b"],
       },
     ]);
   });

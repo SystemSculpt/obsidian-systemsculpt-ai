@@ -7,6 +7,7 @@ import type {
 } from "../../studio/types";
 import {
   getUnknownNodeConfigKeys,
+  isNodeConfigFieldVisible,
   mergeNodeConfigWithDefaults,
   rebuildConfigWithUnknownKeys,
   validateNodeConfig,
@@ -518,12 +519,29 @@ export class StudioNodeInspectorOverlay {
     this.statusEl.setText("");
     const mergedConfig = mergeNodeConfigWithDefaults(definition, node.config);
     const fieldErrors = new Map<string, HTMLElement>();
+    const fieldWrappers = new Map<string, { field: StudioNodeConfigFieldDefinition; wrapper: HTMLElement }>();
+    const refreshVisibilityState = (): void => {
+      const visibilityConfig = mergeNodeConfigWithDefaults(definition, node.config);
+      for (const [key, entry] of fieldWrappers.entries()) {
+        const isVisible = isNodeConfigFieldVisible(entry.field, visibilityConfig);
+        entry.wrapper.classList.toggle("is-hidden", !isVisible);
+        if (!isVisible) {
+          const errorEl = fieldErrors.get(key);
+          if (errorEl) {
+            errorEl.setText("");
+            errorEl.classList.remove("is-visible");
+          }
+        }
+      }
+    };
     const refreshValidation = (): void => {
+      refreshVisibilityState();
       this.refreshFieldValidationState(node, definition, fieldErrors);
     };
 
     for (const field of definition.configSchema.fields) {
       const wrapper = this.bodyEl.createDiv({ cls: "ss-studio-node-inspector-field" });
+      fieldWrappers.set(field.key, { field, wrapper });
       const label = wrapper.createDiv({
         cls: "ss-studio-node-inspector-field-label",
         text: field.label,
@@ -1029,6 +1047,36 @@ export class StudioNodeInspectorOverlay {
     }
 
     if (field.type === "select") {
+      if (field.selectPresentation === "button_group" && Array.isArray(field.options) && field.options.length > 0) {
+        const row = wrapper.createDiv({ cls: "ss-studio-node-inspector-select-button-group" });
+        const selectedValue = typeof initialValue === "string" ? initialValue : "";
+        const buttons: HTMLButtonElement[] = [];
+        const refreshActiveState = (value: string): void => {
+          for (const button of buttons) {
+            button.classList.toggle("is-active", button.dataset.optionValue === value);
+          }
+        };
+
+        for (const option of field.options) {
+          const button = row.createEl("button", {
+            cls: "ss-studio-node-inspector-select-button",
+            text: option.label,
+          });
+          button.type = "button";
+          button.dataset.optionValue = option.value;
+          button.disabled = disabled;
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            applyValue(option.value);
+            refreshActiveState(option.value);
+          });
+          buttons.push(button);
+        }
+
+        refreshActiveState(selectedValue);
+        return;
+      }
+
       const select = wrapper.createEl("select", { cls: "ss-studio-node-inspector-select" });
       const empty = select.createEl("option", { text: "(none)" });
       empty.value = "";

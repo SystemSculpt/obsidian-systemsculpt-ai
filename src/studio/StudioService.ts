@@ -7,9 +7,11 @@ import { migrateStudioProjectToPathOnlyPorts } from "./StudioGraphMigrations";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { StudioRuntime } from "./StudioRuntime";
+import { STUDIO_LOCAL_MAC_IMAGE_COMMAND } from "./nodes/localMacImageGeneration";
 import { StudioSystemSculptApiAdapter } from "./StudioSystemSculptApiAdapter";
 import { randomId } from "./utils";
 import type {
+  StudioAssetRef,
   StudioCapability,
   StudioCapabilityGrant,
   StudioNodeCacheSnapshotV1,
@@ -29,7 +31,6 @@ function starterGraph(project: StudioProjectV1): StudioProjectV1 {
   }
 
   const inputId = randomId("node");
-  const promptId = randomId("node");
   const textId = randomId("node");
 
   return {
@@ -47,21 +48,11 @@ function starterGraph(project: StudioProjectV1): StudioProjectV1 {
           disabled: false,
         },
         {
-          id: promptId,
-          kind: "studio.prompt_template",
-          version: "1.0.0",
-          title: "Prompt Template",
-          position: { x: 420, y: 120 },
-          config: { template: "{{text}}" },
-          continueOnError: false,
-          disabled: false,
-        },
-        {
           id: textId,
           kind: "studio.text_generation",
           version: "1.0.0",
           title: "Text Generation",
-          position: { x: 760, y: 120 },
+          position: { x: 420, y: 120 },
           config: {
             modelId: project.engine.apiMode === "systemsculpt_only" ? "openai/gpt-5-mini" : "",
           },
@@ -74,13 +65,6 @@ function starterGraph(project: StudioProjectV1): StudioProjectV1 {
           id: randomId("edge"),
           fromNodeId: inputId,
           fromPortId: "text",
-          toNodeId: promptId,
-          toPortId: "text",
-        },
-        {
-          id: randomId("edge"),
-          fromNodeId: promptId,
-          fromPortId: "prompt",
           toNodeId: textId,
           toPortId: "prompt",
         },
@@ -188,7 +172,14 @@ export class StudioService {
       changed = true;
     }
 
-    const requiredCliPatterns = ["ffmpeg", "ffprobe", "*/ffmpeg", "*/ffprobe"];
+    const requiredCliPatterns = [
+      "ffmpeg",
+      "ffprobe",
+      "*/ffmpeg",
+      "*/ffprobe",
+      STUDIO_LOCAL_MAC_IMAGE_COMMAND,
+      `*/${STUDIO_LOCAL_MAC_IMAGE_COMMAND}`,
+    ];
     const cliGrant = policy.grants.find((grant) => grant.capability === "cli");
     if (!cliGrant) {
       policy.grants.push({
@@ -291,6 +282,11 @@ export class StudioService {
     }
     const targetPath = normalizeStudioProjectPath(rawPath);
     return this.runtime.getNodeCacheSnapshot(targetPath);
+  }
+
+  async storeAsset(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {
+    const targetPath = normalizeStudioProjectPath(String(projectPath || "").trim());
+    return this.assetStore.storeArrayBuffer(targetPath, bytes, mimeType);
   }
 
   async addCapabilityGrant(grant: {

@@ -57,11 +57,11 @@ function projectWithBranchMerge(): StudioProjectV1 {
     },
     {
       id: "c",
-      kind: "studio.prompt_template",
+      kind: "studio.text",
       version: "1.0.0",
       title: "C",
       position: { x: 200, y: 0 },
-      config: {},
+      config: { value: "c" },
     },
     {
       id: "d",
@@ -99,7 +99,7 @@ function projectWithBranchMerge(): StudioProjectV1 {
     {
       id: "e3",
       fromNodeId: "c",
-      fromPortId: "prompt",
+      fromPortId: "text",
       toNodeId: "d",
       toPortId: "prompt",
     }

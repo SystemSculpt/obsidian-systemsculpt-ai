@@ -24,7 +24,9 @@ const WHEEL_DOM_DELTA_PAGE =
 const NATIVE_WHEEL_SCROLL_SELECTORS = [
   ".ss-studio-node-inspector",
   ".ss-studio-node-context-menu",
+  ".ss-studio-simple-context-menu",
   ".ss-studio-group-color-palette",
+  ".ss-studio-node-text-editor",
 ].join(", ");
 
 type StudioGraphSelectionHost = {
@@ -34,6 +36,9 @@ type StudioGraphSelectionHost = {
   onNodePositionsChanged?: () => void;
   scheduleProjectSave: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
+  resolveNodeDragHoverGroup?: (draggedNodeIds: string[]) => string | null;
+  onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
+  onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onGraphZoomChanged?: (zoom: number) => void;
 };
 
@@ -242,12 +247,12 @@ export class StudioGraphSelectionController {
       const x2 = Math.max(startGraph.x, currentGraph.x);
       const y2 = Math.max(startGraph.y, currentGraph.y);
       const zoom = this.graphZoom || 1;
-      const viewportLeft = viewport.scrollLeft;
-      const viewportTop = viewport.scrollTop;
 
       marquee.classList.add("is-active");
-      marquee.style.left = `${x1 * zoom - viewportLeft}px`;
-      marquee.style.top = `${y1 * zoom - viewportTop}px`;
+      // Marquee is rendered inside the scrollable viewport content layer, so
+      // coordinates must stay in content-space (do not subtract scroll offsets).
+      marquee.style.left = `${x1 * zoom}px`;
+      marquee.style.top = `${y1 * zoom}px`;
       marquee.style.width = `${(x2 - x1) * zoom}px`;
       marquee.style.height = `${(y2 - y1) * zoom}px`;
 
@@ -492,6 +497,15 @@ export class StudioGraphSelectionController {
     const startY = startEvent.clientY;
     const zoom = this.graphZoom || 1;
     let dragged = false;
+    let hoveredGroupId: string | null = null;
+    const syncHoveredGroup = (): void => {
+      const nextGroupId = this.host.resolveNodeDragHoverGroup?.(dragNodeIds) || null;
+      if (nextGroupId === hoveredGroupId) {
+        return;
+      }
+      hoveredGroupId = nextGroupId;
+      this.host.onNodeDragHoverGroupChange?.(hoveredGroupId, dragNodeIds);
+    };
     if (typeof dragSurfaceEl.setPointerCapture === "function") {
       try {
         dragSurfaceEl.setPointerCapture(pointerId);
@@ -509,6 +523,7 @@ export class StudioGraphSelectionController {
       if (!dragged && travel > 3) {
         dragged = true;
         this.host.onNodeDragStateChange?.(true);
+        syncHoveredGroup();
       }
       if (!dragged) {
         return;
@@ -524,6 +539,7 @@ export class StudioGraphSelectionController {
         this.updateNodePosition(dragNodeId);
       }
       this.notifyNodePositionsChanged();
+      syncHoveredGroup();
     };
 
     const finishDrag = (event: PointerEvent): void => {
@@ -543,6 +559,9 @@ export class StudioGraphSelectionController {
       }
       if (dragged) {
         this.host.onNodeDragStateChange?.(false);
+        this.host.onNodeDropToGroup?.(hoveredGroupId, dragNodeIds);
+        hoveredGroupId = null;
+        this.host.onNodeDragHoverGroupChange?.(null, dragNodeIds);
         this.host.scheduleProjectSave();
         return;
       }

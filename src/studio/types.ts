@@ -57,6 +57,12 @@ export type StudioNodeConfigSelectOption = {
   label: string;
 };
 
+export type StudioNodeConfigSelectPresentation = "dropdown" | "button_group";
+export type StudioNodeConfigFieldVisibilityRule = {
+  key: string;
+  equals: StudioPrimitiveValue | StudioPrimitiveValue[];
+};
+
 export type StudioNodeConfigFieldDefinition = {
   key: string;
   label: string;
@@ -69,6 +75,8 @@ export type StudioNodeConfigFieldDefinition = {
   step?: number;
   integer?: boolean;
   options?: StudioNodeConfigSelectOption[];
+  selectPresentation?: StudioNodeConfigSelectPresentation;
+  visibleWhen?: StudioNodeConfigFieldVisibilityRule;
   accept?: string;
   mediaKinds?: StudioNodeConfigMediaKind[];
   allowOutsideVault?: boolean;
@@ -250,6 +258,7 @@ export type StudioImageGenerationRequest = {
   modelId?: string;
   count?: number;
   aspectRatio?: string;
+  inputImages?: StudioAssetRef[];
   runId: string;
   projectPath: string;
 };

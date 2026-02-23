@@ -32,6 +32,8 @@ export type StudioGraphWorkspaceRendererOptions = {
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onRevealPathInFinder: (path: string) => void;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
@@ -55,6 +57,8 @@ export function renderStudioGraphWorkspace(
     onRunNode,
     onRemoveNode,
     onNodeTitleInput,
+    onNodeConfigMutated,
+    onRevealPathInFinder,
   } = options;
 
   const editor = root.createDiv({ cls: "ss-studio-graph-workspace" });
@@ -85,7 +89,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -102,7 +106,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -148,6 +152,8 @@ export function renderStudioGraphWorkspace(
       onRunNode,
       onRemoveNode,
       onNodeTitleInput,
+      onNodeConfigMutated,
+      onRevealPathInFinder,
     });
   }
 

@@ -1,4 +1,4 @@
-import { ItemView, Notice, Platform, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, ItemView, Notice, Platform, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
@@ -16,6 +16,7 @@ import {
   removeNodesFromGroups,
   sanitizeGraphGroups,
 } from "./graph-v3/StudioGraphGroupModel";
+import { computeStudioGraphGroupBounds } from "./graph-v3/StudioGraphGroupBounds";
 import {
   openStudioMediaPreviewModal,
   resolveStudioAssetPreviewSrc,
@@ -41,6 +42,7 @@ import {
   StudioNodeInspectorOverlay,
 } from "./StudioNodeInspectorOverlay";
 import { StudioNodeContextMenuOverlay } from "./StudioNodeContextMenuOverlay";
+import { StudioSimpleContextMenuOverlay } from "./StudioSimpleContextMenuOverlay";
 import {
   statusLabelForNode,
   StudioRunPresentationState,
@@ -52,7 +54,10 @@ import {
   formatNodeConfigPreview,
   prettifyNodeKind,
 } from "./StudioViewHelpers";
-import { materializeImageOutputsAsMediaNodes } from "./StudioGeneratedMediaNodes";
+import {
+  materializeImageOutputsAsMediaNodes,
+  materializeTextOutputsAsTextNodes,
+} from "./StudioManagedOutputNodes";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -62,6 +67,7 @@ const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
   width: 420,
   height: 460,
 };
+const GROUP_DISCONNECT_OFFSET_X = 36;
 
 type SystemSculptStudioViewState = {
   inspectorLayout?: unknown;
@@ -84,6 +90,7 @@ export class SystemSculptStudioView extends ItemView {
   private graphViewportProjectPath: string | null = null;
   private inspectorOverlay: StudioNodeInspectorOverlay | null = null;
   private nodeContextMenuOverlay: StudioNodeContextMenuOverlay | null = null;
+  private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
   private inspectorLayout: StudioNodeInspectorLayout = { ...DEFAULT_INSPECTOR_LAYOUT };
   private nodeDragInProgress = false;
   private transientFieldErrorsByNodeId = new Map<string, Map<string, string>>();
@@ -91,8 +98,12 @@ export class SystemSculptStudioView extends ItemView {
   private pendingViewportState: StudioGraphViewportState | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
+  private lastGraphPointerPosition: { x: number; y: number } | null = null;
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
     this.handleWindowKeyDown(event);
+  };
+  private readonly onWindowPaste = (event: ClipboardEvent): void => {
+    void this.handleWindowPaste(event);
   };
 
   constructor(
@@ -169,12 +180,14 @@ export class SystemSculptStudioView extends ItemView {
 
   async onOpen(): Promise<void> {
     window.addEventListener("keydown", this.onWindowKeyDown, true);
+    window.addEventListener("paste", this.onWindowPaste, true);
     await this.loadNodeDefinitions();
     this.render();
   }
 
   async onClose(): Promise<void> {
     window.removeEventListener("keydown", this.onWindowKeyDown, true);
+    window.removeEventListener("paste", this.onWindowPaste, true);
     this.captureGraphViewportState();
     this.app.workspace.requestSaveLayout();
     this.clearSaveTimer();
@@ -184,9 +197,12 @@ export class SystemSculptStudioView extends ItemView {
     this.inspectorOverlay = null;
     this.nodeContextMenuOverlay?.destroy();
     this.nodeContextMenuOverlay = null;
+    this.nodeActionContextMenuOverlay?.destroy();
+    this.nodeActionContextMenuOverlay = null;
     this.pendingViewportState = null;
     this.graphViewportEl = null;
     this.graphViewportProjectPath = null;
+    this.lastGraphPointerPosition = null;
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
   }
@@ -195,7 +211,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!(target instanceof HTMLElement)) {
       return false;
     }
-    if (target.closest(".ss-studio-node-context-menu")) {
+    if (target.closest(".ss-studio-node-context-menu, .ss-studio-simple-context-menu")) {
       return true;
     }
     if (target.isContentEditable) {
@@ -239,6 +255,172 @@ export class SystemSculptStudioView extends ItemView {
     this.removeNodes(selectedNodeIds);
   }
 
+  private normalizePastedImageMimeType(rawMimeType: string): string {
+    const normalized = String(rawMimeType || "").trim().toLowerCase();
+    if (normalized.startsWith("image/")) {
+      return normalized;
+    }
+    return "image/png";
+  }
+
+  private extractClipboardImageFiles(event: ClipboardEvent): File[] {
+    const clipboard = event.clipboardData;
+    if (!clipboard) {
+      return [];
+    }
+
+    const files: File[] = [];
+    const seenKeys = new Set<string>();
+    if (clipboard.items && clipboard.items.length > 0) {
+      for (const item of Array.from(clipboard.items)) {
+        if (!item || item.kind !== "file") {
+          continue;
+        }
+        const file = item.getAsFile();
+        if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
+          continue;
+        }
+        const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+        if (seenKeys.has(key)) {
+          continue;
+        }
+        seenKeys.add(key);
+        files.push(file);
+      }
+    }
+
+    if (files.length > 0) {
+      return files;
+    }
+
+    if (clipboard.files && clipboard.files.length > 0) {
+      for (const file of Array.from(clipboard.files)) {
+        if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
+          continue;
+        }
+        const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+        if (seenKeys.has(key)) {
+          continue;
+        }
+        seenKeys.add(key);
+        files.push(file);
+      }
+    }
+
+    return files;
+  }
+
+  private resolvePasteAnchorPosition(): { x: number; y: number } {
+    const pointer = this.lastGraphPointerPosition;
+    if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
+      return {
+        x: pointer.x,
+        y: pointer.y,
+      };
+    }
+
+    const viewport = this.graphViewportEl;
+    if (viewport) {
+      const zoom = this.graphInteraction.getGraphZoom() || 1;
+      return {
+        x: (viewport.scrollLeft + viewport.clientWidth * 0.5) / zoom,
+        y: (viewport.scrollTop + viewport.clientHeight * 0.5) / zoom,
+      };
+    }
+
+    if (this.currentProject) {
+      return this.computeDefaultNodePosition(this.currentProject);
+    }
+
+    return { x: 120, y: 120 };
+  }
+
+  private async handleWindowPaste(event: ClipboardEvent): Promise<void> {
+    if (event.defaultPrevented) {
+      return;
+    }
+    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+      return;
+    }
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    if (this.isEditableKeyboardTarget(event.target)) {
+      return;
+    }
+
+    const imageFiles = this.extractClipboardImageFiles(event);
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      await this.pasteClipboardImages(imageFiles);
+    } catch (error) {
+      this.setError(error);
+    }
+  }
+
+  private async pasteClipboardImages(imageFiles: File[]): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+
+    const mediaDefinition = this.nodeDefinitions.find(
+      (definition) => definition.kind === "studio.media_ingest"
+    );
+    if (!mediaDefinition) {
+      throw new Error("Media node definition is unavailable.");
+    }
+
+    const studio = this.plugin.getStudioService();
+    const project = this.currentProject;
+    const anchor = this.resolvePasteAnchorPosition();
+    const createdNodeIds: string[] = [];
+
+    for (let index = 0; index < imageFiles.length; index += 1) {
+      const imageFile = imageFiles[index];
+      const mimeType = this.normalizePastedImageMimeType(imageFile.type);
+      const bytes = await imageFile.arrayBuffer();
+      const asset = await studio.storeAsset(this.currentProjectPath, bytes, mimeType);
+      const node: StudioNodeInstance = {
+        id: randomId("node"),
+        kind: mediaDefinition.kind,
+        version: mediaDefinition.version,
+        title: prettifyNodeKind(mediaDefinition.kind),
+        position: this.normalizeNodePosition({
+          x: anchor.x + (index % 5) * 38,
+          y: anchor.y + Math.floor(index / 5) * 38,
+        }),
+        config: {
+          ...cloneConfigDefaults(mediaDefinition),
+          sourcePath: asset.path,
+        },
+        continueOnError: false,
+        disabled: false,
+      };
+      project.graph.nodes.push(node);
+      createdNodeIds.push(node.id);
+    }
+
+    if (createdNodeIds.length === 0) {
+      return;
+    }
+
+    this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(project);
+    this.scheduleProjectSave();
+    this.render();
+    new Notice(
+      createdNodeIds.length === 1
+        ? "Pasted 1 image as a Media node."
+        : `Pasted ${createdNodeIds.length} images as Media nodes.`
+    );
+  }
+
   private async loadNodeDefinitions(): Promise<void> {
     const definitions = this.plugin
       .getStudioService()
@@ -280,7 +462,7 @@ export class SystemSculptStudioView extends ItemView {
   private handleRunEvent(event: StudioRunEvent): void {
     this.runPresentation.applyEvent(event);
     if (event.type === "node.output") {
-      this.materializeGeneratedImageOutputs(event);
+      this.materializeManagedOutputNodes(event);
     }
     if (event.type === "node.failed") {
       console.error("[SystemSculpt Studio] Node failed", {
@@ -303,25 +485,39 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
-  private materializeGeneratedImageOutputs(event: Extract<StudioRunEvent, { type: "node.output" }>): void {
+  private materializeManagedOutputNodes(event: Extract<StudioRunEvent, { type: "node.output" }>): void {
     if (!this.currentProject) {
       return;
     }
 
     const sourceNode = this.findNode(this.currentProject, event.nodeId);
-    if (!sourceNode || sourceNode.kind !== "studio.image_generation") {
+    if (!sourceNode) {
       return;
     }
 
-    const materialized = materializeImageOutputsAsMediaNodes({
-      project: this.currentProject,
-      sourceNode,
-      outputs: event.outputs || null,
-      createNodeId: () => randomId("node"),
-      createEdgeId: () => randomId("edge"),
-    });
+    let changed = false;
+    if (sourceNode.kind === "studio.image_generation") {
+      const materializedMedia = materializeImageOutputsAsMediaNodes({
+        project: this.currentProject,
+        sourceNode,
+        outputs: event.outputs || null,
+        createNodeId: () => randomId("node"),
+        createEdgeId: () => randomId("edge"),
+      });
+      changed = changed || materializedMedia.changed;
+    }
+    if (sourceNode.kind === "studio.text_generation") {
+      const materializedText = materializeTextOutputsAsTextNodes({
+        project: this.currentProject,
+        sourceNode,
+        outputs: event.outputs || null,
+        createNodeId: () => randomId("node"),
+        createEdgeId: () => randomId("edge"),
+      });
+      changed = changed || materializedText.changed;
+    }
 
-    if (!materialized.changed) {
+    if (!changed) {
       return;
     }
 
@@ -329,7 +525,7 @@ export class SystemSculptStudioView extends ItemView {
     this.scheduleProjectSave();
   }
 
-  private materializeGeneratedImageOutputsFromCache(
+  private materializeManagedOutputNodesFromCache(
     entries: Record<string, { outputs: StudioNodeOutputMap; updatedAt?: string }> | null
   ): void {
     if (!this.currentProject || !entries) {
@@ -338,7 +534,7 @@ export class SystemSculptStudioView extends ItemView {
 
     let changed = false;
     for (const node of this.currentProject.graph.nodes) {
-      if (node.kind !== "studio.image_generation") {
+      if (node.kind !== "studio.image_generation" && node.kind !== "studio.text_generation") {
         continue;
       }
 
@@ -347,15 +543,29 @@ export class SystemSculptStudioView extends ItemView {
         continue;
       }
 
-      const materialized = materializeImageOutputsAsMediaNodes({
-        project: this.currentProject,
-        sourceNode: node,
-        outputs: cacheEntry.outputs,
-        createNodeId: () => randomId("node"),
-        createEdgeId: () => randomId("edge"),
-      });
-      if (materialized.changed) {
-        changed = true;
+      if (node.kind === "studio.image_generation") {
+        const materializedMedia = materializeImageOutputsAsMediaNodes({
+          project: this.currentProject,
+          sourceNode: node,
+          outputs: cacheEntry.outputs,
+          createNodeId: () => randomId("node"),
+          createEdgeId: () => randomId("edge"),
+        });
+        if (materializedMedia.changed) {
+          changed = true;
+        }
+      }
+      if (node.kind === "studio.text_generation") {
+        const materializedText = materializeTextOutputsAsTextNodes({
+          project: this.currentProject,
+          sourceNode: node,
+          outputs: cacheEntry.outputs,
+          createNodeId: () => randomId("node"),
+          createEdgeId: () => randomId("edge"),
+        });
+        if (materializedText.changed) {
+          changed = true;
+        }
       }
     }
 
@@ -474,6 +684,7 @@ export class SystemSculptStudioView extends ItemView {
       const studio = this.plugin.getStudioService();
       const project = await studio.openProject(projectPath);
       const groupsSanitized = sanitizeGraphGroups(project);
+      const mediaTitlesNormalized = this.normalizeLegacyMediaNodeTitles(project);
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
@@ -495,7 +706,7 @@ export class SystemSculptStudioView extends ItemView {
           this.runPresentation.hydrateFromCache(cacheSnapshot.entries, {
             allowedNodeIds: project.graph.nodes.map((node) => node.id),
           });
-          this.materializeGeneratedImageOutputsFromCache(cacheSnapshot.entries);
+          this.materializeManagedOutputNodesFromCache(cacheSnapshot.entries);
         }
       } catch (cacheError) {
         console.warn("[SystemSculpt Studio] Unable to hydrate cache state on project load", {
@@ -503,7 +714,7 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
-      if (groupsSanitized) {
+      if (groupsSanitized || mediaTitlesNormalized) {
         this.scheduleProjectSave();
       }
       this.lastError = null;
@@ -585,6 +796,15 @@ export class SystemSculptStudioView extends ItemView {
     return this.nodeContextMenuOverlay;
   }
 
+  private ensureNodeActionContextMenuOverlay(): StudioSimpleContextMenuOverlay {
+    if (this.nodeActionContextMenuOverlay) {
+      return this.nodeActionContextMenuOverlay;
+    }
+
+    this.nodeActionContextMenuOverlay = new StudioSimpleContextMenuOverlay();
+    return this.nodeActionContextMenuOverlay;
+  }
+
   private refreshNodeCardPreview(node: StudioNodeInstance): void {
     const nodeEl = this.graphInteraction.getNodeElement(node.id);
     if (!nodeEl) {
@@ -624,6 +844,7 @@ export class SystemSculptStudioView extends ItemView {
     if (this.nodeDragInProgress) {
       this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
+      this.nodeActionContextMenuOverlay?.hide();
     }
   }
 
@@ -853,6 +1074,21 @@ export class SystemSculptStudioView extends ItemView {
     };
   }
 
+  private normalizeLegacyMediaNodeTitles(project: StudioProjectV1): boolean {
+    let changed = false;
+    for (const node of project.graph.nodes) {
+      if (node.kind !== "studio.media_ingest") {
+        continue;
+      }
+      const currentTitle = String(node.title || "").trim();
+      if (!currentTitle || currentTitle === "Media Ingest") {
+        node.title = "Media";
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   private createNodeFromDefinition(
     definition: StudioNodeDefinition,
     options?: { position?: { x: number; y: number } }
@@ -884,6 +1120,7 @@ export class SystemSculptStudioView extends ItemView {
     };
 
     this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
     project.graph.nodes.push(node);
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
@@ -912,22 +1149,58 @@ export class SystemSculptStudioView extends ItemView {
     const menuY = normalizeGraphCoordinate(viewport.scrollTop + localY);
     const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
     const selectedNodeIdSet = new Set(selectedNodeIds);
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    const contextNodeCard = target?.closest<HTMLElement>(".ss-studio-node-card");
-    const contextNodeId = String(contextNodeCard?.dataset.nodeId || "").trim();
-    const canGroupSelection = selectedNodeIds.length > 1 &&
-      (!contextNodeId || selectedNodeIdSet.has(contextNodeId));
+    const canGroupSelection = selectedNodeIds.length > 1;
     const contextMenuItems = this.nodeDefinitions.map((definition) => ({
       definition,
       title: prettifyNodeKind(definition.kind),
       summary: describeNodeDefinition(definition),
     }));
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const contextNodeCard = target?.closest<HTMLElement>(".ss-studio-node-card");
+    const contextNodeId = String(contextNodeCard?.dataset.nodeId || "").trim();
+    if (contextNodeId) {
+      if (canGroupSelection && selectedNodeIdSet.has(contextNodeId)) {
+        this.nodeActionContextMenuOverlay?.hide();
+        const contextMenu = this.ensureNodeContextMenuOverlay();
+        contextMenu.mount(viewport);
+        contextMenu.setGraphZoom(zoom);
+        contextMenu.open({
+          anchorX: menuX,
+          anchorY: menuY,
+          items: contextMenuItems,
+          actions: [
+            {
+              id: "group-selected-nodes",
+              title: "Group Selected Nodes",
+              summary: `Create a group around ${selectedNodeIds.length} selected nodes.`,
+              onSelect: () => {
+                this.createGroupFromSelectedNodes(selectedNodeIds);
+              },
+            },
+          ],
+          onSelectDefinition: (definition) => {
+            this.createNodeFromDefinition(definition, {
+              position: { x: graphX, y: graphY },
+            });
+          },
+        });
+        return;
+      }
+      this.openNodeActionContextMenuAtPointer({
+        nodeId: contextNodeId,
+        menuX,
+        menuY,
+        zoom,
+      });
+      return;
+    }
 
     if (contextMenuItems.length === 0) {
       new Notice("No node definitions are available.");
       return;
     }
 
+    this.nodeActionContextMenuOverlay?.hide();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     contextMenu.mount(viewport);
     contextMenu.setGraphZoom(zoom);
@@ -953,6 +1226,121 @@ export class SystemSculptStudioView extends ItemView {
         });
       },
     });
+  }
+
+  private openNodeActionContextMenuAtPointer(options: {
+    nodeId: string;
+    menuX: number;
+    menuY: number;
+    zoom: number;
+  }): void {
+    if (!this.currentProject || !this.graphViewportEl) {
+      return;
+    }
+
+    const nodeId = String(options.nodeId || "").trim();
+    if (!nodeId) {
+      return;
+    }
+    const contextNode = this.findNode(this.currentProject, nodeId);
+    if (!contextNode) {
+      return;
+    }
+    const containingGroup = this.findGroupContainingNode(nodeId);
+    if (!containingGroup) {
+      this.nodeActionContextMenuOverlay?.hide();
+      return;
+    }
+
+    this.nodeContextMenuOverlay?.hide();
+    const contextMenu = this.ensureNodeActionContextMenuOverlay();
+    contextMenu.mount(this.graphViewportEl);
+    contextMenu.setGraphZoom(options.zoom);
+    contextMenu.open({
+      anchorX: options.menuX,
+      anchorY: options.menuY,
+      title: "Node Actions",
+      subtitle: contextNode.title || contextNode.id,
+      width: 250,
+      items: [
+        {
+          id: "disconnect-from-group",
+          title: "Disconnect from group",
+          summary: "Remove this node from its group and move it outside the group boundary.",
+          onSelect: () => {
+            this.disconnectNodeFromGroup(nodeId);
+          },
+        },
+      ],
+    });
+  }
+
+  private findGroupContainingNode(nodeId: string): {
+    group: NonNullable<StudioProjectV1["graph"]["groups"]>[number];
+    index: number;
+  } | null {
+    if (!this.currentProject) {
+      return null;
+    }
+
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return null;
+    }
+
+    const groups = this.currentProject.graph.groups || [];
+    const index = groups.findIndex((group) =>
+      Array.isArray(group.nodeIds) && group.nodeIds.some((candidate) => candidate === normalizedNodeId)
+    );
+    if (index < 0) {
+      return null;
+    }
+    const group = groups[index];
+    if (!group) {
+      return null;
+    }
+    return { group, index };
+  }
+
+  private disconnectNodeFromGroup(nodeId: string): void {
+    if (!this.currentProject || this.busy) {
+      return;
+    }
+
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return;
+    }
+    const node = this.findNode(this.currentProject, normalizedNodeId);
+    const containingGroup = this.findGroupContainingNode(normalizedNodeId);
+    if (!node || !containingGroup) {
+      return;
+    }
+
+    const bounds = computeStudioGraphGroupBounds(this.currentProject, containingGroup.group, {
+      getNodeHeight: (candidateNodeId) => {
+        const nodeEl = this.graphInteraction.getNodeElement(candidateNodeId);
+        return nodeEl ? nodeEl.offsetHeight : null;
+      },
+    });
+    const changed = removeNodesFromGroups(this.currentProject, [normalizedNodeId]);
+    if (!changed) {
+      return;
+    }
+
+    if (bounds) {
+      node.position = this.normalizeNodePosition({
+        x: bounds.left + bounds.width + GROUP_DISCONNECT_OFFSET_X,
+        y: node.position.y,
+      });
+    }
+
+    this.nodeActionContextMenuOverlay?.hide();
+    this.graphInteraction.selectOnlyNode(normalizedNodeId);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(this.currentProject);
+    this.scheduleProjectSave();
+    this.render();
   }
 
   private createGroupFromSelectedNodes(selectedNodeIds: string[]): void {
@@ -1005,6 +1393,7 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.onNodeRemoved(nodeId);
     }
     this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
     this.recomputeEntryNodes(this.currentProject);
     this.scheduleProjectSave();
     this.render();
@@ -1017,12 +1406,128 @@ export class SystemSculptStudioView extends ItemView {
   private handleGraphZoomChanged(zoom: number): void {
     this.inspectorOverlay?.setGraphZoom(zoom);
     this.nodeContextMenuOverlay?.setGraphZoom(zoom);
+    this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
     this.captureGraphViewportState({ zoomOverride: zoom, requestLayoutSave: true });
   }
 
   private handleGraphViewportScrolled(): void {
     this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
     this.captureGraphViewportState({ requestLayoutSave: true });
+  }
+
+  private handleGraphViewportPointerMove(event: PointerEvent): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+      return;
+    }
+    const zoom = this.graphInteraction.getGraphZoom() || 1;
+    this.lastGraphPointerPosition = {
+      x: (viewport.scrollLeft + localX) / zoom,
+      y: (viewport.scrollTop + localY) / zoom,
+    };
+  }
+
+  private isAbsoluteFilesystemPath(path: string): boolean {
+    const normalized = String(path || "").replace(/\\/g, "/");
+    return normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
+  }
+
+  private resolveAbsolutePathFromVaultPath(vaultPath: string): string | null {
+    const normalizedVaultPath = String(vaultPath || "").trim().replace(/\\/g, "/");
+    if (!normalizedVaultPath) {
+      return null;
+    }
+
+    const adapter = this.app.vault.adapter as any;
+    if (adapter instanceof FileSystemAdapter && typeof adapter.getFullPath === "function") {
+      try {
+        const fullPath = adapter.getFullPath(normalizedVaultPath);
+        if (typeof fullPath === "string" && fullPath.trim().length > 0) {
+          return fullPath;
+        }
+      } catch {
+        // Fall through to base path fallback.
+      }
+    }
+    if (typeof adapter.basePath === "string" && adapter.basePath.trim().length > 0) {
+      const basePath = adapter.basePath.replace(/[\\/]+$/, "");
+      const separator = basePath.includes("\\") ? "\\" : "/";
+      const normalizedRelative = normalizedVaultPath.split(/[\\/]+/).filter(Boolean).join(separator);
+      return normalizedRelative ? `${basePath}${separator}${normalizedRelative}` : basePath;
+    }
+    return null;
+  }
+
+  private async revealPathInFinder(path: string): Promise<void> {
+    const rawPath = String(path || "").trim();
+    if (!rawPath) {
+      new Notice("No media path available to reveal.");
+      return;
+    }
+    if (!Platform.isDesktopApp) {
+      new Notice("Reveal in Finder is desktop-only.");
+      return;
+    }
+
+    const normalizedPath = rawPath.replace(/\\/g, "/");
+    const isAbsolutePath = this.isAbsoluteFilesystemPath(normalizedPath);
+    const adapter = this.app.vault.adapter as {
+      revealInFolder?: (path: string) => void | Promise<void>;
+    };
+    const revealTarget = isAbsolutePath ? rawPath : normalizedPath;
+    if (typeof adapter.revealInFolder === "function") {
+      try {
+        await Promise.resolve(adapter.revealInFolder(revealTarget));
+        return;
+      } catch {
+        // Fallback to Electron shell reveal.
+      }
+    }
+
+    const absolutePath = isAbsolutePath
+      ? rawPath
+      : this.resolveAbsolutePathFromVaultPath(normalizedPath);
+    if (!absolutePath) {
+      new Notice(`Unable to resolve media path: ${rawPath}`);
+      return;
+    }
+
+    const runtimeRequire = typeof window !== "undefined" ? (window as any)?.require : null;
+    const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
+    const shell = electron?.shell;
+    try {
+      if (typeof shell?.showItemInFolder === "function") {
+        shell.showItemInFolder(absolutePath);
+        return;
+      }
+    } catch {
+      // Continue through shell fallbacks.
+    }
+    try {
+      if (typeof shell?.openPath === "function") {
+        await shell.openPath(absolutePath);
+        return;
+      }
+    } catch {
+      // Continue through shell fallbacks.
+    }
+    try {
+      if (typeof shell?.openExternal === "function") {
+        await shell.openExternal(`file://${encodeURI(absolutePath)}`);
+        return;
+      }
+    } catch {
+      // Fall through to notice.
+    }
+
+    new Notice(`Unable to open in Finder: ${rawPath}`);
   }
 
   private renderGraphEditor(root: HTMLElement): void {
@@ -1051,6 +1556,13 @@ export class SystemSculptStudioView extends ItemView {
         node.title = title;
         this.scheduleProjectSave();
       },
+      onNodeConfigMutated: (node) => {
+        this.refreshNodeCardPreview(node);
+        this.scheduleProjectSave();
+      },
+      onRevealPathInFinder: (path) => {
+        void this.revealPathInFinder(path);
+      },
     });
 
     this.graphViewportEl = result.viewportEl;
@@ -1059,19 +1571,29 @@ export class SystemSculptStudioView extends ItemView {
       this.graphViewportProjectPath = null;
       this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
+      this.nodeActionContextMenuOverlay?.hide();
       return;
     }
 
     this.graphViewportEl.addEventListener("scroll", () => {
       this.handleGraphViewportScrolled();
     }, { passive: true });
+    this.graphViewportEl.addEventListener("pointermove", (event) => {
+      this.handleGraphViewportPointerMove(event);
+    }, { passive: true });
+    this.graphViewportEl.addEventListener("pointerleave", () => {
+      this.lastGraphPointerPosition = null;
+    }, { passive: true });
     this.restoreGraphViewportState(this.graphViewportEl);
     const inspector = this.ensureInspectorOverlay();
     const contextMenu = this.ensureNodeContextMenuOverlay();
+    const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
     inspector.setGraphZoom(this.graphInteraction.getGraphZoom());
     contextMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
+    nodeActionMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     inspector.mount(this.graphViewportEl);
     contextMenu.mount(this.graphViewportEl);
+    nodeActionMenu.mount(this.graphViewportEl);
     this.syncInspectorSelection();
   }
 
@@ -1142,8 +1664,10 @@ export class SystemSculptStudioView extends ItemView {
     this.captureGraphViewportState();
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
     this.graphViewportEl = null;
     this.graphViewportProjectPath = null;
+    this.lastGraphPointerPosition = null;
 
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });

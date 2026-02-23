@@ -1,5 +1,6 @@
 import type {
   StudioJsonValue,
+  StudioNodeConfigFieldDefinition,
   StudioNodeConfigValidationResult,
   StudioNodeDefinition,
 } from "./types";
@@ -33,6 +34,19 @@ function toFiniteNumber(value: StudioJsonValue): number | null {
     }
   }
   return null;
+}
+
+export function isNodeConfigFieldVisible(
+  field: StudioNodeConfigFieldDefinition,
+  mergedConfig: Record<string, StudioJsonValue>
+): boolean {
+  const rule = field.visibleWhen;
+  if (!rule) {
+    return true;
+  }
+  const actual = mergedConfig[rule.key];
+  const expectedValues = Array.isArray(rule.equals) ? rule.equals : [rule.equals];
+  return expectedValues.some((expected) => actual === expected);
 }
 
 export function mergeNodeConfigWithDefaults(
@@ -91,6 +105,9 @@ export function validateNodeConfig(
   const errors: StudioNodeConfigValidationResult["errors"] = [];
 
   for (const field of definition.configSchema.fields) {
+    if (!isNodeConfigFieldVisible(field, merged)) {
+      continue;
+    }
     const value = merged[field.key];
     const hasValue = typeof value !== "undefined" && value !== null;
 
