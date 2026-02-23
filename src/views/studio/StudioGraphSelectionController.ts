@@ -39,6 +39,11 @@ export class StudioGraphSelectionController {
     return this.graphZoom;
   }
 
+  setGraphZoom(nextZoom: number): void {
+    this.graphZoom = this.clampGraphZoom(nextZoom);
+    this.applyGraphZoom();
+  }
+
   isNodeSelected(nodeId: string): boolean {
     return this.selectedNodeIds.has(nodeId);
   }
@@ -201,10 +206,12 @@ export class StudioGraphSelectionController {
       const x2 = Math.max(startGraph.x, currentGraph.x);
       const y2 = Math.max(startGraph.y, currentGraph.y);
       const zoom = this.graphZoom || 1;
+      const viewportLeft = viewport.scrollLeft;
+      const viewportTop = viewport.scrollTop;
 
       marquee.classList.add("is-active");
-      marquee.style.left = `${x1 * zoom}px`;
-      marquee.style.top = `${y1 * zoom}px`;
+      marquee.style.left = `${x1 * zoom - viewportLeft}px`;
+      marquee.style.top = `${y1 * zoom - viewportTop}px`;
       marquee.style.width = `${(x2 - x1) * zoom}px`;
       marquee.style.height = `${(y2 - y1) * zoom}px`;
 
@@ -284,12 +291,11 @@ export class StudioGraphSelectionController {
   }
 
   applyGraphZoom(): void {
+    const zoom = this.clampGraphZoom(this.graphZoom);
+    this.graphZoom = zoom;
     if (!this.graphCanvasEl || !this.graphSurfaceEl) {
       return;
     }
-
-    const zoom = this.clampGraphZoom(this.graphZoom);
-    this.graphZoom = zoom;
     this.graphCanvasEl.style.transform = `scale(${zoom})`;
     this.graphCanvasEl.style.transformOrigin = "0 0";
     this.graphSurfaceEl.style.width = `${Math.round(STUDIO_GRAPH_CANVAS_WIDTH * zoom)}px`;

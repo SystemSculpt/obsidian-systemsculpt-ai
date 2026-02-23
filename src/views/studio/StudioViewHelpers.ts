@@ -4,6 +4,18 @@ export function definitionKey(definition: StudioNodeDefinition): string {
   return `${definition.kind}@${definition.version}`;
 }
 
+const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
+  "studio.input": "Injects starter text or JSON into your graph.",
+  "studio.prompt_template": "Builds structured prompts from templates and variables.",
+  "studio.text_generation": "Calls a text model and returns generated text output.",
+  "studio.image_generation": "Generates one or more images from your prompt.",
+  "studio.media_ingest": "Ingests media files and outputs a reusable media path.",
+  "studio.audio_extract": "Extracts an audio track from a media file.",
+  "studio.transcription": "Transcribes audio media into text.",
+  "studio.http_request": "Fetches remote HTTP data for downstream nodes.",
+  "studio.cli_command": "Runs a local shell command and captures output.",
+};
+
 export function prettifyNodeKind(kind: string): string {
   const leaf = kind.split(".").pop() || kind;
   return leaf
@@ -22,6 +34,19 @@ export function cloneConfigDefaults(
   } catch {
     return {};
   }
+}
+
+export function describeNodeDefinition(definition: StudioNodeDefinition): string {
+  const mapped = NODE_DESCRIPTION_BY_KIND[definition.kind];
+  if (mapped) {
+    return mapped;
+  }
+
+  const inputCount = definition.inputPorts.length;
+  const outputCount = definition.outputPorts.length;
+  const inputLabel = inputCount === 1 ? "1 input" : `${inputCount} inputs`;
+  const outputLabel = outputCount === 1 ? "1 output" : `${outputCount} outputs`;
+  return `${prettifyNodeKind(definition.kind)} node with ${inputLabel} and ${outputLabel}.`;
 }
 
 function valuePreview(value: unknown): string {

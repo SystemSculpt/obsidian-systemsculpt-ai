@@ -519,6 +519,146 @@
   font-size: 12px;
 }
 
+.ss-studio-node-context-menu {
+  --ss-studio-node-context-menu-scale: 1;
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 85%, #8de8bc 15%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-primary) 92%, #214b38 8%);
+  box-shadow: 0 10px 30px color-mix(in srgb, #000 32%, transparent);
+  overflow: hidden;
+  transform: scale(var(--ss-studio-node-context-menu-scale));
+  backdrop-filter: blur(6px);
+  transition: left 110ms ease, top 110ms ease, transform 120ms ease;
+}
+
+.ss-studio-node-context-menu-header {
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ss-studio-border) 85%, #8de8bc 15%);
+  background: color-mix(in srgb, var(--background-secondary) 88%, #2a5942 12%);
+}
+
+.ss-studio-node-context-menu-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+.ss-studio-node-context-menu-subtitle {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ss-studio-node-context-menu-search-wrap {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ss-studio-border) 86%, #8de8bc 14%);
+  background: color-mix(in srgb, var(--background-primary) 92%, #1f4a37 8%);
+}
+
+.ss-studio-node-context-menu-search-input {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 88%, #7fcfaa 12%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 95%, #133326 5%);
+  color: var(--text-normal);
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.ss-studio-node-context-menu-search-input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #8de8bc 68%, var(--ss-studio-border) 32%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 26%, transparent);
+}
+
+.ss-studio-node-context-menu-list {
+  max-height: 320px;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.ss-studio-node-context-menu-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ss-studio-node-context-menu-list::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--background-primary) 88%, #173f2f 12%);
+  border-radius: 999px;
+}
+
+.ss-studio-node-context-menu-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #8de8bc 52%, var(--ss-studio-border) 48%);
+  border-radius: 999px;
+}
+
+.ss-studio-node-context-menu-item {
+  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 88%, #7fcfaa 12%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 93%, #173f2f 7%);
+  color: var(--text-normal);
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+
+.ss-studio-node-context-menu-item:hover {
+  border-color: color-mix(in srgb, #8de8bc 64%, var(--ss-studio-border) 36%);
+  background: color-mix(in srgb, var(--background-primary) 86%, #24543f 14%);
+}
+
+.ss-studio-node-context-menu-item.is-active {
+  border-color: color-mix(in srgb, #8de8bc 68%, var(--ss-studio-border) 32%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 28%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 83%, #2a5a43 17%);
+}
+
+.ss-studio-node-context-menu-item:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #8de8bc 68%, var(--ss-studio-border) 32%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8de8bc 34%, transparent);
+}
+
+.ss-studio-node-context-menu-item-content {
+  display: grid;
+  gap: 4px;
+}
+
+.ss-studio-node-context-menu-item-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-normal);
+}
+
+.ss-studio-node-context-menu-item-summary {
+  display: block;
+  font-size: 10px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text-muted) 84%, #9deec8 16%);
+  overflow-wrap: break-word;
+}
+
+.ss-studio-node-context-menu-empty {
+  padding: 10px;
+  border: 1px dashed color-mix(in srgb, var(--ss-studio-border) 82%, #7fcfaa 18%);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .ss-studio-node-inspector {
   --ss-studio-inspector-scale: 1;
   position: absolute;

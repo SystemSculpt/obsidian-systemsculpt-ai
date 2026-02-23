@@ -33,6 +33,10 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getGraphZoom();
   }
 
+  setGraphZoom(nextZoom: number): void {
+    this.selectionController.setGraphZoom(nextZoom);
+  }
+
   getPendingConnection(): PendingConnection | null {
     return this.connectionEngine.getPendingConnection();
   }

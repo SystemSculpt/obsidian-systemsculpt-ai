@@ -13,16 +13,23 @@ import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { renderStudioGraphEditor } from "./StudioGraphEditorRenderer";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
+  STUDIO_GRAPH_DEFAULT_ZOOM,
+  STUDIO_GRAPH_MAX_ZOOM,
+  STUDIO_GRAPH_MIN_ZOOM,
+} from "./StudioGraphInteractionTypes";
+import {
   type StudioNodeInspectorRuntimeDetails,
   StudioNodeInspectorLayout,
   StudioNodeInspectorOverlay,
 } from "./StudioNodeInspectorOverlay";
+import { StudioNodeContextMenuOverlay } from "./StudioNodeContextMenuOverlay";
 import {
   statusLabelForNode,
   StudioRunPresentationState,
 } from "./StudioRunPresentationState";
 import {
   cloneConfigDefaults,
+  describeNodeDefinition,
   definitionKey,
   formatNodeConfigPreview,
   prettifyNodeKind,
@@ -41,7 +48,22 @@ const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
 type StudioGraphViewportState = {
   scrollLeft: number;
   scrollTop: number;
+  zoom: number;
   projectPath: string | null;
+};
+
+type StudioGraphViewState = {
+  scrollLeft: number;
+  scrollTop: number;
+  zoom: number;
+};
+
+type StudioGraphViewStateByProject = Record<string, StudioGraphViewState>;
+
+type SystemSculptStudioViewState = {
+  inspectorLayout?: unknown;
+  file?: unknown;
+  graphViewByProject?: unknown;
 };
 
 export class SystemSculptStudioView extends ItemView {
@@ -53,16 +75,23 @@ export class SystemSculptStudioView extends ItemView {
   private nodeDefinitionsByKey = new Map<string, StudioNodeDefinition>();
   private nodePickerKey = "";
   private saveTimer: number | null = null;
+  private layoutSaveTimer: number | null = null;
   private saveInFlight = false;
   private saveQueued = false;
   private graphViewportEl: HTMLElement | null = null;
+  private graphViewportProjectPath: string | null = null;
   private inspectorOverlay: StudioNodeInspectorOverlay | null = null;
+  private nodeContextMenuOverlay: StudioNodeContextMenuOverlay | null = null;
   private inspectorLayout: StudioNodeInspectorLayout = { ...DEFAULT_INSPECTOR_LAYOUT };
   private nodeDragInProgress = false;
   private transientFieldErrorsByNodeId = new Map<string, Map<string, string>>();
+  private graphViewStateByProjectPath: StudioGraphViewStateByProject = {};
   private pendingViewportState: StudioGraphViewportState | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
+  private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
+    this.handleWindowKeyDown(event);
+  };
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -77,7 +106,7 @@ export class SystemSculptStudioView extends ItemView {
       scheduleProjectSave: () => this.scheduleProjectSave(),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
-      onGraphZoomChanged: (zoom) => this.inspectorOverlay?.setGraphZoom(zoom),
+      onGraphZoomChanged: (zoom) => this.handleGraphZoomChanged(zoom),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
     });
@@ -99,9 +128,14 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   getState(): Record<string, unknown> {
+    this.captureGraphViewportState();
     const state: Record<string, unknown> = {
       inspectorLayout: { ...this.inspectorLayout },
     };
+    const graphViewByProject = this.serializeGraphViewStateByProject();
+    if (Object.keys(graphViewByProject).length > 0) {
+      state.graphViewByProject = graphViewByProject;
+    }
     if (this.currentProjectPath) {
       state.file = this.currentProjectPath;
     }
@@ -110,7 +144,9 @@ export class SystemSculptStudioView extends ItemView {
 
   async setState(state: unknown, result: any): Promise<void> {
     await super.setState(state, result);
-    const rawLayout = (state as { inspectorLayout?: unknown })?.inspectorLayout;
+    const rawState = (state || {}) as SystemSculptStudioViewState;
+    const rawLayout = rawState.inspectorLayout;
+    this.graphViewStateByProjectPath = this.parseGraphViewStateByProject(rawState.graphViewByProject);
     if (rawLayout && typeof rawLayout === "object") {
       const candidate = rawLayout as Partial<StudioNodeInspectorLayout>;
       this.inspectorLayout = {
@@ -122,27 +158,83 @@ export class SystemSculptStudioView extends ItemView {
           : DEFAULT_INSPECTOR_LAYOUT.height,
       };
     }
-    const filePath = typeof (state as { file?: unknown })?.file === "string"
-      ? ((state as { file?: string }).file || "")
+    const filePath = typeof rawState.file === "string"
+      ? (rawState.file || "")
       : "";
     await this.loadProjectFromPath(filePath || null, { notifyOnError: false });
     this.render();
   }
 
   async onOpen(): Promise<void> {
+    window.addEventListener("keydown", this.onWindowKeyDown, true);
     await this.loadNodeDefinitions();
     this.render();
   }
 
   async onClose(): Promise<void> {
+    window.removeEventListener("keydown", this.onWindowKeyDown, true);
+    this.captureGraphViewportState();
+    this.app.workspace.requestSaveLayout();
     this.clearSaveTimer();
+    this.clearLayoutSaveTimer();
     this.runPresentation.reset();
     this.inspectorOverlay?.destroy();
     this.inspectorOverlay = null;
+    this.nodeContextMenuOverlay?.destroy();
+    this.nodeContextMenuOverlay = null;
     this.pendingViewportState = null;
     this.graphViewportEl = null;
+    this.graphViewportProjectPath = null;
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
+  }
+
+  private isEditableKeyboardTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    if (target.closest(".ss-studio-node-context-menu")) {
+      return true;
+    }
+    if (target.isContentEditable) {
+      return true;
+    }
+    if (target.matches("input, textarea, select")) {
+      return true;
+    }
+    return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  }
+
+  private handleWindowKeyDown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
+    if (this.app.workspace.getActiveViewOfType(SystemSculptStudioView) !== this) {
+      return;
+    }
+    if (this.busy || !this.currentProject) {
+      return;
+    }
+
+    const key = String(event.key || "");
+    if (key !== "Delete" && key !== "Backspace") {
+      return;
+    }
+    if (this.isEditableKeyboardTarget(event.target)) {
+      return;
+    }
+
+    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+    if (selectedNodeIds.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.removeNodes(selectedNodeIds);
   }
 
   private async loadNodeDefinitions(): Promise<void> {
@@ -284,6 +376,117 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private clearLayoutSaveTimer(): void {
+    if (this.layoutSaveTimer !== null) {
+      window.clearTimeout(this.layoutSaveTimer);
+      this.layoutSaveTimer = null;
+    }
+  }
+
+  private scheduleLayoutSave(): void {
+    this.clearLayoutSaveTimer();
+    this.layoutSaveTimer = window.setTimeout(() => {
+      this.layoutSaveTimer = null;
+      this.app.workspace.requestSaveLayout();
+    }, 360);
+  }
+
+  private normalizeGraphZoom(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return STUDIO_GRAPH_DEFAULT_ZOOM;
+    }
+    return Math.min(STUDIO_GRAPH_MAX_ZOOM, Math.max(STUDIO_GRAPH_MIN_ZOOM, numeric));
+  }
+
+  private normalizeGraphCoordinate(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return 0;
+    }
+    return Math.max(0, numeric);
+  }
+
+  private normalizeGraphViewState(raw: unknown): StudioGraphViewState | null {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return null;
+    }
+    const candidate = raw as Partial<StudioGraphViewState>;
+    return {
+      scrollLeft: this.normalizeGraphCoordinate(candidate.scrollLeft),
+      scrollTop: this.normalizeGraphCoordinate(candidate.scrollTop),
+      zoom: this.normalizeGraphZoom(candidate.zoom),
+    };
+  }
+
+  private parseGraphViewStateByProject(raw: unknown): StudioGraphViewStateByProject {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+    const parsed: StudioGraphViewStateByProject = {};
+    for (const [path, value] of Object.entries(raw as Record<string, unknown>)) {
+      const normalizedPath = String(path || "").trim();
+      if (!normalizedPath) {
+        continue;
+      }
+      const normalizedState = this.normalizeGraphViewState(value);
+      if (!normalizedState) {
+        continue;
+      }
+      parsed[normalizedPath] = normalizedState;
+    }
+    return parsed;
+  }
+
+  private serializeGraphViewStateByProject(): StudioGraphViewStateByProject {
+    const serialized: StudioGraphViewStateByProject = {};
+    for (const [path, viewState] of Object.entries(this.graphViewStateByProjectPath)) {
+      const normalizedPath = String(path || "").trim();
+      if (!normalizedPath) {
+        continue;
+      }
+      const normalizedViewState = this.normalizeGraphViewState(viewState);
+      if (!normalizedViewState) {
+        continue;
+      }
+      serialized[normalizedPath] = normalizedViewState;
+    }
+    return serialized;
+  }
+
+  private saveGraphViewStateForProject(
+    projectPath: string,
+    nextViewState: StudioGraphViewState,
+    options?: { requestLayoutSave?: boolean }
+  ): void {
+    const previous = this.graphViewStateByProjectPath[projectPath];
+    const isUnchanged = Boolean(
+      previous &&
+      Math.abs(previous.scrollLeft - nextViewState.scrollLeft) < 0.5 &&
+      Math.abs(previous.scrollTop - nextViewState.scrollTop) < 0.5 &&
+      Math.abs(previous.zoom - nextViewState.zoom) < 0.0001
+    );
+    if (isUnchanged) {
+      return;
+    }
+    this.graphViewStateByProjectPath = {
+      ...this.graphViewStateByProjectPath,
+      [projectPath]: { ...nextViewState },
+    };
+    if (options?.requestLayoutSave) {
+      this.scheduleLayoutSave();
+    }
+  }
+
+  private getSavedGraphViewState(projectPath: string | null): StudioGraphViewState | null {
+    const normalizedPath = String(projectPath || "").trim();
+    if (!normalizedPath) {
+      return null;
+    }
+    const existing = this.graphViewStateByProjectPath[normalizedPath];
+    return this.normalizeGraphViewState(existing);
+  }
+
   private scheduleProjectSave(): void {
     this.clearSaveTimer();
     this.saveTimer = window.setTimeout(() => {
@@ -330,12 +533,18 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
+    if (projectPath !== this.currentProjectPath) {
+      this.captureGraphViewportState();
+    }
+
     if (!projectPath) {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.graphInteraction.clearProjectState();
+      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.pendingViewportState = null;
       this.syncInspectorSelection();
       return;
     }
@@ -344,8 +553,10 @@ export class SystemSculptStudioView extends ItemView {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.graphInteraction.clearProjectState();
+      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.pendingViewportState = null;
       this.syncInspectorSelection();
       if (options?.notifyOnError !== false) {
         new Notice("SystemSculpt Studio only opens .systemsculpt files.");
@@ -360,11 +571,21 @@ export class SystemSculptStudioView extends ItemView {
     try {
       const studio = this.plugin.getStudioService();
       const project = await studio.openProject(projectPath);
+      const savedGraphView = this.getSavedGraphViewState(projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
       this.graphInteraction.clearProjectState();
+      this.graphInteraction.setGraphZoom(savedGraphView?.zoom ?? STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.pendingViewportState = savedGraphView
+        ? { ...savedGraphView, projectPath }
+        : {
+            scrollLeft: 0,
+            scrollTop: 0,
+            zoom: this.graphInteraction.getGraphZoom(),
+            projectPath,
+          };
       try {
         const cacheSnapshot = await studio.getProjectNodeCache(projectPath);
         if (cacheSnapshot) {
@@ -385,8 +606,10 @@ export class SystemSculptStudioView extends ItemView {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.graphInteraction.clearProjectState();
+      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
+      this.pendingViewportState = null;
       this.syncInspectorSelection();
       this.lastError = error instanceof Error ? error.message : String(error);
       if (options?.notifyOnError !== false) {
@@ -445,6 +668,15 @@ export class SystemSculptStudioView extends ItemView {
       this.inspectorLayout
     );
     return this.inspectorOverlay;
+  }
+
+  private ensureNodeContextMenuOverlay(): StudioNodeContextMenuOverlay {
+    if (this.nodeContextMenuOverlay) {
+      return this.nodeContextMenuOverlay;
+    }
+
+    this.nodeContextMenuOverlay = new StudioNodeContextMenuOverlay();
+    return this.nodeContextMenuOverlay;
   }
 
   private refreshNodeCardPreview(node: StudioNodeInstance): void {
@@ -565,6 +797,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeDragInProgress = Boolean(isDragging);
     if (this.nodeDragInProgress) {
       this.inspectorOverlay?.hide();
+      this.nodeContextMenuOverlay?.hide();
     }
   }
 
@@ -779,7 +1012,25 @@ export class SystemSculptStudioView extends ItemView {
     return definition.outputPorts.find((port) => port.id === portId)?.type || null;
   }
 
-  private createNodeFromPicker(): void {
+  private computeDefaultNodePosition(project: StudioProjectV1): { x: number; y: number } {
+    const index = project.graph.nodes.length;
+    return {
+      x: 120 + (index % 4) * 320,
+      y: 120 + Math.floor(index / 4) * 220,
+    };
+  }
+
+  private normalizeNodePosition(position: { x: number; y: number }): { x: number; y: number } {
+    return {
+      x: Math.max(24, Math.round(this.normalizeGraphCoordinate(position.x))),
+      y: Math.max(24, Math.round(this.normalizeGraphCoordinate(position.y))),
+    };
+  }
+
+  private createNodeFromDefinition(
+    definition: StudioNodeDefinition,
+    options?: { position?: { x: number; y: number } }
+  ): void {
     let project: StudioProjectV1;
     try {
       project = this.currentProjectOrThrow();
@@ -788,18 +1039,13 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const definition = this.nodeDefinitionsByKey.get(this.nodePickerKey || "");
-    if (!definition) {
-      new Notice("Select a node type to add.");
+    if (this.busy) {
       return;
     }
 
-    const index = project.graph.nodes.length;
-    const position = {
-      x: 120 + (index % 4) * 320,
-      y: 120 + Math.floor(index / 4) * 220,
-    };
-
+    const position = options?.position
+      ? this.normalizeNodePosition(options.position)
+      : this.computeDefaultNodePosition(project);
     const node: StudioNodeInstance = {
       id: randomId("node"),
       kind: definition.kind,
@@ -811,6 +1057,7 @@ export class SystemSculptStudioView extends ItemView {
       disabled: false,
     };
 
+    this.nodeContextMenuOverlay?.hide();
     project.graph.nodes.push(node);
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
@@ -819,24 +1066,109 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
-  private removeNode(nodeId: string): void {
+  private openNodeContextMenuAtPointer(event: MouseEvent): void {
+    if (this.busy || !this.graphViewportEl || !this.currentProject) {
+      return;
+    }
+
+    const viewport = this.graphViewportEl;
+    const rect = viewport.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+      return;
+    }
+
+    const zoom = this.graphInteraction.getGraphZoom() || 1;
+    const graphX = (viewport.scrollLeft + localX) / zoom;
+    const graphY = (viewport.scrollTop + localY) / zoom;
+    const menuX = this.normalizeGraphCoordinate(viewport.scrollLeft + localX);
+    const menuY = this.normalizeGraphCoordinate(viewport.scrollTop + localY);
+    const contextMenuItems = this.nodeDefinitions.map((definition) => ({
+      definition,
+      title: prettifyNodeKind(definition.kind),
+      summary: describeNodeDefinition(definition),
+    }));
+
+    if (contextMenuItems.length === 0) {
+      new Notice("No node definitions are available.");
+      return;
+    }
+
+    const contextMenu = this.ensureNodeContextMenuOverlay();
+    contextMenu.mount(viewport);
+    contextMenu.setGraphZoom(zoom);
+    contextMenu.open({
+      anchorX: menuX,
+      anchorY: menuY,
+      items: contextMenuItems,
+      onSelectDefinition: (definition) => {
+        this.nodePickerKey = definitionKey(definition);
+        this.createNodeFromDefinition(definition, {
+          position: { x: graphX, y: graphY },
+        });
+      },
+    });
+  }
+
+  private createNodeFromPicker(): void {
+    const definition = this.nodeDefinitionsByKey.get(this.nodePickerKey || "");
+    if (!definition) {
+      new Notice("Select a node type to add.");
+      return;
+    }
+    this.createNodeFromDefinition(definition);
+  }
+
+  private removeNodes(nodeIds: string[]): void {
     if (!this.currentProject) {
       return;
     }
 
-    this.currentProject.graph.nodes = this.currentProject.graph.nodes.filter(
-      (node) => node.id !== nodeId
+    const idsToRemove = new Set(
+      nodeIds
+        .map((nodeId) => String(nodeId || "").trim())
+        .filter((nodeId) => nodeId.length > 0)
     );
+    if (idsToRemove.size === 0) {
+      return;
+    }
+
+    const previousCount = this.currentProject.graph.nodes.length;
+    this.currentProject.graph.nodes = this.currentProject.graph.nodes.filter(
+      (node) => !idsToRemove.has(node.id)
+    );
+    if (this.currentProject.graph.nodes.length === previousCount) {
+      return;
+    }
     this.currentProject.graph.edges = this.currentProject.graph.edges.filter(
-      (edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId
+      (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
     );
 
-    this.clearTransientFieldErrorsForNode(nodeId);
-    this.runPresentation.removeNode(nodeId);
-    this.graphInteraction.onNodeRemoved(nodeId);
+    for (const nodeId of idsToRemove) {
+      this.clearTransientFieldErrorsForNode(nodeId);
+      this.runPresentation.removeNode(nodeId);
+      this.graphInteraction.onNodeRemoved(nodeId);
+    }
+    this.nodeContextMenuOverlay?.hide();
     this.recomputeEntryNodes(this.currentProject);
     this.scheduleProjectSave();
     this.render();
+  }
+
+  private removeNode(nodeId: string): void {
+    this.removeNodes([nodeId]);
+  }
+
+  private handleGraphZoomChanged(zoom: number): void {
+    this.inspectorOverlay?.setGraphZoom(zoom);
+    this.nodeContextMenuOverlay?.setGraphZoom(zoom);
+    this.captureGraphViewportState({ zoomOverride: zoom, requestLayoutSave: true });
+  }
+
+  private handleGraphViewportScrolled(): void {
+    this.nodeContextMenuOverlay?.hide();
+    this.captureGraphViewportState({ requestLayoutSave: true });
   }
 
   private renderGraphEditor(root: HTMLElement): void {
@@ -864,6 +1196,9 @@ export class SystemSculptStudioView extends ItemView {
       onCreateNode: () => {
         this.createNodeFromPicker();
       },
+      onOpenNodeContextMenu: (event) => {
+        this.openNodeContextMenuAtPointer(event);
+      },
       onRunNode: (nodeId) => {
         void this.runGraph({ fromNodeId: nodeId });
       },
@@ -877,41 +1212,71 @@ export class SystemSculptStudioView extends ItemView {
     });
 
     this.graphViewportEl = result.viewportEl;
+    this.graphViewportProjectPath = this.currentProjectPath;
     if (!this.graphViewportEl || !this.currentProject) {
+      this.graphViewportProjectPath = null;
       this.inspectorOverlay?.hide();
+      this.nodeContextMenuOverlay?.hide();
       return;
     }
 
+    this.graphViewportEl.addEventListener("scroll", () => {
+      this.handleGraphViewportScrolled();
+    }, { passive: true });
     this.restoreGraphViewportState(this.graphViewportEl);
     const inspector = this.ensureInspectorOverlay();
+    const contextMenu = this.ensureNodeContextMenuOverlay();
     inspector.setGraphZoom(this.graphInteraction.getGraphZoom());
+    contextMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     inspector.mount(this.graphViewportEl);
+    contextMenu.mount(this.graphViewportEl);
     this.syncInspectorSelection();
   }
 
-  private captureGraphViewportState(): void {
+  private captureGraphViewportState(options?: {
+    zoomOverride?: number;
+    requestLayoutSave?: boolean;
+  }): void {
     const viewport = this.graphViewportEl;
-    if (!viewport) {
+    const projectPath = this.graphViewportProjectPath;
+    if (!viewport || !projectPath) {
       this.pendingViewportState = null;
       return;
     }
 
-    this.pendingViewportState = {
-      scrollLeft: viewport.scrollLeft,
-      scrollTop: viewport.scrollTop,
-      projectPath: this.currentProjectPath,
+    const snapshot: StudioGraphViewState = {
+      scrollLeft: this.normalizeGraphCoordinate(viewport.scrollLeft),
+      scrollTop: this.normalizeGraphCoordinate(viewport.scrollTop),
+      zoom: this.normalizeGraphZoom(
+        options?.zoomOverride ?? this.graphInteraction.getGraphZoom()
+      ),
     };
+    this.pendingViewportState = { ...snapshot, projectPath };
+    this.saveGraphViewStateForProject(projectPath, snapshot, {
+      requestLayoutSave: options?.requestLayoutSave,
+    });
   }
 
   private restoreGraphViewportState(viewport: HTMLElement): void {
     const pending = this.pendingViewportState;
     this.pendingViewportState = null;
-    if (!pending || pending.projectPath !== this.currentProjectPath) {
+    const currentProjectPath = this.currentProjectPath;
+    if (!currentProjectPath) {
       return;
     }
 
-    const nextLeft = Number.isFinite(pending.scrollLeft) ? Math.max(0, pending.scrollLeft) : 0;
-    const nextTop = Number.isFinite(pending.scrollTop) ? Math.max(0, pending.scrollTop) : 0;
+    const restoredState = pending && pending.projectPath === currentProjectPath
+      ? pending
+      : this.getSavedGraphViewState(currentProjectPath);
+    if (!restoredState) {
+      return;
+    }
+
+    const nextZoom = this.normalizeGraphZoom(restoredState.zoom);
+    this.graphInteraction.setGraphZoom(nextZoom);
+
+    const nextLeft = this.normalizeGraphCoordinate(restoredState.scrollLeft);
+    const nextTop = this.normalizeGraphCoordinate(restoredState.scrollTop);
     viewport.scrollLeft = nextLeft;
     viewport.scrollTop = nextTop;
 
@@ -928,7 +1293,9 @@ export class SystemSculptStudioView extends ItemView {
   private render(): void {
     this.captureGraphViewportState();
     this.graphInteraction.clearRenderBindings();
+    this.nodeContextMenuOverlay?.hide();
     this.graphViewportEl = null;
+    this.graphViewportProjectPath = null;
 
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });

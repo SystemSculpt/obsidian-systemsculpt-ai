@@ -59,6 +59,7 @@ export type StudioGraphEditorRendererOptions = {
   onNodePickerChange: (key: string) => void;
   onRunGraph: () => void;
   onCreateNode: () => void;
+  onOpenNodeContextMenu: (event: MouseEvent) => void;
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
@@ -454,6 +455,7 @@ export function renderStudioGraphEditor(
     onNodePickerChange,
     onRunGraph,
     onCreateNode,
+    onOpenNodeContextMenu,
     onRunNode,
     onRemoveNode,
     onNodeTitleInput,
@@ -479,6 +481,26 @@ export function renderStudioGraphEditor(
     (event) => graphInteraction.handleGraphViewportWheel(event as WheelEvent),
     { passive: false }
   );
+  viewport.addEventListener("contextmenu", (event) => {
+    const contextEvent = event as MouseEvent;
+    const target = contextEvent.target as HTMLElement | null;
+    if (!target) {
+      return;
+    }
+    if (target.closest("input, textarea, select, [contenteditable='true']")) {
+      return;
+    }
+    if (
+      target.closest(
+        ".ss-studio-graph-controls, .ss-studio-graph-hint, .ss-studio-node-inspector, .ss-studio-node-context-menu"
+      )
+    ) {
+      return;
+    }
+    contextEvent.preventDefault();
+    contextEvent.stopPropagation();
+    onOpenNodeContextMenu(contextEvent);
+  });
   viewport.addEventListener("pointerdown", (event) => {
     const pointerEvent = event as PointerEvent;
     const target = pointerEvent.target as HTMLElement | null;
