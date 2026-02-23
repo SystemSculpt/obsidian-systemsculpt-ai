@@ -49,6 +49,8 @@ type RenderStudioGraphNodeCardOptions = {
     title: string;
   }) => void;
   onRunNode: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
@@ -375,6 +377,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     resolveAssetPreviewSrc,
     onOpenMediaPreview,
     onRunNode,
+    onCopyTextGenerationPromptBundle,
+    onToggleTextGenerationOutputLock,
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
@@ -464,6 +468,38 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     event.stopPropagation();
     onRunNode(node.id);
   });
+
+  if (node.kind === "studio.text_generation") {
+    const outputLocked = node.config.lockOutput === true;
+    const copyPromptButton = header.createEl("button", {
+      text: "Copy",
+      cls: "ss-studio-node-copy-prompt",
+      attr: {
+        title: "Copy prompt bundle for handoff",
+        "aria-label": "Copy prompt bundle for handoff",
+      },
+    });
+    copyPromptButton.disabled = interactionLocked;
+    copyPromptButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onCopyTextGenerationPromptBundle(node.id);
+    });
+
+    const lockOutputButton = header.createEl("button", {
+      text: outputLocked ? "Unlock" : "Lock",
+      cls: "ss-studio-node-lock-output",
+      attr: {
+        title: outputLocked ? "Unlock text output" : "Lock text output",
+        "aria-label": outputLocked ? "Unlock text output" : "Lock text output",
+      },
+    });
+    lockOutputButton.disabled = interactionLocked;
+    lockOutputButton.classList.toggle("is-active", outputLocked);
+    lockOutputButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onToggleTextGenerationOutputLock(node.id);
+    });
+  }
 
   const removeButton = header.createEl("button", {
     text: "×",

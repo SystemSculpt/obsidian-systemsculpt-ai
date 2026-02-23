@@ -33,6 +33,8 @@ export type StudioGraphWorkspaceRendererOptions = {
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateLabelAtPosition: (position: { x: number; y: number }) => void;
   onRunNode: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
@@ -73,6 +75,8 @@ export function renderStudioGraphWorkspace(
     onOpenNodeContextMenu,
     onCreateLabelAtPosition,
     onRunNode,
+    onCopyTextGenerationPromptBundle,
+    onToggleTextGenerationOutputLock,
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
@@ -202,6 +206,8 @@ export function renderStudioGraphWorkspace(
       resolveAssetPreviewSrc,
       onOpenMediaPreview,
       onRunNode,
+      onCopyTextGenerationPromptBundle,
+      onToggleTextGenerationOutputLock,
       onRemoveNode,
       onNodeTitleInput,
       onNodeConfigMutated,

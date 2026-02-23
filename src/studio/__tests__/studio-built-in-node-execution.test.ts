@@ -303,6 +303,36 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.text).toBe("Local output");
   });
 
+  it("returns locked text output without regenerating when lockOutput is enabled", async () => {
+    const definition = registry.get("studio.text_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({
+      text: "Should not be returned",
+      modelId: "openai/gpt-5-mini",
+    }));
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "text-node",
+        kind: "studio.text_generation",
+        config: {
+          lockOutput: true,
+          value: "Pinned draft body",
+          sourceMode: "local_pi",
+          localModelId: "ollama@@llama3.1:8b",
+          modelId: "openai/gpt-5-mini",
+        },
+        inputs: {
+          prompt: "Fresh upstream prompt that should be ignored.",
+        },
+        generateTextMock,
+      })
+    );
+
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(result.outputs.text).toBe("Pinned draft body");
+  });
+
   it("materializes structured prompts for image generation and enforces prompt budget", async () => {
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).toBeDefined();
@@ -771,6 +801,188 @@ describe("Studio built-in text/image node execution", () => {
       expect(result.outputs.revenue).toEqual([19900, 24900]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("http request node performs authenticated batch item requests", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        text: async () => JSON.stringify({ id: "contact-1" }),
+      })
+      .mockResolvedValueOnce({
+        status: 202,
+        text: async () => JSON.stringify({ id: "contact-2" }),
+      });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      const result = await definition!.execute(
+        createContext({
+          nodeId: "http-node",
+          kind: "studio.http_request",
+          config: {
+            mode: "batch_items",
+            method: "POST",
+            authSource: "plaintext",
+            authToken: "re_test_123",
+            authHeaderName: "Authorization",
+            authScheme: "bearer",
+            url: "https://api.resend.com/contacts",
+            body: {
+              unsubscribed: false,
+              segments: [{ id: "segment_abc" }],
+            },
+            itemBodyField: "email",
+            maxRequests: 10,
+            throttleMs: 0,
+            maxRetries: 0,
+            continueOnHttpError: true,
+          },
+          inputs: {
+            items: ["first@example.com", "second@example.com"],
+          },
+        })
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const firstCall = fetchMock.mock.calls[0];
+      const secondCall = fetchMock.mock.calls[1];
+
+      expect(firstCall[0]).toBe("https://api.resend.com/contacts");
+      expect(firstCall[1]).toEqual(
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer re_test_123",
+          }),
+        })
+      );
+      expect(JSON.parse(firstCall[1].body)).toEqual({
+        unsubscribed: false,
+        segments: [{ id: "segment_abc" }],
+        email: "first@example.com",
+      });
+
+      expect(secondCall[0]).toBe("https://api.resend.com/contacts");
+      expect(secondCall[1]).toEqual(
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer re_test_123",
+          }),
+        })
+      );
+      expect(JSON.parse(secondCall[1].body)).toEqual({
+        unsubscribed: false,
+        segments: [{ id: "segment_abc" }],
+        email: "second@example.com",
+      });
+      expect(result.outputs.summary).toEqual({
+        mode: "batch_items",
+        dryRun: false,
+        total: 2,
+        succeeded: 2,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(result.outputs.responses).toHaveLength(2);
+      expect(result.outputs.status).toBe(202);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node reads auth token from keychain secret references", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const secretGetMock = jest.fn(async () => "re_from_keychain");
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      const context = createContext({
+        nodeId: "http-node",
+        kind: "studio.http_request",
+        config: {
+          mode: "single",
+          method: "POST",
+          url: "https://api.resend.com/contacts",
+          authSource: "keychain_ref",
+          authTokenRef: "resend.marketing",
+          authHeaderName: "Authorization",
+          authScheme: "bearer",
+          maxRetries: 0,
+          continueOnHttpError: true,
+        },
+        inputs: {
+          body: { email: "first@example.com" },
+        },
+      });
+      context.services.secretStore = {
+        isAvailable: () => true,
+        getSecret: secretGetMock,
+      };
+
+      const result = await definition!.execute(context);
+
+      expect(secretGetMock).toHaveBeenCalledWith("resend.marketing");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.resend.com/contacts",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer re_from_keychain",
+          }),
+        })
+      );
+      expect(result.outputs.status).toBe(200);
+      expect(result.outputs.json).toEqual({ ok: true });
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node fails fast on HTTP errors when continueOnHttpError is disabled", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 409,
+      text: async () => JSON.stringify({ error: "already_exists" }),
+    });
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await expect(
+        definition!.execute(
+          createContext({
+            nodeId: "http-node",
+            kind: "studio.http_request",
+            config: {
+              mode: "single",
+              method: "POST",
+              url: "https://api.resend.com/contacts",
+              continueOnHttpError: false,
+              maxRetries: 0,
+            },
+            inputs: {
+              body: { email: "first@example.com" },
+            },
+          })
+        )
+      ).rejects.toThrow("HTTP request failed (409)");
+    } finally {
+      (globalThis as any).fetch = originalFetch;
     }
   });
 });

@@ -3,6 +3,11 @@ import { nowIso } from "./utils";
 
 const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
+const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
+const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
+const RESEND_DEFAULT_MAX_REQUESTS = 500;
+const RESEND_DEFAULT_THROTTLE_MS = 550;
+const RESEND_DEFAULT_MAX_RETRIES = 3;
 
 const LEGACY_OUTPUT_PORT_REMAP: Record<string, Record<string, string>> = {
   "studio.image_generation": {
@@ -91,6 +96,145 @@ function dedupeEdges(edges: StudioEdge[]): StudioEdge[] {
     result.push(edge);
   }
   return result;
+}
+
+function clampFiniteInt(
+  value: StudioJsonValue | undefined,
+  fallback: number,
+  bounds: { min: number; max: number }
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  const rounded = Math.floor(parsed);
+  return Math.max(bounds.min, Math.min(bounds.max, rounded));
+}
+
+function migrateResendAudienceSyncNodes(
+  nodes: StudioProjectV1["graph"]["nodes"],
+  edges: StudioEdge[]
+): {
+  nodes: StudioProjectV1["graph"]["nodes"];
+  edges: StudioEdge[];
+  changed: boolean;
+} {
+  const convertedNodeIds = new Set<string>();
+  let changed = false;
+
+  const nextNodes = nodes.map((node) => {
+    if (node.kind !== "studio.resend_audience_sync") {
+      return node;
+    }
+    changed = true;
+    convertedNodeIds.add(node.id);
+
+    const config = (node.config || {}) as Record<string, StudioJsonValue>;
+    const apiBaseUrl =
+      asText(config.apiBaseUrl).trim().replace(/\/+$/, "") || RESEND_DEFAULT_BASE_URL;
+    const segmentId = asText(config.segmentId).trim();
+    const authSourceRaw = asText(config.apiKeySource).trim().toLowerCase();
+    const authSource = authSourceRaw === "plaintext" ? "plaintext" : "keychain_ref";
+    const body: Record<string, StudioJsonValue> = {
+      unsubscribed: config.unsubscribed === true,
+    };
+    if (segmentId) {
+      body.segments = [{ id: segmentId }];
+    }
+
+    const maxRequests = clampFiniteInt(config.maxContacts, RESEND_DEFAULT_MAX_REQUESTS, {
+      min: 1,
+      max: 5000,
+    });
+    const throttleMs = clampFiniteInt(config.throttleMs, RESEND_DEFAULT_THROTTLE_MS, {
+      min: 0,
+      max: 60000,
+    });
+    const maxRetries = clampFiniteInt(config.maxRetries, RESEND_DEFAULT_MAX_RETRIES, {
+      min: 0,
+      max: 8,
+    });
+
+    return {
+      ...node,
+      kind: "studio.http_request",
+      title: asText(node.title).trim() || "HTTP Request",
+      config: {
+        mode: "batch_items",
+        method: "POST",
+        url: `${apiBaseUrl}/contacts`,
+        headers: { "Content-Type": "application/json" },
+        authSource,
+        authTokenRef: asText(config.apiKeyRef).trim(),
+        authToken: asText(config.apiKey).trim(),
+        authHeaderName: "Authorization",
+        authScheme: "bearer",
+        body,
+        bodyTemplate: "",
+        itemBodyField: "email",
+        mergeItemObject: true,
+        maxRequests,
+        throttleMs,
+        maxRetries,
+        dryRun: config.dryRun === true,
+        continueOnHttpError: true,
+      },
+    };
+  });
+
+  if (convertedNodeIds.size === 0) {
+    return { nodes, edges, changed: false };
+  }
+
+  const nextEdges: StudioEdge[] = [];
+  for (const edge of edges) {
+    if (convertedNodeIds.has(edge.toNodeId)) {
+      if (edge.toPortId === "segmentId") {
+        changed = true;
+        continue;
+      }
+      if (edge.toPortId === "emails") {
+        changed = true;
+        nextEdges.push({
+          ...edge,
+          toPortId: "items",
+        });
+        continue;
+      }
+    }
+
+    if (convertedNodeIds.has(edge.fromNodeId)) {
+      if (edge.fromPortId === "emails") {
+        changed = true;
+        nextEdges.push({
+          ...edge,
+          fromPortId: "items",
+        });
+        continue;
+      }
+      if (edge.fromPortId === "synced") {
+        changed = true;
+        nextEdges.push({
+          ...edge,
+          fromPortId: "succeeded",
+        });
+        continue;
+      }
+    }
+
+    nextEdges.push(edge);
+  }
+
+  return {
+    nodes: nextNodes,
+    edges: dedupeEdges(nextEdges),
+    changed,
+  };
 }
 
 function appendTemplateToSystemPrompt(
@@ -310,6 +454,13 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     changed = true;
   }
 
+  const resendMigration = migrateResendAudienceSyncNodes(nodes, edges);
+  if (resendMigration.changed) {
+    changed = true;
+    nodes = resendMigration.nodes;
+    edges = resendMigration.edges;
+  }
+
   let entryNodeIds = project.graph.entryNodeIds;
   let groups = project.graph.groups;
   const promptTemplateMigration = migratePromptTemplateNodes(nodes, edges, entryNodeIds, groups);
@@ -336,6 +487,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (promptTemplateMigration.changed && !appliedMigrationIds.has(PROMPT_TEMPLATE_INLINE_MIGRATION_ID)) {
     nextApplied.push({
       id: PROMPT_TEMPLATE_INLINE_MIGRATION_ID,
+      at: nowIso(),
+    });
+  }
+  if (resendMigration.changed && !appliedMigrationIds.has(RESEND_TO_HTTP_REQUEST_MIGRATION_ID)) {
+    nextApplied.push({
+      id: RESEND_TO_HTTP_REQUEST_MIGRATION_ID,
       at: nowIso(),
     });
   }

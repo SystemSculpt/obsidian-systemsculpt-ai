@@ -552,6 +552,234 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private coercePromptBundleText(value: unknown): string {
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (value == null) {
+      return "";
+    }
+    try {
+      return JSON.stringify(value, null, 2).trim();
+    } catch {
+      return "";
+    }
+  }
+
+  private isTextGenerationOutputLocked(node: StudioNodeInstance | null): boolean {
+    if (!node || node.kind !== "studio.text_generation") {
+      return false;
+    }
+    return node.config.lockOutput === true;
+  }
+
+  private resolveTextGenerationOutputSnapshot(node: StudioNodeInstance): string {
+    if (node.kind !== "studio.text_generation") {
+      return "";
+    }
+    const configuredValueRaw =
+      typeof node.config.value === "string"
+        ? node.config.value
+        : typeof node.config.value === "number" || typeof node.config.value === "boolean"
+          ? String(node.config.value)
+          : "";
+    if (configuredValueRaw.trim().length > 0) {
+      return configuredValueRaw;
+    }
+    const runtimeText =
+      typeof this.runPresentation.getNodeState(node.id).outputs?.text === "string"
+        ? String(this.runPresentation.getNodeState(node.id).outputs?.text || "")
+        : "";
+    return runtimeText;
+  }
+
+  private toggleTextGenerationOutputLock(nodeId: string): void {
+    if (!this.currentProject) {
+      new Notice("Open a Studio project first.");
+      return;
+    }
+
+    const node = this.currentProject.graph.nodes.find((entry) => entry.id === nodeId);
+    if (!node || node.kind !== "studio.text_generation") {
+      new Notice("Output lock is only available for text generation nodes.");
+      return;
+    }
+
+    if (this.isTextGenerationOutputLocked(node)) {
+      delete node.config.lockOutput;
+      this.scheduleProjectSave();
+      this.render();
+      new Notice("Text generation output unlocked.");
+      return;
+    }
+
+    const snapshotText = this.resolveTextGenerationOutputSnapshot(node);
+    node.config.lockOutput = true;
+    node.config.value = snapshotText;
+    this.runPresentation.primeNodeOutput(
+      node.id,
+      { text: snapshotText },
+      { message: "Output locked" }
+    );
+    this.scheduleProjectSave();
+    this.render();
+    new Notice(snapshotText.trim() ? "Text generation output locked." : "Text output locked (currently empty).");
+  }
+
+  private wrapPromptBundleFence(language: string, content: string): string {
+    const normalized = String(content || "");
+    const fence = normalized.includes("```") ? "~~~~" : "```";
+    const info = String(language || "").trim();
+    return `${fence}${info}\n${normalized}\n${fence}`;
+  }
+
+  private async resolvePromptBundleSource(node: StudioNodeInstance): Promise<{
+    content: string;
+    contentLanguage: string;
+    sourceLabel: string;
+    vaultPath: string;
+  }> {
+    if (node.kind === "studio.note") {
+      const configuredPath = this.readNotePathFromConfig(node);
+      let noteText = this.coercePromptBundleText((node.config as Record<string, unknown>).value);
+      let resolvedPath = configuredPath;
+      if (configuredPath) {
+        const abstract = this.app.vault.getAbstractFileByPath(configuredPath);
+        if (this.isMarkdownVaultFile(abstract)) {
+          resolvedPath = abstract.path;
+          try {
+            noteText = (await this.readVaultMarkdownFile(abstract)).trim();
+          } catch {
+            // Fallback to cached config value.
+          }
+        }
+      }
+      return {
+        content: noteText || "(Note is empty.)",
+        contentLanguage: "markdown",
+        sourceLabel: resolvedPath ? "vault note" : "note config",
+        vaultPath: resolvedPath,
+      };
+    }
+
+    const runtimeText =
+      typeof this.runPresentation.getNodeState(node.id).outputs?.text === "string"
+        ? String(this.runPresentation.getNodeState(node.id).outputs?.text || "").trim()
+        : "";
+    if (runtimeText) {
+      return {
+        content: runtimeText,
+        contentLanguage: "text",
+        sourceLabel: "latest node output",
+        vaultPath: "",
+      };
+    }
+
+    const configValueText = this.coercePromptBundleText((node.config as Record<string, unknown>).value);
+    if (configValueText) {
+      return {
+        content: configValueText,
+        contentLanguage: "text",
+        sourceLabel: "node config value",
+        vaultPath: "",
+      };
+    }
+
+    const configPreview = formatNodeConfigPreview(node).trim();
+    return {
+      content: configPreview || "(No text content available for this source node yet.)",
+      contentLanguage: "text",
+      sourceLabel: "node config preview",
+      vaultPath: "",
+    };
+  }
+
+  private async copyTextGenerationPromptBundle(nodeId: string): Promise<void> {
+    if (!this.currentProject) {
+      new Notice("Open a Studio project first.");
+      return;
+    }
+
+    const project = this.currentProject;
+    const targetNode = project.graph.nodes.find((node) => node.id === nodeId);
+    if (!targetNode || targetNode.kind !== "studio.text_generation") {
+      new Notice("Prompt bundle copy is only available for text generation nodes.");
+      return;
+    }
+
+    const sourceNodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
+    const promptEdges = project.graph.edges.filter(
+      (edge) => edge.toNodeId === nodeId && edge.toPortId === "prompt"
+    );
+    const seenSourceIds = new Set<string>();
+    const sourceSections: string[] = [];
+
+    for (const edge of promptEdges) {
+      const sourceNodeId = String(edge.fromNodeId || "").trim();
+      if (!sourceNodeId || seenSourceIds.has(sourceNodeId)) {
+        continue;
+      }
+      seenSourceIds.add(sourceNodeId);
+      const sourceNode = sourceNodeById.get(sourceNodeId);
+      if (!sourceNode) {
+        continue;
+      }
+
+      const sourceIndex = sourceSections.length + 1;
+      const sourceKind = sourceNode.kind === "studio.note" ? "Note" : prettifyNodeKind(sourceNode.kind);
+      const sourceTitle = String(sourceNode.title || sourceKind).trim() || sourceKind;
+      const source = await this.resolvePromptBundleSource(sourceNode);
+      const sectionLines: string[] = [
+        `### Source ${sourceIndex}: ${sourceKind} - ${sourceTitle}`,
+        `- Node ID: \`${sourceNode.id}\``,
+        `- Kind: \`${sourceNode.kind}\``,
+        `- Content Source: ${source.sourceLabel}`,
+      ];
+      if (source.vaultPath) {
+        sectionLines.push(`- Vault Path: \`${source.vaultPath}\``);
+      }
+      sectionLines.push("", this.wrapPromptBundleFence(source.contentLanguage, source.content), "");
+      sourceSections.push(sectionLines.join("\n"));
+    }
+
+    const systemPrompt = String(targetNode.config.systemPrompt || "").trim();
+    const bundleLines: string[] = [
+      "# Studio Text Generation Handoff",
+      "",
+      `Generated: ${new Date().toISOString()}`,
+      `Target Node: ${String(targetNode.title || targetNode.kind).trim() || targetNode.kind}`,
+      `Target Node ID: \`${targetNode.id}\``,
+      "",
+      "## Attached Prompt Sources",
+      "",
+    ];
+    if (sourceSections.length === 0) {
+      bundleLines.push("_No prompt-linked source nodes found._", "");
+    } else {
+      bundleLines.push(...sourceSections);
+    }
+    bundleLines.push(
+      "## System Prompt",
+      "",
+      this.wrapPromptBundleFence("text", systemPrompt || "(System prompt is empty.)"),
+      ""
+    );
+
+    const copied = await tryCopyToClipboard(bundleLines.join("\n"));
+    if (!copied) {
+      new Notice("Unable to copy prompt bundle (clipboard unavailable).");
+      return;
+    }
+    new Notice(
+      sourceSections.length === 1
+        ? "Prompt bundle copied with 1 source."
+        : `Prompt bundle copied with ${sourceSections.length} sources.`
+    );
+  }
+
   private parseGraphClipboardPayload(raw: string): StudioGraphClipboardPayload | null {
     const trimmed = String(raw || "").trim();
     if (!trimmed) {
@@ -1492,6 +1720,9 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     if (sourceNode.kind !== "studio.text_generation" && sourceNode.kind !== "studio.transcription") {
+      return;
+    }
+    if (sourceNode.kind === "studio.text_generation" && this.isTextGenerationOutputLocked(sourceNode)) {
       return;
     }
     const outputText = typeof event.outputs?.text === "string" ? event.outputs.text : "";
@@ -3607,6 +3838,12 @@ export class SystemSculptStudioView extends ItemView {
       },
       onRunNode: (nodeId) => {
         void this.runGraph({ fromNodeId: nodeId });
+      },
+      onCopyTextGenerationPromptBundle: (nodeId) => {
+        void this.copyTextGenerationPromptBundle(nodeId);
+      },
+      onToggleTextGenerationOutputLock: (nodeId) => {
+        this.toggleTextGenerationOutputLock(nodeId);
       },
       onRemoveNode: (nodeId) => {
         this.removeNode(nodeId);

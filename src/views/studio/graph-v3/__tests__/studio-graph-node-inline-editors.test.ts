@@ -13,6 +13,7 @@ describe("StudioGraphNodeInlineEditors node-kind policy", () => {
     expect(hasStudioNodeInlineEditor("studio.media_ingest")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.audio_extract")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.text_generation")).toBe(true);
+    expect(hasStudioNodeInlineEditor("studio.resend_audience_sync")).toBe(false);
   });
 
   it("only suppresses output preview for content-dominant nodes", () => {

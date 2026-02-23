@@ -811,6 +811,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
   if (!isInlineTextNodeKind(node.kind)) {
     return false;
   }
+  const outputLocked = node.kind === "studio.text_generation" && node.config.lockOutput === true;
 
   const editorLabel = node.kind === "studio.transcription"
     ? "TRANSCRIPT"
@@ -846,7 +847,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     },
   });
   textEditorEl.value = readEditableNodeText(node, nodeRunState);
-  textEditorEl.disabled = interactionLocked;
+  textEditorEl.disabled = interactionLocked || outputLocked;
   textEditorEl.style.minHeight = "240px";
   textEditorEl.addEventListener("input", (event) => {
     node.config.value = (event.target as HTMLTextAreaElement).value;
@@ -978,7 +979,26 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["method", "url", "headers"],
+      orderedFieldKeys: [
+        "mode",
+        "method",
+        "authSource",
+        "authTokenRef",
+        "authToken",
+        "authHeaderName",
+        "authScheme",
+        "url",
+        "headers",
+        "body",
+        "bodyTemplate",
+        "itemBodyField",
+        "mergeItemObject",
+        "maxRequests",
+        "throttleMs",
+        "maxRetries",
+        "dryRun",
+        "continueOnHttpError",
+      ],
       interactionLocked,
       onNodeConfigMutated,
       resolveDynamicSelectOptions,

@@ -41,7 +41,8 @@ type PiOutputSnapshot = {
 const COMMON_CLI_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt/local/bin"];
 const PI_MODEL_LIST_TIMEOUT_MS = 60_000;
 const PI_GENERATION_TIMEOUT_MS = 300_000;
-const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const PI_GENERATION_MAX_ATTEMPTS = 2;
 
 function mergeCliPath(rawPath: string): string {
   const segments = String(rawPath || "")
@@ -258,7 +259,7 @@ function toModelDescription(model: PiListedModel): string {
 
 function extractAssistantMessage(payload: Record<string, unknown>): Record<string, unknown> | null {
   const type = String(payload.type || "").trim().toLowerCase();
-  if (type === "message_end" || type === "turn_end") {
+  if (type === "message_update" || type === "message_end" || type === "turn_end") {
     const message = payload.message as Record<string, unknown> | undefined;
     if (String(message?.role || "").trim().toLowerCase() === "assistant") {
       return message || null;
@@ -319,9 +320,42 @@ function extractAssistantError(message: Record<string, unknown>): string | null 
   return null;
 }
 
+function extractAssistantUpdate(payload: Record<string, unknown>): {
+  appendText?: string;
+  replaceText?: string;
+  errorMessage?: string;
+} | null {
+  const type = String(payload.type || "").trim().toLowerCase();
+  if (type !== "message_update") {
+    return null;
+  }
+  const event =
+    payload.assistantMessageEvent && typeof payload.assistantMessageEvent === "object"
+      ? (payload.assistantMessageEvent as Record<string, unknown>)
+      : null;
+  if (!event) {
+    return null;
+  }
+  const updateType = String(event.type || "").trim().toLowerCase();
+  if (updateType === "text_delta") {
+    const delta = String(event.delta || "");
+    return delta ? { appendText: delta } : null;
+  }
+  if (updateType === "text_end") {
+    const content = String(event.content || "");
+    return content ? { replaceText: content } : null;
+  }
+  const explicitError = String(event.errorMessage || event.message || "").trim();
+  if (explicitError) {
+    return { errorMessage: explicitError };
+  }
+  return null;
+}
+
 function parsePiOutput(stdout: string): PiOutputSnapshot {
   let lastText = "";
   let lastError: string | null = null;
+  let streamedText = "";
   const lines = String(stdout || "").split(/\r?\n/);
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -333,6 +367,15 @@ function parsePiOutput(stdout: string): PiOutputSnapshot {
       payload = JSON.parse(line) as Record<string, unknown>;
     } catch {
       continue;
+    }
+    const update = extractAssistantUpdate(payload);
+    if (update?.replaceText) {
+      streamedText = update.replaceText;
+    } else if (update?.appendText) {
+      streamedText += update.appendText;
+    }
+    if (update?.errorMessage) {
+      lastError = update.errorMessage;
     }
     const message = extractAssistantMessage(payload);
     if (!message) {
@@ -355,7 +398,7 @@ function parsePiOutput(stdout: string): PiOutputSnapshot {
     }
   }
   return {
-    text: lastText,
+    text: lastText || streamedText.trim(),
     errorMessage: lastError,
   };
 }
@@ -421,25 +464,32 @@ export async function runStudioLocalPiTextGeneration(options: {
   }
   args.push(String(options.prompt || ""));
 
-  const result = await runCommand(options.plugin, args, PI_GENERATION_TIMEOUT_MS);
-  if (result.timedOut) {
-    throw new Error(`Local (Pi) generation timed out for model "${modelId}".`);
+  for (let attempt = 1; attempt <= PI_GENERATION_MAX_ATTEMPTS; attempt += 1) {
+    const result = await runCommand(options.plugin, args, PI_GENERATION_TIMEOUT_MS);
+    if (result.timedOut) {
+      throw new Error(`Local (Pi) generation timed out for model "${modelId}".`);
+    }
+
+    const parsed = parsePiOutput(result.stdout);
+    if (result.exitCode !== 0) {
+      throw new Error(parsed.errorMessage || summarizePiCommandError(result));
+    }
+    if (parsed.errorMessage) {
+      throw new Error(parsed.errorMessage);
+    }
+    const text = String(parsed.text || "").trim();
+    if (text) {
+      return {
+        text,
+        modelId,
+      };
+    }
+
+    const shouldRetry = attempt < PI_GENERATION_MAX_ATTEMPTS;
+    if (!shouldRetry) {
+      throw new Error(`Local (Pi) generation returned no text for model "${modelId}".`);
+    }
   }
 
-  const parsed = parsePiOutput(result.stdout);
-  if (result.exitCode !== 0) {
-    throw new Error(parsed.errorMessage || summarizePiCommandError(result));
-  }
-  if (parsed.errorMessage) {
-    throw new Error(parsed.errorMessage);
-  }
-  const text = String(parsed.text || "").trim();
-  if (!text) {
-    throw new Error(`Local (Pi) generation returned no text for model "${modelId}".`);
-  }
-
-  return {
-    text,
-    modelId,
-  };
+  throw new Error(`Local (Pi) generation returned no text for model "${modelId}".`);
 }

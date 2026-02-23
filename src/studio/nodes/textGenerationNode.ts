@@ -66,6 +66,15 @@ export const textGenerationNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
+    const lockOutput = context.node.config.lockOutput === true;
+    if (lockOutput) {
+      return {
+        outputs: {
+          text: getText(context.node.config.value as StudioJsonValue),
+        },
+      };
+    }
+
     const structured = parseStructuredPromptInput(context.inputs.prompt);
     const prompt = structured.prompt.trim();
     if (!prompt) {

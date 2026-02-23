@@ -235,4 +235,72 @@ describe("Studio node config validation", () => {
     });
     expect(systemWithoutLocalModel.isValid).toBe(true);
   });
+
+  it("requires keychain auth token reference when HTTP node uses keychain source", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      mode: "batch_items",
+      method: "POST",
+      url: "https://api.resend.com/contacts",
+      authSource: "keychain_ref",
+      authTokenRef: "",
+      authHeaderName: "Authorization",
+      authScheme: "bearer",
+      maxRequests: 500,
+      throttleMs: 550,
+      maxRetries: 3,
+      continueOnHttpError: true,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "authTokenRef")).toBe(true);
+  });
+
+  it("requires plaintext auth token when HTTP node uses plaintext source", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      mode: "single",
+      method: "POST",
+      url: "https://api.resend.com/contacts",
+      authSource: "plaintext",
+      authToken: "",
+      authHeaderName: "Authorization",
+      authScheme: "bearer",
+      maxRetries: 3,
+      continueOnHttpError: true,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "authToken")).toBe(true);
+  });
+
+  it("passes valid batch HTTP config", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      mode: "batch_items",
+      method: "POST",
+      url: "https://api.resend.com/contacts",
+      authSource: "keychain_ref",
+      authTokenRef: "resend.marketing",
+      authHeaderName: "Authorization",
+      authScheme: "bearer",
+      itemBodyField: "email",
+      maxRequests: 250,
+      throttleMs: 550,
+      maxRetries: 3,
+      continueOnHttpError: true,
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
 });

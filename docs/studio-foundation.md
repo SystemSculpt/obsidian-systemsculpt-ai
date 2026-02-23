@@ -75,6 +75,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - `studio.dataset` resolves data through a user-configurable adapter command + argument list.
 - `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.
 - `studio.dataset` inline card includes a read-only latest-result preview so operators can verify fetched data after runs.
+- `studio.http_request` is the canonical outbound API/action node for single or batched requests, including keychain/plaintext auth, retries, throttling, and request-body shaping.
 
 ## Grouping Contracts
 - Grouping is graph-native metadata (`project.graph.groups`) persisted in `.systemsculpt`.

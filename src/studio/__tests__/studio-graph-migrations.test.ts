@@ -343,4 +343,77 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(signature).toEqual(["source_text:text->text:prompt"]);
     expect(migrated.project.graph.nodes.some((node) => node.kind === "studio.prompt_template")).toBe(false);
   });
+
+  it("migrates resend audience sync nodes to generic batch HTTP request nodes", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "dataset",
+        kind: "studio.dataset",
+        version: "1.0.0",
+        title: "Dataset",
+        position: { x: 0, y: 0 },
+        config: {
+          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          customQuery: "select 1",
+        },
+      },
+      {
+        id: "resend",
+        kind: "studio.resend_audience_sync",
+        version: "1.0.0",
+        title: "Resend Audience Sync",
+        position: { x: 220, y: 0 },
+        config: {
+          apiKeySource: "keychain_ref",
+          apiKeyRef: "resend.marketing",
+          apiBaseUrl: "https://api.resend.com",
+          segmentId: "segment_123",
+          maxContacts: 250,
+          throttleMs: 500,
+          maxRetries: 2,
+          unsubscribed: false,
+        },
+      }
+    );
+    project.graph.edges.push({
+      id: "e1",
+      fromNodeId: "dataset",
+      fromPortId: "email",
+      toNodeId: "resend",
+      toPortId: "emails",
+    });
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+
+    const migratedNode = migrated.project.graph.nodes.find((node) => node.id === "resend");
+    expect(migratedNode?.kind).toBe("studio.http_request");
+    expect(migratedNode?.config).toEqual(
+      expect.objectContaining({
+        mode: "batch_items",
+        method: "POST",
+        url: "https://api.resend.com/contacts",
+        authSource: "keychain_ref",
+        authTokenRef: "resend.marketing",
+        itemBodyField: "email",
+        maxRequests: 250,
+        throttleMs: 500,
+        maxRetries: 2,
+      })
+    );
+    expect(migratedNode?.config.body).toEqual({
+      unsubscribed: false,
+      segments: [{ id: "segment_123" }],
+    });
+
+    const signature = migrated.project.graph.edges
+      .map((edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`)
+      .sort();
+    expect(signature).toEqual(["dataset:email->resend:items"]);
+
+    expect(
+      migrated.project.migrations.applied.some((entry) => entry.id === "studio.resend-http-request.v1")
+    ).toBe(true);
+  });
 });

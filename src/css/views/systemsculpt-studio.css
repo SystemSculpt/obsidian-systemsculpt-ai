@@ -439,7 +439,7 @@
 
 .ss-studio-node-header {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
@@ -478,6 +478,36 @@
   color: #d5f4e3;
   font-size: 12px;
   font-weight: 600;
+}
+
+.ss-studio-node-copy-prompt {
+  border: 1px solid color-mix(in srgb, #4c83b8 64%, var(--ss-studio-border));
+  border-radius: 8px;
+  height: 28px;
+  min-width: 50px;
+  padding: 0 8px;
+  background: color-mix(in srgb, #3f6d97 20%, var(--background-primary));
+  color: #d9ebfc;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ss-studio-node-lock-output {
+  border: 1px solid color-mix(in srgb, #9a7b32 62%, var(--ss-studio-border));
+  border-radius: 8px;
+  height: 28px;
+  min-width: 58px;
+  padding: 0 8px;
+  background: color-mix(in srgb, #6b5421 18%, var(--background-primary));
+  color: #f0ddab;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ss-studio-node-lock-output.is-active {
+  border-color: color-mix(in srgb, #b79745 74%, var(--ss-studio-border));
+  background: color-mix(in srgb, #8a6f29 30%, var(--background-primary));
+  color: #ffe7b2;
 }
 
 .ss-studio-node-kind {

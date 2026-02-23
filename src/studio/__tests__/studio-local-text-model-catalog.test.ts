@@ -165,4 +165,63 @@ describe("StudioLocalTextModelCatalog", () => {
       )
     ).rejects.toThrow("Bad API key");
   });
+
+  it("parses message_update text deltas when final assistant message is missing", async () => {
+    const runCommand = createPiRunner({
+      exitCode: 0,
+      timedOut: false,
+      stderr: "",
+      stdout: [
+        '{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}',
+        '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"hello "}}',
+        '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"local pi"}}',
+      ].join("\n"),
+    });
+
+    const result = await runStudioLocalPiTextGeneration(
+      {
+        plugin,
+        modelId: "google/gemini-2.5-flash",
+        prompt: "Say hello",
+      },
+      runCommand
+    );
+
+    expect(result).toEqual({
+      text: "hello local pi",
+      modelId: "google/gemini-2.5-flash",
+    });
+  });
+
+  it("retries once when local pi exits successfully but emits no assistant text", async () => {
+    const runCommand = jest
+      .fn<ReturnType<StudioPiCommandRunner>, Parameters<StudioPiCommandRunner>>()
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        timedOut: false,
+        stderr: "",
+        stdout: '{"type":"turn_start"}',
+      })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        timedOut: false,
+        stderr: "",
+        stdout: '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}}',
+      });
+
+    const result = await runStudioLocalPiTextGeneration(
+      {
+        plugin,
+        modelId: "google/gemini-2.5-flash",
+        prompt: "Say hello",
+      },
+      runCommand
+    );
+
+    expect(runCommand).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      text: "hello local pi",
+      modelId: "google/gemini-2.5-flash",
+    });
+  });
 });
