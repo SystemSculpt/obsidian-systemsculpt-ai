@@ -3014,6 +3014,30 @@ export class SystemSculptStudioView extends ItemView {
     this.captureGraphViewportState({ requestLayoutSave: true });
   }
 
+  private blurActiveStudioEditableTarget(): void {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) {
+      return;
+    }
+    if (!this.contentEl.contains(activeElement)) {
+      return;
+    }
+    if (!this.isEditableKeyboardTarget(activeElement)) {
+      return;
+    }
+    activeElement.blur();
+  }
+
+  private handleGraphViewportPointerDown(event: PointerEvent): void {
+    if (this.isEditableKeyboardTarget(event.target)) {
+      return;
+    }
+    this.blurActiveStudioEditableTarget();
+  }
+
   private handleGraphViewportPointerMove(event: PointerEvent): void {
     const viewport = this.graphViewportEl;
     if (!viewport) {
@@ -3385,6 +3409,9 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl.addEventListener("scroll", () => {
       this.handleGraphViewportScrolled();
     }, { passive: true });
+    this.graphViewportEl.addEventListener("pointerdown", (event) => {
+      this.handleGraphViewportPointerDown(event);
+    }, true);
     this.graphViewportEl.addEventListener("pointermove", (event) => {
       this.handleGraphViewportPointerMove(event);
     }, { passive: true });
