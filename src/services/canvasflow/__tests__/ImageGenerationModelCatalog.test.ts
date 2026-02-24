@@ -1,6 +1,7 @@
 import {
   CURATED_IMAGE_GENERATION_MODELS,
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD,
   formatCuratedImageModelOptionText,
   formatImageAspectRatioLabel,
   getCuratedImageGenerationModel,
@@ -82,8 +83,10 @@ describe("ImageGenerationModelCatalog", () => {
     const merged = resolveImageGenerationModelCatalog(serverModels);
     expect(merged.some((model) => model.id === "acme/vision-neo")).toBe(true);
     const acme = merged.find((model) => model.id === "acme/vision-neo");
+    const expectedCredits = 0.03 * IMAGE_GENERATION_EFFECTIVE_CREDITS_PER_USD;
     expect(acme?.pricing.summary).toContain("$0.030");
-    expect(acme?.pricing.summary).toContain("30 cr/img");
+    expect(acme?.pricing.summary).toContain("cr/img");
+    expect(acme?.pricing.creditsPerImageAverage).toBeCloseTo(expectedCredits, 6);
 
     const groups = getCuratedImageGenerationModelGroups(serverModels);
     expect(groups.some((group) => group.provider === "Acme")).toBe(true);
