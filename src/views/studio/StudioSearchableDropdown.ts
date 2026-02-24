@@ -17,6 +17,12 @@ type RankedOption = {
   index: number;
 };
 
+const STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX = 220;
+const STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX = 760;
+const STUDIO_DROPDOWN_ESTIMATED_GLYPH_WIDTH_PX = 7.2;
+const STUDIO_DROPDOWN_ESTIMATED_PADDING_PX = 84;
+const STUDIO_DROPDOWN_MAX_DESCRIPTION_CHARS_FOR_WIDTH = 60;
+
 function normalizeSearchText(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -101,6 +107,20 @@ function sortRankedOptions(ranked: RankedOption[]): StudioNodeConfigSelectOption
     .map((entry) => entry.option);
 }
 
+function estimatePreferredPanelWidth(optionsList: StudioNodeConfigSelectOption[]): number {
+  let longest = 0;
+  for (const option of optionsList) {
+    const label = String(option.label || option.value || "").trim();
+    const value = String(option.value || "").trim();
+    const badge = option.badge ? `[${String(option.badge).trim()}] ` : "";
+    const description = String(option.description || "")
+      .trim()
+      .slice(0, STUDIO_DROPDOWN_MAX_DESCRIPTION_CHARS_FOR_WIDTH);
+    longest = Math.max(longest, (badge + label).length, value.length, description.length);
+  }
+  return Math.round(longest * STUDIO_DROPDOWN_ESTIMATED_GLYPH_WIDTH_PX + STUDIO_DROPDOWN_ESTIMATED_PADDING_PX);
+}
+
 export function renderStudioSearchableDropdown(options: StudioSearchableDropdownOptions): void {
   const {
     containerEl,
@@ -140,7 +160,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     cls: "ss-studio-searchable-select-search",
     type: "text",
     attr: {
-      placeholder: "Search models...",
+      placeholder: "Search options...",
       "aria-label": `${ariaLabel} search`,
     },
   });
@@ -163,9 +183,15 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     const rect = rootEl.getBoundingClientRect();
     const viewportMargin = 12;
     const availableWidth = Math.max(rect.width, viewportWidth - viewportMargin * 2);
-    const preferredWidth = Math.max(rect.width, 520);
-    const cappedPreferredWidth = Math.min(760, preferredWidth);
-    const panelWidth = Math.max(rect.width, Math.min(cappedPreferredWidth, availableWidth));
+    const optionsForSizing = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
+    const estimatedContentWidth = estimatePreferredPanelWidth(optionsForSizing);
+    const minPanelWidth = Math.min(
+      availableWidth,
+      Math.max(rect.width, STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX)
+    );
+    const preferredWidth = Math.max(minPanelWidth, Math.max(rect.width, estimatedContentWidth));
+    const cappedPreferredWidth = Math.min(STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX, preferredWidth);
+    const panelWidth = Math.min(availableWidth, cappedPreferredWidth);
 
     let leftOffset = 0;
     const rightOverflow = rect.left + panelWidth - (viewportWidth - viewportMargin);
@@ -194,7 +220,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       {
         value: currentValue,
         label: currentValue,
-        description: "Unavailable in current provider catalog",
+        description: "Unavailable in current options",
         badge: "Unavailable",
       },
     ];
@@ -209,7 +235,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       triggerEl.title = selected.description || selected.label;
       return;
     }
-    const fallback = currentValue || placeholder || "Select model";
+    const fallback = currentValue || placeholder || "Select option";
     triggerLabelEl.setText(fallback);
     triggerEl.title = fallback;
   };
@@ -225,7 +251,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   const renderOptions = (): void => {
     listEl.empty();
     if (filteredOptions.length === 0) {
-      renderEmptyState(noResultsText || "No matching models.");
+      renderEmptyState(noResultsText || "No matching options.");
       return;
     }
 
@@ -313,7 +339,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
         } catch (error) {
           loadedOptions = [];
           const message = error instanceof Error ? error.message : String(error);
-          renderEmptyState(`Unable to load models (${message}).`);
+          renderEmptyState(`Unable to load options (${message}).`);
         } finally {
           loadingPromise = null;
           updateTriggerLabel();
@@ -332,7 +358,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     positionPanel();
     rootEl.addClass("is-open");
     triggerEl.setAttribute("aria-expanded", "true");
-    renderEmptyState("Loading models...");
+    renderEmptyState("Loading options...");
     await ensureOptionsLoaded(true);
     positionPanel();
     applyFilter("");

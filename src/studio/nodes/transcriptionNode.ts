@@ -8,7 +8,9 @@ export const transcriptionNode: StudioNodeDefinition = {
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "path", type: "text", required: true }],
   outputPorts: [{ id: "text", type: "text" }],
-  configDefaults: {},
+  configDefaults: {
+    textDisplayMode: "rendered",
+  },
   configSchema: {
     fields: [],
     allowUnknownKeys: true,

@@ -1233,7 +1233,6 @@ export class CanvasFlowRunner {
     options.status("Submitting generation job...");
     const runAttemptId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const payloadSignature = stableSerialize({
-      model: options.modelId,
       prompt: options.promptText,
       options: {
         count: options.imageCount,
@@ -1250,7 +1249,6 @@ export class CanvasFlowRunner {
     });
     const idempotencyKey = `images-job:${hashFnv1a(options.runScopeKey)}:${hashFnv1a(payloadSignature)}:${runAttemptId}`;
     const job = await options.client.createGenerationJob({
-      model: options.modelId,
       prompt: options.promptText,
       input_images: uploadedInputRefs,
       options: {

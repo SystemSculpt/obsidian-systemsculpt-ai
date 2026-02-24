@@ -27,6 +27,8 @@ export type PiCommandResult = {
   timedOut: boolean;
 };
 
+export type StudioPiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export type StudioPiCommandRunner = (
   plugin: SystemSculptPlugin,
   args: string[],
@@ -43,6 +45,21 @@ const PI_MODEL_LIST_TIMEOUT_MS = 60_000;
 const PI_GENERATION_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const PI_GENERATION_MAX_ATTEMPTS = 2;
+
+function normalizePiThinkingLevel(rawValue: unknown): StudioPiThinkingLevel | undefined {
+  const normalized = String(rawValue || "").trim().toLowerCase();
+  if (
+    normalized === "off" ||
+    normalized === "minimal" ||
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high" ||
+    normalized === "xhigh"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
 
 function mergeCliPath(rawPath: string): string {
   const segments = String(rawPath || "")
@@ -451,6 +468,7 @@ export async function runStudioLocalPiTextGeneration(options: {
   modelId: string;
   prompt: string;
   systemPrompt?: string;
+  reasoningEffort?: StudioPiThinkingLevel;
 }, runCommand: StudioPiCommandRunner = runStudioPiCommand): Promise<{ text: string; modelId: string }> {
   const modelId = normalizeStudioLocalPiModelId(options.modelId);
   if (!modelId) {
@@ -458,6 +476,10 @@ export async function runStudioLocalPiTextGeneration(options: {
   }
 
   const args = ["--mode", "json", "--print", "--no-session", "--model", modelId];
+  const thinkingLevel = normalizePiThinkingLevel(options.reasoningEffort);
+  if (thinkingLevel) {
+    args.push("--thinking", thinkingLevel);
+  }
   const systemPrompt = String(options.systemPrompt || "").trim();
   if (systemPrompt) {
     args.push("--system-prompt", systemPrompt);

@@ -53,8 +53,18 @@ function normalizeSpacing(value: number | undefined, fallback: number): number {
   return Math.max(0, Number(value));
 }
 
-function getStableNodeSortKey(node: StudioNodeInstance): string {
-  return `${Math.round(node.position.y)}:${Math.round(node.position.x)}:${node.id}`;
+function compareNodeVisualPosition(left: StudioNodeInstance, right: StudioNodeInstance): number {
+  const yDelta = Math.round(left.position.y) - Math.round(right.position.y);
+  if (yDelta !== 0) {
+    return yDelta;
+  }
+
+  const xDelta = Math.round(left.position.x) - Math.round(right.position.x);
+  if (xDelta !== 0) {
+    return xDelta;
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 function buildNodeMap(project: StudioProjectV1): Map<string, StudioNodeInstance> {
@@ -73,9 +83,33 @@ function buildPredecessors(edgeMap: Map<string, Set<string>>): Map<string, Set<s
   return predecessors;
 }
 
+function buildVisualOrderIndex(
+  nodeMetas: NodeMeta[],
+  groupOrderIndex: Map<string, number>
+): Map<string, number> {
+  const ordered = nodeMetas.slice().sort((left, right) => {
+    const positionCompare = compareNodeVisualPosition(left.node, right.node);
+    if (positionCompare !== 0) {
+      return positionCompare;
+    }
+    const leftGroupOrder = groupOrderIndex.get(left.id);
+    const rightGroupOrder = groupOrderIndex.get(right.id);
+    if (
+      Number.isFinite(leftGroupOrder) &&
+      Number.isFinite(rightGroupOrder) &&
+      leftGroupOrder !== rightGroupOrder
+    ) {
+      return Number(leftGroupOrder) - Number(rightGroupOrder);
+    }
+    return left.id.localeCompare(right.id);
+  });
+  return new Map(ordered.map((entry, index) => [entry.id, index] as const));
+}
+
 function computeLayerAssignments(
   nodeMetas: NodeMeta[],
-  successors: Map<string, Set<string>>
+  successors: Map<string, Set<string>>,
+  visualOrderIndex: Map<string, number>
 ): LayerLayoutEntry[] {
   const nodeIds = nodeMetas.map((entry) => entry.id);
   const indegree = new Map<string, number>();
@@ -94,14 +128,17 @@ function computeLayerAssignments(
 
   const unresolved = new Set(nodeIds);
   const stableSort = (ids: string[]): string[] => {
-    const byId = new Map(nodeMetas.map((entry) => [entry.id, entry.node] as const));
     return ids.slice().sort((left, right) => {
-      const leftNode = byId.get(left);
-      const rightNode = byId.get(right);
-      if (!leftNode || !rightNode) {
-        return left.localeCompare(right);
+      const leftVisualOrder = visualOrderIndex.get(left);
+      const rightVisualOrder = visualOrderIndex.get(right);
+      if (
+        Number.isFinite(leftVisualOrder) &&
+        Number.isFinite(rightVisualOrder) &&
+        leftVisualOrder !== rightVisualOrder
+      ) {
+        return Number(leftVisualOrder) - Number(rightVisualOrder);
       }
-      return getStableNodeSortKey(leftNode).localeCompare(getStableNodeSortKey(rightNode));
+      return left.localeCompare(right);
     });
   };
 
@@ -138,7 +175,8 @@ function sortLayerByBarycenter(
   layerNodeIds: string[],
   predecessors: Map<string, Set<string>>,
   prevOrderIndex: Map<string, number>,
-  fallbackNodesById: Map<string, StudioNodeInstance>
+  fallbackNodesById: Map<string, StudioNodeInstance>,
+  visualOrderIndex: Map<string, number>
 ): string[] {
   return layerNodeIds.slice().sort((leftId, rightId) => {
     const leftPredecessors = predecessors.get(leftId) || new Set<string>();
@@ -168,12 +206,22 @@ function sortLayerByBarycenter(
       return 1;
     }
 
+    const leftVisualOrder = visualOrderIndex.get(leftId);
+    const rightVisualOrder = visualOrderIndex.get(rightId);
+    if (
+      Number.isFinite(leftVisualOrder) &&
+      Number.isFinite(rightVisualOrder) &&
+      leftVisualOrder !== rightVisualOrder
+    ) {
+      return Number(leftVisualOrder) - Number(rightVisualOrder);
+    }
+
     const leftNode = fallbackNodesById.get(leftId);
     const rightNode = fallbackNodesById.get(rightId);
     if (!leftNode || !rightNode) {
       return leftId.localeCompare(rightId);
     }
-    return getStableNodeSortKey(leftNode).localeCompare(getStableNodeSortKey(rightNode));
+    return compareNodeVisualPosition(leftNode, rightNode);
   });
 }
 
@@ -206,6 +254,14 @@ export function autoAlignGroupNodes(
 
   const getNodeHeight = options?.getNodeHeight;
   const getNodeWidth = options?.getNodeWidth;
+  const groupOrderIndex = new Map<string, number>();
+  for (let index = 0; index < group.nodeIds.length; index += 1) {
+    const nodeId = String(group.nodeIds[index] || "").trim();
+    if (!nodeId || groupOrderIndex.has(nodeId)) {
+      continue;
+    }
+    groupOrderIndex.set(nodeId, index);
+  }
   const nodeMetas = groupNodeIds.map((nodeId) => {
     const node = nodeMap.get(nodeId);
     if (!node) {
@@ -225,6 +281,7 @@ export function autoAlignGroupNodes(
   if (nodeMetas.length < 2) {
     return { changed: false, movedNodeIds: [] };
   }
+  const visualOrderIndex = buildVisualOrderIndex(nodeMetas, groupOrderIndex);
 
   const successors = new Map<string, Set<string>>();
   const groupNodeSet = new Set(nodeMetas.map((entry) => entry.id));
@@ -243,7 +300,7 @@ export function autoAlignGroupNodes(
     toSet?.add(edge.toNodeId);
   }
 
-  const layerAssignments = computeLayerAssignments(nodeMetas, successors);
+  const layerAssignments = computeLayerAssignments(nodeMetas, successors, visualOrderIndex);
   const nodesByLayer = new Map<number, string[]>();
   for (const assignment of layerAssignments) {
     const layer = nodesByLayer.get(assignment.layerIndex) || [];
@@ -267,7 +324,8 @@ export function autoAlignGroupNodes(
       layerNodeIds,
       predecessors,
       previousLayerOrderIndex,
-      fallbackNodesById
+      fallbackNodesById,
+      visualOrderIndex
     );
     orderedLayers.push(sorted);
     previousLayerOrderIndex = new Map(sorted.map((id, index) => [id, index] as const));

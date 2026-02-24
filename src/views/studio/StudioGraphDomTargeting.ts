@@ -5,7 +5,9 @@ const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
   ".ss-studio-node-context-menu",
   ".ss-studio-simple-context-menu",
   ".ss-studio-group-color-palette",
-  STUDIO_GRAPH_EDITABLE_SELECTOR,
+  ".ss-studio-searchable-select",
+  ".ss-studio-searchable-select-panel",
+  ".ss-studio-searchable-select-list",
 ].join(", ");
 
 export function resolveStudioGraphTargetElement(target: EventTarget | null): Element | null {
@@ -27,6 +29,14 @@ export function isStudioGraphEditableTarget(target: EventTarget | null): boolean
     return false;
   }
   return Boolean(targetEl.closest(`${STUDIO_GRAPH_MENU_SELECTOR}, ${STUDIO_GRAPH_EDITABLE_SELECTOR}`));
+}
+
+export function isStudioGraphEditableFieldTarget(target: EventTarget | null): boolean {
+  const targetEl = resolveStudioGraphTargetElement(target);
+  if (!targetEl) {
+    return false;
+  }
+  return Boolean(targetEl.closest(STUDIO_GRAPH_EDITABLE_SELECTOR));
 }
 
 export function shouldStudioGraphDeferWheelToNativeScroll(target: EventTarget | null): boolean {

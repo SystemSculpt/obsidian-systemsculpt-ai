@@ -20,11 +20,19 @@ type RenderStudioNodeInlineEditorOptions = {
   definition: StudioNodeDefinition;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  renderMarkdownPreview?: (
+    node: StudioNodeInstance,
+    markdown: string,
+    containerEl: HTMLElement
+  ) => Promise<void> | void;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
 };
+
+type StudioTextDisplayMode = "raw" | "rendered";
 
 const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.input",
@@ -54,6 +62,9 @@ const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.text_generation",
   "studio.transcription",
 ]);
+
+const TEXT_DISPLAY_MODE_CONFIG_KEY = "textDisplayMode";
+const FORCE_INLINE_TEXT_RENDERED_MODE = true;
 
 function normalizeNodeKind(kind: string): string {
   return String(kind || "").trim();
@@ -86,6 +97,14 @@ function readEditableNodeText(node: StudioNodeInstance, nodeRunState: StudioNode
   return outputText;
 }
 
+function readTextDisplayMode(node: StudioNodeInstance): StudioTextDisplayMode {
+  if (FORCE_INLINE_TEXT_RENDERED_MODE) {
+    return "rendered";
+  }
+  const raw = readConfigString(node.config[TEXT_DISPLAY_MODE_CONFIG_KEY]).trim().toLowerCase();
+  return raw === "raw" ? "raw" : "rendered";
+}
+
 function isInlineTextNodeKind(kind: string): boolean {
   const normalizedKind = normalizeNodeKind(kind);
   return (
@@ -99,6 +118,22 @@ function isInlineTextNodeKind(kind: string): boolean {
 function normalizeFieldLabel(field: StudioNodeConfigFieldDefinition): string {
   const raw = String(field.label || field.key || "").trim();
   return raw.toUpperCase();
+}
+
+function fieldKeyToCssSuffix(key: string): string {
+  return String(key || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefinition): string {
+  if (field.required !== true) {
+    return "Default";
+  }
+  const raw = String(field.label || field.key || "option").trim().toLowerCase();
+  return raw ? `Select ${raw}` : "Select option";
 }
 
 function buildOrderedFieldList(options: {
@@ -309,8 +344,8 @@ function renderInlineConfigSelectField(options: {
       ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
       value: readConfigString(node.config[field.key]),
       disabled: interactionLocked,
-      placeholder: field.required ? "Select model" : "Default",
-      noResultsText: "No matching models.",
+      placeholder: resolveSearchableSelectPlaceholder(field),
+      noResultsText: "No matching options.",
       loadOptions,
       onValueChange: (value) => {
         node.config[field.key] = value;
@@ -646,6 +681,7 @@ function renderInlineConfigPanel(options: {
   orderedFieldKeys: string[];
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  panelClassName?: string;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
@@ -658,6 +694,7 @@ function renderInlineConfigPanel(options: {
     orderedFieldKeys,
     interactionLocked,
     onNodeConfigMutated,
+    panelClassName,
     resolveDynamicSelectOptions,
   } = options;
 
@@ -670,6 +707,9 @@ function renderInlineConfigPanel(options: {
   }
 
   const panelEl = nodeEl.createDiv({ cls: "ss-studio-node-inline-config" });
+  if (panelClassName) {
+    panelEl.addClass(panelClassName);
+  }
   const gridEl = panelEl.createDiv({ cls: "ss-studio-node-inline-config-grid" });
   const fieldWrappers = new Map<string, { field: StudioNodeConfigFieldDefinition; wrapper: HTMLElement }>();
   const refreshVisibilityState = (): void => {
@@ -687,8 +727,9 @@ function renderInlineConfigPanel(options: {
 
   for (const field of fields) {
     const fullWidth = isInlineConfigFieldFullWidth(field);
+    const fieldKeySuffix = fieldKeyToCssSuffix(field.key);
     const fieldEl = gridEl.createDiv({
-      cls: `ss-studio-node-inline-config-field${fullWidth ? " is-full" : ""}`,
+      cls: `ss-studio-node-inline-config-field ss-studio-node-inline-config-field--${fieldKeySuffix}${fullWidth ? " is-full" : ""}`,
     });
     fieldWrappers.set(field.key, { field, wrapper: fieldEl });
     fieldEl.createDiv({
@@ -806,53 +847,212 @@ function renderInlineConfigPanel(options: {
   return true;
 }
 
+function resolveInlineTextEditorLabel(nodeKind: string): string {
+  return nodeKind === "studio.transcription" ? "TRANSCRIPT" : "TEXT";
+}
+
+function resolveInlineTextEditorPlaceholder(nodeKind: string): string {
+  if (nodeKind === "studio.transcription") {
+    return "Transcribed text appears here...";
+  }
+  if (nodeKind === "studio.note") {
+    return "Edit note text...";
+  }
+  if (nodeKind === "studio.text_generation") {
+    return "Generated text appears here...";
+  }
+  return "Write or paste text...";
+}
+
+function resolveInlineTextEditorAriaLabel(node: StudioNodeInstance): string {
+  if (node.kind === "studio.transcription") {
+    return `${node.title || "Transcription"} transcript`;
+  }
+  if (node.kind === "studio.note") {
+    return `${node.title || "Note"} content`;
+  }
+  if (node.kind === "studio.text_generation") {
+    return `${node.title || "Text Generation"} text`;
+  }
+  return `${node.title || "Text"} content`;
+}
+
+function resolveInlineRenderedEmptyState(nodeKind: string): string {
+  if (nodeKind === "studio.note") {
+    return "Note is empty.";
+  }
+  if (nodeKind === "studio.text_generation") {
+    return "Generated text appears here after a run.";
+  }
+  return "No markdown content yet.";
+}
+
 function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions): boolean {
-  const { nodeEl, node, nodeRunState, interactionLocked, onNodeConfigMutated } = options;
+  const {
+    nodeEl,
+    node,
+    nodeRunState,
+    interactionLocked,
+    onNodeConfigMutated,
+    onNodePresentationMutated,
+    renderMarkdownPreview,
+  } = options;
   if (!isInlineTextNodeKind(node.kind)) {
     return false;
   }
   const outputLocked = node.kind === "studio.text_generation" && node.config.lockOutput === true;
+  const editorReadOnly = interactionLocked || outputLocked;
+  let textDisplayMode = readTextDisplayMode(node);
+  let previewRenderRequest = 0;
 
-  const editorLabel = node.kind === "studio.transcription"
-    ? "TRANSCRIPT"
-    : node.kind === "studio.note"
-      ? "NOTE"
-    : node.kind === "studio.text_generation"
-      ? "TEXT"
-      : "TEXT";
   const editorWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-text-editor-wrap" });
   editorWrapEl.createDiv({
     cls: "ss-studio-node-text-editor-label",
-    text: editorLabel,
+    text: resolveInlineTextEditorLabel(node.kind),
   });
-  const textEditorEl = editorWrapEl.createEl("textarea", {
+
+  const controlsEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-controls" });
+  const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
+  modeToggleEl.createEl("span", {
+    cls: "ss-studio-node-text-display-mode-label",
+    text: "Mode",
+  });
+
+  const rawModeButtonEl = modeToggleEl.createEl("button", {
+    cls: "ss-studio-node-text-display-mode-button",
+    text: "Raw",
+    attr: {
+      "aria-label": "Show raw markdown source",
+    },
+  });
+  rawModeButtonEl.type = "button";
+  rawModeButtonEl.disabled = interactionLocked;
+
+  const renderedModeButtonEl = modeToggleEl.createEl("button", {
+    cls: "ss-studio-node-text-display-mode-button",
+    text: "Rendered",
+    attr: {
+      "aria-label": "Show rendered markdown preview",
+    },
+  });
+  renderedModeButtonEl.type = "button";
+  renderedModeButtonEl.disabled = interactionLocked;
+
+  const rawSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-surface" });
+  const textEditorEl = rawSurfaceEl.createEl("textarea", {
     cls: "ss-studio-node-text-editor",
     attr: {
-      placeholder:
-        node.kind === "studio.transcription"
-          ? "Transcribed text appears here..."
-          : node.kind === "studio.note"
-            ? "Edit note text..."
-          : node.kind === "studio.text_generation"
-            ? "Generated text appears here..."
-            : "Write or paste text...",
-      "aria-label":
-        node.kind === "studio.transcription"
-          ? `${node.title || "Transcription"} transcript`
-          : node.kind === "studio.note"
-            ? `${node.title || "Note"} content`
-          : node.kind === "studio.text_generation"
-            ? `${node.title || "Text Generation"} text`
-            : `${node.title || "Text"} content`,
+      placeholder: resolveInlineTextEditorPlaceholder(node.kind),
+      "aria-label": resolveInlineTextEditorAriaLabel(node),
     },
   });
   textEditorEl.value = readEditableNodeText(node, nodeRunState);
-  textEditorEl.disabled = interactionLocked || outputLocked;
-  textEditorEl.style.minHeight = "240px";
+  textEditorEl.disabled = editorReadOnly;
   textEditorEl.addEventListener("input", (event) => {
     node.config.value = (event.target as HTMLTextAreaElement).value;
     onNodeConfigMutated(node);
   });
+
+  const renderedSurfaceEl = editorWrapEl.createDiv({
+    cls: "ss-studio-node-text-rendered is-hidden",
+    attr: {
+      "aria-label": `${resolveInlineTextEditorAriaLabel(node)} rendered markdown`,
+    },
+  });
+  renderedSurfaceEl.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+  renderedSurfaceEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  renderedSurfaceEl.addEventListener("wheel", (event) => {
+    event.stopPropagation();
+  });
+
+  const commitPresentationMutation = (): void => {
+    if (onNodePresentationMutated) {
+      onNodePresentationMutated(node);
+      return;
+    }
+    onNodeConfigMutated(node);
+  };
+
+  const renderMarkdownSurface = (): void => {
+    const content = textEditorEl.value;
+    renderedSurfaceEl.empty();
+    if (!content.trim()) {
+      renderedSurfaceEl.createDiv({
+        cls: "ss-studio-node-text-rendered-empty",
+        text: resolveInlineRenderedEmptyState(node.kind),
+      });
+      return;
+    }
+
+    if (!renderMarkdownPreview) {
+      renderedSurfaceEl.setText(content);
+      return;
+    }
+
+    const currentRenderRequest = previewRenderRequest + 1;
+    previewRenderRequest = currentRenderRequest;
+    void Promise.resolve(renderMarkdownPreview(node, content, renderedSurfaceEl)).catch(() => {
+      if (currentRenderRequest !== previewRenderRequest) {
+        return;
+      }
+      renderedSurfaceEl.empty();
+      renderedSurfaceEl.setText(content);
+    });
+  };
+
+  const syncRenderedSurfaceHeightToRaw = (): void => {
+    const rawHeight = Math.round(textEditorEl.getBoundingClientRect().height);
+    if (rawHeight > 0) {
+      renderedSurfaceEl.style.height = `${rawHeight}px`;
+      return;
+    }
+    renderedSurfaceEl.style.removeProperty("height");
+  };
+
+  const applyDisplayMode = (): void => {
+    const showRaw = textDisplayMode === "raw";
+    if (!showRaw) {
+      syncRenderedSurfaceHeightToRaw();
+      renderMarkdownSurface();
+    }
+    rawSurfaceEl.toggleClass("is-hidden", !showRaw);
+    renderedSurfaceEl.toggleClass("is-hidden", showRaw);
+    rawModeButtonEl.classList.toggle("is-active", showRaw);
+    renderedModeButtonEl.classList.toggle("is-active", !showRaw);
+    rawModeButtonEl.setAttr("aria-pressed", showRaw ? "true" : "false");
+    renderedModeButtonEl.setAttr("aria-pressed", showRaw ? "false" : "true");
+    textEditorEl.disabled = editorReadOnly || !showRaw;
+  };
+
+  rawModeButtonEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (interactionLocked || textDisplayMode === "raw") {
+      return;
+    }
+    textDisplayMode = "raw";
+    node.config[TEXT_DISPLAY_MODE_CONFIG_KEY] = "raw";
+    commitPresentationMutation();
+    applyDisplayMode();
+  });
+
+  renderedModeButtonEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (interactionLocked || textDisplayMode === "rendered") {
+      return;
+    }
+    textDisplayMode = "rendered";
+    node.config[TEXT_DISPLAY_MODE_CONFIG_KEY] = "rendered";
+    commitPresentationMutation();
+    applyDisplayMode();
+  });
+
+  applyDisplayMode();
   return true;
 }
 
@@ -921,9 +1121,10 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["sourceMode", "systemPrompt", "modelId", "localModelId"],
+      orderedFieldKeys: ["sourceMode", "modelId", "localModelId", "reasoningEffort", "systemPrompt"],
       interactionLocked,
       onNodeConfigMutated,
+      panelClassName: "ss-studio-node-inline-config--text-generation",
       resolveDynamicSelectOptions,
     });
   }

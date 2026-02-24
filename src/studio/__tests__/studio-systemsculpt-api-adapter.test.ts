@@ -104,9 +104,9 @@ describe("StudioApiExecutionAdapter", () => {
       }),
     ]);
 
-    expect(first).toEqual({ text: "ok", modelId: "openai/gpt-5-mini" });
-    expect(second).toEqual({ text: "ok", modelId: "openai/gpt-5-mini" });
-    expect(third).toEqual({ text: "ok", modelId: "openai/gpt-5-mini" });
+    expect(first).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
+    expect(second).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
+    expect(third).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
     expect(maxInFlightTurns).toBe(1);
     expect(inFlightTurns).toBe(0);
     expect(seenChatIds).toEqual([
@@ -114,6 +114,41 @@ describe("StudioApiExecutionAdapter", () => {
       "studio:run_test:node_b",
       "studio:run_test:node_c",
     ]);
+  });
+
+  it("ignores client model and reasoning controls in SystemSculpt mode", async () => {
+    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
+    const startOrContinueTurn = jest.fn(async () => ({ ok: true } as Response));
+
+    (adapter as any).sessionClient = {
+      updateConfig: jest.fn(),
+      startOrContinueTurn,
+    };
+    (adapter as any).streamer = {
+      streamResponse: jest.fn(() =>
+        (async function* () {
+          yield { type: "content" as const, text: "ok" };
+        })()
+      ),
+    };
+
+    await adapter.generateText({
+      prompt: "Summarize this transcript.",
+      modelId: "openai/gpt-5-mini",
+      reasoningEffort: "xhigh",
+      runId: "run_test",
+      nodeId: "node_reasoning",
+      projectPath: "Studio/Test.systemsculpt",
+    });
+
+    const turnArgs = startOrContinueTurn.mock.calls[0]?.[0];
+    expect(turnArgs).toMatchObject({
+      chatId: "studio:run_test:node_reasoning",
+      pluginVersion: "4.13.0",
+      messages: expect.any(Array),
+    });
+    expect(turnArgs).not.toHaveProperty("modelId");
+    expect(turnArgs).not.toHaveProperty("reasoningEffort");
   });
 
   it("surfaces lock_until details for turn_in_flight conflicts", async () => {
@@ -168,6 +203,7 @@ describe("StudioApiExecutionAdapter", () => {
       prompt: "Summarize this transcript.",
       sourceMode: "local_pi",
       localModelId: "google/gemini-2.5-flash",
+      reasoningEffort: "xhigh",
       runId: "run_local",
       nodeId: "node_local",
       projectPath: "Studio/Test.systemsculpt",
@@ -178,6 +214,7 @@ describe("StudioApiExecutionAdapter", () => {
         plugin,
         modelId: "google/gemini-2.5-flash",
         prompt: "Summarize this transcript.",
+        reasoningEffort: "xhigh",
       })
     );
     expect(plugin.aiService.streamMessage).not.toHaveBeenCalled();
@@ -339,6 +376,12 @@ describe("StudioApiExecutionAdapter", () => {
             sha256: "input-hash-0",
           },
         ],
+      }),
+      expect.any(Object)
+    );
+    expect(imageClient.createGenerationJob).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        model: expect.anything(),
       }),
       expect.any(Object)
     );

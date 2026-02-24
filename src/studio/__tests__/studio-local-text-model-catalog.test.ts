@@ -143,6 +143,47 @@ describe("StudioLocalTextModelCatalog", () => {
     });
   });
 
+  it("passes Pi thinking level when reasoning effort is configured", async () => {
+    const runCommand = createPiRunner({
+      exitCode: 0,
+      timedOut: false,
+      stderr: "",
+      stdout: [
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}}',
+      ].join("\n"),
+    });
+
+    const result = await runStudioLocalPiTextGeneration(
+      {
+        plugin,
+        modelId: "google/gemini-2.5-flash",
+        prompt: "Say hello",
+        reasoningEffort: "xhigh",
+      },
+      runCommand
+    );
+
+    expect(runCommand).toHaveBeenCalledWith(
+      plugin,
+      [
+        "--mode",
+        "json",
+        "--print",
+        "--no-session",
+        "--model",
+        "google/gemini-2.5-flash",
+        "--thinking",
+        "xhigh",
+        "Say hello",
+      ],
+      300_000
+    );
+    expect(result).toEqual({
+      text: "hello local pi",
+      modelId: "google/gemini-2.5-flash",
+    });
+  });
+
   it("surfaces pi runtime errors from assistant output", async () => {
     const runCommand = createPiRunner({
       exitCode: 0,

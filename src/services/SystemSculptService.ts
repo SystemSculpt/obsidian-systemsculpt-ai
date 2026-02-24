@@ -665,6 +665,10 @@ export class SystemSculptService {
       baseUrl: this.baseUrl,
       licenseKey: this.settings.licenseKey,
       request: (input) => this.requestAgentV2(input),
+      defaultHeaders: {
+        "x-systemsculpt-surface": "chat",
+      },
+      managedInference: true,
     });
   }
 
@@ -1552,7 +1556,6 @@ export class SystemSculptService {
       const endpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`;
       const piTools = normalizePiTools(requestTools);
       const requestBody = {
-        modelId: serverModelId,
         messages: apiMessages,
         tools: piTools,
         stream: true,
@@ -1586,7 +1589,6 @@ export class SystemSculptService {
         try {
           const response = await this.agentSessionClient.startOrContinueTurn({
             chatId: chatSessionId,
-            modelId: serverModelId,
             messages: apiMessages,
             tools: piTools,
             pluginVersion: (this.plugin as any)?.manifest?.version,

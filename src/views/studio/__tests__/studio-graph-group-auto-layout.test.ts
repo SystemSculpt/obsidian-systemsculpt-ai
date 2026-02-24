@@ -123,7 +123,7 @@ describe("StudioGraphGroupAutoLayout", () => {
     expect(b.x).toBeLessThan(c.x);
   });
 
-  it("keeps disconnected nodes deterministic in a shared layer", () => {
+  it("keeps disconnected nodes deterministic in current visual order", () => {
     const project = createProject();
     project.graph.groups = [
       {

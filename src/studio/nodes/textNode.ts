@@ -10,6 +10,7 @@ export const textNode: StudioNodeDefinition = {
   outputPorts: [{ id: "text", type: "text" }],
   configDefaults: {
     value: "",
+    textDisplayMode: "rendered",
   },
   configSchema: {
     fields: [

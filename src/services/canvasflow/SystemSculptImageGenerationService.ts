@@ -88,7 +88,6 @@ export type SystemSculptPrepareInputImageUploadsResponse = {
 };
 
 export type SystemSculptCreateGenerationJobRequest = {
-  model?: string;
   prompt: string;
   input_images?: SystemSculptImageInput[];
   options?: {
@@ -948,10 +947,6 @@ export class SystemSculptImageGenerationService {
       prompt: request.prompt,
       input_images: request.input_images || [],
     };
-
-    if (request.model && String(request.model).trim()) {
-      payload.model = String(request.model).trim();
-    }
 
     if (request.options) {
       const optionsPayload: Record<string, unknown> = {};

@@ -54,6 +54,12 @@ type RenderStudioGraphNodeCardOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  renderMarkdownPreview?: (
+    node: StudioNodeInstance,
+    markdown: string,
+    containerEl: HTMLElement
+  ) => Promise<void> | void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
@@ -382,6 +388,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onNodePresentationMutated,
+    renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
     isLabelEditing,
@@ -658,6 +666,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       definition,
       interactionLocked,
       onNodeConfigMutated,
+      onNodePresentationMutated,
+      renderMarkdownPreview,
       resolveDynamicSelectOptions,
     });
 

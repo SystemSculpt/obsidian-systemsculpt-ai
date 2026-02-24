@@ -84,6 +84,14 @@ function normalizeInspectorScale(value: number): number {
   return Math.min(MAX_INSPECTOR_SCALE, Math.max(MIN_INSPECTOR_SCALE, value));
 }
 
+function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefinition): string {
+  if (field.required !== true) {
+    return "Default";
+  }
+  const raw = String(field.label || field.key || "option").trim().toLowerCase();
+  return raw ? `Select ${raw}` : "Select option";
+}
+
 function clampInspectorSize(
   viewportEl: HTMLElement,
   layout: StudioNodeInspectorLayout,
@@ -781,8 +789,8 @@ export class StudioNodeInspectorOverlay {
           ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
           value: typeof initialValue === "string" ? initialValue : "",
           disabled,
-          placeholder: field.required === true ? "Select model" : "Default",
-          noResultsText: "No matching models.",
+          placeholder: resolveSearchableSelectPlaceholder(field),
+          noResultsText: "No matching options.",
           loadOptions: async (): Promise<StudioNodeConfigSelectOption[]> => {
             if (field.optionsSource && this.host.resolveDynamicSelectOptions) {
               const dynamicOptions = await this.host.resolveDynamicSelectOptions(field.optionsSource, node);

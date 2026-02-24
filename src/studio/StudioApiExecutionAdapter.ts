@@ -15,6 +15,7 @@ import type {
   StudioTextGenerationRequest,
   StudioTextGenerationResult,
   StudioTextProviderMode,
+  StudioTextReasoningEffort,
   StudioTranscriptionRequest,
   StudioTranscriptionResult,
 } from "./types";
@@ -26,10 +27,8 @@ import {
 import { randomId } from "./utils";
 
 const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
-const STUDIO_IMAGE_MODEL_ALIASES: Record<string, string> = {
-  "google/nano-banana-pro": "google/gemini-3-pro-image-preview",
-  "google/nano-banana": "google/gemini-3-pro-image-preview",
-};
+const STUDIO_FIXED_IMAGE_MODEL_ID = "bytedance-seed/seedream-4.5";
+const STUDIO_MANAGED_TEXT_MODEL_ID = "systemsculpt/managed";
 
 function hashFnv1aHex(value: string): string {
   let hash = 0x811c9dc5;
@@ -51,9 +50,9 @@ function sanitizeIdempotencyToken(value: string, maxLength: number): string {
   return normalized.slice(0, maxLength);
 }
 
-function buildStudioImageIdempotencyKey(request: StudioImageGenerationRequest, modelId: string): string {
+function buildStudioImageIdempotencyKey(request: StudioImageGenerationRequest): string {
   const runToken = sanitizeIdempotencyToken(request.runId, 24);
-  const modelToken = sanitizeIdempotencyToken(modelId, 28);
+  const modelToken = sanitizeIdempotencyToken(STUDIO_FIXED_IMAGE_MODEL_ID, 28);
   const imageSignature = (request.inputImages || [])
     .map((asset) => `${String(asset.hash || "").toLowerCase()}:${Math.max(0, Number(asset.sizeBytes) || 0)}`)
     .join("|");
@@ -110,6 +109,10 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       baseUrl: this.apiBaseUrl(),
       licenseKey: this.licenseKey(),
       request: (input) => this.plugin.aiService.requestAgentSession(input),
+      defaultHeaders: {
+        "x-systemsculpt-surface": "studio",
+      },
+      managedInference: true,
     });
   }
 
@@ -117,30 +120,24 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     return resolveSystemSculptApiBaseUrl(this.plugin.settings.serverUrl);
   }
 
-  private normalizeStudioModelId(raw: string): string {
-    const trimmed = String(raw || "").trim();
-    if (!trimmed) {
-      return "";
-    }
-
-    if (trimmed.includes("@@")) {
-      const [providerIdRaw, upstreamModelRaw] = trimmed.split("@@", 2);
-      const providerId = providerIdRaw.trim().toLowerCase();
-      const upstreamModel = upstreamModelRaw.trim();
-      if (providerId !== "systemsculpt") {
-        throw new Error(
-          `Text generation source is set to SystemSculpt, but model "${trimmed}" belongs to provider "${providerIdRaw}". Switch the node source to Local (Pi) for non-SystemSculpt providers.`
-        );
-      }
-      return upstreamModel;
-    }
-
-    return trimmed;
-  }
-
   private readTextProviderMode(request: StudioTextGenerationRequest): StudioTextProviderMode {
     const normalized = String(request.sourceMode || "systemsculpt").trim().toLowerCase();
     return normalized === "local_pi" ? "local_pi" : "systemsculpt";
+  }
+
+  private readReasoningEffort(request: StudioTextGenerationRequest): StudioTextReasoningEffort | undefined {
+    const normalized = String(request.reasoningEffort || "").trim().toLowerCase();
+    if (
+      normalized === "off" ||
+      normalized === "minimal" ||
+      normalized === "low" ||
+      normalized === "medium" ||
+      normalized === "high" ||
+      normalized === "xhigh"
+    ) {
+      return normalized;
+    }
+    return undefined;
   }
 
   private async resolveLocalTextModelId(request: StudioTextGenerationRequest): Promise<string> {
@@ -151,15 +148,6 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       );
     }
     return normalizeStudioLocalPiModelId(rawLocalModelId);
-  }
-
-  private normalizeStudioImageModelId(raw: string): string {
-    const normalized = this.normalizeStudioModelId(raw);
-    if (!normalized) {
-      return "";
-    }
-    const alias = STUDIO_IMAGE_MODEL_ALIASES[normalized.toLowerCase()];
-    return alias || normalized;
   }
 
   private licenseKey(): string {
@@ -366,6 +354,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
 
   async generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult> {
     const sourceMode = this.readTextProviderMode(request);
+    const reasoningEffort = this.readReasoningEffort(request);
     const systemPrompt = String(request.systemPrompt || "").trim();
     const messages: Array<{ role: "system" | "user"; content: string; message_id: string }> = [];
     if (systemPrompt) {
@@ -389,6 +378,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
           modelId: localModelId,
           prompt: request.prompt,
           systemPrompt,
+          reasoningEffort,
         });
         return result;
       } catch (error) {
@@ -398,18 +388,12 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     }
 
     this.refreshSessionConfig();
-    const modelId = this.normalizeStudioModelId(
-      String(request.modelId || this.plugin.settings.selectedModelId || "")
-    );
-    if (!modelId) {
-      throw new Error("Text generation requires a model ID.");
-    }
+    const modelId = STUDIO_MANAGED_TEXT_MODEL_ID;
 
     // API turn locking is account-scoped server-side, so serialize Studio text turns locally.
     return this.runTextTurnExclusive(async () => {
       const response = await this.sessionClient.startOrContinueTurn({
         chatId: `studio:${request.runId}:${request.nodeId}`,
-        modelId,
         messages,
         pluginVersion: this.plugin.manifest.version,
       });
@@ -464,17 +448,13 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {
-    const modelId =
-      this.normalizeStudioImageModelId(
-        String(request.modelId || this.plugin.settings.imageGenerationDefaultModelId || "")
-      ) || "openai/gpt-5-image-mini";
+    const modelId = STUDIO_FIXED_IMAGE_MODEL_ID;
     const imageClient = this.ensureImageClient();
     const uploadedInputImages = await this.uploadInputImagesForStudioGeneration(imageClient, request.inputImages);
     let create: Awaited<ReturnType<SystemSculptImageGenerationService["createGenerationJob"]>>;
     try {
       create = await imageClient.createGenerationJob(
         {
-          model: modelId,
           prompt: request.prompt,
           input_images: uploadedInputImages,
           options: {
@@ -483,7 +463,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
           },
         },
         {
-          idempotencyKey: buildStudioImageIdempotencyKey(request, modelId),
+          idempotencyKey: buildStudioImageIdempotencyKey(request),
         }
       );
     } catch (error) {

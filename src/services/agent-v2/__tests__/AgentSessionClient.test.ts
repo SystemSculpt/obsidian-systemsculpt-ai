@@ -9,7 +9,14 @@ type RequestRecord = {
 };
 
 describe("AgentSessionClient", () => {
-  function createClient(records: RequestRecord[], options?: { sessionStatus?: number }) {
+  function createClient(
+    records: RequestRecord[],
+    options?: {
+      sessionStatus?: number;
+      managedInference?: boolean;
+      defaultHeaders?: Record<string, string>;
+    }
+  ) {
     const sessionStatus = options?.sessionStatus ?? 200;
     const request = jest.fn(async (input: {
       url: string;
@@ -55,6 +62,8 @@ describe("AgentSessionClient", () => {
       baseUrl: "https://api.systemsculpt.com/api/v1",
       licenseKey: "license_abc",
       request,
+      managedInference: options?.managedInference,
+      defaultHeaders: options?.defaultHeaders,
     });
 
     return { client, request };
@@ -92,6 +101,78 @@ describe("AgentSessionClient", () => {
           },
         ],
       },
+      stream: true,
+    });
+  });
+
+  it("omits model and reasoning controls when managed inference is enabled", async () => {
+    const records: RequestRecord[] = [];
+    const { client } = createClient(records, {
+      managedInference: true,
+      defaultHeaders: {
+        "x-systemsculpt-surface": "chat",
+      },
+    });
+
+    await client.startOrContinueTurn({
+      chatId: "chat_managed",
+      pluginVersion: "4.8.1",
+      reasoningEffort: "xhigh",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+    });
+
+    expect(records).toHaveLength(2);
+    expect(records[0].headers?.["Idempotency-Key"]).toContain(":managed");
+    expect(records[0].headers?.["x-systemsculpt-surface"]).toBe("chat");
+    expect(records[0].body).toEqual({
+      client: {
+        platform: "obsidian",
+        pluginVersion: "4.8.1",
+      },
+    });
+
+    expect(records[1].headers?.["x-systemsculpt-surface"]).toBe("chat");
+    expect(records[1].body).toMatchObject({
+      context: expect.any(Object),
+      stream: true,
+    });
+    expect(records[1].body).not.toHaveProperty("modelId");
+    expect(records[1].body).not.toHaveProperty("reasoningEffort");
+  });
+
+  it("requires modelId when managed inference is disabled", async () => {
+    const records: RequestRecord[] = [];
+    const { client } = createClient(records);
+
+    await expect(
+      client.startOrContinueTurn({
+        chatId: "chat_missing_model",
+        pluginVersion: "4.8.1",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+      })
+    ).rejects.toThrow("modelId is required when managed inference is disabled.");
+
+    expect(records).toHaveLength(0);
+  });
+
+  it("includes reasoning effort in the turn payload when provided", async () => {
+    const records: RequestRecord[] = [];
+    const { client } = createClient(records);
+
+    await client.startOrContinueTurn({
+      chatId: "chat_reasoning",
+      modelId: "systemsculpt/ai-agent",
+      pluginVersion: "4.8.1",
+      reasoningEffort: "xhigh",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+    });
+
+    expect(records[1].body).toMatchObject({
+      modelId: "systemsculpt/ai-agent",
+      reasoningEffort: "xhigh",
       stream: true,
     });
   });

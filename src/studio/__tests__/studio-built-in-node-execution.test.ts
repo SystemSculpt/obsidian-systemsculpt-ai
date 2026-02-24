@@ -268,6 +268,38 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.text).toBe("Generated body");
   });
 
+  it("passes configured reasoning effort for SystemSculpt text generation", async () => {
+    const definition = registry.get("studio.text_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({
+      text: "Generated body",
+      modelId: "openai/gpt-5-mini",
+    }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "text-node",
+        kind: "studio.text_generation",
+        config: {
+          modelId: "openai/gpt-5-mini",
+          reasoningEffort: "xhigh",
+        },
+        inputs: {
+          prompt: "Plain user prompt",
+        },
+        generateTextMock,
+      })
+    );
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMode: "systemsculpt",
+        modelId: "openai/gpt-5-mini",
+        reasoningEffort: "xhigh",
+      })
+    );
+  });
+
   it("routes text generation to Local Pi when source mode is local_pi", async () => {
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).toBeDefined();
@@ -284,6 +316,7 @@ describe("Studio built-in text/image node execution", () => {
           sourceMode: "local_pi",
           localModelId: "ollama@@llama3.1:8b",
           modelId: "openai/gpt-5-mini",
+          reasoningEffort: "xhigh",
         },
         inputs: {
           prompt: "Use local model.",
@@ -298,6 +331,7 @@ describe("Studio built-in text/image node execution", () => {
         sourceMode: "local_pi",
         localModelId: "ollama@@llama3.1:8b",
         modelId: "openai/gpt-5-mini",
+        reasoningEffort: "xhigh",
       })
     );
     expect(result.outputs.text).toBe("Local output");
@@ -371,6 +405,7 @@ describe("Studio built-in text/image node execution", () => {
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
     expect(typeof imageRequest.prompt).toBe("string");
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
+    expect(imageRequest.modelId).toBe("bytedance-seed/seedream-4.5");
   });
 
   it("materializes plain image prompts when system prompt is configured on the node", async () => {

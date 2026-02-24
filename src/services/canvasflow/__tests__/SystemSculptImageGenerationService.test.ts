@@ -77,7 +77,6 @@ describe("SystemSculptImageGenerationService", () => {
     });
 
     const response = await service.createGenerationJob({
-      model: "openai/gpt-5-image-mini",
       prompt: "A tiny robot",
       input_images: [],
       options: {

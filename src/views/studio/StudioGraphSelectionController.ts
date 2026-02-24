@@ -13,7 +13,10 @@ import {
   STUDIO_GRAPH_CANVAS_MAX_WIDTH,
 } from "./graph-v3/StudioGraphCanvasBounds";
 import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
-import { shouldStudioGraphDeferWheelToNativeScroll } from "./StudioGraphDomTargeting";
+import {
+  isStudioGraphEditableFieldTarget,
+  shouldStudioGraphDeferWheelToNativeScroll,
+} from "./StudioGraphDomTargeting";
 
 type GraphPoint = {
   x: number;
@@ -411,15 +414,18 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    if (this.shouldDeferWheelToOverlay(event)) {
-      return;
-    }
-
     const shouldZoom = event.ctrlKey || event.metaKey;
     if (shouldZoom) {
+      if (this.shouldDeferWheelToOverlay(event)) {
+        return;
+      }
       event.preventDefault();
       const scaleFactor = Math.exp(-event.deltaY * 0.0025);
       this.zoomGraphAtClientPoint(this.graphZoom * scaleFactor, event.clientX, event.clientY);
+      return;
+    }
+
+    if (this.shouldDeferWheelToOverlay(event) || isStudioGraphEditableFieldTarget(event.target)) {
       return;
     }
 

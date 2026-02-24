@@ -28,9 +28,10 @@ type ApiLikeMessage = {
 
 type StartOrContinueArgs = {
   chatId: string;
-  modelId: string;
+  modelId?: string;
   messages: unknown[];
   tools?: unknown[];
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   pluginVersion?: string;
 };
 
@@ -104,6 +105,7 @@ export class AgentSessionClient {
   private licenseKey: string;
   private readonly requestFn: AgentSessionRequestFn;
   private readonly defaultHeaders: Record<string, string>;
+  private readonly managedInference: boolean;
   private readonly sessionByChatId = new Map<string, ChatSessionState>();
 
   constructor(options: {
@@ -111,11 +113,13 @@ export class AgentSessionClient {
     licenseKey: string;
     request?: AgentSessionRequestFn;
     defaultHeaders?: Record<string, string>;
+    managedInference?: boolean;
   }) {
     this.baseUrl = options.baseUrl;
     this.licenseKey = options.licenseKey;
     this.requestFn = options.request ?? this.defaultRequest.bind(this);
     this.defaultHeaders = { ...(options.defaultHeaders || {}) };
+    this.managedInference = options.managedInference === true;
   }
 
   public updateConfig(next: { baseUrl: string; licenseKey: string }): void {
@@ -129,9 +133,20 @@ export class AgentSessionClient {
 
   public async startOrContinueTurn(args: StartOrContinueArgs): Promise<Response> {
     const pluginVersion = this.normalizePluginVersion(args.pluginVersion);
-    const session = await this.ensureSession(args.chatId, args.modelId, pluginVersion);
+    const modelId = this.normalizeModelId(args.modelId);
+    if (!this.managedInference && !modelId) {
+      throw new Error("modelId is required when managed inference is disabled.");
+    }
+    const contextModelId = modelId || "systemsculpt/managed";
+    const session = await this.ensureSession(args.chatId, modelId, pluginVersion);
     const sessionId = session.sessionId;
-    const idempotencyKey = this.buildTurnIdempotencyKey(args, sessionId);
+    const idempotencyKey = this.buildTurnIdempotencyKey(
+      {
+        ...args,
+        modelId,
+      },
+      sessionId
+    );
 
     const turnResponse = await this.requestFn({
       url: this.endpoint(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS(sessionId)),
@@ -142,8 +157,11 @@ export class AgentSessionClient {
         "Idempotency-Key": idempotencyKey,
       },
       body: {
-        modelId: args.modelId,
-        context: this.buildPiContext(args.messages, args.tools || [], args.modelId),
+        ...(!this.managedInference && modelId ? { modelId } : {}),
+        ...(!this.managedInference && args.reasoningEffort
+          ? { reasoningEffort: args.reasoningEffort }
+          : {}),
+        context: this.buildPiContext(args.messages, args.tools || [], contextModelId),
         stream: true,
       },
       stream: true,
@@ -165,10 +183,10 @@ export class AgentSessionClient {
       headers: {
         ...this.defaultHeaders,
         "x-plugin-version": pluginVersion,
-        "Idempotency-Key": `pi-session:${chatId}:${modelId}`,
+        "Idempotency-Key": `pi-session:${chatId}:${this.managedInference ? "managed" : modelId}`,
       },
       body: {
-        modelId,
+        ...(!this.managedInference ? { modelId } : {}),
         client: {
           platform: "obsidian",
           pluginVersion,
@@ -469,10 +487,14 @@ export class AgentSessionClient {
     return pluginVersion || "0.0.0";
   }
 
+  private normalizeModelId(raw: string | undefined): string {
+    return asString(raw).trim();
+  }
+
   private buildTurnIdempotencyKey(args: StartOrContinueArgs, sessionId: string): string {
     const payload = JSON.stringify({
       chatId: args.chatId,
-      modelId: args.modelId,
+      modelId: this.managedInference ? "managed" : args.modelId || "",
       messages: args.messages,
       tools: normalizePiTools(args.tools || []),
     });

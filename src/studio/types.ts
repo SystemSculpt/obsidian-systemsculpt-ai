@@ -64,7 +64,9 @@ export type StudioNodeConfigSelectPresentation =
   | "dropdown"
   | "button_group"
   | "searchable_dropdown";
-export type StudioNodeConfigDynamicOptionsSource = "studio.local_text_models";
+export type StudioNodeConfigDynamicOptionsSource =
+  | "studio.local_text_models"
+  | "studio.systemsculpt_text_models";
 export type StudioNodeConfigFieldVisibilityRule = {
   key: string;
   equals: StudioPrimitiveValue | StudioPrimitiveValue[];
@@ -248,6 +250,7 @@ export type StudioNodeCacheSnapshotV1 = {
 };
 
 export type StudioTextProviderMode = "systemsculpt" | "local_pi";
+export type StudioTextReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type StudioTextGenerationRequest = {
   prompt: string;
@@ -255,6 +258,7 @@ export type StudioTextGenerationRequest = {
   sourceMode?: StudioTextProviderMode;
   modelId?: string;
   localModelId?: string;
+  reasoningEffort?: StudioTextReasoningEffort;
   runId: string;
   nodeId: string;
   projectPath: string;

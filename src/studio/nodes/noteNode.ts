@@ -27,6 +27,7 @@ export const noteNode: StudioNodeDefinition = {
   configDefaults: {
     vaultPath: "",
     value: "",
+    textDisplayMode: "rendered",
   },
   configSchema: {
     fields: [

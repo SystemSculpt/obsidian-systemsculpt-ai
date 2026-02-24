@@ -69,7 +69,6 @@ describe("Studio node config validation", () => {
     expect(definition).not.toBeNull();
 
     const result = validateNodeConfig(definition!, {
-      modelId: "google/gemini-3-pro-image-preview",
       count: 1,
       aspectRatio: "bad-ratio",
     });
@@ -85,7 +84,6 @@ describe("Studio node config validation", () => {
 
     const result = validateNodeConfig(definition!, {
       provider: "legacy-provider",
-      modelId: "google/gemini-3-pro-image-preview",
       count: 1,
       aspectRatio: "16:9",
     });

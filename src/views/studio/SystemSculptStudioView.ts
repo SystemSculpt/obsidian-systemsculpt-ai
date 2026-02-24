@@ -2,6 +2,7 @@ import {
   EventRef,
   FileSystemAdapter,
   ItemView,
+  MarkdownRenderer,
   Notice,
   normalizePath,
   Platform,
@@ -2456,6 +2457,33 @@ export class SystemSculptStudioView extends ItemView {
     };
   }
 
+  private async renderNodeMarkdownPreview(
+    node: StudioNodeInstance,
+    markdown: string,
+    containerEl: HTMLElement
+  ): Promise<void> {
+    const content = String(markdown || "");
+    containerEl.empty();
+    if (!content.trim()) {
+      return;
+    }
+
+    const noteSourcePath = node.kind === "studio.note" ? this.readNotePathFromConfig(node) : "";
+    const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
+    try {
+      await MarkdownRenderer.render(this.app, content, containerEl, sourcePath, this);
+    } catch (error) {
+      console.warn("[SystemSculpt Studio] Failed to render node markdown preview", {
+        nodeId: node.id,
+        nodeKind: node.kind,
+        sourcePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      containerEl.empty();
+      containerEl.setText(content);
+    }
+  }
+
   private setTransientFieldError(nodeId: string, fieldKey: string, message: string | null): void {
     const normalizedNodeId = String(nodeId || "").trim();
     const normalizedKey = String(fieldKey || "").trim();
@@ -3854,6 +3882,12 @@ export class SystemSculptStudioView extends ItemView {
       },
       onNodeConfigMutated: (node) => {
         this.handleNodeConfigMutated(node);
+      },
+      onNodePresentationMutated: (_node) => {
+        this.scheduleProjectSave();
+      },
+      renderMarkdownPreview: (node, markdown, containerEl) => {
+        return this.renderNodeMarkdownPreview(node, markdown, containerEl);
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();

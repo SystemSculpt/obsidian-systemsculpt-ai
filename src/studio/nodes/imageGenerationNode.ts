@@ -18,7 +18,7 @@ import {
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
 const IMAGE_CONTEXT_MAX_CHARS = 3_600;
 const IMAGE_INPUT_MAX_COUNT = 8;
-const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3-pro-image-preview";
+const FIXED_IMAGE_MODEL_ID = "bytedance-seed/seedream-4.5";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const LEGACY_LOCAL_PROVIDER_IDS = new Set([
   "local_macos_image_generation",
@@ -211,7 +211,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
     systemPrompt: "",
-    modelId: DEFAULT_IMAGE_MODEL_ID,
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
   },
@@ -223,21 +222,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
         type: "textarea",
         required: false,
         placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
-      },
-      {
-        key: "modelId",
-        label: "Image Model",
-        description: "Image model used for SystemSculpt API generation.",
-        type: "select",
-        required: false,
-        options: [
-          { value: "google/gemini-3-pro-image-preview", label: "Gemini Nano Banana Pro" },
-          { value: "bytedance-seed/seedream-4.5", label: "ByteDance Seedream 4.5" },
-          { value: "google/nano-banana-pro", label: "Gemini Nano Banana Pro (legacy alias)" },
-          { value: "google/gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
-          { value: "openai/gpt-5-image-mini", label: "OpenAI GPT-5 Image Mini" },
-          { value: "openai/gpt-5-image", label: "OpenAI GPT-5 Image" },
-        ],
       },
       {
         key: "count",
@@ -278,14 +262,13 @@ export const imageGenerationNode: StudioNodeDefinition = {
         `Image generation node "${context.node.id}" is configured for removed provider "${providerRaw}". Switch this node to SystemSculpt AI and rerun.`
       );
     }
-    const modelId = getText(context.node.config.modelId as StudioJsonValue).trim() || undefined;
     const countRaw = Number(context.node.config.count as StudioJsonValue);
     const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
     const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
     const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
     const result = await context.services.api.generateImage({
       prompt,
-      modelId,
+      modelId: FIXED_IMAGE_MODEL_ID,
       count,
       aspectRatio,
       inputImages,
