@@ -14,7 +14,7 @@ export type SystemSculptImageGenerationJobStatus =
 export type SystemSculptImageGenerationModel = {
   id: string;
   name: string;
-  provider: string;
+  provider?: string;
   supports_generation?: boolean;
   input_modalities?: string[];
   output_modalities?: string[];
@@ -31,7 +31,6 @@ export type SystemSculptImageGenerationModel = {
 export type SystemSculptImageGenerationJob = {
   id: string;
   status: SystemSculptImageGenerationJobStatus;
-  model: string;
   created_at: string;
   processing_started_at?: string | null;
   completed_at?: string | null;
@@ -52,7 +51,6 @@ export type SystemSculptImageGenerationOutput = {
 };
 
 export type SystemSculptImageGenerationUsage = {
-  provider: string;
   raw_usd: number | null;
   cost_source: string | null;
   estimated: boolean;
@@ -803,7 +801,7 @@ export class SystemSculptImageGenerationService {
       models.push({
         id,
         name,
-        provider: typeof model.provider === "string" ? model.provider : "openrouter",
+        provider: typeof model.provider === "string" ? model.provider : undefined,
         supports_generation: typeof model.supports_generation === "boolean" ? model.supports_generation : undefined,
         input_modalities: Array.isArray(model.input_modalities) ? model.input_modalities.map(String) : undefined,
         output_modalities: Array.isArray(model.output_modalities) ? model.output_modalities.map(String) : undefined,
@@ -1003,7 +1001,6 @@ export class SystemSculptImageGenerationService {
     const usage =
       usageRaw && typeof usageRaw === "object"
         ? ({
-            provider: typeof (usageRaw as any).provider === "string" ? (usageRaw as any).provider : "openrouter",
             raw_usd:
               typeof (usageRaw as any).raw_usd === "number" && Number.isFinite((usageRaw as any).raw_usd)
                 ? (usageRaw as any).raw_usd

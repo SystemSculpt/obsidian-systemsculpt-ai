@@ -367,7 +367,7 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.text).toBe("Pinned draft body");
   });
 
-  it("materializes structured prompts for image generation and enforces prompt budget", async () => {
+  it("uses structured image prompts directly and skips internal prompt materialization", async () => {
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).toBeDefined();
     const generateTextMock = jest.fn(async () => ({
@@ -381,7 +381,6 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "image-node",
         kind: "studio.image_generation",
         config: {
-          modelId: "google/nano-banana-pro",
           count: 1,
           aspectRatio: "16:9",
         },
@@ -396,50 +395,11 @@ describe("Studio built-in text/image node execution", () => {
       })
     );
 
-    expect(generateTextMock).toHaveBeenCalledTimes(1);
-    expect(generateTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        nodeId: "image-node",
-      })
-    );
+    expect(generateTextMock).not.toHaveBeenCalled();
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
     expect(typeof imageRequest.prompt).toBe("string");
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
-    expect(imageRequest.modelId).toBe("bytedance-seed/seedream-4.5");
-  });
-
-  it("materializes plain image prompts when system prompt is configured on the node", async () => {
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).toBeDefined();
-    const generateTextMock = jest.fn(async () => ({
-      text: "Final composed image prompt",
-      modelId: "openai/gpt-5-mini",
-    }));
-    const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
-
-    await definition!.execute(
-      createContext({
-        nodeId: "image-node",
-        kind: "studio.image_generation",
-        config: {
-          systemPrompt: "Use this style guide for {{prompt}}",
-        },
-        inputs: {
-          prompt: "Make a cinematic frame",
-        },
-        generateTextMock,
-        generateImageMock,
-      })
-    );
-
-    expect(generateTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: "Make a cinematic frame",
-        systemPrompt: expect.stringContaining("Use this style guide for Make a cinematic frame"),
-      })
-    );
-    const imageRequest = generateImageMock.mock.calls[0]?.[0];
-    expect(imageRequest.prompt).toBe("Final composed image prompt");
+    expect(imageRequest).not.toHaveProperty("modelId");
   });
 
   it("truncates oversized plain image prompts before API submission", async () => {
@@ -472,6 +432,7 @@ describe("Studio built-in text/image node execution", () => {
   it("passes prompt-embedded input images through to image generation API", async () => {
     const definition = registry.get("studio.image_generation", "1.0.0");
     expect(definition).toBeDefined();
+    const generateTextMock = jest.fn(async () => ({ text: "unused", modelId: "openai/gpt-5-mini" }));
     const generateImageMock = jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
 
     await definition!.execute(
@@ -492,11 +453,14 @@ describe("Studio built-in text/image node execution", () => {
             ],
           },
         },
+        generateTextMock,
         generateImageMock,
       })
     );
 
+    expect(generateTextMock).not.toHaveBeenCalled();
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.prompt).toBe("Prompt user");
     expect(imageRequest.inputImages).toEqual([
       {
         path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/ab/asset-a.png",

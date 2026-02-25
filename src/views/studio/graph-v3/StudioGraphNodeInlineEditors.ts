@@ -1073,7 +1073,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["systemPrompt", "modelId", "count", "aspectRatio"],
+      orderedFieldKeys: ["modelId", "count", "aspectRatio"],
       interactionLocked,
       onNodeConfigMutated,
       resolveDynamicSelectOptions,

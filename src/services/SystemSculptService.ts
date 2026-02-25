@@ -98,8 +98,6 @@ export type CreditsUsageSnapshot = {
     | "youtube_transcript"
     | "agent_turn"
     | "request";
-  provider: string | null;
-  model: string | null;
   durationSeconds: number;
   totalTokens: number;
   inputTokens: number;
@@ -1121,8 +1119,6 @@ export class SystemSculptService {
       transactionType: "agent_turn",
       endpoint: asNullableString(item?.endpoint),
       usageKind: asUsageKind(item?.usage_kind),
-      provider: asNullableString(item?.provider),
-      model: asNullableString(item?.model),
       durationSeconds: asNumber(item?.duration_seconds),
       totalTokens: asNumber(item?.total_tokens),
       inputTokens: asNumber(item?.input_tokens),

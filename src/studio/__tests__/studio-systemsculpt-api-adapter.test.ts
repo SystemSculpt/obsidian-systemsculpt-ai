@@ -226,6 +226,67 @@ describe("StudioApiExecutionAdapter", () => {
     localPiMock.mockReset();
   });
 
+  it("serializes concurrent local Pi text generations", async () => {
+    const plugin = createPluginStub();
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+    const localPiMock = StudioLocalTextModelCatalog
+      .runStudioLocalPiTextGeneration as jest.MockedFunction<
+      typeof StudioLocalTextModelCatalog.runStudioLocalPiTextGeneration
+    >;
+    localPiMock.mockReset();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    localPiMock.mockImplementation(async (options) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return {
+        text: `local:${options.prompt}`,
+        modelId: String(options.modelId),
+      };
+    });
+    const startOrContinueTurn = jest.fn(async () => {
+      throw new Error("SystemSculpt session client should not be called in local mode.");
+    });
+    (adapter as any).sessionClient = {
+      updateConfig: jest.fn(),
+      startOrContinueTurn,
+    };
+
+    const [first, second] = await Promise.all([
+      adapter.generateText({
+        prompt: "first",
+        sourceMode: "local_pi",
+        localModelId: "openai-codex/gpt-5.3-codex",
+        runId: "run_local",
+        nodeId: "node_a",
+        projectPath: "Studio/Test.systemsculpt",
+      }),
+      adapter.generateText({
+        prompt: "second",
+        sourceMode: "local_pi",
+        localModelId: "openai-codex/gpt-5.3-codex",
+        runId: "run_local",
+        nodeId: "node_b",
+        projectPath: "Studio/Test.systemsculpt",
+      }),
+    ]);
+
+    expect(first).toEqual({
+      text: "local:first",
+      modelId: "openai-codex/gpt-5.3-codex",
+    });
+    expect(second).toEqual({
+      text: "local:second",
+      modelId: "openai-codex/gpt-5.3-codex",
+    });
+    expect(localPiMock).toHaveBeenCalledTimes(2);
+    expect(maxInFlight).toBe(1);
+    expect(startOrContinueTurn).not.toHaveBeenCalled();
+    localPiMock.mockReset();
+  });
+
   it("skips SystemSculpt credit checks when all text nodes run in local Pi mode", async () => {
     const plugin = createPluginStub();
     plugin.aiService.getCreditsBalance = jest.fn(async () => ({ totalRemaining: 0 }));
@@ -385,5 +446,85 @@ describe("StudioApiExecutionAdapter", () => {
       }),
       expect.any(Object)
     );
+  });
+
+  it("retries transient image polling failures with backoff and a new idempotency key", async () => {
+    jest.useFakeTimers();
+    try {
+      const assetStore = {
+        readArrayBuffer: jest.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+        storeArrayBuffer: jest.fn(async () => ({
+          hash: "out-hash",
+          mimeType: "image/png",
+          sizeBytes: 3,
+          path: "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/out-hash.png",
+        })),
+      } as any;
+      const adapter = new StudioApiExecutionAdapter(createPluginStub(), assetStore);
+      const imageClient = {
+        createGenerationJob: jest
+          .fn()
+          .mockResolvedValueOnce({
+            job: { id: "job_retry_1" },
+            poll_url: "/api/v1/images/generations/jobs/job_retry_1",
+          })
+          .mockResolvedValueOnce({
+            job: { id: "job_retry_2" },
+            poll_url: "/api/v1/images/generations/jobs/job_retry_2",
+          }),
+        waitForGenerationJob: jest
+          .fn()
+          .mockRejectedValueOnce(
+            new Error(
+              "Service is currently unavailable due to high demand. Please try again later. (E003) (abc123)"
+            )
+          )
+          .mockResolvedValueOnce({
+            job: { id: "job_retry_2", status: "succeeded" },
+            outputs: [
+              {
+                index: 0,
+                mime_type: "image/png",
+                size_bytes: 3,
+                width: 1024,
+                height: 576,
+                url: "https://systemsculpt-assets.example.com/output.png",
+                url_expires_in_seconds: 1800,
+              },
+            ],
+          }),
+        downloadImage: jest.fn(async () => ({
+          arrayBuffer: new Uint8Array([9, 8, 7]).buffer,
+          contentType: "image/png",
+        })),
+        prepareInputImageUploads: jest.fn(async () => ({
+          input_uploads: [],
+        })),
+        uploadPreparedInputImage: jest.fn(async () => undefined),
+      } as any;
+      (adapter as any).ensureImageClient = jest.fn(() => imageClient);
+
+      const runPromise = adapter.generateImage({
+        prompt: "Retry this image generation",
+        count: 1,
+        aspectRatio: "16:9",
+        runId: "run_retry",
+        projectPath: "Studio/Test.systemsculpt",
+      });
+
+      await jest.runOnlyPendingTimersAsync();
+      const result = await runPromise;
+
+      expect(result.images).toHaveLength(1);
+      expect(imageClient.createGenerationJob).toHaveBeenCalledTimes(2);
+      expect(imageClient.waitForGenerationJob).toHaveBeenCalledTimes(2);
+      const firstIdempotencyKey = String(imageClient.createGenerationJob.mock.calls[0]?.[1]?.idempotencyKey || "");
+      const secondIdempotencyKey = String(imageClient.createGenerationJob.mock.calls[1]?.[1]?.idempotencyKey || "");
+      expect(firstIdempotencyKey).toContain("-r1-");
+      expect(secondIdempotencyKey).toContain("-r2-");
+      expect(secondIdempotencyKey).not.toBe(firstIdempotencyKey);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

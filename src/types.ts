@@ -185,6 +185,17 @@ export interface SystemSculptSettings {
    */
   autoSubmitAfterTranscription: boolean;
   /**
+   * Default output format when transcribing audio files.
+   * - "markdown": Save as a markdown note
+   * - "srt": Save as an SRT subtitle file
+   */
+  transcriptionOutputFormat?: "markdown" | "srt";
+  /**
+   * When enabled, the "Transcribe an audio file" modal shows an output format selector.
+   * Users can hide this chooser from the modal and re-enable it in Settings.
+   */
+  showTranscriptionFormatChooserInModal?: boolean;
+  /**
    * Show a video recording button in chat composer (desktop + licensed only).
    */
   showVideoRecordButtonInChat: boolean;
@@ -578,6 +589,8 @@ Raw transcript:`,
   postProcessingModelId: "", // Default to empty; logic should handle fallback if unset
   cleanTranscriptionOutput: false,
   autoSubmitAfterTranscription: false,
+  transcriptionOutputFormat: "markdown",
+  showTranscriptionFormatChooserInModal: true,
   showVideoRecordButtonInChat: true,
   showVideoRecordingPermissionPopup: true,
   transcriptionProvider: "systemsculpt",

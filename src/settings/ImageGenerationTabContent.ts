@@ -1,11 +1,7 @@
 import { Notice, Platform, Setting } from "obsidian";
-import { ListSelectionModal, type ListItem } from "../core/ui/modals/standard/ListSelectionModal";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import {
-  DEFAULT_IMAGE_GENERATION_MODEL_ID,
-  formatCuratedImageModelOptionText,
-  getCuratedImageGenerationModelGroups,
   type ImageGenerationServerCatalogModel,
 } from "../services/canvasflow/ImageGenerationModelCatalog";
 import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
@@ -21,7 +17,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   containerEl.createEl("h3", { text: "Image Generation" });
   containerEl.createEl("p", {
-    text: "Configure SystemSculpt Studio (desktop-only) and run image generation through the SystemSculpt API with OpenRouter providers.",
+    text: "Configure SystemSculpt Studio (desktop-only) and run image generation through the SystemSculpt API managed backend.",
     cls: "setting-item-description",
   });
 
@@ -107,33 +103,13 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
         });
     });
 
-  containerEl.createEl("h3", { text: "SystemSculpt Image API (OpenRouter)" });
+  containerEl.createEl("h3", { text: "SystemSculpt Image API (Managed)" });
 
-  const modelSetting = new Setting(containerEl)
-    .setName("Default image model")
-    .setDesc("Used as the default model for new SystemSculpt Studio image generations.");
-
-  modelSetting.addText((text) => {
-    text
-      .setPlaceholder(DEFAULT_IMAGE_GENERATION_MODEL_ID)
-      .setValue(plugin.settings.imageGenerationDefaultModelId || DEFAULT_IMAGE_GENERATION_MODEL_ID)
-      .onChange(async (value) => {
-        const nextModel = value.trim() || DEFAULT_IMAGE_GENERATION_MODEL_ID;
-        void queueCanvasFlowLastUsedPatch(plugin, { modelId: nextModel });
-        await plugin
-          .getSettingsManager()
-          .updateSettings({ imageGenerationDefaultModelId: nextModel });
-      });
-  });
-
-  modelSetting.addExtraButton((button) => {
-    button
-      .setIcon("search")
-      .setTooltip("Browse image models")
-      .onClick(async () => {
-        await openImageModelBrowser(tabInstance);
-      });
-  });
+  new Setting(containerEl)
+    .setName("Managed image engine")
+    .setDesc(
+      "SystemSculpt controls the image provider and model server-side. No client-side model selection is exposed."
+    );
 
   new Setting(containerEl)
     .setName("Output folder")
@@ -168,7 +144,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   new Setting(containerEl)
     .setName("Write metadata sidecar")
-    .setDesc("When enabled, writes a JSON file next to each generated image with prompt, model, and job metadata.")
+    .setDesc("When enabled, writes a JSON file next to each generated image with prompt, generation settings, and job metadata.")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.imageGenerationSaveMetadataSidecar !== false)
@@ -179,7 +155,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
 
   new Setting(containerEl)
     .setName("Test image generation API")
-    .setDesc("Validates your license and SystemSculpt image model access by listing available models.")
+    .setDesc("Validates your license and confirms SystemSculpt image generation access.")
     .addButton((button) => {
       button.setButtonText("Test").onClick(async () => {
         button.setDisabled(true);
@@ -199,77 +175,20 @@ async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab
   const models = await syncImageGenerationModelCatalog(tabInstance);
   const supportedModels = models.filter((model) => model.supports_generation !== false);
   if (supportedModels.length === 0) {
-    throw new Error("No image generation models were returned by the server.");
+    throw new Error("Image generation is temporarily unavailable.");
   }
 
-  const configured = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
-  const fallback = supportedModels[0]?.id || DEFAULT_IMAGE_GENERATION_MODEL_ID;
-  const nextModel = configured && supportedModels.some((model) => model.id === configured) ? configured : fallback;
+  const nextModel = String(supportedModels[0]?.id || "").trim();
+  if (!nextModel) {
+    throw new Error("Image generation is temporarily unavailable.");
+  }
 
   await plugin.getSettingsManager().updateSettings({
     imageGenerationDefaultModelId: nextModel,
   });
   void queueCanvasFlowLastUsedPatch(plugin, { modelId: nextModel });
 
-  new Notice(`Image generation API connection OK (${models.length} model${models.length === 1 ? "" : "s"}).`);
-  tabInstance.display();
-}
-
-async function openImageModelBrowser(tabInstance: SystemSculptSettingTab): Promise<void> {
-  const { plugin } = tabInstance;
-  const currentDefault = String(plugin.settings.imageGenerationDefaultModelId || "").trim();
-  const serverModels = await syncImageGenerationModelCatalog(tabInstance, { silent: true });
-  const groups = getCuratedImageGenerationModelGroups(serverModels);
-  const items: ListItem[] = [];
-
-  for (const group of groups) {
-    for (const model of group.models) {
-      const supportLabel = model.supportsGeneration ? "Runnable in SystemSculpt backend." : "Visible for pricing only (not yet runnable).";
-      items.push({
-        id: model.id,
-        title: model.supportsGeneration
-          ? formatCuratedImageModelOptionText(model)
-          : `${formatCuratedImageModelOptionText(model)} (Not supported yet)`,
-        description: `${supportLabel} ${model.pricing.lines.join(" | ")}`.trim(),
-        icon: "image",
-        badge: model.pricing.summary,
-        selected: model.id === currentDefault,
-        metadata: { id: model.id, provider: group.provider, supportsGeneration: model.supportsGeneration === true },
-      });
-    }
-  }
-
-  const modal = new ListSelectionModal(tabInstance.app, items, {
-    title: "Image models",
-    description: "Loaded from the live SystemSculpt API catalog. Shows provider USD and estimated SystemSculpt credits per image.",
-    withSearch: true,
-    size: "large",
-    customContent: (el) => {
-      const hint = el.createEl("p", {
-        text: "Pick a default model for SystemSculpt Studio image generations.",
-        cls: "setting-item-description",
-      });
-      hint.style.marginTop = "0";
-    },
-  });
-
-  const [selection] = await modal.openAndGetSelection();
-  const modelId = String(selection?.metadata?.id || "").trim();
-  const supportsGeneration = selection?.metadata?.supportsGeneration === true;
-  if (!modelId) {
-    return;
-  }
-  if (!supportsGeneration) {
-    new Notice("That model is not currently supported by the SystemSculpt image backend. Pick a runnable model.");
-    return;
-  }
-
-  await plugin.getSettingsManager().updateSettings({
-    imageGenerationDefaultModelId: modelId,
-  });
-  void queueCanvasFlowLastUsedPatch(plugin, { modelId });
-
-  new Notice("Default image model updated.");
+  new Notice("Image generation API connection OK.");
   tabInstance.display();
 }
 
@@ -346,7 +265,7 @@ async function syncImageGenerationModelCatalog(
     const response = await service.listModels();
     const supportedModels = Array.isArray(response.models) ? response.models : [];
     if (supportedModels.length === 0) {
-      throw new Error("No supported image models were returned by /images/models.");
+      throw new Error("No managed image generation capabilities were returned by the server.");
     }
     const models = supportedModels;
     await plugin.getSettingsManager().updateSettings({
@@ -361,7 +280,7 @@ async function syncImageGenerationModelCatalog(
       throw error;
     }
     if (!options?.silent) {
-      new Notice("Could not refresh image model catalog; using cached model metadata.");
+      new Notice("Could not refresh managed image generation capabilities; using cached metadata.");
     }
     return cached;
   }

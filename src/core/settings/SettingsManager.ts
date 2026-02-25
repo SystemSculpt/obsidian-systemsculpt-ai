@@ -418,6 +418,14 @@ export class SettingsManager {
       validatedSettings.cleanTranscriptionOutput = defaultSettings.cleanTranscriptionOutput;
     }
 
+    if (validatedSettings.transcriptionOutputFormat !== "markdown" && validatedSettings.transcriptionOutputFormat !== "srt") {
+      validatedSettings.transcriptionOutputFormat = defaultSettings.transcriptionOutputFormat;
+    }
+
+    if (typeof validatedSettings.showTranscriptionFormatChooserInModal !== "boolean") {
+      validatedSettings.showTranscriptionFormatChooserInModal = defaultSettings.showTranscriptionFormatChooserInModal;
+    }
+
     if (typeof validatedSettings.showVideoRecordButtonInChat !== 'boolean') {
       validatedSettings.showVideoRecordButtonInChat = defaultSettings.showVideoRecordButtonInChat;
     }

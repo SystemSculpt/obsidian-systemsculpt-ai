@@ -27,8 +27,23 @@ import {
 import { randomId } from "./utils";
 
 const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
-const STUDIO_FIXED_IMAGE_MODEL_ID = "bytedance-seed/seedream-4.5";
+const STUDIO_MANAGED_IMAGE_MODEL_ID = "systemsculpt/managed-image";
 const STUDIO_MANAGED_TEXT_MODEL_ID = "systemsculpt/managed";
+const STUDIO_IMAGE_POLL_MAX_WAIT_MS = 8 * 60_000;
+const STUDIO_IMAGE_RETRY_INITIAL_DELAY_MS = 2_000;
+const STUDIO_IMAGE_RETRY_MAX_DELAY_MS = 60_000;
+const STUDIO_IMAGE_RETRY_MAX_ATTEMPTS = 12;
+const STUDIO_IMAGE_RETRY_MAX_ELAPSED_MS = 30 * 60_000;
+const STUDIO_IMAGE_RETRYABLE_MESSAGE_MARKERS = [
+  "(e003)",
+  "high demand",
+  "please try again later",
+  "temporarily unavailable",
+  "provider_unavailable",
+  "request failed",
+  "request timed out",
+  "polling failed",
+] as const;
 
 function hashFnv1aHex(value: string): string {
   let hash = 0x811c9dc5;
@@ -50,16 +65,59 @@ function sanitizeIdempotencyToken(value: string, maxLength: number): string {
   return normalized.slice(0, maxLength);
 }
 
-function buildStudioImageIdempotencyKey(request: StudioImageGenerationRequest): string {
+function buildStudioImageIdempotencyKey(
+  request: StudioImageGenerationRequest,
+  modelId: string,
+  attempt: number = 1
+): string {
   const runToken = sanitizeIdempotencyToken(request.runId, 24);
-  const modelToken = sanitizeIdempotencyToken(STUDIO_FIXED_IMAGE_MODEL_ID, 28);
+  const modelToken = sanitizeIdempotencyToken(modelId, 28);
+  const attemptToken = Math.max(1, Math.floor(attempt || 1));
   const imageSignature = (request.inputImages || [])
     .map((asset) => `${String(asset.hash || "").toLowerCase()}:${Math.max(0, Number(asset.sizeBytes) || 0)}`)
     .join("|");
   const payloadSignature = hashFnv1aHex(
     `${String(request.prompt || "")}|${String(request.aspectRatio || "")}|${String(request.count || "")}|${imageSignature}`
   );
-  return `studio-image-${runToken}-${modelToken}-${payloadSignature}`;
+  return `studio-image-${runToken}-${modelToken}-r${attemptToken}-${payloadSignature}`;
+}
+
+function isRetryableStudioImageError(message: string): boolean {
+  const normalized = String(message || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return STUDIO_IMAGE_RETRYABLE_MESSAGE_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+function computeStudioImageRetryDelayMs(retryIndex: number): number {
+  const steps = Math.max(0, retryIndex - 1);
+  const computed = STUDIO_IMAGE_RETRY_INITIAL_DELAY_MS * Math.pow(2, steps);
+  return Math.min(STUDIO_IMAGE_RETRY_MAX_DELAY_MS, Math.max(STUDIO_IMAGE_RETRY_INITIAL_DELAY_MS, Math.floor(computed)));
+}
+
+function shouldRetryStudioImageError(options: {
+  message: string;
+  attempt: number;
+  startedAtMs: number;
+}): boolean {
+  if (!isRetryableStudioImageError(options.message)) {
+    return false;
+  }
+  if (options.attempt >= STUDIO_IMAGE_RETRY_MAX_ATTEMPTS) {
+    return false;
+  }
+  return Date.now() - options.startedAtMs <= STUDIO_IMAGE_RETRY_MAX_ELAPSED_MS;
+}
+
+function waitForStudioImageRetry(ms: number): Promise<void> {
+  const delay = Math.max(0, Math.floor(ms));
+  if (delay <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, delay);
+  });
 }
 
 function mimeExtension(mimeType: string): string {
@@ -100,6 +158,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private readonly sessionClient: AgentSessionClient;
   private imageClient: SystemSculptImageGenerationService | null = null;
   private textTurnQueue: Promise<void> = Promise.resolve();
+  private localPiTextTurnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -188,6 +247,15 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private async runTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.textTurnQueue.then(operation, operation);
     this.textTurnQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  private async runLocalPiTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.localPiTextTurnQueue.then(operation, operation);
+    this.localPiTextTurnQueue = run.then(
       () => undefined,
       () => undefined
     );
@@ -373,13 +441,15 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     if (sourceMode === "local_pi") {
       const localModelId = await this.resolveLocalTextModelId(request);
       try {
-        const result = await runStudioLocalPiTextGeneration({
+        // Pi CLI uses a shared startup/settings lock, so concurrent invocations can fail
+        // transiently with lock/auth initialization races.
+        const result = await this.runLocalPiTextTurnExclusive(() => runStudioLocalPiTextGeneration({
           plugin: this.plugin,
           modelId: localModelId,
           prompt: request.prompt,
           systemPrompt,
           reasoningEffort,
-        });
+        }));
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -448,64 +518,85 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {
-    const modelId = STUDIO_FIXED_IMAGE_MODEL_ID;
+    const modelId = String(request.modelId || STUDIO_MANAGED_IMAGE_MODEL_ID).trim() || STUDIO_MANAGED_IMAGE_MODEL_ID;
     const imageClient = this.ensureImageClient();
     const uploadedInputImages = await this.uploadInputImagesForStudioGeneration(imageClient, request.inputImages);
-    let create: Awaited<ReturnType<SystemSculptImageGenerationService["createGenerationJob"]>>;
-    try {
-      create = await imageClient.createGenerationJob(
-        {
-          prompt: request.prompt,
-          input_images: uploadedInputImages,
-          options: {
-            count: request.count,
-            aspect_ratio: request.aspectRatio,
+    const startedAtMs = Date.now();
+
+    for (let attempt = 1; attempt <= STUDIO_IMAGE_RETRY_MAX_ATTEMPTS; attempt += 1) {
+      let create: Awaited<ReturnType<SystemSculptImageGenerationService["createGenerationJob"]>>;
+      try {
+        create = await imageClient.createGenerationJob(
+          {
+            prompt: request.prompt,
+            input_images: uploadedInputImages,
+            options: {
+              count: request.count,
+              aspect_ratio: request.aspectRatio,
+            },
           },
-        },
-        {
-          idempotencyKey: buildStudioImageIdempotencyKey(request),
+          {
+            idempotencyKey: buildStudioImageIdempotencyKey(request, modelId, attempt),
+          }
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const fullMessage =
+          `Image generation request failed (aspectRatio: "${String(request.aspectRatio || "").trim() || "default"}"): ${message}`;
+        if (shouldRetryStudioImageError({ message: fullMessage, attempt, startedAtMs })) {
+          const delayMs = computeStudioImageRetryDelayMs(attempt);
+          await waitForStudioImageRetry(delayMs);
+          continue;
         }
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Image generation request failed for model "${modelId}" (aspectRatio: "${String(request.aspectRatio || "").trim() || "default"}"): ${message}`
-      );
+        throw new Error(fullMessage);
+      }
+
+      let completed: Awaited<ReturnType<SystemSculptImageGenerationService["waitForGenerationJob"]>>;
+      try {
+        completed = await imageClient.waitForGenerationJob(create.job.id, {
+          pollUrl: create.poll_url,
+          pollIntervalMs: 1_000,
+          maxWaitMs: STUDIO_IMAGE_POLL_MAX_WAIT_MS,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const fullMessage = `Image generation polling failed (job: "${create.job.id}"): ${message}`;
+        if (shouldRetryStudioImageError({ message: fullMessage, attempt, startedAtMs })) {
+          const delayMs = computeStudioImageRetryDelayMs(attempt);
+          await waitForStudioImageRetry(delayMs);
+          continue;
+        }
+        throw new Error(fullMessage);
+      }
+
+      if (!completed.outputs || completed.outputs.length === 0) {
+        const fullMessage = "SystemSculpt image generation returned no outputs.";
+        if (shouldRetryStudioImageError({ message: fullMessage, attempt, startedAtMs })) {
+          const delayMs = computeStudioImageRetryDelayMs(attempt);
+          await waitForStudioImageRetry(delayMs);
+          continue;
+        }
+        throw new Error(fullMessage);
+      }
+
+      const images = [];
+      for (const output of completed.outputs) {
+        const downloaded = await imageClient.downloadImage(output.url);
+        const asset = await this.assetStore.storeArrayBuffer(
+          request.projectPath,
+          downloaded.arrayBuffer,
+          downloaded.contentType || output.mime_type
+        );
+        images.push(asset);
+      }
+
+      return {
+        images,
+        modelId,
+      };
     }
 
-    let completed: Awaited<ReturnType<SystemSculptImageGenerationService["waitForGenerationJob"]>>;
-    try {
-      completed = await imageClient.waitForGenerationJob(create.job.id, {
-        pollUrl: create.poll_url,
-        pollIntervalMs: 1_000,
-        maxWaitMs: 8 * 60_000,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Image generation polling failed for model "${modelId}" (job: "${create.job.id}"): ${message}`
-      );
-    }
-
-    if (!completed.outputs || completed.outputs.length === 0) {
-      throw new Error("SystemSculpt image generation returned no outputs.");
-    }
-
-    const images = [];
-    for (const output of completed.outputs) {
-      const downloaded = await imageClient.downloadImage(output.url);
-      const asset = await this.assetStore.storeArrayBuffer(
-        request.projectPath,
-        downloaded.arrayBuffer,
-        downloaded.contentType || output.mime_type
-      );
-      images.push(asset);
-    }
-
-    return {
-      images,
-      modelId,
-    };
+    throw new Error("Image generation failed after repeated retries.");
   }
 
   private async writeTempAudioFile(

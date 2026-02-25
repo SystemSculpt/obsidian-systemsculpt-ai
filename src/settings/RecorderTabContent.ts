@@ -174,6 +174,35 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
       });
   });
 
+  new Setting(containerEl)
+    .setName('Default transcription output format')
+    .setDesc('Choose whether transcriptions are saved as Markdown (.md) or SRT (.srt) by default.')
+    .addDropdown((dropdown) => {
+      dropdown
+        .addOption('markdown', 'Markdown (.md)')
+        .addOption('srt', 'SRT subtitle file (.srt)')
+        .setValue(plugin.settings.transcriptionOutputFormat ?? 'markdown')
+        .onChange(async (value: 'markdown' | 'srt') => {
+          await plugin.getSettingsManager().updateSettings({ transcriptionOutputFormat: value });
+        });
+    });
+
+  new Setting(containerEl)
+    .setName('Show output format chooser in transcribe modal')
+    .setDesc('Keep the Markdown/SRT picker visible in the modal. Re-enable this here if you selected "Do not show this again".')
+    .addToggle((toggle) => {
+      toggle
+        .setValue(plugin.settings.showTranscriptionFormatChooserInModal ?? true)
+        .onChange(async (value) => {
+          await plugin.getSettingsManager().updateSettings({ showTranscriptionFormatChooserInModal: value });
+        });
+    });
+
+  containerEl.createEl("p", {
+    text: "Tip: You can always change transcription output format and modal behavior here.",
+    cls: "setting-item-description",
+  });
+
   if (!isMobile && plugin.settings.settingsMode === 'advanced') {
     new Setting(containerEl)
       .setName('Automatic audio format conversion')

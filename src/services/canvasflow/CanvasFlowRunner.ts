@@ -1400,7 +1400,6 @@ export class CanvasFlowRunner {
           stampIso: stamp.iso,
           promptFilePath: options.promptFile.path,
           promptText: options.promptText,
-          modelId: options.modelId,
           job: options.job,
           output: outputToDownload,
           inputImagePaths: options.inputImagePaths,
@@ -1492,25 +1491,18 @@ export class CanvasFlowRunner {
     stampIso: string;
     promptFilePath: string;
     promptText: string;
-    modelId: string;
     job: SystemSculptGenerationJobResponse;
     output: SystemSculptImageGenerationOutput;
     inputImagePaths: string[];
   }): Promise<void> {
     try {
       const sidecarPath = normalizePath(`${options.imagePath}.systemsculpt.json`);
-      const curated = getCuratedImageGenerationModel(options.modelId, this.getCachedImageGenerationModels());
       const payload = {
         kind: "canvasflow_generation",
         created_at: options.stampIso,
         prompt_file: options.promptFilePath,
         prompt: options.promptText,
-        provider: "openrouter",
-        model: {
-          id: options.modelId,
-          label: curated?.label ?? null,
-          provider: curated?.provider ?? null,
-        },
+        managed_engine: "systemsculpt_image_managed",
         job: {
           id: options.job.job.id,
           status: options.job.job.status,

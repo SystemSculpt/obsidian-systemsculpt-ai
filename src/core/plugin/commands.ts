@@ -31,6 +31,7 @@ export class CommandManager {
     this.registerOpenChatHistory();
     this.registerOpenJanitor();
     this.registerMeetingProcessor();
+    this.registerTranscribeAudioFile();
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
     this.registerOpenSettings();
@@ -177,6 +178,18 @@ export class CommandManager {
       callback: async () => {
         const { MeetingProcessorModal } = await import("../../modals/MeetingProcessorModal");
         const modal = new MeetingProcessorModal(this.plugin);
+        modal.open();
+      },
+    });
+  }
+
+  private registerTranscribeAudioFile() {
+    this.plugin.addCommand({
+      id: "transcribe-audio-file",
+      name: "Transcribe an audio file",
+      callback: async () => {
+        const { TranscribeAudioFileModal } = await import("../../modals/TranscribeAudioFileModal");
+        const modal = new TranscribeAudioFileModal(this.plugin);
         modal.open();
       },
     });

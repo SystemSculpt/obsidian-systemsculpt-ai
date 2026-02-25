@@ -1,0 +1,333 @@
+.ss-transcribe-audio {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 960px) {
+  .ss-transcribe-audio {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ss-transcribe-audio__column {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.ss-transcribe-audio__column--panel {
+  background: var(--background-secondary);
+}
+
+.ss-transcribe-audio__section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-transcribe-audio__section-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: -4px;
+}
+
+.ss-transcribe-audio__search {
+  position: relative;
+}
+
+.ss-transcribe-audio__search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-transcribe-audio__search-input {
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ss-transcribe-audio__search-input:focus {
+  outline: 1px solid var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ss-transcribe-audio__list {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+
+.ss-transcribe-audio__file {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--background-primary);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ss-transcribe-audio__file:hover {
+  border-color: var(--interactive-accent-hover);
+}
+
+.ss-transcribe-audio__file.is-selected {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
+}
+
+.ss-transcribe-audio__file-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ss-transcribe-audio__file-path {
+  color: var(--text-muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.ss-transcribe-audio__file-badge-stack {
+  display: flex;
+  align-items: flex-start;
+}
+
+.ss-transcribe-audio__file-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  background: var(--background-secondary);
+  white-space: nowrap;
+}
+
+.ss-transcribe-audio__file-badge-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ss-transcribe-audio__empty {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.ss-transcribe-audio__empty-icon {
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: center;
+}
+
+.ss-transcribe-audio__empty-text {
+  font-size: 13px;
+}
+
+.ss-transcribe-audio__more {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.ss-transcribe-audio__dropzone {
+  border: 1.5px dashed var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ss-transcribe-audio__dropzone:hover {
+  border-color: var(--interactive-accent-hover);
+}
+
+.ss-transcribe-audio__dropzone.is-dragging {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+
+.ss-transcribe-audio__drop-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.ss-transcribe-audio__drop-sub,
+.ss-transcribe-audio__drop-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-transcribe-audio__drop-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ss-transcribe-audio__picker-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ss-transcribe-audio__open-file-btn {
+  min-height: 30px;
+}
+
+.ss-transcribe-audio__output {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-transcribe-audio__output-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.ss-transcribe-audio__output-option {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.ss-transcribe-audio__output-option.is-selected {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+}
+
+.ss-transcribe-audio__output-radio {
+  margin-top: 3px;
+}
+
+.ss-transcribe-audio__output-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.ss-transcribe-audio__output-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-transcribe-audio__output-option-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-transcribe-audio__output-hide {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ss-transcribe-audio__output-hide-checkbox {
+  margin-top: 2px;
+}
+
+.ss-transcribe-audio__output-hide-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ss-transcribe-audio__output-static {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.ss-transcribe-audio__selection {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  padding: 10px;
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-transcribe-audio__selection-path {
+  color: var(--text-muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.ss-transcribe-audio__selection-output {
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ss-transcribe-audio__selection-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ss-transcribe-audio__preview {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  padding: 8px;
+}
+
+.ss-transcribe-audio__audio {
+  width: 100%;
+}
+
+.ss-transcribe-audio__file-input {
+  display: none;
+}
+
+.ss-transcribe-audio__transcribe-btn {
+  margin-left: 8px;
+}

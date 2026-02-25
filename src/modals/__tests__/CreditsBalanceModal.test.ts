@@ -297,6 +297,8 @@ describe("CreditsBalanceModal", () => {
     expect(loadUsage).toHaveBeenCalledTimes(1);
     expect(modal.modalEl.textContent).toContain("audio/transcriptions/jobs/start");
     expect(modal.modalEl.textContent).toContain("3 credits");
+    expect(modal.modalEl.textContent).not.toContain("groq");
+    expect(modal.modalEl.textContent).not.toContain("whisper-large-v3");
     expect(modal.modalEl.textContent).not.toContain("$");
   });
 

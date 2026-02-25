@@ -52,6 +52,8 @@ jest.mock("../../../types", () => ({
     videoCaptureMicrophoneAudio: false,
     showVideoRecordButtonInChat: true,
     showVideoRecordingPermissionPopup: true,
+    transcriptionOutputFormat: "markdown",
+    showTranscriptionFormatChooserInModal: true,
     defaultAgentBudget: 10,
     agentDefaultAction: "approve",
     agentLoopBehavior: "manual",
@@ -382,6 +384,22 @@ describe("SettingsManager", () => {
       });
       expect(result.videoCaptureSystemAudio).toBe(false);
       expect(result.videoCaptureMicrophoneAudio).toBe(false);
+    });
+
+    it("defaults invalid transcription output format settings", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        transcriptionOutputFormat: "invalid",
+      });
+      expect(result.transcriptionOutputFormat).toBe("markdown");
+    });
+
+    it("defaults invalid modal format chooser visibility", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        showTranscriptionFormatChooserInModal: "invalid",
+      });
+      expect(result.showTranscriptionFormatChooserInModal).toBe(true);
     });
   });
 

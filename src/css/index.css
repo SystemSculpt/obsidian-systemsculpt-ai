@@ -44,6 +44,7 @@
 @import 'components/quick-edit-widget.css';  /* Quick edit floating widget */
 @import 'components/quick-edit-editor-diff.css';  /* Quick Edit editor diff overlay */
 @import 'components/meeting-processor.css';  /* Meeting processor modal */
+@import 'components/transcribe-audio-modal.css';  /* Transcribe audio file modal */
 @import 'components/youtube-canvas.css';  /* YouTube Canvas modal */
 @import 'components/custom-endpoint.css';  /* Custom endpoint settings styles */
 @import 'components/favorite-toggle.css';  /* Favorite toggle component */

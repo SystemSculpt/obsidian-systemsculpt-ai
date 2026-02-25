@@ -370,8 +370,10 @@ function migratePromptTemplateNodes(
       const generationPromptTarget =
         outbound.toPortId === "prompt" &&
         (targetNode.kind === "studio.text_generation" || targetNode.kind === "studio.image_generation");
+      const textGenerationPromptTarget =
+        outbound.toPortId === "prompt" && targetNode.kind === "studio.text_generation";
 
-      if (generationPromptTarget) {
+      if (textGenerationPromptTarget) {
         const appended = appendTemplateToSystemPrompt(targetNode.config || {}, template);
         if (appended.changed) {
           targetNode.config = appended.config;

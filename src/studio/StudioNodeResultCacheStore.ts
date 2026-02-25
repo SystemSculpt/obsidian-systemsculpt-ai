@@ -19,11 +19,42 @@ type JsonAdapter = {
 
 const NODE_CACHE_SCHEMA = "studio.node-cache.v1" as const;
 const NODE_FINGERPRINT_SALT_BY_KIND: Record<string, string> = {
-  // Text generation now supports direct prompt input and optional config-level system prompt templating.
-  "studio.text_generation": "prompt-bundle-v3",
-  // Image generation now supports config-level system prompt templating.
-  "studio.image_generation": "image-prompt-v2",
+  // Text generation fingerprinting ignores unlocked output snapshots stored in node config.
+  "studio.text_generation": "prompt-bundle-v4",
+  // Image generation uses prompt input plus count/aspect controls; model selection is server-managed.
+  "studio.image_generation": "image-prompt-v3",
 };
+
+function normalizeNodeConfigForFingerprint(node: StudioNodeInstance): StudioNodeInstance["config"] {
+  if (!isRecord(node.config)) {
+    return node.config;
+  }
+  const config = {
+    ...(node.config as Record<string, StudioJsonValue>),
+  };
+  const kind = String(node.kind || "").trim();
+
+  if (kind === "studio.text_generation") {
+    const lockOutput = config.lockOutput === true;
+    // `value` and `textDisplayMode` are UI/runtime snapshot fields; they should not invalidate cache
+    // unless lockOutput is intentionally enabled.
+    if (!lockOutput) {
+      delete config.value;
+      delete config.lockOutput;
+    }
+    delete config.textDisplayMode;
+    return config;
+  }
+
+  if (kind === "studio.transcription") {
+    // Transcription node stores rendered output in config for inline display; ignore in cache keys.
+    delete config.value;
+    delete config.textDisplayMode;
+    return config;
+  }
+
+  return config;
+}
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value === "number" || typeof value === "boolean") {
@@ -95,7 +126,7 @@ export async function buildNodeInputFingerprint(
     salt: NODE_FINGERPRINT_SALT_BY_KIND[node.kind] || "",
     kind: node.kind,
     version: node.version,
-    config: node.config,
+    config: normalizeNodeConfigForFingerprint(node),
     inputs,
   });
   const bytes = new TextEncoder().encode(serialized);

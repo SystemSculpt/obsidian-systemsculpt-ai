@@ -544,7 +544,7 @@ export class FileContextMenuService {
     this.info("Audio conversion started", { filePath: file.path });
 
     try {
-      await this.handleAudioTranscription(file, true);
+      await this.handleAudioTranscription(file, false);
       this.info("Audio conversion completed", { filePath: file.path });
     } catch (error) {
       this.error("Audio conversion failed", error, { filePath: file.path });

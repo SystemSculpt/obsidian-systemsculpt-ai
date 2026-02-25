@@ -94,6 +94,95 @@ describe("StudioNodeResultCacheStore", () => {
     expect(fingerprintC).not.toBe(fingerprintA);
   });
 
+  it("ignores unlocked text-generation snapshot value when building fingerprints", async () => {
+    const inputs = {
+      prompt: "Generate title options",
+    };
+    const baseConfig = {
+      systemPrompt: "You are concise.",
+      modelId: "openai/gpt-5-mini",
+      sourceMode: "systemsculpt",
+      textDisplayMode: "raw",
+    };
+
+    const fingerprintA = await buildNodeInputFingerprint(
+      nodeFixture({
+        ...baseConfig,
+        value: "Old generated output",
+      }),
+      inputs
+    );
+    const fingerprintB = await buildNodeInputFingerprint(
+      nodeFixture({
+        ...baseConfig,
+        value: "New generated output",
+      }),
+      inputs
+    );
+
+    expect(fingerprintA).toBe(fingerprintB);
+  });
+
+  it("includes locked text-generation value in fingerprints", async () => {
+    const inputs = {
+      prompt: "Generate title options",
+    };
+    const baseConfig = {
+      systemPrompt: "You are concise.",
+      modelId: "openai/gpt-5-mini",
+      sourceMode: "systemsculpt",
+      lockOutput: true,
+    };
+
+    const fingerprintA = await buildNodeInputFingerprint(
+      nodeFixture({
+        ...baseConfig,
+        value: "Locked output A",
+      }),
+      inputs
+    );
+    const fingerprintB = await buildNodeInputFingerprint(
+      nodeFixture({
+        ...baseConfig,
+        value: "Locked output B",
+      }),
+      inputs
+    );
+
+    expect(fingerprintA).not.toBe(fingerprintB);
+  });
+
+  it("ignores transcription display snapshots in fingerprinting", async () => {
+    const transcriptionNode = (config: StudioNodeInstance["config"]): StudioNodeInstance => ({
+      id: "node_tx",
+      kind: "studio.transcription",
+      version: "1.0.0",
+      title: "Transcription",
+      position: { x: 0, y: 0 },
+      config,
+    });
+
+    const inputs = {
+      path: "/Users/systemsculpt/Downloads/audio.wav",
+    };
+    const fingerprintA = await buildNodeInputFingerprint(
+      transcriptionNode({
+        textDisplayMode: "raw",
+        value: "Transcript one",
+      }),
+      inputs
+    );
+    const fingerprintB = await buildNodeInputFingerprint(
+      transcriptionNode({
+        textDisplayMode: "rendered",
+        value: "Transcript two",
+      }),
+      inputs
+    );
+
+    expect(fingerprintA).toBe(fingerprintB);
+  });
+
   it("round-trips cache snapshots to the project cache file", async () => {
     const { store } = createCacheStore();
     const projectPath = "SystemSculpt/Studio/Cache Test.systemsculpt";

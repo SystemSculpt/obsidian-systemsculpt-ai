@@ -417,6 +417,8 @@ describe("SystemSculptService", () => {
     expect(usage.items[0]?.creditsCharged).toBe(3);
     expect(usage.items[0]?.rawUsd).toBe(0.002553);
     expect(usage.items[0]?.billingCreditsExact).toBe(2.553);
+    expect((usage.items[0] as any)?.provider).toBeUndefined();
+    expect((usage.items[0] as any)?.model).toBeUndefined();
     expect(usage.nextBefore).toBe("2026-02-11T00:00:00.000Z");
 
     const [requestedUrl] = (global.fetch as jest.Mock).mock.calls[0] ?? [];

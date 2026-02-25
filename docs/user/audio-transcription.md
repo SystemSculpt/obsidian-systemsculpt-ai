@@ -35,12 +35,12 @@ Transcription controls include:
 
 ## Pipeline behavior notes
 
-- Desktop + SystemSculpt provider uses a server-side jobs pipeline (large-file capable).
-- Mobile/provider-specific direct uploads have stricter request-size constraints.
+- Desktop + SystemSculpt API uses a server-side jobs pipeline (large-file capable).
+- Mobile/direct upload paths have stricter request-size constraints.
 - Custom-provider path uses direct upload and chunks audio when required.
 
 ## If transcription fails
 
-1. Verify provider credentials and endpoint.
-2. Verify selected model supports transcription on that provider.
+1. If you use SystemSculpt API, re-run license validation and retry the request.
+2. If you use a custom provider, verify credentials and endpoint configuration.
 3. For custom local servers, verify local reachability from Obsidian.

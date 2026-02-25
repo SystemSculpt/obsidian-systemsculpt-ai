@@ -292,9 +292,8 @@ export class CreditsBalanceModal extends StandardModal {
       });
 
       const meta = row.createDiv({ cls: "ss-credits-usage__item-meta" });
-      const modelText = [item.provider, item.model].filter(Boolean).join(" · ");
       meta.setText(
-        [this.formatDate(item.createdAt, true), modelText || this.formatUsageKind(item.usageKind)]
+        [this.formatDate(item.createdAt, true), this.formatUsageKind(item.usageKind)]
           .filter(Boolean)
           .join("  •  ")
       );

@@ -10,15 +10,11 @@ import {
   inferMimeTypeFromPath,
   isLikelyAbsolutePath,
   parseStructuredPromptInput,
-  renderTemplate,
-  resolveTemplateVariables,
   type StudioImageInputCandidate,
 } from "./shared";
 
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
-const IMAGE_CONTEXT_MAX_CHARS = 3_600;
 const IMAGE_INPUT_MAX_COUNT = 8;
-const FIXED_IMAGE_MODEL_ID = "bytedance-seed/seedream-4.5";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const LEGACY_LOCAL_PROVIDER_IDS = new Set([
   "local_macos_image_generation",
@@ -59,66 +55,19 @@ function clampImagePromptLength(prompt: string, maxChars: number = IMAGE_PROMPT_
   return trimmed.slice(0, maxChars).trim();
 }
 
-function compactContextText(text: string, maxChars: number = IMAGE_CONTEXT_MAX_CHARS): string {
-  const cleaned = String(text || "").replace(/\s+/g, " ").trim();
-  if (cleaned.length <= maxChars) {
-    return cleaned;
-  }
-  const headChars = Math.floor(maxChars * 0.7);
-  const tailChars = Math.max(0, maxChars - headChars - 7);
-  const head = cleaned.slice(0, headChars).trim();
-  const tail = cleaned.slice(Math.max(headChars, cleaned.length - tailChars)).trim();
-  if (!tail) {
-    return head;
-  }
-  return `${head} [...] ${tail}`;
-}
-
-async function resolveImagePrompt(context: StudioNodeExecutionContext): Promise<{
+function resolveImagePrompt(context: StudioNodeExecutionContext): {
   prompt: string;
   structuredInputImages: StudioImageInputCandidate[];
-}> {
+} {
   const rawPromptInput = context.inputs.prompt;
   const structured = parseStructuredPromptInput(rawPromptInput);
-  const configuredSystemPrompt = renderTemplate(
-    getText(context.node.config.systemPrompt as StudioJsonValue),
-    resolveTemplateVariables(context)
-  ).trim();
-  const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim();
-  const userPrompt = structured.prompt.trim();
-
-  if (systemPrompt && userPrompt) {
-    const compactedUserPrompt = compactContextText(userPrompt, IMAGE_CONTEXT_MAX_CHARS);
-    try {
-      const materialized = await context.services.api.generateText({
-        prompt: compactedUserPrompt,
-        systemPrompt: `${systemPrompt}\n\nOutput constraints:\n- Return ONLY the final image prompt text.\n- Keep the final image prompt under ${IMAGE_PROMPT_MAX_CHARS} characters.`,
-        runId: context.runId,
-        nodeId: context.node.id,
-        projectPath: context.projectPath,
-      });
-      const compiled = clampImagePromptLength(materialized.text, IMAGE_PROMPT_MAX_CHARS);
-      if (compiled) {
-        context.log(
-          `[studio.image_generation] Materialized structured prompt (${compiled.length} chars) before image generation.`
-        );
-        return {
-          prompt: compiled,
-          structuredInputImages: structured.inputImages,
-        };
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      context.log(
-        `[studio.image_generation] Prompt materialization failed, falling back to compact prompt: ${message.slice(0, 240)}`
-      );
-    }
-
-    return {
-      prompt: clampImagePromptLength(`${systemPrompt}\n\n${compactedUserPrompt}`, IMAGE_PROMPT_MAX_CHARS),
-      structuredInputImages: structured.inputImages,
-    };
+  const systemPrompt = structured.systemPrompt.trim();
+  if (systemPrompt.length > 0) {
+    context.log(
+      `[studio.image_generation] Ignoring system prompt for node "${context.node.id}". Build prompt strategy upstream in a text-generation node.`
+    );
   }
+  const userPrompt = structured.prompt.trim();
 
   if (userPrompt) {
     return {
@@ -210,19 +159,11 @@ export const imageGenerationNode: StudioNodeDefinition = {
   ],
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
-    systemPrompt: "",
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
   },
   configSchema: {
     fields: [
-      {
-        key: "systemPrompt",
-        label: "System Prompt",
-        type: "textarea",
-        required: false,
-        placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
-      },
       {
         key: "count",
         label: "Image Count",
@@ -251,7 +192,7 @@ export const imageGenerationNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const { prompt, structuredInputImages } = await resolveImagePrompt(context);
+    const { prompt, structuredInputImages } = resolveImagePrompt(context);
     if (!prompt) {
       throw new Error(`Image generation node "${context.node.id}" requires a prompt input.`);
     }
@@ -268,7 +209,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
     const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
     const result = await context.services.api.generateImage({
       prompt,
-      modelId: FIXED_IMAGE_MODEL_ID,
       count,
       aspectRatio,
       inputImages,

@@ -249,7 +249,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(textNode?.config.systemPrompt).toBe("System instruction");
 
     const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
-    expect(imageNode?.config.systemPrompt).toBe("System instruction");
+    expect(imageNode?.config.systemPrompt).toBeUndefined();
 
     const signature = migrated.project.graph.edges
       .map(
