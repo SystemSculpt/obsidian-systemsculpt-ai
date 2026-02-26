@@ -1,6 +1,8 @@
 import type { StudioJsonValue, StudioNodeDefinition } from "../types";
 import { isRecord } from "../utils";
+import { PlatformContext } from "../../services/PlatformContext";
 import { getText, renderTemplate, resolveTemplateVariables } from "./shared";
+import { requestUrl } from "obsidian";
 
 const DEFAULT_MAX_REQUESTS = 500;
 const DEFAULT_THROTTLE_MS = 0;
@@ -263,6 +265,16 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+function shouldUseRequestUrlForEndpoint(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return host === "api.resend.com" || host.endsWith(".api.resend.com");
+  } catch {
+    return false;
+  }
+}
+
 async function requestWithRetry(options: {
   url: string;
   method: string;
@@ -271,38 +283,66 @@ async function requestWithRetry(options: {
   signal: AbortSignal;
   maxRetries: number;
 }): Promise<HttpRequestResponseSnapshot> {
+  const preferredTransport = PlatformContext.get().preferredTransport({ endpoint: options.url });
+  let useRequestUrl = preferredTransport === "requestUrl" || shouldUseRequestUrlForEndpoint(options.url);
+
+  const body: string | undefined =
+    typeof options.bodyValue === "string"
+      ? options.bodyValue
+      : typeof options.bodyValue === "undefined"
+        ? undefined
+        : JSON.stringify(options.bodyValue);
+
+  const headers = { ...options.headers };
+  if (typeof body !== "undefined" && !hasHeaderCaseInsensitive(headers, "Content-Type")) {
+    headers["Content-Type"] = "application/json";
+  }
+
   let attempt = 0;
   while (attempt <= options.maxRetries) {
     if (options.signal.aborted) {
       throw new Error("HTTP request aborted.");
     }
     try {
-      const headers = { ...options.headers };
-      let body: string | undefined;
-      if (typeof options.bodyValue === "string") {
-        body = options.bodyValue;
-      } else if (typeof options.bodyValue !== "undefined") {
-        body = JSON.stringify(options.bodyValue);
-        if (!hasHeaderCaseInsensitive(headers, "Content-Type")) {
-          headers["Content-Type"] = "application/json";
+      let responseText = "";
+      let status = 0;
+
+      if (useRequestUrl) {
+        const response = await requestUrl({
+          url: options.url,
+          method: options.method,
+          headers,
+          body,
+          throw: false,
+        });
+
+        status = response.status ?? 0;
+        if (typeof response.text === "string") {
+          responseText = response.text;
+        } else if (typeof response.json !== "undefined") {
+          responseText = JSON.stringify(response.json);
         }
+      } else {
+        const response = await fetch(options.url, {
+          method: options.method,
+          headers,
+          body,
+          signal: options.signal,
+        });
+
+        status = response.status;
+        responseText = await response.text();
+
       }
 
-      const response = await fetch(options.url, {
-        method: options.method,
-        headers,
-        body,
-        signal: options.signal,
-      });
-      const bodyText = await response.text();
       let bodyJson: StudioJsonValue = null;
       try {
-        bodyJson = JSON.parse(bodyText) as StudioJsonValue;
+        bodyJson = responseText ? (JSON.parse(responseText) as StudioJsonValue) : null;
       } catch {
         bodyJson = null;
       }
 
-      if (isRetryableStatus(response.status) && attempt < options.maxRetries) {
+      if (status >= 400 && (isRetryableStatus(status) || status === 0) && attempt < options.maxRetries) {
         const backoffMs = 400 * Math.pow(2, attempt);
         await sleep(backoffMs, options.signal);
         attempt += 1;
@@ -310,12 +350,16 @@ async function requestWithRetry(options: {
       }
 
       return {
-        status: response.status,
-        bodyText,
+        status,
+        bodyText: responseText,
         bodyJson,
-        ok: response.status >= 200 && response.status < 300,
+        ok: status >= 200 && status < 300,
       };
     } catch (error) {
+      if (!useRequestUrl && preferredTransport !== "requestUrl") {
+        useRequestUrl = true;
+        continue;
+      }
       if (attempt >= options.maxRetries) {
         throw error;
       }

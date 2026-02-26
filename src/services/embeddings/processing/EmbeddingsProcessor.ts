@@ -234,6 +234,8 @@ export class EmbeddingsProcessor {
               createdAt: Date.now(),
               namespace,
               complete: true,
+              partial: false,
+              failedChunkCount: 0,
               chunkCount: 0
             }
           };
@@ -274,6 +276,8 @@ export class EmbeddingsProcessor {
               createdAt: Date.now(),
               namespace,
               complete: true,
+              partial: false,
+              failedChunkCount: 0,
               chunkCount: 0
             }
           };
@@ -919,11 +923,14 @@ export class EmbeddingsProcessor {
     const root = this.storage.getVectorSync(rootId);
     if (root) {
       const mtime = file.stat?.mtime || Date.now();
+      const failedChunkCount = Math.max(0, chunkCount - keepChunkIds.size);
       const needsUpdate =
         (hadFailures ? root.metadata.complete !== false : root.metadata.complete !== true)
         || root.metadata.chunkCount !== chunkCount
         || root.metadata.title !== file.basename
-        || root.metadata.mtime !== mtime;
+        || root.metadata.mtime !== mtime
+        || root.metadata.partial !== hadFailures
+        || (hadFailures ? (root.metadata.failedChunkCount ?? 0) !== failedChunkCount : (root.metadata.failedChunkCount ?? 0) !== 0);
 
       if (needsUpdate) {
         await this.storage.storeVectors([{
@@ -936,6 +943,8 @@ export class EmbeddingsProcessor {
             title: file.basename,
             mtime,
             complete: hadFailures ? false : true,
+            partial: hadFailures,
+            failedChunkCount: failedChunkCount,
             chunkCount
           }
         }]);

@@ -521,35 +521,27 @@ export class EmbeddingsManager {
       }
     }
 
-    // Constrain to exact namespace based on actual vector dimensionality
-    const targetNamespace = buildNamespace(this.provider.id, currentModel, queryVec.length);
-    const finalCandidates = candidates.filter(v => v.metadata?.namespace === targetNamespace);
-    const dimensionMismatch = candidates.length > 0 && finalCandidates.length === 0;
-    if (finalCandidates.length === 0) {
+    // Prefer the exact namespace (including dimension) but keep a best-effort fallback
+    // to the most-populated namespace for the same provider/model prefix when needed.
+    const preferredNamespace = buildNamespace(this.provider.id, currentModel, queryVec.length);
+    const namespaceChoice = this.resolveNamespaceForSearchVectors(candidates, preferredNamespace, nsPrefix);
+    if (!namespaceChoice) {
+      return [];
+    }
+    const finalCandidates = candidates.filter(v => v.metadata?.namespace === namespaceChoice.namespace);
+
+    // Exclude files that don't have a "root" vector (chunkId=0).
+    // Prefer fully complete roots first, but fall back to roots with undefined/missing complete.
+    const eligiblePaths = this.collectSearchableRootPaths(finalCandidates);
+    const eligibleCandidates = finalCandidates.filter((v) => v?.path && eligiblePaths.has(v.path));
+    if (eligibleCandidates.length === 0) {
       if (this.storage.size() > 0 && this.plugin.settings.embeddingsEnabled) {
         try {
-          if (dimensionMismatch) {
+          if (!namespaceChoice.exactMatch && finalCandidates.length > 0) {
             this.showDimensionMismatchNotice();
           }
         } catch {}
       }
-      return [];
-    }
-
-    // Exclude files that don't have a "root" vector (chunkId=0) or are marked incomplete.
-    // This avoids showing stale/partial paths (e.g. during deletes/renames, WAF-skipped chunks).
-    const eligiblePaths = new Set<string>();
-    for (const vector of finalCandidates) {
-      if (!vector?.path) continue;
-      if (this.isPathExcluded(vector.path)) continue;
-      const chunkId = typeof vector.chunkId === "number" ? vector.chunkId : -1;
-      if (chunkId !== 0) continue;
-      if (vector.metadata?.isEmpty === true) continue;
-      if (vector.metadata?.complete !== true) continue;
-      eligiblePaths.add(vector.path);
-    }
-    const eligibleCandidates = finalCandidates.filter((v) => v?.path && eligiblePaths.has(v.path));
-    if (eligibleCandidates.length === 0) {
       return [];
     }
 
@@ -575,43 +567,26 @@ export class EmbeddingsManager {
     if (this.isPathExcluded(filePath)) return [];
 
     const { model: currentModel, namespace: targetNamespace } = this.resolveLookupNamespace();
-    if (!targetNamespace) return [];
+    const preferredNamespace = targetNamespace || buildNamespace(this.provider.id, currentModel, this.getExpectedDimensionHint() || 0);
+    if (!preferredNamespace) return [];
 
     const vectors = await this.storage.getVectorsByPath(filePath);
+    const searchableNamespace = this.resolveNamespaceForSearchVectors(vectors, preferredNamespace, buildNamespacePrefix(this.provider.id, currentModel));
+    if (!searchableNamespace) {
+      return [];
+    }
     const fileVectors = vectors.filter(
-      (v) => v && v.metadata?.namespace === targetNamespace && v.metadata?.isEmpty !== true
+      (v) => v && v.metadata?.namespace === searchableNamespace.namespace && v.metadata?.isEmpty !== true
     );
     if (fileVectors.length === 0) {
-      const nsPrefix = buildNamespacePrefix(this.provider.id, currentModel);
-      const hasOtherNamespace = vectors.some(
-        (v) =>
-          v &&
-          v.metadata?.isEmpty !== true &&
-          typeof v.metadata?.namespace === "string" &&
-          v.metadata.namespace.startsWith(nsPrefix)
-      );
-      if (hasOtherNamespace) {
-        try {
-          this.showDimensionMismatchNotice();
-        } catch {}
-      }
       return [];
     }
 
     const queryVectors = this.selectQueryVectors(fileVectors);
     if (queryVectors.length === 0) return [];
 
-    const nsVectors = await this.storage.getVectorsByNamespace(targetNamespace);
-    const eligiblePaths = new Set<string>();
-    for (const vector of nsVectors) {
-      if (!vector?.path) continue;
-      if (this.isPathExcluded(vector.path)) continue;
-      const chunkId = typeof vector.chunkId === "number" ? vector.chunkId : -1;
-      if (chunkId !== 0) continue;
-      if (vector.metadata?.isEmpty === true) continue;
-      if (vector.metadata?.complete !== true) continue;
-      eligiblePaths.add(vector.path);
-    }
+    const nsVectors = await this.storage.getVectorsByNamespace(searchableNamespace.namespace);
+    const eligiblePaths = this.collectSearchableRootPaths(nsVectors);
 
     const candidates = nsVectors.filter(
       (v) =>
@@ -895,22 +870,22 @@ export class EmbeddingsManager {
    */
   public hasAnyEmbeddings(): boolean {
     try {
-      const expectedDimension = this.getExpectedDimensionHint() || undefined;
-      const { model: currentModel, namespace: targetNamespace } = this.resolveLookupNamespace();
-      if (!targetNamespace) return false;
-      const paths = this.storage.getDistinctPaths();
-      for (const path of paths) {
-        if (!path) continue;
-        if (this.isPathExcluded(path)) continue;
-        const root = this.storage.getVectorSync(buildVectorId(targetNamespace, path, 0));
-        if (!root) continue;
-        if (root.metadata?.isEmpty === true) continue;
-        if (!namespaceMatchesCurrentVersion(root.metadata?.namespace, this.provider.id, currentModel, expectedDimension)) {
-          continue;
-        }
-        return true;
+      const { model: currentModel, namespace } = this.resolveLookupNamespace();
+      const nsPrefix = buildNamespacePrefix(this.provider.id, currentModel);
+      if (!nsPrefix) return false;
+
+      const candidates = this.storage.getVectorsByNamespacePrefix(nsPrefix).filter((v) =>
+        v && v.metadata?.isEmpty !== true && !this.isPathExcluded(v.path)
+      );
+      if (candidates.length === 0) return false;
+
+      const usablePaths = this.collectSearchableRootPaths(candidates);
+      if (namespace && namespaceMatchesCurrentVersion(namespace, this.provider.id, currentModel, this.getExpectedDimensionHint() || undefined)) {
+        // Fast-path check for the active namespace.
+        if (usablePaths.size > 0) return true;
       }
-      return false;
+
+      return usablePaths.size > 0;
     } catch {
       return false;
     }
@@ -1057,10 +1032,68 @@ export class EmbeddingsManager {
   public hasVector(path: string): boolean {
     if (!path) return false;
     if (this.isPathExcluded(path)) return false;
-    const { namespace: targetNamespace } = this.resolveLookupNamespace();
-    if (!targetNamespace) return false;
-    const root = this.storage.getVectorSync(buildVectorId(targetNamespace, path, 0));
-    return !!root && root.metadata?.isEmpty !== true && root.metadata?.complete === true;
+    const { model: currentModel, namespace: targetNamespace } = this.resolveLookupNamespace();
+    const candidates = this.storage.getVectorsByPath(path).filter((v) => v && v.metadata?.isEmpty !== true);
+    const preferredNamespace = targetNamespace || buildNamespace(this.provider.id, currentModel, this.getExpectedDimensionHint() || 0);
+    const searchableNamespace = this.resolveNamespaceForSearchVectors(candidates, preferredNamespace, buildNamespacePrefix(this.provider.id, currentModel));
+    if (!searchableNamespace) return false;
+    const root = this.storage.getVectorSync(buildVectorId(searchableNamespace.namespace, path, 0));
+    return !!root && root.metadata?.isEmpty !== true && root.metadata?.complete !== false;
+  }
+
+  private resolveNamespaceForSearchVectors(
+    vectors: EmbeddingVector[],
+    preferredNamespace: string,
+    namespacePrefix: string
+  ): { namespace: string; exactMatch: boolean } | null {
+    const countsByNamespace = new Map<string, number>();
+
+    for (const vector of vectors) {
+      const namespace = vector?.metadata?.namespace;
+      if (typeof namespace !== "string") continue;
+      if (!namespace.startsWith(namespacePrefix)) continue;
+      if (vector.metadata?.isEmpty === true) continue;
+
+      const count = countsByNamespace.get(namespace) || 0;
+      countsByNamespace.set(namespace, count + 1);
+    }
+
+    if ((countsByNamespace.get(preferredNamespace) || 0) > 0) {
+      return { namespace: preferredNamespace, exactMatch: true };
+    }
+
+    let bestNamespace: string | null = null;
+    let bestCount = 0;
+    for (const [namespace, count] of countsByNamespace) {
+      if (count > bestCount || (count === bestCount && namespace < (bestNamespace || namespace))) {
+        bestNamespace = namespace;
+        bestCount = count;
+      }
+    }
+
+    if (!bestNamespace) return null;
+    return { namespace: bestNamespace, exactMatch: false };
+  }
+
+  private collectSearchableRootPaths(vectors: EmbeddingVector[]): Set<string> {
+    const completePaths = new Set<string>();
+    const usablePaths = new Set<string>();
+
+    for (const vector of vectors) {
+      const path = vector?.path;
+      if (!path) continue;
+      const chunkId = typeof vector.chunkId === "number" ? vector.chunkId : -1;
+      if (chunkId !== 0) continue;
+      if (vector.metadata?.isEmpty === true) continue;
+      if (vector.metadata?.complete !== false) {
+        usablePaths.add(path);
+      }
+      if (vector.metadata?.complete === true) {
+        completePaths.add(path);
+      }
+    }
+
+    return completePaths.size > 0 ? completePaths : usablePaths;
   }
 
   /**

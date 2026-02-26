@@ -50,6 +50,10 @@ export interface EmbeddingVector {
     chunkLength?: number;
     /** Marks that all chunks for the file were embedded successfully (set on chunk 0). */
     complete?: boolean;
+    /** Marks partial file-level embedding execution (set on chunk 0). */
+    partial?: boolean;
+    /** Number of chunks that failed and were not regenerated in this pass (set on chunk 0). */
+    failedChunkCount?: number;
     /** Total chunk count for the file at embedding time (set on chunk 0). */
     chunkCount?: number;
   };
