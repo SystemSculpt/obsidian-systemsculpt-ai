@@ -243,6 +243,7 @@ describe("Studio node config validation", () => {
       method: "POST",
       url: "https://api.resend.com/contacts",
       bearerToken: "re_test_123",
+      bodyMode: "auto",
       body: {
         email: "first@example.com",
       },
@@ -266,5 +267,21 @@ describe("Studio node config validation", () => {
 
     expect(result.isValid).toBe(false);
     expect(result.errors.some((error) => error.fieldKey === "maxRetries")).toBe(true);
+  });
+
+  it("rejects invalid HTTP body mode values", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      method: "POST",
+      url: "https://api.resend.com/contacts",
+      bodyMode: "xml",
+      maxRetries: 0,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.fieldKey === "bodyMode")).toBe(true);
   });
 });

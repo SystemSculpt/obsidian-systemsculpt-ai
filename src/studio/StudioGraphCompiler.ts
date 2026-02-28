@@ -91,6 +91,15 @@ export class StudioGraphCompiler {
         );
       }
 
+      if (toNode.node.kind === "studio.http_request" && edge.toPortId === "body") {
+        const existingBodyEdge = toNode.inboundEdges.find((inbound) => inbound.toPortId === "body");
+        if (existingBodyEdge) {
+          throw new Error(
+            `Graph compile failed: HTTP request node "${toNode.node.id}" body input accepts only one connection (choose either text or JSON).`
+          );
+        }
+      }
+
       if (!typeCompatible(sourcePort.type, targetPort.type)) {
         throw new Error(
           `Graph compile failed: type mismatch on edge "${edge.id}" (${sourcePort.type} -> ${targetPort.type}).`

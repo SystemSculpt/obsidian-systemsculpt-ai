@@ -401,6 +401,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         method: "POST",
         url: "https://api.resend.com/contacts",
         bearerToken: "",
+        bodyMode: "auto",
         maxRetries: 2,
       })
     );

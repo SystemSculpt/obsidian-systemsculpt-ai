@@ -13,6 +13,14 @@ type HttpRequestResponseSnapshot = {
   ok: boolean;
 };
 
+type HttpRequestBodyMode = "auto" | "json" | "text";
+type ResolvedHttpRequestBodyMode = "json" | "text";
+
+type PreparedHttpRequestBody = {
+  body: string | undefined;
+  resolvedMode: ResolvedHttpRequestBodyMode | null;
+};
+
 function readFiniteInt(
   value: StudioJsonValue | undefined,
   fallback: number,
@@ -107,6 +115,78 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+function normalizeBodyMode(value: StudioJsonValue | undefined): HttpRequestBodyMode {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "json" || normalized === "text" || normalized === "auto") {
+    return normalized;
+  }
+  return "auto";
+}
+
+function coerceBodyToText(value: StudioJsonValue): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function prepareHttpRequestBody(options: {
+  bodyValue: StudioJsonValue | undefined;
+  bodyMode: HttpRequestBodyMode;
+}): PreparedHttpRequestBody {
+  if (typeof options.bodyValue === "undefined") {
+    return {
+      body: undefined,
+      resolvedMode: null,
+    };
+  }
+
+  if (options.bodyMode === "text") {
+    return {
+      body: coerceBodyToText(options.bodyValue),
+      resolvedMode: "text",
+    };
+  }
+
+  if (options.bodyMode === "json") {
+    if (typeof options.bodyValue === "string") {
+      const trimmed = options.bodyValue.trim();
+      if (!trimmed) {
+        throw new Error("HTTP request body mode is JSON, but body text is empty.");
+      }
+      try {
+        const parsed = JSON.parse(trimmed) as StudioJsonValue;
+        return {
+          body: JSON.stringify(parsed),
+          resolvedMode: "json",
+        };
+      } catch {
+        throw new Error("HTTP request body mode is JSON, but body text is not valid JSON.");
+      }
+    }
+
+    return {
+      body: JSON.stringify(options.bodyValue),
+      resolvedMode: "json",
+    };
+  }
+
+  if (typeof options.bodyValue === "string") {
+    return {
+      body: options.bodyValue,
+      resolvedMode: "text",
+    };
+  }
+
+  return {
+    body: JSON.stringify(options.bodyValue),
+    resolvedMode: "json",
+  };
+}
+
 function shouldUseRequestUrlForEndpoint(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -122,22 +202,23 @@ async function requestWithRetry(options: {
   method: string;
   headers: Record<string, string>;
   bodyValue: StudioJsonValue | undefined;
+  bodyMode: HttpRequestBodyMode;
   signal: AbortSignal;
   maxRetries: number;
 }): Promise<HttpRequestResponseSnapshot> {
   const preferredTransport = PlatformContext.get().preferredTransport({ endpoint: options.url });
   let useRequestUrl = preferredTransport === "requestUrl" || shouldUseRequestUrlForEndpoint(options.url);
 
-  const body: string | undefined =
-    typeof options.bodyValue === "string"
-      ? options.bodyValue
-      : typeof options.bodyValue === "undefined"
-        ? undefined
-        : JSON.stringify(options.bodyValue);
+  const preparedBody = prepareHttpRequestBody({
+    bodyValue: options.bodyValue,
+    bodyMode: options.bodyMode,
+  });
+  const body = preparedBody.body;
 
   const headers = { ...options.headers };
   if (typeof body !== "undefined" && !hasHeaderCaseInsensitive(headers, "Content-Type")) {
-    headers["Content-Type"] = "application/json";
+    headers["Content-Type"] =
+      preparedBody.resolvedMode === "text" ? "text/plain; charset=utf-8" : "application/json";
   }
 
   let attempt = 0;
@@ -221,7 +302,7 @@ export const httpRequestNode: StudioNodeDefinition = {
   cachePolicy: "never",
   inputPorts: [
     { id: "url", type: "text", required: false },
-    { id: "body", type: "json", required: false },
+    { id: "body", type: "any", required: false },
   ],
   outputPorts: [
     { id: "status", type: "number" },
@@ -233,6 +314,7 @@ export const httpRequestNode: StudioNodeDefinition = {
     url: "",
     headers: {},
     bearerToken: "",
+    bodyMode: "auto",
     body: {},
     maxRetries: DEFAULT_MAX_RETRIES,
   },
@@ -275,6 +357,18 @@ export const httpRequestNode: StudioNodeDefinition = {
         placeholder: "re_xxxxx",
       },
       {
+        key: "bodyMode",
+        label: "Body Mode",
+        description: "Auto chooses text/plain for string input and JSON for structured input.",
+        type: "select",
+        required: true,
+        options: [
+          { value: "auto", label: "Auto" },
+          { value: "json", label: "JSON" },
+          { value: "text", label: "Text" },
+        ],
+      },
+      {
         key: "body",
         label: "Default Body",
         description: "Used when no body input is provided.",
@@ -311,6 +405,7 @@ export const httpRequestNode: StudioNodeDefinition = {
       min: 0,
       max: 8,
     });
+    const bodyMode = normalizeBodyMode(context.node.config.bodyMode as StudioJsonValue);
 
     const variables = resolveTemplateVariables(context);
     const url = renderTemplate(baseUrlTemplate, variables).trim();
@@ -331,6 +426,7 @@ export const httpRequestNode: StudioNodeDefinition = {
       method,
       headers,
       bodyValue,
+      bodyMode,
       signal: context.signal,
       maxRetries,
     });

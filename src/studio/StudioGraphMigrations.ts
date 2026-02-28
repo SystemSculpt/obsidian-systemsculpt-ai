@@ -163,6 +163,7 @@ function migrateResendAudienceSyncNodes(
         url: `${apiBaseUrl}/contacts`,
         headers,
         bearerToken: authSource === "plaintext" ? asText(config.apiKey).trim() : "",
+        bodyMode: "auto",
         body,
         maxRetries,
       },

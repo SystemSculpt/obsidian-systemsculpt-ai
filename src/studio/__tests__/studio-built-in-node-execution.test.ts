@@ -841,6 +841,7 @@ describe("Studio built-in text/image node execution", () => {
           method: "POST",
           headers: expect.objectContaining({
             Authorization: "Bearer re_test_123",
+            "Content-Type": "application/json",
           }),
         })
       );
@@ -850,6 +851,126 @@ describe("Studio built-in text/image node execution", () => {
       expect(result.outputs.status).toBe(200);
       expect(result.outputs.body).toContain("contact-1");
       expect(result.outputs.json).toEqual({ id: "contact-1" });
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node auto mode sends text body as text/plain", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await definition!.execute(
+        createContext({
+          nodeId: "http-node",
+          kind: "studio.http_request",
+          config: {
+            method: "POST",
+            url: "https://api.example.com/contacts",
+            maxRetries: 0,
+          },
+          inputs: {
+            body: "plain text payload",
+          },
+        })
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const call = fetchMock.mock.calls[0];
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "text/plain; charset=utf-8",
+          }),
+          body: "plain text payload",
+        })
+      );
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node JSON mode parses JSON text body", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await definition!.execute(
+        createContext({
+          nodeId: "http-node",
+          kind: "studio.http_request",
+          config: {
+            method: "POST",
+            url: "https://api.example.com/contacts",
+            bodyMode: "json",
+            maxRetries: 0,
+          },
+          inputs: {
+            body: "{\"email\":\"json@example.com\"}",
+          },
+        })
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const call = fetchMock.mock.calls[0];
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+          }),
+        })
+      );
+      expect(JSON.parse(call[1].body)).toEqual({
+        email: "json@example.com",
+      });
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node JSON mode rejects invalid JSON text", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn();
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await expect(
+        definition!.execute(
+          createContext({
+            nodeId: "http-node",
+            kind: "studio.http_request",
+            config: {
+              method: "POST",
+              url: "https://api.example.com/contacts",
+              bodyMode: "json",
+              maxRetries: 0,
+            },
+            inputs: {
+              body: "not-json",
+            },
+          })
+        )
+      ).rejects.toThrow("body mode is JSON");
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       (globalThis as any).fetch = originalFetch;
     }

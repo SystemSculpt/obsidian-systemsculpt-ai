@@ -106,6 +106,86 @@ describe("StudioGraphCompiler", () => {
     expect(() => compiler.compile(project, registry)).toThrow("type mismatch");
   });
 
+  it("allows text output to connect into HTTP request body", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "hello from text node" },
+      },
+      {
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 250, y: 0 },
+        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
+      }
+    );
+    project.graph.edges.push({
+      id: "e1",
+      fromNodeId: "text",
+      fromPortId: "text",
+      toNodeId: "http",
+      toPortId: "body",
+    });
+
+    const compiled = compiler.compile(project, registry);
+    expect(compiled.executionOrder).toEqual(["text", "http"]);
+  });
+
+  it("rejects multiple HTTP request body connections", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "hello from text node" },
+      },
+      {
+        id: "json",
+        kind: "studio.json",
+        version: "1.0.0",
+        title: "JSON",
+        position: { x: 0, y: 180 },
+        config: {},
+      },
+      {
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 280, y: 0 },
+        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
+      }
+    );
+    project.graph.edges.push(
+      {
+        id: "e1",
+        fromNodeId: "text",
+        fromPortId: "text",
+        toNodeId: "http",
+        toPortId: "body",
+      },
+      {
+        id: "e2",
+        fromNodeId: "json",
+        fromPortId: "json",
+        toNodeId: "http",
+        toPortId: "body",
+      }
+    );
+
+    expect(() => compiler.compile(project, registry)).toThrow("accepts only one connection");
+  });
+
   it("rejects cyclic graphs", () => {
     const project = baseProject();
     project.graph.nodes.push(
