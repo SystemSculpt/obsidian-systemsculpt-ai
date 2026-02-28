@@ -1,6 +1,7 @@
 import { expect } from "@wdio/globals";
 import { ensurePluginEnabled } from "../utils/obsidian";
 import {
+  coerceMessageContentToText,
   configurePluginForLiveChat,
   ensureE2EVault,
   getActiveChatViewState,
@@ -22,6 +23,7 @@ describe("AgentOps assessment hero (mock) workflow", () => {
 
   const intakePath = "Business/AgentOps/Assessment Intake.md";
   const discoveryPath = "Business/AgentOps/Workflow Discovery.md";
+  const heroToken = "AGENTOPS_HERO_OK";
 
   const beat = async (ms = 500) => {
     await browser.pause(ms);
@@ -182,6 +184,7 @@ describe("AgentOps assessment hero (mock) workflow", () => {
         "Draft an AgentOps assessment kickoff snapshot in exactly 4 bullets for leadership.",
         "Bullets must be labeled: Qualification, Discovery, Risk, Launch.",
         "Each bullet must be one short sentence and business-focused.",
+        `Reply with EXACTLY: ${heroToken}`,
       ].join("\n")
     );
     await beat(450);
@@ -190,8 +193,8 @@ describe("AgentOps assessment hero (mock) workflow", () => {
       async () => {
         const state = await getActiveChatViewState();
         const assistant = [...state.messages].reverse().find((m) => m.role === "assistant");
-        const assistantText = String(assistant?.content ?? "").trim();
-        return assistantText.length > 80 && !state.isGenerating;
+        const assistantText = coerceMessageContentToText(assistant?.content).trim();
+        return assistantText.includes(heroToken) && !state.isGenerating;
       },
       { timeout: 60000, timeoutMsg: "Assistant response did not finish for AgentOps hero showcase." }
     );

@@ -287,7 +287,72 @@ export async function configurePluginForLiveChat(params: {
           nextSettings.licenseValid = false;
         }
 
-        await plugin.getSettingsManager().updateSettings(nextSettings);
+        const resolveSettingsManager = async (): Promise<any> => {
+          const deadline = Date.now() + 30000;
+
+          const getCandidate = () => {
+            if (typeof plugin.getSettingsManager === "function") {
+              try {
+                return plugin.getSettingsManager();
+              } catch (_) {}
+            }
+            return plugin.settingsManager;
+          };
+
+          const ensureFn =
+            plugin.ensureSettingsManagerInstance ??
+            plugin["ensureSettingsManagerInstance"];
+
+          while (Date.now() < deadline) {
+            const candidate = getCandidate();
+            if (candidate && typeof candidate.updateSettings === "function") {
+              return candidate;
+            }
+
+            if (typeof ensureFn === "function") {
+              try {
+                const ensured = await ensureFn.call(plugin);
+                if (ensured && typeof ensured.updateSettings === "function") {
+                  return ensured;
+                }
+              } catch (_) {}
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          return null;
+        };
+
+        const settingsManager = await resolveSettingsManager();
+        if (settingsManager && typeof settingsManager.updateSettings === "function") {
+          await settingsManager.updateSettings(nextSettings);
+        } else {
+          const mutableSettings =
+            plugin._internal_settings_systemsculpt_plugin ??
+            plugin.settings ??
+            {};
+          Object.assign(mutableSettings, nextSettings);
+          plugin._internal_settings_systemsculpt_plugin = mutableSettings;
+          if (typeof plugin.saveSettings === "function") {
+            await plugin.saveSettings();
+          }
+        }
+
+        // Keep in-memory settings and singleton service instances aligned for this test turn.
+        if (plugin && typeof plugin === "object") {
+          const liveSettings =
+            plugin._internal_settings_systemsculpt_plugin ??
+            plugin.settings ??
+            {};
+          Object.assign(liveSettings, nextSettings);
+          plugin._internal_settings_systemsculpt_plugin = liveSettings;
+
+          const aiService = plugin.aiService;
+          if (aiService && typeof aiService.updateSettings === "function") {
+            aiService.updateSettings(liveSettings);
+          }
+        }
 
         if (shouldValidate) {
           const valid = await plugin.aiService.validateLicense(true);

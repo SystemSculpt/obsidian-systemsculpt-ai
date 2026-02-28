@@ -700,7 +700,7 @@ export class StudioNodeInspectorOverlay {
 
     if (field.type === "text") {
       const input = wrapper.createEl("input", {
-        type: "text",
+        type: field.inputType === "password" ? "password" : "text",
         cls: "ss-studio-node-inspector-input",
       });
       input.value = toText(initialValue);

@@ -56,6 +56,7 @@ testing/e2e/reports/
 testing/e2e/screenshots/
 testing/e2e/video/
 testing/e2e/.obsidian-cache/
+testing/e2e/.obsidian-cache.broken*/
 testing/e2e/fixtures/.tmp-vaults/
 testing/e2e/fixtures/vault/.obsidian/
 

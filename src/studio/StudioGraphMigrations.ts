@@ -5,8 +5,6 @@ const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
-const RESEND_DEFAULT_MAX_REQUESTS = 500;
-const RESEND_DEFAULT_THROTTLE_MS = 550;
 const RESEND_DEFAULT_MAX_RETRIES = 3;
 
 const LEGACY_OUTPUT_PORT_REMAP: Record<string, Record<string, string>> = {
@@ -147,42 +145,26 @@ function migrateResendAudienceSyncNodes(
       body.segments = [{ id: segmentId }];
     }
 
-    const maxRequests = clampFiniteInt(config.maxContacts, RESEND_DEFAULT_MAX_REQUESTS, {
-      min: 1,
-      max: 5000,
-    });
-    const throttleMs = clampFiniteInt(config.throttleMs, RESEND_DEFAULT_THROTTLE_MS, {
-      min: 0,
-      max: 60000,
-    });
     const maxRetries = clampFiniteInt(config.maxRetries, RESEND_DEFAULT_MAX_RETRIES, {
       min: 0,
       max: 8,
     });
+
+    const headers: Record<string, StudioJsonValue> = {
+      "Content-Type": "application/json",
+    };
 
     return {
       ...node,
       kind: "studio.http_request",
       title: asText(node.title).trim() || "HTTP Request",
       config: {
-        mode: "batch_items",
         method: "POST",
         url: `${apiBaseUrl}/contacts`,
-        headers: { "Content-Type": "application/json" },
-        authSource,
-        authTokenRef: asText(config.apiKeyRef).trim(),
-        authToken: asText(config.apiKey).trim(),
-        authHeaderName: "Authorization",
-        authScheme: "bearer",
+        headers,
+        bearerToken: authSource === "plaintext" ? asText(config.apiKey).trim() : "",
         body,
-        bodyTemplate: "",
-        itemBodyField: "email",
-        mergeItemObject: true,
-        maxRequests,
-        throttleMs,
         maxRetries,
-        dryRun: config.dryRun === true,
-        continueOnHttpError: true,
       },
     };
   });
@@ -200,10 +182,8 @@ function migrateResendAudienceSyncNodes(
       }
       if (edge.toPortId === "emails") {
         changed = true;
-        nextEdges.push({
-          ...edge,
-          toPortId: "items",
-        });
+        // Dropped intentionally: mapping to `body` overrides configured payload
+        // on the simplified HTTP node and can produce invalid Resend request bodies.
         continue;
       }
     }
@@ -213,16 +193,14 @@ function migrateResendAudienceSyncNodes(
         changed = true;
         nextEdges.push({
           ...edge,
-          fromPortId: "items",
+          fromPortId: "json",
         });
         continue;
       }
       if (edge.fromPortId === "synced") {
         changed = true;
-        nextEdges.push({
-          ...edge,
-          fromPortId: "succeeded",
-        });
+        // Dropped intentionally: legacy `synced` represented contact count,
+        // while HTTP `status` is a response code and not semantically equivalent.
         continue;
       }
     }

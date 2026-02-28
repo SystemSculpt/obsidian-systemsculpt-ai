@@ -77,6 +77,7 @@ export type StudioNodeConfigFieldDefinition = {
   label: string;
   description?: string;
   type: StudioNodeConfigFieldType;
+  inputType?: "text" | "password";
   required?: boolean;
   placeholder?: string;
   min?: number;

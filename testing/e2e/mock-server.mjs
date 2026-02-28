@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEGACY_API_PREFIX = "/api/v1";
-const AGENT_API_PREFIX = "/api/v2/agent";
+const AGENT_API_PREFIX = "/api/v1/agent";
 const DEFAULT_PORT = 43111;
 const DEBUG = process.env.SYSTEMSCULPT_E2E_MOCK_DEBUG === "1";
 const TINY_PNG_BUFFER = Buffer.from(

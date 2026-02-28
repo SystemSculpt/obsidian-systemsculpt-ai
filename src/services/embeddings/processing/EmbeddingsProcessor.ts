@@ -196,19 +196,6 @@ export class EmbeddingsProcessor {
       try {
         const content = await app.vault.read(file);
 
-        const wafCheck = this.shouldSkipForWafPatterns(content);
-        if (wafCheck.skip) {
-          errorLogger.debug(`Skipping file with WAF-triggering content: ${file.path}`, {
-            source: "EmbeddingsProcessor",
-            method: "processFiles",
-            providerId: this.provider.id,
-            metadata: { path: file.path, signals: wafCheck.signals }
-          });
-          completedFiles += 1;
-          reportProgress();
-          continue;
-        }
-
         const processed = this.preprocessor.process(content, file);
 
         // File too small - store empty embedding sentinel to mark as processed
@@ -634,25 +621,6 @@ export class EmbeddingsProcessor {
 
     const msg = (error.message || "").toLowerCase();
     return msg.includes("received html") && msg.includes("403");
-  }
-
-  private static readonly WAF_BLOCK_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
-    { name: "phpunit", pattern: /\bphpunit\b/i },
-    { name: "eval-stdin", pattern: /eval-stdin/i },
-    { name: "traversal", pattern: /\.\.(\/|\\)|%2e%2e|%252e%252e/i },
-    { name: "php-exploit", pattern: /\\think\\app|invokefunction|call_user_func|pearcmd/i },
-    { name: "wp-exploit", pattern: /wp-file-manager.*connector|wp-content.*plugins.*php/i },
-    { name: "fortinet-exploit", pattern: /fgt_lang.*sslvpn|cmdb.*sslvpn/i },
-  ];
-
-  private shouldSkipForWafPatterns(text: string): { skip: boolean; signals: string[] } {
-    const signals: string[] = [];
-    for (const { name, pattern } of EmbeddingsProcessor.WAF_BLOCK_PATTERNS) {
-      if (pattern.test(text)) {
-        signals.push(name);
-      }
-    }
-    return { skip: signals.length > 0, signals };
   }
 
   private detectWafSignals(text: string): string[] {

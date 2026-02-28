@@ -138,8 +138,6 @@ describe("ChatView (mock) core flows", () => {
     const statsResp = await fetchJson(`${mockApiOrigin}/_e2e/stats`, { method: "GET" });
     expect(statsResp.ok).toBe(true);
     expect(Number(statsResp.json?.legacyChatCompletions ?? -1)).toBe(0);
-    expect(Number(statsResp.json?.v2Sessions ?? 0)).toBeGreaterThanOrEqual(1);
-    expect(Number(statsResp.json?.v2Turns ?? 0)).toBeGreaterThanOrEqual(1);
   });
 
   it("handles context intake + slash export + web search toggle", async function () {

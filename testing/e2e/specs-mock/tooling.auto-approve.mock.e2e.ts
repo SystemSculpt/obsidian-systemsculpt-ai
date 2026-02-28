@@ -11,7 +11,7 @@ import {
   upsertVaultFile,
 } from "../utils/systemsculptChat";
 
-describe("Tooling (mock) auto-approve read-only", () => {
+describe("Tooling (mock) immediate MCP execution", () => {
   const licenseKey = requireEnv("SYSTEMSCULPT_E2E_LICENSE_KEY");
   const serverUrl = getEnv("SYSTEMSCULPT_E2E_SERVER_URL");
   const selectedModelId = getEnv("SYSTEMSCULPT_E2E_MODEL_ID") ?? "systemsculpt@@systemsculpt/ai-agent";
@@ -39,7 +39,7 @@ describe("Tooling (mock) auto-approve read-only", () => {
     await upsertVaultFile(readPath, `AUTO_TOKEN: ${token}\n`);
   });
 
-  it("auto-approves mcp-filesystem_read without manual approval", async function () {
+  it("executes mcp-filesystem_read without manual approval gating", async function () {
     this.timeout(120000);
 
     await openFreshChatView();
@@ -95,13 +95,18 @@ describe("Tooling (mock) auto-approve read-only", () => {
       const view = (leaf as any)?.view;
       const manager = view?.toolCallManager as any;
       const call = manager?.getToolCall?.(toolCallId);
+      const pendingCount = Array.from(manager?.toolCalls?.values?.() ?? []).filter(
+        (entry: any) => entry?.state === "pending"
+      ).length;
       return {
-        autoApproved: call?.autoApproved,
+        state: call?.state,
         result: call?.result,
+        pendingCount,
       };
     }, { toolCallId });
 
-    expect(snapshot.autoApproved).toBe(true);
+    expect(snapshot.state).toBe("completed");
+    expect(Number(snapshot.pendingCount ?? 0)).toBe(0);
     expect(snapshot.result?.success).toBe(true);
     expect(snapshot.result?.data?.files?.[0]?.content ?? "").toContain(token);
   });

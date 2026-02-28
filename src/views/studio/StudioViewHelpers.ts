@@ -19,7 +19,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.dataset":
     "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
   "studio.http_request":
-    "Runs authenticated HTTP requests in single or batch mode with configurable retries and request shaping.",
+    "Makes a straightforward API request and returns status, body, and parsed JSON.",
   "studio.cli_command": "Runs a local shell command and captures output.",
 };
 

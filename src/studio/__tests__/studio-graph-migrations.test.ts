@@ -383,6 +383,13 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       toNodeId: "resend",
       toPortId: "emails",
     });
+    project.graph.edges.push({
+      id: "e2",
+      fromNodeId: "resend",
+      fromPortId: "synced",
+      toNodeId: "dataset",
+      toPortId: "value",
+    });
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
     expect(migrated.changed).toBe(true);
@@ -391,17 +398,15 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migratedNode?.kind).toBe("studio.http_request");
     expect(migratedNode?.config).toEqual(
       expect.objectContaining({
-        mode: "batch_items",
         method: "POST",
         url: "https://api.resend.com/contacts",
-        authSource: "keychain_ref",
-        authTokenRef: "resend.marketing",
-        itemBodyField: "email",
-        maxRequests: 250,
-        throttleMs: 500,
+        bearerToken: "",
         maxRetries: 2,
       })
     );
+    expect(migratedNode?.config.headers).toEqual({
+      "Content-Type": "application/json",
+    });
     expect(migratedNode?.config.body).toEqual({
       unsubscribed: false,
       segments: [{ id: "segment_123" }],
@@ -410,7 +415,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     const signature = migrated.project.graph.edges
       .map((edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`)
       .sort();
-    expect(signature).toEqual(["dataset:email->resend:items"]);
+    expect(signature).toEqual([]);
 
     expect(
       migrated.project.migrations.applied.some((entry) => entry.id === "studio.resend-http-request.v1")

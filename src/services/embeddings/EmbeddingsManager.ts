@@ -874,18 +874,26 @@ export class EmbeddingsManager {
       const nsPrefix = buildNamespacePrefix(this.provider.id, currentModel);
       if (!nsPrefix) return false;
 
-      const candidates = this.storage.getVectorsByNamespacePrefix(nsPrefix).filter((v) =>
-        v && v.metadata?.isEmpty !== true && !this.isPathExcluded(v.path)
-      );
-      if (candidates.length === 0) return false;
+      const fallbackNamespace = this.storage.peekBestNamespaceForPrefix(nsPrefix);
+      const namespaces = new Set<string>();
+      if (namespace) namespaces.add(namespace);
+      if (fallbackNamespace) namespaces.add(fallbackNamespace);
+      if (namespaces.size === 0) return false;
 
-      const usablePaths = this.collectSearchableRootPaths(candidates);
-      if (namespace && namespaceMatchesCurrentVersion(namespace, this.provider.id, currentModel, this.getExpectedDimensionHint() || undefined)) {
-        // Fast-path check for the active namespace.
-        if (usablePaths.size > 0) return true;
+      for (const path of this.storage.getDistinctPaths()) {
+        if (!path || this.isPathExcluded(path)) continue;
+
+        for (const namespaceId of namespaces) {
+          const root = this.storage.getVectorSync(buildVectorId(namespaceId, path, 0));
+          if (!root) continue;
+          if (root.metadata?.isEmpty === true) continue;
+          if (root.metadata?.complete === false) continue;
+          if (typeof root.metadata?.namespace === "string" && !root.metadata.namespace.startsWith(nsPrefix)) continue;
+          return true;
+        }
       }
 
-      return usablePaths.size > 0;
+      return false;
     } catch {
       return false;
     }
@@ -1033,12 +1041,26 @@ export class EmbeddingsManager {
     if (!path) return false;
     if (this.isPathExcluded(path)) return false;
     const { model: currentModel, namespace: targetNamespace } = this.resolveLookupNamespace();
-    const candidates = this.storage.getVectorsByPath(path).filter((v) => v && v.metadata?.isEmpty !== true);
+    const nsPrefix = buildNamespacePrefix(this.provider.id, currentModel);
+    if (!nsPrefix) return false;
+
     const preferredNamespace = targetNamespace || buildNamespace(this.provider.id, currentModel, this.getExpectedDimensionHint() || 0);
-    const searchableNamespace = this.resolveNamespaceForSearchVectors(candidates, preferredNamespace, buildNamespacePrefix(this.provider.id, currentModel));
-    if (!searchableNamespace) return false;
-    const root = this.storage.getVectorSync(buildVectorId(searchableNamespace.namespace, path, 0));
-    return !!root && root.metadata?.isEmpty !== true && root.metadata?.complete !== false;
+    const fallbackNamespace = this.storage.peekBestNamespaceForPrefix(nsPrefix);
+    const namespaces = new Set<string>();
+    if (preferredNamespace) namespaces.add(preferredNamespace);
+    if (fallbackNamespace) namespaces.add(fallbackNamespace);
+    if (namespaces.size === 0) return false;
+
+    for (const namespaceId of namespaces) {
+      const root = this.storage.getVectorSync(buildVectorId(namespaceId, path, 0));
+      if (!root) continue;
+      if (root.metadata?.isEmpty === true) continue;
+      if (root.metadata?.complete === false) continue;
+      if (typeof root.metadata?.namespace === "string" && !root.metadata.namespace.startsWith(nsPrefix)) continue;
+      return true;
+    }
+
+    return false;
   }
 
   private resolveNamespaceForSearchVectors(

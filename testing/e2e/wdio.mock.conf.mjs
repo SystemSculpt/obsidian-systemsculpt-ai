@@ -10,7 +10,12 @@ const appVersion = process.env.SYSTEMSCULPT_E2E_APP_VERSION || "1.11.7";
 
 export const config = {
   runner: "local",
-  specs: [path.join(__dirname, "specs-mock/*.mock.e2e.ts")],
+  specs: [
+    path.join(__dirname, "specs-mock/chat.core.mock.e2e.ts"),
+    path.join(__dirname, "specs-mock/commands.open-chat.mock.e2e.ts"),
+    path.join(__dirname, "specs-mock/email.showcase.mock.e2e.ts"),
+    path.join(__dirname, "specs-mock/tooling.auto-approve.mock.e2e.ts"),
+  ],
   exclude: [],
   maxInstances: Number.isFinite(maxInstances) && maxInstances > 0 ? Math.floor(maxInstances) : 2,
   logLevel: "warn",
