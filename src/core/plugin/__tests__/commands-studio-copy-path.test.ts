@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, TFile } from "obsidian";
+import { App, TFile, WorkspaceLeaf } from "obsidian";
 import { CommandManager } from "../commands";
 import { tryCopyToClipboard } from "../../../utils/clipboard";
 
@@ -8,26 +8,59 @@ jest.mock("../../../utils/clipboard", () => ({
   tryCopyToClipboard: jest.fn(),
 }));
 
-describe("CommandManager copy-systemsculpt-studio-file-path command", () => {
+describe("CommandManager copy-current-file-path command", () => {
   const mockedTryCopyToClipboard = tryCopyToClipboard as jest.MockedFunction<typeof tryCopyToClipboard>;
 
   beforeEach(() => {
     mockedTryCopyToClipboard.mockReset();
   });
 
-  function registerCopyStudioPathCommand(options?: {
+  function registerCopyPathCommand(options?: {
     activeFile?: TFile | null;
-    activeStudioStateFile?: string | null;
+    activeLeafViewFile?: string | null;
+    activeLeafStateFile?: string | null;
+    knownVaultFiles?: string[];
     getFullPath?: (vaultPath: string) => string;
     basePath?: string;
   }) {
     const app = new App();
     (app.workspace.getActiveFile as jest.Mock).mockReturnValue(options?.activeFile ?? null);
-    if (options?.activeStudioStateFile) {
-      (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue({
-        getState: () => ({ file: options.activeStudioStateFile }),
-      });
+
+    if (options?.activeLeafViewFile || options?.activeLeafStateFile) {
+      const activeLeaf = new WorkspaceLeaf(app);
+      if (options.activeLeafViewFile) {
+        (activeLeaf as any).view = {
+          file: new TFile({
+            path: options.activeLeafViewFile,
+            extension: options.activeLeafViewFile.split(".").pop() || "",
+          }),
+        };
+      }
+      if (options.activeLeafStateFile) {
+        (activeLeaf as any)._viewState = {
+          type: "custom-view",
+          state: { file: options.activeLeafStateFile },
+        };
+      }
+      (app.workspace as any).activeLeaf = activeLeaf;
     }
+
+    const hasExplicitKnownVaultFiles = Array.isArray(options?.knownVaultFiles);
+    const knownVaultFiles = new Set<string>(options?.knownVaultFiles ?? []);
+    if (!hasExplicitKnownVaultFiles) {
+      if (options?.activeFile?.path) {
+        knownVaultFiles.add(options.activeFile.path);
+      }
+      if (options?.activeLeafViewFile) {
+        knownVaultFiles.add(options.activeLeafViewFile);
+      }
+      if (options?.activeLeafStateFile) {
+        knownVaultFiles.add(options.activeLeafStateFile);
+      }
+    }
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+      knownVaultFiles.has(path) ? new TFile({ path, extension: path.split(".").pop() || "" }) : null
+    );
 
     if (options?.getFullPath) {
       (app.vault.adapter as any).getFullPath = jest.fn(options.getFullPath);
@@ -46,30 +79,30 @@ describe("CommandManager copy-systemsculpt-studio-file-path command", () => {
 
     const copyCommand = addCommand.mock.calls
       .map((entry) => entry[0])
-      .find((command) => command.id === "copy-systemsculpt-studio-file-path");
+      .find((command) => command.id === "copy-current-file-path");
 
     return { copyCommand };
   }
 
-  it("registers copy-systemsculpt-studio-file-path with Mod+Shift+C", () => {
-    const { copyCommand } = registerCopyStudioPathCommand();
+  it("registers copy-current-file-path with Mod+Shift+C", () => {
+    const { copyCommand } = registerCopyPathCommand();
 
     expect(copyCommand).toEqual(
       expect.objectContaining({
-        id: "copy-systemsculpt-studio-file-path",
-        name: "Copy Current SystemSculpt Studio File Path",
+        id: "copy-current-file-path",
+        name: "Copy Current File Path",
         checkCallback: expect.any(Function),
         hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
       })
     );
   });
 
-  it("copies the active studio file absolute path and shows a success notice", async () => {
+  it("copies the active file absolute path and shows a success notice", async () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
-    const { copyCommand } = registerCopyStudioPathCommand({
-      activeFile: new TFile({ path: "SystemSculpt/Studio/Test.systemsculpt", extension: "systemsculpt" }),
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: new TFile({ path: "Notes/Inbox.md", extension: "md" }),
       getFullPath: (vaultPath) => `/vault/${vaultPath}`,
     });
 
@@ -80,17 +113,18 @@ describe("CommandManager copy-systemsculpt-studio-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Studio/Test.systemsculpt");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Studio file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Notes/Inbox.md");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    consoleLogSpy.mockRestore();
   });
 
-  it("copies path when Studio view is active even if getActiveFile() is null", async () => {
+  it("copies path from active leaf view.file when getActiveFile() is null", async () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
-    const { copyCommand } = registerCopyStudioPathCommand({
+    const { copyCommand } = registerCopyPathCommand({
       activeFile: null,
-      activeStudioStateFile: "SystemSculpt/Studio/Graph.systemsculpt",
+      activeLeafViewFile: "SystemSculpt/Canvas/Map.canvas",
       getFullPath: (vaultPath) => `/vault/${vaultPath}`,
     });
 
@@ -99,13 +133,41 @@ describe("CommandManager copy-systemsculpt-studio-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Studio/Graph.systemsculpt");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Studio file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Canvas/Map.canvas");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    consoleLogSpy.mockRestore();
   });
 
-  it("is unavailable when no current studio file can be resolved", () => {
-    const { copyCommand } = registerCopyStudioPathCommand({
+  it("copies path from active leaf state.file when getActiveFile() is null", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    mockedTryCopyToClipboard.mockResolvedValue(true);
+
+    const { copyCommand } = registerCopyPathCommand({
       activeFile: null,
+      activeLeafStateFile: "Research/Papers/SystemSculpt.pdf",
+      getFullPath: (vaultPath) => `/vault/${vaultPath}`,
+    });
+
+    expect(copyCommand.checkCallback(true)).toBe(true);
+    expect(copyCommand.checkCallback(false)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Research/Papers/SystemSculpt.pdf");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    consoleLogSpy.mockRestore();
+  });
+
+  it("is unavailable when no current file can be resolved", () => {
+    const { copyCommand } = registerCopyPathCommand({ activeFile: null });
+    expect(copyCommand.checkCallback(true)).toBe(false);
+  });
+
+  it("is unavailable when active leaf references a non-file path", () => {
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: null,
+      activeLeafStateFile: "SystemSculpt/DoesNotExist.base",
+      knownVaultFiles: [],
     });
 
     expect(copyCommand.checkCallback(true)).toBe(false);

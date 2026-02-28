@@ -1,4 +1,4 @@
-import { App, MarkdownView, Notice, Platform, WorkspaceLeaf, TFile } from "obsidian";
+import { App, MarkdownView, Notice, Platform, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { StandardModelSelectionModal, ModelSelectionResult, ModelSelectionOptions } from "../../modals/StandardModelSelectionModal";
@@ -887,16 +887,16 @@ export class CommandManager {
     });
 
     this.plugin.addCommand({
-      id: "copy-systemsculpt-studio-file-path",
-      name: "Copy Current SystemSculpt Studio File Path",
+      id: "copy-current-file-path",
+      name: "Copy Current File Path",
       checkCallback: (checking: boolean) => {
-        const currentStudioPath = this.getCurrentStudioProjectPath();
-        if (!currentStudioPath) {
+        const currentFilePath = this.getCurrentActiveFilePath();
+        if (!currentFilePath) {
           return false;
         }
 
         if (!checking) {
-          void this.copyStudioProjectPathToClipboard(currentStudioPath);
+          void this.copyActiveFilePathToClipboard(currentFilePath);
         }
         return true;
       },
@@ -904,55 +904,103 @@ export class CommandManager {
     });
   }
 
-  private getCurrentStudioProjectPath(): string | null {
+  private getCurrentActiveFilePath(): string | null {
     if (!Platform.isDesktopApp) {
       return null;
     }
 
     const activeFile = this.app.workspace.getActiveFile();
-    if (activeFile && activeFile.extension.toLowerCase() === "systemsculpt") {
+    if (activeFile instanceof TFile && activeFile.path) {
       return activeFile.path;
     }
 
+    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
+    const activeLeafPath = this.resolveLeafFilePath(activeLeaf);
+    if (activeLeafPath) {
+      return activeLeafPath;
+    }
+
     const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
-    if (!activeStudioView) {
-      return null;
-    }
-
-    const viewState = activeStudioView.getState();
-    const stateFilePath = typeof (viewState as { file?: unknown }).file === "string"
-      ? String((viewState as { file?: string }).file || "").trim()
-      : "";
-    if (stateFilePath.toLowerCase().endsWith(".systemsculpt")) {
-      return stateFilePath;
-    }
-
-    try {
-      const servicePath = String(this.plugin.getStudioService().getCurrentProjectPath() || "").trim();
-      if (servicePath.toLowerCase().endsWith(".systemsculpt")) {
-        return servicePath;
+    if (activeStudioView) {
+      const viewState = activeStudioView.getState();
+      const stateFilePath = this.resolveVaultFilePath((viewState as { file?: unknown }).file);
+      if (stateFilePath) {
+        return stateFilePath;
       }
-    } catch {
-      // Best-effort fallback only when Studio view is active.
+
+      try {
+        const servicePath = this.resolveVaultFilePath(this.plugin.getStudioService().getCurrentProjectPath());
+        if (servicePath) {
+          return servicePath;
+        }
+      } catch {
+        // Best-effort fallback only when Studio view is active.
+      }
     }
 
     return null;
   }
 
-  private async copyStudioProjectPathToClipboard(studioProjectPath: string): Promise<void> {
-    const absolutePath = resolveAbsoluteVaultPath(this.app.vault.adapter, studioProjectPath);
+  private resolveLeafFilePath(leaf: WorkspaceLeaf | null): string | null {
+    if (!leaf) {
+      return null;
+    }
+
+    const view = (leaf as { view?: { file?: { path?: unknown } } }).view;
+    const pathFromView = this.resolveVaultFilePath(view?.file?.path);
+    if (pathFromView) {
+      return pathFromView;
+    }
+
+    const viewState = leaf.getViewState();
+    const pathFromState = this.resolveVaultFilePath(
+      (viewState as { state?: { file?: unknown }; file?: unknown })?.state?.file
+        ?? (viewState as { file?: unknown })?.file,
+    );
+    if (pathFromState) {
+      return pathFromState;
+    }
+
+    return null;
+  }
+
+  private resolveVaultFilePath(pathCandidate: unknown): string | null {
+    if (typeof pathCandidate !== "string") {
+      return null;
+    }
+
+    const normalizedPath = normalizePath(pathCandidate.trim().replace(/\\/g, "/")).replace(/^\/+/, "");
+    if (!normalizedPath) {
+      return null;
+    }
+
+    const getAbstractFileByPath = this.app.vault?.getAbstractFileByPath;
+    if (typeof getAbstractFileByPath !== "function") {
+      return null;
+    }
+
+    const abstractFile = getAbstractFileByPath.call(this.app.vault, normalizedPath);
+    if (!(abstractFile instanceof TFile)) {
+      return null;
+    }
+
+    return abstractFile.path || normalizedPath;
+  }
+
+  private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {
+    const absolutePath = resolveAbsoluteVaultPath(this.app.vault.adapter, vaultFilePath);
     if (!absolutePath) {
-      new Notice("Unable to resolve the full Studio file path.");
+      new Notice("Unable to resolve the full file path.");
       return;
     }
 
     const copied = await tryCopyToClipboard(absolutePath);
     if (!copied) {
-      new Notice("Unable to copy Studio file path to clipboard.");
+      new Notice("Unable to copy file path to clipboard.");
       return;
     }
 
-    new Notice("Studio file path copied to clipboard.");
+    new Notice("File path copied to clipboard.");
   }
 
   private registerDebugCommands() {}

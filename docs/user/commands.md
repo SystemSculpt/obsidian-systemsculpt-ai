@@ -17,6 +17,7 @@ Source of truth:
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
+| Copy Current File Path | `Mod+Shift+C` | `copy-current-file-path` | Available when the active tab resolves to a vault file (note, PDF, canvas, base, Studio project, etc.); copies the full filesystem path |
 
 ## Chat and writing
 
@@ -78,7 +79,6 @@ Source of truth:
 | New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
 | Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio |
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
-| Copy Current SystemSculpt Studio File Path | `Mod+Shift+C` | `copy-systemsculpt-studio-file-path` | Available while a Studio project file is active/current; copies the full filesystem path |
 
 ## Benchmark and diagnostics
 
