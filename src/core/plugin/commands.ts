@@ -8,10 +8,13 @@ import { TemplateSelectionModal } from "../../modals/TemplateSelectionModal";
 import { ensureCanonicalId } from "../../utils/modelUtils";
 import { DebugLogger } from "../../utils/debugLogger";
 import { errorLogger } from "../../utils/errorLogger";
+import { tryCopyToClipboard } from "../../utils/clipboard";
+import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowTemplates";
 import { AutomationRunnerModal, AutomationOption } from "../../modals/AutomationRunnerModal";
 import { AutomationBacklogModal } from "../../modals/AutomationBacklogModal";
 import { showConfirm } from "../ui/notifications";
+import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 
 export class CommandManager {
   private plugin: SystemSculptPlugin;
@@ -882,6 +885,74 @@ export class CommandManager {
         }
       },
     });
+
+    this.plugin.addCommand({
+      id: "copy-systemsculpt-studio-file-path",
+      name: "Copy Current SystemSculpt Studio File Path",
+      checkCallback: (checking: boolean) => {
+        const currentStudioPath = this.getCurrentStudioProjectPath();
+        if (!currentStudioPath) {
+          return false;
+        }
+
+        if (!checking) {
+          void this.copyStudioProjectPathToClipboard(currentStudioPath);
+        }
+        return true;
+      },
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
+    });
+  }
+
+  private getCurrentStudioProjectPath(): string | null {
+    if (!Platform.isDesktopApp) {
+      return null;
+    }
+
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile && activeFile.extension.toLowerCase() === "systemsculpt") {
+      return activeFile.path;
+    }
+
+    const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+    if (!activeStudioView) {
+      return null;
+    }
+
+    const viewState = activeStudioView.getState();
+    const stateFilePath = typeof (viewState as { file?: unknown }).file === "string"
+      ? String((viewState as { file?: string }).file || "").trim()
+      : "";
+    if (stateFilePath.toLowerCase().endsWith(".systemsculpt")) {
+      return stateFilePath;
+    }
+
+    try {
+      const servicePath = String(this.plugin.getStudioService().getCurrentProjectPath() || "").trim();
+      if (servicePath.toLowerCase().endsWith(".systemsculpt")) {
+        return servicePath;
+      }
+    } catch {
+      // Best-effort fallback only when Studio view is active.
+    }
+
+    return null;
+  }
+
+  private async copyStudioProjectPathToClipboard(studioProjectPath: string): Promise<void> {
+    const absolutePath = resolveAbsoluteVaultPath(this.app.vault.adapter, studioProjectPath);
+    if (!absolutePath) {
+      new Notice("Unable to resolve the full Studio file path.");
+      return;
+    }
+
+    const copied = await tryCopyToClipboard(absolutePath);
+    if (!copied) {
+      new Notice("Unable to copy Studio file path to clipboard.");
+      return;
+    }
+
+    new Notice("Studio file path copied to clipboard.");
   }
 
   private registerDebugCommands() {}

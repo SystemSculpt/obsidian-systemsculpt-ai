@@ -71,6 +71,15 @@ Source of truth:
 | SystemSculpt - Create Prompt Node (Active Canvas) |  | `canvasflow-create-prompt-node` | Only when active view is Canvas |
 | SystemSculpt - Toggle Canvas Enhancements |  | `canvasflow-toggle-enhancements` | Toggles SystemSculpt canvas enhancement mode |
 
+## Studio
+
+| Command | Default hotkey | Command ID | Notes |
+| --- | --- | --- | --- |
+| New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
+| Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio |
+| Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
+| Copy Current SystemSculpt Studio File Path | `Mod+Shift+C` | `copy-systemsculpt-studio-file-path` | Available while a Studio project file is active/current; copies the full filesystem path |
+
 ## Benchmark and diagnostics
 
 | Command | Default hotkey | Command ID | Notes |

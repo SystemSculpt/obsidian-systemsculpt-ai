@@ -965,9 +965,6 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
   renderedSurfaceEl.addEventListener("click", (event) => {
     event.stopPropagation();
   });
-  renderedSurfaceEl.addEventListener("wheel", (event) => {
-    event.stopPropagation();
-  });
 
   const commitPresentationMutation = (): void => {
     if (onNodePresentationMutated) {

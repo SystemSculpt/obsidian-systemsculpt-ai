@@ -157,7 +157,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     boundsSpy.mockRestore();
   });
 
-  it("prevents rendered surface wheel events from bubbling to the graph container", () => {
+  it("lets rendered surface wheel events bubble to the graph container", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture("studio.text", {
       value: "# Hello",
@@ -181,7 +181,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     expect(renderedPanel).toBeDefined();
     renderedPanel?.dispatchEvent(new Event("wheel", { bubbles: true }));
 
-    expect(containerWheelSpy).not.toHaveBeenCalled();
+    expect(containerWheelSpy).toHaveBeenCalledTimes(1);
   });
 
   it("keeps raw editor disabled for locked text-generation nodes while still rendering markdown preview", () => {

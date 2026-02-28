@@ -14,7 +14,7 @@ import {
 } from "./graph-v3/StudioGraphCanvasBounds";
 import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
 import {
-  isStudioGraphEditableFieldTarget,
+  isStudioGraphEditableFieldActive,
   shouldStudioGraphDeferWheelToNativeScroll,
 } from "./StudioGraphDomTargeting";
 
@@ -425,7 +425,7 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    if (this.shouldDeferWheelToOverlay(event) || isStudioGraphEditableFieldTarget(event.target)) {
+    if (this.shouldDeferWheelToOverlay(event) || isStudioGraphEditableFieldActive(event.target)) {
       return;
     }
 

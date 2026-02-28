@@ -8,6 +8,7 @@ const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
   ".ss-studio-searchable-select",
   ".ss-studio-searchable-select-panel",
   ".ss-studio-searchable-select-list",
+  ".ss-studio-node-text-rendered:focus-within",
 ].join(", ");
 
 export function resolveStudioGraphTargetElement(target: EventTarget | null): Element | null {
@@ -31,12 +32,33 @@ export function isStudioGraphEditableTarget(target: EventTarget | null): boolean
   return Boolean(targetEl.closest(`${STUDIO_GRAPH_MENU_SELECTOR}, ${STUDIO_GRAPH_EDITABLE_SELECTOR}`));
 }
 
-export function isStudioGraphEditableFieldTarget(target: EventTarget | null): boolean {
+export function isStudioGraphEditableFieldActive(target: EventTarget | null): boolean {
   const targetEl = resolveStudioGraphTargetElement(target);
   if (!targetEl) {
     return false;
   }
-  return Boolean(targetEl.closest(STUDIO_GRAPH_EDITABLE_SELECTOR));
+  const editableFieldEl = targetEl.closest(STUDIO_GRAPH_EDITABLE_SELECTOR);
+  if (!editableFieldEl) {
+    return false;
+  }
+
+  if (typeof document === "undefined") {
+    return false;
+  }
+  const activeElement = (document as { activeElement?: unknown }).activeElement;
+  if (!activeElement || typeof activeElement !== "object") {
+    return false;
+  }
+  if (editableFieldEl === activeElement) {
+    return true;
+  }
+
+  const contains = (editableFieldEl as { contains?: (node: unknown) => boolean }).contains;
+  if (typeof contains === "function") {
+    return contains.call(editableFieldEl, activeElement);
+  }
+
+  return false;
 }
 
 export function shouldStudioGraphDeferWheelToNativeScroll(target: EventTarget | null): boolean {

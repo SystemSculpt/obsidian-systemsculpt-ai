@@ -124,7 +124,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(282);
   });
 
-  it("keeps native scrolling for wheel events inside editable form controls", () => {
+  it("pans the canvas for wheel events over unfocused editable form controls", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -147,12 +147,12 @@ describe("StudioGraphSelectionController wheel behavior", () => {
 
     controller.handleGraphViewportWheel(event);
 
-    expect(preventDefault).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(viewport.scrollLeft).toBe(120);
-    expect(viewport.scrollTop).toBe(240);
+    expect(viewport.scrollTop).toBe(312);
   });
 
-  it("keeps native scrolling for wheel events inside image generation prompt editor", () => {
+  it("pans the canvas for wheel events over unfocused prompt editors", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -175,9 +175,51 @@ describe("StudioGraphSelectionController wheel behavior", () => {
 
     controller.handleGraphViewportWheel(event);
 
-    expect(preventDefault).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(viewport.scrollLeft).toBe(120);
-    expect(viewport.scrollTop).toBe(240);
+    expect(viewport.scrollTop).toBe(336);
+  });
+
+  it("keeps native scrolling for wheel events inside focused editable form controls", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+
+    const focusedTextarea = {} as Element;
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      activeElement: focusedTextarea,
+    };
+
+    try {
+      const preventDefault = jest.fn();
+      const event = {
+        target: {
+          closest: (selector: string) =>
+            selector.includes("textarea") ? focusedTextarea : null,
+        },
+        ctrlKey: false,
+        metaKey: false,
+        deltaX: 0,
+        deltaY: 84,
+        deltaMode: 0,
+        clientX: 0,
+        clientY: 0,
+        preventDefault,
+      } as unknown as WheelEvent;
+
+      controller.handleGraphViewportWheel(event);
+
+      expect(preventDefault).not.toHaveBeenCalled();
+      expect(viewport.scrollLeft).toBe(120);
+      expect(viewport.scrollTop).toBe(240);
+    } finally {
+      if (typeof originalDocument === "undefined") {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        (globalThis as { document?: unknown }).document = originalDocument;
+      }
+    }
   });
 
   it("zooms the canvas for ctrl+wheel events inside editable form controls", () => {

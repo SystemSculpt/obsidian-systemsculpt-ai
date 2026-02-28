@@ -1,6 +1,5 @@
 import {
   EventRef,
-  FileSystemAdapter,
   ItemView,
   MarkdownRenderer,
   Notice,
@@ -98,6 +97,8 @@ import {
 } from "./StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import { resolveStudioViewTitle } from "./studio-view-title";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -206,7 +207,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "SystemSculpt Studio";
+    return resolveStudioViewTitle(this.currentProjectPath);
   }
 
   getIcon(): string {
@@ -1233,7 +1234,7 @@ export class SystemSculptStudioView extends ItemView {
     pushCandidate(this.parseObsidianWikiLinkTarget(raw));
     pushCandidate(this.parseMarkdownLinkTarget(raw));
     pushCandidate(this.resolveVaultPathFromFileUri(raw));
-    if (this.isAbsoluteFilesystemPath(raw)) {
+    if (isAbsoluteFilesystemPath(raw)) {
       pushCandidate(this.resolveVaultPathFromAbsoluteFilePath(raw));
     }
     pushCandidate(this.normalizeObsidianLinkTarget(raw));
@@ -3749,37 +3750,6 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
-  private isAbsoluteFilesystemPath(path: string): boolean {
-    const normalized = String(path || "").replace(/\\/g, "/");
-    return normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
-  }
-
-  private resolveAbsolutePathFromVaultPath(vaultPath: string): string | null {
-    const normalizedVaultPath = String(vaultPath || "").trim().replace(/\\/g, "/");
-    if (!normalizedVaultPath) {
-      return null;
-    }
-
-    const adapter = this.app.vault.adapter as any;
-    if (adapter instanceof FileSystemAdapter && typeof adapter.getFullPath === "function") {
-      try {
-        const fullPath = adapter.getFullPath(normalizedVaultPath);
-        if (typeof fullPath === "string" && fullPath.trim().length > 0) {
-          return fullPath;
-        }
-      } catch {
-        // Fall through to base path fallback.
-      }
-    }
-    if (typeof adapter.basePath === "string" && adapter.basePath.trim().length > 0) {
-      const basePath = adapter.basePath.replace(/[\\/]+$/, "");
-      const separator = basePath.includes("\\") ? "\\" : "/";
-      const normalizedRelative = normalizedVaultPath.split(/[\\/]+/).filter(Boolean).join(separator);
-      return normalizedRelative ? `${basePath}${separator}${normalizedRelative}` : basePath;
-    }
-    return null;
-  }
-
   private async revealPathInFinder(path: string): Promise<void> {
     const rawPath = String(path || "").trim();
     if (!rawPath) {
@@ -3792,7 +3762,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const normalizedPath = rawPath.replace(/\\/g, "/");
-    const isAbsolutePath = this.isAbsoluteFilesystemPath(normalizedPath);
+    const isAbsolutePath = isAbsoluteFilesystemPath(normalizedPath);
     const adapter = this.app.vault.adapter as {
       revealInFolder?: (path: string) => void | Promise<void>;
     };
@@ -3808,7 +3778,7 @@ export class SystemSculptStudioView extends ItemView {
 
     const absolutePath = isAbsolutePath
       ? rawPath
-      : this.resolveAbsolutePathFromVaultPath(normalizedPath);
+      : resolveAbsoluteVaultPath(this.app.vault.adapter, normalizedPath);
     if (!absolutePath) {
       new Notice(`Unable to resolve media path: ${rawPath}`);
       return;
