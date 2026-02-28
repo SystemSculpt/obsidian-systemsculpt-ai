@@ -21,6 +21,7 @@ import {
 } from "./StudioGraphInteractionTypes";
 import { browseForNodeConfigPath } from "./StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "./StudioSearchableDropdown";
+import { resolveStudioSearchableSelectPlaceholder } from "./StudioSelectFieldHelpers";
 
 const MIN_INSPECTOR_WIDTH = 320;
 const MIN_INSPECTOR_HEIGHT = 280;
@@ -82,14 +83,6 @@ function normalizeInspectorScale(value: number): number {
     return 1;
   }
   return Math.min(MAX_INSPECTOR_SCALE, Math.max(MIN_INSPECTOR_SCALE, value));
-}
-
-function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefinition): string {
-  if (field.required !== true) {
-    return "Default";
-  }
-  const raw = String(field.label || field.key || "option").trim().toLowerCase();
-  return raw ? `Select ${raw}` : "Select option";
 }
 
 function clampInspectorSize(
@@ -789,7 +782,7 @@ export class StudioNodeInspectorOverlay {
           ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
           value: typeof initialValue === "string" ? initialValue : "",
           disabled,
-          placeholder: resolveSearchableSelectPlaceholder(field),
+          placeholder: resolveStudioSearchableSelectPlaceholder(field),
           noResultsText: "No matching options.",
           loadOptions: async (): Promise<StudioNodeConfigSelectOption[]> => {
             if (field.optionsSource && this.host.resolveDynamicSelectOptions) {

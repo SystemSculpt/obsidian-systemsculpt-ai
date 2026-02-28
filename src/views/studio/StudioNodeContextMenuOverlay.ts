@@ -1,13 +1,11 @@
 import type { StudioNodeDefinition } from "../../studio/types";
+import { rankStudioFuzzyItems } from "./StudioFuzzySearch";
 import {
-  STUDIO_GRAPH_MAX_ZOOM,
-  STUDIO_GRAPH_MIN_ZOOM,
-} from "./StudioGraphInteractionTypes";
+  normalizeStudioMenuScale,
+  resolveStudioAnchoredMenuPosition,
+} from "./StudioFloatingMenuUtils";
 
 const CONTEXT_MENU_WIDTH = 360;
-const CONTEXT_MENU_EDGE_PADDING = 8;
-const MIN_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MIN_ZOOM;
-const MAX_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MAX_ZOOM;
 
 export type StudioNodeContextMenuItem = {
   definition: StudioNodeDefinition;
@@ -21,75 +19,6 @@ export type StudioNodeContextMenuAction = {
   summary?: string;
   onSelect: () => void;
 };
-
-function normalizeContextMenuScale(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.min(MAX_CONTEXT_MENU_SCALE, Math.max(MIN_CONTEXT_MENU_SCALE, value));
-}
-
-function normalizeSearchText(value: string): string {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isBoundaryChar(char: string): boolean {
-  return char === " " || char === "." || char === "_" || char === "-" || char === "/" || char === ":";
-}
-
-function fuzzyScore(haystackRaw: string, queryRaw: string): number | null {
-  const haystack = normalizeSearchText(haystackRaw);
-  const query = normalizeSearchText(queryRaw);
-  if (!query) {
-    return 0;
-  }
-
-  let scanIndex = 0;
-  let firstMatchIndex = -1;
-  let previousMatchIndex = -1;
-  let gapPenalty = 0;
-  let boundaryBonus = 0;
-
-  for (const queryChar of query) {
-    const matchIndex = haystack.indexOf(queryChar, scanIndex);
-    if (matchIndex < 0) {
-      return null;
-    }
-    if (firstMatchIndex < 0) {
-      firstMatchIndex = matchIndex;
-    }
-    if (previousMatchIndex >= 0) {
-      gapPenalty += Math.max(0, matchIndex - previousMatchIndex - 1);
-    }
-    if (matchIndex === 0 || isBoundaryChar(haystack.charAt(matchIndex - 1))) {
-      boundaryBonus += 0.45;
-    }
-    previousMatchIndex = matchIndex;
-    scanIndex = matchIndex + 1;
-  }
-
-  const span = previousMatchIndex - firstMatchIndex + 1;
-  let score =
-    firstMatchIndex * 1.6 +
-    gapPenalty * 1.3 +
-    Math.max(0, span - query.length) * 0.8 +
-    haystack.length * 0.01;
-
-  if (haystack.startsWith(query)) {
-    score -= 5;
-  } else {
-    const containsIndex = haystack.indexOf(query);
-    if (containsIndex >= 0) {
-      score -= 3.2 - Math.min(2, containsIndex * 0.1);
-    }
-  }
-
-  score -= boundaryBonus;
-  return score;
-}
 
 export class StudioNodeContextMenuOverlay {
   private viewportEl: HTMLElement | null = null;
@@ -167,7 +96,7 @@ export class StudioNodeContextMenuOverlay {
   }
 
   setGraphZoom(zoom: number): void {
-    const nextZoom = normalizeContextMenuScale(zoom);
+    const nextZoom = normalizeStudioMenuScale(zoom);
     if (Math.abs(this.graphZoom - nextZoom) < 0.0001) {
       return;
     }
@@ -378,34 +307,12 @@ export class StudioNodeContextMenuOverlay {
   }
 
   private applyFilter(query: string): void {
-    const normalizedQuery = normalizeSearchText(query);
-    if (!normalizedQuery) {
-      this.filteredItems = this.allItems.slice();
-    } else {
-      const ranked = this.allItems
-        .map((item, index) => {
-          const score = fuzzyScore(
-            `${item.title} ${item.summary} ${item.definition.kind}`,
-            normalizedQuery
-          );
-          return {
-            item,
-            score,
-            index,
-          };
-        })
-        .filter((entry) => entry.score !== null)
-        .sort((a, b) => {
-          if (a.score !== b.score) {
-            return Number(a.score) - Number(b.score);
-          }
-          if (a.item.title !== b.item.title) {
-            return a.item.title.localeCompare(b.item.title);
-          }
-          return a.index - b.index;
-        });
-      this.filteredItems = ranked.map((entry) => entry.item);
-    }
+    this.filteredItems = rankStudioFuzzyItems({
+      items: this.allItems,
+      query,
+      getSearchText: (item) => `${item.title} ${item.summary} ${item.definition.kind}`,
+      compareWhenEqual: (left, right) => left.title.localeCompare(right.title),
+    });
 
     this.activeIndex = this.filteredItems.length > 0 ? 0 : -1;
     this.renderItems();
@@ -545,7 +452,7 @@ export class StudioNodeContextMenuOverlay {
       return;
     }
 
-    const scale = normalizeContextMenuScale(this.graphZoom);
+    const scale = normalizeStudioMenuScale(this.graphZoom);
     const width = CONTEXT_MENU_WIDTH;
     this.rootEl.style.width = `${width}px`;
     this.rootEl.style.setProperty("--ss-studio-node-context-menu-scale", String(scale));
@@ -554,23 +461,15 @@ export class StudioNodeContextMenuOverlay {
     const height = Math.max(120, this.rootEl.offsetHeight || 280);
     const visualWidth = width * scale;
     const visualHeight = height * scale;
-    const minX = this.viewportEl.scrollLeft + CONTEXT_MENU_EDGE_PADDING;
-    const minY = this.viewportEl.scrollTop + CONTEXT_MENU_EDGE_PADDING;
-    const maxX = Math.max(
-      minX,
-      this.viewportEl.scrollLeft + this.viewportEl.clientWidth - visualWidth - CONTEXT_MENU_EDGE_PADDING
-    );
-    const maxY = Math.max(
-      minY,
-      this.viewportEl.scrollTop + this.viewportEl.clientHeight - visualHeight - CONTEXT_MENU_EDGE_PADDING
-    );
-    const desiredX = this.anchorX + 8;
-    const desiredY = this.anchorY + 8;
-    const nextX = Math.min(maxX, Math.max(minX, desiredX));
-    const nextY = Math.min(maxY, Math.max(minY, desiredY));
-
-    this.rootEl.style.left = `${nextX}px`;
-    this.rootEl.style.top = `${nextY}px`;
+    const position = resolveStudioAnchoredMenuPosition({
+      viewportEl: this.viewportEl,
+      anchorX: this.anchorX,
+      anchorY: this.anchorY,
+      visualWidth,
+      visualHeight,
+    });
+    this.rootEl.style.left = `${position.x}px`;
+    this.rootEl.style.top = `${position.y}px`;
   }
 
   private bindGlobalListeners(): void {

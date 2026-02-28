@@ -1,12 +1,9 @@
 import {
-  STUDIO_GRAPH_MAX_ZOOM,
-  STUDIO_GRAPH_MIN_ZOOM,
-} from "./StudioGraphInteractionTypes";
+  normalizeStudioMenuScale,
+  resolveStudioAnchoredMenuPosition,
+} from "./StudioFloatingMenuUtils";
 
 const CONTEXT_MENU_DEFAULT_WIDTH = 220;
-const CONTEXT_MENU_EDGE_PADDING = 8;
-const MIN_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MIN_ZOOM;
-const MAX_CONTEXT_MENU_SCALE = STUDIO_GRAPH_MAX_ZOOM;
 
 export type StudioSimpleContextMenuItem = {
   id: string;
@@ -14,13 +11,6 @@ export type StudioSimpleContextMenuItem = {
   summary?: string;
   onSelect: () => void;
 };
-
-function normalizeContextMenuScale(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.min(MAX_CONTEXT_MENU_SCALE, Math.max(MIN_CONTEXT_MENU_SCALE, value));
-}
 
 export class StudioSimpleContextMenuOverlay {
   private viewportEl: HTMLElement | null = null;
@@ -92,7 +82,7 @@ export class StudioSimpleContextMenuOverlay {
   }
 
   setGraphZoom(zoom: number): void {
-    const nextZoom = normalizeContextMenuScale(zoom);
+    const nextZoom = normalizeStudioMenuScale(zoom);
     if (Math.abs(this.graphZoom - nextZoom) < 0.0001) {
       return;
     }
@@ -253,7 +243,7 @@ export class StudioSimpleContextMenuOverlay {
       return;
     }
 
-    const scale = normalizeContextMenuScale(this.graphZoom);
+    const scale = normalizeStudioMenuScale(this.graphZoom);
     this.rootEl.style.width = `${this.menuWidth}px`;
     this.rootEl.style.setProperty("--ss-studio-simple-context-menu-scale", String(scale));
     this.rootEl.style.transformOrigin = "top left";
@@ -261,23 +251,15 @@ export class StudioSimpleContextMenuOverlay {
     const height = Math.max(40, this.rootEl.offsetHeight || 80);
     const visualWidth = this.menuWidth * scale;
     const visualHeight = height * scale;
-    const minX = this.viewportEl.scrollLeft + CONTEXT_MENU_EDGE_PADDING;
-    const minY = this.viewportEl.scrollTop + CONTEXT_MENU_EDGE_PADDING;
-    const maxX = Math.max(
-      minX,
-      this.viewportEl.scrollLeft + this.viewportEl.clientWidth - visualWidth - CONTEXT_MENU_EDGE_PADDING
-    );
-    const maxY = Math.max(
-      minY,
-      this.viewportEl.scrollTop + this.viewportEl.clientHeight - visualHeight - CONTEXT_MENU_EDGE_PADDING
-    );
-    const desiredX = this.anchorX + 8;
-    const desiredY = this.anchorY + 8;
-    const nextX = Math.min(maxX, Math.max(minX, desiredX));
-    const nextY = Math.min(maxY, Math.max(minY, desiredY));
-
-    this.rootEl.style.left = `${nextX}px`;
-    this.rootEl.style.top = `${nextY}px`;
+    const position = resolveStudioAnchoredMenuPosition({
+      viewportEl: this.viewportEl,
+      anchorX: this.anchorX,
+      anchorY: this.anchorY,
+      visualWidth,
+      visualHeight,
+    });
+    this.rootEl.style.left = `${position.x}px`;
+    this.rootEl.style.top = `${position.y}px`;
   }
 
   private bindGlobalListeners(): void {

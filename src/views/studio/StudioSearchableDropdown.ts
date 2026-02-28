@@ -1,4 +1,5 @@
 import type { StudioNodeConfigSelectOption } from "../../studio/types";
+import { rankStudioFuzzyItems } from "./StudioFuzzySearch";
 
 type StudioSearchableDropdownOptions = {
   containerEl: HTMLElement;
@@ -11,79 +12,11 @@ type StudioSearchableDropdownOptions = {
   onValueChange: (value: string) => void;
 };
 
-type RankedOption = {
-  option: StudioNodeConfigSelectOption;
-  score: number;
-  index: number;
-};
-
 const STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX = 220;
 const STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX = 760;
 const STUDIO_DROPDOWN_ESTIMATED_GLYPH_WIDTH_PX = 7.2;
 const STUDIO_DROPDOWN_ESTIMATED_PADDING_PX = 84;
 const STUDIO_DROPDOWN_MAX_DESCRIPTION_CHARS_FOR_WIDTH = 60;
-
-function normalizeSearchText(value: string): string {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isBoundaryChar(char: string): boolean {
-  return char === " " || char === "." || char === "_" || char === "-" || char === "/" || char === ":";
-}
-
-function fuzzyScore(haystackRaw: string, queryRaw: string): number | null {
-  const haystack = normalizeSearchText(haystackRaw);
-  const query = normalizeSearchText(queryRaw);
-  if (!query) {
-    return 0;
-  }
-
-  let scanIndex = 0;
-  let firstMatchIndex = -1;
-  let previousMatchIndex = -1;
-  let gapPenalty = 0;
-  let boundaryBonus = 0;
-
-  for (const queryChar of query) {
-    const matchIndex = haystack.indexOf(queryChar, scanIndex);
-    if (matchIndex < 0) {
-      return null;
-    }
-    if (firstMatchIndex < 0) {
-      firstMatchIndex = matchIndex;
-    }
-    if (previousMatchIndex >= 0) {
-      gapPenalty += Math.max(0, matchIndex - previousMatchIndex - 1);
-    }
-    if (matchIndex === 0 || isBoundaryChar(haystack.charAt(matchIndex - 1))) {
-      boundaryBonus += 0.4;
-    }
-    previousMatchIndex = matchIndex;
-    scanIndex = matchIndex + 1;
-  }
-
-  const span = previousMatchIndex - firstMatchIndex + 1;
-  let score =
-    firstMatchIndex * 1.6 +
-    gapPenalty * 1.3 +
-    Math.max(0, span - query.length) * 0.8 +
-    haystack.length * 0.01;
-
-  if (haystack.startsWith(query)) {
-    score -= 5;
-  } else {
-    const containsIndex = haystack.indexOf(query);
-    if (containsIndex >= 0) {
-      score -= 3.2 - Math.min(2, containsIndex * 0.1);
-    }
-  }
-
-  score -= boundaryBonus;
-  return score;
-}
 
 function optionSearchText(option: StudioNodeConfigSelectOption): string {
   const parts: string[] = [option.label, option.value, option.description || "", option.badge || ""];
@@ -91,20 +24,6 @@ function optionSearchText(option: StudioNodeConfigSelectOption): string {
     parts.push(...option.keywords);
   }
   return parts.join(" ");
-}
-
-function sortRankedOptions(ranked: RankedOption[]): StudioNodeConfigSelectOption[] {
-  return ranked
-    .sort((left, right) => {
-      if (left.score !== right.score) {
-        return left.score - right.score;
-      }
-      if (left.option.label !== right.option.label) {
-        return left.option.label.localeCompare(right.option.label);
-      }
-      return left.index - right.index;
-    })
-    .map((entry) => entry.option);
 }
 
 function estimatePreferredPanelWidth(optionsList: StudioNodeConfigSelectOption[]): number {
@@ -307,22 +226,12 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
 
   const applyFilter = (query: string): void => {
     const optionsList = ensureCurrentValuePresent(loadedOptions || []);
-    const normalizedQuery = normalizeSearchText(query);
-    if (!normalizedQuery) {
-      filteredOptions = optionsList.slice();
-      activeIndex = filteredOptions.length > 0 ? 0 : -1;
-      renderOptions();
-      return;
-    }
-    const ranked: RankedOption[] = [];
-    for (const [index, option] of optionsList.entries()) {
-      const score = fuzzyScore(optionSearchText(option), normalizedQuery);
-      if (score === null) {
-        continue;
-      }
-      ranked.push({ option, score, index });
-    }
-    filteredOptions = sortRankedOptions(ranked);
+    filteredOptions = rankStudioFuzzyItems({
+      items: optionsList,
+      query,
+      getSearchText: optionSearchText,
+      compareWhenEqual: (left, right) => left.label.localeCompare(right.label),
+    });
     activeIndex = filteredOptions.length > 0 ? 0 : -1;
     renderOptions();
   };
