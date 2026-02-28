@@ -416,6 +416,7 @@ export interface SystemSculptSettings {
   studioRunRetentionMaxRuns: number;
   studioRunRetentionMaxArtifactsMb: number;
   studioTelemetryOptIn: boolean;
+  studioJsonEditorDefaultMode?: "composer" | "raw";
 
   /**
    * Embeddings settings for the new embeddings system
@@ -701,6 +702,7 @@ Raw transcript:`,
   studioRunRetentionMaxRuns: 100,
   studioRunRetentionMaxArtifactsMb: 1024,
   studioTelemetryOptIn: false,
+  studioJsonEditorDefaultMode: "composer",
 
   /**
    * Embeddings defaults

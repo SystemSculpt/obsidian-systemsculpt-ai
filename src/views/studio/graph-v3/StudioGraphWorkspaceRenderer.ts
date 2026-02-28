@@ -39,6 +39,8 @@ export type StudioGraphWorkspaceRendererOptions = {
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  getJsonEditorPreferredMode?: () => "composer" | "raw";
+  onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
     markdown: string,
@@ -87,6 +89,8 @@ export function renderStudioGraphWorkspace(
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodePresentationMutated,
+    getJsonEditorPreferredMode,
+    onJsonEditorPreferredModeChange,
     renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
@@ -203,11 +207,25 @@ export function renderStudioGraphWorkspace(
 
   const nodeLayer = canvas.createDiv({ cls: "ss-studio-nodes-layer" });
   graphInteraction.clearGraphElementMaps();
+  const inboundEdgesByNode = new Map<
+    string,
+    Array<{ fromNodeId: string; fromPortId: string; toPortId: string }>
+  >();
+  for (const edge of currentProject.graph.edges) {
+    const bucket = inboundEdgesByNode.get(edge.toNodeId) || [];
+    bucket.push({
+      fromNodeId: edge.fromNodeId,
+      fromPortId: edge.fromPortId,
+      toPortId: edge.toPortId,
+    });
+    inboundEdgesByNode.set(edge.toNodeId, bucket);
+  }
   for (const node of currentProject.graph.nodes) {
     renderStudioGraphNodeCard({
       layer: nodeLayer,
       busy,
       node,
+      inboundEdges: inboundEdgesByNode.get(node.id) || [],
       nodeRunState: getNodeRunState(node.id),
       graphInteraction,
       findNodeDefinition,
@@ -220,6 +238,8 @@ export function renderStudioGraphWorkspace(
       onNodeTitleInput,
       onNodeConfigMutated,
       onNodePresentationMutated,
+      getJsonEditorPreferredMode,
+      onJsonEditorPreferredModeChange,
       renderMarkdownPreview,
       onNodeGeometryMutated,
       resolveDynamicSelectOptions,

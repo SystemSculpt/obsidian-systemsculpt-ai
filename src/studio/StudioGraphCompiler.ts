@@ -27,6 +27,18 @@ function typeCompatible(source: string, target: string): boolean {
   return source === target;
 }
 
+const HTTP_SINGLE_VALUE_INPUT_PORTS = new Set<string>([
+  "url",
+  "headers",
+  "query",
+  "path_params",
+  "bearer_token",
+  "body_json",
+  "body_text",
+]);
+
+const HTTP_BODY_INPUT_PORTS = new Set<string>(["body_json", "body_text"]);
+
 export class StudioGraphCompiler {
   compile(project: StudioProjectV1, registry: StudioNodeRegistry): StudioCompiledGraph {
     const nodesById = new Map<string, StudioCompiledNode>();
@@ -91,12 +103,25 @@ export class StudioGraphCompiler {
         );
       }
 
-      if (toNode.node.kind === "studio.http_request" && edge.toPortId === "body") {
-        const existingBodyEdge = toNode.inboundEdges.find((inbound) => inbound.toPortId === "body");
-        if (existingBodyEdge) {
-          throw new Error(
-            `Graph compile failed: HTTP request node "${toNode.node.id}" body input accepts only one connection (choose either text or JSON).`
+      if (toNode.node.kind === "studio.http_request") {
+        if (HTTP_SINGLE_VALUE_INPUT_PORTS.has(edge.toPortId)) {
+          const existingPortEdge = toNode.inboundEdges.find((inbound) => inbound.toPortId === edge.toPortId);
+          if (existingPortEdge) {
+            throw new Error(
+              `Graph compile failed: HTTP request node "${toNode.node.id}" input "${edge.toPortId}" accepts only one connection.`
+            );
+          }
+        }
+
+        if (HTTP_BODY_INPUT_PORTS.has(edge.toPortId)) {
+          const existingBodyEdge = toNode.inboundEdges.find((inbound) =>
+            HTTP_BODY_INPUT_PORTS.has(inbound.toPortId)
           );
+          if (existingBodyEdge) {
+            throw new Error(
+              `Graph compile failed: HTTP request node "${toNode.node.id}" body accepts one source: choose "body_json" or "body_text".`
+            );
+          }
         }
       }
 

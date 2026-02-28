@@ -38,6 +38,11 @@ type RenderStudioGraphNodeCardOptions = {
   layer: HTMLElement;
   busy: boolean;
   node: StudioNodeInstance;
+  inboundEdges?: Array<{
+    fromNodeId: string;
+    fromPortId: string;
+    toPortId: string;
+  }>;
   nodeRunState: StudioNodeRunDisplayState;
   graphInteraction: StudioGraphInteractionEngine;
   findNodeDefinition: (node: StudioNodeInstance) => StudioNodeDefinition | null;
@@ -55,6 +60,8 @@ type RenderStudioGraphNodeCardOptions = {
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  getJsonEditorPreferredMode?: () => "composer" | "raw";
+  onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
     markdown: string,
@@ -389,6 +396,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodePresentationMutated,
+    getJsonEditorPreferredMode,
+    onJsonEditorPreferredModeChange,
     renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
@@ -405,6 +414,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   const interactionLocked = busy || isPlaceholder;
   const nodeEl = layer.createDiv({ cls: "ss-studio-node-card" });
   nodeEl.dataset.nodeId = node.id;
+  nodeEl.dataset.nodeKind = node.kind;
   nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
   nodeEl.style.width = `${resolveStudioGraphNodeWidth(node)}px`;
   const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
@@ -664,9 +674,12 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       node,
       nodeRunState,
       definition,
+      inboundEdges: options.inboundEdges,
       interactionLocked,
       onNodeConfigMutated,
       onNodePresentationMutated,
+      getJsonEditorPreferredMode,
+      onJsonEditorPreferredModeChange,
       renderMarkdownPreview,
       resolveDynamicSelectOptions,
     });

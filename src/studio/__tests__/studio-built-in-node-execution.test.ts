@@ -153,6 +153,45 @@ describe("Studio built-in text/image node execution", () => {
     });
   });
 
+  it("json node emits configured JSON when input is not connected", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        config: {
+          value: {
+            from: "mike@systemsculpt.com",
+            subject: "Payout ready",
+          },
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      from: "mike@systemsculpt.com",
+      subject: "Payout ready",
+    });
+  });
+
+  it("json node defaults to an empty object for brand-new nodes", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        config: {},
+        inputs: {},
+      })
+    );
+
+    expect(result.outputs.json).toEqual({});
+  });
+
   it("note node reads markdown text from the vault and emits text/path/title", async () => {
     const definition = registry.get("studio.note", "1.0.0");
     expect(definition).toBeDefined();
@@ -826,7 +865,7 @@ describe("Studio built-in text/image node execution", () => {
             maxRetries: 0,
           },
           inputs: {
-            body: {
+            body_json: {
               email: "first@example.com",
             },
           },
@@ -856,6 +895,73 @@ describe("Studio built-in text/image node execution", () => {
     }
   });
 
+  it("http request node resolves typed URL/query/header/bearer/body_json inputs", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await definition!.execute(
+        createContext({
+          nodeId: "http-node",
+          kind: "studio.http_request",
+          config: {
+            method: "POST",
+            url: "https://api.example.com/contacts/{{contact_id}}",
+            headers: {
+              "X-Config": "config",
+            },
+            maxRetries: 0,
+          },
+          inputs: {
+            path_params: {
+              contact_id: "abc-123",
+            },
+            query: {
+              source: "studio",
+              tags: ["one", "two"],
+            },
+            headers: {
+              "X-Input": "input",
+            },
+            bearer_token: "re_from_input",
+            body_json: {
+              email: "typed@example.com",
+            },
+          },
+        })
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const call = fetchMock.mock.calls[0];
+      expect(call[0]).toBe(
+        "https://api.example.com/contacts/abc-123?source=studio&tags=one&tags=two"
+      );
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer re_from_input",
+            "Content-Type": "application/json",
+            "X-Config": "config",
+            "X-Input": "input",
+          }),
+        })
+      );
+      expect(JSON.parse(call[1].body)).toEqual({
+        email: "typed@example.com",
+      });
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
   it("http request node auto mode sends text body as text/plain", async () => {
     const definition = registry.get("studio.http_request", "1.0.0");
     expect(definition).toBeDefined();
@@ -875,11 +981,10 @@ describe("Studio built-in text/image node execution", () => {
           config: {
             method: "POST",
             url: "https://api.example.com/contacts",
+            body: "plain text payload",
             maxRetries: 0,
           },
-          inputs: {
-            body: "plain text payload",
-          },
+          inputs: {},
         })
       );
 
@@ -894,6 +999,80 @@ describe("Studio built-in text/image node execution", () => {
           body: "plain text payload",
         })
       );
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node body_text input forces text mode", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await definition!.execute(
+        createContext({
+          nodeId: "http-node",
+          kind: "studio.http_request",
+          config: {
+            method: "POST",
+            url: "https://api.example.com/contacts",
+            bodyMode: "json",
+            maxRetries: 0,
+          },
+          inputs: {
+            body_text: "plain text payload",
+          },
+        })
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const call = fetchMock.mock.calls[0];
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "Content-Type": "text/plain; charset=utf-8",
+          }),
+          body: "plain text payload",
+        })
+      );
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  it("http request node rejects conflicting typed body inputs", async () => {
+    const definition = registry.get("studio.http_request", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const fetchMock = jest.fn();
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchMock;
+    try {
+      await expect(
+        definition!.execute(
+          createContext({
+            nodeId: "http-node",
+            kind: "studio.http_request",
+            config: {
+              method: "POST",
+              url: "https://api.example.com/contacts",
+              maxRetries: 0,
+            },
+            inputs: {
+              body_json: { email: "json@example.com" },
+              body_text: "plain text",
+            },
+          })
+        )
+      ).rejects.toThrow("either \"body_json\" or \"body_text\"");
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       (globalThis as any).fetch = originalFetch;
     }
@@ -919,11 +1098,10 @@ describe("Studio built-in text/image node execution", () => {
             method: "POST",
             url: "https://api.example.com/contacts",
             bodyMode: "json",
+            body: "{\"email\":\"json@example.com\"}",
             maxRetries: 0,
           },
-          inputs: {
-            body: "{\"email\":\"json@example.com\"}",
-          },
+          inputs: {},
         })
       );
 
@@ -962,11 +1140,10 @@ describe("Studio built-in text/image node execution", () => {
               method: "POST",
               url: "https://api.example.com/contacts",
               bodyMode: "json",
+              body: "not-json",
               maxRetries: 0,
             },
-            inputs: {
-              body: "not-json",
-            },
+            inputs: {},
           })
         )
       ).rejects.toThrow("body mode is JSON");
@@ -1002,7 +1179,7 @@ describe("Studio built-in text/image node execution", () => {
             maxRetries: 0,
           },
           inputs: {
-            body: {
+            body_json: {
               email: "first@example.com",
             },
           },
@@ -1051,7 +1228,7 @@ describe("Studio built-in text/image node execution", () => {
             maxRetries: 1,
           },
           inputs: {
-            body: { email: "first@example.com" },
+            body_json: { email: "first@example.com" },
           },
         })
       );
@@ -1086,7 +1263,7 @@ describe("Studio built-in text/image node execution", () => {
               maxRetries: 0,
             },
             inputs: {
-              body: { email: "first@example.com" },
+              body_json: { email: "first@example.com" },
             },
           })
         )

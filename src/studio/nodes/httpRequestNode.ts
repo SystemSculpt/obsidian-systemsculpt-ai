@@ -21,6 +21,13 @@ type PreparedHttpRequestBody = {
   resolvedMode: ResolvedHttpRequestBodyMode | null;
 };
 
+const HTTP_BODY_CONFIG_FALLBACK_KEY = "body";
+
+type ResolvedBodySelection = {
+  bodyValue: StudioJsonValue | undefined;
+  forcedMode: ResolvedHttpRequestBodyMode | null;
+};
+
 function readFiniteInt(
   value: StudioJsonValue | undefined,
   fallback: number,
@@ -68,6 +75,127 @@ function readHeaders(value: StudioJsonValue | undefined): Record<string, string>
     out[headerKey] = getText(entry);
   }
   return out;
+}
+
+function hasInputPort(inputs: Record<string, StudioJsonValue>, portId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(inputs, portId);
+}
+
+function readHeaderOverrides(value: StudioJsonValue | undefined): Record<string, string> {
+  if (typeof value === "undefined") {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new Error("HTTP request headers input must be a JSON object.");
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, StudioJsonValue>)) {
+    const headerKey = String(key || "").trim();
+    if (!headerKey) {
+      continue;
+    }
+    out[headerKey] = getText(entry);
+  }
+  return out;
+}
+
+function readTemplateVariableOverrides(value: StudioJsonValue | undefined): Record<string, string> {
+  if (typeof value === "undefined") {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new Error("HTTP request path_params input must be a JSON object.");
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, StudioJsonValue>)) {
+    const variableKey = String(key || "").trim();
+    if (!variableKey) {
+      continue;
+    }
+    out[variableKey] = getText(entry);
+  }
+  return out;
+}
+
+function appendQueryParamValue(searchParams: URLSearchParams, key: string, value: StudioJsonValue): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      appendQueryParamValue(searchParams, key, entry as StudioJsonValue);
+    }
+    return;
+  }
+  if (value == null) {
+    return;
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    searchParams.append(key, String(value));
+    return;
+  }
+  searchParams.append(key, JSON.stringify(value));
+}
+
+function appendQueryParams(url: string, queryValue: StudioJsonValue | undefined): string {
+  if (typeof queryValue === "undefined") {
+    return url;
+  }
+  if (!isRecord(queryValue)) {
+    throw new Error("HTTP request query input must be a JSON object.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`HTTP request resolved an invalid URL: "${url}"`);
+  }
+
+  for (const [key, value] of Object.entries(queryValue as Record<string, StudioJsonValue>)) {
+    const queryKey = String(key || "").trim();
+    if (!queryKey) {
+      continue;
+    }
+    appendQueryParamValue(parsed.searchParams, queryKey, value);
+  }
+  return parsed.toString();
+}
+
+function resolveBodySelection(options: {
+  method: string;
+  inputs: Record<string, StudioJsonValue>;
+  configBody: StudioJsonValue | undefined;
+}): ResolvedBodySelection {
+  if (options.method === "GET" || options.method === "HEAD") {
+    return {
+      bodyValue: undefined,
+      forcedMode: null,
+    };
+  }
+
+  const hasBodyJson = hasInputPort(options.inputs, "body_json");
+  const hasBodyText = hasInputPort(options.inputs, "body_text");
+
+  if (hasBodyJson && hasBodyText) {
+    throw new Error(
+      'HTTP request node body accepts either "body_json" or "body_text", not both at once.'
+    );
+  }
+
+  if (hasBodyJson) {
+    return {
+      bodyValue: options.inputs.body_json,
+      forcedMode: "json",
+    };
+  }
+  if (hasBodyText) {
+    return {
+      bodyValue: getText(options.inputs.body_text),
+      forcedMode: "text",
+    };
+  }
+  return {
+    bodyValue: options.configBody,
+    forcedMode: null,
+  };
 }
 
 function formatBearerAuthorization(token: string): string {
@@ -301,8 +429,33 @@ export const httpRequestNode: StudioNodeDefinition = {
   capabilityClass: "api",
   cachePolicy: "never",
   inputPorts: [
-    { id: "url", type: "text", required: false },
-    { id: "body", type: "any", required: false },
+    { id: "url", type: "text", required: false, description: "Optional URL override." },
+    { id: "headers", type: "json", required: false, description: "Merged into request headers." },
+    { id: "query", type: "json", required: false, description: "Query parameters object." },
+    {
+      id: "path_params",
+      type: "json",
+      required: false,
+      description: "Template variables for {{param}} in URL.",
+    },
+    {
+      id: "bearer_token",
+      type: "text",
+      required: false,
+      description: "Authorization bearer token override.",
+    },
+    {
+      id: "body_json",
+      type: "json",
+      required: false,
+      description: "Structured request body (forces JSON mode).",
+    },
+    {
+      id: "body_text",
+      type: "text",
+      required: false,
+      description: "Raw text request body (forces text mode).",
+    },
   ],
   outputPorts: [
     { id: "status", type: "number" },
@@ -388,16 +541,22 @@ export const httpRequestNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
+    const inputs = context.inputs as Record<string, StudioJsonValue>;
     const configuredUrl = getText(context.node.config.url as StudioJsonValue).trim();
-    const inputUrl = getText(context.inputs.url).trim();
+    const inputUrl = getText(inputs.url).trim();
     const baseUrlTemplate = inputUrl || configuredUrl;
     if (!baseUrlTemplate) {
       throw new Error(`HTTP request node "${context.node.id}" requires a URL.`);
     }
 
     const method = normalizeMethod(context.node.config.method as StudioJsonValue);
-    const headers = readHeaders(context.node.config.headers as StudioJsonValue);
-    const bearerToken = getText(context.node.config.bearerToken as StudioJsonValue).trim();
+    const headers = {
+      ...readHeaders(context.node.config.headers as StudioJsonValue),
+      ...readHeaderOverrides(inputs.headers),
+    };
+    const bearerTokenOverride = getText(inputs.bearer_token).trim();
+    const bearerToken =
+      bearerTokenOverride || getText(context.node.config.bearerToken as StudioJsonValue).trim();
     if (bearerToken && !hasHeaderCaseInsensitive(headers, "Authorization")) {
       headers.Authorization = formatBearerAuthorization(bearerToken);
     }
@@ -405,27 +564,32 @@ export const httpRequestNode: StudioNodeDefinition = {
       min: 0,
       max: 8,
     });
-    const bodyMode = normalizeBodyMode(context.node.config.bodyMode as StudioJsonValue);
+    const configuredBodyMode = normalizeBodyMode(context.node.config.bodyMode as StudioJsonValue);
 
     const variables = resolveTemplateVariables(context);
-    const url = renderTemplate(baseUrlTemplate, variables).trim();
+    const pathParamVariables = readTemplateVariableOverrides(inputs.path_params);
+    for (const [key, value] of Object.entries(pathParamVariables)) {
+      variables[key] = value;
+    }
+    const urlTemplateResolved = renderTemplate(baseUrlTemplate, variables).trim();
+    const url = appendQueryParams(urlTemplateResolved, inputs.query);
     if (!url) {
       throw new Error(`HTTP request node "${context.node.id}" resolved an empty URL.`);
     }
     context.services.assertNetworkUrl(url);
 
-    const bodyValue =
-      method === "GET" || method === "HEAD"
-        ? undefined
-        : typeof context.inputs.body !== "undefined"
-          ? context.inputs.body
-          : (context.node.config.body as StudioJsonValue);
+    const bodySelection = resolveBodySelection({
+      method,
+      inputs,
+      configBody: context.node.config[HTTP_BODY_CONFIG_FALLBACK_KEY] as StudioJsonValue,
+    });
+    const bodyMode = bodySelection.forcedMode || configuredBodyMode;
 
     const response = await requestWithRetry({
       url,
       method,
       headers,
-      bodyValue,
+      bodyValue: bodySelection.bodyValue,
       bodyMode,
       signal: context.signal,
       maxRetries,

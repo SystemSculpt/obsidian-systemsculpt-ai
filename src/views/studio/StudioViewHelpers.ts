@@ -6,7 +6,7 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
-  "studio.json": "Pass-through JSON preview node for inspecting structured values.",
+  "studio.json": "Build JSON payloads in Composer or Raw mode, then pass through upstream JSON when connected.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
   "studio.label": "Adds a visual-only label card for organizing your canvas.",
   "studio.note": "Mirrors a markdown note from your vault with live text editing.",
@@ -19,7 +19,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.dataset":
     "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
   "studio.http_request":
-    "Makes a straightforward API request and returns status, body, and parsed JSON.",
+    "Makes a straightforward API request with typed URL/header/query/body bindings, then returns status/body/json.",
   "studio.cli_command": "Runs a local shell command and captures output.",
 };
 

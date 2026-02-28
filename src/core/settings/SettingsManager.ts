@@ -202,6 +202,13 @@ export class SettingsManager {
     if (typeof migratedSettings.studioTelemetryOptIn !== "boolean") {
       migratedSettings.studioTelemetryOptIn = DEFAULT_SETTINGS.studioTelemetryOptIn;
     }
+
+    if (
+      migratedSettings.studioJsonEditorDefaultMode !== "composer" &&
+      migratedSettings.studioJsonEditorDefaultMode !== "raw"
+    ) {
+      migratedSettings.studioJsonEditorDefaultMode = DEFAULT_SETTINGS.studioJsonEditorDefaultMode;
+    }
     
     return migratedSettings as SystemSculptSettings;
   }
@@ -536,6 +543,13 @@ export class SettingsManager {
 
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
+    }
+
+    if (
+      validatedSettings.studioJsonEditorDefaultMode !== "composer" &&
+      validatedSettings.studioJsonEditorDefaultMode !== "raw"
+    ) {
+      validatedSettings.studioJsonEditorDefaultMode = defaultSettings.studioJsonEditorDefaultMode;
     }
 
     if (typeof validatedSettings.systemPromptType !== 'string') {

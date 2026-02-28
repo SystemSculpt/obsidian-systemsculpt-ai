@@ -2519,6 +2519,27 @@ export class SystemSculptStudioView extends ItemView {
     return this.plugin.getStudioService().resolveDynamicSelectOptions(source, node);
   }
 
+  private readJsonEditorPreferredMode(): "composer" | "raw" {
+    const rawMode = String(this.plugin.settings.studioJsonEditorDefaultMode || "")
+      .trim()
+      .toLowerCase();
+    return rawMode === "raw" ? "raw" : "composer";
+  }
+
+  private updateJsonEditorPreferredMode(mode: "composer" | "raw"): void {
+    const normalized = mode === "raw" ? "raw" : "composer";
+    if (this.plugin.settings.studioJsonEditorDefaultMode === normalized) {
+      return;
+    }
+    this.plugin.settings.studioJsonEditorDefaultMode = normalized;
+    void this.plugin.saveSettings().catch((error) => {
+      console.warn("[SystemSculpt Studio] Failed to persist JSON editor mode preference", {
+        mode: normalized,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   private ensureInspectorOverlay(): StudioNodeInspectorOverlay {
     if (this.inspectorOverlay) {
       return this.inspectorOverlay;
@@ -2934,7 +2955,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     if (nodeKind === "studio.json") {
-      node.config.__studio_seed_json = this.cloneJsonValue(value);
+      node.config.value = this.cloneJsonValue(value);
       return;
     }
     if (nodeKind === "studio.value") {
@@ -3856,6 +3877,8 @@ export class SystemSculptStudioView extends ItemView {
       onNodePresentationMutated: (_node) => {
         this.scheduleProjectSave();
       },
+      getJsonEditorPreferredMode: () => this.readJsonEditorPreferredMode(),
+      onJsonEditorPreferredModeChange: (mode) => this.updateJsonEditorPreferredMode(mode),
       renderMarkdownPreview: (node, markdown, containerEl) => {
         return this.renderNodeMarkdownPreview(node, markdown, containerEl);
       },

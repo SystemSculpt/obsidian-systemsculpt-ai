@@ -131,7 +131,7 @@ describe("StudioGraphCompiler", () => {
       fromNodeId: "text",
       fromPortId: "text",
       toNodeId: "http",
-      toPortId: "body",
+      toPortId: "body_text",
     });
 
     const compiled = compiler.compile(project, registry);
@@ -172,18 +172,114 @@ describe("StudioGraphCompiler", () => {
         fromNodeId: "text",
         fromPortId: "text",
         toNodeId: "http",
-        toPortId: "body",
+        toPortId: "body_text",
       },
       {
         id: "e2",
         fromNodeId: "json",
         fromPortId: "json",
         toNodeId: "http",
-        toPortId: "body",
+        toPortId: "body_json",
       }
     );
 
-    expect(() => compiler.compile(project, registry)).toThrow("accepts only one connection");
+    expect(() => compiler.compile(project, registry)).toThrow("body accepts one source");
+  });
+
+  it("rejects mixed HTTP body sources across typed ports", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "hello from text node" },
+      },
+      {
+        id: "json",
+        kind: "studio.json",
+        version: "1.0.0",
+        title: "JSON",
+        position: { x: 0, y: 180 },
+        config: {},
+      },
+      {
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 280, y: 0 },
+        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
+      }
+    );
+    project.graph.edges.push(
+      {
+        id: "e1",
+        fromNodeId: "text",
+        fromPortId: "text",
+        toNodeId: "http",
+        toPortId: "body_text",
+      },
+      {
+        id: "e2",
+        fromNodeId: "json",
+        fromPortId: "json",
+        toNodeId: "http",
+        toPortId: "body_json",
+      }
+    );
+
+    expect(() => compiler.compile(project, registry)).toThrow("body accepts one source");
+  });
+
+  it("rejects duplicate HTTP query connections", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "q1",
+        kind: "studio.json",
+        version: "1.0.0",
+        title: "Query 1",
+        position: { x: 0, y: 0 },
+        config: {},
+      },
+      {
+        id: "q2",
+        kind: "studio.json",
+        version: "1.0.0",
+        title: "Query 2",
+        position: { x: 0, y: 180 },
+        config: {},
+      },
+      {
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 280, y: 0 },
+        config: { method: "GET", url: "https://api.systemsculpt.com/import" },
+      }
+    );
+    project.graph.edges.push(
+      {
+        id: "e1",
+        fromNodeId: "q1",
+        fromPortId: "json",
+        toNodeId: "http",
+        toPortId: "query",
+      },
+      {
+        id: "e2",
+        fromNodeId: "q2",
+        fromPortId: "json",
+        toNodeId: "http",
+        toPortId: "query",
+      }
+    );
+
+    expect(() => compiler.compile(project, registry)).toThrow('input "query" accepts only one connection');
   });
 
   it("rejects cyclic graphs", () => {
@@ -255,7 +351,7 @@ describe("StudioGraphCompiler", () => {
       fromNodeId: "dataset",
       fromPortId: "email",
       toNodeId: "http",
-      toPortId: "body",
+      toPortId: "body_json",
     });
 
     const compiled = compiler.compile(project, registry);
