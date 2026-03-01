@@ -341,6 +341,32 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.title).toBe("Launch Plan");
   });
 
+  it("note node prepends preface text before single-note output", async () => {
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).toBeDefined();
+    const readVaultTextMock = jest.fn(async () => "Live note body");
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "note-node",
+        kind: "studio.note",
+        config: {
+          preface: "Use this note as factual context for the draft.",
+          notes: {
+            items: [{ path: "Inbox/Launch Plan.md", enabled: true }],
+          },
+        },
+        readVaultTextMock,
+      })
+    );
+
+    expect(result.outputs.text).toBe(
+      "Use this note as factual context for the draft.\n\nLive note body"
+    );
+    expect(result.outputs.path).toBe("Inbox/Launch Plan.md");
+    expect(result.outputs.title).toBe("Launch Plan");
+  });
+
   it("note node rejects non-markdown paths", async () => {
     const definition = registry.get("studio.note", "1.0.0");
     expect(definition).toBeDefined();
@@ -391,6 +417,36 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.title).toEqual(["First", "Second"]);
     expect(result.outputs.text).toEqual([
       "Body for Inbox/First.md",
+      "Body for Inbox/Second.md",
+    ]);
+  });
+
+  it("note node prepends preface text to the first entry for multi-note output", async () => {
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).toBeDefined();
+    const readVaultTextMock = jest.fn(async (path: string) => `Body for ${path}`);
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "note-node",
+        kind: "studio.note",
+        config: {
+          preface: "Treat the following notes as input context only.",
+          notes: {
+            items: [
+              { path: "Inbox/First.md", enabled: true },
+              { path: "Inbox/Second.md", enabled: true },
+            ],
+          },
+        },
+        readVaultTextMock,
+      })
+    );
+
+    expect(result.outputs.path).toEqual(["Inbox/First.md", "Inbox/Second.md"]);
+    expect(result.outputs.title).toEqual(["First", "Second"]);
+    expect(result.outputs.text).toEqual([
+      "Treat the following notes as input context only.\n\nBody for Inbox/First.md",
       "Body for Inbox/Second.md",
     ]);
   });

@@ -6,6 +6,35 @@ export type StudioNoteConfigItem = {
   enabled: boolean;
 };
 
+export function readStudioNotePreface(
+  config: Record<string, StudioJsonValue>
+): string {
+  const raw = config.preface;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+export function applyStudioNotePreface(noteText: string, preface: string): string {
+  if (!preface) {
+    return noteText;
+  }
+  if (!noteText.trim()) {
+    return preface;
+  }
+  return `${preface}\n\n${noteText}`;
+}
+
+export function applyStudioNotePrefaceToTextOutputs(
+  noteTexts: string[],
+  preface: string
+): string[] {
+  if (!preface || noteTexts.length === 0) {
+    return noteTexts;
+  }
+  const outputs = [...noteTexts];
+  outputs[0] = applyStudioNotePreface(outputs[0] || "", preface);
+  return outputs;
+}
+
 export function normalizeStudioNotePath(path: string): string {
   return String(path || "").replace(/\\/g, "/").trim();
 }

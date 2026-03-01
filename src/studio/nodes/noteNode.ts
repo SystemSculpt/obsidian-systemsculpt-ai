@@ -1,6 +1,9 @@
 import type { StudioJsonValue, StudioNodeDefinition } from "../types";
 import {
+  applyStudioNotePreface,
+  applyStudioNotePrefaceToTextOutputs,
   deriveStudioNoteTitleFromPath,
+  readStudioNotePreface,
   readEnabledStudioNoteItems,
   type StudioNoteConfigItem,
 } from "../StudioNoteConfig";
@@ -34,10 +37,17 @@ export const noteNode: StudioNodeDefinition = {
     { id: "title", type: "text" },
   ],
   configDefaults: {
+    preface: "",
     notes: { items: [] },
   },
   configSchema: {
     fields: [
+      {
+        key: "preface",
+        label: "Preface",
+        type: "textarea",
+        required: false,
+      },
       {
         key: "notes",
         label: "Notes",
@@ -52,6 +62,7 @@ export const noteNode: StudioNodeDefinition = {
     if (enabledItems.length === 0) {
       throw new Error(`Note node "${context.node.id}" has no enabled notes.`);
     }
+    const preface = readStudioNotePreface(context.node.config);
 
     const results = await Promise.all(
       enabledItems.map((entry) => readNoteEntry(entry, context))
@@ -60,16 +71,20 @@ export const noteNode: StudioNodeDefinition = {
     if (results.length === 1) {
       return {
         outputs: {
-          text: results[0].text,
+          text: applyStudioNotePreface(results[0].text, preface),
           path: results[0].path,
           title: results[0].title,
         },
       };
     }
+    const textOutputs = applyStudioNotePrefaceToTextOutputs(
+      results.map((result) => result.text),
+      preface
+    );
 
     return {
       outputs: {
-        text: results.map((r) => r.text) as unknown as StudioJsonValue,
+        text: textOutputs as unknown as StudioJsonValue,
         path: results.map((r) => r.path) as unknown as StudioJsonValue,
         title: results.map((r) => r.title) as unknown as StudioJsonValue,
       },

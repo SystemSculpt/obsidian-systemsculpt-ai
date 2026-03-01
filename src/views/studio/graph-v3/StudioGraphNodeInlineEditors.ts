@@ -2504,7 +2504,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["notes"],
+      orderedFieldKeys: ["preface", "notes"],
       interactionLocked,
       onNodeConfigMutated,
       resolveDynamicSelectOptions,
