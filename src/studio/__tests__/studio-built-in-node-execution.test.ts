@@ -192,6 +192,126 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.json).toEqual({});
   });
 
+  it("json node parses valid JSON text input into structured output", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          text: "{\"from\":\"SystemSculpt <no-reply@systemsculpt.com>\",\"to\":[\"mike@example.com\"]}",
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      from: "SystemSculpt <no-reply@systemsculpt.com>",
+      to: ["mike@example.com"],
+    });
+  });
+
+  it("json node accepts fenced JSON text payloads", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          text: "```json\n{\"subject\":\"Campaign test\",\"reply_to\":\"mike@example.com\"}\n```",
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      subject: "Campaign test",
+      reply_to: "mike@example.com",
+    });
+  });
+
+  it("json node auto-repairs unescaped html attribute quotes inside JSON strings", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          text:
+            '{"subject":"Campaign test","html":"<p>Hi</p><p><a href="https://systemsculpt.com/business/apply">Apply</a></p>"}',
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      subject: "Campaign test",
+      html: '<p>Hi</p><p><a href="https://systemsculpt.com/business/apply">Apply</a></p>',
+    });
+  });
+
+  it("json node extracts and parses wrapped JSON content", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          text: 'Here is your payload:\n{"subject":"Campaign test","to":["mike@example.com"]}\nThanks!',
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      subject: "Campaign test",
+      to: ["mike@example.com"],
+    });
+  });
+
+  it("json node auto-repairs truncated unterminated JSON string/object endings", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "json-node",
+        kind: "studio.json",
+        inputs: {
+          text:
+            '{"from":"SystemSculpt <no-reply@systemsculpt.com>","subject":"Campaign","html":"<p>Hi</p><p>I am opening a few spots for prior buyers',
+        },
+      })
+    );
+
+    expect(result.outputs.json).toEqual({
+      from: "SystemSculpt <no-reply@systemsculpt.com>",
+      subject: "Campaign",
+      html: "<p>Hi</p><p>I am opening a few spots for prior buyers",
+    });
+  });
+
+  it("json node throws for invalid JSON text input with actionable guidance", async () => {
+    const definition = registry.get("studio.json", "1.0.0");
+    expect(definition).toBeDefined();
+
+    await expect(
+      definition!.execute(
+        createContext({
+          nodeId: "json-node",
+          kind: "studio.json",
+          inputs: {
+            text: "{\"subject\":}",
+          },
+        })
+      )
+    ).rejects.toThrow("Fix the input JSON and rerun");
+  });
+
   it("note node reads markdown text from the vault and emits text/path/title", async () => {
     const definition = registry.get("studio.note", "1.0.0");
     expect(definition).toBeDefined();
@@ -202,8 +322,14 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "note-node",
         kind: "studio.note",
         config: {
-          vaultPath: "Inbox/Launch Plan.md",
-          value: "",
+          notes: {
+            items: [
+              {
+                path: "Inbox/Launch Plan.md",
+                enabled: true,
+              },
+            ],
+          },
         },
         readVaultTextMock,
       })
@@ -225,11 +351,48 @@ describe("Studio built-in text/image node execution", () => {
           nodeId: "note-node",
           kind: "studio.note",
           config: {
-            vaultPath: "Inbox/Audio.m4a",
+            notes: {
+              items: [
+                {
+                  path: "Inbox/Audio.m4a",
+                  enabled: true,
+                },
+              ],
+            },
           },
         })
       )
     ).rejects.toThrow("only supports markdown files");
+  });
+
+  it("note node emits array outputs when multiple notes are enabled", async () => {
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).toBeDefined();
+    const readVaultTextMock = jest.fn(async (path: string) => `Body for ${path}`);
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "note-node",
+        kind: "studio.note",
+        config: {
+          notes: {
+            items: [
+              { path: "Inbox/First.md", enabled: true },
+              { path: "Inbox/Second.md", enabled: true },
+            ],
+          },
+        },
+        readVaultTextMock,
+      })
+    );
+
+    expect(readVaultTextMock).toHaveBeenCalledTimes(2);
+    expect(result.outputs.path).toEqual(["Inbox/First.md", "Inbox/Second.md"]);
+    expect(result.outputs.title).toEqual(["First", "Second"]);
+    expect(result.outputs.text).toEqual([
+      "Body for Inbox/First.md",
+      "Body for Inbox/Second.md",
+    ]);
   });
 
   it("text generation consumes structured prompt payload and passes system prompt", async () => {

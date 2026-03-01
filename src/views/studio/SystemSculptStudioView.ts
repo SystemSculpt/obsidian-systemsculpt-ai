@@ -103,6 +103,16 @@ import {
   openStudioPiSetupWizard,
   type StudioPiSetupWizardIssue,
 } from "./StudioPiSetupWizardModal";
+import {
+  deriveStudioNoteTitleFromPath,
+  ensureStudioNoteConfigItems,
+  parseStudioNoteItems,
+  readAllStudioNotePaths,
+  readEnabledStudioNoteItems,
+  readPrimaryStudioNotePath,
+  serializeStudioNoteItems,
+  type StudioNoteConfigItem,
+} from "../../studio/StudioNoteConfig";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -179,8 +189,6 @@ export class SystemSculptStudioView extends ItemView {
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private lastGraphPointerPosition: { x: number; y: number } | null = null;
   private vaultEventRefs: EventRef[] = [];
-  private notePathByNodeId = new Map<string, string>();
-  private noteWriteTimersByNodeId = new Map<string, number>();
   private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
   private graphClipboardPasteCount = 0;
   private historyCurrentSnapshot: StudioGraphHistorySnapshot | null = null;
@@ -279,10 +287,7 @@ export class SystemSculptStudioView extends ItemView {
   async onClose(): Promise<void> {
     window.removeEventListener("keydown", this.onWindowKeyDown, true);
     window.removeEventListener("paste", this.onWindowPaste, true);
-    await this.flushPendingNoteWrites();
     this.unbindVaultEvents();
-    this.clearAllNoteWriteTimers();
-    this.notePathByNodeId.clear();
     this.graphClipboardPayload = null;
     this.graphClipboardPasteCount = 0;
     this.resetProjectHistory(null);
@@ -323,7 +328,7 @@ export class SystemSculptStudioView extends ItemView {
     );
     this.vaultEventRefs.push(
       this.app.vault.on("delete", (file) => {
-        this.handleVaultItemDeleted(file);
+        void this.handleVaultItemDeleted(file);
       })
     );
   }
@@ -429,9 +434,6 @@ export class SystemSculptStudioView extends ItemView {
     );
 
     this.currentProject = nextProject;
-    this.clearAllNoteWriteTimers();
-    this.notePathByNodeId.clear();
-    this.rebuildNotePathIndex(nextProject);
     this.transientFieldErrorsByNodeId.clear();
     this.runPresentation.reset();
     this.editingLabelNodeIds.clear();
@@ -445,6 +447,12 @@ export class SystemSculptStudioView extends ItemView {
     this.scheduleProjectSave({ captureHistory: false });
     this.render();
     this.graphInteraction.setSelectedNodeIds(nextSelection);
+    void this.refreshNoteNodePreviewsFromVault(nextProject).then((changed) => {
+      if (changed) {
+        this.scheduleProjectSave({ captureHistory: false });
+      }
+      this.render();
+    });
   }
 
   private undoGraphHistory(): boolean {
@@ -587,6 +595,62 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private coerceNotePreviewText(value: unknown, pathValue?: StudioJsonValue | undefined): string {
+    const readPathAtIndex = (index: number): string => {
+      if (typeof pathValue === "string") {
+        return pathValue.trim();
+      }
+      if (Array.isArray(pathValue)) {
+        const entry = pathValue[index];
+        return typeof entry === "string" ? entry.trim() : "";
+      }
+      return "";
+    };
+
+    const formatNoteBlock = (text: string, index: number): string => {
+      const body = text.trim();
+      if (!body) {
+        return "";
+      }
+      const path = readPathAtIndex(index);
+      if (!path) {
+        return body;
+      }
+      return `Path: ${path}\n${body}`;
+    };
+
+    if (typeof value === "string") {
+      return formatNoteBlock(value, 0);
+    }
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((entry, index) => (typeof entry === "string" ? formatNoteBlock(entry, index) : ""))
+        .filter((entry) => entry.length > 0);
+      if (parts.length > 0) {
+        return parts.join("\n\n---\n\n");
+      }
+    }
+    return "";
+  }
+
+  private readFirstTextValue(value: StudioJsonValue | undefined): string {
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry !== "string") {
+          continue;
+        }
+        const trimmed = entry.trim();
+        if (trimmed.length > 0) {
+          return trimmed;
+        }
+      }
+    }
+    return "";
+  }
+
   private isTextGenerationOutputLocked(node: StudioNodeInstance | null): boolean {
     if (!node || node.kind !== "studio.text_generation") {
       return false;
@@ -661,25 +725,44 @@ export class SystemSculptStudioView extends ItemView {
     vaultPath: string;
   }> {
     if (node.kind === "studio.note") {
-      const configuredPath = this.readNotePathFromConfig(node);
-      let noteText = this.coercePromptBundleText((node.config as Record<string, unknown>).value);
-      let resolvedPath = configuredPath;
+      const runtimePath = this.runPresentation.getNodeState(node.id).outputs?.path;
+      const runtimeOutput = this.runPresentation.getNodeState(node.id).outputs?.text;
+      const noteText = this.coerceNotePreviewText(runtimeOutput, runtimePath);
+      const resolvedPath = this.readFirstTextValue(runtimePath);
+      if (noteText) {
+        return {
+          content: noteText,
+          contentLanguage: "markdown",
+          sourceLabel: "live note preview",
+          vaultPath: resolvedPath,
+        };
+      }
+
+      const configuredPath = this.readNotePrimaryPathFromConfig(node);
       if (configuredPath) {
         const abstract = this.app.vault.getAbstractFileByPath(configuredPath);
         if (this.isMarkdownVaultFile(abstract)) {
-          resolvedPath = abstract.path;
           try {
-            noteText = (await this.readVaultMarkdownFile(abstract)).trim();
+            const text = (await this.readVaultMarkdownFile(abstract)).trim();
+            if (text) {
+              return {
+                content: text,
+                contentLanguage: "markdown",
+                sourceLabel: "vault note",
+                vaultPath: abstract.path,
+              };
+            }
           } catch {
-            // Fallback to cached config value.
+            // Fall through to empty preview state.
           }
         }
       }
+
       return {
-        content: noteText || "(Note is empty.)",
+        content: "(Note preview is empty. Run or refresh note links.)",
         contentLanguage: "markdown",
-        sourceLabel: resolvedPath ? "vault note" : "note config",
-        vaultPath: resolvedPath,
+        sourceLabel: "note preview",
+        vaultPath: configuredPath,
       };
     }
 
@@ -984,18 +1067,19 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.clearPendingConnection({ requestRender: false });
     this.graphInteraction.setSelectedNodeIds(nextSelection);
-    for (const node of newNodes) {
-      if (node.kind !== "studio.note") {
-        continue;
-      }
-      const notePath = this.readNotePathFromConfig(node);
-      if (notePath) {
-        this.notePathByNodeId.set(node.id, normalizePath(notePath));
-      }
-    }
     this.recomputeEntryNodes(project);
     this.scheduleProjectSave();
     this.render();
+    const pastedNoteNodeIds = newNodes
+      .filter((node) => node.kind === "studio.note")
+      .map((node) => node.id);
+    if (pastedNoteNodeIds.length > 0) {
+      void this.refreshNoteNodePreviewsFromVault(project, {
+        onlyNodeIds: new Set(pastedNoteNodeIds),
+      }).then(() => {
+        this.render();
+      });
+    }
     this.graphClipboardPasteCount += 1;
     new Notice(newNodes.length === 1 ? "Pasted 1 node." : `Pasted ${newNodes.length} nodes.`);
     return true;
@@ -1553,20 +1637,157 @@ export class SystemSculptStudioView extends ItemView {
     );
   }
 
-  private readNotePathFromConfig(node: Pick<StudioNodeInstance, "config">): string {
-    return String(node.config.vaultPath || "").trim();
+  private readNotePrimaryPathFromConfig(node: Pick<StudioNodeInstance, "config">): string {
+    const rawPath = readPrimaryStudioNotePath(node.config);
+    return rawPath ? normalizePath(rawPath) : "";
   }
 
-  private deriveNoteTitleFromPath(path: string): string {
-    const normalized = String(path || "").trim().replace(/\\/g, "/");
-    if (!normalized) {
-      return "";
+  private readAllNotePathsFromConfig(node: Pick<StudioNodeInstance, "config">): string[] {
+    const output: string[] = [];
+    const seen = new Set<string>();
+    for (const path of readAllStudioNotePaths(node.config)) {
+      const normalized = path ? normalizePath(path) : "";
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      output.push(normalized);
     }
-    const fileName = normalized.split("/").pop() || normalized;
-    if (fileName.toLowerCase().endsWith(".md") && fileName.length > 3) {
-      return fileName.slice(0, -3);
+    return output;
+  }
+
+  private readEnabledNoteItemsFromConfig(node: Pick<StudioNodeInstance, "config">): StudioNoteConfigItem[] {
+    return readEnabledStudioNoteItems(node.config)
+      .map((item) => ({
+        path: item.path ? normalizePath(item.path) : "",
+        enabled: item.enabled !== false,
+      }))
+      .filter((item) => item.path.length > 0);
+  }
+
+  private normalizeNoteNodeConfig(node: StudioNodeInstance): boolean {
+    let changed = false;
+    let nextConfig: Record<string, StudioJsonValue> = node.config;
+    const canonicalized = ensureStudioNoteConfigItems(nextConfig);
+    if (canonicalized.changed) {
+      nextConfig = canonicalized.nextConfig;
+      changed = true;
     }
-    return fileName;
+
+    const normalizedItems = parseStudioNoteItems(nextConfig.notes).map((item) => ({
+      path: item.path ? normalizePath(item.path) : "",
+      enabled: item.enabled !== false,
+    }));
+    const serializedItems = serializeStudioNoteItems(normalizedItems);
+    if (JSON.stringify(nextConfig.notes) !== JSON.stringify(serializedItems)) {
+      nextConfig = {
+        ...nextConfig,
+        notes: serializedItems,
+      };
+      changed = true;
+    }
+
+    if (changed) {
+      node.config = nextConfig;
+    }
+    return changed;
+  }
+
+  private async refreshNoteNodePreviewsFromVault(
+    project: StudioProjectV1,
+    options?: {
+      onlyNodeIds?: Set<string>;
+    }
+  ): Promise<boolean> {
+    let configChanged = false;
+    const onlyNodeIds = options?.onlyNodeIds;
+
+    for (const node of project.graph.nodes) {
+      if (node.kind !== "studio.note") {
+        continue;
+      }
+      if (onlyNodeIds && !onlyNodeIds.has(node.id)) {
+        continue;
+      }
+
+      if (this.normalizeNoteNodeConfig(node)) {
+        configChanged = true;
+      }
+
+      const enabledItems = this.readEnabledNoteItemsFromConfig(node);
+      if (enabledItems.length === 0) {
+        this.runPresentation.primeNodeOutput(
+          node.id,
+          {
+            text: "",
+            path: "",
+            title: "",
+          },
+          { message: "No enabled notes selected" }
+        );
+        continue;
+      }
+
+      const loadedEntries: Array<{ text: string; path: string; title: string }> = [];
+      let failedCount = 0;
+      for (const item of enabledItems) {
+        const abstract = this.app.vault.getAbstractFileByPath(item.path);
+        if (!this.isMarkdownVaultFile(abstract)) {
+          failedCount += 1;
+          continue;
+        }
+
+        try {
+          const text = await this.readVaultMarkdownFile(abstract);
+          loadedEntries.push({
+            text,
+            path: abstract.path,
+            title: deriveStudioNoteTitleFromPath(abstract.path) || abstract.path,
+          });
+        } catch (error) {
+          failedCount += 1;
+          console.warn("[SystemSculpt Studio] Unable to read note preview", {
+            nodeId: node.id,
+            path: item.path,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      if (loadedEntries.length === 0) {
+        const fallbackPath = enabledItems[0]?.path || "";
+        this.runPresentation.primeNodeOutput(
+          node.id,
+          {
+            text: "",
+            path: fallbackPath,
+            title: deriveStudioNoteTitleFromPath(fallbackPath) || "",
+          },
+          { message: "Linked notes unavailable" }
+        );
+        continue;
+      }
+
+      const outputs: StudioNodeOutputMap =
+        loadedEntries.length === 1
+          ? {
+              text: loadedEntries[0].text,
+              path: loadedEntries[0].path,
+              title: loadedEntries[0].title,
+            }
+          : {
+              text: loadedEntries.map((entry) => entry.text),
+              path: loadedEntries.map((entry) => entry.path),
+              title: loadedEntries.map((entry) => entry.title),
+            };
+      const message =
+        failedCount > 0
+          ? `Preview ready (${loadedEntries.length}/${enabledItems.length} notes loaded)`
+          : "Preview ready";
+      this.runPresentation.primeNodeOutput(node.id, outputs, { message });
+    }
+
+    return configChanged;
   }
 
   private async readVaultMarkdownFile(file: TFile): Promise<string> {
@@ -1602,8 +1823,7 @@ export class SystemSculptStudioView extends ItemView {
       if (!this.isMarkdownVaultFile(abstract)) {
         continue;
       }
-      const noteText = await this.readVaultMarkdownFile(abstract);
-      const title = this.deriveNoteTitleFromPath(abstract.path) || prettifyNodeKind(noteDefinition.kind);
+      const title = deriveStudioNoteTitleFromPath(abstract.path) || prettifyNodeKind(noteDefinition.kind);
       const node: StudioNodeInstance = {
         id: randomId("node"),
         kind: noteDefinition.kind,
@@ -1615,14 +1835,12 @@ export class SystemSculptStudioView extends ItemView {
         }),
         config: {
           ...cloneConfigDefaults(noteDefinition),
-          vaultPath: abstract.path,
-          value: noteText,
+          notes: serializeStudioNoteItems([{ path: abstract.path, enabled: true }]),
         },
         continueOnError: false,
         disabled: false,
       };
       project.graph.nodes.push(node);
-      this.notePathByNodeId.set(node.id, abstract.path);
       createdNodeIds.push(node.id);
     }
 
@@ -1635,6 +1853,11 @@ export class SystemSculptStudioView extends ItemView {
     this.recomputeEntryNodes(project);
     this.scheduleProjectSave();
     this.render();
+    void this.refreshNoteNodePreviewsFromVault(project, {
+      onlyNodeIds: new Set(createdNodeIds),
+    }).then(() => {
+      this.render();
+    });
 
     if (options?.source === "drop") {
       new Notice(
@@ -2079,8 +2302,6 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
     for (const nodeId of removed.removedNodeIds) {
-      this.clearNoteWriteTimer(nodeId);
-      this.notePathByNodeId.delete(nodeId);
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
@@ -2166,12 +2387,9 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (projectPath !== this.currentProjectPath) {
-      await this.flushPendingNoteWrites();
       this.captureGraphViewportState();
       this.editingLabelNodeIds.clear();
       this.pendingLabelAutofocusNodeId = null;
-      this.notePathByNodeId.clear();
-      this.clearAllNoteWriteTimers();
     }
 
     if (!projectPath) {
@@ -2182,7 +2400,6 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
-      this.notePathByNodeId.clear();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
       return;
@@ -2196,7 +2413,6 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
       this.runPresentation.reset();
-      this.notePathByNodeId.clear();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
       if (options?.notifyOnError !== false) {
@@ -2216,11 +2432,9 @@ export class SystemSculptStudioView extends ItemView {
       const mediaTitlesNormalized = this.normalizeLegacyMediaNodeTitles(project);
       const stalePendingRemoved = cleanupStaleManagedOutputPlaceholders(project).changed;
       const legacyManagedTextRemoved = removeManagedTextOutputNodes({ project }).changed;
-      const noteValuesHydrated = await this.hydrateNoteNodeValuesFromVault(project);
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
-      this.rebuildNotePathIndex(project);
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(savedGraphView?.zoom ?? STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -2247,6 +2461,7 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
+      const noteValuesHydrated = await this.refreshNoteNodePreviewsFromVault(project);
       this.resetProjectHistory(project);
       if (
         groupsSanitized ||
@@ -2263,7 +2478,6 @@ export class SystemSculptStudioView extends ItemView {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
-      this.notePathByNodeId.clear();
       this.graphInteraction.clearProjectState();
       this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
       this.transientFieldErrorsByNodeId.clear();
@@ -2277,193 +2491,6 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
-  private rebuildNotePathIndex(project: StudioProjectV1): void {
-    this.notePathByNodeId.clear();
-    for (const node of project.graph.nodes) {
-      if (node.kind !== "studio.note") {
-        continue;
-      }
-      const vaultPath = this.readNotePathFromConfig(node);
-      if (!vaultPath) {
-        continue;
-      }
-      this.notePathByNodeId.set(node.id, normalizePath(vaultPath));
-    }
-  }
-
-  private async hydrateNoteNodeValuesFromVault(
-    project: StudioProjectV1,
-    options?: {
-      onlyNodeIds?: Set<string>;
-      clearWhenMissing?: boolean;
-    }
-  ): Promise<boolean> {
-    let changed = false;
-    const onlyNodeIds = options?.onlyNodeIds;
-    const clearWhenMissing = options?.clearWhenMissing ?? true;
-
-    for (const node of project.graph.nodes) {
-      if (node.kind !== "studio.note") {
-        continue;
-      }
-      if (onlyNodeIds && !onlyNodeIds.has(node.id)) {
-        continue;
-      }
-
-      const configuredPath = this.readNotePathFromConfig(node);
-      if (!configuredPath) {
-        continue;
-      }
-      const normalizedPath = normalizePath(configuredPath);
-      if (normalizedPath !== configuredPath) {
-        node.config.vaultPath = normalizedPath;
-        changed = true;
-      }
-      this.notePathByNodeId.set(node.id, normalizedPath);
-      if (!normalizedPath.toLowerCase().endsWith(".md")) {
-        continue;
-      }
-
-      const abstract = this.app.vault.getAbstractFileByPath(normalizedPath);
-      if (!this.isMarkdownVaultFile(abstract)) {
-        if (clearWhenMissing && String(node.config.value || "") !== "") {
-          node.config.value = "";
-          changed = true;
-        }
-        continue;
-      }
-
-      try {
-        const text = await this.readVaultMarkdownFile(abstract);
-        if (String(node.config.value || "") !== text) {
-          node.config.value = text;
-          changed = true;
-        }
-      } catch (error) {
-        console.warn("[SystemSculpt Studio] Unable to read note for hydration", {
-          nodeId: node.id,
-          path: normalizedPath,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    return changed;
-  }
-
-  private clearNoteWriteTimer(nodeId: string): void {
-    const normalizedNodeId = String(nodeId || "").trim();
-    if (!normalizedNodeId) {
-      return;
-    }
-    const timerId = this.noteWriteTimersByNodeId.get(normalizedNodeId);
-    if (typeof timerId !== "number") {
-      return;
-    }
-    window.clearTimeout(timerId);
-    this.noteWriteTimersByNodeId.delete(normalizedNodeId);
-  }
-
-  private clearAllNoteWriteTimers(): void {
-    for (const timerId of this.noteWriteTimersByNodeId.values()) {
-      window.clearTimeout(timerId);
-    }
-    this.noteWriteTimersByNodeId.clear();
-  }
-
-  private async flushPendingNoteWrites(): Promise<void> {
-    const pendingNodeIds = Array.from(this.noteWriteTimersByNodeId.keys());
-    if (pendingNodeIds.length === 0) {
-      return;
-    }
-    this.clearAllNoteWriteTimers();
-    for (const nodeId of pendingNodeIds) {
-      await this.persistNoteNodeToVault(nodeId);
-    }
-  }
-
-  private scheduleNoteNodeWrite(nodeId: string): void {
-    const normalizedNodeId = String(nodeId || "").trim();
-    if (!normalizedNodeId) {
-      return;
-    }
-    this.clearNoteWriteTimer(normalizedNodeId);
-    const timerId = window.setTimeout(() => {
-      this.noteWriteTimersByNodeId.delete(normalizedNodeId);
-      void this.persistNoteNodeToVault(normalizedNodeId);
-    }, 260);
-    this.noteWriteTimersByNodeId.set(normalizedNodeId, timerId);
-  }
-
-  private async ensureFolderPathForVaultFile(filePath: string): Promise<void> {
-    const normalized = normalizePath(String(filePath || "").trim());
-    if (!normalized.includes("/")) {
-      return;
-    }
-    const segments = normalized.split("/");
-    segments.pop();
-    let current = "";
-    for (const segment of segments) {
-      current = current ? `${current}/${segment}` : segment;
-      if (!current) {
-        continue;
-      }
-      const existing = this.app.vault.getAbstractFileByPath(current);
-      if (!existing) {
-        await this.app.vault.createFolder(current);
-      } else if (!(existing instanceof TFolder)) {
-        throw new Error(`Cannot create folder "${current}" because a file already exists there.`);
-      }
-    }
-  }
-
-  private async persistNoteNodeToVault(nodeId: string): Promise<void> {
-    if (!this.currentProject) {
-      return;
-    }
-    const node = this.findNode(this.currentProject, nodeId);
-    if (!node || node.kind !== "studio.note") {
-      return;
-    }
-
-    const rawPath = this.readNotePathFromConfig(node);
-    if (!rawPath) {
-      return;
-    }
-    const vaultPath = normalizePath(rawPath);
-    if (!vaultPath.toLowerCase().endsWith(".md")) {
-      return;
-    }
-
-    const nextText = String(node.config.value || "");
-    try {
-      const existing = this.app.vault.getAbstractFileByPath(vaultPath);
-      if (this.isMarkdownVaultFile(existing)) {
-        const currentText = await this.readVaultMarkdownFile(existing);
-        if (currentText !== nextText) {
-          await this.app.vault.modify(existing, nextText);
-        }
-        this.notePathByNodeId.set(node.id, existing.path);
-        return;
-      }
-      if (this.isVaultFolder(existing)) {
-        throw new Error(`Cannot write note to "${vaultPath}" because it is a folder.`);
-      }
-
-      await this.ensureFolderPathForVaultFile(vaultPath);
-      await this.app.vault.create(vaultPath, nextText);
-      this.notePathByNodeId.set(node.id, vaultPath);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[SystemSculpt Studio] Failed to persist note node to vault", {
-        nodeId,
-        vaultPath,
-        message,
-      });
-      new Notice(`Failed to save note "${vaultPath}": ${message}`);
-    }
-  }
-
   private async handleVaultItemModified(file: TAbstractFile): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
@@ -2472,21 +2499,28 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
+    const modifiedPath = normalizePath(String(file.path || "").trim());
+    if (!modifiedPath) {
+      return;
+    }
     const matchingNodeIds = this.currentProject.graph.nodes
-      .filter((node) => node.kind === "studio.note" && this.readNotePathFromConfig(node) === file.path)
+      .filter((node) => {
+        if (node.kind !== "studio.note") {
+          return false;
+        }
+        return this.readAllNotePathsFromConfig(node).includes(modifiedPath);
+      })
       .map((node) => node.id);
     if (matchingNodeIds.length === 0) {
       return;
     }
 
-    const changed = await this.hydrateNoteNodeValuesFromVault(this.currentProject, {
+    const changed = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
       onlyNodeIds: new Set(matchingNodeIds),
-      clearWhenMissing: false,
     });
-    if (!changed) {
-      return;
+    if (changed) {
+      this.scheduleProjectSave();
     }
-    this.scheduleProjectSave();
     this.render();
   }
 
@@ -2506,12 +2540,22 @@ export class SystemSculptStudioView extends ItemView {
         if (node.kind !== "studio.note") {
           continue;
         }
-        if (this.readNotePathFromConfig(node) !== previousPath) {
+        if (this.normalizeNoteNodeConfig(node)) {
+          changed = true;
+        }
+        const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
+          path: item.path ? normalizePath(item.path) : "",
+          enabled: item.enabled !== false,
+        }));
+        const remappedItems = existingItems.map((item) => ({
+          path: item.path === previousPath ? normalizePath(file.path) : item.path,
+          enabled: item.enabled,
+        }));
+        if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
           continue;
         }
-        node.config.vaultPath = file.path;
-        this.notePathByNodeId.set(node.id, file.path);
-        const previousTitle = this.deriveNoteTitleFromPath(previousPath);
+        node.config.notes = serializeStudioNoteItems(remappedItems);
+        const previousTitle = deriveStudioNoteTitleFromPath(previousPath);
         if (!node.title || node.title === "Note" || node.title === previousTitle) {
           node.title = file.basename || node.title;
         }
@@ -2524,23 +2568,35 @@ export class SystemSculptStudioView extends ItemView {
         if (node.kind !== "studio.note") {
           continue;
         }
-        const currentPath = this.readNotePathFromConfig(node);
-        if (!currentPath.startsWith(prefix)) {
+        if (this.normalizeNoteNodeConfig(node)) {
+          changed = true;
+        }
+        const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
+          path: item.path ? normalizePath(item.path) : "",
+          enabled: item.enabled !== false,
+        }));
+        const remappedItems = existingItems.map((item) => {
+          if (!item.path.startsWith(prefix)) {
+            return item;
+          }
+          const suffix = item.path.slice(prefix.length);
+          return {
+            path: normalizePath(`${file.path}/${suffix}`),
+            enabled: item.enabled,
+          };
+        });
+        if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
           continue;
         }
-        const suffix = currentPath.slice(prefix.length);
-        const nextPath = normalizePath(`${file.path}/${suffix}`);
-        node.config.vaultPath = nextPath;
-        this.notePathByNodeId.set(node.id, nextPath);
+        node.config.notes = serializeStudioNoteItems(remappedItems);
         changed = true;
         changedNodeIds.add(node.id);
       }
     }
 
     if (changedNodeIds.size > 0) {
-      const hydrated = await this.hydrateNoteNodeValuesFromVault(this.currentProject, {
+      const hydrated = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
         onlyNodeIds: changedNodeIds,
-        clearWhenMissing: false,
       });
       changed = changed || hydrated;
     }
@@ -2551,7 +2607,7 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
-  private handleVaultItemDeleted(file: TAbstractFile): void {
+  private async handleVaultItemDeleted(file: TAbstractFile): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
@@ -2560,19 +2616,16 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    let changed = false;
+    const matchingNodeIds = new Set<string>();
     if (this.isMarkdownVaultFile(file)) {
       for (const node of this.currentProject.graph.nodes) {
         if (node.kind !== "studio.note") {
           continue;
         }
-        if (this.readNotePathFromConfig(node) !== deletedPath) {
+        if (!this.readAllNotePathsFromConfig(node).includes(deletedPath)) {
           continue;
         }
-        if (String(node.config.value || "") !== "") {
-          node.config.value = "";
-          changed = true;
-        }
+        matchingNodeIds.add(node.id);
       }
     } else if (this.isVaultFolder(file)) {
       const prefix = `${deletedPath}/`;
@@ -2580,21 +2633,23 @@ export class SystemSculptStudioView extends ItemView {
         if (node.kind !== "studio.note") {
           continue;
         }
-        const path = this.readNotePathFromConfig(node);
-        if (!path.startsWith(prefix)) {
+        const hasMatch = this.readAllNotePathsFromConfig(node).some((path) => path.startsWith(prefix));
+        if (!hasMatch) {
           continue;
         }
-        if (String(node.config.value || "") !== "") {
-          node.config.value = "";
-          changed = true;
-        }
+        matchingNodeIds.add(node.id);
       }
     }
 
-    if (!changed) {
+    if (matchingNodeIds.size === 0) {
       return;
     }
-    this.scheduleProjectSave();
+    const changed = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
+      onlyNodeIds: matchingNodeIds,
+    });
+    if (changed) {
+      this.scheduleProjectSave();
+    }
     this.render();
   }
 
@@ -2606,37 +2661,53 @@ export class SystemSculptStudioView extends ItemView {
     if (node.kind !== "studio.note") {
       return null;
     }
-    const rawPath = this.readNotePathFromConfig(node);
-    if (!rawPath) {
+    const enabledItems = this.readEnabledNoteItemsFromConfig(node);
+    if (enabledItems.length === 0) {
       return {
         text: "Broken link",
         tone: "warning",
-        title: "Note path is empty. Set a markdown vault path to link this note node.",
+        title: "No enabled markdown notes selected.",
       };
     }
-    const normalizedPath = normalizePath(rawPath);
-    const abstract = this.app.vault.getAbstractFileByPath(normalizedPath);
-    if (this.isMarkdownVaultFile(abstract)) {
+
+    let firstIssue: string | null = null;
+    let issueCount = 0;
+    for (const item of enabledItems) {
+      const normalizedPath = normalizePath(item.path);
+      const abstract = this.app.vault.getAbstractFileByPath(normalizedPath);
+      if (this.isMarkdownVaultFile(abstract)) {
+        continue;
+      }
+      issueCount += 1;
+      if (firstIssue) {
+        continue;
+      }
+      if (this.isVaultFolder(abstract)) {
+        firstIssue = `Vault path "${normalizedPath}" points to a folder. Note nodes require a markdown file.`;
+      } else if (abstract instanceof TFile) {
+        firstIssue = `Vault path "${normalizedPath}" is not a markdown file.`;
+      } else {
+        firstIssue = `Vault note "${normalizedPath}" was not found.`;
+      }
+    }
+
+    if (issueCount === 0) {
       return null;
     }
-    if (this.isVaultFolder(abstract)) {
+    if (issueCount === 1 && firstIssue) {
       return {
         text: "Broken link",
         tone: "warning",
-        title: `Vault path "${normalizedPath}" points to a folder. Note nodes require a markdown file.`,
-      };
-    }
-    if (abstract instanceof TFile) {
-      return {
-        text: "Broken link",
-        tone: "warning",
-        title: `Vault path "${normalizedPath}" is not a markdown file.`,
+        title: firstIssue,
       };
     }
     return {
       text: "Broken link",
       tone: "warning",
-      title: `Vault note "${normalizedPath}" was not found.`,
+      title:
+        firstIssue && firstIssue.length > 0
+          ? `${issueCount} of ${enabledItems.length} enabled notes are unavailable. ${firstIssue}`
+          : `${issueCount} of ${enabledItems.length} enabled notes are unavailable.`,
     };
   }
 
@@ -2651,7 +2722,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const noteSourcePath = node.kind === "studio.note" ? this.readNotePathFromConfig(node) : "";
+    const noteSourcePath = node.kind === "studio.note" ? this.readNotePrimaryPathFromConfig(node) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
       await MarkdownRenderer.render(this.app, content, containerEl, sourcePath, this);
@@ -2775,35 +2846,17 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
-    const rawPath = this.readNotePathFromConfig(node);
-    const normalizedPath = rawPath ? normalizePath(rawPath) : "";
-    if (rawPath && normalizedPath !== rawPath) {
-      node.config.vaultPath = normalizedPath;
+    if (this.normalizeNoteNodeConfig(node)) {
+      this.refreshNodeCardPreview(node);
     }
-    const previousPath = this.notePathByNodeId.get(node.id) || "";
-    if (!normalizedPath) {
-      this.notePathByNodeId.delete(node.id);
-      this.clearNoteWriteTimer(node.id);
+    if (!this.currentProject) {
       return;
     }
-    if (previousPath !== normalizedPath) {
-      this.clearNoteWriteTimer(node.id);
-      this.notePathByNodeId.set(node.id, normalizedPath);
-      if (this.currentProject) {
-        void this.hydrateNoteNodeValuesFromVault(this.currentProject, {
-          onlyNodeIds: new Set([node.id]),
-          clearWhenMissing: false,
-        }).then((changed) => {
-          if (!changed) {
-            return;
-          }
-          this.scheduleProjectSave();
-          this.render();
-        });
-      }
-      return;
-    }
-    this.scheduleNoteNodeWrite(node.id);
+    void this.refreshNoteNodePreviewsFromVault(this.currentProject, {
+      onlyNodeIds: new Set([node.id]),
+    }).then(() => {
+      this.render();
+    });
   }
 
   private refreshNodeCardPreview(node: StudioNodeInstance): void {
@@ -2827,8 +2880,9 @@ export class SystemSculptStudioView extends ItemView {
       return null;
     }
 
-    const outputPath = typeof outputs?.path === "string" ? outputs.path.trim() : "";
-    const outputText = typeof outputs?.text === "string" ? outputs.text : "";
+    const outputPath =
+      this.readFirstTextValue(outputs?.path);
+    const outputText = this.coerceNotePreviewText(outputs?.text, outputs?.path);
     return {
       statusLabel: statusLabelForNode(state.status),
       statusTone: state.status,
@@ -3690,8 +3744,6 @@ export class SystemSculptStudioView extends ItemView {
     removeNodesFromGroups(this.currentProject, Array.from(idsToRemove));
 
     for (const nodeId of idsToRemove) {
-      this.clearNoteWriteTimer(nodeId);
-      this.notePathByNodeId.delete(nodeId);
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);

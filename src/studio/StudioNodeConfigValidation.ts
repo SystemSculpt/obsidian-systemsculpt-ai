@@ -223,6 +223,58 @@ export function validateNodeConfig(
         }
         break;
       }
+      case "note_selector": {
+        if (!isRecord(value)) {
+          errors.push({
+            fieldKey: field.key,
+            message: "Must be a note selector object.",
+          });
+          break;
+        }
+        const nsValue = value as Record<string, StudioJsonValue>;
+        const nsItems = nsValue.items;
+        if (!Array.isArray(nsItems)) {
+          errors.push({
+            fieldKey: field.key,
+            message: "Must have an 'items' array.",
+          });
+          break;
+        }
+        if (field.required === true && nsItems.length === 0) {
+          errors.push({
+            fieldKey: field.key,
+            message: "At least one note entry is required.",
+          });
+          break;
+        }
+        for (let i = 0; i < nsItems.length; i++) {
+          const item = nsItems[i];
+          if (!isRecord(item)) {
+            errors.push({
+              fieldKey: field.key,
+              message: `Item ${i} must be an object.`,
+            });
+            continue;
+          }
+          const itemObj = item as Record<string, StudioJsonValue>;
+          if (typeof itemObj.path !== "string" || itemObj.path.trim() === "") {
+            errors.push({
+              fieldKey: field.key,
+              message: `Item ${i} must have a non-empty path.`,
+            });
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(itemObj, "enabled") &&
+            typeof itemObj.enabled !== "boolean"
+          ) {
+            errors.push({
+              fieldKey: field.key,
+              message: `Item ${i} enabled must be true or false.`,
+            });
+          }
+        }
+        break;
+      }
       default: {
         errors.push({
           fieldKey: field.key,

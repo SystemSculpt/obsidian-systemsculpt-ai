@@ -99,6 +99,41 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
     expect(onNodeConfigMutated).toHaveBeenCalled();
   });
 
+  it("hydrates the editor from latest json output when config.value is unset", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture();
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: {
+        status: "success",
+        message: "",
+        updatedAt: "2026-03-01T00:00:00Z",
+        outputs: {
+          json: {
+            subject: "Generated payload",
+            to: ["mike@example.com"],
+          },
+        },
+      },
+      definition: definitionFixture(),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+    });
+
+    const keyInputs = nodeEl.querySelectorAll<HTMLInputElement>(".ss-studio-node-json-row-key");
+    expect(keyInputs.length).toBeGreaterThan(0);
+    expect(Array.from(keyInputs).some((entry) => entry.value === "subject")).toBe(true);
+
+    const rawEditor = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-json-raw-editor");
+    expect(rawEditor).toBeDefined();
+    expect(rawEditor?.value).toContain("Generated payload");
+
+    const sourceBadge = nodeEl.querySelector<HTMLElement>(".ss-studio-node-json-source-badge");
+    expect(sourceBadge?.textContent?.trim()).toBe("Runtime");
+  });
+
   it("starts in raw mode when preference says raw and parses JSON input", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture();
@@ -247,6 +282,38 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
     });
   });
 
+  it("supports HTML row type with source and sanitized preview", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture({
+      value: {
+        html: "<p>Hello</p><script>alert(1)</script>",
+      },
+    });
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: IDLE_NODE_RUN_STATE,
+      definition: definitionFixture(),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+    });
+
+    const typeSelect = nodeEl.querySelector<HTMLSelectElement>(".ss-studio-node-json-row-type");
+    expect(typeSelect?.value).toBe("html");
+
+    const previewButton = Array.from(
+      nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-json-row-html-mode-button")
+    ).find((button) => button.textContent?.trim() === "Preview");
+    expect(previewButton).toBeDefined();
+    click(previewButton!);
+
+    const iframe = nodeEl.querySelector<HTMLIFrameElement>(".ss-studio-node-json-row-html-preview-frame");
+    expect(iframe).toBeDefined();
+    expect(iframe?.getAttribute("srcdoc")).toContain("<p>Hello</p>");
+    expect(iframe?.getAttribute("srcdoc")).not.toContain("<script");
+  });
+
   it("shows inline key validation when duplicate keys are entered", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture();
@@ -295,10 +362,48 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
 
     expect(node.config.value).toEqual({
       from: "",
-      to: "",
+      to: [],
+      reply_to: "",
       subject: "",
       text: "",
+      html: "",
     });
+  });
+
+  it("shows effective payload and source badge updates after config edits", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture();
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: {
+        status: "success",
+        message: "",
+        updatedAt: "2026-03-01T00:00:00Z",
+        outputs: {
+          json: {
+            subject: "Runtime payload",
+          },
+        },
+      },
+      definition: definitionFixture(),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+      getJsonEditorPreferredMode: () => "raw",
+    });
+
+    const sourceBadge = nodeEl.querySelector<HTMLElement>(".ss-studio-node-json-source-badge");
+    const effectiveEditor = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-json-effective-editor");
+    const rawEditor = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-json-raw-editor");
+    expect(sourceBadge?.textContent?.trim()).toBe("Runtime");
+    expect(effectiveEditor?.value).toContain("Runtime payload");
+    expect(rawEditor).toBeDefined();
+
+    typeValue(rawEditor!, '{"subject":"Config payload"}');
+
+    expect(sourceBadge?.textContent?.trim()).toBe("Config");
+    expect(effectiveEditor?.value).toContain("Config payload");
   });
 
   it("collapses latest output preview by default and expands on demand", () => {

@@ -70,7 +70,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Metadata/debug details belong in runtime logs or snapshots, not as default output ports.
 - `studio.text_generation` exposes only `text` as its output.
 - `studio.text_generation` defaults to `SystemSculpt`; switching to `Local (Pi)` reveals a searchable model picker backed by dynamic provider models.
-- `studio.json` is a lightweight structured-data preview/pass-through node (`json` in, `json` out).
+- `studio.json` is a structured-data node that can pass through upstream `json` input or parse/validate upstream `text` into `json` for typed downstream bindings.
 - `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), always exposes raw `text`, and auto-exposes reusable field outputs from structured adapter results (cached internally with TTL).
 - `studio.dataset` resolves data through a user-configurable adapter command + argument list.
 - `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.

@@ -422,4 +422,39 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       migrated.project.migrations.applied.some((entry) => entry.id === "studio.resend-http-request.v1")
     ).toBe(true);
   });
+
+  it("migrates legacy note node config into canonical notes.items and removes legacy fields", () => {
+    const project = baseProject();
+    project.graph.nodes.push({
+      id: "note_1",
+      kind: "studio.note",
+      version: "1.0.0",
+      title: "Note",
+      position: { x: 0, y: 0 },
+      config: {
+        vaultPath: "Inbox/Launch Plan.md",
+        value: "legacy cached text",
+      },
+    });
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+
+    const noteNode = migrated.project.graph.nodes.find((node) => node.id === "note_1");
+    expect(noteNode?.config).toEqual({
+      notes: {
+        items: [
+          {
+            path: "Inbox/Launch Plan.md",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    expect(
+      migrated.project.migrations.applied.some(
+        (entry) => entry.id === "studio.note-canonical-config.v1"
+      )
+    ).toBe(true);
+  });
 });

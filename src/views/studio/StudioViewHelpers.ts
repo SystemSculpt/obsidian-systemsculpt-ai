@@ -6,10 +6,11 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
-  "studio.json": "Build JSON payloads in Composer or Raw mode, then pass through upstream JSON when connected.",
+  "studio.json":
+    "Build JSON payloads in Composer or Raw mode, pass through upstream JSON, or validate/parse text input into JSON.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
   "studio.label": "Adds a visual-only label card for organizing your canvas.",
-  "studio.note": "Mirrors a markdown note from your vault with live text editing.",
+  "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
   "studio.text": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",

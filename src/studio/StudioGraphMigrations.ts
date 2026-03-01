@@ -1,9 +1,11 @@
 import type { StudioEdge, StudioJsonValue, StudioProjectV1 } from "./types";
 import { nowIso } from "./utils";
+import { ensureStudioNoteConfigItems } from "./StudioNoteConfig";
 
 const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
+const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
 const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
 const RESEND_DEFAULT_MAX_RETRIES = 3;
 
@@ -402,21 +404,36 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   changed: boolean;
 } {
   let changed = false;
+  let noteMigrationChanged = false;
 
   let nodes = project.graph.nodes.map((node) => {
-    if (node.kind !== "studio.media_ingest") {
+    if (node.kind === "studio.media_ingest") {
+      const nextConfig = normalizeMediaIngestConfig(node.config || {});
+      const currentSerialized = JSON.stringify(node.config || {});
+      const nextSerialized = JSON.stringify(nextConfig);
+      if (currentSerialized !== nextSerialized) {
+        changed = true;
+        return {
+          ...node,
+          config: nextConfig,
+        };
+      }
       return node;
     }
-    const nextConfig = normalizeMediaIngestConfig(node.config || {});
-    const currentSerialized = JSON.stringify(node.config || {});
-    const nextSerialized = JSON.stringify(nextConfig);
-    if (currentSerialized !== nextSerialized) {
-      changed = true;
-      return {
-        ...node,
-        config: nextConfig,
-      };
+
+    if (node.kind === "studio.note") {
+      const normalized = ensureStudioNoteConfigItems(node.config || {});
+      if (normalized.changed) {
+        changed = true;
+        noteMigrationChanged = true;
+        return {
+          ...node,
+          config: normalized.nextConfig,
+        };
+      }
+      return node;
     }
+
     return node;
   });
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
@@ -474,6 +491,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (resendMigration.changed && !appliedMigrationIds.has(RESEND_TO_HTTP_REQUEST_MIGRATION_ID)) {
     nextApplied.push({
       id: RESEND_TO_HTTP_REQUEST_MIGRATION_ID,
+      at: nowIso(),
+    });
+  }
+  if (noteMigrationChanged && !appliedMigrationIds.has(NOTE_NODE_CANONICAL_MIGRATION_ID)) {
+    nextApplied.push({
+      id: NOTE_NODE_CANONICAL_MIGRATION_ID,
       at: nowIso(),
     });
   }

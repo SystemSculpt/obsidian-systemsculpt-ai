@@ -1,16 +1,25 @@
-import { basename } from "node:path";
 import type { StudioJsonValue, StudioNodeDefinition } from "../types";
-import { getText } from "./shared";
+import {
+  deriveStudioNoteTitleFromPath,
+  readEnabledStudioNoteItems,
+  type StudioNoteConfigItem,
+} from "../StudioNoteConfig";
 
-function deriveNoteTitleFromPath(vaultPath: string): string {
-  const fileName = basename(String(vaultPath || "").replace(/\\/g, "/")).trim();
-  if (!fileName) {
-    return "";
+async function readNoteEntry(
+  entry: StudioNoteConfigItem,
+  context: Parameters<StudioNodeDefinition["execute"]>[0]
+): Promise<{ text: string; path: string; title: string }> {
+  const vaultPath = entry.path.trim();
+  if (!vaultPath) {
+    throw new Error("Note entry has no path.");
   }
-  if (fileName.toLowerCase().endsWith(".md") && fileName.length > 3) {
-    return fileName.slice(0, -3);
+  if (!vaultPath.toLowerCase().endsWith(".md")) {
+    throw new Error(`Note node only supports markdown files. Received "${vaultPath}".`);
   }
-  return fileName;
+  context.services.assertFilesystemPath(vaultPath);
+  const text = await context.services.readVaultText(vaultPath);
+  const title = deriveStudioNoteTitleFromPath(vaultPath) || vaultPath;
+  return { text, path: vaultPath, title };
 }
 
 export const noteNode: StudioNodeDefinition = {
@@ -25,43 +34,44 @@ export const noteNode: StudioNodeDefinition = {
     { id: "title", type: "text" },
   ],
   configDefaults: {
-    vaultPath: "",
-    value: "",
-    textDisplayMode: "rendered",
+    notes: { items: [] },
   },
   configSchema: {
     fields: [
       {
-        key: "vaultPath",
-        label: "Vault Path",
-        type: "file_path",
+        key: "notes",
+        label: "Notes",
+        type: "note_selector",
         required: true,
-        placeholder: "Path to a markdown note (for example, Inbox/Idea.md).",
-        accept: ".md,text/markdown",
       },
     ],
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const vaultPath = getText(context.node.config.vaultPath as StudioJsonValue).trim();
-    if (!vaultPath) {
-      throw new Error(`Note node "${context.node.id}" requires config.vaultPath.`);
-    }
-    if (!vaultPath.toLowerCase().endsWith(".md")) {
-      throw new Error(
-        `Note node "${context.node.id}" only supports markdown files. Received "${vaultPath}".`
-      );
+    const enabledItems = readEnabledStudioNoteItems(context.node.config);
+    if (enabledItems.length === 0) {
+      throw new Error(`Note node "${context.node.id}" has no enabled notes.`);
     }
 
-    context.services.assertFilesystemPath(vaultPath);
-    const text = await context.services.readVaultText(vaultPath);
-    const title = deriveNoteTitleFromPath(vaultPath) || vaultPath;
+    const results = await Promise.all(
+      enabledItems.map((entry) => readNoteEntry(entry, context))
+    );
+
+    if (results.length === 1) {
+      return {
+        outputs: {
+          text: results[0].text,
+          path: results[0].path,
+          title: results[0].title,
+        },
+      };
+    }
 
     return {
       outputs: {
-        text,
-        path: vaultPath,
-        title,
+        text: results.map((r) => r.text) as unknown as StudioJsonValue,
+        path: results.map((r) => r.path) as unknown as StudioJsonValue,
+        title: results.map((r) => r.title) as unknown as StudioJsonValue,
       },
     };
   },

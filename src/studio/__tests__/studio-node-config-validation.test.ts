@@ -254,6 +254,39 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  it("accepts note selector items with path and optional enabled", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      notes: {
+        items: [
+          { path: "Inbox/Launch Plan.md", enabled: true },
+          { path: "Inbox/Offer.md" },
+        ],
+      },
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("rejects note selector entries with blank paths", () => {
+    const registry = registryWithBuiltIns();
+    const definition = registry.get("studio.note", "1.0.0");
+    expect(definition).not.toBeNull();
+
+    const result = validateNodeConfig(definition!, {
+      notes: {
+        items: [{ path: "", enabled: true }],
+      },
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((error) => error.message.includes("non-empty path"))).toBe(true);
+  });
+
   it("rejects out-of-range HTTP retry values", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.http_request", "1.0.0");
