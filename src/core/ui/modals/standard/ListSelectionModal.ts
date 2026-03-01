@@ -417,6 +417,9 @@ export class ListSelectionModal extends StandardModal {
     if ((itemData as any).additionalClasses) {
        itemEl.classList.add((itemData as any).additionalClasses);
     }
+    if ((itemData as any).providerAuthenticated || itemData.metadata?.providerAuthenticated) {
+      itemEl.classList.add("ss-provider-authenticated-model");
+    }
     
     // Use properties from itemData
     const { title, description, icon, badge, thumbnail, fileType } = itemData;

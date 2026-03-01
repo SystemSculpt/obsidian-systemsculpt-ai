@@ -6,7 +6,6 @@ import {
   installStudioLocalPiCli,
   launchStudioPiProviderLoginInTerminal,
   listStudioPiOAuthProviders,
-  loginStudioPiProviderOAuth,
   readStudioPiProviderAuthState,
   runStudioPiCommand,
   setStudioPiProviderApiKey,
@@ -15,6 +14,8 @@ import {
   type StudioPiOAuthProvider,
 } from "../../studio/StudioLocalTextModelCatalog";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { openExternalUrlForOAuth } from "../../utils/oauthUiHelpers";
+import { runStudioPiOAuthLoginFlow } from "../../studio/piAuth/StudioPiOAuthLoginFlow";
 
 export type StudioPiSetupWizardIssue =
   | "missing_cli"
@@ -94,6 +95,7 @@ export const PROVIDER_AUTH_HINT_OVERRIDES: Record<string, string> = {
  * may be incomplete across Pi versions.
  */
 export const KNOWN_OAUTH_PROVIDER_IDS = new Set<string>([
+  "anthropic",
   "openai-codex",
   "github-copilot",
   "google-gemini-cli",
@@ -573,22 +575,7 @@ class StudioPiSetupWizardModal extends Modal {
   }
 
   private async openExternalUrl(url: string): Promise<void> {
-    const trimmed = String(url || "").trim();
-    if (!trimmed) return;
-    const runtimeRequire = typeof window !== "undefined" ? (window as any)?.require : null;
-    const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
-    const shell = electron?.shell;
-    try {
-      if (typeof shell?.openExternal === "function") {
-        await shell.openExternal(trimmed);
-        return;
-      }
-    } catch {
-      // Fallback
-    }
-    if (typeof window !== "undefined" && typeof window.open === "function") {
-      window.open(trimmed, "_blank", "noopener,noreferrer");
-    }
+    await openExternalUrlForOAuth(url);
   }
 
   private async requestAuthPrompt(prompt: StudioPiAuthPrompt): Promise<string> {
@@ -651,7 +638,7 @@ class StudioPiSetupWizardModal extends Modal {
       this.setStepStatus("auth", "running", `Starting OAuth login for ${this.providerLabel(provider)}…`);
       this.render();
 
-      await loginStudioPiProviderOAuth({
+      await runStudioPiOAuthLoginFlow({
         providerId: provider,
         onAuth: (info) => {
           this.authUrl = String(info.url || "").trim() || null;

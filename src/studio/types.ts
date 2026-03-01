@@ -48,7 +48,8 @@ export type StudioNodeConfigFieldType =
   | "select"
   | "file_path"
   | "directory_path"
-  | "media_path";
+  | "media_path"
+  | "note_selector";
 
 export type StudioNodeConfigMediaKind = "image" | "video" | "audio";
 
@@ -58,6 +59,7 @@ export type StudioNodeConfigSelectOption = {
   description?: string;
   badge?: string;
   keywords?: string[];
+  providerAuthenticated?: boolean;
 };
 
 export type StudioNodeConfigSelectPresentation =

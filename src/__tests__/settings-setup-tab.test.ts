@@ -1,8 +1,14 @@
 /** @jest-environment jsdom */
 
-import { displaySetupTabContent } from "../settings/SetupTabContent";
+import {
+  compareStudioPiAuthRecords,
+  displaySetupTabContent,
+  deriveStudioPiMigrationCandidates,
+} from "../settings/SetupTabContent";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App } from "obsidian";
+import * as StudioPiCatalog from "../studio/StudioLocalTextModelCatalog";
+import * as SetupPiOAuthFlow from "../settings/piAuth/SetupPiOAuthFlow";
 
 jest.mock("../services/providers/LocalLLMScanner", () => ({
   scanLocalLLMProviders: jest.fn().mockResolvedValue([]),
@@ -10,6 +16,22 @@ jest.mock("../services/providers/LocalLLMScanner", () => ({
 
 jest.mock("../modals/CustomProviderModal", () => ({
   showCustomProviderModal: jest.fn().mockResolvedValue(null),
+}));
+
+jest.mock("../studio/StudioLocalTextModelCatalog", () => ({
+  listStudioPiProviderAuthRecords: jest.fn().mockResolvedValue([]),
+  migrateStudioPiProviderApiKeys: jest.fn().mockResolvedValue({
+    migrated: [],
+    skipped: [],
+    errors: [],
+  }),
+  loginStudioPiProviderOAuth: jest.fn().mockResolvedValue(undefined),
+  setStudioPiProviderApiKey: jest.fn().mockResolvedValue(undefined),
+  clearStudioPiProviderAuth: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../settings/piAuth/SetupPiOAuthFlow", () => ({
+  runSetupPiOAuthLogin: jest.fn().mockResolvedValue(undefined),
 }));
 
 var getCreditsBalanceMock: jest.Mock;
@@ -42,6 +64,7 @@ const createPluginStub = () => {
       licenseValid: false,
       licenseKey: "",
       customProviders: [],
+      studioPiAuthMigrationVersion: 1,
       enableSystemSculptProvider: false,
       useSystemSculptAsFallback: false,
       systemPromptsDirectory: "SystemSculpt/System Prompts",
@@ -104,6 +127,8 @@ describe("Setup tab native layout", () => {
     expect(container.querySelector('.systemsculpt-pro-promotion-redesigned')).toBeNull();
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
     expect(container.querySelector('.ss-help-link')).not.toBeNull();
+    expect(container.textContent).toContain("Local Pi Auth");
+    expect(container.textContent).toContain("Custom Endpoint Providers (Advanced Fallback)");
   });
 
   it("opens credits details from setup when pro is active", async () => {
@@ -147,5 +172,216 @@ describe("Setup tab native layout", () => {
       "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
       "_blank"
     );
+  });
+
+  it("derives strict Pi migration candidates from known endpoints only", () => {
+    const result = deriveStudioPiMigrationCandidates(
+      [
+        {
+          id: "openai-main",
+          name: "OpenAI",
+          endpoint: "https://api.openai.com/v1",
+          apiKey: "sk-openai",
+          isEnabled: true,
+        },
+        {
+          id: "unknown-endpoint",
+          name: "Unknown",
+          endpoint: "https://example.com/v1",
+          apiKey: "sk-unknown",
+          isEnabled: true,
+        },
+      ],
+      "legacy-key"
+    );
+
+    expect(result.candidates).toEqual([
+      {
+        providerId: "openai",
+        apiKey: "sk-openai",
+        origin: "custom-provider:openai-main",
+      },
+    ]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "custom-provider:unknown-endpoint",
+          reason: "unmapped_endpoint",
+        }),
+        expect.objectContaining({
+          source: "legacy:openAiApiKey",
+          reason: "duplicate_provider_mapping",
+          providerId: "openai",
+        }),
+      ])
+    );
+  });
+
+  it("sorts providers with stored OAuth/API-key credentials to the top", () => {
+    const records = [
+      {
+        provider: "openrouter",
+        displayName: "OpenRouter",
+        supportsOAuth: false,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        source: "none",
+        credentialType: "none",
+        oauthExpiresAt: null,
+      },
+      {
+        provider: "openai-codex",
+        displayName: "OpenAI Codex",
+        supportsOAuth: true,
+        hasAnyAuth: true,
+        hasStoredCredential: true,
+        source: "oauth",
+        credentialType: "oauth",
+        oauthExpiresAt: null,
+      },
+      {
+        provider: "anthropic",
+        displayName: "Anthropic",
+        supportsOAuth: false,
+        hasAnyAuth: true,
+        hasStoredCredential: true,
+        source: "api_key",
+        credentialType: "api_key",
+        oauthExpiresAt: null,
+      },
+    ] as any[];
+
+    const sorted = [...records].sort(compareStudioPiAuthRecords).map((record) => record.provider);
+    expect(sorted.slice(0, 2)).toEqual(["anthropic", "openai-codex"]);
+    expect(sorted[2]).toBe("openrouter");
+  });
+
+  it("shows completion labels for authenticated OAuth and API-key providers", async () => {
+    const listAuthRecordsMock = StudioPiCatalog.listStudioPiProviderAuthRecords as jest.Mock;
+    listAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "openai-codex",
+        displayName: "OpenAI Codex",
+        supportsOAuth: true,
+        hasAnyAuth: true,
+        hasStoredCredential: true,
+        source: "oauth",
+        credentialType: "oauth",
+        oauthExpiresAt: null,
+      },
+      {
+        provider: "anthropic",
+        displayName: "Anthropic",
+        supportsOAuth: false,
+        hasAnyAuth: true,
+        hasStoredCredential: true,
+        source: "api_key",
+        credentialType: "api_key",
+        oauthExpiresAt: null,
+      },
+      {
+        provider: "openrouter",
+        displayName: "OpenRouter",
+        supportsOAuth: false,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        source: "none",
+        credentialType: "none",
+        oauthExpiresAt: null,
+      },
+    ]);
+
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const piRows = Array.from(container.querySelectorAll(".ss-setup-pi-auth-list .setting-item"));
+    const getRowByName = (name: string) =>
+      piRows.find((row) => row.querySelector(".setting-item-name")?.textContent?.trim() === name);
+
+    const oauthRow = getRowByName("OpenAI Codex");
+    expect(oauthRow).toBeTruthy();
+    expect(oauthRow?.textContent).toContain("OAuth ✓");
+    expect(oauthRow?.classList.contains("is-authenticated")).toBe(true);
+
+    const apiKeyRow = getRowByName("Anthropic");
+    expect(apiKeyRow).toBeTruthy();
+    expect(apiKeyRow?.textContent).toContain("API key ✓");
+    expect(apiKeyRow?.classList.contains("is-authenticated")).toBe(true);
+
+    const unauthenticatedRow = getRowByName("OpenRouter");
+    expect(unauthenticatedRow).toBeTruthy();
+    expect(unauthenticatedRow?.textContent).toContain("Set API key");
+    expect(unauthenticatedRow?.classList.contains("is-authenticated")).toBe(false);
+  });
+
+  it("runs in-app OAuth login flow from setup instead of terminal launcher", async () => {
+    const listAuthRecordsMock = StudioPiCatalog.listStudioPiProviderAuthRecords as jest.Mock;
+    const runSetupPiOAuthLoginMock = SetupPiOAuthFlow.runSetupPiOAuthLogin as jest.Mock;
+    listAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "openai-codex",
+        displayName: "OpenAI Codex",
+        supportsOAuth: true,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        source: "none",
+        credentialType: "none",
+        oauthExpiresAt: null,
+      },
+    ]);
+
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const oauthRow = Array.from(
+      container.querySelectorAll(".ss-setup-pi-auth-list .setting-item")
+    ).find((row) => row.querySelector(".setting-item-name")?.textContent?.trim() === "OpenAI Codex");
+    expect(oauthRow).toBeTruthy();
+
+    const oauthButton = Array.from(
+      (oauthRow as HTMLElement).querySelectorAll("button")
+    ).find((button) => button.textContent?.trim() === "OAuth login");
+    expect(oauthButton).toBeTruthy();
+
+    (oauthButton as HTMLButtonElement).click();
+    await Promise.resolve();
+
+    expect(runSetupPiOAuthLoginMock).toHaveBeenCalledTimes(1);
+    const oauthOptions = runSetupPiOAuthLoginMock.mock.calls[0][0];
+    expect(oauthOptions.record.provider).toBe("openai-codex");
+    expect(oauthOptions.providerLabel).toBe("OpenAI Codex");
+    expect(oauthOptions.app).toBe(app);
+    expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+
+  it("includes Anthropic in fallback OAuth provider rows", async () => {
+    const listAuthRecordsMock = StudioPiCatalog.listStudioPiProviderAuthRecords as jest.Mock;
+    listAuthRecordsMock.mockResolvedValue([]);
+
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const piRows = Array.from(container.querySelectorAll(".ss-setup-pi-auth-list .setting-item"));
+    const anthropicRow = piRows.find(
+      (row) => row.querySelector(".setting-item-name")?.textContent?.trim() === "Anthropic"
+    );
+
+    expect(anthropicRow).toBeTruthy();
+    expect(anthropicRow?.textContent).toContain("OAuth login");
   });
 });

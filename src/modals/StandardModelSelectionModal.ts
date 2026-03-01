@@ -1,4 +1,4 @@
-import { App, setIcon, DropdownComponent, Notice, ButtonComponent } from "obsidian";
+import { App, Platform, setIcon, DropdownComponent, Notice, ButtonComponent } from "obsidian";
 import { ListItem, ListSelectionModal } from "../core/ui/modals/standard";
 import { SystemSculptModel } from "../types/llm";
 import SystemSculptPlugin from "../main";
@@ -14,6 +14,12 @@ import { FavoritesService } from "../services/FavoritesService";
 import { FavoritesFilter } from "../components/FavoritesFilter";
 import { FavoriteToggle } from "../components/FavoriteToggle";
 import { EmptyFavoritesState } from "../components/EmptyFavoritesState";
+import type { StudioPiProviderAuthRecord } from "../studio/piAuth/StudioPiAuthStorage";
+import {
+  hasAuthenticatedStudioPiProvider,
+  normalizeStudioPiProviderId,
+  type StudioPiProviderAuthRecordLike,
+} from "../studio/piAuth/StudioPiProviderAuthUtils";
 // Define the result type for the onSelect callback
 export interface ModelSelectionResult {
   modelId: string;
@@ -27,6 +33,19 @@ export interface ModelSelectionOptions {
   onSelect: (result: ModelSelectionResult) => void;
   title?: string; // Optional custom title
   description?: string; // Optional custom description
+}
+
+type ModelSelectorProviderAuthRecord = StudioPiProviderAuthRecordLike &
+  Pick<StudioPiProviderAuthRecord, "displayName">;
+
+export function normalizeModelSelectorProviderId(value: unknown): string {
+  return normalizeStudioPiProviderId(value);
+}
+
+export function hasAuthenticatedModelSelectorProvider(
+  record: ModelSelectorProviderAuthRecord | null | undefined
+): boolean {
+  return hasAuthenticatedStudioPiProvider(record);
 }
 
 /**
@@ -53,6 +72,8 @@ export class StandardModelSelectionModal {
 
   // Cache for provider name lookups
   private static providerNameCache: Record<string, string> = {};
+  private providerAuthById = new Map<string, ModelSelectorProviderAuthRecord>();
+  private providerAuthRequestId = 0;
 
   // Updated constructor to use options object
   constructor(options: ModelSelectionOptions) {
@@ -76,9 +97,11 @@ export class StandardModelSelectionModal {
       this.favoritesService.processFavorites(this.allModels);
 
       this.filteredModels = this.applyAllFilters(this.allModels);
+      void this.refreshProviderAuthState(this.allModels);
     }).catch(error => {
       this.allModels = [];
       this.filteredModels = [];
+      this.providerAuthById.clear();
     });
 
   }
@@ -217,6 +240,7 @@ export class StandardModelSelectionModal {
       try {
         this.allModels = await this.plugin.modelService.refreshModels();
         this.favoritesService.processFavorites(this.allModels);
+        void this.refreshProviderAuthState(this.allModels);
         this.updateModelList();
         this.updateFavoritesButtonCount();
         this.updateEmptyState();
@@ -245,6 +269,7 @@ export class StandardModelSelectionModal {
 
       // Re-process favorites flags and update filtered view
       this.favoritesService.processFavorites(this.allModels);
+      void this.refreshProviderAuthState(this.allModels);
       this.updateModelList();
       this.updateFavoritesButtonCount();
       this.updateEmptyState();
@@ -263,6 +288,85 @@ export class StandardModelSelectionModal {
       }
     } catch (error) {
     }
+  }
+
+  private async refreshProviderAuthState(models: SystemSculptModel[]): Promise<void> {
+    const providerHints = Array.from(
+      new Set(
+        models
+          .map((model) => normalizeModelSelectorProviderId(model.provider))
+          .filter((providerId) => providerId.length > 0 && providerId !== "systemsculpt")
+      )
+    );
+    const requestId = ++this.providerAuthRequestId;
+
+    if (!providerHints.length || !Platform.isDesktopApp) {
+      if (requestId !== this.providerAuthRequestId) {
+        return;
+      }
+      this.providerAuthById.clear();
+      this.updateModelList();
+      return;
+    }
+
+    try {
+      const authModule = await import("../studio/piAuth/StudioPiAuthStorage");
+      const records = await authModule.listStudioPiProviderAuthRecords({ providerHints });
+      if (requestId !== this.providerAuthRequestId) {
+        return;
+      }
+      const next = new Map<string, ModelSelectorProviderAuthRecord>();
+      for (const record of records) {
+        const providerId = normalizeModelSelectorProviderId(record.provider);
+        if (!providerId) {
+          continue;
+        }
+        next.set(providerId, record);
+        const displayName = String(record.displayName || "").trim();
+        if (displayName) {
+          StandardModelSelectionModal.providerNameCache[providerId] = displayName;
+        }
+      }
+      this.providerAuthById = next;
+    } catch {
+      if (requestId !== this.providerAuthRequestId) {
+        return;
+      }
+      this.providerAuthById.clear();
+    }
+
+    this.updateModelList();
+  }
+
+  private getProviderAuthRecord(providerName: string): ModelSelectorProviderAuthRecord | null {
+    const providerId = normalizeModelSelectorProviderId(providerName);
+    if (!providerId || providerId === "systemsculpt") {
+      return null;
+    }
+    return this.providerAuthById.get(providerId) ?? null;
+  }
+
+  private providerHasStoredAuth(providerName: string): boolean {
+    return hasAuthenticatedModelSelectorProvider(this.getProviderAuthRecord(providerName));
+  }
+
+  private resolveCustomProviderDisplayName(providerName: string): string {
+    const providerId = normalizeModelSelectorProviderId(providerName);
+    if (!providerId) {
+      return "Custom";
+    }
+
+    if (!StandardModelSelectionModal.providerNameCache[providerId]) {
+      const matchingProvider = this.plugin.settings.customProviders.find(
+        (provider) =>
+          normalizeModelSelectorProviderId(provider.name) === providerId ||
+          normalizeModelSelectorProviderId(provider.id) === providerId
+      );
+      const resolved = matchingProvider?.name || (providerName ? providerName : "Custom");
+      StandardModelSelectionModal.providerNameCache[providerId] = resolved;
+    }
+
+    return StandardModelSelectionModal.providerNameCache[providerId];
   }
 
   /**
@@ -401,12 +505,20 @@ export class StandardModelSelectionModal {
         return bFavorite - aFavorite;
       }
 
+      // Then providers with stored Pi auth so working providers are easier to find.
+      const aAuthenticated = this.providerHasStoredAuth(a.provider) ? 1 : 0;
+      const bAuthenticated = this.providerHasStoredAuth(b.provider) ? 1 : 0;
+      if (aAuthenticated !== bAuthenticated) {
+        return bAuthenticated - aAuthenticated;
+      }
+
       // Then alphabetical by name
       return a.name.localeCompare(b.name);
     });
 
     return sortedModels.map(model => {
       const isCurrentModel = this.isModelSelected(model.id);
+      const providerAuthenticated = this.providerHasStoredAuth(model.provider);
 
       // Create an enhanced list item for each model
       const item: ListItem = {
@@ -425,7 +537,8 @@ export class StandardModelSelectionModal {
           isBeta: (model as any).is_beta || false,
           isDeprecated: (model as any).is_deprecated || false,
           capabilities: this.getModelCapabilities(model),
-          isCurrentModel: isCurrentModel // Add flag for current model
+          isCurrentModel: isCurrentModel, // Add flag for current model
+          providerAuthenticated,
         }
       } as ListItem;
 
@@ -442,6 +555,10 @@ export class StandardModelSelectionModal {
       // Add special class for current model
       if (isCurrentModel) {
         (item as any).additionalClasses = "ss-current-model";
+      }
+
+      if (providerAuthenticated) {
+        (item as any).providerAuthenticated = true;
       }
 
       return item;
@@ -572,18 +689,11 @@ export class StandardModelSelectionModal {
       return "SystemSculpt";
     }
 
-    const providerName = (model.provider || "").toLowerCase();
-
-    if (!StandardModelSelectionModal.providerNameCache[providerName]) {
-      const matchingProvider = this.plugin.settings.customProviders.find(
-        p => p.name.toLowerCase() === providerName || p.id.toLowerCase() === providerName
-      );
-      StandardModelSelectionModal.providerNameCache[providerName] = matchingProvider
-        ? matchingProvider.name
-        : (model.provider ? model.provider : "Custom");
+    const providerLabel = this.resolveCustomProviderDisplayName(model.provider || "");
+    if (this.providerHasStoredAuth(model.provider || "")) {
+      return `${providerLabel} ✓`;
     }
-
-    return StandardModelSelectionModal.providerNameCache[providerName];
+    return providerLabel;
   }
 
   /**
@@ -671,6 +781,7 @@ export class StandardModelSelectionModal {
       this.plugin.modelService.refreshModels().then((models) => {
         this.allModels = filterChatModels(models);
         this.favoritesService.processFavorites(this.allModels);
+        void this.refreshProviderAuthState(this.allModels);
         this.filteredModels = this.applyAllFilters(this.allModels);
         const items = this.convertModelsToListItems(this.filteredModels);
         this.modalInstance?.setItems(items);

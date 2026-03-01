@@ -588,6 +588,15 @@
   background-color: var(--background-modifier-hover);
 }
 
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-authenticated-model {
+  border-left: 3px solid var(--color-green, #2ea043);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-authenticated-model .ss-modal__item-badge {
+  background: var(--color-green, #2ea043);
+  color: var(--text-on-accent, #ffffff);
+}
+
 /* Mobile responsive for indicators */
 @media (max-width: 600px) {
   .systemsculpt-model-indicator {

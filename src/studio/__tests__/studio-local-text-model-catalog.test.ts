@@ -1,6 +1,8 @@
 import {
   buildStudioPiLoginCommand,
+  listStudioPiProviderAuthRecords,
   listStudioLocalTextModelOptions,
+  migrateStudioPiProviderApiKeys,
   normalizeStudioLocalPiModelId,
   runStudioLocalPiTextGeneration,
   type PiCommandResult,
@@ -104,6 +106,110 @@ describe("StudioLocalTextModelCatalog", () => {
     expect(buildStudioPiLoginCommand("github-copilot")).toBe("pi /login github-copilot");
     expect(buildStudioPiLoginCommand("  OpenAI-Codex  ")).toBe("pi /login openai-codex");
     expect(buildStudioPiLoginCommand("bad provider!")).toBe("pi /login");
+  });
+
+  it("lists provider auth records with credential metadata but no secrets", async () => {
+    const credentials: Record<string, any> = {
+      "openai-codex": {
+        type: "oauth",
+        expires: 1_733_071_111_000,
+      },
+      openai: {
+        type: "api_key",
+      },
+    };
+    const storage = {
+      getOAuthProviders: () => [
+        { id: "openai-codex", name: "OpenAI Codex", usesCallbackServer: true },
+      ],
+      login: jest.fn(),
+      set: jest.fn(),
+      remove: jest.fn(),
+      get: (provider: string) => credentials[provider],
+      hasAuth: (provider: string) => provider in credentials || provider === "openrouter",
+      has: (provider: string) => provider in credentials,
+      list: () => Object.keys(credentials),
+    } as any;
+
+    const records = await listStudioPiProviderAuthRecords(
+      {
+        providerHints: ["openrouter", "bad provider!"],
+      },
+      storage
+    );
+
+    const codex = records.find((record) => record.provider === "openai-codex");
+    expect(codex).toBeDefined();
+    expect(codex?.source).toBe("oauth");
+    expect(codex?.credentialType).toBe("oauth");
+    expect(codex?.supportsOAuth).toBe(true);
+    expect(codex?.displayName).toBe("OpenAI Codex");
+    expect(codex?.oauthExpiresAt).toBe(1_733_071_111_000);
+
+    const openai = records.find((record) => record.provider === "openai");
+    expect(openai).toBeDefined();
+    expect(openai?.source).toBe("api_key");
+    expect(openai?.credentialType).toBe("api_key");
+
+    const openrouter = records.find((record) => record.provider === "openrouter");
+    expect(openrouter).toBeDefined();
+    expect(openrouter?.source).toBe("environment_or_fallback");
+    expect(openrouter?.hasStoredCredential).toBe(false);
+    expect(openrouter?.credentialType).toBe("none");
+  });
+
+  it("migrates API keys idempotently and skips existing credentials", async () => {
+    const credentials: Record<string, any> = {
+      "openai-codex": {
+        type: "oauth",
+      },
+      openai: {
+        type: "api_key",
+      },
+    };
+    const storage = {
+      getOAuthProviders: () => [],
+      login: jest.fn(),
+      set: jest.fn((provider: string, credential: any) => {
+        credentials[provider] = credential;
+      }),
+      remove: jest.fn(),
+      get: (provider: string) => credentials[provider],
+      hasAuth: (provider: string) => provider in credentials,
+      has: (provider: string) => provider in credentials,
+      list: () => Object.keys(credentials),
+    } as any;
+
+    const report = await migrateStudioPiProviderApiKeys(
+      [
+        { providerId: "openai", apiKey: "sk-existing", origin: "provider:openai" },
+        { providerId: "openai-codex", apiKey: "oauth-should-skip", origin: "provider:openai-codex" },
+        { providerId: "minimax", apiKey: "mm-new-key", origin: "provider:minimax" },
+        { providerId: "anthropic", apiKey: "   ", origin: "provider:anthropic" },
+        { providerId: "bad provider!", apiKey: "broken", origin: "provider:broken" },
+      ],
+      storage
+    );
+
+    expect(report.migrated).toEqual([
+      {
+        provider: "minimax",
+        origin: "provider:minimax",
+      },
+    ]);
+    expect(credentials.minimax).toEqual({
+      type: "api_key",
+      key: "mm-new-key",
+    });
+    expect(report.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "openai", reason: "existing_api_key" }),
+        expect.objectContaining({ provider: "openai-codex", reason: "existing_oauth" }),
+        expect.objectContaining({ provider: "anthropic", reason: "empty_key" }),
+        expect.objectContaining({ provider: "bad provider!", reason: "invalid_provider" }),
+      ])
+    );
+    expect(report.errors).toEqual([]);
   });
 
   it("executes local pi text generation and parses ndjson assistant output", async () => {

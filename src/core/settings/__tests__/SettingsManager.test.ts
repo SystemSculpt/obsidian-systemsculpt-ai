@@ -28,6 +28,7 @@ jest.mock("../../../types", () => ({
     modelFilterSettings: { showAll: true },
     activeProvider: "openai",
     customProviders: [],
+    studioPiAuthMigrationVersion: 0,
     favoriteModels: [],
     workflowEngine: {
       enabled: false,
@@ -205,6 +206,16 @@ describe("SettingsManager", () => {
         expect(result.customProviders).toEqual([]);
       });
 
+      it("initializes missing studioPiAuthMigrationVersion", () => {
+        const result = migrateSettings({});
+        expect(result.studioPiAuthMigrationVersion).toBe(0);
+      });
+
+      it("defaults invalid studioPiAuthMigrationVersion", () => {
+        const result = migrateSettings({ studioPiAuthMigrationVersion: "bad-value" });
+        expect(result.studioPiAuthMigrationVersion).toBe(0);
+      });
+
       it("initializes missing favoriteModels", () => {
         const result = migrateSettings({});
         expect(result.favoriteModels).toEqual([]);
@@ -359,6 +370,16 @@ describe("SettingsManager", () => {
       it("initializes non-array customProviders", () => {
         const result = validateSettings({ ...DEFAULT_SETTINGS, customProviders: "not-array" });
         expect(result.customProviders).toEqual([]);
+      });
+
+      it("defaults invalid studioPiAuthMigrationVersion during validation", () => {
+        const result = validateSettings({ ...DEFAULT_SETTINGS, studioPiAuthMigrationVersion: -1 });
+        expect(result.studioPiAuthMigrationVersion).toBe(0);
+      });
+
+      it("normalizes studioPiAuthMigrationVersion to an integer", () => {
+        const result = validateSettings({ ...DEFAULT_SETTINGS, studioPiAuthMigrationVersion: 2.9 });
+        expect(result.studioPiAuthMigrationVersion).toBe(2);
       });
 
       it("initializes non-array favoriteModels", () => {

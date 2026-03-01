@@ -1,4 +1,4 @@
-import { normalizePath } from "obsidian";
+import { Platform, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
@@ -8,7 +8,14 @@ import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { StudioRuntime } from "./StudioRuntime";
 import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
-import { listStudioLocalTextModelOptions } from "./StudioLocalTextModelCatalog";
+import {
+  listStudioLocalTextModelOptions,
+  listStudioPiProviderAuthRecords,
+} from "./StudioLocalTextModelCatalog";
+import {
+  decorateStudioLocalTextModelOptionsWithAuth,
+  resolveStudioLocalTextModelProviderId,
+} from "./StudioLocalTextModelOptionAuth";
 import { randomId } from "./utils";
 import type {
   StudioAssetRef,
@@ -378,14 +385,36 @@ export class StudioService {
     _node: StudioNodeInstance
   ): Promise<StudioNodeConfigSelectOption[]> {
     if (source === "studio.local_text_models") {
-      const options = await listStudioLocalTextModelOptions(this.plugin);
-      return options.map((option) => ({
+      const localOptions = await listStudioLocalTextModelOptions(this.plugin);
+      const baseOptions = localOptions.map((option) => ({
         value: option.value,
         label: option.label,
         description: option.description,
         badge: option.badge,
         keywords: option.keywords,
       }));
+      if (!Platform.isDesktopApp || baseOptions.length === 0) {
+        return baseOptions;
+      }
+
+      const providerHints = Array.from(
+        new Set(
+          baseOptions
+            .map((option) => resolveStudioLocalTextModelProviderId(option))
+            .filter((providerId) => providerId.length > 0)
+        )
+      );
+
+      if (providerHints.length === 0) {
+        return baseOptions;
+      }
+
+      try {
+        const records = await listStudioPiProviderAuthRecords({ providerHints });
+        return decorateStudioLocalTextModelOptionsWithAuth(baseOptions, records);
+      } catch {
+        return baseOptions;
+      }
     }
     if (source === "studio.systemsculpt_text_models") {
       const models = await this.plugin.modelService.getModels().catch(() => [] as any[]);

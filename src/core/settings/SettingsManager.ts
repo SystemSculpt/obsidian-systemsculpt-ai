@@ -79,6 +79,14 @@ export class SettingsManager {
     if (!Array.isArray(migratedSettings.customProviders)) {
       migratedSettings.customProviders = DEFAULT_SETTINGS.customProviders;
     }
+
+    if (
+      typeof migratedSettings.studioPiAuthMigrationVersion !== "number" ||
+      !Number.isFinite(migratedSettings.studioPiAuthMigrationVersion) ||
+      migratedSettings.studioPiAuthMigrationVersion < 0
+    ) {
+      migratedSettings.studioPiAuthMigrationVersion = DEFAULT_SETTINGS.studioPiAuthMigrationVersion;
+    }
     
     if (!Array.isArray(migratedSettings.favoriteModels)) {
       migratedSettings.favoriteModels = DEFAULT_SETTINGS.favoriteModels;
@@ -354,6 +362,16 @@ export class SettingsManager {
     // Ensure critical arrays exist
     if (!Array.isArray(validatedSettings.customProviders)) {
       validatedSettings.customProviders = [];
+    }
+
+    if (
+      typeof validatedSettings.studioPiAuthMigrationVersion !== "number" ||
+      !Number.isFinite(validatedSettings.studioPiAuthMigrationVersion) ||
+      validatedSettings.studioPiAuthMigrationVersion < 0
+    ) {
+      validatedSettings.studioPiAuthMigrationVersion = defaultSettings.studioPiAuthMigrationVersion;
+    } else {
+      validatedSettings.studioPiAuthMigrationVersion = Math.floor(validatedSettings.studioPiAuthMigrationVersion);
     }
 
     if (!Array.isArray(validatedSettings.favoriteModels)) {

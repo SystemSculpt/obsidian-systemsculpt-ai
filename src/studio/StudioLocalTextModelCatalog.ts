@@ -2,6 +2,13 @@ import { Platform } from "obsidian";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type SystemSculptPlugin from "../main";
+import {
+  STUDIO_PI_COMMON_CLI_PATHS as COMMON_CLI_PATHS,
+  appendStudioPiOutput as appendOutput,
+  isLikelyMissingStudioPiExecutableError,
+  mergeStudioPiCliPath as mergeCliPath,
+} from "./piAuth/StudioPiProcessUtils";
+import { buildStudioPiLoginCommand } from "./piAuth/StudioPiAuthStorage";
 import { parseCanonicalId } from "../utils/modelUtils";
 
 export type StudioLocalTextModelOption = {
@@ -36,57 +43,42 @@ export type StudioPiCommandRunner = (
   timeoutMs: number
 ) => Promise<PiCommandResult>;
 
-export type StudioPiOAuthProvider = {
-  id: string;
-  name: string;
-  usesCallbackServer: boolean;
-};
-
-export type StudioPiAuthPrompt = {
-  message: string;
-  placeholder?: string;
-  allowEmpty?: boolean;
-};
-
-export type StudioPiAuthInfo = {
-  url: string;
-  instructions?: string;
-};
-
-export type StudioPiAuthState = {
-  provider: string;
-  hasAnyAuth: boolean;
-  source: "none" | "oauth" | "api_key" | "environment_or_fallback";
-};
-
-export type StudioPiOAuthLoginOptions = {
-  providerId: string;
-  onAuth: (info: StudioPiAuthInfo) => void;
-  onPrompt: (prompt: StudioPiAuthPrompt) => Promise<string>;
-  onProgress?: (message: string) => void;
-  onManualCodeInput?: () => Promise<string>;
-  signal?: AbortSignal;
-};
+export {
+  buildStudioPiLoginCommand,
+  clearStudioPiProviderAuth,
+  listStudioPiOAuthProviders,
+  listStudioPiProviderAuthRecords,
+  loginStudioPiProviderOAuth,
+  migrateStudioPiProviderApiKeys,
+  readStudioPiProviderAuthState,
+  setStudioPiProviderApiKey,
+} from "./piAuth/StudioPiAuthStorage";
+export type {
+  StudioPiApiKeyMigrationCandidate,
+  StudioPiApiKeyMigrationEntry,
+  StudioPiApiKeyMigrationReason,
+  StudioPiApiKeyMigrationReport,
+  StudioPiAuthCredentialType,
+  StudioPiAuthInfo,
+  StudioPiAuthPrompt,
+  StudioPiAuthState,
+  StudioPiOAuthLoginOptions,
+  StudioPiOAuthProvider,
+  StudioPiProviderAuthRecord,
+} from "./piAuth/StudioPiAuthStorage";
 
 type PiOutputSnapshot = {
   text: string;
   errorMessage: string | null;
 };
 
-const COMMON_CLI_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt/local/bin"];
 const PI_MODEL_LIST_TIMEOUT_MS = 60_000;
 const PI_GENERATION_TIMEOUT_MS = 300_000;
 const PI_INSTALL_TIMEOUT_MS = 10 * 60_000;
-const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const PI_GENERATION_MAX_ATTEMPTS = 2;
 const PI_COMMAND_NAME = "pi";
 const PI_NPM_PACKAGE = "@mariozechner/pi-coding-agent";
 const PI_TERMINAL_LAUNCH_TIMEOUT_MS = 20_000;
-const PI_PACKAGE_ROOT_CANDIDATES = [
-  "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent",
-  "/usr/local/lib/node_modules/@mariozechner/pi-coding-agent",
-];
-const PI_AUTH_STORAGE_MODULE_RELATIVE = "dist/core/auth-storage.js";
 
 function normalizePiThinkingLevel(rawValue: unknown): StudioPiThinkingLevel | undefined {
   const normalized = String(rawValue || "").trim().toLowerCase();
@@ -101,48 +93,6 @@ function normalizePiThinkingLevel(rawValue: unknown): StudioPiThinkingLevel | un
     return normalized;
   }
   return undefined;
-}
-
-function normalizePiProviderHint(rawProvider: unknown): string {
-  const normalized = String(rawProvider || "").trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  if (!/^[a-z0-9._-]+$/.test(normalized)) {
-    return "";
-  }
-  return normalized;
-}
-
-function mergeCliPath(rawPath: string): string {
-  const segments = String(rawPath || "")
-    .split(":")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  const seen = new Set(segments);
-  for (const segment of COMMON_CLI_PATHS) {
-    if (!seen.has(segment)) {
-      segments.push(segment);
-      seen.add(segment);
-    }
-  }
-  return segments.join(":");
-}
-
-function isLikelyMissingExecutableError(error: unknown): boolean {
-  const code = String((error as { code?: unknown })?.code || "").trim().toUpperCase();
-  if (code === "ENOENT") {
-    return true;
-  }
-  const message = String((error as { message?: unknown })?.message || "").trim().toLowerCase();
-  if (!message) {
-    return false;
-  }
-  return (
-    message.includes("spawn pi enoent") ||
-    message.includes("command not found") ||
-    message.includes("no such file or directory")
-  );
 }
 
 function resolvePiAbsoluteCandidates(): string[] {
@@ -266,17 +216,6 @@ function resolvePiCommandCwd(plugin: SystemSculptPlugin): string {
   return "/";
 }
 
-function appendOutput(existing: string, chunk: Buffer | string): string {
-  if (existing.length >= MAX_OUTPUT_BYTES) {
-    return existing;
-  }
-  const next = existing + chunk.toString();
-  if (next.length <= MAX_OUTPUT_BYTES) {
-    return next;
-  }
-  return next.slice(0, MAX_OUTPUT_BYTES);
-}
-
 function quoteShellSingle(value: string): string {
   const normalized = String(value || "");
   if (!normalized) {
@@ -289,93 +228,6 @@ function escapeAppleScriptDoubleQuoted(value: string): string {
   return String(value || "")
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"');
-}
-
-type StudioPiAuthCredentialRecord = {
-  type?: unknown;
-};
-
-type StudioPiAuthStorageInstance = {
-  getOAuthProviders: () => Array<{
-    id: string;
-    name: string;
-    usesCallbackServer?: boolean;
-  }>;
-  login: (
-    providerId: string,
-    callbacks: {
-      onAuth: (info: StudioPiAuthInfo) => void;
-      onPrompt: (prompt: StudioPiAuthPrompt) => Promise<string>;
-      onProgress?: (message: string) => void;
-      onManualCodeInput?: () => Promise<string>;
-      signal?: AbortSignal;
-    }
-  ) => Promise<void>;
-  set: (provider: string, credential: { type: "api_key"; key: string }) => void;
-  remove: (provider: string) => void;
-  get: (provider: string) => StudioPiAuthCredentialRecord | undefined;
-  hasAuth: (provider: string) => boolean;
-};
-
-type StudioPiAuthStorageModule = {
-  AuthStorage: {
-    create: (authPath?: string) => StudioPiAuthStorageInstance;
-  };
-};
-
-function resolvePiPackageRoot(): string | null {
-  for (const candidate of PI_PACKAGE_ROOT_CANDIDATES) {
-    const authStoragePath = `${candidate}/${PI_AUTH_STORAGE_MODULE_RELATIVE}`;
-    if (existsSync(authStoragePath)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-async function importPiModule<T>(absolutePath: string): Promise<T> {
-  const importFn = new Function("specifier", "return import(specifier);") as (
-    specifier: string
-  ) => Promise<T>;
-  const moduleUrl = `file://${absolutePath}`;
-  return await importFn(moduleUrl);
-}
-
-async function loadPiAuthStorageModule(): Promise<StudioPiAuthStorageModule> {
-  const packageRoot = resolvePiPackageRoot();
-  if (!packageRoot) {
-    throw new Error("Pi auth module is unavailable. Reinstall @mariozechner/pi-coding-agent.");
-  }
-  const absolutePath = `${packageRoot}/${PI_AUTH_STORAGE_MODULE_RELATIVE}`;
-
-  // Prefer Electron's window.require (CommonJS) — Obsidian's renderer exposes
-  // this and it can load local files, unlike dynamic import() of file:// URLs
-  // which Obsidian's security policy blocks.
-  const windowRequire = typeof window !== "undefined"
-    ? (window as unknown as Record<string, unknown>)?.require
-    : undefined;
-  if (typeof windowRequire === "function") {
-    try {
-      return (windowRequire as (path: string) => StudioPiAuthStorageModule)(absolutePath);
-    } catch {
-      // Fall through to dynamic import if require fails
-    }
-  }
-
-  return await importPiModule<StudioPiAuthStorageModule>(absolutePath);
-}
-
-function normalizeAuthSource(credentialType: unknown, hasAnyAuth: boolean): StudioPiAuthState["source"] {
-  if (credentialType === "oauth") {
-    return "oauth";
-  }
-  if (credentialType === "api_key") {
-    return "api_key";
-  }
-  if (hasAnyAuth) {
-    return "environment_or_fallback";
-  }
-  return "none";
 }
 
 function summarizePiCommandError(result: PiCommandResult): string {
@@ -487,7 +339,7 @@ export async function runStudioPiCommand(
         timeoutMs,
       });
     } catch (error) {
-      if (isLikelyMissingExecutableError(error)) {
+      if (isLikelyMissingStudioPiExecutableError(error, ["pi"])) {
         lastMissingBinaryError = error;
         continue;
       }
@@ -539,92 +391,6 @@ export async function installStudioLocalPiCli(plugin: SystemSculptPlugin): Promi
     .map((line) => line.trim())
     .find((line) => line.length > 0) || "unknown";
   return { version };
-}
-
-export function buildStudioPiLoginCommand(providerHint: string): string {
-  const provider = normalizePiProviderHint(providerHint);
-  return provider ? `pi /login ${provider}` : "pi /login";
-}
-
-export async function listStudioPiOAuthProviders(): Promise<StudioPiOAuthProvider[]> {
-  const authStorageModule = await loadPiAuthStorageModule();
-  const storage = authStorageModule.AuthStorage.create();
-  return storage.getOAuthProviders().map((provider) => ({
-    id: String(provider.id || "").trim(),
-    name: String(provider.name || provider.id || "").trim(),
-    usesCallbackServer: Boolean(provider.usesCallbackServer),
-  }))
-    .filter((provider) => provider.id.length > 0)
-    .sort((left, right) => left.name.localeCompare(right.name));
-}
-
-export async function loginStudioPiProviderOAuth(options: StudioPiOAuthLoginOptions): Promise<void> {
-  const providerId = normalizePiProviderHint(options.providerId);
-  if (!providerId) {
-    throw new Error("Select a valid provider before starting OAuth login.");
-  }
-  const authStorageModule = await loadPiAuthStorageModule();
-  const storage = authStorageModule.AuthStorage.create();
-  // Do not pre-check getOAuthProviders() — its list may be incomplete and
-  // would incorrectly block known OAuth providers like openai-codex.
-  // Let storage.login() throw naturally if the provider truly doesn't support OAuth.
-  await storage.login(providerId, {
-    onAuth: (info) => options.onAuth({
-      url: String(info?.url || "").trim(),
-      instructions: String(info?.instructions || "").trim() || undefined,
-    }),
-    onPrompt: options.onPrompt,
-    onProgress: options.onProgress,
-    onManualCodeInput: options.onManualCodeInput,
-    signal: options.signal,
-  });
-}
-
-export async function setStudioPiProviderApiKey(providerHint: string, apiKey: string): Promise<void> {
-  const provider = normalizePiProviderHint(providerHint);
-  const key = String(apiKey || "").trim();
-  if (!provider) {
-    throw new Error("Select a valid provider before saving an API key.");
-  }
-  if (!key) {
-    throw new Error("API key cannot be empty.");
-  }
-  const authStorageModule = await loadPiAuthStorageModule();
-  const storage = authStorageModule.AuthStorage.create();
-  storage.set(provider, {
-    type: "api_key",
-    key,
-  });
-}
-
-export async function clearStudioPiProviderAuth(providerHint: string): Promise<void> {
-  const provider = normalizePiProviderHint(providerHint);
-  if (!provider) {
-    throw new Error("Select a valid provider before clearing credentials.");
-  }
-  const authStorageModule = await loadPiAuthStorageModule();
-  const storage = authStorageModule.AuthStorage.create();
-  storage.remove(provider);
-}
-
-export async function readStudioPiProviderAuthState(providerHint: string): Promise<StudioPiAuthState> {
-  const provider = normalizePiProviderHint(providerHint);
-  if (!provider) {
-    return {
-      provider: "",
-      hasAnyAuth: false,
-      source: "none",
-    };
-  }
-  const authStorageModule = await loadPiAuthStorageModule();
-  const storage = authStorageModule.AuthStorage.create();
-  const credentialType = storage.get(provider)?.type;
-  const hasAnyAuth = storage.hasAuth(provider);
-  return {
-    provider,
-    hasAnyAuth,
-    source: normalizeAuthSource(credentialType, hasAnyAuth),
-  };
 }
 
 export async function launchStudioPiProviderLoginInTerminal(

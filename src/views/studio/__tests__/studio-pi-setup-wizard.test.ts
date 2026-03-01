@@ -55,8 +55,11 @@ describe("KNOWN_OAUTH_PROVIDER_IDS", () => {
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("google-antigravity")).toBe(true);
   });
 
+  it("includes anthropic", () => {
+    expect(KNOWN_OAUTH_PROVIDER_IDS.has("anthropic")).toBe(true);
+  });
+
   it("does not include api-key-only providers", () => {
-    expect(KNOWN_OAUTH_PROVIDER_IDS.has("anthropic")).toBe(false);
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("openai")).toBe(false);
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("mistral")).toBe(false);
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("groq")).toBe(false);
@@ -82,13 +85,16 @@ describe("supportsOAuthLogin", () => {
     expect(supportsOAuthLogin("google-antigravity", EMPTY_OAUTH)).toBe(true);
   });
 
+  it("returns true for anthropic even with empty dynamic provider list", () => {
+    expect(supportsOAuthLogin("anthropic", EMPTY_OAUTH)).toBe(true);
+  });
+
   it("returns true for a provider only present in the dynamic list", () => {
     const dynamic = oauthMap([{ id: "some-new-oauth-provider" }]);
     expect(supportsOAuthLogin("some-new-oauth-provider", dynamic)).toBe(true);
   });
 
   it("returns false for a purely API-key provider with no dynamic entry", () => {
-    expect(supportsOAuthLogin("anthropic", EMPTY_OAUTH)).toBe(false);
     expect(supportsOAuthLogin("openai", EMPTY_OAUTH)).toBe(false);
     expect(supportsOAuthLogin("groq", EMPTY_OAUTH)).toBe(false);
     expect(supportsOAuthLogin("mistral", EMPTY_OAUTH)).toBe(false);
@@ -128,8 +134,8 @@ describe("selectDefaultAuthMethod", () => {
     expect(selectDefaultAuthMethod("some-oauth-provider", dynamic)).toBe("oauth");
   });
 
-  it("selects api_key for anthropic (no OAuth support)", () => {
-    expect(selectDefaultAuthMethod("anthropic", EMPTY_OAUTH)).toBe("api_key");
+  it("selects oauth for anthropic (OAuth support)", () => {
+    expect(selectDefaultAuthMethod("anthropic", EMPTY_OAUTH)).toBe("oauth");
   });
 
   it("selects api_key for openai (no OAuth support)", () => {

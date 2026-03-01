@@ -316,6 +316,41 @@
   font-size: 0.95em;
 }
 
+/* Local Pi auth rows: highlight providers with stored OAuth/API key credentials */
+.ss-setup-pi-auth-list .setting-item.ss-setup-pi-auth-row {
+  border-left: 2px solid transparent;
+  padding-left: var(--size-4-2);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.ss-setup-pi-auth-list .setting-item.ss-setup-pi-auth-row.is-authenticated {
+  border-left-color: var(--text-success);
+  background: color-mix(in srgb, var(--background-modifier-success) 35%, transparent);
+}
+
+.ss-setup-pi-auth-list .setting-item.ss-setup-pi-auth-row.is-authenticated .setting-item-name {
+  color: var(--text-success);
+}
+
+.ss-pi-auth-prompt-modal .ss-pi-auth-prompt__message {
+  margin: 0 0 var(--size-4-2);
+  color: var(--text-normal);
+}
+
+.ss-pi-auth-prompt-modal .ss-pi-auth-prompt__input {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  margin-bottom: var(--size-4-2);
+}
+
+.ss-pi-auth-prompt-modal .ss-pi-auth-prompt__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-2-2);
+}
+
 /* ============================================================================
    Readwise Sync Widget - Bottom Right Floating Notification
    ============================================================================ */

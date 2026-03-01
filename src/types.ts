@@ -278,6 +278,10 @@ export interface SystemSculptSettings {
    * Custom provider settings
    */
   customProviders: CustomProvider[];
+  /**
+   * One-time migration marker for importing known endpoint API keys into Local Pi auth storage.
+   */
+  studioPiAuthMigrationVersion: number;
 
   modelFilterSettings: ModelFilterSettings;
 
@@ -632,6 +636,7 @@ Raw transcript:`,
    * Custom provider defaults
    */
   customProviders: [],
+  studioPiAuthMigrationVersion: 0,
 
   modelFilterSettings: DEFAULT_FILTER_SETTINGS,
 

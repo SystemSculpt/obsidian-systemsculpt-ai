@@ -145,15 +145,22 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     ];
   };
 
+  const setTriggerAuthState = (authenticated: boolean): void => {
+    rootEl.classList.toggle("is-provider-authenticated", authenticated);
+    triggerEl.classList.toggle("is-provider-authenticated", authenticated);
+  };
+
   const updateTriggerLabel = (): void => {
     const optionsList = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
     const selected = optionsList.find((option) => option.value === currentValue) || null;
     if (selected) {
+      setTriggerAuthState(Boolean(selected.providerAuthenticated));
       const badgePrefix = selected.badge ? `[${selected.badge}] ` : "";
       triggerLabelEl.setText(`${badgePrefix}${selected.label}`);
       triggerEl.title = selected.description || selected.label;
       return;
     }
+    setTriggerAuthState(false);
     const fallback = currentValue || placeholder || "Select option";
     triggerLabelEl.setText(fallback);
     triggerEl.title = fallback;
@@ -178,17 +185,20 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       const itemEl = listEl.createDiv({
         cls: "ss-studio-searchable-select-item",
       });
+      const providerAuthenticated = option.providerAuthenticated === true;
       itemEl.setAttribute("role", "option");
       itemEl.setAttribute("aria-selected", option.value === currentValue ? "true" : "false");
       itemEl.classList.toggle("is-active", index === activeIndex);
       itemEl.classList.toggle("is-selected", option.value === currentValue);
+      itemEl.classList.toggle("is-provider-authenticated", providerAuthenticated);
 
       const titleEl = itemEl.createDiv({ cls: "ss-studio-searchable-select-item-title" });
       if (option.badge) {
-        titleEl.createSpan({
+        const badgeEl = titleEl.createSpan({
           cls: "ss-studio-searchable-select-item-badge",
           text: option.badge,
         });
+        badgeEl.classList.toggle("is-provider-authenticated", providerAuthenticated);
       }
       titleEl.createSpan({
         cls: "ss-studio-searchable-select-item-label",
