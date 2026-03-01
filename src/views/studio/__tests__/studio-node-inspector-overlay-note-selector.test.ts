@@ -96,6 +96,8 @@ describe("StudioNodeInspectorOverlay note selector", () => {
 
     overlay.mount(viewport);
     overlay.showNode(node, definitionFixture());
+    const firstCardLabel = viewport.querySelector<HTMLElement>(".ss-studio-note-selector-card-index");
+    expect(firstCardLabel?.textContent?.trim()).toBe("Note 1 (First)");
 
     const addButton = viewport.querySelector<HTMLButtonElement>('button[aria-label="Add note entry"]');
     expect(addButton).toBeDefined();
@@ -110,6 +112,8 @@ describe("StudioNodeInspectorOverlay note selector", () => {
       "Notes/First.md",
       "",
     ]);
+    const reorderedFirstLabel = viewport.querySelector<HTMLElement>(".ss-studio-note-selector-card-index");
+    expect(reorderedFirstLabel?.textContent?.trim()).toBe("Note 1 (Second)");
     expect(host.onConfigMutated).toHaveBeenCalled();
 
     overlay.destroy();

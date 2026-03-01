@@ -141,12 +141,15 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
 
     const pathInput = nodeEl.querySelector<HTMLInputElement>('input[aria-label="Markdown path for note 1"]');
     const enabledToggle = nodeEl.querySelector<HTMLInputElement>(".ss-studio-note-selector-toggle-checkbox");
+    const cardIndexLabel = nodeEl.querySelector<HTMLElement>(".ss-studio-note-selector-card-index");
 
     expect(pathInput).toBeDefined();
     expect(enabledToggle).toBeDefined();
+    expect(cardIndexLabel?.textContent?.trim()).toBe("Note 1");
 
     typeValue(pathInput!, "SystemSculpt/Studio/Offers/AgentOps 1K Plan.md");
     toggleValue(enabledToggle!, false);
+    expect(cardIndexLabel?.textContent?.trim()).toBe("Note 1 (AgentOps 1K Plan)");
 
     expect(readNoteItems(node)).toEqual([
       {

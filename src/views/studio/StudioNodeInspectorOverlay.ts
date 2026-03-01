@@ -14,7 +14,11 @@ import {
   rebuildConfigWithUnknownKeys,
   validateNodeConfig,
 } from "../../studio/StudioNodeConfigValidation";
-import { parseStudioNoteItems, serializeStudioNoteItems } from "../../studio/StudioNoteConfig";
+import {
+  deriveStudioNoteTitleFromPath,
+  parseStudioNoteItems,
+  serializeStudioNoteItems,
+} from "../../studio/StudioNoteConfig";
 import { isRecord } from "../../studio/utils";
 import {
   STUDIO_GRAPH_MAX_ZOOM,
@@ -732,6 +736,14 @@ export class StudioNodeInspectorOverlay {
       });
     };
 
+    const formatNoteCardLabel = (index: number, path: string): string => {
+      const noteTitle = deriveStudioNoteTitleFromPath(path);
+      if (!noteTitle) {
+        return `Note ${index + 1}`;
+      }
+      return `Note ${index + 1} (${noteTitle})`;
+    };
+
     const renderItems = (): void => {
       itemsContainer.empty();
       if (state.items.length === 0) {
@@ -762,10 +774,14 @@ export class StudioNodeInspectorOverlay {
         });
         checkbox.checked = item.enabled;
         checkbox.disabled = disabled;
-        toggleLabel.createSpan({
+        const cardIndexEl = toggleLabel.createSpan({
           cls: "ss-studio-note-selector-card-index",
-          text: `Note ${i + 1}`,
+          text: "",
         });
+        const syncCardIndex = (): void => {
+          cardIndexEl.setText(formatNoteCardLabel(i, item.path));
+        };
+        syncCardIndex();
 
         const actionsEl = cardHeaderEl.createDiv({ cls: "ss-studio-note-selector-card-actions" });
         const moveUpButton = actionsEl.createEl("button", {
@@ -865,6 +881,7 @@ export class StudioNodeInspectorOverlay {
         syncPathState();
         pathInput.addEventListener("input", (event) => {
           item.path = (event.target as HTMLInputElement).value;
+          syncCardIndex();
           syncPathState();
           emitChange();
         });
@@ -899,6 +916,7 @@ export class StudioNodeInspectorOverlay {
           }
           item.path = selected;
           pathInput.value = selected;
+          syncCardIndex();
           syncPathState();
           emitChange();
         });
