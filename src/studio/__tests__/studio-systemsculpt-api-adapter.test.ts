@@ -287,6 +287,99 @@ describe("StudioApiExecutionAdapter", () => {
     localPiMock.mockReset();
   });
 
+  it("returns actionable Pi install guidance when the pi CLI binary is missing", async () => {
+    const plugin = createPluginStub();
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+    const localPiMock = StudioLocalTextModelCatalog
+      .runStudioLocalPiTextGeneration as jest.MockedFunction<
+      typeof StudioLocalTextModelCatalog.runStudioLocalPiTextGeneration
+    >;
+    localPiMock.mockReset();
+    localPiMock.mockRejectedValue(new Error("spawn pi ENOENT"));
+
+    let capturedMessage = "";
+    await adapter
+      .generateText({
+        prompt: "Summarize this transcript.",
+        sourceMode: "local_pi",
+        localModelId: "openai-codex/gpt-5.3-codex",
+        runId: "run_local",
+        nodeId: "node_local",
+        projectPath: "Studio/Test.systemsculpt",
+      })
+      .catch((error: unknown) => {
+        capturedMessage = error instanceof Error ? error.message : String(error);
+      });
+
+    expect(capturedMessage).toContain("pi CLI not found");
+    expect(capturedMessage).toContain("Install/setup checklist");
+    expect(capturedMessage).toContain("command -v pi");
+    expect(capturedMessage).toContain("pi --list-models");
+    localPiMock.mockReset();
+  });
+
+  it("returns actionable Pi auth guidance when the provider is missing API credentials", async () => {
+    const plugin = createPluginStub();
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+    const localPiMock = StudioLocalTextModelCatalog
+      .runStudioLocalPiTextGeneration as jest.MockedFunction<
+      typeof StudioLocalTextModelCatalog.runStudioLocalPiTextGeneration
+    >;
+    localPiMock.mockReset();
+    localPiMock.mockRejectedValue(new Error("No API key found for openai-codex.\nUse /login..."));
+
+    let capturedMessage = "";
+    await adapter
+      .generateText({
+        prompt: "Summarize this transcript.",
+        sourceMode: "local_pi",
+        localModelId: "openai-codex/gpt-5.3-codex",
+        runId: "run_local",
+        nodeId: "node_local",
+        projectPath: "Studio/Test.systemsculpt",
+      })
+      .catch((error: unknown) => {
+        capturedMessage = error instanceof Error ? error.message : String(error);
+      });
+
+    expect(capturedMessage).toContain("provider authentication is missing or invalid");
+    expect(capturedMessage).toContain("pi /login openai-codex");
+    expect(capturedMessage).toContain("pi --list-models");
+    localPiMock.mockReset();
+  });
+
+  it("returns token-type guidance for providers that reject personal access tokens", async () => {
+    const plugin = createPluginStub();
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+    const localPiMock = StudioLocalTextModelCatalog
+      .runStudioLocalPiTextGeneration as jest.MockedFunction<
+      typeof StudioLocalTextModelCatalog.runStudioLocalPiTextGeneration
+    >;
+    localPiMock.mockReset();
+    localPiMock.mockRejectedValue(
+      new Error("400 bad request: Personal Access Tokens are not supported for this endpoint")
+    );
+
+    let capturedMessage = "";
+    await adapter
+      .generateText({
+        prompt: "Summarize this transcript.",
+        sourceMode: "local_pi",
+        localModelId: "github-copilot/gpt-5.2-codex",
+        runId: "run_local",
+        nodeId: "node_local",
+        projectPath: "Studio/Test.systemsculpt",
+      })
+      .catch((error: unknown) => {
+        capturedMessage = error instanceof Error ? error.message : String(error);
+      });
+
+    expect(capturedMessage).toContain("credentials are not accepted for this endpoint");
+    expect(capturedMessage).toContain("pi /login github-copilot");
+    expect(capturedMessage).toContain("pi --list-models");
+    localPiMock.mockReset();
+  });
+
   it("skips SystemSculpt credit checks when all text nodes run in local Pi mode", async () => {
     const plugin = createPluginStub();
     plugin.aiService.getCreditsBalance = jest.fn(async () => ({ totalRemaining: 0 }));

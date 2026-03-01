@@ -1,4 +1,5 @@
 import {
+  buildStudioPiLoginCommand,
   listStudioLocalTextModelOptions,
   normalizeStudioLocalPiModelId,
   runStudioLocalPiTextGeneration,
@@ -97,6 +98,12 @@ describe("StudioLocalTextModelCatalog", () => {
     expect(() => normalizeStudioLocalPiModelId("bad-model-id")).toThrow(
       'Choose a model in "provider/model" format.'
     );
+  });
+
+  it("builds provider login command with safe provider normalization", () => {
+    expect(buildStudioPiLoginCommand("github-copilot")).toBe("pi /login github-copilot");
+    expect(buildStudioPiLoginCommand("  OpenAI-Codex  ")).toBe("pi /login openai-codex");
+    expect(buildStudioPiLoginCommand("bad provider!")).toBe("pi /login");
   });
 
   it("executes local pi text generation and parses ndjson assistant output", async () => {
@@ -205,6 +212,35 @@ describe("StudioLocalTextModelCatalog", () => {
         runCommand
       )
     ).rejects.toThrow("Bad API key");
+  });
+
+  it("extracts a meaningful message from stack-like stderr output", async () => {
+    const runCommand = createPiRunner({
+      exitCode: 1,
+      timedOut: false,
+      stdout: "",
+      stderr: [
+        "file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js:556",
+        "            throw new Error(`No API key found for openai-codex.\\n\\n` +",
+        "                  ^",
+        "",
+        "Error: No API key found for openai-codex.",
+        "",
+        "Use /login or set an API key environment variable. See /docs/providers.md",
+        "    at AgentSession.prompt (file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js:556:19)",
+      ].join("\n"),
+    });
+
+    await expect(
+      runStudioLocalPiTextGeneration(
+        {
+          plugin,
+          modelId: "openai-codex/gpt-5.3-codex",
+          prompt: "Say hello",
+        },
+        runCommand
+      )
+    ).rejects.toThrow("No API key found for openai-codex.");
   });
 
   it("parses message_update text deltas when final assistant message is missing", async () => {

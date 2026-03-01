@@ -209,6 +209,123 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     return normalizeStudioLocalPiModelId(rawLocalModelId);
   }
 
+  private isLikelyMissingPiCli(message: string): boolean {
+    const normalized = String(message || "").trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+    return (
+      normalized.includes("spawn pi enoent") ||
+      normalized.includes("pi: command not found") ||
+      normalized.includes("command not found: pi") ||
+      normalized.includes("no such file or directory") && normalized.includes("pi")
+    );
+  }
+
+  private buildLocalPiInstallGuidanceMessage(options: {
+    modelId: string;
+    rawMessage: string;
+  }): string {
+    const pathValue = String(process?.env?.PATH || "").trim();
+    return [
+      `Local (Pi) text generation failed for model "${options.modelId}": pi CLI not found.`,
+      `Original error: ${options.rawMessage}`,
+      "",
+      "Install/setup checklist:",
+      "1) Install the Pi CLI on this machine (the executable must be named \"pi\").",
+      "   Default install command:",
+      "   npm install -g @mariozechner/pi-coding-agent",
+      "2) Verify it is reachable from the shell:",
+      "   command -v pi",
+      "   pi --version",
+      "3) If not found, add the install directory to PATH (macOS zsh example):",
+      "   echo 'export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"' >> ~/.zshrc",
+      "   source ~/.zshrc",
+      "4) Verify models are visible to Studio:",
+      "   pi --list-models",
+      "5) Restart Obsidian after PATH or auth/env changes.",
+      "",
+      `PATH seen by Studio: ${pathValue || "(empty)"}`,
+    ].join("\n");
+  }
+
+  private extractProviderFromLocalPiModelId(modelId: string): string {
+    const trimmed = String(modelId || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    const slash = trimmed.indexOf("/");
+    if (slash <= 0) {
+      return "";
+    }
+    return trimmed.slice(0, slash).trim().toLowerCase();
+  }
+
+  private buildLocalPiAuthGuidanceMessage(options: {
+    modelId: string;
+    rawMessage: string;
+  }): string {
+    const providerFromMessage =
+      /no api key found for\s+([a-z0-9._-]+)/i.exec(options.rawMessage)?.[1]?.trim().toLowerCase() ||
+      /authentication failed for\s+\"([a-z0-9._-]+)\"/i.exec(options.rawMessage)?.[1]?.trim().toLowerCase() ||
+      "";
+    const provider = providerFromMessage || this.extractProviderFromLocalPiModelId(options.modelId);
+    const loginCommand = provider ? `pi /login ${provider}` : "pi /login <provider>";
+
+    const lines = [
+      `Local (Pi) text generation failed for model "${options.modelId}": provider authentication is missing or invalid.`,
+      `Original error: ${options.rawMessage}`,
+      "",
+      "Fix checklist:",
+      "1) Re-authenticate in terminal:",
+      `   ${loginCommand}`,
+      "2) Verify model/provider availability:",
+      "   pi --list-models",
+      "3) Retry the Studio run.",
+      "",
+      "If you use API-key providers, you can also export the required provider API key env vars before launching Obsidian.",
+    ];
+
+    return lines.join("\n");
+  }
+
+  private buildLocalPiTokenTypeGuidanceMessage(options: {
+    modelId: string;
+    rawMessage: string;
+  }): string {
+    const provider = this.extractProviderFromLocalPiModelId(options.modelId) || "provider";
+    return [
+      `Local (Pi) text generation failed for model "${options.modelId}": the current ${provider} credentials are not accepted for this endpoint.`,
+      `Original error: ${options.rawMessage}`,
+      "",
+      "Fix checklist:",
+      `1) Re-authenticate with OAuth in terminal: pi /login ${provider}`,
+      "2) Confirm the provider/model appears in: pi --list-models",
+      "3) Retry the Studio run.",
+    ].join("\n");
+  }
+
+  private enrichLocalPiRuntimeErrorMessage(options: {
+    modelId: string;
+    rawMessage: string;
+  }): string {
+    const normalized = String(options.rawMessage || "").trim().toLowerCase();
+    if (!normalized) {
+      return options.rawMessage;
+    }
+    if (
+      normalized.includes("no api key found for") ||
+      normalized.includes("agent-session.js:556") ||
+      normalized.includes("authentication failed for")
+    ) {
+      return this.buildLocalPiAuthGuidanceMessage(options);
+    }
+    if (normalized.includes("personal access tokens are not supported for this endpoint")) {
+      return this.buildLocalPiTokenTypeGuidanceMessage(options);
+    }
+    return options.rawMessage;
+  }
+
   private licenseKey(): string {
     const licenseKey = String(this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
@@ -453,7 +570,19 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Local (Pi) text generation failed: ${message}`);
+        if (this.isLikelyMissingPiCli(message)) {
+          throw new Error(
+            this.buildLocalPiInstallGuidanceMessage({
+              modelId: localModelId,
+              rawMessage: message,
+            })
+          );
+        }
+        const enrichedMessage = this.enrichLocalPiRuntimeErrorMessage({
+          modelId: localModelId,
+          rawMessage: message,
+        });
+        throw new Error(`Local (Pi) text generation failed: ${enrichedMessage}`);
       }
     }
 

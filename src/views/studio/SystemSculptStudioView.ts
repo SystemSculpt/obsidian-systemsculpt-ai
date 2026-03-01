@@ -99,6 +99,10 @@ import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
+import {
+  openStudioPiSetupWizard,
+  type StudioPiSetupWizardIssue,
+} from "./StudioPiSetupWizardModal";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -134,6 +138,18 @@ type SystemSculptStudioViewState = {
   inspectorLayout?: unknown;
   file?: unknown;
   graphViewByProject?: unknown;
+};
+
+type StudioRunGraphOptions = {
+  fromNodeId?: string;
+  skipPiSetupWizard?: boolean;
+};
+
+type StudioPiSetupErrorContext = {
+  issue: StudioPiSetupWizardIssue;
+  message: string;
+  modelId: string;
+  provider: string;
 };
 
 export class SystemSculptStudioView extends ItemView {
@@ -1654,23 +1670,189 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private setError(error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const message = this.normalizeEscapedNewlines(rawMessage);
     this.lastError = message;
     if (error instanceof Error) {
-      console.error("[SystemSculpt Studio] Error", {
+      this.logStudioConsoleError("[SystemSculpt Studio] Error", {
         message,
         name: error.name,
         stack: error.stack || null,
         projectPath: this.currentProjectPath,
       });
     } else {
-      console.error("[SystemSculpt Studio] Error", {
+      this.logStudioConsoleError("[SystemSculpt Studio] Error", {
         message,
         rawError: error,
         projectPath: this.currentProjectPath,
       });
     }
-    new Notice(`SystemSculpt Studio: ${message}`);
+    const summary = this.summarizeMessageForNotice(message);
+    new Notice(`SystemSculpt Studio: ${summary}. See console for full details.`);
+  }
+
+  private logStudioConsoleError(label: string, details: Record<string, unknown>): void {
+    console.error(label, details);
+    const serialized = this.serializeStudioConsoleDetails(details);
+    if (serialized) {
+      console.error(`${label} JSON ${serialized}`);
+    }
+  }
+
+  private serializeStudioConsoleDetails(details: Record<string, unknown>): string {
+    const seen = new WeakSet<object>();
+    try {
+      return JSON.stringify(
+        details,
+        (_key, value: unknown) => {
+          if (value instanceof Error) {
+            return {
+              name: value.name,
+              message: value.message,
+              stack: value.stack || null,
+            };
+          }
+          if (typeof value === "bigint") {
+            return value.toString();
+          }
+          if (value && typeof value === "object") {
+            if (seen.has(value as object)) {
+              return "[Circular]";
+            }
+            seen.add(value as object);
+          }
+          return value;
+        },
+        2
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({
+        message: "Failed to serialize console details.",
+        serializationError: message,
+      });
+    }
+  }
+
+  private normalizeEscapedNewlines(message: string): string {
+    return String(message || "")
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n");
+  }
+
+  private summarizeMessageForNotice(message: string): string {
+    const firstLine = this.normalizeEscapedNewlines(message)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (!firstLine) {
+      return "Unknown error";
+    }
+    if (firstLine.length <= 220) {
+      return firstLine;
+    }
+    return `${firstLine.slice(0, 217)}...`;
+  }
+
+  private extractProviderFromModelId(modelId: string): string {
+    const trimmed = String(modelId || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    const slash = trimmed.indexOf("/");
+    if (slash <= 0) {
+      return "";
+    }
+    return trimmed.slice(0, slash).trim().toLowerCase();
+  }
+
+  private extractPiSetupErrorContext(error: unknown): StudioPiSetupErrorContext | null {
+    const rawMessage = error instanceof Error ? error.message : String(error || "");
+    const message = this.normalizeEscapedNewlines(rawMessage);
+    const normalized = message.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    const piSignals = [
+      "local (pi)",
+      "spawn pi enoent",
+      "pi cli not found",
+      "agent-session.js:556",
+      "no api key found for",
+      "pi /login",
+    ];
+    if (!piSignals.some((signal) => normalized.includes(signal))) {
+      return null;
+    }
+
+    let issue: StudioPiSetupWizardIssue = "runtime_error";
+    if (
+      normalized.includes("pi cli not found") ||
+      normalized.includes("spawn pi enoent") ||
+      normalized.includes("pi: command not found") ||
+      normalized.includes("command not found: pi")
+    ) {
+      issue = "missing_cli";
+    } else if (normalized.includes("personal access tokens are not supported for this endpoint")) {
+      issue = "token_type";
+    } else if (
+      normalized.includes("provider authentication is missing or invalid") ||
+      normalized.includes("no api key found for") ||
+      normalized.includes("authentication failed") ||
+      normalized.includes("use /login")
+    ) {
+      issue = "provider_auth";
+    }
+
+    const modelIdMatch = /model\s+"([^"]+)"/i.exec(message);
+    const modelId = modelIdMatch ? String(modelIdMatch[1] || "").trim() : "";
+    const providerFromError =
+      /no api key found for\s+([a-z0-9._-]+)/i.exec(message)?.[1]?.trim().toLowerCase() ||
+      /pi\s+\/login\s+([a-z0-9._-]+)/i.exec(message)?.[1]?.trim().toLowerCase() ||
+      "";
+    const provider = providerFromError || this.extractProviderFromModelId(modelId);
+
+    return {
+      issue,
+      message,
+      modelId,
+      provider,
+    };
+  }
+
+  private async tryOpenPiSetupWizardAndRetry(
+    options: StudioRunGraphOptions | undefined,
+    error: unknown
+  ): Promise<"retry" | "dismiss" | null> {
+    if (options?.skipPiSetupWizard) {
+      return null;
+    }
+
+    const context = this.extractPiSetupErrorContext(error);
+    if (!context) {
+      return null;
+    }
+
+    const outcome = await openStudioPiSetupWizard({
+      app: this.app,
+      plugin: this.plugin,
+      issue: context.issue,
+      modelId: context.modelId,
+      provider: context.provider,
+      errorMessage: context.message,
+      projectPath: this.currentProjectPath,
+      onLog: (label, details) => {
+        this.logStudioConsoleError(label, details);
+      },
+    });
+    if (outcome.action !== "retry") {
+      return "dismiss";
+    }
+    await this.runGraph({
+      fromNodeId: options?.fromNodeId,
+    });
+    return "retry";
   }
 
   private handleRunEvent(event: StudioRunEvent): void {
@@ -1688,7 +1870,7 @@ export class SystemSculptStudioView extends ItemView {
         sourceNodeId: event.nodeId,
         runId: event.runId,
       });
-      console.error("[SystemSculpt Studio] Node failed", {
+      this.logStudioConsoleError("[SystemSculpt Studio] Node failed", {
         runId: event.runId,
         nodeId: event.nodeId,
         error: event.error,
@@ -1698,7 +1880,7 @@ export class SystemSculptStudioView extends ItemView {
       });
     } else if (event.type === "run.failed") {
       this.removePendingManagedOutputPlaceholders({ runId: event.runId });
-      console.error("[SystemSculpt Studio] Run failed", {
+      this.logStudioConsoleError("[SystemSculpt Studio] Run failed", {
         runId: event.runId,
         error: event.error,
         stack: event.errorStack || null,
@@ -2730,7 +2912,7 @@ export class SystemSculptStudioView extends ItemView {
     };
   }
 
-  private async runGraph(options?: { fromNodeId?: string }): Promise<void> {
+  private async runGraph(options?: StudioRunGraphOptions): Promise<void> {
     if (!this.currentProjectPath) {
       new Notice("Open a .systemsculpt file from the file explorer first.");
       return;
@@ -2790,14 +2972,25 @@ export class SystemSculptStudioView extends ItemView {
             : `Studio run completed: ${result.runId}${runStatsSuffix}`
         );
       } else {
+        const rawRunError = String(result.error || result.runId || "");
+        const runErrorSummary = this.summarizeMessageForNotice(rawRunError);
         new Notice(
           fromNodeId
-            ? `Studio run from node failed: ${result.error || result.runId}`
-            : `Studio run failed: ${result.error || result.runId}`
+            ? `Studio run from node failed: ${runErrorSummary}. See console for details.`
+            : `Studio run failed: ${runErrorSummary}. See console for details.`
         );
       }
     } catch (error) {
-      this.runPresentation.failBeforeRun(error instanceof Error ? error.message : String(error));
+      const wizardAction = await this.tryOpenPiSetupWizardAndRetry(options, error);
+      if (wizardAction === "retry") {
+        return;
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (wizardAction === "dismiss") {
+        this.runPresentation.failBeforeRun(errorMessage);
+        return;
+      }
+      this.runPresentation.failBeforeRun(errorMessage);
       this.setError(error);
     } finally {
       this.setBusy(false);
