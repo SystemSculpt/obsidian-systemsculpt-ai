@@ -14,11 +14,17 @@ import {
   rebuildConfigWithUnknownKeys,
   validateNodeConfig,
 } from "../../studio/StudioNodeConfigValidation";
+import { parseStudioNoteItems, serializeStudioNoteItems } from "../../studio/StudioNoteConfig";
 import { isRecord } from "../../studio/utils";
 import {
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
 } from "./StudioGraphInteractionTypes";
+import {
+  appendStudioPathBrowseButtonIcon,
+  resolveStudioNotePathState,
+  type StudioNotePathStateTone,
+} from "./StudioPathFieldUi";
 import { browseForNodeConfigPath } from "./StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "./StudioSearchableDropdown";
 import { resolveStudioSearchableSelectPlaceholder } from "./StudioSelectFieldHelpers";
@@ -124,23 +130,6 @@ function clampInspectorPosition(
     x: Math.min(maxX, Math.max(minX, layout.x)),
     y: Math.min(maxY, Math.max(minY, layout.y)),
   };
-}
-
-function appendPathBrowseButtonIcon(
-  buttonEl: HTMLElement,
-  iconClassName: string
-): void {
-  const iconEl = buttonEl.createSpan({ cls: iconClassName });
-  iconEl.setAttr("aria-hidden", "true");
-  const namespace = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(namespace, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  const folderPath = document.createElementNS(namespace, "path");
-  folderPath.setAttribute("d", "M1.75 4.75a1 1 0 0 1 1-1h3l1.1 1.2h6.4a1 1 0 0 1 1 1v5.3a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z");
-  const linePath = document.createElementNS(namespace, "path");
-  linePath.setAttribute("d", "M6.25 8.4h4.1m-2.05-2.05V10.5");
-  svg.append(folderPath, linePath);
-  iconEl.appendChild(svg);
 }
 
 export class StudioNodeInspectorOverlay {
@@ -652,7 +641,7 @@ export class StudioNodeInspectorOverlay {
     });
     browseButton.type = "button";
     browseButton.disabled = disabled;
-    appendPathBrowseButtonIcon(
+    appendStudioPathBrowseButtonIcon(
       browseButton,
       "ss-studio-node-inspector-path-button-icon ss-studio-path-browse-button-icon"
     );
@@ -672,6 +661,259 @@ export class StudioNodeInspectorOverlay {
       this.setTransientFieldError(node.id, field.key, null);
       onValidationRefresh();
     });
+  }
+
+  private renderNoteSelectorFieldInput(options: {
+    wrapper: HTMLElement;
+    field: StudioNodeConfigFieldDefinition;
+    node: StudioNodeInstance;
+    initialValue: StudioJsonValue | undefined;
+    disabled: boolean;
+    applyValue: (nextValue: StudioJsonValue) => void;
+  }): void {
+    const { wrapper, field, node, initialValue, disabled, applyValue } = options;
+
+    const state = {
+      items: parseStudioNoteItems(initialValue),
+    };
+    const container = wrapper.createDiv({ cls: "ss-studio-note-selector" });
+    const toolbarEl = container.createDiv({ cls: "ss-studio-note-selector-toolbar" });
+    const summaryEl = toolbarEl.createDiv({ cls: "ss-studio-note-selector-summary" });
+    const countBadgeEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-count" });
+    const statusEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-status" });
+    const addButton = toolbarEl.createEl("button", {
+      cls: "ss-studio-note-selector-add-button",
+      text: "Add Note",
+      attr: {
+        "aria-label": "Add note entry",
+      },
+    });
+    addButton.type = "button";
+    addButton.disabled = disabled;
+    const itemsContainer = container.createDiv({ cls: "ss-studio-note-selector-items" });
+
+    const updateSummary = (): void => {
+      const total = state.items.length;
+      const enabled = state.items.filter((entry) => entry.enabled).length;
+      const skipped = total - enabled;
+      countBadgeEl.setText(`${total} ${total === 1 ? "note" : "notes"}`);
+      if (total === 0) {
+        statusEl.setText("Add markdown notes to include in this node.");
+        return;
+      }
+      if (enabled === total) {
+        statusEl.setText("All notes included.");
+        return;
+      }
+      if (enabled === 0) {
+        statusEl.setText("All notes are skipped.");
+        return;
+      }
+      statusEl.setText(`${enabled} included, ${skipped} skipped.`);
+    };
+
+    const emitChange = (): void => {
+      this.setTransientFieldError(node.id, field.key, null);
+      applyValue(serializeStudioNoteItems(state.items));
+      updateSummary();
+    };
+
+    const bindActionButton = (
+      buttonEl: HTMLButtonElement,
+      handler: () => Promise<void> | void
+    ): void => {
+      buttonEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (disabled) {
+          return;
+        }
+        void handler();
+      });
+    };
+
+    const renderItems = (): void => {
+      itemsContainer.empty();
+      if (state.items.length === 0) {
+        itemsContainer.createDiv({
+          cls: "ss-studio-note-selector-empty",
+          text: "No notes yet. Add one or more markdown notes.",
+        });
+        return;
+      }
+
+      for (let i = 0; i < state.items.length; i++) {
+        const item = state.items[i];
+        const cardEl = itemsContainer.createDiv({ cls: "ss-studio-note-selector-card" });
+        if (!item.enabled) {
+          cardEl.addClass("is-disabled");
+        }
+
+        const cardHeaderEl = cardEl.createDiv({ cls: "ss-studio-note-selector-card-head" });
+        const toggleLabel = cardHeaderEl.createEl("label", {
+          cls: "ss-studio-note-selector-control-label",
+        });
+        const checkbox = toggleLabel.createEl("input", {
+          type: "checkbox",
+          cls: "ss-studio-note-selector-toggle-checkbox",
+          attr: {
+            "aria-label": `Include note ${i + 1} in output`,
+          },
+        });
+        checkbox.checked = item.enabled;
+        checkbox.disabled = disabled;
+        toggleLabel.createSpan({
+          cls: "ss-studio-note-selector-card-index",
+          text: `Note ${i + 1}`,
+        });
+
+        const actionsEl = cardHeaderEl.createDiv({ cls: "ss-studio-note-selector-card-actions" });
+        const moveUpButton = actionsEl.createEl("button", {
+          cls: "ss-studio-note-selector-action-button",
+          text: "Up",
+          attr: {
+            "aria-label": `Move note ${i + 1} up`,
+            title: "Move note up",
+          },
+        });
+        moveUpButton.type = "button";
+        moveUpButton.disabled = disabled || i === 0;
+        bindActionButton(moveUpButton, () => {
+          if (i === 0) {
+            return;
+          }
+          const previous = state.items[i - 1];
+          state.items[i - 1] = item;
+          state.items[i] = previous;
+          renderItems();
+          emitChange();
+        });
+
+        const moveDownButton = actionsEl.createEl("button", {
+          cls: "ss-studio-note-selector-action-button",
+          text: "Down",
+          attr: {
+            "aria-label": `Move note ${i + 1} down`,
+            title: "Move note down",
+          },
+        });
+        moveDownButton.type = "button";
+        moveDownButton.disabled = disabled || i === state.items.length - 1;
+        bindActionButton(moveDownButton, () => {
+          if (i >= state.items.length - 1) {
+            return;
+          }
+          const next = state.items[i + 1];
+          state.items[i + 1] = item;
+          state.items[i] = next;
+          renderItems();
+          emitChange();
+        });
+
+        const removeButton = actionsEl.createEl("button", {
+          cls: "ss-studio-note-selector-remove-button",
+          text: "Remove",
+          attr: {
+            "aria-label": `Remove note ${i + 1}`,
+            title: "Remove note",
+          },
+        });
+        removeButton.type = "button";
+        removeButton.disabled = disabled;
+        bindActionButton(removeButton, () => {
+          state.items.splice(i, 1);
+          renderItems();
+          emitChange();
+        });
+
+        const syncEnabledState = (): void => {
+          const isEnabled = item.enabled;
+          cardEl.classList.toggle("is-disabled", !isEnabled);
+        };
+        syncEnabledState();
+        checkbox.addEventListener("change", () => {
+          item.enabled = checkbox.checked;
+          syncEnabledState();
+          emitChange();
+        });
+
+        const fieldsEl = cardEl.createDiv({ cls: "ss-studio-note-selector-fields" });
+        const pathField = fieldsEl.createDiv({ cls: "ss-studio-note-selector-field" });
+        const pathRow = pathField.createDiv({
+          cls: "ss-studio-node-inspector-path-row ss-studio-note-selector-path-row",
+        });
+        const pathInput = pathRow.createEl("input", {
+          type: "text",
+          cls: "ss-studio-node-inspector-input ss-studio-node-inspector-path-input",
+          attr: {
+            placeholder: "Vault path to markdown note",
+            "aria-label": `Markdown path for note ${i + 1}`,
+          },
+        });
+        pathInput.value = item.path;
+        pathInput.disabled = disabled;
+        const pathStateEl = pathField.createDiv({
+          cls: "ss-studio-note-selector-path-state",
+        });
+        const syncPathState = (): void => {
+          const stateForPath: { tone: StudioNotePathStateTone; message: string } =
+            resolveStudioNotePathState(item.path);
+          pathStateEl.setText(stateForPath.message);
+          pathStateEl.classList.toggle("is-ready", stateForPath.tone === "ready");
+          pathStateEl.classList.toggle("is-invalid", stateForPath.tone === "invalid");
+        };
+        syncPathState();
+        pathInput.addEventListener("input", (event) => {
+          item.path = (event.target as HTMLInputElement).value;
+          syncPathState();
+          emitChange();
+        });
+
+        const browseButton = pathRow.createEl("button", {
+          cls: "ss-studio-node-inspector-path-button ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
+          attr: {
+            "aria-label": "Browse files",
+            title: "Browse files",
+          },
+        });
+        browseButton.type = "button";
+        browseButton.disabled = disabled;
+        appendStudioPathBrowseButtonIcon(
+          browseButton,
+          "ss-studio-node-inspector-path-button-icon ss-studio-path-browse-button-icon"
+        );
+        browseButton.createSpan({
+          cls: "ss-studio-node-inspector-path-button-label ss-studio-path-browse-button-label",
+          text: "Browse",
+        });
+        bindActionButton(browseButton, async () => {
+          const browseField: StudioNodeConfigFieldDefinition = {
+            key: field.key,
+            label: field.label,
+            type: "file_path",
+            accept: ".md,text/markdown",
+          };
+          const selected = await browseForNodeConfigPath(browseField);
+          if (!selected) {
+            return;
+          }
+          item.path = selected;
+          pathInput.value = selected;
+          syncPathState();
+          emitChange();
+        });
+      }
+      updateSummary();
+    };
+
+    bindActionButton(addButton, () => {
+      state.items.push({ path: "", enabled: true });
+      renderItems();
+      emitChange();
+    });
+
+    renderItems();
+    updateSummary();
   }
 
   private renderFieldInput(options: {
@@ -857,6 +1099,18 @@ export class StudioNodeInspectorOverlay {
         initialValue,
         disabled,
         onValidationRefresh,
+        applyValue,
+      });
+      return;
+    }
+
+    if (field.type === "note_selector") {
+      this.renderNoteSelectorFieldInput({
+        wrapper,
+        field,
+        node,
+        initialValue,
+        disabled,
         applyValue,
       });
       return;

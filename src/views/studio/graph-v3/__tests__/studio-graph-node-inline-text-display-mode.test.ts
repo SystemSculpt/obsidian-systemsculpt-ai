@@ -79,35 +79,81 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     expect(rawButton?.classList.contains("is-active")).toBe(false);
     expect(renderedButton?.classList.contains("is-active")).toBe(true);
     expect(renderedPanel?.classList.contains("is-hidden")).toBe(false);
-    expect(textarea?.disabled).toBe(true);
+    expect(textarea?.readOnly).toBe(true);
   });
 
-  it("switches to raw mode and persists the per-node display setting via presentation mutation", () => {
+  it("keeps note nodes in read-only raw mode and hides the display toggle", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.note", { value: "# Hello" });
+    const node = nodeFixture("studio.note", {
+      notes: {
+        items: [{ path: "Notes/Campaign.md", enabled: true }],
+      },
+    });
     const onNodeConfigMutated = jest.fn();
     const onNodePresentationMutated = jest.fn();
+    const nodeRunState: StudioNodeRunDisplayState = {
+      status: "succeeded",
+      message: "Preview ready",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      outputs: { text: "# Hello" },
+    };
 
     renderStudioNodeInlineEditor({
       nodeEl,
       node,
-      nodeRunState: IDLE_NODE_RUN_STATE,
+      nodeRunState,
       definition: definitionFixture("studio.note"),
       interactionLocked: false,
       onNodeConfigMutated,
       onNodePresentationMutated,
     });
 
+    const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
+    const modeToggle = nodeEl.querySelector<HTMLElement>(".ss-studio-node-text-display-mode");
     const buttons = Array.from(
       nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-text-display-mode-button")
     );
-    const rawButton = buttons.find((button) => button.textContent?.trim() === "Raw");
-    expect(rawButton).toBeDefined();
-    click(rawButton!);
-
-    expect(node.config.textDisplayMode).toBe("raw");
-    expect(onNodePresentationMutated).toHaveBeenCalledTimes(1);
+    expect(textarea?.readOnly).toBe(true);
+    expect(modeToggle?.classList.contains("is-hidden")).toBe(true);
+    expect(buttons).toHaveLength(2);
+    expect(node.config.textDisplayMode).toBeUndefined();
+    expect(onNodePresentationMutated).not.toHaveBeenCalled();
     expect(onNodeConfigMutated).not.toHaveBeenCalled();
+  });
+
+  it("prefixes each note block with its path in the note preview text", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture("studio.note", {
+      notes: {
+        items: [
+          { path: "Notes/One.md", enabled: true },
+          { path: "Notes/Two.md", enabled: true },
+        ],
+      },
+    });
+    const nodeRunState: StudioNodeRunDisplayState = {
+      status: "succeeded",
+      message: "Preview ready",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      outputs: {
+        text: ["# One\nBody one", "# Two\nBody two"],
+        path: ["Notes/One.md", "Notes/Two.md"],
+      },
+    };
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState,
+      definition: definitionFixture("studio.note"),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+    });
+
+    const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
+    expect(textarea?.value).toContain("Path: Notes/One.md");
+    expect(textarea?.value).toContain("Path: Notes/Two.md");
+    expect(textarea?.value).toContain("---");
   });
 
   it("keeps rendered surface height aligned with the raw editor when toggled", () => {
@@ -209,7 +255,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-text-display-mode-button")
     ).find((button) => button.textContent?.trim() === "Raw");
 
-    expect(textarea?.disabled).toBe(true);
+    expect(textarea?.readOnly).toBe(true);
     expect(renderedPanel?.classList.contains("is-hidden")).toBe(false);
     expect(rawButton?.classList.contains("is-active")).toBe(false);
     expect(renderMarkdownPreview).toHaveBeenCalledTimes(1);

@@ -10,7 +10,17 @@ import {
   isNodeConfigFieldVisible,
   mergeNodeConfigWithDefaults,
 } from "../../../studio/StudioNodeConfigValidation";
+import {
+  parseStudioNoteItems,
+  serializeStudioNoteItems,
+} from "../../../studio/StudioNoteConfig";
+import { isRecord } from "../../../studio/utils";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import {
+  appendStudioPathBrowseButtonIcon,
+  resolveStudioNotePathState,
+  type StudioNotePathStateTone,
+} from "../StudioPathFieldUi";
 import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
 
@@ -42,14 +52,17 @@ type RenderStudioNodeInlineEditorOptions = {
 
 type StudioTextDisplayMode = "raw" | "rendered";
 type StudioJsonEditorMode = "composer" | "raw";
-type StudioJsonComposerValueType = "text" | "number" | "boolean" | "null" | "json";
+type StudioJsonHtmlViewMode = "source" | "preview";
+type StudioJsonComposerValueType = "text" | "html" | "number" | "boolean" | "null" | "json";
 type StudioJsonComposerRow = {
   id: string;
   key: string;
   value: string;
   valueType: StudioJsonComposerValueType;
   useTextarea: boolean;
+  htmlViewMode: StudioJsonHtmlViewMode;
 };
+type StudioJsonEditorSourceKind = "config" | "runtime" | "default";
 
 const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.input",
@@ -94,6 +107,7 @@ const HTTP_INPUT_BINDING_LABELS: Record<string, string> = {
 };
 const JSON_COMPOSER_TYPE_OPTIONS: Array<{ value: StudioJsonComposerValueType; label: string }> = [
   { value: "text", label: "Text" },
+  { value: "html", label: "HTML" },
   { value: "number", label: "Number" },
   { value: "boolean", label: "Bool" },
   { value: "null", label: "Null" },
@@ -123,6 +137,47 @@ function readConfigNumber(value: unknown): number | null {
 }
 
 function readEditableNodeText(node: StudioNodeInstance, nodeRunState: StudioNodeRunDisplayState): string {
+  if (node.kind === "studio.note") {
+    const outputText = nodeRunState.outputs?.text;
+    const outputPath = nodeRunState.outputs?.path;
+
+    const readPathAtIndex = (index: number): string => {
+      if (typeof outputPath === "string") {
+        return outputPath.trim();
+      }
+      if (Array.isArray(outputPath)) {
+        const value = outputPath[index];
+        return typeof value === "string" ? value.trim() : "";
+      }
+      return "";
+    };
+
+    const formatNoteBlock = (text: string, index: number): string => {
+      const path = readPathAtIndex(index);
+      if (!path) {
+        return text;
+      }
+      return `Path: ${path}\n${text}`;
+    };
+
+    if (typeof outputText === "string") {
+      return formatNoteBlock(outputText, 0);
+    }
+    if (Array.isArray(outputText)) {
+      const blocks: string[] = [];
+      for (let i = 0; i < outputText.length; i += 1) {
+        const entry = outputText[i];
+        if (typeof entry !== "string" || entry.trim().length === 0) {
+          continue;
+        }
+        blocks.push(formatNoteBlock(entry, i));
+      }
+      if (blocks.length > 0) {
+        return blocks.join("\n\n---\n\n");
+      }
+    }
+    return "";
+  }
   const configuredValue = readConfigString(node.config.value);
   if (configuredValue.trim().length > 0) {
     return configuredValue;
@@ -212,7 +267,8 @@ function isInlineConfigFieldFullWidth(field: StudioNodeConfigFieldDefinition): b
     field.type === "textarea" ||
     field.type === "media_path" ||
     field.type === "directory_path" ||
-    field.type === "string_list"
+    field.type === "string_list" ||
+    field.type === "note_selector"
   ) {
     return true;
   }
@@ -277,6 +333,106 @@ function readJsonNodeConfigValue(node: StudioNodeInstance): StudioJsonValue {
   return typeof value === "undefined" ? {} : value;
 }
 
+function hasConfiguredJsonNodeValue(node: StudioNodeInstance): boolean {
+  const config = node.config as Record<string, StudioJsonValue>;
+  return Object.prototype.hasOwnProperty.call(config, JSON_VALUE_CONFIG_KEY);
+}
+
+function readJsonNodeEditorValue(
+  node: StudioNodeInstance,
+  nodeRunState: StudioNodeRunDisplayState
+): StudioJsonValue {
+  if (hasConfiguredJsonNodeValue(node)) {
+    return readJsonNodeConfigValue(node);
+  }
+  const outputs = nodeRunState.outputs as Record<string, unknown> | null;
+  if (outputs && Object.prototype.hasOwnProperty.call(outputs, "json")) {
+    return outputs.json as StudioJsonValue;
+  }
+  return readJsonNodeConfigValue(node);
+}
+
+function hasRuntimeJsonOutput(nodeRunState: StudioNodeRunDisplayState): boolean {
+  const outputs = nodeRunState.outputs as Record<string, unknown> | null;
+  return Boolean(outputs && Object.prototype.hasOwnProperty.call(outputs, "json"));
+}
+
+function resolveJsonEditorSourceKind(
+  node: StudioNodeInstance,
+  nodeRunState: StudioNodeRunDisplayState
+): StudioJsonEditorSourceKind {
+  if (hasConfiguredJsonNodeValue(node)) {
+    return "config";
+  }
+  if (hasRuntimeJsonOutput(nodeRunState)) {
+    return "runtime";
+  }
+  return "default";
+}
+
+function resolveJsonEditorSourceLabel(sourceKind: StudioJsonEditorSourceKind): string {
+  if (sourceKind === "config") {
+    return "Config";
+  }
+  if (sourceKind === "runtime") {
+    return "Runtime";
+  }
+  return "Default";
+}
+
+function resolveJsonEditorSourceHint(sourceKind: StudioJsonEditorSourceKind): string {
+  if (sourceKind === "config") {
+    return "Using saved config.value";
+  }
+  if (sourceKind === "runtime") {
+    return "Using latest run output";
+  }
+  return "Using default empty object";
+}
+
+function isLikelyHtmlFieldKey(key: string): boolean {
+  const normalized = String(key || "").trim().toLowerCase();
+  return normalized.length > 0 && normalized.includes("html");
+}
+
+function sanitizeHtmlPreviewSource(rawHtml: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = rawHtml;
+
+  for (const selector of ["script", "iframe", "object", "embed", "meta", "base", "link"]) {
+    for (const element of Array.from(template.content.querySelectorAll(selector))) {
+      element.remove();
+    }
+  }
+
+  for (const element of Array.from(template.content.querySelectorAll("*"))) {
+    for (const attribute of Array.from(element.attributes)) {
+      const attributeName = attribute.name.toLowerCase();
+      const attributeValue = attribute.value;
+      if (attributeName.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (
+        (attributeName === "src" ||
+          attributeName === "href" ||
+          attributeName === "xlink:href" ||
+          attributeName === "action" ||
+          attributeName === "formaction") &&
+        /^\s*javascript:/i.test(attributeValue)
+      ) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (attributeName === "srcdoc") {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  }
+
+  return template.innerHTML;
+}
+
 function writeJsonNodeConfigValue(node: StudioNodeInstance, value: StudioJsonValue): void {
   node.config[JSON_VALUE_CONFIG_KEY] = value;
 }
@@ -285,7 +441,7 @@ function normalizeJsonEditorMode(raw: unknown): StudioJsonEditorMode {
   return String(raw || "").trim().toLowerCase() === "raw" ? "raw" : "composer";
 }
 
-function inferComposerValueType(value: StudioJsonValue): StudioJsonComposerValueType {
+function inferComposerValueType(value: StudioJsonValue, key = ""): StudioJsonComposerValueType {
   if (typeof value === "number") {
     return "number";
   }
@@ -298,21 +454,35 @@ function inferComposerValueType(value: StudioJsonValue): StudioJsonComposerValue
   if (typeof value === "object") {
     return "json";
   }
+  if (typeof value === "string" && isLikelyHtmlFieldKey(key)) {
+    return "html";
+  }
   return "text";
 }
 
-function formatComposerRowValue(value: StudioJsonValue): {
+function formatComposerRowValue(value: StudioJsonValue, key = ""): {
   value: string;
   valueType: StudioJsonComposerValueType;
   useTextarea: boolean;
+  htmlViewMode: StudioJsonHtmlViewMode;
 } {
-  const valueType = inferComposerValueType(value);
+  const valueType = inferComposerValueType(value, key);
   if (valueType === "text") {
     const textValue = typeof value === "string" ? value : String(value ?? "");
     return {
       value: textValue,
       valueType,
       useTextarea: textValue.includes("\n"),
+      htmlViewMode: "source",
+    };
+  }
+  if (valueType === "html") {
+    const htmlValue = typeof value === "string" ? value : String(value ?? "");
+    return {
+      value: htmlValue,
+      valueType,
+      useTextarea: true,
+      htmlViewMode: "source",
     };
   }
   if (valueType === "number" || valueType === "boolean") {
@@ -320,6 +490,7 @@ function formatComposerRowValue(value: StudioJsonValue): {
       value: String(value),
       valueType,
       useTextarea: false,
+      htmlViewMode: "source",
     };
   }
   if (valueType === "null") {
@@ -327,6 +498,7 @@ function formatComposerRowValue(value: StudioJsonValue): {
       value: "",
       valueType,
       useTextarea: false,
+      htmlViewMode: "source",
     };
   }
   const jsonValue = formatJsonPreview(value);
@@ -334,6 +506,7 @@ function formatComposerRowValue(value: StudioJsonValue): {
     value: jsonValue,
     valueType,
     useTextarea: jsonValue.includes("\n"),
+    htmlViewMode: "source",
   };
 }
 
@@ -361,6 +534,12 @@ function parseComposerRowValue(row: StudioJsonComposerRow): {
     };
   }
   if (row.valueType === "text") {
+    return {
+      value: raw,
+      error: null,
+    };
+  }
+  if (row.valueType === "html") {
     return {
       value: raw,
       error: null,
@@ -444,13 +623,14 @@ function buildComposerRowsFromJsonObject(
   value: Record<string, StudioJsonValue>
 ): StudioJsonComposerRow[] {
   return Object.entries(value).map(([key, rawValue]) => {
-    const formatted = formatComposerRowValue(rawValue);
+    const formatted = formatComposerRowValue(rawValue, key);
     return {
       id: nextJsonComposerRowId(),
       key,
       value: formatted.value,
       valueType: formatted.valueType,
       useTextarea: formatted.useTextarea,
+      htmlViewMode: formatted.htmlViewMode,
     };
   });
 }
@@ -565,6 +745,16 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
   });
 
   const controlsEl = editorWrapEl.createDiv({ cls: "ss-studio-node-json-editor-controls" });
+  const sourceStateEl = controlsEl.createDiv({ cls: "ss-studio-node-json-source-state" });
+  sourceStateEl.createDiv({
+    cls: "ss-studio-node-json-source-state-label",
+    text: "Source",
+  });
+  const sourceStateBadgeEl = sourceStateEl.createDiv({
+    cls: "ss-studio-node-json-source-badge",
+    text: "Default",
+  });
+
   const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
   modeToggleEl.createEl("span", {
     cls: "ss-studio-node-text-display-mode-label",
@@ -605,6 +795,25 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
     cls: "ss-studio-node-json-raw-error is-hidden",
   });
 
+  const effectivePayloadEl = editorWrapEl.createDiv({ cls: "ss-studio-node-json-effective-payload" });
+  const effectiveHeaderEl = effectivePayloadEl.createDiv({ cls: "ss-studio-node-json-effective-header" });
+  effectiveHeaderEl.createDiv({
+    cls: "ss-studio-node-json-effective-label",
+    text: "Effective Payload",
+  });
+  const effectiveHintEl = effectiveHeaderEl.createDiv({
+    cls: "ss-studio-node-json-effective-hint",
+    text: "",
+  });
+  const effectiveEditorEl = effectivePayloadEl.createEl("textarea", {
+    cls: "ss-studio-node-inline-output-preview-text ss-studio-node-json-effective-editor",
+    attr: {
+      "aria-label": `${node.title || "JSON"} effective payload`,
+      readonly: "readonly",
+    },
+  });
+  effectiveEditorEl.readOnly = true;
+
   let composerRows: StudioJsonComposerRow[] = [];
   let editorMode = normalizeJsonEditorMode(getJsonEditorPreferredMode?.());
 
@@ -614,16 +823,28 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
     value: "",
     valueType: "text",
     useTextarea: false,
+    htmlViewMode: "source",
   });
 
+  const refreshJsonEditorSourceState = (): void => {
+    const sourceKind = resolveJsonEditorSourceKind(node, nodeRunState);
+    sourceStateBadgeEl.setText(resolveJsonEditorSourceLabel(sourceKind));
+    sourceStateBadgeEl.classList.toggle("is-config", sourceKind === "config");
+    sourceStateBadgeEl.classList.toggle("is-runtime", sourceKind === "runtime");
+    sourceStateBadgeEl.classList.toggle("is-default", sourceKind === "default");
+    effectiveHintEl.setText(resolveJsonEditorSourceHint(sourceKind));
+    effectiveEditorEl.value = formatJsonPreview(readJsonNodeEditorValue(node, nodeRunState));
+  };
+
   const syncRawEditorFromConfig = (): void => {
-    rawEditorEl.value = formatJsonPreview(readJsonNodeConfigValue(node));
+    rawEditorEl.value = formatJsonPreview(readJsonNodeEditorValue(node, nodeRunState));
     rawErrorEl.addClass("is-hidden");
     rawErrorEl.setText("");
+    refreshJsonEditorSourceState();
   };
 
   const hydrateComposerRowsFromConfig = (): void => {
-    const configuredValue = readJsonNodeConfigValue(node);
+    const configuredValue = readJsonNodeEditorValue(node, nodeRunState);
     if (!isJsonObjectValue(configuredValue)) {
       composerRows = [];
       return;
@@ -633,7 +854,7 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
 
   const renderComposerRows = (focusRowId?: string): void => {
     composerSurfaceEl.empty();
-    const configuredValue = readJsonNodeConfigValue(node);
+    const configuredValue = readJsonNodeEditorValue(node, nodeRunState);
     if (!isJsonObjectValue(configuredValue)) {
       const unsupportedEl = composerSurfaceEl.createDiv({ cls: "ss-studio-node-json-composer-unsupported" });
       unsupportedEl.createDiv({
@@ -660,6 +881,7 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
         onNodeConfigMutated(node);
         hydrateComposerRowsFromConfig();
         renderComposerRows();
+        refreshJsonEditorSourceState();
       });
       return;
     }
@@ -677,6 +899,7 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
       writeJsonNodeConfigValue(node, collectComposerRowsValue(composerRows));
       onNodeConfigMutated(node);
       syncRawEditorFromConfig();
+      refreshJsonEditorSourceState();
     };
 
     const validationHandles = new Map<
@@ -767,10 +990,15 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
           if (nextType === "null") {
             row.value = "";
             row.useTextarea = false;
-          } else if (nextType === "json") {
+          } else if (nextType === "json" || nextType === "html") {
             row.useTextarea = true;
+          } else if (nextType === "text") {
+            row.useTextarea = row.value.includes("\n");
           } else if (!row.value.includes("\n")) {
             row.useTextarea = false;
+          }
+          if (nextType === "html") {
+            row.htmlViewMode = "source";
           }
           commitComposerRows();
           renderComposerRows(row.id);
@@ -798,9 +1026,94 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
         });
 
         const valueWrapEl = rowEl.createDiv({ cls: "ss-studio-node-json-row-value-wrap" });
+        valueWrapEl.classList.toggle("is-html-row", row.valueType === "html");
         const valueReadOnly = interactionLocked || row.valueType === "null";
         const valueInputClass = "ss-studio-node-json-row-value";
-        if (row.useTextarea) {
+        if (row.valueType === "html") {
+          const htmlValueWrapEl = valueWrapEl.createDiv({ cls: "ss-studio-node-json-row-html-wrap" });
+          const htmlModeEl = htmlValueWrapEl.createDiv({ cls: "ss-studio-node-json-row-html-mode" });
+          const sourceModeEl = htmlModeEl.createEl("button", {
+            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
+            text: "Source",
+          });
+          sourceModeEl.type = "button";
+          sourceModeEl.disabled = interactionLocked;
+          const previewModeEl = htmlModeEl.createEl("button", {
+            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
+            text: "Preview",
+          });
+          previewModeEl.type = "button";
+          previewModeEl.disabled = interactionLocked;
+
+          const htmlSourceSurfaceEl = htmlValueWrapEl.createDiv({
+            cls: "ss-studio-node-json-row-html-source-surface",
+          });
+          const valueEl = htmlSourceSurfaceEl.createEl("textarea", {
+            cls: `${valueInputClass} ss-studio-node-json-row-html-source`,
+            attr: {
+              placeholder: "html source",
+              "aria-label": `HTML value for ${row.key || "row"}`,
+            },
+          });
+          valueEl.value = row.value;
+          valueEl.disabled = interactionLocked;
+
+          const htmlPreviewSurfaceEl = htmlValueWrapEl.createDiv({
+            cls: "ss-studio-node-json-row-html-preview-surface is-hidden",
+          });
+          const htmlPreviewFrameEl = htmlPreviewSurfaceEl.createEl("iframe", {
+            cls: "ss-studio-node-json-row-html-preview-frame",
+            attr: {
+              sandbox: "",
+              referrerpolicy: "no-referrer",
+              title: `HTML preview for ${row.key || "field"}`,
+            },
+          });
+
+          const applyHtmlMode = (): void => {
+            const showSource = row.htmlViewMode !== "preview";
+            htmlSourceSurfaceEl.classList.toggle("is-hidden", !showSource);
+            htmlPreviewSurfaceEl.classList.toggle("is-hidden", showSource);
+            sourceModeEl.classList.toggle("is-active", showSource);
+            previewModeEl.classList.toggle("is-active", !showSource);
+            sourceModeEl.setAttr("aria-pressed", showSource ? "true" : "false");
+            previewModeEl.setAttr("aria-pressed", showSource ? "false" : "true");
+            if (!showSource) {
+              htmlPreviewFrameEl.setAttr("srcdoc", sanitizeHtmlPreviewSource(row.value));
+            }
+          };
+
+          sourceModeEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (interactionLocked || row.htmlViewMode === "source") {
+              return;
+            }
+            row.htmlViewMode = "source";
+            applyHtmlMode();
+          });
+
+          previewModeEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (interactionLocked || row.htmlViewMode === "preview") {
+              return;
+            }
+            row.htmlViewMode = "preview";
+            applyHtmlMode();
+          });
+
+          valueEl.addEventListener("input", () => {
+            row.value = valueEl.value;
+            commitComposerRows();
+            refreshComposerValidation();
+            if (row.htmlViewMode === "preview") {
+              htmlPreviewFrameEl.setAttr("srcdoc", sanitizeHtmlPreviewSource(row.value));
+            }
+          });
+
+          applyHtmlMode();
+        } else if (row.useTextarea) {
           const valueEl = valueWrapEl.createEl("textarea", {
             cls: valueInputClass,
             attr: {
@@ -833,25 +1146,27 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
           });
         }
 
-        const toggleValueEditorEl = valueWrapEl.createEl("button", {
-          cls: "ss-studio-node-json-row-button ss-studio-node-json-row-mode",
-          text: row.useTextarea ? "Line" : "Area",
-          attr: {
-            "aria-label": row.useTextarea ? "Use single-line input" : "Use multi-line input",
-            title: row.useTextarea ? "Use single-line input" : "Use multi-line input",
-          },
-        });
-        toggleValueEditorEl.type = "button";
-        toggleValueEditorEl.disabled = interactionLocked || row.valueType === "null";
-        toggleValueEditorEl.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (interactionLocked || row.valueType === "null") {
-            return;
-          }
-          row.useTextarea = !row.useTextarea;
-          renderComposerRows(row.id);
-        });
+        if (row.valueType !== "html") {
+          const toggleValueEditorEl = valueWrapEl.createEl("button", {
+            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-mode",
+            text: row.useTextarea ? "Line" : "Area",
+            attr: {
+              "aria-label": row.useTextarea ? "Use single-line input" : "Use multi-line input",
+              title: row.useTextarea ? "Use single-line input" : "Use multi-line input",
+            },
+          });
+          toggleValueEditorEl.type = "button";
+          toggleValueEditorEl.disabled = interactionLocked || row.valueType === "null";
+          toggleValueEditorEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (interactionLocked || row.valueType === "null") {
+              return;
+            }
+            row.useTextarea = !row.useTextarea;
+            renderComposerRows(row.id);
+          });
+        }
 
         const keyErrorEl = rowEl.createDiv({
           cls: "ss-studio-node-json-row-error is-hidden",
@@ -915,24 +1230,34 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
       if (interactionLocked) {
         return;
       }
-      const current = readJsonNodeConfigValue(node);
+      const current = readJsonNodeEditorValue(node, nodeRunState);
       const baseObject: Record<string, StudioJsonValue> = isJsonObjectValue(current)
         ? { ...(current as Record<string, StudioJsonValue>) }
         : {};
       baseObject.from = typeof baseObject.from === "string" ? baseObject.from : "";
-      baseObject.to = typeof baseObject.to === "string" ? baseObject.to : "";
+      if (Array.isArray(baseObject.to)) {
+        baseObject.to = baseObject.to.map((entry) => String(entry ?? "")).filter((entry) => entry.trim().length > 0);
+      } else if (typeof baseObject.to === "string" && baseObject.to.trim().length > 0) {
+        baseObject.to = [baseObject.to];
+      } else {
+        baseObject.to = [];
+      }
+      baseObject.reply_to = typeof baseObject.reply_to === "string" ? baseObject.reply_to : "";
       baseObject.subject = typeof baseObject.subject === "string" ? baseObject.subject : "";
       baseObject.text = typeof baseObject.text === "string" ? baseObject.text : "";
+      baseObject.html = typeof baseObject.html === "string" ? baseObject.html : "";
       writeJsonNodeConfigValue(node, baseObject);
       onNodeConfigMutated(node);
       hydrateComposerRowsFromConfig();
       syncRawEditorFromConfig();
       renderComposerRows();
+      refreshJsonEditorSourceState();
     });
 
     const hintEl = footerEl.createDiv({ cls: "ss-studio-node-json-composer-hint" });
-    hintEl.setText("Choose value type per row. Use Raw for advanced nested JSON editing.");
+    hintEl.setText("Choose value type per row. HTML rows support Source/Preview. Use Raw for advanced nested JSON.");
     refreshComposerValidation();
+    refreshJsonEditorSourceState();
   };
 
   const applyDisplayMode = (): void => {
@@ -989,18 +1314,20 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
     rawErrorEl.setText("");
     writeJsonNodeConfigValue(node, parsed.value);
     onNodeConfigMutated(node);
+    refreshJsonEditorSourceState();
   });
 
   hydrateComposerRowsFromConfig();
   renderComposerRows();
   syncRawEditorFromConfig();
   applyDisplayMode();
+  refreshJsonEditorSourceState();
 
   renderJsonOutputPreview({
     nodeEl,
     node,
     nodeRunState,
-    configuredValue: readJsonNodeConfigValue(node),
+    configuredValue: readJsonNodeEditorValue(node, nodeRunState),
   });
 
   return true;
@@ -1400,21 +1727,254 @@ function renderInlineConfigStringListField(options: {
   });
 }
 
-function appendPathBrowseButtonIcon(
-  buttonEl: HTMLElement,
-  iconClassName: string
-): void {
-  const iconEl = buttonEl.createSpan({ cls: iconClassName });
-  iconEl.setAttr("aria-hidden", "true");
-  const namespace = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(namespace, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  const folderPath = document.createElementNS(namespace, "path");
-  folderPath.setAttribute("d", "M1.75 4.75a1 1 0 0 1 1-1h3l1.1 1.2h6.4a1 1 0 0 1 1 1v5.3a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z");
-  const linePath = document.createElementNS(namespace, "path");
-  linePath.setAttribute("d", "M6.25 8.4h4.1m-2.05-2.05V10.5");
-  svg.append(folderPath, linePath);
-  iconEl.appendChild(svg);
+function renderInlineConfigNoteSelectorField(options: {
+  node: StudioNodeInstance;
+  field: StudioNodeConfigFieldDefinition;
+  fieldEl: HTMLElement;
+  interactionLocked: boolean;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+}): void {
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+
+  const items = parseStudioNoteItems(node.config[field.key] as StudioJsonValue | undefined);
+  const container = fieldEl.createDiv({ cls: "ss-studio-note-selector" });
+  const toolbarEl = container.createDiv({ cls: "ss-studio-note-selector-toolbar" });
+  const summaryEl = toolbarEl.createDiv({ cls: "ss-studio-note-selector-summary" });
+  const countBadgeEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-count" });
+  const statusEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-status" });
+  const addButton = toolbarEl.createEl("button", {
+    cls: "ss-studio-note-selector-add-button",
+    text: "Add Note",
+    attr: {
+      "aria-label": "Add note entry",
+    },
+  });
+  addButton.type = "button";
+  addButton.disabled = interactionLocked;
+  const itemsContainer = container.createDiv({ cls: "ss-studio-note-selector-items" });
+
+  const updateSummary = (): void => {
+    const total = items.length;
+    const enabled = items.filter((entry) => entry.enabled).length;
+    const skipped = total - enabled;
+    countBadgeEl.setText(`${total} ${total === 1 ? "note" : "notes"}`);
+    if (total === 0) {
+      statusEl.setText("Add markdown notes to include in this node.");
+      return;
+    }
+    if (enabled === total) {
+      statusEl.setText("All notes included.");
+      return;
+    }
+    if (enabled === 0) {
+      statusEl.setText("All notes are skipped.");
+      return;
+    }
+    statusEl.setText(`${enabled} included, ${skipped} skipped.`);
+  };
+
+  const emitChange = (): void => {
+    node.config[field.key] = serializeStudioNoteItems(items);
+    updateSummary();
+    onNodeConfigMutated(node);
+  };
+
+  const bindActionButton = (
+    buttonEl: HTMLButtonElement,
+    handler: () => Promise<void> | void
+  ): void => {
+    buttonEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (interactionLocked) {
+        return;
+      }
+      void handler();
+    });
+  };
+
+  const renderItems = (): void => {
+    itemsContainer.empty();
+    if (items.length === 0) {
+      itemsContainer.createDiv({
+        cls: "ss-studio-note-selector-empty",
+        text: "No notes yet. Add one or more markdown notes.",
+      });
+      return;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const cardEl = itemsContainer.createDiv({ cls: "ss-studio-note-selector-card" });
+      if (!item.enabled) {
+        cardEl.addClass("is-disabled");
+      }
+
+      const cardHeaderEl = cardEl.createDiv({ cls: "ss-studio-note-selector-card-head" });
+      const toggleLabel = cardHeaderEl.createEl("label", {
+        cls: "ss-studio-note-selector-control-label",
+      });
+      const checkbox = toggleLabel.createEl("input", {
+        type: "checkbox",
+        cls: "ss-studio-note-selector-toggle-checkbox",
+        attr: {
+          "aria-label": `Include note ${i + 1} in output`,
+        },
+      });
+      checkbox.checked = item.enabled;
+      checkbox.disabled = interactionLocked;
+      toggleLabel.createSpan({
+        cls: "ss-studio-note-selector-card-index",
+        text: `Note ${i + 1}`,
+      });
+
+      const actionsEl = cardHeaderEl.createDiv({ cls: "ss-studio-note-selector-card-actions" });
+      const moveUpButton = actionsEl.createEl("button", {
+        cls: "ss-studio-note-selector-action-button",
+        text: "Up",
+        attr: {
+          "aria-label": `Move note ${i + 1} up`,
+          title: "Move note up",
+        },
+      });
+      moveUpButton.type = "button";
+      moveUpButton.disabled = interactionLocked || i === 0;
+      bindActionButton(moveUpButton, () => {
+        if (i === 0) {
+          return;
+        }
+        const previous = items[i - 1];
+        items[i - 1] = item;
+        items[i] = previous;
+        renderItems();
+        emitChange();
+      });
+
+      const moveDownButton = actionsEl.createEl("button", {
+        cls: "ss-studio-note-selector-action-button",
+        text: "Down",
+        attr: {
+          "aria-label": `Move note ${i + 1} down`,
+          title: "Move note down",
+        },
+      });
+      moveDownButton.type = "button";
+      moveDownButton.disabled = interactionLocked || i === items.length - 1;
+      bindActionButton(moveDownButton, () => {
+        if (i >= items.length - 1) {
+          return;
+        }
+        const next = items[i + 1];
+        items[i + 1] = item;
+        items[i] = next;
+        renderItems();
+        emitChange();
+      });
+
+      const removeButton = actionsEl.createEl("button", {
+        cls: "ss-studio-note-selector-remove-button",
+        text: "Remove",
+        attr: {
+          "aria-label": `Remove note ${i + 1}`,
+          title: "Remove note",
+        },
+      });
+      removeButton.type = "button";
+      removeButton.disabled = interactionLocked;
+      bindActionButton(removeButton, () => {
+        items.splice(i, 1);
+        renderItems();
+        emitChange();
+      });
+
+      const syncEnabledState = (): void => {
+        const isEnabled = item.enabled;
+        cardEl.classList.toggle("is-disabled", !isEnabled);
+      };
+      syncEnabledState();
+      checkbox.addEventListener("change", () => {
+        item.enabled = checkbox.checked;
+        syncEnabledState();
+        emitChange();
+      });
+
+      const fieldsEl = cardEl.createDiv({ cls: "ss-studio-note-selector-fields" });
+      const pathField = fieldsEl.createDiv({ cls: "ss-studio-note-selector-field" });
+      const pathRow = pathField.createDiv({
+        cls: "ss-studio-node-inline-config-path-row ss-studio-note-selector-path-row",
+      });
+      const pathInput = pathRow.createEl("input", {
+        type: "text",
+        cls: "ss-studio-node-inline-config-input ss-studio-node-inline-config-path-input",
+        attr: {
+          placeholder: "Vault path to markdown note",
+          "aria-label": `Markdown path for note ${i + 1}`,
+        },
+      });
+      pathInput.value = item.path;
+      pathInput.disabled = interactionLocked;
+      const pathStateEl = pathField.createDiv({
+        cls: "ss-studio-note-selector-path-state",
+      });
+      const syncPathState = (): void => {
+        const state: { tone: StudioNotePathStateTone; message: string } =
+          resolveStudioNotePathState(item.path);
+        pathStateEl.setText(state.message);
+        pathStateEl.classList.toggle("is-ready", state.tone === "ready");
+        pathStateEl.classList.toggle("is-invalid", state.tone === "invalid");
+      };
+      syncPathState();
+      pathInput.addEventListener("input", () => {
+        item.path = pathInput.value;
+        syncPathState();
+        emitChange();
+      });
+
+      const browseButtonEl = pathRow.createEl("button", {
+        cls: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
+        attr: {
+          "aria-label": "Browse files",
+          title: "Browse files",
+        },
+      });
+      browseButtonEl.type = "button";
+      browseButtonEl.disabled = interactionLocked;
+      appendStudioPathBrowseButtonIcon(
+        browseButtonEl,
+        "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
+      );
+      browseButtonEl.createSpan({
+        cls: "ss-studio-node-inline-config-path-button-label ss-studio-path-browse-button-label",
+        text: "Browse",
+      });
+      bindActionButton(browseButtonEl, async () => {
+        const browseField: StudioNodeConfigFieldDefinition = {
+          key: field.key,
+          label: field.label,
+          type: "file_path",
+          accept: ".md,text/markdown",
+        };
+        const selected = await browseForNodeConfigPath(browseField);
+        if (!selected) {
+          return;
+        }
+        item.path = selected;
+        pathInput.value = selected;
+        syncPathState();
+        emitChange();
+      });
+    }
+    updateSummary();
+  };
+
+  bindActionButton(addButton, () => {
+    items.push({ path: "", enabled: true });
+    renderItems();
+    emitChange();
+  });
+
+  renderItems();
+  updateSummary();
 }
 
 function renderInlineConfigPathField(options: {
@@ -1451,7 +2011,7 @@ function renderInlineConfigPathField(options: {
   });
   browseButtonEl.type = "button";
   browseButtonEl.disabled = interactionLocked;
-  appendPathBrowseButtonIcon(
+  appendStudioPathBrowseButtonIcon(
     browseButtonEl,
     "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
   );
@@ -1637,6 +2197,17 @@ function renderInlineConfigPanel(options: {
         onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
+      continue;
+    }
+    if (field.type === "note_selector") {
+      renderInlineConfigNoteSelectorField({
+        node,
+        field,
+        fieldEl,
+        interactionLocked,
+        onNodeConfigMutated: handleNodeConfigMutated,
+      });
+      renderedAnyField = true;
     }
   }
 
@@ -1657,7 +2228,7 @@ function resolveInlineTextEditorPlaceholder(nodeKind: string): string {
     return "Transcribed text appears here...";
   }
   if (nodeKind === "studio.note") {
-    return "Edit note text...";
+    return "Live note preview appears here...";
   }
   if (nodeKind === "studio.text_generation") {
     return "Generated text appears here...";
@@ -1680,7 +2251,7 @@ function resolveInlineTextEditorAriaLabel(node: StudioNodeInstance): string {
 
 function resolveInlineRenderedEmptyState(nodeKind: string): string {
   if (nodeKind === "studio.note") {
-    return "Note is empty.";
+    return "Run preview is empty. Select one or more markdown notes.";
   }
   if (nodeKind === "studio.text_generation") {
     return "Generated text appears here after a run.";
@@ -1701,8 +2272,9 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
   if (!isInlineTextNodeKind(node.kind)) {
     return false;
   }
+  const isNoteNode = node.kind === "studio.note";
   const outputLocked = node.kind === "studio.text_generation" && node.config.lockOutput === true;
-  const editorReadOnly = interactionLocked || outputLocked;
+  const editorReadOnly = interactionLocked || outputLocked || isNoteNode;
   let textDisplayMode = readTextDisplayMode(node);
   let previewRenderRequest = 0;
 
@@ -1727,7 +2299,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     },
   });
   rawModeButtonEl.type = "button";
-  rawModeButtonEl.disabled = interactionLocked;
+  rawModeButtonEl.disabled = interactionLocked || isNoteNode;
 
   const renderedModeButtonEl = modeToggleEl.createEl("button", {
     cls: "ss-studio-node-text-display-mode-button",
@@ -1737,7 +2309,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     },
   });
   renderedModeButtonEl.type = "button";
-  renderedModeButtonEl.disabled = interactionLocked;
+  renderedModeButtonEl.disabled = interactionLocked || isNoteNode;
 
   const rawSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-surface" });
   const textEditorEl = rawSurfaceEl.createEl("textarea", {
@@ -1748,11 +2320,14 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     },
   });
   textEditorEl.value = readEditableNodeText(node, nodeRunState);
-  textEditorEl.disabled = editorReadOnly;
-  textEditorEl.addEventListener("input", (event) => {
-    node.config.value = (event.target as HTMLTextAreaElement).value;
-    onNodeConfigMutated(node);
-  });
+  textEditorEl.readOnly = editorReadOnly;
+  textEditorEl.disabled = false;
+  if (!isNoteNode) {
+    textEditorEl.addEventListener("input", (event) => {
+      node.config.value = (event.target as HTMLTextAreaElement).value;
+      onNodeConfigMutated(node);
+    });
+  }
 
   const renderedSurfaceEl = editorWrapEl.createDiv({
     cls: "ss-studio-node-text-rendered is-hidden",
@@ -1812,6 +2387,9 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
   };
 
   const applyDisplayMode = (): void => {
+    if (isNoteNode) {
+      textDisplayMode = "raw";
+    }
     const showRaw = textDisplayMode === "raw";
     if (!showRaw) {
       syncRenderedSurfaceHeightToRaw();
@@ -1823,13 +2401,14 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     renderedModeButtonEl.classList.toggle("is-active", !showRaw);
     rawModeButtonEl.setAttr("aria-pressed", showRaw ? "true" : "false");
     renderedModeButtonEl.setAttr("aria-pressed", showRaw ? "false" : "true");
-    textEditorEl.disabled = editorReadOnly || !showRaw;
+    textEditorEl.readOnly = editorReadOnly || !showRaw;
+    textEditorEl.disabled = false;
   };
 
   rawModeButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (interactionLocked || textDisplayMode === "raw") {
+    if (interactionLocked || isNoteNode || textDisplayMode === "raw") {
       return;
     }
     textDisplayMode = "raw";
@@ -1841,7 +2420,7 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
   renderedModeButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (interactionLocked || textDisplayMode === "rendered") {
+    if (interactionLocked || isNoteNode || textDisplayMode === "rendered") {
       return;
     }
     textDisplayMode = "rendered";
@@ -1850,6 +2429,9 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     applyDisplayMode();
   });
 
+  if (isNoteNode) {
+    modeToggleEl.addClass("is-hidden");
+  }
   applyDisplayMode();
   return true;
 }
@@ -1907,7 +2489,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["vaultPath"],
+      orderedFieldKeys: ["notes"],
       interactionLocked,
       onNodeConfigMutated,
       resolveDynamicSelectOptions,
