@@ -7,7 +7,7 @@ SystemSculpt adds the following ribbon actions in this order:
 | Icon name | Ribbon action label | Behavior |
 | --- | --- | --- |
 | `message-square` | Open SystemSculpt Chat | Opens a new chat view |
-| `history` | Open SystemSculpt Chat History | Opens chat history modal |
+| `history` | Open SystemSculpt History | Opens unified history modal |
 | `trash` | Open SystemSculpt Janitor | Opens janitor modal |
 | `network` | Open Similar Notes Panel | Opens Similar Notes view |
 | `search` | Open SystemSculpt Search | Opens search modal |

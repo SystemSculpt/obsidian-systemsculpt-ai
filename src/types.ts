@@ -290,6 +290,7 @@ export interface SystemSculptSettings {
   favoritesFilterSettings: FavoritesFilterSettings;
 
   favoriteChats: string[];
+  favoriteStudioSessions: string[];
 
   activeProvider: ActiveProvider;
 
@@ -645,6 +646,7 @@ Raw transcript:`,
   favoritesFilterSettings: DEFAULT_FAVORITES_FILTER_SETTINGS,
 
   favoriteChats: [],
+  favoriteStudioSessions: [],
 
   activeProvider: {
     id: "systemsculpt",

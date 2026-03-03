@@ -1890,6 +1890,7 @@ export default class SystemSculptPlugin extends Plugin {
           "toggle-audio-recorder",
           "toggle-obsidian-window-video-recorder",
           "open-systemsculpt-chat",
+          "open-systemsculpt-history",
           "open-chat-history",
           "open-systemsculpt-janitor",
           "reload-obsidian",

@@ -1,0 +1,126 @@
+.systemsculpt-history-modal .ss-modal__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 420px;
+}
+
+.systemsculpt-history-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-history-search .search-input-container {
+  flex: 1;
+}
+
+.systemsculpt-history-search .search-input {
+  width: 100%;
+}
+
+.systemsculpt-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.systemsculpt-history-item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.systemsculpt-history-item:hover,
+.systemsculpt-history-item.is-selected {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.systemsculpt-history-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.systemsculpt-history-item-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemsculpt-history-item-badge {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.systemsculpt-history-item-time {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.systemsculpt-history-item-favorite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.systemsculpt-history-item-favorite.is-favorite {
+  color: var(--color-yellow);
+  border-color: color-mix(in srgb, var(--color-yellow) 60%, var(--background-modifier-border));
+}
+
+.systemsculpt-history-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-history-item-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  min-height: 240px;
+  color: var(--text-muted);
+}
+
+.systemsculpt-history-empty-icon .svg-icon {
+  width: 24px;
+  height: 24px;
+}

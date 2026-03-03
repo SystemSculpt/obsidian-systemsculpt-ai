@@ -33,7 +33,7 @@
 @import 'components/inputs.css';
 @import 'components/loaders.css';
 @import 'components/streaming-indicator.css';  /* Enhanced streaming status indicator */
-@import 'components/load-chat.css';  /* Load chat modal styles */
+@import 'components/systemsculpt-history.css';  /* Unified history modal styles */
 @import 'components/tooltips.css';
 @import 'components/checkboxes.css';
 @import 'components/buttons.css';

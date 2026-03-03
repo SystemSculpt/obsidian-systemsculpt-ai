@@ -1,7 +1,7 @@
 import { App, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { JanitorModal } from "../../modals/JanitorModal";
-import { LoadChatModal } from "../../views/chatview/LoadChatModal";
+import { SystemSculptHistoryModal } from "../../views/history/SystemSculptHistoryModal";
 import { ChatView, CHAT_VIEW_TYPE } from "../../views/chatview/ChatView";
 import { generateDefaultChatTitle } from "../../utils/titleUtils";
 
@@ -37,7 +37,7 @@ export class RibbonManager {
   /**
    * Register all ribbon icons in the correct order:
    * 1. SystemSculpt Chat
-   * 2. SystemSculpt Chat History
+   * 2. SystemSculpt History
    * 3. SystemSculpt Janitor
    * 4. Similar Notes
    * 5. SystemSculpt Search
@@ -55,12 +55,12 @@ export class RibbonManager {
       }
     );
 
-    // 2. Chat History
+    // 2. SystemSculpt History
     this.registerRibbonIcon(
       "history",
-      "Open SystemSculpt Chat History",
+      "Open SystemSculpt History",
       () => {
-        this.openChatHistoryModal();
+        this.openSystemSculptHistoryModal();
       }
     );
 
@@ -166,11 +166,18 @@ export class RibbonManager {
   }
 
   /**
-   * Open the SystemSculpt Chat History modal
+   * Open the SystemSculpt History modal
+   */
+  public openSystemSculptHistoryModal() {
+    const modal = new SystemSculptHistoryModal(this.plugin);
+    modal.open();
+  }
+
+  /**
+   * Backward-compatible alias for older callers.
    */
   public openChatHistoryModal() {
-    const modal = new LoadChatModal(this.plugin);
-    modal.open();
+    this.openSystemSculptHistoryModal();
   }
 
   /**

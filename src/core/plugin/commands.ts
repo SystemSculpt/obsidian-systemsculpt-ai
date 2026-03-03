@@ -31,7 +31,7 @@ export class CommandManager {
     this.registerToggleAudioRecorder();
     this.registerToggleVideoRecorder();
     this.registerOpenChat();
-    this.registerOpenChatHistory();
+    this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
     this.registerMeetingProcessor();
     this.registerTranscribeAudioFile();
@@ -154,12 +154,20 @@ export class CommandManager {
     });
   }
 
-  private registerOpenChatHistory() {
+  private registerOpenSystemSculptHistory() {
+    this.plugin.addCommand({
+      id: "open-systemsculpt-history",
+      name: "Open SystemSculpt History",
+      callback: () => {
+        this.ribbonManager.openSystemSculptHistoryModal();
+      },
+    });
+
     this.plugin.addCommand({
       id: "open-chat-history",
-      name: "Open SystemSculpt Chat History",
+      name: "Open SystemSculpt Chat History (Legacy Alias)",
       callback: () => {
-        this.ribbonManager.openChatHistoryModal();
+        this.ribbonManager.openSystemSculptHistoryModal();
       },
     });
   }

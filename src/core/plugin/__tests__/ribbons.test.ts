@@ -45,6 +45,16 @@ describe("RibbonManager", () => {
     expect((plugin as any)._ribbons).toHaveLength(8);
   });
 
+  it("uses the new SystemSculpt History ribbon label", () => {
+    const { app, plugin } = createPlugin();
+    const manager = new RibbonManager(plugin, app);
+
+    manager.initialize();
+
+    const ribbons = (plugin as any)._ribbons;
+    expect(ribbons[1]?.title).toBe("Open SystemSculpt History");
+  });
+
   it("prevents re-registering after cleanup", () => {
     const { app, plugin } = createPlugin();
     const manager = new RibbonManager(plugin, app);

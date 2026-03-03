@@ -161,6 +161,10 @@ export class SettingsManager {
     if (!Array.isArray(migratedSettings.favoriteChats)) {
       migratedSettings.favoriteChats = DEFAULT_SETTINGS.favoriteChats;
     }
+
+    if (!Array.isArray(migratedSettings.favoriteStudioSessions)) {
+      migratedSettings.favoriteStudioSessions = DEFAULT_SETTINGS.favoriteStudioSessions;
+    }
     
     // Ensure automatic backup settings are properly initialized (migration for existing users)
     if (typeof migratedSettings.automaticBackupsEnabled !== 'boolean') {
@@ -607,6 +611,14 @@ export class SettingsManager {
       if (typeof validatedSettings.favoritesFilterSettings.modelSortOrder !== 'string') {
         validatedSettings.favoritesFilterSettings.modelSortOrder = defaultSettings.favoritesFilterSettings.modelSortOrder;
       }
+    }
+
+    if (!Array.isArray(validatedSettings.favoriteChats)) {
+      validatedSettings.favoriteChats = defaultSettings.favoriteChats;
+    }
+
+    if (!Array.isArray(validatedSettings.favoriteStudioSessions)) {
+      validatedSettings.favoriteStudioSessions = defaultSettings.favoriteStudioSessions;
     }
 
     // Remove cachedEmbeddingStats if it exists (from old embeddings system)

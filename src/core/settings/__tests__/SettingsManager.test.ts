@@ -40,6 +40,7 @@ jest.mock("../../../types", () => ({
     debugMode: false,
     logLevel: 2,
     favoriteChats: [],
+    favoriteStudioSessions: [],
     automaticBackupsEnabled: false,
     automaticBackupInterval: 24,
     automaticBackupRetentionDays: 7,
@@ -229,6 +230,11 @@ describe("SettingsManager", () => {
       it("initializes missing favoriteChats", () => {
         const result = migrateSettings({});
         expect(result.favoriteChats).toEqual([]);
+      });
+
+      it("initializes missing favoriteStudioSessions", () => {
+        const result = migrateSettings({});
+        expect(result.favoriteStudioSessions).toEqual([]);
       });
 
       it("initializes missing selectedModelProviders", () => {

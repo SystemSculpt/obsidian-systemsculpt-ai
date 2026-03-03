@@ -11,7 +11,6 @@ import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
 import { SystemPromptService } from "../../services/SystemPromptService";
-import { LoadChatModal } from "./LoadChatModal";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 import { StandardModelSelectionModal } from "../../modals/StandardModelSelectionModal";
 

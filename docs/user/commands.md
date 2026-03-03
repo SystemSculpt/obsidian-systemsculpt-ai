@@ -12,7 +12,8 @@ Source of truth:
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Open SystemSculpt Chat |  | `open-systemsculpt-chat` | Opens a new chat view |
-| Open SystemSculpt Chat History |  | `open-chat-history` | Opens chat history modal |
+| Open SystemSculpt History |  | `open-systemsculpt-history` | Opens unified history modal (Chats + Studio sessions) |
+| Open SystemSculpt Chat History (Legacy Alias) |  | `open-chat-history` | Deprecated alias for `open-systemsculpt-history` |
 | Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
