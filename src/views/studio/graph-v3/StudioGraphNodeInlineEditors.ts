@@ -24,6 +24,7 @@ import {
 } from "../StudioPathFieldUi";
 import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
+import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 
 type RenderStudioNodeInlineEditorOptions = {
   nodeEl: HTMLElement;
@@ -49,6 +50,11 @@ type RenderStudioNodeInlineEditorOptions = {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
+  nodeDetailMode?: StudioNodeDetailMode;
+  showTextEditor?: boolean;
+  showSystemPromptField?: boolean;
+  showOutputPreview?: boolean;
+  showFieldHelp?: boolean;
 };
 
 type StudioTextDisplayMode = "raw" | "rendered";
@@ -737,6 +743,7 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
     onNodeConfigMutated,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
+    showOutputPreview = true,
   } = options;
 
   const editorWrapEl = nodeEl.createDiv({ cls: "ss-studio-node-json-editor" });
@@ -1324,12 +1331,14 @@ function renderJsonNodeEditor(options: RenderStudioNodeInlineEditorOptions): boo
   applyDisplayMode();
   refreshJsonEditorSourceState();
 
-  renderJsonOutputPreview({
-    nodeEl,
-    node,
-    nodeRunState,
-    configuredValue: readJsonNodeEditorValue(node, nodeRunState),
-  });
+  if (showOutputPreview) {
+    renderJsonOutputPreview({
+      nodeEl,
+      node,
+      nodeRunState,
+      configuredValue: readJsonNodeEditorValue(node, nodeRunState),
+    });
+  }
 
   return true;
 }
@@ -2058,6 +2067,8 @@ function renderInlineConfigPanel(options: {
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   panelClassName?: string;
+  hiddenFieldKeys?: Set<string>;
+  showFieldHelp?: boolean;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
@@ -2071,6 +2082,8 @@ function renderInlineConfigPanel(options: {
     interactionLocked,
     onNodeConfigMutated,
     panelClassName,
+    hiddenFieldKeys,
+    showFieldHelp = true,
     resolveDynamicSelectOptions,
   } = options;
 
@@ -2102,6 +2115,9 @@ function renderInlineConfigPanel(options: {
   let renderedAnyField = false;
 
   for (const field of fields) {
+    if (hiddenFieldKeys?.has(field.key)) {
+      continue;
+    }
     const fullWidth = isInlineConfigFieldFullWidth(field);
     const fieldKeySuffix = fieldKeyToCssSuffix(field.key);
     const fieldEl = gridEl.createDiv({
@@ -2113,7 +2129,7 @@ function renderInlineConfigPanel(options: {
       text: normalizeFieldLabel(field),
     });
 
-    if (field.description) {
+    if (showFieldHelp && field.description) {
       fieldEl.createDiv({
         cls: "ss-studio-node-inline-config-help",
         text: field.description,
@@ -2283,8 +2299,12 @@ function renderInlineTextNodeEditor(options: RenderStudioNodeInlineEditorOptions
     onNodeConfigMutated,
     onNodePresentationMutated,
     renderMarkdownPreview,
+    showTextEditor = true,
   } = options;
   if (!isInlineTextNodeKind(node.kind)) {
+    return false;
+  }
+  if (!showTextEditor) {
     return false;
   }
   const isNoteNode = node.kind === "studio.note";
@@ -2459,8 +2479,15 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     definition,
     interactionLocked,
     onNodeConfigMutated,
+    showSystemPromptField = true,
+    showOutputPreview = true,
+    showFieldHelp = true,
     resolveDynamicSelectOptions,
   } = options;
+  const hiddenFieldKeys = new Set<string>();
+  if (!showSystemPromptField) {
+    hiddenFieldKeys.add("systemPrompt");
+  }
   const kind = normalizeNodeKind(node.kind);
 
   if (kind === "studio.image_generation") {
@@ -2471,6 +2498,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["modelId", "count", "aspectRatio"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2483,6 +2511,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["sourcePath"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2495,6 +2524,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["ffmpegCommand", "outputFormat", "outputPath", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2507,6 +2537,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["preface", "notes"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2520,6 +2551,8 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       interactionLocked,
       onNodeConfigMutated,
       panelClassName: "ss-studio-node-inline-config--text-generation",
+      hiddenFieldKeys,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2540,9 +2573,10 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       ],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
-    if (rendered) {
+    if (rendered && showOutputPreview) {
       renderDatasetOutputPreview({
         nodeEl,
         node,
@@ -2553,15 +2587,20 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
   }
 
   if (kind === "studio.json") {
-    return renderJsonNodeEditor(options);
+    return renderJsonNodeEditor({
+      ...options,
+      showOutputPreview,
+    });
   }
 
   if (kind === "studio.value") {
-    renderValueOutputPreview({
-      nodeEl,
-      node,
-      nodeRunState,
-    });
+    if (showOutputPreview) {
+      renderValueOutputPreview({
+        nodeEl,
+        node,
+        nodeRunState,
+      });
+    }
     return true;
   }
 
@@ -2580,6 +2619,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       ],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
     renderHttpRequestBindingSummary({
@@ -2597,6 +2637,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["command", "args", "cwd", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2609,6 +2650,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["value"],
       interactionLocked,
       onNodeConfigMutated,
+      showFieldHelp,
       resolveDynamicSelectOptions,
     });
   }
@@ -2624,6 +2666,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     orderedFieldKeys: definition.configSchema.fields.map((field) => field.key),
     interactionLocked,
     onNodeConfigMutated,
+    showFieldHelp,
     resolveDynamicSelectOptions,
   });
 }

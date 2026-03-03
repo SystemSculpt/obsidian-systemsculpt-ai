@@ -3,6 +3,11 @@ import {
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
 } from "../StudioGraphInteractionTypes";
+import {
+  normalizeStudioNodeDetailMode,
+  STUDIO_NODE_DETAIL_DEFAULT_MODE,
+  type StudioNodeDetailMode,
+} from "./StudioGraphNodeDetailMode";
 
 export type StudioGraphViewState = {
   scrollLeft: number;
@@ -15,6 +20,7 @@ export type StudioGraphViewportState = StudioGraphViewState & {
 };
 
 export type StudioGraphViewStateByProject = Record<string, StudioGraphViewState>;
+export type StudioNodeDetailModeByProject = Record<string, StudioNodeDetailMode>;
 
 const GRAPH_SCROLL_EPSILON = 0.5;
 const GRAPH_ZOOM_EPSILON = 0.0001;
@@ -124,4 +130,44 @@ export function getSavedGraphViewState(
   }
   const existing = graphViewStateByProjectPath[normalizedPath];
   return normalizeGraphViewState(existing);
+}
+
+export function parseNodeDetailModeByProject(raw: unknown): StudioNodeDetailModeByProject {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const parsed: StudioNodeDetailModeByProject = {};
+  for (const [path, value] of Object.entries(raw as Record<string, unknown>)) {
+    const normalizedPath = String(path || "").trim();
+    if (!normalizedPath) {
+      continue;
+    }
+    parsed[normalizedPath] = normalizeStudioNodeDetailMode(value);
+  }
+  return parsed;
+}
+
+export function serializeNodeDetailModeByProject(
+  nodeDetailModeByProject: StudioNodeDetailModeByProject
+): StudioNodeDetailModeByProject {
+  const serialized: StudioNodeDetailModeByProject = {};
+  for (const [path, mode] of Object.entries(nodeDetailModeByProject)) {
+    const normalizedPath = String(path || "").trim();
+    if (!normalizedPath) {
+      continue;
+    }
+    serialized[normalizedPath] = normalizeStudioNodeDetailMode(mode);
+  }
+  return serialized;
+}
+
+export function getSavedNodeDetailMode(
+  nodeDetailModeByProject: StudioNodeDetailModeByProject,
+  projectPath: string | null
+): StudioNodeDetailMode {
+  const normalizedPath = String(projectPath || "").trim();
+  if (!normalizedPath) {
+    return STUDIO_NODE_DETAIL_DEFAULT_MODE;
+  }
+  return normalizeStudioNodeDetailMode(nodeDetailModeByProject[normalizedPath]);
 }

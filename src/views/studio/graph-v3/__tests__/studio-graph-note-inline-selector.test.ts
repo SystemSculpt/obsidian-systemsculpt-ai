@@ -188,4 +188,27 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       "Notes/First.md",
     ]);
   });
+
+  it("keeps editable note paths visible when text editor surface is hidden", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture({
+      notes: {
+        items: [{ path: "Notes/Context.md", enabled: true }],
+      },
+    });
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: IDLE_NODE_RUN_STATE,
+      definition: definitionFixture(),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+      showTextEditor: false,
+    });
+
+    const pathInput = nodeEl.querySelector<HTMLInputElement>('input[aria-label="Markdown path for note 1"]');
+    expect(pathInput).toBeDefined();
+    expect(nodeEl.querySelector(".ss-studio-node-text-editor-wrap")).toBeNull();
+  });
 });

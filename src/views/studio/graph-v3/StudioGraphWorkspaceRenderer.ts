@@ -11,6 +11,7 @@ import {
   StudioGraphInteractionEngine,
 } from "../StudioGraphInteractionEngine";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -20,6 +21,7 @@ export type StudioGraphWorkspaceRendererOptions = {
   busy: boolean;
   currentProject: StudioProjectV1 | null;
   currentProjectPath: string | null;
+  nodeDetailMode: StudioNodeDetailMode;
   graphInteraction: StudioGraphInteractionEngine;
   getNodeRunState: (nodeId: string) => StudioNodeRunDisplayState;
   findNodeDefinition: (node: StudioNodeInstance) => StudioNodeDefinition | null;
@@ -30,6 +32,12 @@ export type StudioGraphWorkspaceRendererOptions = {
     src: string;
     title: string;
   }) => void;
+  onRunGraph: () => void;
+  onOpenAddNodeMenuAtViewportCenter: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateLabelAtPosition: (position: { x: number; y: number }) => void;
   onRunNode: (nodeId: string) => void;
@@ -75,11 +83,18 @@ export function renderStudioGraphWorkspace(
     busy,
     currentProject,
     currentProjectPath,
+    nodeDetailMode,
     graphInteraction,
     getNodeRunState,
     findNodeDefinition,
     resolveAssetPreviewSrc,
     onOpenMediaPreview,
+    onRunGraph,
+    onOpenAddNodeMenuAtViewportCenter,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
+    onToggleNodeDetailMode,
     onOpenNodeContextMenu,
     onCreateLabelAtPosition,
     onRunNode,
@@ -193,6 +208,113 @@ export function renderStudioGraphWorkspace(
   const marquee = viewport.createDiv({ cls: "ss-studio-marquee-select" });
   graphInteraction.registerMarqueeElement(marquee);
 
+  const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
+  const runButton = controls.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button is-run",
+    text: "Run",
+    attr: {
+      "aria-label": "Run Studio graph",
+      title: "Run graph",
+    },
+  });
+  runButton.type = "button";
+  runButton.disabled = busy;
+  runButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) {
+      return;
+    }
+    onRunGraph();
+  });
+
+  const addButton = controls.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: "Add",
+    attr: {
+      "aria-label": "Add node",
+      title: "Add node",
+    },
+  });
+  addButton.type = "button";
+  addButton.disabled = busy;
+  addButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) {
+      return;
+    }
+    onOpenAddNodeMenuAtViewportCenter();
+  });
+
+  const zoomRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
+  const zoomOutButton = zoomRow.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: "-",
+    attr: {
+      "aria-label": "Zoom out",
+      title: "Zoom out",
+    },
+  });
+  zoomOutButton.type = "button";
+  zoomOutButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onZoomOut();
+  });
+
+  const zoomLabel = zoomRow.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-label" });
+  graphInteraction.registerZoomLabelElement(zoomLabel);
+
+  const zoomInButton = zoomRow.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: "+",
+    attr: {
+      "aria-label": "Zoom in",
+      title: "Zoom in",
+    },
+  });
+  zoomInButton.type = "button";
+  zoomInButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onZoomIn();
+  });
+
+  const zoomResetButton = controls.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: "100%",
+    attr: {
+      "aria-label": "Reset zoom",
+      title: "Reset zoom",
+    },
+  });
+  zoomResetButton.type = "button";
+  zoomResetButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onZoomReset();
+  });
+
+  const detailButton = controls.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: nodeDetailMode === "collapsed" ? "Expand" : "Collapse",
+    attr: {
+      "aria-label": "Toggle node detail mode",
+      title:
+        nodeDetailMode === "collapsed"
+          ? "Switch to expanded node details"
+          : "Switch to collapsed node details",
+    },
+  });
+  detailButton.type = "button";
+  detailButton.classList.toggle("is-active", nodeDetailMode === "collapsed");
+  detailButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onToggleNodeDetailMode();
+  });
+
   canvas.addEventListener("click", (event) => {
     graphInteraction.handleCanvasBackgroundClick(event.target as HTMLElement);
   });
@@ -225,6 +347,7 @@ export function renderStudioGraphWorkspace(
       layer: nodeLayer,
       busy,
       node,
+      nodeDetailMode,
       inboundEdges: inboundEdgesByNode.get(node.id) || [],
       nodeRunState: getNodeRunState(node.id),
       graphInteraction,

@@ -502,6 +502,80 @@ select.ss-pi-wizard__select { width: 100%; }
   flex-direction: column;
 }
 
+.ss-studio-graph-workspace-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 8;
+  display: grid;
+  gap: 8px;
+  width: 112px;
+  pointer-events: none;
+}
+
+.ss-studio-graph-workspace-control-button {
+  pointer-events: auto;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, #8de8bc 44%, var(--ss-studio-border) 56%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 88%, #214b38 12%);
+  color: color-mix(in srgb, #e5fced 92%, var(--text-normal) 8%);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 90ms ease;
+}
+
+.ss-studio-graph-workspace-control-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #9effd0 64%, var(--ss-studio-border) 36%);
+  background: color-mix(in srgb, var(--background-primary) 82%, #2a5f48 18%);
+  transform: translateY(-1px);
+}
+
+.ss-studio-graph-workspace-control-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ss-studio-graph-workspace-control-button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.ss-studio-graph-workspace-control-button.is-run {
+  border-color: color-mix(in srgb, #73d7a2 56%, var(--ss-studio-border) 44%);
+  background: color-mix(in srgb, #2d6f53 26%, var(--background-primary) 74%);
+}
+
+.ss-studio-graph-workspace-control-button.is-active {
+  border-color: color-mix(in srgb, #8ec8e6 66%, var(--ss-studio-border) 34%);
+  background: color-mix(in srgb, #31556a 34%, var(--background-primary) 66%);
+}
+
+.ss-studio-graph-workspace-control-zoom-row {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 30px 1fr 30px;
+  gap: 6px;
+  align-items: center;
+}
+
+.ss-studio-graph-workspace-control-zoom-label {
+  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 88%, #89d6ad 12%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 90%, #1f4a37 10%);
+  color: color-mix(in srgb, #c8fbe2 90%, var(--text-normal) 10%);
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .ss-studio-empty-state {
   border: 1px dashed color-mix(in srgb, var(--ss-studio-border) 85%, #79cda3 15%);
   border-radius: 0;
@@ -863,6 +937,10 @@ select.ss-pi-wizard__select { width: 100%; }
   pointer-events: auto;
 }
 
+.ss-studio-node-card.is-detail-collapsed {
+  background: color-mix(in srgb, var(--background-primary) 92%, #1e4735 8%);
+}
+
 .ss-studio-node-card:active {
   cursor: grabbing;
 }
@@ -1139,6 +1217,59 @@ select.ss-pi-wizard__select { width: 100%; }
   color: var(--text-muted);
   font-family: var(--font-monospace);
   line-height: 1.35;
+}
+
+.ss-studio-node-collapsed-visibility {
+  margin: 8px 0 0;
+  border: 1px dashed color-mix(in srgb, #8de8bc 30%, var(--ss-studio-border) 70%);
+  border-radius: 8px;
+  background: color-mix(in srgb, #122a1f 24%, var(--background-primary) 76%);
+  padding: 6px 7px;
+  display: grid;
+  gap: 6px;
+}
+
+.ss-studio-node-collapsed-visibility-title {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: color-mix(in srgb, #9deec8 72%, var(--text-muted) 28%);
+}
+
+.ss-studio-node-collapsed-visibility-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ss-studio-node-collapsed-visibility-button {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, #8de8bc 40%, var(--ss-studio-border) 60%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-primary) 90%, #1f4a37 10%);
+  color: color-mix(in srgb, #d3f8e5 90%, var(--text-normal) 10%);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.ss-studio-node-collapsed-visibility-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #9effd0 62%, var(--ss-studio-border) 38%);
+  background: color-mix(in srgb, var(--background-primary) 84%, #2a5f48 16%);
+}
+
+.ss-studio-node-collapsed-visibility-button.is-active {
+  border-color: color-mix(in srgb, #8ec8e6 66%, var(--ss-studio-border) 34%);
+  background: color-mix(in srgb, #31556a 34%, var(--background-primary) 66%);
+}
+
+.ss-studio-node-collapsed-visibility-button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 .ss-studio-node-text-editor-wrap {

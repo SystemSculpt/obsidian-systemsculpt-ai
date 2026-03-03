@@ -14,6 +14,14 @@ import {
   shouldSuppressNodeOutputPreview,
 } from "./StudioGraphNodeInlineEditors";
 import {
+  isStudioCollapsedSectionApplicableToNode,
+  listStudioCollapsedDetailSections,
+  resolveStudioCollapsedSectionLabel,
+  resolveStudioNodeDetailSectionVisibility,
+  writeStudioCollapsedSectionVisibilityOverride,
+  type StudioNodeDetailMode,
+} from "./StudioGraphNodeDetailMode";
+import {
   isStudioExpandedTextNodeKind,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
@@ -38,6 +46,7 @@ type RenderStudioGraphNodeCardOptions = {
   layer: HTMLElement;
   busy: boolean;
   node: StudioNodeInstance;
+  nodeDetailMode: StudioNodeDetailMode;
   inboundEdges?: Array<{
     fromNodeId: string;
     fromPortId: string;
@@ -379,11 +388,103 @@ function renderLabelNodeCard(options: {
   });
 }
 
+function renderCollapsedVisibilityControls(options: {
+  nodeEl: HTMLElement;
+  node: StudioNodeInstance;
+  busy: boolean;
+  nodeDetailMode: StudioNodeDetailMode;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+}): void {
+  const {
+    nodeEl,
+    node,
+    busy,
+    nodeDetailMode,
+    onNodeConfigMutated,
+    onNodePresentationMutated,
+  } = options;
+  if (nodeDetailMode !== "expanded") {
+    return;
+  }
+  if (node.kind === "studio.label") {
+    return;
+  }
+
+  const sections = listStudioCollapsedDetailSections().filter((section) =>
+    isStudioCollapsedSectionApplicableToNode(node, section)
+  );
+  if (sections.length === 0) {
+    return;
+  }
+
+  const wrapEl = nodeEl.createDiv({ cls: "ss-studio-node-collapsed-visibility" });
+  wrapEl.createDiv({
+    cls: "ss-studio-node-collapsed-visibility-title",
+    text: "Collapsed Visibility",
+  });
+  const buttonsEl = wrapEl.createDiv({ cls: "ss-studio-node-collapsed-visibility-buttons" });
+  const commitPresentationMutation = (): void => {
+    if (onNodePresentationMutated) {
+      onNodePresentationMutated(node);
+      return;
+    }
+    onNodeConfigMutated(node);
+  };
+  for (const section of sections) {
+    const metadata = resolveStudioCollapsedSectionLabel(section);
+    const button = buttonsEl.createEl("button", {
+      cls: "ss-studio-node-collapsed-visibility-button",
+      text: metadata.shortLabel,
+      attr: {
+        "aria-label": `Show ${metadata.summary} in collapsed mode`,
+        title: `Show ${metadata.summary} in collapsed mode`,
+      },
+    });
+    button.type = "button";
+    button.disabled = busy;
+
+    const syncVisualState = (): void => {
+      const visibleInCollapsed = resolveStudioNodeDetailSectionVisibility({
+        node,
+        mode: "collapsed",
+        section,
+      });
+      button.classList.toggle("is-active", visibleInCollapsed);
+      button.setAttr("aria-pressed", visibleInCollapsed ? "true" : "false");
+    };
+    syncVisualState();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (busy) {
+        return;
+      }
+      const currentlyVisible = resolveStudioNodeDetailSectionVisibility({
+        node,
+        mode: "collapsed",
+        section,
+      });
+      const changed = writeStudioCollapsedSectionVisibilityOverride({
+        node,
+        section,
+        visibleInCollapsed: !currentlyVisible,
+      });
+      if (!changed) {
+        return;
+      }
+      commitPresentationMutation();
+      syncVisualState();
+    });
+  }
+}
+
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
     layer,
     busy,
     node,
+    nodeDetailMode,
     nodeRunState,
     graphInteraction,
     findNodeDefinition,
@@ -422,6 +523,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     nodeEl.style.minHeight = `${resolvedMinHeight}px`;
   }
   nodeEl.classList.toggle("is-expanded-text-node", isStudioExpandedTextNodeKind(node.kind));
+  nodeEl.classList.toggle("is-detail-collapsed", nodeDetailMode === "collapsed");
   nodeEl.classList.toggle("is-selected", graphInteraction.isNodeSelected(node.id));
   nodeEl.classList.toggle("is-managed-pending", isPlaceholder);
   graphInteraction.registerNodeElement(node.id, nodeEl);
@@ -667,6 +769,26 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line" });
     pendingPreviewEl.createDiv({ cls: "ss-studio-node-pending-line is-short" });
   }
+  const showTextEditor = resolveStudioNodeDetailSectionVisibility({
+    node,
+    mode: nodeDetailMode,
+    section: "textEditor",
+  });
+  const showSystemPromptField = resolveStudioNodeDetailSectionVisibility({
+    node,
+    mode: nodeDetailMode,
+    section: "systemPrompt",
+  });
+  const showOutputPreview = resolveStudioNodeDetailSectionVisibility({
+    node,
+    mode: nodeDetailMode,
+    section: "outputPreview",
+  });
+  const showFieldHelp = resolveStudioNodeDetailSectionVisibility({
+    node,
+    mode: nodeDetailMode,
+    section: "fieldHelp",
+  });
   const renderedInlineEditor =
     !isPlaceholder &&
     renderStudioNodeInlineEditor({
@@ -682,6 +804,11 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onJsonEditorPreferredModeChange,
       renderMarkdownPreview,
       resolveDynamicSelectOptions,
+      nodeDetailMode,
+      showTextEditor,
+      showSystemPromptField,
+      showOutputPreview,
+      showFieldHelp,
     });
 
   if (!isPlaceholder && !renderedInlineEditor) {
@@ -692,10 +819,21 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     configPreviewEl.setAttribute("data-node-config-preview", node.id);
   }
 
+  if (!isPlaceholder) {
+    renderCollapsedVisibilityControls({
+      nodeEl,
+      node,
+      busy,
+      nodeDetailMode,
+      onNodeConfigMutated,
+      onNodePresentationMutated,
+    });
+  }
+
   const outputPreview = shouldSuppressNodeOutputPreview(node.kind)
     ? ""
     : formatNodeOutputPreview(nodeRunState.outputs);
-  if (outputPreview) {
+  if (showOutputPreview && outputPreview) {
     const outputPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-output-preview" });
     const separatorIndex = outputPreview.indexOf(":");
     if (separatorIndex > 0 && separatorIndex < 48) {
