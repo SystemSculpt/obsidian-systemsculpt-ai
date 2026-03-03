@@ -1,4 +1,8 @@
 import { StudioGraphSelectionController } from "../StudioGraphSelectionController";
+import {
+  createElementStub,
+  installWindowPointerListenerHarness,
+} from "./studio-graph-pointer-test-helpers";
 
 type TestHost = ConstructorParameters<typeof StudioGraphSelectionController>[0];
 
@@ -275,5 +279,118 @@ describe("StudioGraphSelectionController wheel behavior", () => {
 
     expect(preventDefault).not.toHaveBeenCalled();
     expect(controller.getGraphZoom()).toBe(initialZoom);
+  });
+});
+
+describe("StudioGraphSelectionController drag behavior", () => {
+  it("allows dragging regular nodes while busy so layout can be reorganized during runs", () => {
+    const host = createHost();
+    const scheduleProjectSave = jest.fn();
+    const renderEdgeLayer = jest.fn();
+    host.isBusy = () => true;
+    host.scheduleProjectSave = scheduleProjectSave;
+    host.renderEdgeLayer = renderEdgeLayer;
+
+    const project = {
+      graph: {
+        nodes: [
+          {
+            id: "node_1",
+            position: { x: 40, y: 50 },
+            kind: "studio.input",
+            config: {},
+          },
+        ],
+      },
+    } as any;
+    host.getCurrentProject = () => project;
+
+    const controller = new StudioGraphSelectionController(host);
+    const nodeEl = createElementStub();
+    controller.registerNodeElement("node_1", nodeEl);
+    const startEvent = {
+      button: 0,
+      pointerId: 11,
+      clientX: 100,
+      clientY: 120,
+      preventDefault: jest.fn(),
+    } as unknown as PointerEvent;
+
+    const harness = installWindowPointerListenerHarness();
+    try {
+      controller.startNodeDrag("node_1", startEvent, nodeEl);
+      harness.emit(
+        "pointermove",
+        {
+          pointerId: 11,
+          clientX: 140,
+          clientY: 180,
+        } as PointerEvent
+      );
+      harness.emit(
+        "pointerup",
+        {
+          pointerId: 11,
+          clientX: 140,
+          clientY: 180,
+        } as PointerEvent
+      );
+    } finally {
+      harness.restore();
+    }
+
+    expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(project.graph.nodes[0].position).toEqual({ x: 80, y: 110 });
+    expect(nodeEl.style.transform).toBe("translate(80px, 110px)");
+    expect(renderEdgeLayer).toHaveBeenCalled();
+    expect(scheduleProjectSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows marquee selection while busy so multi-node layout changes stay available during runs", () => {
+    const host = createHost();
+    host.isBusy = () => true;
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [
+            {
+              id: "node_1",
+              version: "1.0.0",
+              title: "Node 1",
+              position: { x: 100, y: 100 },
+              kind: "studio.input",
+              config: {},
+            },
+          ],
+        },
+      } as any);
+
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = createViewport();
+    const marquee = createElementStub();
+    controller.registerViewportElement(viewport);
+    controller.registerMarqueeElement(marquee);
+
+    const startEvent = {
+      button: 0,
+      pointerId: 5,
+      clientX: 80,
+      clientY: 80,
+      preventDefault: jest.fn(),
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    } as unknown as PointerEvent;
+
+    const harness = installWindowPointerListenerHarness();
+    try {
+      controller.startMarqueeSelection(startEvent);
+      expect(harness.has("pointermove")).toBe(true);
+      expect(harness.has("pointerup")).toBe(true);
+    } finally {
+      harness.restore();
+    }
+
+    expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 });

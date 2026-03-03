@@ -690,7 +690,7 @@ export class StudioGraphGroupController {
   }
 
   private startGroupDrag(groupId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
-    if (this.host.isBusy() || startEvent.button !== 0) {
+    if (startEvent.button !== 0) {
       return;
     }
 

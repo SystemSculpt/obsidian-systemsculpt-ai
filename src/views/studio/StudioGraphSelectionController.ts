@@ -1,5 +1,4 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
-import { isManagedOutputPlaceholderNode } from "./StudioManagedOutputNodes";
 import {
   STUDIO_GRAPH_CANVAS_HEIGHT,
   STUDIO_GRAPH_CANVAS_WIDTH,
@@ -217,7 +216,7 @@ export class StudioGraphSelectionController {
   }
 
   startMarqueeSelection(startEvent: PointerEvent): void {
-    if (this.host.isBusy() || !this.host.getCurrentProject() || !this.graphViewportEl || !this.graphMarqueeEl) {
+    if (!this.host.getCurrentProject() || !this.graphViewportEl || !this.graphMarqueeEl) {
       return;
     }
 
@@ -462,11 +461,6 @@ export class StudioGraphSelectionController {
   startNodeDrag(nodeId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
     const project = this.host.getCurrentProject();
     if (!project) {
-      return;
-    }
-    const dragSourceNode = this.findNode(project, nodeId);
-    const canDragWhileBusy = dragSourceNode ? isManagedOutputPlaceholderNode(dragSourceNode) : false;
-    if (this.host.isBusy() && !canDragWhileBusy) {
       return;
     }
 

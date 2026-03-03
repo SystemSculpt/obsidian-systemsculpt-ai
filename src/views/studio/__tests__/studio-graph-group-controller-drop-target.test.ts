@@ -1,5 +1,11 @@
 import type { StudioProjectV1 } from "../../../studio/types";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
+import {
+  createElementStub,
+  installWindowPointerListenerHarness,
+} from "./studio-graph-pointer-test-helpers";
+
+type GroupHost = ConstructorParameters<typeof StudioGraphGroupController>[0];
 
 function createProject(): StudioProjectV1 {
   return {
@@ -84,7 +90,10 @@ function createProject(): StudioProjectV1 {
   };
 }
 
-function createController(project: StudioProjectV1): StudioGraphGroupController {
+function createController(
+  project: StudioProjectV1,
+  overrides?: Partial<GroupHost>
+): StudioGraphGroupController {
   return new StudioGraphGroupController({
     isBusy: () => false,
     getCurrentProject: () => project,
@@ -93,6 +102,7 @@ function createController(project: StudioProjectV1): StudioGraphGroupController 
     notifyNodePositionsChanged: () => undefined,
     requestRender: () => undefined,
     scheduleProjectSave: () => undefined,
+    ...overrides,
   });
 }
 
@@ -119,5 +129,58 @@ describe("StudioGraphGroupController drop target resolution", () => {
     const project = createProject();
     const controller = createController(project);
     expect(controller.resolveDropTargetGroupId(["member"])).toBeNull();
+  });
+
+  it("allows dragging groups while busy so graph layout can still be organized during runs", () => {
+    const project = createProject();
+    const notifyNodePositionsChanged = jest.fn();
+    const scheduleProjectSave = jest.fn();
+    const memberEl = createElementStub();
+    const controller = createController(project, {
+      isBusy: () => true,
+      notifyNodePositionsChanged,
+      scheduleProjectSave,
+      getNodeElement: (nodeId) => (nodeId === "member" ? memberEl : null),
+    });
+    const frameEl = createElementStub();
+    const startEvent = {
+      button: 0,
+      pointerId: 17,
+      clientX: 100,
+      clientY: 100,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    } as unknown as PointerEvent;
+
+    const harness = installWindowPointerListenerHarness();
+    try {
+      (controller as any).startGroupDrag("group_1", startEvent, frameEl);
+      harness.emit(
+        "pointermove",
+        {
+          pointerId: 17,
+          clientX: 140,
+          clientY: 160,
+        } as PointerEvent
+      );
+      harness.emit(
+        "pointerup",
+        {
+          pointerId: 17,
+          clientX: 140,
+          clientY: 160,
+        } as PointerEvent
+      );
+    } finally {
+      harness.restore();
+    }
+
+    const memberNode = project.graph.nodes.find((node) => node.id === "member");
+    expect(memberNode?.position).toEqual({ x: 140, y: 160 });
+    expect(memberEl.style.transform).toBe("translate(140px, 160px)");
+    expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(startEvent.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(notifyNodePositionsChanged).toHaveBeenCalled();
+    expect(scheduleProjectSave).toHaveBeenCalledTimes(1);
   });
 });
