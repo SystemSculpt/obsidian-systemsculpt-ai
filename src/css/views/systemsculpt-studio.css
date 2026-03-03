@@ -2567,6 +2567,13 @@ select.ss-pi-wizard__select { width: 100%; }
   resize: vertical;
 }
 
+.ss-studio-node-inline-config-textarea.is-single-row {
+  min-height: 32px;
+  max-height: 32px;
+  resize: none;
+  overflow-y: auto;
+}
+
 .ss-studio-node-inline-config-input:focus-visible,
 .ss-studio-node-inline-config-select:focus-visible,
 .ss-studio-node-inline-config-textarea:focus-visible,

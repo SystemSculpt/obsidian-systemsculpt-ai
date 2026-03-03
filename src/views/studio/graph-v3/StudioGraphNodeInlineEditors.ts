@@ -1624,14 +1624,19 @@ function renderInlineConfigTextareaField(options: {
   field: StudioNodeConfigFieldDefinition;
   fieldEl: HTMLElement;
   interactionLocked: boolean;
+  compactSingleRow?: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, compactSingleRow = false, onNodeConfigMutated } = options;
+  const textareaClassName = compactSingleRow
+    ? "ss-studio-node-inline-config-textarea is-single-row"
+    : "ss-studio-node-inline-config-textarea";
   const textAreaEl = fieldEl.createEl("textarea", {
-    cls: "ss-studio-node-inline-config-textarea",
+    cls: textareaClassName,
     attr: {
       placeholder: field.placeholder || "",
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
+      ...(compactSingleRow ? { rows: "1" } : {}),
     },
   });
   textAreaEl.disabled = interactionLocked;
@@ -2068,6 +2073,7 @@ function renderInlineConfigPanel(options: {
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   panelClassName?: string;
   hiddenFieldKeys?: Set<string>;
+  compactTextareaFieldKeys?: Set<string>;
   showFieldHelp?: boolean;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
@@ -2083,6 +2089,7 @@ function renderInlineConfigPanel(options: {
     onNodeConfigMutated,
     panelClassName,
     hiddenFieldKeys,
+    compactTextareaFieldKeys,
     showFieldHelp = true,
     resolveDynamicSelectOptions,
   } = options;
@@ -2181,6 +2188,7 @@ function renderInlineConfigPanel(options: {
         field,
         fieldEl,
         interactionLocked,
+        compactSingleRow: compactTextareaFieldKeys?.has(field.key) === true,
         onNodeConfigMutated: handleNodeConfigMutated,
       });
       renderedAnyField = true;
@@ -2479,6 +2487,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     definition,
     interactionLocked,
     onNodeConfigMutated,
+    nodeDetailMode,
     showSystemPromptField = true,
     showOutputPreview = true,
     showFieldHelp = true,
@@ -2530,6 +2539,8 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
   }
 
   if (kind === "studio.note") {
+    const compactTextareaFieldKeys =
+      nodeDetailMode === "collapsed" ? new Set<string>(["preface"]) : undefined;
     return renderInlineConfigPanel({
       nodeEl,
       node,
@@ -2537,6 +2548,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["preface", "notes"],
       interactionLocked,
       onNodeConfigMutated,
+      compactTextareaFieldKeys,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });

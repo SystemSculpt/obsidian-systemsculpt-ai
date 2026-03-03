@@ -92,6 +92,33 @@ function definitionFixture(kind: string): StudioNodeDefinition {
     };
   }
 
+  if (kind === "studio.note") {
+    return {
+      kind,
+      version: "1.0.0",
+      capabilityClass: "local_io",
+      cachePolicy: "never",
+      inputPorts: [],
+      outputPorts: [{ id: "text", type: "text" }],
+      configDefaults: {},
+      configSchema: {
+        fields: [
+          {
+            key: "preface",
+            label: "Preface",
+            type: "textarea",
+          },
+        ],
+        allowUnknownKeys: true,
+      },
+      async execute() {
+        return {
+          outputs: {},
+        };
+      },
+    };
+  }
+
   return {
     kind,
     version: "1.0.0",
@@ -189,5 +216,25 @@ describe("Studio collapsed detail rendering", () => {
     });
 
     expect(nodeEl.querySelector(".ss-studio-node-inline-output-preview")).toBeNull();
+  });
+
+  it("renders note preface as a single-row textarea in collapsed mode", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture("studio.note", { preface: "Campaign context" });
+
+    renderStudioNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: IDLE_NODE_RUN_STATE,
+      definition: definitionFixture("studio.note"),
+      interactionLocked: false,
+      onNodeConfigMutated: jest.fn(),
+      nodeDetailMode: "collapsed",
+    });
+
+    const prefaceTextarea = nodeEl.querySelector<HTMLTextAreaElement>('textarea[aria-label="Node Preface"]');
+    expect(prefaceTextarea).toBeDefined();
+    expect(prefaceTextarea?.classList.contains("is-single-row")).toBe(true);
+    expect(prefaceTextarea?.getAttribute("rows")).toBe("1");
   });
 });
