@@ -1,4 +1,4 @@
-import { Platform, normalizePath } from "obsidian";
+import { normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
@@ -9,13 +9,13 @@ import { StudioProjectStore } from "./StudioProjectStore";
 import { StudioRuntime } from "./StudioRuntime";
 import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
 import {
-  listStudioLocalTextModelOptions,
-  listStudioPiProviderAuthRecords,
-} from "./StudioLocalTextModelCatalog";
-import {
-  decorateStudioLocalTextModelOptionsWithAuth,
-  resolveStudioLocalTextModelProviderId,
-} from "./StudioLocalTextModelOptionAuth";
+  StudioTerminalSessionManager,
+  type StudioTerminalSessionListener,
+  type StudioTerminalSessionRequest,
+  type StudioTerminalSessionSnapshot,
+} from "./StudioTerminalSessionManager";
+import { resolveStudioDynamicSelectOptions } from "./StudioDynamicSelectOptions";
+import { StudioTerminalService } from "./StudioTerminalService";
 import { randomId } from "./utils";
 import type {
   StudioAssetRef,
@@ -85,65 +85,6 @@ function starterGraph(project: StudioProjectV1): StudioProjectV1 {
   };
 }
 
-function normalizeOptionText(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function modelIsSystemSculpt(model: any): boolean {
-  const provider = normalizeOptionText(model?.identifier?.providerId || model?.provider).toLowerCase();
-  if (provider === "systemsculpt") {
-    return true;
-  }
-  const id = normalizeOptionText(model?.id).toLowerCase();
-  return id.startsWith("systemsculpt@@");
-}
-
-function modelIsTextCapable(model: any): boolean {
-  const capabilities = Array.isArray(model?.capabilities)
-    ? model.capabilities.map((entry: unknown) => String(entry || "").trim().toLowerCase())
-    : [];
-  if (capabilities.length === 0) {
-    return true;
-  }
-  if (capabilities.includes("embeddings")) {
-    return capabilities.some((capability: string) =>
-      capability === "text" ||
-      capability === "chat" ||
-      capability === "code" ||
-      capability === "tools" ||
-      capability === "function_calling" ||
-      capability === "vision"
-    );
-  }
-  return true;
-}
-
-function toSystemSculptTextModelOption(model: any): StudioNodeConfigSelectOption | null {
-  const value = normalizeOptionText(model?.identifier?.modelId) || normalizeOptionText(model?.id);
-  if (!value) {
-    return null;
-  }
-  const label = normalizeOptionText(model?.identifier?.displayName || model?.name || model?.identifier?.modelId || value);
-  const contextLength = Number(model?.context_length);
-  const descriptionParts: string[] = [];
-  if (Number.isFinite(contextLength) && contextLength > 0) {
-    descriptionParts.push(`context ${contextLength.toLocaleString()}`);
-  }
-  const description = descriptionParts.join(" • ");
-  return {
-    value,
-    label: label || value,
-    description: description || undefined,
-    badge: "SystemSculpt",
-    keywords: [
-      normalizeOptionText(model?.name),
-      normalizeOptionText(model?.id),
-      normalizeOptionText(model?.identifier?.modelId),
-      normalizeOptionText(model?.provider),
-    ].filter((entry) => entry.length > 0),
-  };
-}
-
 export class StudioService {
   private readonly registry = new StudioNodeRegistry();
   private readonly compiler = new StudioGraphCompiler();
@@ -151,6 +92,7 @@ export class StudioService {
   private readonly assetStore: StudioAssetStore;
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
+  private readonly terminalService: StudioTerminalService;
   private currentProjectPath: string | null = null;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
@@ -165,6 +107,12 @@ export class StudioService {
       this.compiler,
       this.assetStore,
       this.apiAdapter
+    );
+    const terminalSessionManager = new StudioTerminalSessionManager(plugin);
+    this.terminalService = new StudioTerminalService(
+      plugin,
+      this.projectStore,
+      terminalSessionManager
     );
 
     registerBuiltInStudioNodes(this.registry);
@@ -376,6 +324,48 @@ export class StudioService {
     await this.projectStore.savePolicy(project.permissionsRef.policyPath, policy);
   }
 
+  async ensureTerminalSession(request: StudioTerminalSessionRequest): Promise<StudioTerminalSessionSnapshot> {
+    return await this.terminalService.ensureSession(request);
+  }
+
+  async restartTerminalSession(request: StudioTerminalSessionRequest): Promise<StudioTerminalSessionSnapshot> {
+    return await this.terminalService.restartSession(request);
+  }
+
+  async stopTerminalSession(options: { projectPath: string; nodeId: string }): Promise<void> {
+    await this.terminalService.stopSession(options);
+  }
+
+  clearTerminalSessionHistory(options: { projectPath: string; nodeId: string }): void {
+    this.terminalService.clearHistory(options);
+  }
+
+  writeTerminalInput(options: { projectPath: string; nodeId: string; data: string }): void {
+    this.terminalService.writeInput(options);
+  }
+
+  resizeTerminalSession(options: { projectPath: string; nodeId: string; cols: number; rows: number }): void {
+    this.terminalService.resizeSession(options);
+  }
+
+  getTerminalSessionSnapshot(options: {
+    projectPath: string;
+    nodeId: string;
+  }): StudioTerminalSessionSnapshot | null {
+    return this.terminalService.getSnapshot(options);
+  }
+
+  subscribeTerminalSession(
+    options: { projectPath: string; nodeId: string },
+    listener: StudioTerminalSessionListener
+  ): () => void {
+    return this.terminalService.subscribe(options, listener);
+  }
+
+  async dispose(): Promise<void> {
+    await this.terminalService.dispose();
+  }
+
   listNodeDefinitions() {
     return this.registry.list();
   }
@@ -384,47 +374,9 @@ export class StudioService {
     source: StudioNodeConfigDynamicOptionsSource,
     _node: StudioNodeInstance
   ): Promise<StudioNodeConfigSelectOption[]> {
-    if (source === "studio.local_text_models") {
-      const localOptions = await listStudioLocalTextModelOptions(this.plugin);
-      const baseOptions = localOptions.map((option) => ({
-        value: option.value,
-        label: option.label,
-        description: option.description,
-        badge: option.badge,
-        keywords: option.keywords,
-      }));
-      if (!Platform.isDesktopApp || baseOptions.length === 0) {
-        return baseOptions;
-      }
-
-      const providerHints = Array.from(
-        new Set(
-          baseOptions
-            .map((option) => resolveStudioLocalTextModelProviderId(option))
-            .filter((providerId) => providerId.length > 0)
-        )
-      );
-
-      if (providerHints.length === 0) {
-        return baseOptions;
-      }
-
-      try {
-        const records = await listStudioPiProviderAuthRecords({ providerHints });
-        return decorateStudioLocalTextModelOptionsWithAuth(baseOptions, records);
-      } catch {
-        return baseOptions;
-      }
-    }
-    if (source === "studio.systemsculpt_text_models") {
-      const models = await this.plugin.modelService.getModels().catch(() => [] as any[]);
-      const options = models
-        .filter((model) => modelIsSystemSculpt(model) && modelIsTextCapable(model))
-        .map((model) => toSystemSculptTextModelOption(model))
-        .filter((option): option is StudioNodeConfigSelectOption => option !== null)
-        .sort((left, right) => left.label.localeCompare(right.label));
-      return options;
-    }
-    return [];
+    return await resolveStudioDynamicSelectOptions({
+      plugin: this.plugin,
+      source,
+    });
   }
 }
