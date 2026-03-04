@@ -13,12 +13,10 @@ import {
 import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
-  StudioEdge,
   StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
   StudioNodeDefinition,
-  StudioNodeGroup,
   StudioNodeInstance,
   StudioNodeOutputMap,
   StudioProjectV1,
@@ -124,16 +122,22 @@ import {
 import { mountStudioTerminalNode } from "./StudioTerminalNodeRenderer";
 import {
   buildGraphClipboardPayload,
-  cloneHistorySnapshot,
   cloneProjectSnapshot,
   normalizeNodeIdList,
   parseGraphClipboardPayload,
-  serializeProjectSnapshot,
   STUDIO_GRAPH_CLIPBOARD_SCHEMA,
-  trimHistorySnapshots,
   type StudioGraphClipboardPayload,
   type StudioGraphHistorySnapshot,
 } from "./systemsculpt-studio-view/StudioGraphClipboardModel";
+import {
+  consumeStudioGraphRedoSnapshot,
+  consumeStudioGraphUndoSnapshot,
+  createStudioGraphHistoryState,
+  resetStudioGraphHistory,
+  setStudioGraphHistoryCurrentSnapshot,
+  captureStudioGraphHistoryCheckpoint,
+} from "./systemsculpt-studio-view/StudioGraphHistoryState";
+import { materializeGraphClipboardPaste } from "./systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
@@ -202,10 +206,7 @@ export class SystemSculptStudioView extends ItemView {
   private vaultEventRefs: EventRef[] = [];
   private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
   private graphClipboardPasteCount = 0;
-  private historyCurrentSnapshot: StudioGraphHistorySnapshot | null = null;
-  private historyCurrentSerialized = "";
-  private historyUndoSnapshots: StudioGraphHistorySnapshot[] = [];
-  private historyRedoSnapshots: StudioGraphHistorySnapshot[] = [];
+  private readonly historyState = createStudioGraphHistoryState();
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
     this.handleWindowKeyDown(event);
   };
@@ -386,42 +387,23 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private setHistoryCurrentSnapshot(project: StudioProjectV1, selectedNodeIds: string[]): void {
-    this.historyCurrentSnapshot = {
-      project: cloneProjectSnapshot(project),
-      selectedNodeIds: normalizeNodeIdList(selectedNodeIds),
-    };
-    this.historyCurrentSerialized = serializeProjectSnapshot(project);
+    setStudioGraphHistoryCurrentSnapshot(this.historyState, project, selectedNodeIds);
   }
 
   private resetProjectHistory(project: StudioProjectV1 | null, options?: { selectedNodeIds?: string[] }): void {
-    this.historyUndoSnapshots = [];
-    this.historyRedoSnapshots = [];
-    if (!project) {
-      this.historyCurrentSnapshot = null;
-      this.historyCurrentSerialized = "";
-      return;
-    }
-    this.setHistoryCurrentSnapshot(project, options?.selectedNodeIds || []);
+    resetStudioGraphHistory(this.historyState, project, options);
   }
 
   private captureProjectHistoryCheckpoint(): void {
     if (!this.currentProject) {
       return;
     }
-
-    const serialized = serializeProjectSnapshot(this.currentProject);
-    if (!this.historyCurrentSnapshot) {
-      this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
-      return;
-    }
-    if (serialized === this.historyCurrentSerialized) {
-      return;
-    }
-
-    this.historyUndoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
-    trimHistorySnapshots(this.historyUndoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
-    this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
-    this.historyRedoSnapshots = [];
+    captureStudioGraphHistoryCheckpoint(
+      this.historyState,
+      this.currentProject,
+      this.graphInteraction.getSelectedNodeIds(),
+      STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS
+    );
   }
 
   private applyHistorySnapshot(snapshot: StudioGraphHistorySnapshot): void {
@@ -458,31 +440,31 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private undoGraphHistory(): boolean {
-    if (this.busy || !this.currentProject || !this.historyCurrentSnapshot) {
+    if (this.busy || !this.currentProject || !this.historyState.currentSnapshot) {
       return false;
     }
-    const targetSnapshot = this.historyUndoSnapshots.pop();
+    const targetSnapshot = consumeStudioGraphUndoSnapshot(
+      this.historyState,
+      STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS
+    );
     if (!targetSnapshot) {
       return false;
     }
-
-    this.historyRedoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
-    trimHistorySnapshots(this.historyRedoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
     this.applyHistorySnapshot(targetSnapshot);
     return true;
   }
 
   private redoGraphHistory(): boolean {
-    if (this.busy || !this.currentProject || !this.historyCurrentSnapshot) {
+    if (this.busy || !this.currentProject || !this.historyState.currentSnapshot) {
       return false;
     }
-    const targetSnapshot = this.historyRedoSnapshots.pop();
+    const targetSnapshot = consumeStudioGraphRedoSnapshot(
+      this.historyState,
+      STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS
+    );
     if (!targetSnapshot) {
       return false;
     }
-
-    this.historyUndoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
-    trimHistorySnapshots(this.historyUndoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
     this.applyHistorySnapshot(targetSnapshot);
     return true;
   }
@@ -854,73 +836,19 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const project = this.currentProject;
-    const nodeIdMap = new Map<string, string>();
-    const newNodes: StudioNodeInstance[] = [];
-    const anchor = this.resolvePasteAnchorPosition();
-    const repeatedPasteOffset = this.graphClipboardPasteCount * 28;
-    const deltaX = anchor.x + repeatedPasteOffset - payload.anchor.x;
-    const deltaY = anchor.y + repeatedPasteOffset - payload.anchor.y;
-
-    for (const sourceNode of payload.nodes) {
-      const sourceNodeId = String(sourceNode.id || "").trim();
-      if (!sourceNodeId) {
-        continue;
-      }
-      const nextNodeId = randomId("node");
-      nodeIdMap.set(sourceNodeId, nextNodeId);
-      const clonedNode = JSON.parse(JSON.stringify(sourceNode)) as StudioNodeInstance;
-      clonedNode.id = nextNodeId;
-      clonedNode.position = this.normalizeNodePosition({
-        x: Number(clonedNode.position?.x || 0) + deltaX,
-        y: Number(clonedNode.position?.y || 0) + deltaY,
-      });
-      newNodes.push(clonedNode);
-    }
-    if (newNodes.length === 0) {
+    const materializedPaste = materializeGraphClipboardPaste({
+      payload,
+      anchor: this.resolvePasteAnchorPosition(),
+      pasteCount: this.graphClipboardPasteCount,
+      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+      nextNodeId: () => randomId("node"),
+      nextEdgeId: () => randomId("edge"),
+      nextGroupId: () => randomId("group"),
+    });
+    if (!materializedPaste) {
       return false;
     }
-
-    const newEdges: StudioEdge[] = [];
-    for (const sourceEdge of payload.edges || []) {
-      const fromNodeId = nodeIdMap.get(String(sourceEdge.fromNodeId || "").trim());
-      const toNodeId = nodeIdMap.get(String(sourceEdge.toNodeId || "").trim());
-      if (!fromNodeId || !toNodeId) {
-        continue;
-      }
-      const fromPortId = String(sourceEdge.fromPortId || "").trim();
-      const toPortId = String(sourceEdge.toPortId || "").trim();
-      if (!fromPortId || !toPortId) {
-        continue;
-      }
-      newEdges.push({
-        id: randomId("edge"),
-        fromNodeId,
-        fromPortId,
-        toNodeId,
-        toPortId,
-      });
-    }
-
-    const newGroups: StudioNodeGroup[] = [];
-    for (const sourceGroup of payload.groups || []) {
-      const groupNodeIds = normalizeNodeIdList(sourceGroup.nodeIds || [])
-        .map((nodeId) => nodeIdMap.get(nodeId) || "")
-        .filter((nodeId) => nodeId.length > 0);
-      if (groupNodeIds.length < 2) {
-        continue;
-      }
-      const groupName = String(sourceGroup.name || "").trim();
-      if (!groupName) {
-        continue;
-      }
-      const groupColor = String(sourceGroup.color || "").trim();
-      newGroups.push({
-        id: randomId("group"),
-        name: groupName,
-        ...(groupColor ? { color: groupColor } : {}),
-        nodeIds: groupNodeIds,
-      });
-    }
+    const { newNodes, newEdges, newGroups, nextSelection } = materializedPaste;
 
     project.graph.nodes.push(...newNodes);
     if (newEdges.length > 0) {
@@ -931,13 +859,6 @@ export class SystemSculptStudioView extends ItemView {
         project.graph.groups = [];
       }
       project.graph.groups.push(...newGroups);
-    }
-
-    const nextSelection = normalizeNodeIdList(payload.selectedNodeIds || [])
-      .map((nodeId) => nodeIdMap.get(nodeId) || "")
-      .filter((nodeId) => nodeId.length > 0);
-    if (nextSelection.length === 0) {
-      nextSelection.push(...newNodes.map((node) => node.id));
     }
 
     this.nodeContextMenuOverlay?.hide();

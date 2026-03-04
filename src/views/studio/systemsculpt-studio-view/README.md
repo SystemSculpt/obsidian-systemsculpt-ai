@@ -14,6 +14,14 @@ into focused submodules.
   - Obsidian/file URI parsing and vault reference resolution for paste/drop flows.
   - Text payload reference extraction helpers used by paste and drag-drop ingestion.
 
+- `StudioGraphHistoryState.ts`
+  - History state-machine operations (reset/capture/undo/redo snapshot transitions).
+  - Keeps stack mutation logic out of the view orchestration layer.
+
+- `StudioGraphClipboardPasteMaterializer.ts`
+  - Clipboard paste remapping for nodes/edges/groups and next selection calculation.
+  - Pure transform used by the view when applying clipboard payloads.
+
 ## Orchestration contract
 
 `SystemSculptStudioView.ts` should own:
@@ -30,10 +38,9 @@ Helper modules in this directory should own:
 
 ## Planned next slices
 
-1. Extract graph history state machine and transitions into a dedicated controller module.
-2. Extract clipboard paste materialization (node/edge/group remapping) into a model module.
-3. Extract drag/drop ingestion pipeline into focused handlers (`text`, `image`, `vault refs`).
-4. Split run-event materialization and managed-output synchronization into runtime modules.
+1. Extract drag/drop ingestion pipeline into focused handlers (`text`, `image`, `vault refs`).
+2. Split run-event materialization and managed-output synchronization into runtime modules.
+3. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
 
 ## Conventions
 
