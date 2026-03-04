@@ -22,18 +22,10 @@ import type {
   StudioProjectV1,
   StudioRunEvent,
 } from "../../studio/types";
-import {
-  isStudioManagedOutputProducerKind,
-  isStudioVisualOnlyNodeKind,
-} from "../../studio/StudioNodeKinds";
+import { isStudioVisualOnlyNodeKind } from "../../studio/StudioNodeKinds";
 import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { resolveNodeDefinitionPorts } from "../../studio/StudioNodePortResolution";
-import {
-  DATASET_OUTPUT_FIELDS_CONFIG_KEY,
-  deriveDatasetOutputFieldsFromOutputs,
-  readDatasetOutputFields,
-} from "../../studio/nodes/datasetNode";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
@@ -96,8 +88,6 @@ import {
 } from "./StudioViewHelpers";
 import {
   cleanupStaleManagedOutputPlaceholders,
-  materializePendingImageOutputPlaceholders,
-  materializeImageOutputsAsMediaNodes,
   removeManagedTextOutputNodes,
   removePendingManagedOutputNodes,
 } from "./StudioManagedOutputNodes";
@@ -157,6 +147,13 @@ import {
   composeTextGenerationPromptBundle,
   resolvePromptBundleNodeSource,
 } from "./systemsculpt-studio-view/StudioPromptBundleComposer";
+import {
+  materializeManagedOutputNodesForNodeOutput,
+  materializeManagedOutputNodesFromCacheEntries,
+  materializeManagedOutputPlaceholdersForStartedNode,
+  syncDatasetOutputFieldsToProjectNodeConfig,
+  syncInlineTextOutputToProjectNodeConfig,
+} from "./systemsculpt-studio-view/StudioRunOutputProjectors";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
@@ -1445,25 +1442,13 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const sourceNode = this.findNode(this.currentProject, event.nodeId);
-    if (!sourceNode) {
-      return;
+    const changed = syncInlineTextOutputToProjectNodeConfig({
+      project: this.currentProject,
+      event,
+    });
+    if (changed) {
+      this.scheduleProjectSave();
     }
-    if (sourceNode.kind !== "studio.text_generation" && sourceNode.kind !== "studio.transcription") {
-      return;
-    }
-    if (sourceNode.kind === "studio.text_generation" && isTextGenerationOutputLocked(sourceNode)) {
-      return;
-    }
-    const outputText = typeof event.outputs?.text === "string" ? event.outputs.text : "";
-    if (!outputText.trim()) {
-      return;
-    }
-    if (String(sourceNode.config.value || "") === outputText) {
-      return;
-    }
-    sourceNode.config.value = outputText;
-    this.scheduleProjectSave();
   }
 
   private syncDatasetOutputFieldsToNodeConfig(
@@ -1472,28 +1457,13 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const sourceNode = this.findNode(this.currentProject, event.nodeId);
-    if (!sourceNode || sourceNode.kind !== "studio.dataset") {
-      return;
+    const changed = syncDatasetOutputFieldsToProjectNodeConfig({
+      project: this.currentProject,
+      event,
+    });
+    if (changed) {
+      this.scheduleProjectSave();
     }
-
-    const nextFields = deriveDatasetOutputFieldsFromOutputs(event.outputs);
-    const currentFields = readDatasetOutputFields(
-      sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY] as StudioJsonValue
-    );
-    const unchanged =
-      nextFields.length === currentFields.length &&
-      nextFields.every((field, index) => field === currentFields[index]);
-    if (unchanged) {
-      return;
-    }
-
-    if (nextFields.length === 0) {
-      delete sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY];
-    } else {
-      sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY] = nextFields;
-    }
-    this.scheduleProjectSave();
   }
 
   private materializeManagedOutputPlaceholders(
@@ -1502,24 +1472,12 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-
-    const sourceNode = this.findNode(this.currentProject, event.nodeId);
-    if (!sourceNode || !isStudioManagedOutputProducerKind(sourceNode.kind)) {
-      return;
-    }
-
-    let changed = false;
-    if (sourceNode.kind === "studio.image_generation") {
-      const placeholders = materializePendingImageOutputPlaceholders({
-        project: this.currentProject,
-        sourceNode,
-        runId: event.runId,
-        createdAt: event.at,
-        createNodeId: () => randomId("node"),
-        createEdgeId: () => randomId("edge"),
-      });
-      changed = changed || placeholders.changed;
-    }
+    const changed = materializeManagedOutputPlaceholdersForStartedNode({
+      project: this.currentProject,
+      event,
+      createNodeId: () => randomId("node"),
+      createEdgeId: () => randomId("edge"),
+    });
 
     if (!changed) {
       return;
@@ -1533,33 +1491,17 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-
-    const sourceNode = this.findNode(this.currentProject, event.nodeId);
-    if (!sourceNode) {
-      return;
-    }
-
     let changed = this.removePendingManagedOutputPlaceholders({
-      sourceNodeId: sourceNode.id,
+      sourceNodeId: event.nodeId,
       runId: event.runId,
     });
-    if (sourceNode.kind === "studio.image_generation") {
-      const materializedMedia = materializeImageOutputsAsMediaNodes({
+    changed =
+      materializeManagedOutputNodesForNodeOutput({
         project: this.currentProject,
-        sourceNode,
-        outputs: event.outputs || null,
+        event,
         createNodeId: () => randomId("node"),
         createEdgeId: () => randomId("edge"),
-      });
-      changed = changed || materializedMedia.changed;
-    }
-    if (sourceNode.kind === "studio.text_generation") {
-      const removedManagedText = removeManagedTextOutputNodes({
-        project: this.currentProject,
-        sourceNodeId: sourceNode.id,
-      });
-      changed = changed || removedManagedText.changed;
-    }
+      }) || changed;
 
     if (!changed) {
       return;
@@ -1572,34 +1514,15 @@ export class SystemSculptStudioView extends ItemView {
   private materializeManagedOutputNodesFromCache(
     entries: Record<string, { outputs: StudioNodeOutputMap; updatedAt?: string }> | null
   ): void {
-    if (!this.currentProject || !entries) {
+    if (!this.currentProject) {
       return;
     }
-
-    let changed = false;
-    for (const node of this.currentProject.graph.nodes) {
-      if (!isStudioManagedOutputProducerKind(node.kind)) {
-        continue;
-      }
-
-      const cacheEntry = entries[node.id];
-      if (!cacheEntry || !cacheEntry.outputs || typeof cacheEntry.outputs !== "object") {
-        continue;
-      }
-
-      if (node.kind === "studio.image_generation") {
-        const materializedMedia = materializeImageOutputsAsMediaNodes({
-          project: this.currentProject,
-          sourceNode: node,
-          outputs: cacheEntry.outputs,
-          createNodeId: () => randomId("node"),
-          createEdgeId: () => randomId("edge"),
-        });
-        if (materializedMedia.changed) {
-          changed = true;
-        }
-      }
-    }
+    const changed = materializeManagedOutputNodesFromCacheEntries({
+      project: this.currentProject,
+      entries,
+      createNodeId: () => randomId("node"),
+      createEdgeId: () => randomId("edge"),
+    });
 
     if (!changed) {
       return;

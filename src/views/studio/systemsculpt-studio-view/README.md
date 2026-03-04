@@ -46,6 +46,10 @@ into focused submodules.
   - Studio project path predicates, folder-rename project-path remapping, and path-scoped state key remapping.
   - Keeps project-path state transforms deterministic and reusable.
 
+- `StudioRunOutputProjectors.ts`
+  - Run-output projection helpers for node output/start/cache events (text sync, dataset field sync, managed output materialization transforms).
+  - Keeps project graph mutation decisions deterministic and unit-testable outside view orchestration.
+
 ## Orchestration contract
 
 `SystemSculptStudioView.ts` should own:
@@ -62,12 +66,10 @@ Helper modules in this directory should own:
 
 ## Planned next slices
 
-1. Split run-event materialization and managed-output synchronization into runtime modules.
-2. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
-3. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
-4. Extract project file live-sync read/mutate orchestration into a dedicated controller.
-5. Split run-event materialization and managed-output synchronization into dedicated runtime handlers.
-6. Extract keyboard shortcut routing into a dedicated command-map controller.
+1. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
+2. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
+3. Extract project file live-sync read/mutate orchestration into a dedicated controller.
+4. Extract keyboard shortcut routing into a dedicated command-map controller.
 
 ## Conventions
 
