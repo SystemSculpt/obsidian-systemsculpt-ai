@@ -623,6 +623,7 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-graph-canvas {
   position: relative;
+  will-change: transform;
 }
 
 .ss-studio-edges-layer {
@@ -935,6 +936,7 @@ select.ss-pi-wizard__select { width: 100%; }
   touch-action: none;
   user-select: none;
   pointer-events: auto;
+  will-change: transform;
 }
 
 .ss-studio-node-card.is-detail-collapsed {
@@ -961,6 +963,40 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-node-card.is-managed-pending .ss-studio-node-run-status {
   animation: ss-studio-pending-pulse 1.4s ease-in-out infinite;
+}
+
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
+  box-shadow: 0 4px 14px color-mix(in srgb, #000 18%, transparent);
+}
+
+.ss-studio-graph-viewport.is-interacting .ss-studio-group-frame,
+.ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
+.ss-studio-graph-viewport.is-interacting .ss-studio-link-preview,
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
+  transition: none;
+}
+
+.ss-studio-graph-viewport.is-zoomed-far .ss-studio-node-card textarea,
+.ss-studio-graph-viewport.is-zoomed-far .ss-studio-node-card input,
+.ss-studio-graph-viewport.is-zoomed-far .ss-studio-node-text-rendered,
+.ss-studio-graph-viewport.is-zoomed-far .ss-studio-terminal-panel {
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ss-studio-terminal-panel.is-zoomed-far .xterm-cursor-layer {
+  opacity: 0;
+}
+
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card[data-node-kind="studio.terminal"] .ss-studio-terminal-surface {
+  visibility: hidden;
+}
+
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card[data-node-kind="studio.terminal"] .ss-studio-terminal-toolbar::after {
+  content: "Zoom in for live terminal";
+  margin-left: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 @keyframes ss-studio-pending-pulse {

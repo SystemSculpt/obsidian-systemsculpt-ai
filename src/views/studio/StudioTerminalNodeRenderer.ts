@@ -16,12 +16,15 @@ import { mountTerminalResizeHandle } from "./terminal/StudioTerminalResizeHandle
 import {
   buildStudioTerminalXtermOptions,
   loadXtermRuntime,
+  resolveStudioTerminalShortcutInput,
   STUDIO_TERMINAL_FONT_FAMILY,
 } from "./terminal/StudioTerminalXterm";
 import type { StudioTerminalNodeMountOptions } from "./terminal/StudioTerminalNodeTypes";
 
 export { STUDIO_TERMINAL_FONT_FAMILY, buildStudioTerminalXtermOptions } from "./terminal/StudioTerminalXterm";
 export type { StudioTerminalNodeMountOptions } from "./terminal/StudioTerminalNodeTypes";
+
+const STUDIO_TERMINAL_ACTIVE_MIN_ZOOM = 0.56;
 
 export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions): () => void {
   applyTerminalNodeSize(options.node, options.nodeEl);
@@ -59,6 +62,12 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
   let latestSnapshot: StudioTerminalSessionSnapshot | null = null;
   let appliedHistoryRevision: number | null = null;
   let pendingResizeTimer: number | null = null;
+
+  const syncZoomVisualState = (): number => {
+    const zoom = Math.max(0.01, Number(options.getGraphZoom() || 1));
+    panelEl.classList.toggle("is-zoomed-far", zoom < STUDIO_TERMINAL_ACTIVE_MIN_ZOOM);
+    return zoom;
+  };
 
   const syncButtons = (): void => {
     const status = latestSnapshot?.status || "idle";
@@ -134,6 +143,10 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
   };
 
   const queueResize = (): void => {
+    const zoom = syncZoomVisualState();
+    if (zoom < STUDIO_TERMINAL_ACTIVE_MIN_ZOOM) {
+      return;
+    }
     if (pendingResizeTimer !== null) {
       window.clearTimeout(pendingResizeTimer);
     }
@@ -220,6 +233,7 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
   } else {
     syncButtons();
   }
+  syncZoomVisualState();
 
   void (async () => {
     try {
@@ -232,6 +246,20 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       fitAddon = new runtime.FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(surfaceEl);
+      terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+        const translatedInput = resolveStudioTerminalShortcutInput(event);
+        if (!translatedInput) {
+          return true;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        options.writeInput({
+          projectPath: options.projectPath,
+          nodeId: options.node.id,
+          data: translatedInput,
+        });
+        return false;
+      });
       try {
         fitAddon.fit();
       } catch {}

@@ -282,6 +282,106 @@ describe("StudioGraphSelectionController wheel behavior", () => {
   });
 });
 
+describe("StudioGraphSelectionController fit selection", () => {
+  it("zooms and centers the viewport around selected nodes with padding", () => {
+    const host = createHost();
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [
+            {
+              id: "node_a",
+              position: { x: 100, y: 200 },
+              kind: "studio.value",
+              config: {},
+            },
+            {
+              id: "node_b",
+              position: { x: 500, y: 400 },
+              kind: "studio.value",
+              config: {},
+            },
+          ],
+        },
+      } as any);
+
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = {
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 1000,
+      clientHeight: 600,
+      getBoundingClientRect: () =>
+        ({
+          left: 0,
+          top: 0,
+        }) as DOMRect,
+    } as unknown as HTMLElement;
+    controller.registerViewportElement(viewport);
+
+    const nodeAEl = createElementStub() as unknown as HTMLElement & {
+      offsetWidth: number;
+      offsetHeight: number;
+    };
+    (nodeAEl as any).offsetWidth = 200;
+    (nodeAEl as any).offsetHeight = 120;
+    const nodeBEl = createElementStub() as unknown as HTMLElement & {
+      offsetWidth: number;
+      offsetHeight: number;
+    };
+    (nodeBEl as any).offsetWidth = 300;
+    (nodeBEl as any).offsetHeight = 200;
+    controller.registerNodeElement("node_a", nodeAEl);
+    controller.registerNodeElement("node_b", nodeBEl);
+    controller.setSelectedNodeIds(["node_a", "node_b"]);
+
+    const fitted = controller.fitSelectionInViewport({ paddingPx: 25 });
+
+    expect(fitted).toBe(true);
+    expect(controller.getGraphZoom()).toBeCloseTo(950 / 700, 5);
+    expect(viewport.scrollLeft).toBeCloseTo(110.7142857, 5);
+    expect(viewport.scrollTop).toBeCloseTo(242.8571429, 5);
+  });
+
+  it("returns false and keeps viewport state when nothing is selected", () => {
+    const host = createHost();
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [
+            {
+              id: "node_a",
+              position: { x: 100, y: 200 },
+              kind: "studio.value",
+              config: {},
+            },
+          ],
+        },
+      } as any);
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = {
+      scrollLeft: 88,
+      scrollTop: 132,
+      clientWidth: 900,
+      clientHeight: 700,
+      getBoundingClientRect: () =>
+        ({
+          left: 0,
+          top: 0,
+        }) as DOMRect,
+    } as unknown as HTMLElement;
+    controller.registerViewportElement(viewport);
+    const initialZoom = controller.getGraphZoom();
+
+    const fitted = controller.fitSelectionInViewport({ paddingPx: 25 });
+
+    expect(fitted).toBe(false);
+    expect(controller.getGraphZoom()).toBe(initialZoom);
+    expect(viewport.scrollLeft).toBe(88);
+    expect(viewport.scrollTop).toBe(132);
+  });
+});
+
 describe("StudioGraphSelectionController drag behavior", () => {
   it("allows dragging regular nodes while busy so layout can be reorganized during runs", () => {
     const host = createHost();

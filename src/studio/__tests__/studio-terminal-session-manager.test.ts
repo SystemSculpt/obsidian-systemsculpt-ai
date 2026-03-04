@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StudioTerminalSessionManager } from "../StudioTerminalSessionManager";
+import { resolveInteractiveShellArgs } from "../terminal/StudioTerminalShell";
 
 type ExitListener = (event: { exitCode: number | null; signal?: NodeJS.Signals | null }) => void;
 type DataListener = (data: string) => void;
@@ -208,7 +209,7 @@ describe("StudioTerminalSessionManager", () => {
     await manager.dispose();
   });
 
-  it("spawns zsh with prompt spacing disabled to avoid first-line redraw artifacts", async () => {
+  it("spawns zsh as an interactive login shell with prompt spacing disabled", async () => {
     const logger = {
       warn: jest.fn(),
     };
@@ -237,13 +238,21 @@ describe("StudioTerminalSessionManager", () => {
     expect(snapshot.status).toBe("running");
     const spawnOptions = backend.spawn.mock.calls[0]?.[0];
     expect(spawnOptions?.command).toBe("zsh");
-    expect(spawnOptions?.args).toEqual(["-i", "-o", "no_prompt_sp"]);
+    expect(spawnOptions?.args).toEqual(["-i", "-l", "-o", "no_prompt_sp"]);
 
     await manager.stopSession({
       projectPath: "SystemSculpt/Studio/ZshPrompt.systemsculpt",
       nodeId: "terminal_node_zsh_prompt",
     });
     await manager.dispose();
+  });
+
+  it("resolves interactive shell args for POSIX login parity while keeping PowerShell behavior", () => {
+    expect(resolveInteractiveShellArgs("zsh")).toEqual(["-i", "-l", "-o", "no_prompt_sp"]);
+    expect(resolveInteractiveShellArgs("bash")).toEqual(["-i", "-l"]);
+    expect(resolveInteractiveShellArgs("sh")).toEqual(["-i", "-l"]);
+    expect(resolveInteractiveShellArgs("pwsh")).toEqual(["-NoLogo"]);
+    expect(resolveInteractiveShellArgs("cmd")).toEqual([]);
   });
 
   it("strips zsh prompt spacing prelude from startup output while preserving real shell text", async () => {

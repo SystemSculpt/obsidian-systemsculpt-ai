@@ -12,6 +12,51 @@ export const STUDIO_TERMINAL_FONT_FAMILY =
 
 type StudioXtermOptions = ConstructorParameters<typeof import("@xterm/xterm").Terminal>[0];
 
+type StudioTerminalShortcutEvent = Pick<
+  KeyboardEvent,
+  "type" | "key" | "metaKey" | "ctrlKey" | "altKey" | "isComposing"
+>;
+
+function resolveNavigatorPlatform(): string {
+  if (typeof navigator === "undefined") {
+    return "";
+  }
+  const navigatorWithUserAgentData = navigator as Navigator & {
+    userAgentData?: { platform?: string | null };
+  };
+  return String(navigatorWithUserAgentData.userAgentData?.platform || navigator.platform || "").trim();
+}
+
+function isMacPlatform(platformHint?: string): boolean {
+  const normalizedPlatform = String(platformHint || resolveNavigatorPlatform()).toLowerCase();
+  return (
+    normalizedPlatform.includes("mac") ||
+    normalizedPlatform.includes("iphone") ||
+    normalizedPlatform.includes("ipad")
+  );
+}
+
+export function resolveStudioTerminalShortcutInput(
+  event: StudioTerminalShortcutEvent,
+  platformHint?: string
+): string | null {
+  if (!isMacPlatform(platformHint)) {
+    return null;
+  }
+  if (String(event.type || "").toLowerCase() !== "keydown") {
+    return null;
+  }
+  if (!event.metaKey || event.ctrlKey || event.altKey || event.isComposing) {
+    return null;
+  }
+  const normalizedKey = String(event.key || "").toLowerCase();
+  if (normalizedKey !== "backspace" && normalizedKey !== "delete") {
+    return null;
+  }
+  // Match macOS terminal expectations: Cmd+Delete/Cmd+Backspace clears input to line start.
+  return "\u0015";
+}
+
 export async function loadXtermRuntime(): Promise<XtermRuntime> {
   if (xtermRuntimePromise) {
     return xtermRuntimePromise;
@@ -31,7 +76,7 @@ export function buildStudioTerminalXtermOptions(scrollback: number): StudioXterm
     scrollback,
     convertEol: false,
     allowProposedApi: true,
-    cursorBlink: true,
+    cursorBlink: false,
     lineHeight: 1.2,
     minimumContrastRatio: 3,
     // Keep common prompt symbols stable even when users do not have a Nerd Font installed.

@@ -62,7 +62,7 @@ type StudioGraphGroupControllerHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   getGraphZoom: () => number;
   getNodeElement: (nodeId: string) => HTMLElement | null;
-  notifyNodePositionsChanged: () => void;
+  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
   scheduleProjectSave: () => void;
@@ -718,6 +718,9 @@ export class StudioGraphGroupController {
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
     const zoom = this.host.getGraphZoom() || 1;
+    let pendingClientX = startX;
+    let pendingClientY = startY;
+    let dragFrameRequested = false;
     const originByNodeId = new Map(
       dragNodes.map((node) => [
         node.id,
@@ -737,12 +740,9 @@ export class StudioGraphGroupController {
       }
     }
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-
-      const travel = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+    const flushDragFrame = (): void => {
+      dragFrameRequested = false;
+      const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
         dragSurfaceEl.classList.add("is-dragging");
@@ -752,8 +752,8 @@ export class StudioGraphGroupController {
         return;
       }
 
-      const deltaX = (moveEvent.clientX - startX) / zoom;
-      const deltaY = (moveEvent.clientY - startY) / zoom;
+      const deltaX = (pendingClientX - startX) / zoom;
+      const deltaY = (pendingClientY - startY) / zoom;
       for (const node of dragNodes) {
         const origin = originByNodeId.get(node.id);
         if (!origin) {
@@ -766,12 +766,38 @@ export class StudioGraphGroupController {
           nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
         }
       }
-      this.host.notifyNodePositionsChanged();
+      this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
+    };
+
+    const scheduleDragFrame = (): void => {
+      if (dragFrameRequested) {
+        return;
+      }
+      dragFrameRequested = true;
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(flushDragFrame);
+        return;
+      }
+      flushDragFrame();
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      pendingClientX = latestEvent.clientX;
+      pendingClientY = latestEvent.clientY;
+      scheduleDragFrame();
     };
 
     const finishDrag = (event: PointerEvent): void => {
       if (event.pointerId !== pointerId) {
         return;
+      }
+
+      if (dragFrameRequested) {
+        flushDragFrame();
       }
 
       window.removeEventListener("pointermove", onPointerMove);
@@ -791,12 +817,23 @@ export class StudioGraphGroupController {
         return;
       }
       this.host.onNodeDragStateChange?.(false);
+      this.host.notifyNodePositionsChanged();
       this.host.scheduleProjectSave();
     };
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", finishDrag);
+  }
+
+  private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
+    if (typeof event.getCoalescedEvents === "function") {
+      const coalescedEvents = event.getCoalescedEvents();
+      if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
+        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
+      }
+    }
+    return event;
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioProjectV1["graph"]["nodes"][number] | null {

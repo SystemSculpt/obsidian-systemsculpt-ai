@@ -42,6 +42,7 @@ export class StudioGraphConnectionEngineV2 {
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintEl: HTMLElement | null = null;
   private autoCreateHintVisible = false;
+  private previewRenderFrame: number | null = null;
   private readonly edgeContextMenu = new StudioSimpleContextMenuOverlay();
 
   constructor(private readonly host: StudioGraphConnectionEngineHost) {}
@@ -59,6 +60,7 @@ export class StudioGraphConnectionEngineV2 {
     this.dragState = null;
     this.hideAutoCreateHint();
     this.clearAutoCreateHintTimer();
+    this.cancelPreviewRenderFrame();
     this.closeEdgeContextMenu();
   }
 
@@ -69,6 +71,7 @@ export class StudioGraphConnectionEngineV2 {
     this.suppressOutputClickKey = null;
     this.hideAutoCreateHint();
     this.clearAutoCreateHintTimer();
+    this.cancelPreviewRenderFrame();
     this.closeEdgeContextMenu();
     this.edgeContextMenu.destroy();
     this.resetPortVisualState();
@@ -112,6 +115,7 @@ export class StudioGraphConnectionEngineV2 {
     this.dragState = null;
     this.hideAutoCreateHint();
     this.clearAutoCreateHintTimer();
+    this.cancelPreviewRenderFrame();
     this.refreshActiveOutputState();
     this.renderEdgeLayer();
     if (hadPending && options?.requestRender) {
@@ -189,12 +193,13 @@ export class StudioGraphConnectionEngineV2 {
         return;
       }
 
-      this.dragState.lastClientX = moveEvent.clientX;
-      this.dragState.lastClientY = moveEvent.clientY;
+      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      this.dragState.lastClientX = latestEvent.clientX;
+      this.dragState.lastClientY = latestEvent.clientY;
 
       const movedDistance = Math.hypot(
-        moveEvent.clientX - this.dragState.startClientX,
-        moveEvent.clientY - this.dragState.startClientY
+        latestEvent.clientX - this.dragState.startClientX,
+        latestEvent.clientY - this.dragState.startClientY
       );
       if (!this.dragState.active && movedDistance > 3) {
         activateDrag();
@@ -203,7 +208,7 @@ export class StudioGraphConnectionEngineV2 {
       if (this.dragState.active) {
         this.hideAutoCreateHint();
         this.scheduleAutoCreateHint();
-        this.renderEdgeLayer();
+        this.schedulePreviewRender();
       }
     };
 
@@ -229,6 +234,7 @@ export class StudioGraphConnectionEngineV2 {
       this.dragState = null;
       this.hideAutoCreateHint();
       this.clearAutoCreateHintTimer();
+      this.cancelPreviewRenderFrame();
 
       if (!finishedDrag.active) {
         return;
@@ -392,6 +398,30 @@ export class StudioGraphConnectionEngineV2 {
       window.clearTimeout(this.autoCreateHintTimer);
       this.autoCreateHintTimer = null;
     }
+  }
+
+  private schedulePreviewRender(): void {
+    if (this.previewRenderFrame !== null) {
+      return;
+    }
+    if (typeof window.requestAnimationFrame !== "function") {
+      this.renderEdgeLayer();
+      return;
+    }
+    this.previewRenderFrame = window.requestAnimationFrame(() => {
+      this.previewRenderFrame = null;
+      this.renderEdgeLayer();
+    });
+  }
+
+  private cancelPreviewRenderFrame(): void {
+    if (this.previewRenderFrame === null) {
+      return;
+    }
+    if (typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(this.previewRenderFrame);
+    }
+    this.previewRenderFrame = null;
   }
 
   private hideAutoCreateHint(): void {
@@ -645,5 +675,15 @@ export class StudioGraphConnectionEngineV2 {
 
   private closeEdgeContextMenu(): void {
     this.edgeContextMenu.hide();
+  }
+
+  private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
+    if (typeof event.getCoalescedEvents === "function") {
+      const coalescedEvents = event.getCoalescedEvents();
+      if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
+        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
+      }
+    }
+    return event;
   }
 }

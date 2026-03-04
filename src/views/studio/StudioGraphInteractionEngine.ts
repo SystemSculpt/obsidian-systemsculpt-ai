@@ -41,7 +41,7 @@ export class StudioGraphInteractionEngine {
       getCurrentProject: () => this.host.getCurrentProject(),
       getGraphZoom: () => this.selectionController.getGraphZoom(),
       getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
-      notifyNodePositionsChanged: () => this.selectionController.notifyNodePositionsChanged(),
+      notifyNodePositionsChanged: (options) => this.selectionController.notifyNodePositionsChanged(options),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       requestRender: () => this.host.requestRender(),
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
@@ -181,6 +181,10 @@ export class StudioGraphInteractionEngine {
     this.selectionController.applyGraphZoom();
   }
 
+  fitSelectedNodesInViewport(options?: { paddingPx?: number }): boolean {
+    return this.selectionController.fitSelectionInViewport(options);
+  }
+
   handleGraphViewportWheel(event: WheelEvent): void {
     this.selectionController.handleGraphViewportWheel(event);
   }
@@ -239,7 +243,7 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.renderEdgeLayer();
   }
 
-  notifyNodePositionsChanged(): void {
-    this.selectionController.notifyNodePositionsChanged();
+  notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean }): void {
+    this.selectionController.notifyNodePositionsChanged(options);
   }
 }

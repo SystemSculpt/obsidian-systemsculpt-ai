@@ -22,10 +22,20 @@ type GraphPoint = {
   y: number;
 };
 
+type GraphBounds = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
 const WHEEL_DOM_DELTA_LINE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
 const WHEEL_DOM_DELTA_PAGE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
+const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
+const STUDIO_GRAPH_NODE_MIN_HEIGHT_PX = 80;
+const STUDIO_GRAPH_NODE_FALLBACK_HEIGHT_PX = 164;
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
@@ -37,6 +47,10 @@ type StudioGraphSelectionHost = {
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onGraphZoomChanged?: (zoom: number) => void;
+};
+
+type NotifyNodePositionsChangedOptions = {
+  recomputeCanvasBounds?: boolean;
 };
 
 export class StudioGraphSelectionController {
@@ -158,8 +172,9 @@ export class StudioGraphSelectionController {
     this.syncCanvasBounds({ force: true });
   }
 
-  notifyNodePositionsChanged(): void {
-    if (this.syncCanvasBounds()) {
+  notifyNodePositionsChanged(options?: NotifyNodePositionsChangedOptions): void {
+    const shouldRecomputeCanvasBounds = options?.recomputeCanvasBounds !== false;
+    if (shouldRecomputeCanvasBounds && this.syncCanvasBounds()) {
       this.syncGraphSurfaceSize();
     }
     this.host.renderEdgeLayer();
@@ -193,6 +208,42 @@ export class StudioGraphSelectionController {
     this.notifySelectionChanged();
   }
 
+  fitSelectionInViewport(options?: { paddingPx?: number }): boolean {
+    const viewport = this.graphViewportEl;
+    const project = this.host.getCurrentProject();
+    if (!viewport || !project || this.selectedNodeIds.size === 0) {
+      return false;
+    }
+
+    const selectionBounds = this.computeSelectedNodeBounds(project);
+    if (!selectionBounds) {
+      return false;
+    }
+
+    const requestedPadding = options?.paddingPx;
+    const paddingPx = Number.isFinite(requestedPadding)
+      ? Math.max(0, requestedPadding as number)
+      : STUDIO_GRAPH_SELECTION_FIT_PADDING_PX;
+    const viewportWidth = Math.max(1, viewport.clientWidth || 0);
+    const viewportHeight = Math.max(1, viewport.clientHeight || 0);
+    const availableWidth = Math.max(1, viewportWidth - paddingPx * 2);
+    const availableHeight = Math.max(1, viewportHeight - paddingPx * 2);
+    const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
+    const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
+    const targetZoom = this.clampGraphZoom(
+      Math.min(availableWidth / selectionWidth, availableHeight / selectionHeight)
+    );
+
+    this.graphZoom = targetZoom;
+    this.applyGraphZoom();
+
+    const centerX = (selectionBounds.left + selectionBounds.right) * 0.5;
+    const centerY = (selectionBounds.top + selectionBounds.bottom) * 0.5;
+    viewport.scrollLeft = centerX * targetZoom - viewportWidth * 0.5;
+    viewport.scrollTop = centerY * targetZoom - viewportHeight * 0.5;
+    return true;
+  }
+
   consumeSuppressedCanvasClick(): boolean {
     if (!this.suppressNextCanvasClick) {
       return false;
@@ -213,6 +264,53 @@ export class StudioGraphSelectionController {
       x: (viewport.scrollLeft + clientX - rect.left) / zoom,
       y: (viewport.scrollTop + clientY - rect.top) / zoom,
     };
+  }
+
+  private computeSelectedNodeBounds(project: StudioProjectV1): GraphBounds | null {
+    const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
+    let left = Number.POSITIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+
+    for (const nodeId of this.selectedNodeIds) {
+      const node = nodeById.get(nodeId);
+      if (!node || !node.position) {
+        continue;
+      }
+      const nodeX = Number(node.position.x);
+      const nodeY = Number(node.position.y);
+      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
+        continue;
+      }
+
+      const nodeEl = this.nodeElsById.get(node.id);
+      const measuredWidth = nodeEl?.offsetWidth;
+      const measuredHeight = nodeEl?.offsetHeight;
+      const nodeWidth = Math.max(
+        120,
+        measuredWidth && measuredWidth > 0 ? measuredWidth : resolveStudioGraphNodeWidth(node)
+      );
+      const nodeHeight = Math.max(
+        STUDIO_GRAPH_NODE_MIN_HEIGHT_PX,
+        measuredHeight && measuredHeight > 0 ? measuredHeight : STUDIO_GRAPH_NODE_FALLBACK_HEIGHT_PX
+      );
+
+      left = Math.min(left, nodeX);
+      top = Math.min(top, nodeY);
+      right = Math.max(right, nodeX + nodeWidth);
+      bottom = Math.max(bottom, nodeY + nodeHeight);
+    }
+
+    if (
+      !Number.isFinite(left) ||
+      !Number.isFinite(top) ||
+      !Number.isFinite(right) ||
+      !Number.isFinite(bottom)
+    ) {
+      return null;
+    }
+    return { left, top, right, bottom };
   }
 
   startMarqueeSelection(startEvent: PointerEvent): void {
@@ -237,6 +335,9 @@ export class StudioGraphSelectionController {
 
     let lastClientX = startEvent.clientX;
     let lastClientY = startEvent.clientY;
+    let pendingClientX = startEvent.clientX;
+    let pendingClientY = startEvent.clientY;
+    let selectionFrameRequested = false;
 
     if (typeof viewport.setPointerCapture === "function") {
       try {
@@ -298,9 +399,30 @@ export class StudioGraphSelectionController {
       this.refreshNodeSelectionClasses();
     };
 
+    const flushSelectionFrame = (): void => {
+      selectionFrameRequested = false;
+      updateSelection(pendingClientX, pendingClientY);
+    };
+
+    const scheduleSelectionFrame = (): void => {
+      if (selectionFrameRequested) {
+        return;
+      }
+      selectionFrameRequested = true;
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(flushSelectionFrame);
+        return;
+      }
+      flushSelectionFrame();
+    };
+
     const finishSelection = (event: PointerEvent): void => {
       if (event.pointerId !== pointerId) {
         return;
+      }
+
+      if (selectionFrameRequested) {
+        flushSelectionFrame();
       }
 
       window.removeEventListener("pointermove", onPointerMove);
@@ -332,7 +454,10 @@ export class StudioGraphSelectionController {
       if (moveEvent.pointerId !== pointerId) {
         return;
       }
-      updateSelection(moveEvent.clientX, moveEvent.clientY);
+      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      pendingClientX = latestEvent.clientX;
+      pendingClientY = latestEvent.clientY;
+      scheduleSelectionFrame();
     };
 
     updateSelection(startEvent.clientX, startEvent.clientY);
@@ -499,6 +624,9 @@ export class StudioGraphSelectionController {
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
     const zoom = this.graphZoom || 1;
+    let pendingClientX = startX;
+    let pendingClientY = startY;
+    let dragFrameRequested = false;
     let dragged = false;
     let hoveredGroupId: string | null = null;
     const syncHoveredGroup = (): void => {
@@ -517,12 +645,9 @@ export class StudioGraphSelectionController {
       }
     }
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-
-      const travel = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+    const flushDragFrame = (): void => {
+      dragFrameRequested = false;
+      const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
         this.host.onNodeDragStateChange?.(true);
@@ -532,8 +657,8 @@ export class StudioGraphSelectionController {
         return;
       }
 
-      const deltaX = (moveEvent.clientX - startX) / zoom;
-      const deltaY = (moveEvent.clientY - startY) / zoom;
+      const deltaX = (pendingClientX - startX) / zoom;
+      const deltaY = (pendingClientY - startY) / zoom;
       for (const [dragNodeId, dragNode] of dragNodes.entries()) {
         const origin = originByNodeId.get(dragNodeId);
         if (!origin) continue;
@@ -541,13 +666,40 @@ export class StudioGraphSelectionController {
         dragNode.position.y = Math.max(24, Math.round(origin.y + deltaY));
         this.updateNodePosition(dragNodeId);
       }
-      this.notifyNodePositionsChanged();
+      this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
       syncHoveredGroup();
+    };
+
+    const scheduleDragFrame = (): void => {
+      if (dragFrameRequested) {
+        return;
+      }
+      dragFrameRequested = true;
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(flushDragFrame);
+        return;
+      }
+      flushDragFrame();
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      pendingClientX = latestEvent.clientX;
+      pendingClientY = latestEvent.clientY;
+      scheduleDragFrame();
     };
 
     const finishDrag = (event: PointerEvent): void => {
       if (event.pointerId !== pointerId) {
         return;
+      }
+
+      if (dragFrameRequested) {
+        flushDragFrame();
       }
 
       window.removeEventListener("pointermove", onPointerMove);
@@ -565,6 +717,7 @@ export class StudioGraphSelectionController {
         this.host.onNodeDropToGroup?.(hoveredGroupId, dragNodeIds);
         hoveredGroupId = null;
         this.host.onNodeDragHoverGroupChange?.(null, dragNodeIds);
+        this.notifyNodePositionsChanged();
         this.host.scheduleProjectSave();
         return;
       }
@@ -605,6 +758,16 @@ export class StudioGraphSelectionController {
     }
   }
 
+  private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
+    if (typeof event.getCoalescedEvents === "function") {
+      const coalescedEvents = event.getCoalescedEvents();
+      if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
+        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
+      }
+    }
+    return event;
+  }
+
   private syncGraphSurfaceSize(): void {
     if (!this.graphSurfaceEl) {
       return;
@@ -616,17 +779,16 @@ export class StudioGraphSelectionController {
 
   private syncCanvasBounds(options?: { force?: boolean }): boolean {
     const project = this.host.getCurrentProject();
+    const nodeById = project
+      ? new Map(project.graph.nodes.map((node) => [node.id, node] as const))
+      : new Map<string, StudioNodeInstance>();
     const nextSize = computeStudioGraphCanvasSize(project, {
       minWidth: STUDIO_GRAPH_CANVAS_WIDTH,
       minHeight: STUDIO_GRAPH_CANVAS_HEIGHT,
       maxWidth: STUDIO_GRAPH_CANVAS_MAX_WIDTH,
       maxHeight: STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
       getNodeWidth: (nodeId) => {
-        const project = this.host.getCurrentProject();
-        if (!project) {
-          return null;
-        }
-        const node = project.graph.nodes.find((entry) => entry.id === nodeId);
+        const node = nodeById.get(nodeId);
         const nodeEl = this.nodeElsById.get(nodeId);
         if (!node) {
           return nodeEl ? Math.max(120, nodeEl.offsetWidth || 280) : null;

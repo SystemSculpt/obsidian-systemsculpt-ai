@@ -180,6 +180,7 @@ const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
 };
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS = 120;
+const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
 
 type SystemSculptStudioViewState = {
   inspectorLayout?: unknown;
@@ -738,6 +739,8 @@ export class SystemSculptStudioView extends ItemView {
           handled = event.shiftKey ? this.redoGraphHistory() : this.undoGraphHistory();
         } else if (normalizedKey === "y") {
           handled = this.redoGraphHistory();
+        } else if (normalizedKey === "1" && !event.shiftKey) {
+          handled = this.fitSelectedGraphNodesInViewport();
         }
       }
 
@@ -2339,6 +2342,20 @@ export class SystemSculptStudioView extends ItemView {
     this.setGraphZoomAtViewportCenter(STUDIO_GRAPH_DEFAULT_ZOOM);
   }
 
+  private fitSelectedGraphNodesInViewport(): boolean {
+    const fitted = this.graphInteraction.fitSelectedNodesInViewport({
+      paddingPx: STUDIO_GRAPH_SELECTION_FIT_PADDING_PX,
+    });
+    if (!fitted) {
+      return false;
+    }
+    this.captureGraphViewportState({
+      zoomOverride: this.graphInteraction.getGraphZoom() || 1,
+      requestLayoutSave: true,
+    });
+    return true;
+  }
+
   private openAddNodeMenuAtViewportCenter(): void {
     if (this.busy || !this.graphViewportEl || !this.currentProject) {
       return;
@@ -2464,11 +2481,28 @@ export class SystemSculptStudioView extends ItemView {
 
   private handleNodeDragStateChange(isDragging: boolean): void {
     this.nodeDragInProgress = Boolean(isDragging);
+    this.syncGraphInteractionVisualState();
     if (this.nodeDragInProgress) {
       this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
       this.nodeActionContextMenuOverlay?.hide();
     }
+  }
+
+  private syncGraphInteractionVisualState(): void {
+    if (!this.graphViewportEl) {
+      return;
+    }
+    this.graphViewportEl.classList.toggle("is-interacting", this.nodeDragInProgress);
+  }
+
+  private syncGraphZoomVisualState(zoomOverride?: number): void {
+    if (!this.graphViewportEl) {
+      return;
+    }
+    const zoom = normalizeGraphZoom(zoomOverride ?? this.graphInteraction.getGraphZoom());
+    this.graphViewportEl.classList.toggle("is-zoomed-far", zoom <= 0.56);
+    this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.4);
   }
 
   private syncInspectorSelection(): void {
@@ -3336,6 +3370,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphZoomChanged(zoom: number): void {
+    this.syncGraphZoomVisualState(zoom);
     this.inspectorOverlay?.setGraphZoom(zoom);
     this.nodeContextMenuOverlay?.setGraphZoom(zoom);
     this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
@@ -3812,11 +3847,13 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportProjectPath = this.currentProjectPath;
     if (!this.graphViewportEl || !this.currentProject) {
       this.graphViewportProjectPath = null;
+      this.nodeDragInProgress = false;
       this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
       this.nodeActionContextMenuOverlay?.hide();
       return;
     }
+    this.syncGraphInteractionVisualState();
 
     this.graphViewportEl.addEventListener("scroll", () => {
       this.handleGraphViewportScrolled();
@@ -3837,6 +3874,7 @@ export class SystemSculptStudioView extends ItemView {
       void this.handleGraphViewportDrop(event);
     });
     this.restoreGraphViewportState(this.graphViewportEl);
+    this.syncGraphZoomVisualState();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
     this.inspectorOverlay?.hide();
@@ -3917,6 +3955,7 @@ export class SystemSculptStudioView extends ItemView {
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
+    this.nodeDragInProgress = false;
     this.graphViewportEl = null;
     this.graphViewportProjectPath = null;
     this.lastGraphPointerPosition = null;

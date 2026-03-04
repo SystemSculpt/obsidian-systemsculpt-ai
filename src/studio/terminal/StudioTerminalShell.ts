@@ -22,10 +22,10 @@ export function resolveInteractiveShellArgs(command: string): string[] {
   }
   if (basename === "zsh" || basename === "zsh.exe") {
     // Disables zsh prompt spacing redraw prelude that can corrupt first-line rendering in xterm.
-    return ["-i", "-o", "no_prompt_sp"];
+    return ["-i", "-l", "-o", "no_prompt_sp"];
   }
   if (basename === "bash" || basename === "sh" || basename === "bash.exe") {
-    return ["-i"];
+    return ["-i", "-l"];
   }
   if (basename === "pwsh" || basename === "pwsh.exe" || basename === "powershell" || basename === "powershell.exe") {
     return ["-NoLogo"];
