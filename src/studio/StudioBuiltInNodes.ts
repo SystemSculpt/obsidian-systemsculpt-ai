@@ -12,6 +12,7 @@ import { noteNode } from "./nodes/noteNode";
 import { textNode } from "./nodes/textNode";
 import { textGenerationNode } from "./nodes/textGenerationNode";
 import { transcriptionNode } from "./nodes/transcriptionNode";
+import { terminalNode } from "./nodes/terminalNode";
 import { valueNode } from "./nodes/valueNode";
 
 export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
@@ -29,4 +30,5 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(datasetNode);
   registry.register(httpRequestNode);
   registry.register(cliCommandNode);
+  registry.register(terminalNode);
 }

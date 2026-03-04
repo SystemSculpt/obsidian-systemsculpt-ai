@@ -88,6 +88,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Clicking a `.systemsculpt` file in the file explorer opens that file directly in `SystemSculptStudioView`.
 - Studio view is file-native (one project file per leaf state) and behaves like other Obsidian file views (similar to canvas semantics).
 - Studio does not use modal-driven project create/open flows.
+- Active Studio projects hot-reload on vault file changes only when strict parse+compile validation passes; invalid external writes are rejected while keeping the last good in-memory graph.
 - Output-port drag supports preview-node quick-create: pause ~500ms while dragging to see a release hint; releasing without a compatible target can create a typed preview node (for example JSON/Text) and auto-connect it.
 - Runtime source is guarded against browser dialog APIs (`prompt/confirm/alert`) with an automated test gate.
 

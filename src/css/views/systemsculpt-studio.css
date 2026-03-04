@@ -2732,6 +2732,269 @@ select.ss-pi-wizard__select { width: 100%; }
   z-index: 3;
 }
 
+.ss-studio-node-card[data-node-kind="studio.terminal"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.ss-studio-node-card[data-node-kind="studio.terminal"] .ss-studio-node-ports {
+  margin-bottom: 4px;
+}
+
+.ss-studio-node-card[data-node-kind="studio.terminal"] .ss-studio-node-inline-config {
+  margin-top: 6px;
+}
+
+.ss-studio-node-card[data-node-kind="studio.terminal"] .ss-studio-node-run-status-row {
+  display: none;
+}
+
+.ss-studio-terminal-panel {
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, #78d8aa 36%, var(--ss-studio-border) 64%);
+  border-radius: 10px;
+  background: color-mix(in srgb, #0f261c 72%, var(--background-primary) 28%);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 160px;
+  flex: 1 1 auto;
+  overflow: hidden;
+  position: relative;
+}
+
+.ss-studio-terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border-bottom: 1px solid color-mix(in srgb, #78d8aa 26%, var(--ss-studio-border) 74%);
+  background: color-mix(in srgb, #173629 54%, var(--background-primary) 46%);
+}
+
+.ss-studio-terminal-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 82%, #79d1a4 18%);
+  background: color-mix(in srgb, #132d22 62%, var(--background-primary) 38%);
+  padding: 2px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ss-studio-terminal-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentcolor;
+  opacity: 0.84;
+}
+
+.ss-studio-terminal-status.is-idle,
+.ss-studio-terminal-status.is-stopped {
+  color: color-mix(in srgb, #aadfca 70%, var(--text-muted) 30%);
+}
+
+.ss-studio-terminal-status.is-starting {
+  color: #f0d28d;
+  border-color: color-mix(in srgb, #d6a952 68%, var(--ss-studio-border) 32%);
+}
+
+.ss-studio-terminal-status.is-running {
+  color: #95e5bb;
+  border-color: color-mix(in srgb, #4da073 74%, var(--ss-studio-border) 26%);
+}
+
+.ss-studio-terminal-status.is-failed {
+  color: #f0a994;
+  border-color: color-mix(in srgb, #c14d3d 68%, var(--ss-studio-border) 32%);
+}
+
+.ss-studio-terminal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ss-studio-terminal-action {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, #86ddae 48%, var(--ss-studio-border) 52%);
+  border-radius: 999px;
+  background: color-mix(in srgb, #23523f 30%, var(--background-primary) 70%);
+  color: color-mix(in srgb, #d7f8e8 92%, var(--text-normal) 8%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 0 9px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 90ms ease;
+}
+
+.ss-studio-terminal-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #9effd0 64%, var(--ss-studio-border) 36%);
+  background: color-mix(in srgb, #2f664f 38%, var(--background-primary) 62%);
+  transform: translateY(-1px);
+}
+
+.ss-studio-terminal-action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ss-studio-terminal-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ss-studio-terminal-surface {
+  position: relative;
+  min-height: 120px;
+  height: 100%;
+  padding: 8px 8px 8px 10px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, #06120d 92%, var(--background-primary) 8%);
+  overflow: hidden;
+  cursor: text;
+}
+
+.ss-studio-terminal-surface .xterm {
+  position: relative;
+  height: 100%;
+  padding: 0;
+  font-family:
+    "MesloLGS NF",
+    "MesloLGM Nerd Font Mono",
+    "JetBrainsMono Nerd Font",
+    "Hack Nerd Font Mono",
+    "Symbols Nerd Font Mono",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #d7fce8;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ss-studio-terminal-surface .xterm.focus,
+.ss-studio-terminal-surface .xterm:focus {
+  outline: none;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-helpers {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-helper-textarea {
+  position: absolute;
+  opacity: 0;
+  left: -9999em;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: -5;
+  white-space: nowrap;
+  overflow: hidden;
+  resize: none;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-viewport {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  background: transparent;
+  scrollbar-color: color-mix(in srgb, #7cc8a3 42%, transparent) transparent;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-screen {
+  position: relative;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-screen canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-char-measure-element {
+  display: inline-block;
+  visibility: hidden;
+  position: absolute;
+  top: 0;
+  left: -9999em;
+  line-height: normal;
+}
+
+.ss-studio-terminal-surface .xterm .composition-view {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.ss-studio-terminal-surface .xterm .composition-view.active {
+  display: block;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-accessibility:not(.debug),
+.ss-studio-terminal-surface .xterm .xterm-message {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  color: transparent;
+  pointer-events: none;
+}
+
+.ss-studio-terminal-surface .xterm .xterm-scroll-area {
+  visibility: hidden;
+}
+
+.ss-studio-terminal-error {
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in srgb, #f1b3a1 88%, var(--text-normal) 12%);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ss-studio-terminal-resize-handle {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  right: 7px;
+  bottom: 7px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, #7fd9ad 70%, var(--ss-studio-border) 30%);
+  background: color-mix(in srgb, #2d6149 56%, var(--background-primary) 44%);
+  box-shadow: 0 2px 6px color-mix(in srgb, #000 24%, transparent);
+  cursor: nwse-resize;
+  z-index: 4;
+}
+
 .ss-studio-node-output-preview {
   margin: 7px 0 0;
   border: 1px solid color-mix(in srgb, #8ce4bc 24%, var(--ss-studio-border));
@@ -2981,6 +3244,14 @@ select.ss-pi-wizard__select { width: 100%; }
   overflow: hidden;
   transform: scale(var(--ss-studio-inspector-scale));
   transition: left 140ms ease, top 140ms ease, width 120ms ease, height 120ms ease, transform 120ms ease;
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-context-menu,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-simple-context-menu,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-link-context-menu,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-inspector {
+  backdrop-filter: none;
+  transition: none;
 }
 
 .ss-studio-node-inspector-header {

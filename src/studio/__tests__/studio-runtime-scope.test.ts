@@ -135,7 +135,7 @@ describe("StudioRuntime scoped run projection", () => {
     expect(scopeProjectForRun(project, [])).toBe(project);
   });
 
-  it("filters visual-only label nodes out of full-graph runs", () => {
+  it("filters visual-only nodes out of full-graph runs", () => {
     const project = projectWithBranchMerge();
     project.graph.nodes.push({
       id: "label_1",
@@ -147,6 +147,16 @@ describe("StudioRuntime scoped run projection", () => {
         value: "Section marker",
       },
     });
+    project.graph.nodes.push({
+      id: "terminal_1",
+      kind: "studio.terminal",
+      version: "1.0.0",
+      title: "Terminal",
+      position: { x: 120, y: 24 },
+      config: {
+        shellProfile: "auto",
+      },
+    });
     project.graph.edges.push({
       id: "label_edge",
       fromNodeId: "label_1",
@@ -154,12 +164,22 @@ describe("StudioRuntime scoped run projection", () => {
       toNodeId: "d",
       toPortId: "prompt",
     });
-    project.graph.entryNodeIds = [...project.graph.entryNodeIds, "label_1"];
+    project.graph.edges.push({
+      id: "terminal_edge",
+      fromNodeId: "terminal_1",
+      fromPortId: "text",
+      toNodeId: "d",
+      toPortId: "prompt",
+    });
+    project.graph.entryNodeIds = [...project.graph.entryNodeIds, "label_1", "terminal_1"];
 
     const scoped = scopeProjectForRun(project, undefined);
     expect(scoped.graph.nodes.map((node) => node.id)).not.toContain("label_1");
+    expect(scoped.graph.nodes.map((node) => node.id)).not.toContain("terminal_1");
     expect(scoped.graph.edges.map((edge) => edge.id)).not.toContain("label_edge");
+    expect(scoped.graph.edges.map((edge) => edge.id)).not.toContain("terminal_edge");
     expect(scoped.graph.entryNodeIds).not.toContain("label_1");
+    expect(scoped.graph.entryNodeIds).not.toContain("terminal_1");
   });
 
   it("throws when running from a visual-only label node", () => {
@@ -176,6 +196,23 @@ describe("StudioRuntime scoped run projection", () => {
     });
     expect(() => scopeProjectForRun(project, ["label_1"])).toThrow(
       'Cannot run from node "label_1" because "studio.label" is visual-only.'
+    );
+  });
+
+  it("throws when running from a visual-only terminal node", () => {
+    const project = projectWithBranchMerge();
+    project.graph.nodes.push({
+      id: "terminal_1",
+      kind: "studio.terminal",
+      version: "1.0.0",
+      title: "Terminal",
+      position: { x: 20, y: 24 },
+      config: {
+        shellProfile: "auto",
+      },
+    });
+    expect(() => scopeProjectForRun(project, ["terminal_1"])).toThrow(
+      'Cannot run from node "terminal_1" because "studio.terminal" is visual-only.'
     );
   });
 });

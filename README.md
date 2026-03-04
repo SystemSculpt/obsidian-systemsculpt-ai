@@ -94,6 +94,7 @@ npm run release:plugin -- --bump patch # force a specific bump
 ```
 
 Requires an authenticated GitHub CLI session (`gh auth login`).
+Release automation also builds and publishes Studio terminal runtime assets from `dist/terminal-runtime`.
 
 ## Canonical source files for docs
 

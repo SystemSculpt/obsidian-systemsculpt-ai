@@ -1870,6 +1870,7 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       if (this.studioService) {
+        await this.studioService.dispose().catch(() => {});
         this.studioService = null;
       }
 

@@ -193,6 +193,16 @@ export type StudioProjectV1 = {
 
 export type StudioProject = StudioProjectV1;
 
+export type StudioProjectLintResult =
+  | {
+      ok: true;
+      project: StudioProjectV1;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type StudioAssetRef = {
   hash: string;
   mimeType: string;

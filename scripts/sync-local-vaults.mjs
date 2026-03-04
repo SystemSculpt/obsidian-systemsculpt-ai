@@ -52,6 +52,7 @@ const requiredFiles = [
   'styles.css',
 ];
 const optionalFiles = ['README.md', 'LICENSE', 'versions.json'];
+const runtimeNodeModules = ['node-pty'];
 
 const resolvePath = (maybeRelative) => (
   path.isAbsolute(maybeRelative)
@@ -122,6 +123,17 @@ const syncTarget = (target) => {
       console.error(`[sync] Failed to copy ${file}:`, error.message || error);
       throw error;
     }
+  });
+
+  runtimeNodeModules.forEach(moduleName => {
+    const sourcePath = path.join(process.cwd(), 'node_modules', moduleName);
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Runtime dependency missing: ${sourcePath}`);
+    }
+    const destinationPath = path.join(targetPath, 'node_modules', moduleName);
+    console.log(`[sync]  └─ syncing runtime module ${moduleName}`);
+    fs.rmSync(destinationPath, { recursive: true, force: true });
+    copyDirectory(sourcePath, destinationPath);
   });
 
   if (Array.isArray(target.extraCopies)) {

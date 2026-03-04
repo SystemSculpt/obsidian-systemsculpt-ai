@@ -15,6 +15,7 @@ export const config = {
     path.join(__dirname, "specs-mock/commands.open-chat.mock.e2e.ts"),
     path.join(__dirname, "specs-mock/email.showcase.mock.e2e.ts"),
     path.join(__dirname, "specs-mock/tooling.auto-approve.mock.e2e.ts"),
+    path.join(__dirname, "specs-mock/studio.terminal.bootstrap.mock.e2e.ts"),
   ],
   exclude: [],
   maxInstances: Number.isFinite(maxInstances) && maxInstances > 0 ? Math.floor(maxInstances) : 2,

@@ -126,6 +126,7 @@ const buildOptions = {
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
+		"node-pty",
 		...builtins
 	],
 	format: "cjs",
@@ -200,6 +201,25 @@ const syncArtifacts = () => {
 	if (!autoSyncTargets || autoSyncTargets.length === 0) return;
 	const requiredFiles = ["manifest.json", "main.js", "styles.css"];
 	const optionalFiles = ["README.md", "LICENSE", "versions.json"];
+	const runtimeNodeModules = ["node-pty"];
+
+	const copyDirectoryRecursive = (src, dest) => {
+		const stats = fs.statSync(src);
+		if (!stats.isDirectory()) {
+			throw new Error(`Expected directory, got file: ${src}`);
+		}
+		fs.mkdirSync(dest, { recursive: true });
+		for (const entry of fs.readdirSync(src)) {
+			const srcEntry = path.join(src, entry);
+			const destEntry = path.join(dest, entry);
+			const entryStats = fs.statSync(srcEntry);
+			if (entryStats.isDirectory()) {
+				copyDirectoryRecursive(srcEntry, destEntry);
+			} else {
+				fs.copyFileSync(srcEntry, destEntry);
+			}
+		}
+	};
 
 	for (const rawTarget of autoSyncTargets) {
 		const target = rawTarget.startsWith("~")
@@ -218,6 +238,15 @@ const syncArtifacts = () => {
 				}
 				const dest = path.join(target, path.basename(file));
 				fs.copyFileSync(src, dest);
+			}
+			for (const moduleName of runtimeNodeModules) {
+				const srcModulePath = path.join(process.cwd(), "node_modules", moduleName);
+				if (!fs.existsSync(srcModulePath)) {
+					throw new Error(`Runtime dependency missing: ${srcModulePath}`);
+				}
+				const destModulePath = path.join(target, "node_modules", moduleName);
+				fs.rmSync(destModulePath, { recursive: true, force: true });
+				copyDirectoryRecursive(srcModulePath, destModulePath);
 			}
 			logger.info(`[Sync] Updated ${target}`);
 		} catch (error) {

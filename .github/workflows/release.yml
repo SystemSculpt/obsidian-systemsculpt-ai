@@ -21,6 +21,7 @@ jobs:
         run: |
           npm install
           npm run build
+          npm run build:terminal-runtime
 
       - name: Create release
         env:
@@ -31,4 +32,6 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
-            main.js manifest.json styles.css
+            main.js manifest.json styles.css \
+            dist/terminal-runtime/studio-terminal-runtime-manifest.json \
+            dist/terminal-runtime/*.tgz

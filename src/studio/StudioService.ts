@@ -25,6 +25,7 @@ import type {
   StudioNodeConfigSelectOption,
   StudioNodeInstance,
   StudioNodeCacheSnapshotV1,
+  StudioProjectLintResult,
   StudioProjectV1,
   StudioRunEventHandler,
   StudioRunSummary,
@@ -34,6 +35,7 @@ import {
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
+import { parseStudioProject } from "./schema";
 
 function starterGraph(project: StudioProjectV1): StudioProjectV1 {
   if (project.graph.nodes.length > 0) {
@@ -248,6 +250,23 @@ export class StudioService {
 
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
     await this.projectStore.saveProject(projectPath, project);
+  }
+
+  lintProjectText(rawText: string): StudioProjectLintResult {
+    try {
+      const project = parseStudioProject(String(rawText || ""));
+      this.compiler.compile(project, this.registry);
+      return {
+        ok: true,
+        project,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        error: message.trim().length > 0 ? message.trim() : "Studio lint failed with an unknown error.",
+      };
+    }
   }
 
   async runCurrentProject(options?: { onEvent?: StudioRunEventHandler }): Promise<StudioRunSummary> {

@@ -47,6 +47,8 @@ jobs:
             spec: testing/e2e/specs-mock/tooling.auto-approve.mock.e2e.ts
           - id: commands-open-chat
             spec: testing/e2e/specs-mock/commands.open-chat.mock.e2e.ts
+          - id: studio-terminal-bootstrap
+            spec: testing/e2e/specs-mock/studio.terminal.bootstrap.mock.e2e.ts
     env:
       SYSTEMSCULPT_E2E_APP_VERSION: "1.11.7"
       SYSTEMSCULPT_E2E_FOCUS_GUARD: "0"
