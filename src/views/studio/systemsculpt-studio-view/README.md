@@ -22,6 +22,14 @@ into focused submodules.
   - Clipboard paste remapping for nodes/edges/groups and next selection calculation.
   - Pure transform used by the view when applying clipboard payloads.
 
+- `StudioClipboardData.ts`
+  - Clipboard payload readers for text/image extraction and mime normalization.
+  - Keeps browser clipboard parsing details out of the view file.
+
+- `StudioClipboardPasteNodes.ts`
+  - Node construction/materialization for text/image paste actions.
+  - Produces `StudioNodeInstance` outputs without directly mutating view state.
+
 ## Orchestration contract
 
 `SystemSculptStudioView.ts` should own:
@@ -38,9 +46,9 @@ Helper modules in this directory should own:
 
 ## Planned next slices
 
-1. Extract drag/drop ingestion pipeline into focused handlers (`text`, `image`, `vault refs`).
-2. Split run-event materialization and managed-output synchronization into runtime modules.
-3. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
+1. Split run-event materialization and managed-output synchronization into runtime modules.
+2. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
+3. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
 
 ## Conventions
 

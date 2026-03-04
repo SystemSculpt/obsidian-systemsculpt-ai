@@ -139,6 +139,15 @@ import {
 } from "./systemsculpt-studio-view/StudioGraphHistoryState";
 import { materializeGraphClipboardPaste } from "./systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
 import {
+  extractClipboardImageFiles,
+  extractClipboardText,
+  normalizePastedImageMimeType,
+} from "./systemsculpt-studio-view/StudioClipboardData";
+import {
+  buildPastedTextNode,
+  materializePastedMediaNodes,
+} from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
+import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
 } from "./systemsculpt-studio-view/StudioVaultReferenceResolver";
@@ -938,70 +947,6 @@ export class SystemSculptStudioView extends ItemView {
     this.removeNodes(selectedNodeIds);
   }
 
-  private normalizePastedImageMimeType(rawMimeType: string): string {
-    const normalized = String(rawMimeType || "").trim().toLowerCase();
-    if (normalized.startsWith("image/")) {
-      return normalized;
-    }
-    return "image/png";
-  }
-
-  private extractClipboardImageFiles(event: ClipboardEvent): File[] {
-    const clipboard = event.clipboardData;
-    if (!clipboard) {
-      return [];
-    }
-
-    const files: File[] = [];
-    const seenKeys = new Set<string>();
-    if (clipboard.items && clipboard.items.length > 0) {
-      for (const item of Array.from(clipboard.items)) {
-        if (!item || item.kind !== "file") {
-          continue;
-        }
-        const file = item.getAsFile();
-        if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
-          continue;
-        }
-        const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
-        if (seenKeys.has(key)) {
-          continue;
-        }
-        seenKeys.add(key);
-        files.push(file);
-      }
-    }
-
-    if (files.length > 0) {
-      return files;
-    }
-
-    if (clipboard.files && clipboard.files.length > 0) {
-      for (const file of Array.from(clipboard.files)) {
-        if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
-          continue;
-        }
-        const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
-        if (seenKeys.has(key)) {
-          continue;
-        }
-        seenKeys.add(key);
-        files.push(file);
-      }
-    }
-
-    return files;
-  }
-
-  private extractClipboardText(event: ClipboardEvent): string {
-    const clipboard = event.clipboardData;
-    if (!clipboard) {
-      return "";
-    }
-    const text = clipboard.getData("text/plain");
-    return typeof text === "string" ? text : "";
-  }
-
   private isMarkdownVaultFile(file: TAbstractFile | null): file is TFile {
     return file instanceof TFile && file.extension.toLowerCase() === "md";
   }
@@ -1062,7 +1007,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const pastedText = this.extractClipboardText(event);
+    const pastedText = extractClipboardText(event);
     const graphClipboardPayload = parseGraphClipboardPayload(pastedText);
     if (graphClipboardPayload) {
       const previousCreatedAt = this.graphClipboardPayload?.createdAt || "";
@@ -1080,7 +1025,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const imageFiles = this.extractClipboardImageFiles(event);
+    const imageFiles = extractClipboardImageFiles(event);
     if (imageFiles.length > 0) {
       event.preventDefault();
       event.stopPropagation();
@@ -1125,20 +1070,15 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const project = this.currentProject;
-    const anchor = this.resolvePasteAnchorPosition();
-    const node: StudioNodeInstance = {
-      id: randomId("node"),
-      kind: textDefinition.kind,
-      version: textDefinition.version,
-      title: prettifyNodeKind(textDefinition.kind),
-      position: this.normalizeNodePosition(anchor),
-      config: {
-        ...cloneConfigDefaults(textDefinition),
-        value: text,
-      },
-      continueOnError: false,
-      disabled: false,
-    };
+    const node = buildPastedTextNode({
+      textDefinition,
+      text,
+      position: this.resolvePasteAnchorPosition(),
+      nextNodeId: () => randomId("node"),
+      prettifyNodeKind,
+      cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
+      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+    });
     project.graph.nodes.push(node);
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
@@ -1162,37 +1102,24 @@ export class SystemSculptStudioView extends ItemView {
 
     const studio = this.plugin.getStudioService();
     const project = this.currentProject;
-    const anchor = this.resolvePasteAnchorPosition();
-    const createdNodeIds: string[] = [];
-
-    for (let index = 0; index < imageFiles.length; index += 1) {
-      const imageFile = imageFiles[index];
-      const mimeType = this.normalizePastedImageMimeType(imageFile.type);
-      const bytes = await imageFile.arrayBuffer();
-      const asset = await studio.storeAsset(this.currentProjectPath, bytes, mimeType);
-      const node: StudioNodeInstance = {
-        id: randomId("node"),
-        kind: mediaDefinition.kind,
-        version: mediaDefinition.version,
-        title: prettifyNodeKind(mediaDefinition.kind),
-        position: this.normalizeNodePosition({
-          x: anchor.x + (index % 5) * 38,
-          y: anchor.y + Math.floor(index / 5) * 38,
-        }),
-        config: {
-          ...cloneConfigDefaults(mediaDefinition),
-          sourcePath: asset.path,
-        },
-        continueOnError: false,
-        disabled: false,
-      };
-      project.graph.nodes.push(node);
-      createdNodeIds.push(node.id);
-    }
-
-    if (createdNodeIds.length === 0) {
+    const nodes = await materializePastedMediaNodes({
+      imageFiles,
+      mediaDefinition,
+      anchor: this.resolvePasteAnchorPosition(),
+      projectPath: this.currentProjectPath,
+      nextNodeId: () => randomId("node"),
+      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+      normalizeMimeType: normalizePastedImageMimeType,
+      storeAsset: async (projectPath, bytes, mimeType) =>
+        await studio.storeAsset(projectPath, bytes, mimeType),
+      prettifyNodeKind,
+      cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
+    });
+    if (nodes.length === 0) {
       return;
     }
+    project.graph.nodes.push(...nodes);
+    const createdNodeIds = nodes.map((node) => node.id);
 
     this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
     this.graphInteraction.clearPendingConnection();
