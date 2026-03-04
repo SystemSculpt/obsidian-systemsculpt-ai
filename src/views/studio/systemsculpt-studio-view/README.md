@@ -22,10 +22,6 @@ into focused submodules.
   - Clipboard paste remapping for nodes/edges/groups and next selection calculation.
   - Pure transform used by the view when applying clipboard payloads.
 
-- `StudioProjectLiveSync.ts`
-  - Signature + decision helpers for `.systemsculpt` live-reload gating.
-  - Keeps self-write detection and deferred-reload policy logic out of the view class.
-
 - `StudioClipboardData.ts`
   - Clipboard payload readers for text/image extraction and mime normalization.
   - Keeps browser clipboard parsing details out of the view file.
@@ -41,6 +37,10 @@ into focused submodules.
 - `StudioProjectLiveSync.ts`
   - Signature hashing, expected-self-write tracking, and external-modify decision resolution.
   - Keeps `.systemsculpt` live-sync policy deterministic and unit-testable outside view orchestration.
+
+- `StudioPromptBundleComposer.ts`
+  - Prompt-source resolution and text-generation handoff markdown composition.
+  - Keeps bundle source dedupe/formatting logic modular and testable.
 
 ## Orchestration contract
 
@@ -61,8 +61,8 @@ Helper modules in this directory should own:
 1. Split run-event materialization and managed-output synchronization into runtime modules.
 2. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
 3. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
-4. Extract prompt-bundle source resolution and copy orchestration into a dedicated composer/controller.
-5. Extract project file live-sync read/mutate orchestration into a dedicated controller.
+4. Extract project file live-sync read/mutate orchestration into a dedicated controller.
+5. Split run-event materialization and managed-output synchronization into dedicated runtime handlers.
 
 ## Conventions
 

@@ -149,12 +149,14 @@ import {
 } from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
 import {
   coerceNotePreviewText,
-  coercePromptBundleText,
   isTextGenerationOutputLocked,
   readFirstTextValue,
   resolveTextGenerationOutputSnapshot,
-  wrapPromptBundleFence,
 } from "./systemsculpt-studio-view/StudioPromptBundleUtils";
+import {
+  composeTextGenerationPromptBundle,
+  resolvePromptBundleNodeSource,
+} from "./systemsculpt-studio-view/StudioPromptBundleComposer";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
@@ -553,78 +555,31 @@ export class SystemSculptStudioView extends ItemView {
     sourceLabel: string;
     vaultPath: string;
   }> {
-    if (node.kind === "studio.note") {
-      const runtimePath = this.runPresentation.getNodeState(node.id).outputs?.path;
-      const runtimeOutput = this.runPresentation.getNodeState(node.id).outputs?.text;
-      const noteText = coerceNotePreviewText(runtimeOutput, runtimePath);
-      const resolvedPath = readFirstTextValue(runtimePath);
-      if (noteText) {
-        return {
-          content: noteText,
-          contentLanguage: "markdown",
-          sourceLabel: "live note preview",
-          vaultPath: resolvedPath,
-        };
-      }
-
-      const configuredPath = this.readNotePrimaryPathFromConfig(node);
-      if (configuredPath) {
+    const runtimeOutputs = this.runPresentation.getNodeState(node.id).outputs;
+    return resolvePromptBundleNodeSource({
+      node,
+      runtimePath: runtimeOutputs?.path,
+      runtimeText: runtimeOutputs?.text,
+      configuredNotePath: this.readNotePrimaryPathFromConfig(node),
+      readConfiguredNoteText: async (configuredPath) => {
         const abstract = this.app.vault.getAbstractFileByPath(configuredPath);
-        if (this.isMarkdownVaultFile(abstract)) {
-          try {
-            const text = (await this.readVaultMarkdownFile(abstract)).trim();
-            if (text) {
-              return {
-                content: text,
-                contentLanguage: "markdown",
-                sourceLabel: "vault note",
-                vaultPath: abstract.path,
-              };
-            }
-          } catch {
-            // Fall through to empty preview state.
-          }
+        if (!this.isMarkdownVaultFile(abstract)) {
+          return null;
         }
-      }
-
-      return {
-        content: "(Note preview is empty. Run or refresh note links.)",
-        contentLanguage: "markdown",
-        sourceLabel: "note preview",
-        vaultPath: configuredPath,
-      };
-    }
-
-    const runtimeText =
-      typeof this.runPresentation.getNodeState(node.id).outputs?.text === "string"
-        ? String(this.runPresentation.getNodeState(node.id).outputs?.text || "").trim()
-        : "";
-    if (runtimeText) {
-      return {
-        content: runtimeText,
-        contentLanguage: "text",
-        sourceLabel: "latest node output",
-        vaultPath: "",
-      };
-    }
-
-    const configValueText = coercePromptBundleText((node.config as Record<string, unknown>).value);
-    if (configValueText) {
-      return {
-        content: configValueText,
-        contentLanguage: "text",
-        sourceLabel: "node config value",
-        vaultPath: "",
-      };
-    }
-
-    const configPreview = formatNodeConfigPreview(node).trim();
-    return {
-      content: configPreview || "(No text content available for this source node yet.)",
-      contentLanguage: "text",
-      sourceLabel: "node config preview",
-      vaultPath: "",
-    };
+        try {
+          const text = (await this.readVaultMarkdownFile(abstract)).trim();
+          if (!text) {
+            return null;
+          }
+          return {
+            text,
+            path: abstract.path,
+          };
+        } catch {
+          return null;
+        }
+      },
+    });
   }
 
   private async copyTextGenerationPromptBundle(nodeId: string): Promise<void> {
@@ -634,79 +589,26 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const project = this.currentProject;
-    const targetNode = project.graph.nodes.find((node) => node.id === nodeId);
-    if (!targetNode || targetNode.kind !== "studio.text_generation") {
+    const bundle = await composeTextGenerationPromptBundle({
+      project,
+      targetNodeId: nodeId,
+      resolveSource: (sourceNode) => this.resolvePromptBundleSource(sourceNode),
+      generatedAt: new Date(),
+    });
+    if (!bundle.ok) {
       new Notice("Prompt bundle copy is only available for text generation nodes.");
       return;
     }
 
-    const sourceNodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-    const promptEdges = project.graph.edges.filter(
-      (edge) => edge.toNodeId === nodeId && edge.toPortId === "prompt"
-    );
-    const seenSourceIds = new Set<string>();
-    const sourceSections: string[] = [];
-
-    for (const edge of promptEdges) {
-      const sourceNodeId = String(edge.fromNodeId || "").trim();
-      if (!sourceNodeId || seenSourceIds.has(sourceNodeId)) {
-        continue;
-      }
-      seenSourceIds.add(sourceNodeId);
-      const sourceNode = sourceNodeById.get(sourceNodeId);
-      if (!sourceNode) {
-        continue;
-      }
-
-      const sourceIndex = sourceSections.length + 1;
-      const sourceKind = sourceNode.kind === "studio.note" ? "Note" : prettifyNodeKind(sourceNode.kind);
-      const sourceTitle = String(sourceNode.title || sourceKind).trim() || sourceKind;
-      const source = await this.resolvePromptBundleSource(sourceNode);
-      const sectionLines: string[] = [
-        `### Source ${sourceIndex}: ${sourceKind} - ${sourceTitle}`,
-        `- Node ID: \`${sourceNode.id}\``,
-        `- Kind: \`${sourceNode.kind}\``,
-        `- Content Source: ${source.sourceLabel}`,
-      ];
-      if (source.vaultPath) {
-        sectionLines.push(`- Vault Path: \`${source.vaultPath}\``);
-      }
-      sectionLines.push("", wrapPromptBundleFence(source.contentLanguage, source.content), "");
-      sourceSections.push(sectionLines.join("\n"));
-    }
-
-    const systemPrompt = String(targetNode.config.systemPrompt || "").trim();
-    const bundleLines: string[] = [
-      "# Studio Text Generation Handoff",
-      "",
-      `Generated: ${new Date().toISOString()}`,
-      `Target Node: ${String(targetNode.title || targetNode.kind).trim() || targetNode.kind}`,
-      `Target Node ID: \`${targetNode.id}\``,
-      "",
-      "## Attached Prompt Sources",
-      "",
-    ];
-    if (sourceSections.length === 0) {
-      bundleLines.push("_No prompt-linked source nodes found._", "");
-    } else {
-      bundleLines.push(...sourceSections);
-    }
-    bundleLines.push(
-      "## System Prompt",
-      "",
-      wrapPromptBundleFence("text", systemPrompt || "(System prompt is empty.)"),
-      ""
-    );
-
-    const copied = await tryCopyToClipboard(bundleLines.join("\n"));
+    const copied = await tryCopyToClipboard(bundle.markdown);
     if (!copied) {
       new Notice("Unable to copy prompt bundle (clipboard unavailable).");
       return;
     }
     new Notice(
-      sourceSections.length === 1
+      bundle.sourceCount === 1
         ? "Prompt bundle copied with 1 source."
-        : `Prompt bundle copied with ${sourceSections.length} sources.`
+        : `Prompt bundle copied with ${bundle.sourceCount} sources.`
     );
   }
 
@@ -2160,6 +2062,29 @@ export class SystemSculptStudioView extends ItemView {
       const renamedRawText = await this.readStudioProjectRawText(renamedPath);
       if (renamedRawText != null) {
         this.markAcceptedProjectSignature(computeStudioProjectTextSignature(renamedRawText));
+      }
+      this.projectLiveSyncWarning = null;
+      this.render();
+      return;
+    }
+    if (this.isVaultFolder(file) && this.currentProjectPath.startsWith(`${previousPath}/`)) {
+      const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+      const suffix = this.currentProjectPath.slice(previousPath.length + 1);
+      const remappedProjectPath = normalizePath(`${renamedPath}/${suffix}`);
+      if (!this.isStudioProjectPath(remappedProjectPath)) {
+        await this.loadProjectFromPath(null, { notifyOnError: false });
+        this.render();
+        return;
+      }
+      this.remapProjectScopedUiState(this.currentProjectPath, remappedProjectPath);
+      await this.loadProjectFromPath(remappedProjectPath, {
+        notifyOnError: false,
+        forceReload: true,
+      });
+      this.applySelectionToCurrentProject(selectedNodeIds);
+      const remappedRawText = await this.readStudioProjectRawText(remappedProjectPath);
+      if (remappedRawText != null) {
+        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(remappedRawText));
       }
       this.projectLiveSyncWarning = null;
       this.render();
