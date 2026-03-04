@@ -121,6 +121,23 @@ import {
   serializeStudioNoteItems,
   type StudioNoteConfigItem,
 } from "../../studio/StudioNoteConfig";
+import { mountStudioTerminalNode } from "./StudioTerminalNodeRenderer";
+import {
+  buildGraphClipboardPayload,
+  cloneHistorySnapshot,
+  cloneProjectSnapshot,
+  normalizeNodeIdList,
+  parseGraphClipboardPayload,
+  serializeProjectSnapshot,
+  STUDIO_GRAPH_CLIPBOARD_SCHEMA,
+  trimHistorySnapshots,
+  type StudioGraphClipboardPayload,
+  type StudioGraphHistorySnapshot,
+} from "./systemsculpt-studio-view/StudioGraphClipboardModel";
+import {
+  parsePathReferencesFromText,
+  resolveVaultItemFromReference,
+} from "./systemsculpt-studio-view/StudioVaultReferenceResolver";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -132,25 +149,6 @@ const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
 };
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS = 120;
-const STUDIO_GRAPH_CLIPBOARD_SCHEMA = "systemsculpt.studio.clipboard.v1" as const;
-
-type StudioGraphClipboardPayload = {
-  schema: typeof STUDIO_GRAPH_CLIPBOARD_SCHEMA;
-  createdAt: string;
-  nodes: StudioNodeInstance[];
-  edges: StudioEdge[];
-  groups: StudioNodeGroup[];
-  selectedNodeIds: string[];
-  anchor: {
-    x: number;
-    y: number;
-  };
-};
-
-type StudioGraphHistorySnapshot = {
-  project: StudioProjectV1;
-  selectedNodeIds: string[];
-};
 
 type SystemSculptStudioViewState = {
   inspectorLayout?: unknown;
@@ -180,6 +178,8 @@ export class SystemSculptStudioView extends ItemView {
   private nodeDefinitionsByKey = new Map<string, StudioNodeDefinition>();
   private saveTimer: number | null = null;
   private layoutSaveTimer: number | null = null;
+  private viewportScrollCaptureFrame: number | null = null;
+  private viewportScrollingClassTimer: number | null = null;
   private saveInFlight = false;
   private saveQueued = false;
   private graphViewportEl: HTMLElement | null = null;
@@ -197,6 +197,7 @@ export class SystemSculptStudioView extends ItemView {
   private pendingLabelAutofocusNodeId: string | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
+  private terminalNodeMountDisposers: Array<() => void> = [];
   private lastGraphPointerPosition: { x: number; y: number } | null = null;
   private vaultEventRefs: EventRef[] = [];
   private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
@@ -310,6 +311,7 @@ export class SystemSculptStudioView extends ItemView {
     this.app.workspace.requestSaveLayout();
     this.clearSaveTimer();
     this.clearLayoutSaveTimer();
+    this.resetViewportScrollingState();
     this.runPresentation.reset();
     this.editingLabelNodeIds.clear();
     this.pendingLabelAutofocusNodeId = null;
@@ -323,8 +325,24 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl = null;
     this.graphViewportProjectPath = null;
     this.lastGraphPointerPosition = null;
+    this.clearTerminalNodeMountDisposers();
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
+  }
+
+  private clearTerminalNodeMountDisposers(): void {
+    if (this.terminalNodeMountDisposers.length === 0) {
+      return;
+    }
+    const disposers = [...this.terminalNodeMountDisposers];
+    this.terminalNodeMountDisposers = [];
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch {
+        // Best effort cleanup.
+      }
+    }
   }
 
   private bindVaultEvents(): void {
@@ -367,37 +385,12 @@ export class SystemSculptStudioView extends ItemView {
     return this.app.workspace.getActiveViewOfType(SystemSculptStudioView) === this;
   }
 
-  private normalizeNodeIdList(nodeIds: string[]): string[] {
-    return Array.from(
-      new Set(
-        nodeIds
-          .map((nodeId) => String(nodeId || "").trim())
-          .filter((nodeId) => nodeId.length > 0)
-      )
-    );
-  }
-
-  private cloneProjectSnapshot(project: StudioProjectV1): StudioProjectV1 {
-    return JSON.parse(JSON.stringify(project)) as StudioProjectV1;
-  }
-
-  private serializeProjectSnapshot(project: StudioProjectV1): string {
-    return JSON.stringify(project);
-  }
-
-  private cloneHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
-    return {
-      project: this.cloneProjectSnapshot(snapshot.project),
-      selectedNodeIds: [...snapshot.selectedNodeIds],
-    };
-  }
-
   private setHistoryCurrentSnapshot(project: StudioProjectV1, selectedNodeIds: string[]): void {
     this.historyCurrentSnapshot = {
-      project: this.cloneProjectSnapshot(project),
-      selectedNodeIds: this.normalizeNodeIdList(selectedNodeIds),
+      project: cloneProjectSnapshot(project),
+      selectedNodeIds: normalizeNodeIdList(selectedNodeIds),
     };
-    this.historyCurrentSerialized = this.serializeProjectSnapshot(project);
+    this.historyCurrentSerialized = serializeProjectSnapshot(project);
   }
 
   private resetProjectHistory(project: StudioProjectV1 | null, options?: { selectedNodeIds?: string[] }): void {
@@ -411,18 +404,12 @@ export class SystemSculptStudioView extends ItemView {
     this.setHistoryCurrentSnapshot(project, options?.selectedNodeIds || []);
   }
 
-  private trimHistorySnapshots(snapshots: StudioGraphHistorySnapshot[]): void {
-    while (snapshots.length > STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS) {
-      snapshots.shift();
-    }
-  }
-
   private captureProjectHistoryCheckpoint(): void {
     if (!this.currentProject) {
       return;
     }
 
-    const serialized = this.serializeProjectSnapshot(this.currentProject);
+    const serialized = serializeProjectSnapshot(this.currentProject);
     if (!this.historyCurrentSnapshot) {
       this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
       return;
@@ -431,8 +418,8 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    this.historyUndoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
-    this.trimHistorySnapshots(this.historyUndoSnapshots);
+    this.historyUndoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
+    trimHistorySnapshots(this.historyUndoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
     this.setHistoryCurrentSnapshot(this.currentProject, this.graphInteraction.getSelectedNodeIds());
     this.historyRedoSnapshots = [];
   }
@@ -442,9 +429,9 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const nextProject = this.cloneProjectSnapshot(snapshot.project);
+    const nextProject = cloneProjectSnapshot(snapshot.project);
     const nextNodeIdSet = new Set(nextProject.graph.nodes.map((node) => node.id));
-    const nextSelection = this.normalizeNodeIdList(snapshot.selectedNodeIds).filter((nodeId) =>
+    const nextSelection = normalizeNodeIdList(snapshot.selectedNodeIds).filter((nodeId) =>
       nextNodeIdSet.has(nodeId)
     );
 
@@ -479,8 +466,8 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
 
-    this.historyRedoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
-    this.trimHistorySnapshots(this.historyRedoSnapshots);
+    this.historyRedoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
+    trimHistorySnapshots(this.historyRedoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
     this.applyHistorySnapshot(targetSnapshot);
     return true;
   }
@@ -494,94 +481,10 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
 
-    this.historyUndoSnapshots.push(this.cloneHistorySnapshot(this.historyCurrentSnapshot));
-    this.trimHistorySnapshots(this.historyUndoSnapshots);
+    this.historyUndoSnapshots.push(cloneHistorySnapshot(this.historyCurrentSnapshot));
+    trimHistorySnapshots(this.historyUndoSnapshots, STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS);
     this.applyHistorySnapshot(targetSnapshot);
     return true;
-  }
-
-  private resolveClipboardAnchor(nodes: StudioNodeInstance[]): { x: number; y: number } {
-    if (nodes.length === 0) {
-      return { x: 0, y: 0 };
-    }
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    for (const node of nodes) {
-      minX = Math.min(minX, Number(node.position?.x) || 0);
-      minY = Math.min(minY, Number(node.position?.y) || 0);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
-      return { x: 0, y: 0 };
-    }
-    return {
-      x: minX,
-      y: minY,
-    };
-  }
-
-  private buildGraphClipboardPayload(selectedNodeIds: string[]): StudioGraphClipboardPayload | null {
-    if (!this.currentProject) {
-      return null;
-    }
-
-    const project = this.currentProject;
-    const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-    const normalizedSelection = this.normalizeNodeIdList(selectedNodeIds).filter((nodeId) =>
-      nodeById.has(nodeId)
-    );
-    if (normalizedSelection.length === 0) {
-      return null;
-    }
-
-    const selectedNodeIdSet = new Set(normalizedSelection);
-    const nodes = normalizedSelection
-      .map((nodeId) => nodeById.get(nodeId))
-      .filter((node): node is StudioNodeInstance => Boolean(node))
-      .map((node) => JSON.parse(JSON.stringify(node)) as StudioNodeInstance);
-    if (nodes.length === 0) {
-      return null;
-    }
-
-    const edges = project.graph.edges
-      .filter(
-        (edge) =>
-          selectedNodeIdSet.has(edge.fromNodeId) &&
-          selectedNodeIdSet.has(edge.toNodeId)
-      )
-      .map((edge) => ({ ...edge }));
-
-    const groups = (project.graph.groups || [])
-      .map((group) => {
-        const groupNodeIds = this.normalizeNodeIdList(group.nodeIds || []).filter((nodeId) =>
-          selectedNodeIdSet.has(nodeId)
-        );
-        if (groupNodeIds.length < 2) {
-          return null;
-        }
-        const groupName = String(group.name || "").trim();
-        const groupId = String(group.id || "").trim();
-        if (!groupName || !groupId) {
-          return null;
-        }
-        const groupColor = String(group.color || "").trim();
-        return {
-          id: groupId,
-          name: groupName,
-          ...(groupColor ? { color: groupColor } : {}),
-          nodeIds: groupNodeIds,
-        } satisfies StudioNodeGroup;
-      })
-      .filter((group): group is StudioNodeGroup => Boolean(group));
-
-    return {
-      schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
-      createdAt: new Date().toISOString(),
-      nodes,
-      edges,
-      groups,
-      selectedNodeIds: normalizedSelection,
-      anchor: this.resolveClipboardAnchor(nodes),
-    };
   }
 
   private async syncGraphClipboardToSystemClipboard(payload: StudioGraphClipboardPayload): Promise<void> {
@@ -896,57 +799,16 @@ export class SystemSculptStudioView extends ItemView {
     );
   }
 
-  private parseGraphClipboardPayload(raw: string): StudioGraphClipboardPayload | null {
-    const trimmed = String(raw || "").trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed) as unknown;
-    } catch {
-      return null;
-    }
-
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-    const payload = parsed as Partial<StudioGraphClipboardPayload>;
-    if (payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA) {
-      return null;
-    }
-    if (!Array.isArray(payload.nodes) || payload.nodes.length === 0) {
-      return null;
-    }
-
-    return {
-      schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
-      createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
-      nodes: payload.nodes as StudioNodeInstance[],
-      edges: Array.isArray(payload.edges) ? (payload.edges as StudioEdge[]) : [],
-      groups: Array.isArray(payload.groups) ? (payload.groups as StudioNodeGroup[]) : [],
-      selectedNodeIds: Array.isArray(payload.selectedNodeIds)
-        ? this.normalizeNodeIdList(payload.selectedNodeIds as string[])
-        : [],
-      anchor: {
-        x:
-          payload.anchor && Number.isFinite(Number(payload.anchor.x))
-            ? Number(payload.anchor.x)
-            : 0,
-        y:
-          payload.anchor && Number.isFinite(Number(payload.anchor.y))
-            ? Number(payload.anchor.y)
-            : 0,
-      },
-    };
-  }
-
   private copySelectedGraphNodesToClipboard(options?: { showNotice?: boolean }): boolean {
     if (this.busy || !this.currentProject) {
       return false;
     }
-    const payload = this.buildGraphClipboardPayload(this.graphInteraction.getSelectedNodeIds());
+    const payload = this.currentProject
+      ? buildGraphClipboardPayload({
+          project: this.currentProject,
+          selectedNodeIds: this.graphInteraction.getSelectedNodeIds(),
+        })
+      : null;
     if (!payload) {
       return false;
     }
@@ -1041,7 +903,7 @@ export class SystemSculptStudioView extends ItemView {
 
     const newGroups: StudioNodeGroup[] = [];
     for (const sourceGroup of payload.groups || []) {
-      const groupNodeIds = this.normalizeNodeIdList(sourceGroup.nodeIds || [])
+      const groupNodeIds = normalizeNodeIdList(sourceGroup.nodeIds || [])
         .map((nodeId) => nodeIdMap.get(nodeId) || "")
         .filter((nodeId) => nodeId.length > 0);
       if (groupNodeIds.length < 2) {
@@ -1071,7 +933,7 @@ export class SystemSculptStudioView extends ItemView {
       project.graph.groups.push(...newGroups);
     }
 
-    const nextSelection = this.normalizeNodeIdList(payload.selectedNodeIds || [])
+    const nextSelection = normalizeNodeIdList(payload.selectedNodeIds || [])
       .map((nodeId) => nodeIdMap.get(nodeId) || "")
       .filter((nodeId) => nodeId.length > 0);
     if (nextSelection.length === 0) {
@@ -1219,240 +1081,6 @@ export class SystemSculptStudioView extends ItemView {
     return typeof text === "string" ? text : "";
   }
 
-  private parseObsidianOpenFilePath(reference: string): string | null {
-    const raw = String(reference || "").trim();
-    if (!raw.startsWith("obsidian://open")) {
-      return null;
-    }
-    try {
-      const url = new URL(raw);
-      const filePath = url.searchParams.get("file");
-      if (!filePath) {
-        return null;
-      }
-      const decoded = decodeURIComponent(filePath).trim();
-      return decoded ? normalizePath(decoded) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private stripEnclosingReferenceWrappers(reference: string): string {
-    let next = String(reference || "").trim();
-    while (next.startsWith("<") && next.endsWith(">") && next.length > 1) {
-      next = next.slice(1, -1).trim();
-    }
-    if (
-      (next.startsWith("\"") && next.endsWith("\"") && next.length > 1) ||
-      (next.startsWith("'") && next.endsWith("'") && next.length > 1) ||
-      (next.startsWith("`") && next.endsWith("`") && next.length > 1)
-    ) {
-      next = next.slice(1, -1).trim();
-    }
-    return next;
-  }
-
-  private normalizeObsidianLinkTarget(reference: string): string {
-    let next = this.stripEnclosingReferenceWrappers(reference);
-    if (!next) {
-      return "";
-    }
-    if (next.startsWith("!")) {
-      next = next.slice(1).trim();
-    }
-    const aliasIndex = next.indexOf("|");
-    if (aliasIndex >= 0) {
-      next = next.slice(0, aliasIndex).trim();
-    }
-    const headingIndex = next.indexOf("#");
-    if (headingIndex >= 0) {
-      next = next.slice(0, headingIndex).trim();
-    }
-    const blockIndex = next.indexOf("^");
-    if (blockIndex >= 0) {
-      next = next.slice(0, blockIndex).trim();
-    }
-    return next.trim();
-  }
-
-  private parseObsidianWikiLinkTarget(reference: string): string | null {
-    const raw = this.stripEnclosingReferenceWrappers(reference);
-    const match = raw.match(/^!?\[\[([\s\S]+?)\]\]$/);
-    if (!match) {
-      return null;
-    }
-    const target = this.normalizeObsidianLinkTarget(match[1]);
-    return target || null;
-  }
-
-  private parseMarkdownLinkTarget(reference: string): string | null {
-    const raw = this.stripEnclosingReferenceWrappers(reference);
-    const match = raw.match(/^!?\[[^\]]*]\((.+)\)$/);
-    if (!match) {
-      return null;
-    }
-    let target = String(match[1] || "").trim();
-    if (!target) {
-      return null;
-    }
-    if (target.startsWith("<") && target.endsWith(">") && target.length > 1) {
-      target = target.slice(1, -1).trim();
-    } else {
-      const firstToken = target.split(/\s+/)[0];
-      target = firstToken || target;
-    }
-    try {
-      target = decodeURIComponent(target);
-    } catch {
-      // Keep the original text when URL decoding fails.
-    }
-    const normalized = this.normalizeObsidianLinkTarget(target);
-    return normalized || null;
-  }
-
-  private resolveVaultPathFromFileUri(reference: string): string | null {
-    const raw = this.stripEnclosingReferenceWrappers(reference);
-    if (!raw.toLowerCase().startsWith("file://")) {
-      return null;
-    }
-    try {
-      const url = new URL(raw);
-      if (url.protocol !== "file:") {
-        return null;
-      }
-      let absolutePath = decodeURIComponent(url.pathname || "").trim();
-      if (/^\/[a-zA-Z]:\//.test(absolutePath)) {
-        absolutePath = absolutePath.slice(1);
-      }
-      return this.resolveVaultPathFromAbsoluteFilePath(absolutePath);
-    } catch {
-      return null;
-    }
-  }
-
-  private resolveVaultItemFromReference(reference: string): TAbstractFile | null {
-    const raw = this.stripEnclosingReferenceWrappers(reference);
-    if (!raw) {
-      return null;
-    }
-
-    const candidatePaths = new Set<string>();
-    const pushCandidate = (value: string | null | undefined): void => {
-      const next = String(value || "").trim();
-      if (!next) {
-        return;
-      }
-      candidatePaths.add(next);
-    };
-
-    pushCandidate(this.parseObsidianOpenFilePath(raw));
-    pushCandidate(this.parseObsidianWikiLinkTarget(raw));
-    pushCandidate(this.parseMarkdownLinkTarget(raw));
-    pushCandidate(this.resolveVaultPathFromFileUri(raw));
-    if (isAbsoluteFilesystemPath(raw)) {
-      pushCandidate(this.resolveVaultPathFromAbsoluteFilePath(raw));
-    }
-    pushCandidate(this.normalizeObsidianLinkTarget(raw));
-    pushCandidate(raw);
-
-    for (const candidate of candidatePaths) {
-      const normalizedCandidate = normalizePath(candidate.replace(/\\/g, "/"));
-      if (!normalizedCandidate) {
-        continue;
-      }
-      const direct = this.app.vault.getAbstractFileByPath(normalizedCandidate);
-      if (direct) {
-        return direct;
-      }
-      if (!normalizedCandidate.includes(".")) {
-        const markdownFallback = this.app.vault.getAbstractFileByPath(`${normalizedCandidate}.md`);
-        if (markdownFallback) {
-          return markdownFallback;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  private collectInlinePathReferencesFromText(raw: string, push: (value: string) => void): void {
-    const text = String(raw || "");
-    if (!text.trim()) {
-      return;
-    }
-
-    for (const match of text.matchAll(/obsidian:\/\/open[^\s)]+/gi)) {
-      push(match[0]);
-    }
-    for (const match of text.matchAll(/file:\/\/[^\s)]+/gi)) {
-      push(match[0]);
-    }
-    for (const match of text.matchAll(/!?\[\[([\s\S]+?)\]\]/g)) {
-      push(match[0]);
-      push(match[1]);
-    }
-    for (const match of text.matchAll(/!?\[[^\]]*]\(([^)]+)\)/g)) {
-      push(match[0]);
-      push(match[1]);
-    }
-  }
-
-  private parsePathReferencesFromText(raw: string): string[] {
-    const normalized = String(raw || "").trim();
-    if (!normalized) {
-      return [];
-    }
-
-    const references = new Set<string>();
-    const push = (value: string): void => {
-      const next = String(value || "").trim();
-      if (!next) {
-        return;
-      }
-      references.add(next);
-    };
-
-    try {
-      const parsed = JSON.parse(normalized) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const record = parsed as Record<string, unknown>;
-        if (typeof record.path === "string") {
-          push(record.path);
-        }
-        if (typeof record.file === "string") {
-          push(record.file);
-        }
-        if (Array.isArray(record.results)) {
-          for (const result of record.results) {
-            if (result && typeof result === "object" && typeof (result as Record<string, unknown>).path === "string") {
-              push((result as Record<string, unknown>).path as string);
-            }
-          }
-        }
-      } else if (Array.isArray(parsed)) {
-        for (const value of parsed) {
-          if (typeof value === "string") {
-            push(value);
-          }
-        }
-      }
-    } catch {
-      // Continue with line parsing.
-    }
-
-    this.collectInlinePathReferencesFromText(normalized, push);
-    for (const line of normalized.split(/\r?\n/)) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) {
-        continue;
-      }
-      push(trimmedLine);
-      push(trimmedLine.replace(/^[-*]\s+/, ""));
-    }
-
-    return Array.from(references);
-  }
-
   private isMarkdownVaultFile(file: TAbstractFile | null): file is TFile {
     return file instanceof TFile && file.extension.toLowerCase() === "md";
   }
@@ -1462,7 +1090,12 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private resolveMarkdownVaultPathFromReference(reference: string): string | null {
-    const item = this.resolveVaultItemFromReference(reference);
+    const item = resolveVaultItemFromReference({
+      reference,
+      getAbstractFileByPath: (path) => this.app.vault.getAbstractFileByPath(path),
+      resolveVaultPathFromAbsoluteFilePath: (absolutePath) =>
+        this.resolveVaultPathFromAbsoluteFilePath(absolutePath),
+    });
     if (!this.isMarkdownVaultFile(item)) {
       return null;
     }
@@ -1509,7 +1142,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const pastedText = this.extractClipboardText(event);
-    const graphClipboardPayload = this.parseGraphClipboardPayload(pastedText);
+    const graphClipboardPayload = parseGraphClipboardPayload(pastedText);
     if (graphClipboardPayload) {
       const previousCreatedAt = this.graphClipboardPayload?.createdAt || "";
       this.graphClipboardPayload = graphClipboardPayload;
@@ -2341,6 +1974,20 @@ export class SystemSculptStudioView extends ItemView {
     if (this.layoutSaveTimer !== null) {
       window.clearTimeout(this.layoutSaveTimer);
       this.layoutSaveTimer = null;
+    }
+  }
+
+  private clearViewportScrollCaptureFrame(): void {
+    if (this.viewportScrollCaptureFrame !== null) {
+      window.cancelAnimationFrame(this.viewportScrollCaptureFrame);
+      this.viewportScrollCaptureFrame = null;
+    }
+  }
+
+  private clearViewportScrollingClassTimer(): void {
+    if (this.viewportScrollingClassTimer !== null) {
+      window.clearTimeout(this.viewportScrollingClassTimer);
+      this.viewportScrollingClassTimer = null;
     }
   }
 
@@ -3876,7 +3523,35 @@ export class SystemSculptStudioView extends ItemView {
   private handleGraphViewportScrolled(): void {
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
-    this.captureGraphViewportState({ requestLayoutSave: true });
+    this.markViewportScrolling();
+    if (this.viewportScrollCaptureFrame !== null) {
+      return;
+    }
+    this.viewportScrollCaptureFrame = window.requestAnimationFrame(() => {
+      this.viewportScrollCaptureFrame = null;
+      this.captureGraphViewportState({ requestLayoutSave: true });
+    });
+  }
+
+  private markViewportScrolling(): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+    viewport.classList.add("is-scrolling");
+    this.clearViewportScrollingClassTimer();
+    this.viewportScrollingClassTimer = window.setTimeout(() => {
+      this.viewportScrollingClassTimer = null;
+      if (this.graphViewportEl) {
+        this.graphViewportEl.classList.remove("is-scrolling");
+      }
+    }, 140);
+  }
+
+  private resetViewportScrollingState(): void {
+    this.clearViewportScrollCaptureFrame();
+    this.clearViewportScrollingClassTimer();
+    this.graphViewportEl?.classList.remove("is-scrolling");
   }
 
   private blurActiveStudioEditableTarget(): void {
@@ -4022,7 +3697,7 @@ export class SystemSculptStudioView extends ItemView {
       pushPayload(await this.readDataTransferStringItem(item));
     }
     for (const payload of payloads) {
-      for (const reference of this.parsePathReferencesFromText(payload)) {
+      for (const reference of parsePathReferencesFromText(payload)) {
         pushReference(reference);
       }
     }
@@ -4045,7 +3720,12 @@ export class SystemSculptStudioView extends ItemView {
     const folderPaths = new Set<string>();
     const unsupportedPaths = new Set<string>();
     for (const reference of references) {
-      const item = this.resolveVaultItemFromReference(reference);
+      const item = resolveVaultItemFromReference({
+        reference,
+        getAbstractFileByPath: (path) => this.app.vault.getAbstractFileByPath(path),
+        resolveVaultPathFromAbsoluteFilePath: (absolutePath) =>
+          this.resolveVaultPathFromAbsoluteFilePath(absolutePath),
+      });
       if (this.isMarkdownVaultFile(item)) {
         notePaths.add(item.path);
         continue;
@@ -4264,6 +3944,46 @@ export class SystemSculptStudioView extends ItemView {
         void this.revealPathInFinder(path);
       },
       resolveNodeBadge: (node) => this.resolveNodeCardBadge(node),
+      mountTerminalNode: ({
+        node,
+        nodeEl,
+        interactionLocked,
+        graphInteraction,
+        onNodeConfigMutated,
+        onNodeGeometryMutated,
+      }) => {
+        const projectPath = this.currentProjectPath;
+        if (!projectPath) {
+          return;
+        }
+        const studio = this.plugin.getStudioService();
+        const disposeTerminalNode = mountStudioTerminalNode({
+          node,
+          nodeEl,
+          projectPath,
+          interactionLocked,
+          ensureSession: (request) => studio.ensureTerminalSession(request),
+          restartSession: (request) => studio.restartTerminalSession(request),
+          stopSession: async (sessionOptions) => {
+            try {
+              await studio.stopTerminalSession(sessionOptions);
+            } catch (error) {
+              new Notice(
+                `Unable to stop terminal session: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          },
+          clearSessionHistory: (sessionOptions) => studio.clearTerminalSessionHistory(sessionOptions),
+          writeInput: (sessionOptions) => studio.writeTerminalInput(sessionOptions),
+          resizeSession: (sessionOptions) => studio.resizeTerminalSession(sessionOptions),
+          subscribe: (sessionOptions, listener) => studio.subscribeTerminalSession(sessionOptions, listener),
+          getSnapshot: (sessionOptions) => studio.getTerminalSessionSnapshot(sessionOptions),
+          onNodeConfigMutated,
+          onNodeGeometryMutated,
+          getGraphZoom: () => graphInteraction.getGraphZoom(),
+        });
+        this.terminalNodeMountDisposers.push(disposeTerminalNode);
+      },
     });
 
     this.graphViewportEl = result.viewportEl;
@@ -4370,6 +4090,8 @@ export class SystemSculptStudioView extends ItemView {
 
   private render(): void {
     this.captureGraphViewportState();
+    this.resetViewportScrollingState();
+    this.clearTerminalNodeMountDisposers();
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
