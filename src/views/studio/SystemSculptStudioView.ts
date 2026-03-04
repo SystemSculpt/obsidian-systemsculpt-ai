@@ -167,6 +167,11 @@ import {
   resolveStudioProjectModifyDecision,
   trackExpectedStudioProjectWriteSignature,
 } from "./systemsculpt-studio-view/StudioProjectLiveSync";
+import {
+  isStudioProjectPath,
+  remapPathScopedRecord,
+  resolveProjectPathAfterFolderRename,
+} from "./systemsculpt-studio-view/StudioProjectPathState";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -1665,13 +1670,9 @@ export class SystemSculptStudioView extends ItemView {
     return this.saveTimer !== null || this.saveInFlight || this.saveQueued;
   }
 
-  private isStudioProjectPath(path: string): boolean {
-    return String(path || "").trim().toLowerCase().endsWith(".systemsculpt");
-  }
-
   private async readStudioProjectRawText(projectPath: string): Promise<string | null> {
     const normalized = normalizePath(String(projectPath || "").trim());
-    if (!normalized || !this.isStudioProjectPath(normalized)) {
+    if (!normalized || !isStudioProjectPath(normalized)) {
       return null;
     }
     const adapter = this.app.vault.adapter as { read?: (path: string) => Promise<string> };
@@ -1783,32 +1784,6 @@ export class SystemSculptStudioView extends ItemView {
     await this.processCurrentProjectFileMutation(rawText);
   }
 
-  private remapProjectScopedUiState(previousPath: string, nextPath: string): void {
-    const previous = normalizePath(String(previousPath || "").trim());
-    const next = normalizePath(String(nextPath || "").trim());
-    if (!previous || !next || previous === next) {
-      return;
-    }
-    if (Object.prototype.hasOwnProperty.call(this.graphViewStateByProjectPath, previous)) {
-      const previousGraphState = this.graphViewStateByProjectPath[previous];
-      const nextGraphState = { ...this.graphViewStateByProjectPath };
-      delete nextGraphState[previous];
-      if (previousGraphState) {
-        nextGraphState[next] = previousGraphState;
-      }
-      this.graphViewStateByProjectPath = nextGraphState;
-    }
-    if (Object.prototype.hasOwnProperty.call(this.nodeDetailModeByProjectPath, previous)) {
-      const previousNodeMode = this.nodeDetailModeByProjectPath[previous];
-      const nextNodeModes = { ...this.nodeDetailModeByProjectPath };
-      delete nextNodeModes[previous];
-      if (previousNodeMode) {
-        nextNodeModes[next] = previousNodeMode;
-      }
-      this.nodeDetailModeByProjectPath = nextNodeModes;
-    }
-  }
-
   private scheduleLayoutSave(): void {
     this.clearLayoutSaveTimer();
     this.layoutSaveTimer = window.setTimeout(() => {
@@ -1900,7 +1875,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    if (!this.isStudioProjectPath(projectPath)) {
+    if (!isStudioProjectPath(projectPath)) {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -2048,12 +2023,21 @@ export class SystemSculptStudioView extends ItemView {
     const renamedPath = normalizePath(String(file.path || "").trim());
     if (previousPath === this.currentProjectPath) {
       const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-      if (!this.isStudioProjectPath(renamedPath)) {
+      if (!isStudioProjectPath(renamedPath)) {
         await this.loadProjectFromPath(null, { notifyOnError: false });
         this.render();
         return;
       }
-      this.remapProjectScopedUiState(previousPath, renamedPath);
+      this.graphViewStateByProjectPath = remapPathScopedRecord(
+        this.graphViewStateByProjectPath,
+        previousPath,
+        renamedPath
+      );
+      this.nodeDetailModeByProjectPath = remapPathScopedRecord(
+        this.nodeDetailModeByProjectPath,
+        previousPath,
+        renamedPath
+      );
       await this.loadProjectFromPath(renamedPath, {
         notifyOnError: false,
         forceReload: true,
@@ -2067,16 +2051,30 @@ export class SystemSculptStudioView extends ItemView {
       this.render();
       return;
     }
-    if (this.isVaultFolder(file) && this.currentProjectPath.startsWith(`${previousPath}/`)) {
+    const remappedProjectPath = this.isVaultFolder(file)
+      ? resolveProjectPathAfterFolderRename({
+          currentProjectPath: this.currentProjectPath,
+          previousFolderPath: previousPath,
+          nextFolderPath: renamedPath,
+        })
+      : null;
+    if (remappedProjectPath) {
       const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-      const suffix = this.currentProjectPath.slice(previousPath.length + 1);
-      const remappedProjectPath = normalizePath(`${renamedPath}/${suffix}`);
-      if (!this.isStudioProjectPath(remappedProjectPath)) {
+      if (!isStudioProjectPath(remappedProjectPath)) {
         await this.loadProjectFromPath(null, { notifyOnError: false });
         this.render();
         return;
       }
-      this.remapProjectScopedUiState(this.currentProjectPath, remappedProjectPath);
+      this.graphViewStateByProjectPath = remapPathScopedRecord(
+        this.graphViewStateByProjectPath,
+        this.currentProjectPath,
+        remappedProjectPath
+      );
+      this.nodeDetailModeByProjectPath = remapPathScopedRecord(
+        this.nodeDetailModeByProjectPath,
+        this.currentProjectPath,
+        remappedProjectPath
+      );
       await this.loadProjectFromPath(remappedProjectPath, {
         notifyOnError: false,
         forceReload: true,

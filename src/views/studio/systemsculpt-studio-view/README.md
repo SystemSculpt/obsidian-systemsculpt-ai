@@ -42,6 +42,10 @@ into focused submodules.
   - Prompt-source resolution and text-generation handoff markdown composition.
   - Keeps bundle source dedupe/formatting logic modular and testable.
 
+- `StudioProjectPathState.ts`
+  - Studio project path predicates, folder-rename project-path remapping, and path-scoped state key remapping.
+  - Keeps project-path state transforms deterministic and reusable.
+
 ## Orchestration contract
 
 `SystemSculptStudioView.ts` should own:
@@ -63,6 +67,7 @@ Helper modules in this directory should own:
 3. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
 4. Extract project file live-sync read/mutate orchestration into a dedicated controller.
 5. Split run-event materialization and managed-output synchronization into dedicated runtime handlers.
+6. Extract keyboard shortcut routing into a dedicated command-map controller.
 
 ## Conventions
 
