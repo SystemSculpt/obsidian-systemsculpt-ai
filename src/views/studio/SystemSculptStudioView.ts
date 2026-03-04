@@ -148,9 +148,23 @@ import {
   materializePastedMediaNodes,
 } from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
 import {
+  coerceNotePreviewText,
+  coercePromptBundleText,
+  isTextGenerationOutputLocked,
+  readFirstTextValue,
+  resolveTextGenerationOutputSnapshot,
+  wrapPromptBundleFence,
+} from "./systemsculpt-studio-view/StudioPromptBundleUtils";
+import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
 } from "./systemsculpt-studio-view/StudioVaultReferenceResolver";
+import {
+  computeStudioProjectTextSignature,
+  consumeExpectedStudioProjectWriteSignature,
+  resolveStudioProjectModifyDecision,
+  trackExpectedStudioProjectWriteSignature,
+} from "./systemsculpt-studio-view/StudioProjectLiveSync";
 
 export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
 
@@ -195,6 +209,11 @@ export class SystemSculptStudioView extends ItemView {
   private viewportScrollingClassTimer: number | null = null;
   private saveInFlight = false;
   private saveQueued = false;
+  private projectLiveSyncWarning: string | null = null;
+  private pendingExternalProjectSync = false;
+  private lastAcceptedProjectSignature: string | null = null;
+  private lastRejectedProjectSignature: string | null = null;
+  private expectedProjectWriteSignatures = new Set<string>();
   private graphViewportEl: HTMLElement | null = null;
   private graphViewportProjectPath: string | null = null;
   private inspectorOverlay: StudioNodeInspectorOverlay | null = null;
@@ -323,6 +342,7 @@ export class SystemSculptStudioView extends ItemView {
     this.clearLayoutSaveTimer();
     this.resetViewportScrollingState();
     this.runPresentation.reset();
+    this.clearProjectLiveSyncState();
     this.editingLabelNodeIds.clear();
     this.pendingLabelAutofocusNodeId = null;
     this.inspectorOverlay?.destroy();
@@ -487,106 +507,6 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
-  private coercePromptBundleText(value: unknown): string {
-    if (typeof value === "string") {
-      return value.trim();
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (value == null) {
-      return "";
-    }
-    try {
-      return JSON.stringify(value, null, 2).trim();
-    } catch {
-      return "";
-    }
-  }
-
-  private coerceNotePreviewText(value: unknown, pathValue?: StudioJsonValue | undefined): string {
-    const readPathAtIndex = (index: number): string => {
-      if (typeof pathValue === "string") {
-        return pathValue.trim();
-      }
-      if (Array.isArray(pathValue)) {
-        const entry = pathValue[index];
-        return typeof entry === "string" ? entry.trim() : "";
-      }
-      return "";
-    };
-
-    const formatNoteBlock = (text: string, index: number): string => {
-      const body = text.trim();
-      if (!body) {
-        return "";
-      }
-      const path = readPathAtIndex(index);
-      if (!path) {
-        return body;
-      }
-      return `Path: ${path}\n${body}`;
-    };
-
-    if (typeof value === "string") {
-      return formatNoteBlock(value, 0);
-    }
-    if (Array.isArray(value)) {
-      const parts = value
-        .map((entry, index) => (typeof entry === "string" ? formatNoteBlock(entry, index) : ""))
-        .filter((entry) => entry.length > 0);
-      if (parts.length > 0) {
-        return parts.join("\n\n---\n\n");
-      }
-    }
-    return "";
-  }
-
-  private readFirstTextValue(value: StudioJsonValue | undefined): string {
-    if (typeof value === "string") {
-      return value.trim();
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        if (typeof entry !== "string") {
-          continue;
-        }
-        const trimmed = entry.trim();
-        if (trimmed.length > 0) {
-          return trimmed;
-        }
-      }
-    }
-    return "";
-  }
-
-  private isTextGenerationOutputLocked(node: StudioNodeInstance | null): boolean {
-    if (!node || node.kind !== "studio.text_generation") {
-      return false;
-    }
-    return node.config.lockOutput === true;
-  }
-
-  private resolveTextGenerationOutputSnapshot(node: StudioNodeInstance): string {
-    if (node.kind !== "studio.text_generation") {
-      return "";
-    }
-    const configuredValueRaw =
-      typeof node.config.value === "string"
-        ? node.config.value
-        : typeof node.config.value === "number" || typeof node.config.value === "boolean"
-          ? String(node.config.value)
-          : "";
-    if (configuredValueRaw.trim().length > 0) {
-      return configuredValueRaw;
-    }
-    const runtimeText =
-      typeof this.runPresentation.getNodeState(node.id).outputs?.text === "string"
-        ? String(this.runPresentation.getNodeState(node.id).outputs?.text || "")
-        : "";
-    return runtimeText;
-  }
-
   private toggleTextGenerationOutputLock(nodeId: string): void {
     if (!this.currentProject) {
       new Notice("Open a Studio project first.");
@@ -599,7 +519,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    if (this.isTextGenerationOutputLocked(node)) {
+    if (isTextGenerationOutputLocked(node)) {
       delete node.config.lockOutput;
       this.scheduleProjectSave();
       this.render();
@@ -607,7 +527,14 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const snapshotText = this.resolveTextGenerationOutputSnapshot(node);
+    const runtimeText =
+      typeof this.runPresentation.getNodeState(node.id).outputs?.text === "string"
+        ? String(this.runPresentation.getNodeState(node.id).outputs?.text || "")
+        : "";
+    const snapshotText = resolveTextGenerationOutputSnapshot({
+      node,
+      runtimeText,
+    });
     node.config.lockOutput = true;
     node.config.value = snapshotText;
     this.runPresentation.primeNodeOutput(
@@ -620,13 +547,6 @@ export class SystemSculptStudioView extends ItemView {
     new Notice(snapshotText.trim() ? "Text generation output locked." : "Text output locked (currently empty).");
   }
 
-  private wrapPromptBundleFence(language: string, content: string): string {
-    const normalized = String(content || "");
-    const fence = normalized.includes("```") ? "~~~~" : "```";
-    const info = String(language || "").trim();
-    return `${fence}${info}\n${normalized}\n${fence}`;
-  }
-
   private async resolvePromptBundleSource(node: StudioNodeInstance): Promise<{
     content: string;
     contentLanguage: string;
@@ -636,8 +556,8 @@ export class SystemSculptStudioView extends ItemView {
     if (node.kind === "studio.note") {
       const runtimePath = this.runPresentation.getNodeState(node.id).outputs?.path;
       const runtimeOutput = this.runPresentation.getNodeState(node.id).outputs?.text;
-      const noteText = this.coerceNotePreviewText(runtimeOutput, runtimePath);
-      const resolvedPath = this.readFirstTextValue(runtimePath);
+      const noteText = coerceNotePreviewText(runtimeOutput, runtimePath);
+      const resolvedPath = readFirstTextValue(runtimePath);
       if (noteText) {
         return {
           content: noteText,
@@ -688,7 +608,7 @@ export class SystemSculptStudioView extends ItemView {
       };
     }
 
-    const configValueText = this.coercePromptBundleText((node.config as Record<string, unknown>).value);
+    const configValueText = coercePromptBundleText((node.config as Record<string, unknown>).value);
     if (configValueText) {
       return {
         content: configValueText,
@@ -751,7 +671,7 @@ export class SystemSculptStudioView extends ItemView {
       if (source.vaultPath) {
         sectionLines.push(`- Vault Path: \`${source.vaultPath}\``);
       }
-      sectionLines.push("", this.wrapPromptBundleFence(source.contentLanguage, source.content), "");
+      sectionLines.push("", wrapPromptBundleFence(source.contentLanguage, source.content), "");
       sourceSections.push(sectionLines.join("\n"));
     }
 
@@ -774,7 +694,7 @@ export class SystemSculptStudioView extends ItemView {
     bundleLines.push(
       "## System Prompt",
       "",
-      this.wrapPromptBundleFence("text", systemPrompt || "(System prompt is empty.)"),
+      wrapPromptBundleFence("text", systemPrompt || "(System prompt is empty.)"),
       ""
     );
 
@@ -1625,7 +1545,7 @@ export class SystemSculptStudioView extends ItemView {
     if (sourceNode.kind !== "studio.text_generation" && sourceNode.kind !== "studio.transcription") {
       return;
     }
-    if (sourceNode.kind === "studio.text_generation" && this.isTextGenerationOutputLocked(sourceNode)) {
+    if (sourceNode.kind === "studio.text_generation" && isTextGenerationOutputLocked(sourceNode)) {
       return;
     }
     const outputText = typeof event.outputs?.text === "string" ? event.outputs.text : "";
@@ -1839,6 +1759,154 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private hasPendingLocalProjectSaveWork(): boolean {
+    return this.saveTimer !== null || this.saveInFlight || this.saveQueued;
+  }
+
+  private isStudioProjectPath(path: string): boolean {
+    return String(path || "").trim().toLowerCase().endsWith(".systemsculpt");
+  }
+
+  private async readStudioProjectRawText(projectPath: string): Promise<string | null> {
+    const normalized = normalizePath(String(projectPath || "").trim());
+    if (!normalized || !this.isStudioProjectPath(normalized)) {
+      return null;
+    }
+    const adapter = this.app.vault.adapter as { read?: (path: string) => Promise<string> };
+    if (typeof adapter.read !== "function") {
+      return null;
+    }
+    try {
+      return await adapter.read(normalized);
+    } catch {
+      return null;
+    }
+  }
+
+  private markAcceptedProjectSignature(signature: string, options?: { trackExpectedWrite?: boolean }): void {
+    const normalized = String(signature || "").trim();
+    if (!normalized) {
+      return;
+    }
+    this.lastAcceptedProjectSignature = normalized;
+    this.lastRejectedProjectSignature = null;
+    if (options?.trackExpectedWrite === true) {
+      trackExpectedStudioProjectWriteSignature(this.expectedProjectWriteSignatures, normalized);
+    }
+  }
+
+  private clearProjectLiveSyncState(): void {
+    this.projectLiveSyncWarning = null;
+    this.pendingExternalProjectSync = false;
+    this.lastAcceptedProjectSignature = null;
+    this.lastRejectedProjectSignature = null;
+    this.expectedProjectWriteSignatures.clear();
+  }
+
+  private applySelectionToCurrentProject(nodeIds: string[]): void {
+    if (!this.currentProject) {
+      return;
+    }
+    const nodeIdSet = new Set(this.currentProject.graph.nodes.map((node) => node.id));
+    const nextSelection = normalizeNodeIdList(nodeIds).filter((nodeId) => nodeIdSet.has(nodeId));
+    this.graphInteraction.setSelectedNodeIds(nextSelection);
+    this.setHistoryCurrentSnapshot(this.currentProject, nextSelection);
+  }
+
+  private async processCurrentProjectFileMutation(rawText: string): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    this.pendingExternalProjectSync = false;
+    const signature = computeStudioProjectTextSignature(rawText);
+    const isExpectedSelfWrite = consumeExpectedStudioProjectWriteSignature(
+      this.expectedProjectWriteSignatures,
+      signature
+    );
+    const decision = resolveStudioProjectModifyDecision({
+      isActiveProjectFile: true,
+      hasPendingLocalSaveWork: this.hasPendingLocalProjectSaveWork(),
+      isExpectedSelfWrite,
+      signature,
+      lastAcceptedSignature: this.lastAcceptedProjectSignature,
+      lastRejectedSignature: this.lastRejectedProjectSignature,
+    });
+    if (decision.kind === "ignore") {
+      if (decision.reason === "self_write" || decision.reason === "duplicate_accepted") {
+        this.markAcceptedProjectSignature(signature);
+      }
+      return;
+    }
+    if (decision.kind === "defer") {
+      this.pendingExternalProjectSync = true;
+      return;
+    }
+
+    const lintResult = this.plugin.getStudioService().lintProjectText(rawText);
+    if (!lintResult.ok) {
+      this.lastRejectedProjectSignature = signature;
+      this.projectLiveSyncWarning = `External .systemsculpt change rejected: ${lintResult.error}`;
+      this.render();
+      return;
+    }
+
+    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+    await this.loadProjectFromPath(this.currentProjectPath, {
+      notifyOnError: false,
+      forceReload: true,
+    });
+    this.applySelectionToCurrentProject(selectedNodeIds);
+    this.projectLiveSyncWarning = null;
+    this.markAcceptedProjectSignature(signature);
+    this.lastError = null;
+    this.render();
+  }
+
+  private async processPendingExternalProjectSync(): Promise<void> {
+    if (!this.pendingExternalProjectSync) {
+      return;
+    }
+    if (!this.currentProjectPath || !this.currentProject) {
+      this.pendingExternalProjectSync = false;
+      return;
+    }
+    if (this.hasPendingLocalProjectSaveWork()) {
+      return;
+    }
+    const rawText = await this.readStudioProjectRawText(this.currentProjectPath);
+    this.pendingExternalProjectSync = false;
+    if (rawText == null) {
+      return;
+    }
+    await this.processCurrentProjectFileMutation(rawText);
+  }
+
+  private remapProjectScopedUiState(previousPath: string, nextPath: string): void {
+    const previous = normalizePath(String(previousPath || "").trim());
+    const next = normalizePath(String(nextPath || "").trim());
+    if (!previous || !next || previous === next) {
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(this.graphViewStateByProjectPath, previous)) {
+      const previousGraphState = this.graphViewStateByProjectPath[previous];
+      const nextGraphState = { ...this.graphViewStateByProjectPath };
+      delete nextGraphState[previous];
+      if (previousGraphState) {
+        nextGraphState[next] = previousGraphState;
+      }
+      this.graphViewStateByProjectPath = nextGraphState;
+    }
+    if (Object.prototype.hasOwnProperty.call(this.nodeDetailModeByProjectPath, previous)) {
+      const previousNodeMode = this.nodeDetailModeByProjectPath[previous];
+      const nextNodeModes = { ...this.nodeDetailModeByProjectPath };
+      delete nextNodeModes[previous];
+      if (previousNodeMode) {
+        nextNodeModes[next] = previousNodeMode;
+      }
+      this.nodeDetailModeByProjectPath = nextNodeModes;
+    }
+  }
+
   private scheduleLayoutSave(): void {
     this.clearLayoutSaveTimer();
     this.layoutSaveTimer = window.setTimeout(() => {
@@ -1874,6 +1942,13 @@ export class SystemSculptStudioView extends ItemView {
       await this.plugin
         .getStudioService()
         .saveProject(this.currentProjectPath, this.currentProject);
+      const savedRawText = await this.readStudioProjectRawText(this.currentProjectPath);
+      if (savedRawText != null) {
+        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(savedRawText), {
+          trackExpectedWrite: true,
+        });
+      }
+      this.projectLiveSyncWarning = null;
       if (options?.showNotice) {
         new Notice("Studio graph saved.");
       }
@@ -1884,22 +1959,29 @@ export class SystemSculptStudioView extends ItemView {
       if (this.saveQueued) {
         this.saveQueued = false;
         this.scheduleProjectSave();
+      } else {
+        void this.processPendingExternalProjectSync();
       }
     }
   }
 
   private async loadProjectFromPath(
     projectPath: string | null,
-    options?: { notifyOnError?: boolean }
+    options?: { notifyOnError?: boolean; forceReload?: boolean }
   ): Promise<void> {
     if (!Platform.isDesktopApp) {
       return;
     }
 
-    if (projectPath !== this.currentProjectPath) {
+    if (projectPath !== this.currentProjectPath || options?.forceReload) {
       this.captureGraphViewportState();
       this.editingLabelNodeIds.clear();
       this.pendingLabelAutofocusNodeId = null;
+    }
+    if (projectPath !== this.currentProjectPath) {
+      this.pendingExternalProjectSync = false;
+      this.lastRejectedProjectSignature = null;
+      this.expectedProjectWriteSignatures.clear();
     }
 
     if (!projectPath) {
@@ -1912,10 +1994,11 @@ export class SystemSculptStudioView extends ItemView {
       this.runPresentation.reset();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
+      this.clearProjectLiveSyncState();
       return;
     }
 
-    if (!projectPath.toLowerCase().endsWith(".systemsculpt")) {
+    if (!this.isStudioProjectPath(projectPath)) {
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1925,13 +2008,14 @@ export class SystemSculptStudioView extends ItemView {
       this.runPresentation.reset();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
+      this.clearProjectLiveSyncState();
       if (options?.notifyOnError !== false) {
         new Notice("SystemSculpt Studio only opens .systemsculpt files.");
       }
       return;
     }
 
-    if (this.currentProjectPath === projectPath && this.currentProject) {
+    if (!options?.forceReload && this.currentProjectPath === projectPath && this.currentProject) {
       return;
     }
 
@@ -1982,6 +2066,16 @@ export class SystemSculptStudioView extends ItemView {
       ) {
         this.scheduleProjectSave();
       }
+      const loadedRawText = await this.readStudioProjectRawText(projectPath);
+      if (loadedRawText != null) {
+        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(loadedRawText));
+      } else {
+        this.lastAcceptedProjectSignature = null;
+      }
+      this.lastRejectedProjectSignature = null;
+      this.pendingExternalProjectSync = false;
+      this.expectedProjectWriteSignatures.clear();
+      this.projectLiveSyncWarning = null;
       this.lastError = null;
       this.syncInspectorSelection();
     } catch (error) {
@@ -1994,6 +2088,7 @@ export class SystemSculptStudioView extends ItemView {
       this.runPresentation.reset();
       this.pendingViewportState = null;
       this.syncInspectorSelection();
+      this.clearProjectLiveSyncState();
       this.lastError = error instanceof Error ? error.message : String(error);
       if (options?.notifyOnError !== false) {
         this.setError(error);
@@ -2005,12 +2100,18 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
-    if (!this.isMarkdownVaultFile(file)) {
-      return;
-    }
-
     const modifiedPath = normalizePath(String(file.path || "").trim());
     if (!modifiedPath) {
+      return;
+    }
+    if (modifiedPath === this.currentProjectPath) {
+      const rawText = await this.readStudioProjectRawText(modifiedPath);
+      if (rawText != null) {
+        await this.processCurrentProjectFileMutation(rawText);
+      }
+      return;
+    }
+    if (!this.isMarkdownVaultFile(file)) {
       return;
     }
     const matchingNodeIds = this.currentProject.graph.nodes
@@ -2040,6 +2141,28 @@ export class SystemSculptStudioView extends ItemView {
     }
     const previousPath = normalizePath(String(oldPath || "").trim());
     if (!previousPath) {
+      return;
+    }
+    const renamedPath = normalizePath(String(file.path || "").trim());
+    if (previousPath === this.currentProjectPath) {
+      const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
+      if (!this.isStudioProjectPath(renamedPath)) {
+        await this.loadProjectFromPath(null, { notifyOnError: false });
+        this.render();
+        return;
+      }
+      this.remapProjectScopedUiState(previousPath, renamedPath);
+      await this.loadProjectFromPath(renamedPath, {
+        notifyOnError: false,
+        forceReload: true,
+      });
+      this.applySelectionToCurrentProject(selectedNodeIds);
+      const renamedRawText = await this.readStudioProjectRawText(renamedPath);
+      if (renamedRawText != null) {
+        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(renamedRawText));
+      }
+      this.projectLiveSyncWarning = null;
+      this.render();
       return;
     }
 
@@ -2123,6 +2246,11 @@ export class SystemSculptStudioView extends ItemView {
     }
     const deletedPath = normalizePath(String(file.path || "").trim());
     if (!deletedPath) {
+      return;
+    }
+    if (deletedPath === this.currentProjectPath || this.currentProjectPath.startsWith(`${deletedPath}/`)) {
+      await this.loadProjectFromPath(null, { notifyOnError: false });
+      this.render();
       return;
     }
 
@@ -2475,8 +2603,8 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const outputPath =
-      this.readFirstTextValue(outputs?.path);
-    const outputText = this.coerceNotePreviewText(outputs?.text, outputs?.path);
+      readFirstTextValue(outputs?.path);
+    const outputText = coerceNotePreviewText(outputs?.text, outputs?.path);
     return {
       statusLabel: statusLabelForNode(state.status),
       statusTone: state.status,
@@ -3963,6 +4091,12 @@ export class SystemSculptStudioView extends ItemView {
       root.createEl("div", {
         text: this.lastError,
         cls: "ss-studio-error",
+      });
+    }
+    if (this.projectLiveSyncWarning) {
+      root.createEl("div", {
+        text: this.projectLiveSyncWarning,
+        cls: "ss-studio-warning",
       });
     }
 
