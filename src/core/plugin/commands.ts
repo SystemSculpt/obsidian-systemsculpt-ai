@@ -895,6 +895,22 @@ export class CommandManager {
     });
 
     this.plugin.addCommand({
+      id: "fit-systemsculpt-studio-selection-in-viewport",
+      name: "SystemSculpt Studio: Fit Selection in Viewport",
+      checkCallback: (checking: boolean) => {
+        const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+        if (!activeStudioView) {
+          return false;
+        }
+        if (!checking) {
+          activeStudioView.fitSelectionInViewportFromCommand();
+        }
+        return true;
+      },
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
+    });
+
+    this.plugin.addCommand({
       id: "copy-current-file-path",
       name: "Copy Current File Path",
       checkCallback: (checking: boolean) => {

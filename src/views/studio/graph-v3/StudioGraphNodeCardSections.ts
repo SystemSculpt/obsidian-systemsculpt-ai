@@ -186,14 +186,19 @@ export function renderNodePorts(options: {
   interactionLocked: boolean;
 }): void {
   const { nodeEl, node, definition, graphInteraction, interactionLocked } = options;
-  const ports = nodeEl.createDiv({ cls: "ss-studio-node-ports" });
-  const inputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
-  const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
-
   const inputPorts = definition?.inputPorts || [];
-  if (inputPorts.length === 0) {
-    inputsCol.createEl("div", { cls: "ss-studio-node-port-empty", text: "No inputs" });
-  } else {
+  const outputPorts = definition?.outputPorts || [];
+  if (inputPorts.length === 0 && outputPorts.length === 0) {
+    return;
+  }
+
+  const ports = nodeEl.createDiv({ cls: "ss-studio-node-ports" });
+  if (inputPorts.length === 0 || outputPorts.length === 0) {
+    ports.addClass("is-single-col");
+  }
+
+  if (inputPorts.length > 0) {
+    const inputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
     for (const port of inputPorts) {
       const row = inputsCol.createDiv({ cls: "ss-studio-port-row" });
       const pin = row.createEl("button", {
@@ -220,10 +225,8 @@ export function renderNodePorts(options: {
     }
   }
 
-  const outputPorts = definition?.outputPorts || [];
-  if (outputPorts.length === 0) {
-    outputsCol.createEl("div", { cls: "ss-studio-node-port-empty", text: "No outputs" });
-  } else {
+  if (outputPorts.length > 0) {
+    const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
     for (const port of outputPorts) {
       const row = outputsCol.createDiv({ cls: "ss-studio-port-row is-output" });
       row.createEl("span", { cls: "ss-studio-port-label", text: port.id });

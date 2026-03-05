@@ -1,10 +1,5 @@
 import { Notice } from "obsidian";
-import type {
-  StudioTerminalSessionListener,
-  StudioTerminalSessionRequest,
-  StudioTerminalSessionSnapshot,
-} from "../../studio/StudioTerminalSessionManager";
-import { tryCopyToClipboard } from "../../utils/clipboard";
+import type { StudioTerminalSidecarStatus, StudioTerminalSessionSnapshot } from "../../studio/StudioTerminalSessionManager";
 import {
   applyTerminalNodeSize,
   clampTerminalInt,
@@ -12,75 +7,112 @@ import {
   readTerminalSessionRequest,
   resolveTerminalScrollback,
 } from "./terminal/StudioTerminalNodeConfig";
-import { mountTerminalResizeHandle } from "./terminal/StudioTerminalResizeHandle";
+import type { StudioTerminalNodeMountOptions } from "./terminal/StudioTerminalNodeTypes";
 import {
   buildStudioTerminalXtermOptions,
   loadXtermRuntime,
   resolveStudioTerminalShortcutInput,
   STUDIO_TERMINAL_FONT_FAMILY,
 } from "./terminal/StudioTerminalXterm";
-import type { StudioTerminalNodeMountOptions } from "./terminal/StudioTerminalNodeTypes";
 
 export { STUDIO_TERMINAL_FONT_FAMILY, buildStudioTerminalXtermOptions } from "./terminal/StudioTerminalXterm";
-export type { StudioTerminalNodeMountOptions } from "./terminal/StudioTerminalNodeTypes";
 
-const STUDIO_TERMINAL_ACTIVE_MIN_ZOOM = 0.56;
+const RESIZE_DEBOUNCE_MS = 300;
+
+type TerminalVisualTone = "idle" | "starting" | "running" | "failed" | "degraded";
+
+function resolveSidecarState(status: StudioTerminalSidecarStatus | null): string {
+  return String(status?.state || "unknown").trim().toLowerCase();
+}
+
+function resolveTerminalTone(
+  snapshot: StudioTerminalSessionSnapshot | null,
+  sidecarStatus: StudioTerminalSidecarStatus | null
+): TerminalVisualTone {
+  const terminalState = String(snapshot?.status || "idle").trim().toLowerCase();
+  if (terminalState === "failed") {
+    return "failed";
+  }
+  if (terminalState === "starting") {
+    return "starting";
+  }
+  if (terminalState === "running") {
+    const sidecarState = resolveSidecarState(sidecarStatus);
+    if (sidecarState === "failed" || sidecarState === "disconnected") {
+      return "degraded";
+    }
+    return "running";
+  }
+  return "idle";
+}
+
+function resolveCompactStatusText(
+  snapshot: StudioTerminalSessionSnapshot | null,
+  sidecarStatus: StudioTerminalSidecarStatus | null
+): string {
+  const terminalState = String(snapshot?.status || "idle").trim().toLowerCase();
+  const terminalLabel = terminalState.charAt(0).toUpperCase() + terminalState.slice(1);
+  const sidecarState = resolveSidecarState(sidecarStatus);
+  if (!sidecarStatus || sidecarState === "unknown") {
+    return terminalLabel;
+  }
+  return `${terminalLabel} · ${sidecarState}`;
+}
 
 export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions): () => void {
-  applyTerminalNodeSize(options.node, options.nodeEl);
+  const sizeTargets = [options.nodeEl];
+  if (options.nodeCardEl && options.nodeCardEl !== options.nodeEl) {
+    sizeTargets.push(options.nodeCardEl);
+  }
+  for (const targetEl of sizeTargets) {
+    applyTerminalNodeSize(options.node, targetEl);
+  }
 
   const panelEl = options.nodeEl.createDiv({ cls: "ss-studio-terminal-panel" });
   const toolbarEl = panelEl.createDiv({ cls: "ss-studio-terminal-toolbar" });
-  const statusEl = toolbarEl.createDiv({ cls: "ss-studio-terminal-status is-idle", text: "Idle" });
+  const summaryEl = toolbarEl.createDiv({ cls: "ss-studio-terminal-toolbar-summary" });
+  const healthDotEl = summaryEl.createDiv({ cls: "ss-studio-terminal-health-dot is-idle" });
+  const statusEl = summaryEl.createDiv({ cls: "ss-studio-terminal-status-text", text: "Idle" });
   const actionsEl = toolbarEl.createDiv({ cls: "ss-studio-terminal-actions" });
 
-  const startButton = actionsEl.createEl("button", { text: "Start", cls: "ss-studio-terminal-action" });
-  const stopButton = actionsEl.createEl("button", { text: "Stop", cls: "ss-studio-terminal-action" });
-  const clearButton = actionsEl.createEl("button", { text: "Clear", cls: "ss-studio-terminal-action" });
-  const copyButton = actionsEl.createEl("button", { text: "Copy", cls: "ss-studio-terminal-action" });
-  startButton.type = "button";
+  const restartButton = actionsEl.createEl("button", {
+    text: "Restart",
+    cls: "ss-studio-terminal-action",
+  });
+  const stopButton = actionsEl.createEl("button", {
+    text: "Stop",
+    cls: "ss-studio-terminal-action",
+  });
+  restartButton.type = "button";
   stopButton.type = "button";
-  clearButton.type = "button";
-  copyButton.type = "button";
 
   const surfaceEl = panelEl.createDiv({ cls: "ss-studio-terminal-surface" });
-  const disposeResizeHandle = mountTerminalResizeHandle({
-    node: options.node,
-    nodeEl: options.nodeEl,
-    interactionLocked: options.interactionLocked,
-    onNodeConfigMutated: options.onNodeConfigMutated,
-    onNodeGeometryMutated: options.onNodeGeometryMutated,
-    getGraphZoom: options.getGraphZoom,
-  });
 
   let disposed = false;
   let terminal: import("@xterm/xterm").Terminal | null = null;
   let fitAddon: import("@xterm/addon-fit").FitAddon | null = null;
   let unsubscribeSession: (() => void) | null = null;
+  let unsubscribeSidecarStatus: (() => void) | null = null;
+  let unsubscribeZoom: (() => void) | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let inputDisposable: { dispose: () => void } | null = null;
   let latestSnapshot: StudioTerminalSessionSnapshot | null = null;
+  let latestSidecarStatus: StudioTerminalSidecarStatus | null = options.getSidecarStatus();
   let appliedHistoryRevision: number | null = null;
   let pendingResizeTimer: number | null = null;
+  let lastSessionSize: { cols: number; rows: number } | null = null;
 
-  const syncZoomVisualState = (): number => {
-    const zoom = Math.max(0.01, Number(options.getGraphZoom() || 1));
-    panelEl.classList.toggle("is-zoomed-far", zoom < STUDIO_TERMINAL_ACTIVE_MIN_ZOOM);
-    return zoom;
+  const syncStatus = (): void => {
+    const tone = resolveTerminalTone(latestSnapshot, latestSidecarStatus);
+    healthDotEl.className = `ss-studio-terminal-health-dot is-${tone}`;
+    statusEl.setText(resolveCompactStatusText(latestSnapshot, latestSidecarStatus));
   };
 
   const syncButtons = (): void => {
     const status = latestSnapshot?.status || "idle";
-    statusEl.className = `ss-studio-terminal-status is-${status}`;
-    statusEl.setText(status === "running" ? "Running" : status.charAt(0).toUpperCase() + status.slice(1));
-    startButton.disabled = options.interactionLocked || status === "starting";
-    startButton.setText(status === "running" ? "Restart" : "Start");
+    restartButton.disabled = options.interactionLocked || status === "starting";
     stopButton.disabled = options.interactionLocked || (status !== "running" && status !== "starting");
-    clearButton.disabled = options.interactionLocked;
-    copyButton.disabled =
-      options.interactionLocked ||
-      !latestSnapshot ||
-      (latestSnapshot.history.trim().length === 0 && latestSnapshot.errorMessage.trim().length === 0);
+    syncStatus();
   };
 
   const applySnapshotToTerminal = (snapshot: StudioTerminalSessionSnapshot): void => {
@@ -121,6 +153,7 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       node: options.node,
       projectPath: options.projectPath,
     });
+
     const fallback = fallbackTerminalGridDimensions(options.node);
     let cols = fallback.cols;
     let rows = fallback.rows;
@@ -133,6 +166,7 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
     }
     request.cols = cols;
     request.rows = rows;
+
     try {
       const snapshot =
         mode === "restart" ? await options.restartSession(request) : await options.ensureSession(request);
@@ -143,12 +177,9 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
   };
 
   const queueResize = (): void => {
-    const zoom = syncZoomVisualState();
-    if (zoom < STUDIO_TERMINAL_ACTIVE_MIN_ZOOM) {
-      return;
-    }
     if (pendingResizeTimer !== null) {
       window.clearTimeout(pendingResizeTimer);
+      pendingResizeTimer = null;
     }
     pendingResizeTimer = window.setTimeout(() => {
       pendingResizeTimer = null;
@@ -157,22 +188,32 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       }
       try {
         fitAddon.fit();
-      } catch {}
-      if (typeof fitAddon.proposeDimensions === "function") {
-        const proposed = fitAddon.proposeDimensions();
-        if (proposed) {
-          options.resizeSession({
-            projectPath: options.projectPath,
-            nodeId: options.node.id,
-            cols: clampTerminalInt(proposed.cols, 120, 20, 1000),
-            rows: clampTerminalInt(proposed.rows, 30, 8, 600),
-          });
-        }
+      } catch {
+        return;
       }
-    }, 80);
+      if (typeof fitAddon.proposeDimensions !== "function") {
+        return;
+      }
+      const proposed = fitAddon.proposeDimensions();
+      if (!proposed) {
+        return;
+      }
+      const cols = clampTerminalInt(proposed.cols, 120, 20, 1000);
+      const rows = clampTerminalInt(proposed.rows, 30, 8, 600);
+      if (lastSessionSize && lastSessionSize.cols === cols && lastSessionSize.rows === rows) {
+        return;
+      }
+      lastSessionSize = { cols, rows };
+      options.resizeSession({
+        projectPath: options.projectPath,
+        nodeId: options.node.id,
+        cols,
+        rows,
+      });
+    }, RESIZE_DEBOUNCE_MS);
   };
 
-  startButton.addEventListener("click", (event) => {
+  restartButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const mode = latestSnapshot?.status === "running" ? "restart" : "ensure";
@@ -188,41 +229,19 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
     });
   });
 
-  clearButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    options.clearSessionHistory({
-      projectPath: options.projectPath,
-      nodeId: options.node.id,
-    });
-    if (terminal) {
-      terminal.reset();
+  unsubscribeSession = options.subscribe(
+    { projectPath: options.projectPath, nodeId: options.node.id },
+    (sessionEvent) => {
+      if (disposed) {
+        return;
+      }
+      if (sessionEvent.type === "snapshot") {
+        applySnapshotToTerminal(sessionEvent.snapshot);
+        return;
+      }
+      pushDataToTerminal(sessionEvent.data, sessionEvent.historyRevision);
     }
-  });
-
-  copyButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const text = latestSnapshot?.history || latestSnapshot?.errorMessage || "";
-    if (!text) {
-      return;
-    }
-    void (async () => {
-      const copied = await tryCopyToClipboard(text);
-      new Notice(copied ? "Terminal output copied." : "Unable to copy terminal output.");
-    })();
-  });
-
-  unsubscribeSession = options.subscribe({ projectPath: options.projectPath, nodeId: options.node.id }, (sessionEvent) => {
-    if (disposed) {
-      return;
-    }
-    if (sessionEvent.type === "snapshot") {
-      applySnapshotToTerminal(sessionEvent.snapshot);
-      return;
-    }
-    pushDataToTerminal(sessionEvent.data, sessionEvent.historyRevision);
-  });
+  );
 
   const initialSnapshot = options.getSnapshot({
     projectPath: options.projectPath,
@@ -233,7 +252,33 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
   } else {
     syncButtons();
   }
-  syncZoomVisualState();
+
+  unsubscribeSidecarStatus = options.subscribeSidecarStatus((status) => {
+    if (disposed) {
+      return;
+    }
+    latestSidecarStatus = status;
+    syncStatus();
+  });
+
+  unsubscribeZoom = options.subscribeToGraphZoomChanges?.(() => {
+    if (disposed) {
+      return;
+    }
+    queueResize();
+  }) || null;
+
+  if (options.refreshSidecarStatus) {
+    void options.refreshSidecarStatus().then((status) => {
+      if (disposed || !status) {
+        return;
+      }
+      latestSidecarStatus = status;
+      syncStatus();
+    });
+  } else {
+    syncStatus();
+  }
 
   void (async () => {
     try {
@@ -241,11 +286,13 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       if (disposed) {
         return;
       }
+
       const resolvedScrollback = resolveTerminalScrollback((options.node.config as Record<string, unknown>).scrollback);
       terminal = new runtime.TerminalCtor(buildStudioTerminalXtermOptions(resolvedScrollback));
       fitAddon = new runtime.FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(surfaceEl);
+
       terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
         const translatedInput = resolveStudioTerminalShortcutInput(event);
         if (!translatedInput) {
@@ -260,9 +307,13 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
         });
         return false;
       });
+
       try {
         fitAddon.fit();
-      } catch {}
+      } catch {
+        // Fit is best effort at startup.
+      }
+
       inputDisposable = terminal.onData((data: string) => {
         options.writeInput({
           projectPath: options.projectPath,
@@ -270,10 +321,12 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
           data,
         });
       });
+
       surfaceEl.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         terminal?.focus();
       });
+
       surfaceEl.addEventListener("click", (event) => {
         event.stopPropagation();
         terminal?.focus();
@@ -288,13 +341,26 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       });
       resizeObserver.observe(panelEl);
       queueResize();
+
+      try {
+        const peekSnapshot = await options.peekSession({
+          projectPath: options.projectPath,
+          nodeId: options.node.id,
+        });
+        if (peekSnapshot) {
+          applySnapshotToTerminal(peekSnapshot);
+        }
+      } catch {
+        // Peek is best effort.
+      }
+
       await runWithCurrentConfig("ensure");
       terminal.focus();
     } catch (error) {
       if (disposed) {
         return;
       }
-      statusEl.className = "ss-studio-terminal-status is-failed";
+      healthDotEl.className = "ss-studio-terminal-health-dot is-failed";
       statusEl.setText("Failed");
       const message = error instanceof Error ? error.message : String(error);
       surfaceEl.createDiv({
@@ -310,17 +376,24 @@ export function mountStudioTerminalNode(options: StudioTerminalNodeMountOptions)
       window.clearTimeout(pendingResizeTimer);
       pendingResizeTimer = null;
     }
+    unsubscribeZoom?.();
+    unsubscribeZoom = null;
+    unsubscribeSidecarStatus?.();
+    unsubscribeSidecarStatus = null;
     unsubscribeSession?.();
     unsubscribeSession = null;
+    lastSessionSize = null;
     resizeObserver?.disconnect();
     resizeObserver = null;
     inputDisposable?.dispose();
     inputDisposable = null;
     try {
       terminal?.dispose();
-    } catch {}
+    } catch {
+      // Best effort cleanup.
+    }
     terminal = null;
     fitAddon = null;
-    disposeResizeHandle();
+    panelEl.remove();
   };
 }

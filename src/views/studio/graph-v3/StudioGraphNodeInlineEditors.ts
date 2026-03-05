@@ -379,9 +379,10 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["cwd", "shellProfile", "scrollback", "width", "height"],
+      orderedFieldKeys: ["shellProfile", "cwd"],
       interactionLocked,
       onNodeConfigMutated,
+      panelClassName: "ss-studio-node-inline-config--terminal",
       showFieldHelp,
       resolveDynamicSelectOptions,
     });

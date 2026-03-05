@@ -97,3 +97,30 @@ jobs:
             testing/e2e/reports
             testing/e2e/screenshots
             testing/e2e/video
+
+  terminal-runtime-smoke:
+    name: Terminal Runtime Smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Sidecar tests
+        run: npm run test -- src/studio/__tests__/studio-terminal-runtime-bootstrap.test.ts src/studio/__tests__/studio-terminal-sidecar-client.test.ts src/studio/__tests__/studio-terminal-sidecar-backend.test.ts src/studio/__tests__/studio-terminal-sidecar-script.integration.test.ts src/studio/__tests__/studio-terminal-session-manager.test.ts --runInBand
+
+      - name: Build terminal runtime assets
+        run: npm run build:terminal-runtime

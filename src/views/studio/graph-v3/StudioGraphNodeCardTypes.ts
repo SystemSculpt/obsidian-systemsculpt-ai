@@ -60,6 +60,7 @@ export type RenderStudioGraphNodeCardOptions = {
   mountTerminalNode?: (options: {
     node: StudioNodeInstance;
     nodeEl: HTMLElement;
+    terminalAnchorEl: HTMLElement;
     interactionLocked: boolean;
     graphInteraction: StudioGraphInteractionEngine;
     onNodeConfigMutated: (node: StudioNodeInstance) => void;

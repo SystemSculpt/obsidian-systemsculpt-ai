@@ -420,6 +420,8 @@ export interface SystemSculptSettings {
   studioDefaultProjectsFolder: string;
   studioRunRetentionMaxRuns: number;
   studioRunRetentionMaxArtifactsMb: number;
+  /** Minutes the Studio terminal sidecar can stay alive without active Obsidian clients. */
+  studioTerminalSidecarTimeoutMinutes: number;
   studioTelemetryOptIn: boolean;
   studioJsonEditorDefaultMode?: "composer" | "raw";
 
@@ -708,6 +710,7 @@ Raw transcript:`,
   studioDefaultProjectsFolder: "SystemSculpt/Studio",
   studioRunRetentionMaxRuns: 100,
   studioRunRetentionMaxArtifactsMb: 1024,
+  studioTerminalSidecarTimeoutMinutes: 15,
   studioTelemetryOptIn: false,
   studioJsonEditorDefaultMode: "composer",
 

@@ -20,7 +20,10 @@ export class StudioGraphInteractionEngine {
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
       renderEdgeLayer: () => this.connectionEngine.renderEdgeLayer(),
-      onNodePositionsChanged: () => this.groupController.refreshGroupBounds(),
+      onNodePositionsChanged: () => {
+        this.groupController.refreshGroupBounds();
+        this.host.onNodePositionsChanged?.();
+      },
       scheduleProjectSave: () => this.host.scheduleProjectSave(),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       resolveNodeDragHoverGroup: (draggedNodeIds) =>

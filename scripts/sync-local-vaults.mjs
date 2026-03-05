@@ -50,6 +50,7 @@ const requiredFiles = [
   'manifest.json',
   'main.js',
   'styles.css',
+  'studio-terminal-sidecar.cjs',
 ];
 const optionalFiles = ['README.md', 'LICENSE', 'versions.json'];
 const runtimeNodeModules = ['node-pty'];

@@ -415,7 +415,7 @@ function collectTerminalRuntimeAssets() {
 }
 
 function ensureReleaseAssets() {
-  const baseAssets = ["main.js", "manifest.json", "styles.css"];
+  const baseAssets = ["main.js", "manifest.json", "styles.css", "studio-terminal-sidecar.cjs"];
   for (const asset of baseAssets) {
     if (!fs.existsSync(path.join(cwd, asset))) {
       fail(`Required release asset missing after build: ${asset}`);

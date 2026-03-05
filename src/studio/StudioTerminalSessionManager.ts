@@ -1,7 +1,7 @@
 import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { nowIso } from "./utils";
-import { NodePtyTerminalBackend } from "./terminal/NodePtyTerminalBackend";
+import { StudioTerminalSidecarBackend } from "./terminal/StudioTerminalSidecarBackend";
 import {
   buildStudioTerminalEnv,
   isZshShellCommand,
@@ -26,6 +26,8 @@ import {
   type StudioTerminalSessionRecord,
   type StudioTerminalSessionRequest,
   type StudioTerminalSessionSnapshot,
+  type StudioTerminalSidecarStatus,
+  type StudioTerminalSidecarStatusListener,
 } from "./terminal/StudioTerminalSessionTypes";
 
 export type {
@@ -35,6 +37,8 @@ export type {
   StudioTerminalSessionRequest,
   StudioTerminalSessionSnapshot,
   StudioTerminalSessionStatus,
+  StudioTerminalSidecarStatus,
+  StudioTerminalSidecarStatusListener,
 } from "./terminal/StudioTerminalSessionTypes";
 
 export class StudioTerminalSessionManager {
@@ -47,7 +51,7 @@ export class StudioTerminalSessionManager {
       backend?: StudioTerminalBackend;
     }
   ) {
-    this.backend = options?.backend || new NodePtyTerminalBackend(plugin);
+    this.backend = options?.backend || new StudioTerminalSidecarBackend(plugin);
   }
 
   private createRecord(projectPath: string, nodeId: string): StudioTerminalSessionRecord {
@@ -96,7 +100,25 @@ export class StudioTerminalSessionManager {
       updatedAt: record.updatedAt,
       exitCode: record.exitCode,
       errorMessage: record.errorMessage,
+      webSocketUrl: record.webSocketUrl,
     };
+  }
+
+  private hydrateRecordFromSnapshot(record: StudioTerminalSessionRecord, snapshot: StudioTerminalSessionSnapshot): void {
+    record.status = snapshot.status;
+    record.cwd = snapshot.cwd;
+    record.shellProfile = snapshot.shellProfile;
+    record.shellCommand = snapshot.shellCommand;
+    record.shellArgs = [...snapshot.shellArgs];
+    record.cols = snapshot.cols;
+    record.rows = snapshot.rows;
+    record.history = snapshot.history;
+    record.historyRevision = snapshot.historyRevision;
+    record.startedAt = snapshot.startedAt;
+    record.updatedAt = snapshot.updatedAt;
+    record.exitCode = snapshot.exitCode;
+    record.errorMessage = snapshot.errorMessage;
+    record.webSocketUrl = snapshot.webSocketUrl;
   }
 
   private notifySnapshot(record: StudioTerminalSessionRecord): void {
@@ -174,6 +196,51 @@ export class StudioTerminalSessionManager {
     return this.readSnapshot(record);
   }
 
+  async peekSession(options: { projectPath: string; nodeId: string }): Promise<StudioTerminalSessionSnapshot | null> {
+    const projectPath = String(options.projectPath || "").trim();
+    const nodeId = String(options.nodeId || "").trim();
+    if (!projectPath || !nodeId) {
+      return null;
+    }
+    const key = sessionKey(projectPath, nodeId);
+
+    if (typeof this.backend.peekSession !== "function") {
+      const record = this.sessions.get(key);
+      return record ? this.readSnapshot(record) : null;
+    }
+
+    const snapshot = await this.backend.peekSession({ sessionId: key });
+    if (!snapshot) {
+      return null;
+    }
+
+    const record = this.upsertRecord(projectPath, nodeId);
+    this.hydrateRecordFromSnapshot(record, snapshot);
+    this.notifySnapshot(record);
+    return this.readSnapshot(record);
+  }
+
+  getSidecarStatus(): StudioTerminalSidecarStatus | null {
+    if (typeof this.backend.getSidecarStatus !== "function") {
+      return null;
+    }
+    return this.backend.getSidecarStatus();
+  }
+
+  subscribeSidecarStatus(listener: StudioTerminalSidecarStatusListener): () => void {
+    if (typeof this.backend.subscribeSidecarStatus !== "function") {
+      return () => {};
+    }
+    return this.backend.subscribeSidecarStatus(listener);
+  }
+
+  async refreshSidecarStatus(): Promise<StudioTerminalSidecarStatus | null> {
+    if (typeof this.backend.refreshSidecarStatus === "function") {
+      return await this.backend.refreshSidecarStatus();
+    }
+    return this.getSidecarStatus();
+  }
+
   async ensureSession(request: StudioTerminalSessionRequest): Promise<StudioTerminalSessionSnapshot> {
     const projectPath = String(request.projectPath || "").trim();
     const nodeId = String(request.nodeId || "").trim();
@@ -207,11 +274,15 @@ export class StudioTerminalSessionManager {
     record.maxHistoryChars = Math.max(10_000, Math.min(MAX_HISTORY_CHARS, scrollback * 400));
     record.errorMessage = "";
     record.exitCode = null;
-    record.status = "starting";
+    const shouldResetHistory =
+      !(this.backend.keepsSessionsOnDispose === true && record.status === "running" && !record.process);
+    record.status = shouldResetHistory ? "starting" : "running";
     record.stopRequested = false;
     record.updatedAt = nowIso();
-    record.history = "";
-    record.historyRevision += 1;
+    if (shouldResetHistory) {
+      record.history = "";
+      record.historyRevision += 1;
+    }
     this.notifySnapshot(record);
 
     record.startPromise = this.startRecord(record).finally(() => {
@@ -228,9 +299,65 @@ export class StudioTerminalSessionManager {
     return await this.ensureSession(request);
   }
 
+  async terminateProjectSessions(options: { projectPath: string; reason?: string }): Promise<void> {
+    const projectPath = String(options.projectPath || "").trim();
+    if (!projectPath) {
+      return;
+    }
+
+    const matchingRecords = Array.from(this.sessions.values()).filter((record) => record.projectPath === projectPath);
+    if (matchingRecords.length === 0) {
+      return;
+    }
+
+    if (typeof this.backend.terminateProjectSessions === "function") {
+      await this.backend.terminateProjectSessions({
+        projectPath,
+        reason: String(options.reason || "").trim(),
+      });
+    } else {
+      await Promise.allSettled(
+        matchingRecords.map((record) =>
+          this.stopSession({
+            projectPath: record.projectPath,
+            nodeId: record.nodeId,
+          })
+        )
+      );
+    }
+
+    for (const record of matchingRecords) {
+      try {
+        record.process?.dispose?.();
+      } catch {}
+      record.process = null;
+      record.startPromise = null;
+      record.stopRequested = false;
+      record.status = "stopped";
+      record.exitCode = null;
+      record.errorMessage = "";
+      record.updatedAt = nowIso();
+      this.notifySnapshot(record);
+      record.observers.clear();
+      this.sessions.delete(record.sessionId);
+    }
+  }
+
   async stopSession(options: { projectPath: string; nodeId: string }): Promise<void> {
     const key = sessionKey(String(options.projectPath || "").trim(), String(options.nodeId || "").trim());
     const record = this.sessions.get(key);
+
+    if (typeof this.backend.stopSession === "function") {
+      await this.backend.stopSession(key);
+      if (record) {
+        record.stopRequested = true;
+        record.status = "stopped";
+        record.updatedAt = nowIso();
+        this.notifySnapshot(record);
+      }
+      return;
+    }
+
     if (!record) {
       return;
     }
@@ -240,12 +367,11 @@ export class StudioTerminalSessionManager {
       try {
         process.kill();
       } catch {}
+      return;
     }
-    if (!record.process) {
-      record.status = "stopped";
-      record.updatedAt = nowIso();
-      this.notifySnapshot(record);
-    }
+    record.status = "stopped";
+    record.updatedAt = nowIso();
+    this.notifySnapshot(record);
   }
 
   clearHistory(options: { projectPath: string; nodeId: string }): void {
@@ -258,21 +384,35 @@ export class StudioTerminalSessionManager {
     record.historyRevision += 1;
     record.updatedAt = nowIso();
     this.notifySnapshot(record);
+    if (typeof this.backend.clearHistory === "function") {
+      void Promise.resolve(this.backend.clearHistory(key)).catch(() => {});
+    }
   }
 
   writeInput(options: { projectPath: string; nodeId: string; data: string }): void {
     const key = sessionKey(String(options.projectPath || "").trim(), String(options.nodeId || "").trim());
     const record = this.sessions.get(key);
-    if (!record || !record.process || record.status !== "running") {
+    if (!record) {
       return;
     }
     const data = String(options.data || "");
     if (!data) {
       return;
     }
-    try {
-      record.process.write(data);
-    } catch {}
+    if (record.process && record.status === "running") {
+      try {
+        record.process.write(data);
+      } catch {}
+      return;
+    }
+    if (typeof this.backend.writeInput === "function") {
+      void Promise.resolve(
+        this.backend.writeInput({
+          sessionId: key,
+          data,
+        })
+      ).catch(() => {});
+    }
   }
 
   resizeSession(options: { projectPath: string; nodeId: string; cols: number; rows: number }): void {
@@ -293,11 +433,35 @@ export class StudioTerminalSessionManager {
       try {
         record.process.resize(cols, rows);
       } catch {}
+    } else if (typeof this.backend.resizeSession === "function") {
+      void Promise.resolve(
+        this.backend.resizeSession({
+          sessionId: key,
+          cols,
+          rows,
+        })
+      ).catch(() => {});
     }
     this.notifySnapshot(record);
   }
 
   async dispose(): Promise<void> {
+    if (this.backend.keepsSessionsOnDispose === true) {
+      for (const record of this.sessions.values()) {
+        try {
+          record.process?.dispose?.();
+        } catch {}
+        record.process = null;
+        record.startPromise = null;
+        record.observers.clear();
+      }
+      this.sessions.clear();
+      if (typeof this.backend.dispose === "function") {
+        await this.backend.dispose();
+      }
+      return;
+    }
+
     const stopJobs: Promise<void>[] = [];
     for (const record of this.sessions.values()) {
       stopJobs.push(
@@ -309,6 +473,9 @@ export class StudioTerminalSessionManager {
     }
     await Promise.allSettled(stopJobs);
     this.sessions.clear();
+    if (typeof this.backend.dispose === "function") {
+      await this.backend.dispose();
+    }
   }
 
   private async startRecord(record: StudioTerminalSessionRecord): Promise<StudioTerminalSessionSnapshot> {
@@ -325,6 +492,11 @@ export class StudioTerminalSessionManager {
           cols: record.cols,
           rows: record.rows,
           env,
+          sessionId: record.sessionId,
+          projectPath: record.projectPath,
+          nodeId: record.nodeId,
+          shellProfile: record.shellProfile,
+          maxHistoryChars: record.maxHistoryChars,
         });
         this.attachProcess(record, process, candidate.command, candidate.args);
         return this.readSnapshot(record);
@@ -365,6 +537,9 @@ export class StudioTerminalSessionManager {
     record.process = process;
     record.shellCommand = shellCommand;
     record.shellArgs = [...shellArgs];
+    if ('webSocketUrl' in process && typeof process.webSocketUrl === 'string') {
+      record.webSocketUrl = process.webSocketUrl;
+    }
     record.status = "running";
     record.startedAt = nowIso();
     record.updatedAt = record.startedAt;
@@ -408,6 +583,9 @@ export class StudioTerminalSessionManager {
     const disposeExit = process.onExit((event) => {
       disposeData();
       disposeExit();
+      try {
+        process.dispose?.();
+      } catch {}
       record.process = null;
       record.status = record.stopRequested ? "stopped" : "failed";
       record.exitCode = Number.isFinite(event.exitCode) ? Math.floor(event.exitCode) : null;

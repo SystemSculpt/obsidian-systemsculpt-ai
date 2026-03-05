@@ -38,6 +38,16 @@ export function isStudioGraphEditableTarget(target: EventTarget | null): boolean
   );
 }
 
+export function isStudioGraphTerminalInteractiveTarget(target: EventTarget | null): boolean {
+  const targetEl = resolveStudioGraphTargetElement(target);
+  if (!targetEl) {
+    return false;
+  }
+  return Boolean(
+    targetEl.closest(".ss-studio-terminal-panel, .ss-studio-terminal-surface, .ss-studio-terminal-surface .xterm")
+  );
+}
+
 export function isStudioGraphEditableFieldActive(target: EventTarget | null): boolean {
   const targetEl = resolveStudioGraphTargetElement(target);
   if (!targetEl) {

@@ -110,6 +110,7 @@ import {
   type StudioNoteConfigItem,
 } from "../../studio/StudioNoteConfig";
 import { mountStudioTerminalNode } from "./StudioTerminalNodeRenderer";
+import { mountTerminalResizeHandle } from "./terminal/StudioTerminalResizeHandle";
 import {
   buildGraphClipboardPayload,
   cloneProjectSnapshot,
@@ -201,6 +202,30 @@ type StudioPiSetupErrorContext = {
   provider: string;
 };
 
+type StudioTerminalRenderCandidate = {
+  projectPath: string;
+  node: StudioNodeInstance;
+  nodeEl: HTMLElement;
+  terminalAnchorEl: HTMLElement;
+  interactionLocked: boolean;
+  graphInteraction: StudioGraphInteractionEngine;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+};
+
+type StudioTerminalMount = {
+  key: string;
+  projectPath: string;
+  nodeId: string;
+  node: StudioNodeInstance;
+  nodeEl: HTMLElement;
+  terminalAnchorEl: HTMLElement;
+  interactionLocked: boolean;
+  containerEl: HTMLElement;
+  dispose: () => void;
+  disposeResizeHandle: () => void;
+};
+
 export class SystemSculptStudioView extends ItemView {
   private currentProject: StudioProjectV1 | null = null;
   private currentProjectPath: string | null = null;
@@ -234,7 +259,8 @@ export class SystemSculptStudioView extends ItemView {
   private pendingLabelAutofocusNodeId: string | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
-  private terminalNodeMountDisposers: Array<() => void> = [];
+  private terminalMounts = new Map<string, StudioTerminalMount>();
+  private terminalZoomChangeListeners = new Set<() => void>();
   private lastGraphPointerPosition: { x: number; y: number } | null = null;
   private vaultEventRefs: EventRef[] = [];
   private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
@@ -360,22 +386,149 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl = null;
     this.graphViewportProjectPath = null;
     this.lastGraphPointerPosition = null;
-    this.clearTerminalNodeMountDisposers();
+    this.clearTerminalMounts();
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
   }
 
-  private clearTerminalNodeMountDisposers(): void {
-    if (this.terminalNodeMountDisposers.length === 0) {
+  private buildTerminalMountKey(projectPath: string, nodeId: string): string {
+    return `${projectPath}::${nodeId}`;
+  }
+
+  private disposeTerminalMount(key: string): void {
+    const mount = this.terminalMounts.get(key);
+    if (!mount) {
       return;
     }
-    const disposers = [...this.terminalNodeMountDisposers];
-    this.terminalNodeMountDisposers = [];
-    for (const dispose of disposers) {
+    this.terminalMounts.delete(key);
+    try {
+      mount.disposeResizeHandle();
+    } catch {
+      // Best effort cleanup.
+    }
+    try {
+      mount.dispose();
+    } catch {
+      // Best effort cleanup.
+    }
+    mount.containerEl.remove();
+  }
+
+  private clearTerminalMounts(): void {
+    this.terminalZoomChangeListeners.clear();
+    for (const key of this.terminalMounts.keys()) {
+      this.disposeTerminalMount(key);
+    }
+    this.terminalMounts.clear();
+  }
+
+  private reconcileTerminalMounts(candidates: StudioTerminalRenderCandidate[]): void {
+    const nextKeys = new Set<string>();
+    for (const candidate of candidates) {
+      const nodeId = String(candidate.node.id || "").trim();
+      if (!nodeId) {
+        continue;
+      }
+      const key = this.buildTerminalMountKey(candidate.projectPath, nodeId);
+      nextKeys.add(key);
+      const existing = this.terminalMounts.get(key);
+      const needsRemount =
+        !existing ||
+        existing.node !== candidate.node ||
+        existing.interactionLocked !== candidate.interactionLocked;
+      if (needsRemount) {
+        if (existing) {
+          this.disposeTerminalMount(key);
+        }
+        const containerEl = candidate.terminalAnchorEl.createDiv({ cls: "ss-studio-terminal-host" });
+        const sizeTargets = [candidate.nodeEl];
+        const disposeResizeHandle = mountTerminalResizeHandle({
+          node: candidate.node,
+          nodeEl: candidate.nodeEl,
+          sizeTargets,
+          interactionLocked: candidate.interactionLocked,
+          onNodeConfigMutated: candidate.onNodeConfigMutated,
+          onNodeGeometryMutated: candidate.onNodeGeometryMutated,
+          getGraphZoom: () => candidate.graphInteraction.getGraphZoom(),
+        });
+        const studio = this.plugin.getStudioService();
+        const dispose = mountStudioTerminalNode({
+          node: candidate.node,
+          nodeEl: containerEl,
+          nodeCardEl: candidate.nodeEl,
+          projectPath: candidate.projectPath,
+          interactionLocked: candidate.interactionLocked,
+          ensureSession: (request) => studio.ensureTerminalSession(request),
+          restartSession: (request) => studio.restartTerminalSession(request),
+          stopSession: async (sessionOptions) => {
+            try {
+              await studio.stopTerminalSession(sessionOptions);
+            } catch (error) {
+              new Notice(
+                `Unable to stop terminal session: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          },
+          clearSessionHistory: (sessionOptions) => studio.clearTerminalSessionHistory(sessionOptions),
+          writeInput: (sessionOptions) => studio.writeTerminalInput(sessionOptions),
+          resizeSession: (sessionOptions) => studio.resizeTerminalSession(sessionOptions),
+          peekSession: (sessionOptions) => studio.peekTerminalSession(sessionOptions),
+          subscribe: (sessionOptions, listener) => studio.subscribeTerminalSession(sessionOptions, listener),
+          getSnapshot: (sessionOptions) => studio.getTerminalSessionSnapshot(sessionOptions),
+          getSidecarStatus: () => studio.getTerminalSidecarStatus(),
+          subscribeSidecarStatus: (listener) => studio.subscribeTerminalSidecarStatus(listener),
+          refreshSidecarStatus: () => studio.refreshTerminalSidecarStatus(),
+          onNodeConfigMutated: candidate.onNodeConfigMutated,
+          onNodeGeometryMutated: (node) => candidate.onNodeGeometryMutated(node),
+          getGraphZoom: () => candidate.graphInteraction.getGraphZoom(),
+          subscribeToGraphZoomChanges: (listener) => this.subscribeTerminalZoomChanges(listener),
+        });
+        this.terminalMounts.set(key, {
+          key,
+          projectPath: candidate.projectPath,
+          nodeId,
+          node: candidate.node,
+          nodeEl: candidate.nodeEl,
+          terminalAnchorEl: candidate.terminalAnchorEl,
+          interactionLocked: candidate.interactionLocked,
+          containerEl,
+          dispose,
+          disposeResizeHandle,
+        });
+        continue;
+      }
+
+      existing.nodeEl = candidate.nodeEl;
+      existing.terminalAnchorEl = candidate.terminalAnchorEl;
+      if (existing.containerEl.parentElement !== candidate.terminalAnchorEl) {
+        candidate.terminalAnchorEl.appendChild(existing.containerEl);
+      }
+    }
+
+    for (const key of Array.from(this.terminalMounts.keys())) {
+      if (!nextKeys.has(key)) {
+        this.disposeTerminalMount(key);
+      }
+    }
+  }
+
+  private subscribeTerminalZoomChanges(listener: () => void): () => void {
+    this.terminalZoomChangeListeners.add(listener);
+    return () => {
+      this.terminalZoomChangeListeners.delete(listener);
+    };
+  }
+
+  private notifyTerminalZoomChanges(): void {
+    if (this.terminalZoomChangeListeners.size === 0) {
+      return;
+    }
+    const listeners = [...this.terminalZoomChangeListeners];
+    for (const listener of listeners) {
       try {
-        dispose();
+        listener();
       } catch {
-        // Best effort cleanup.
+        // Zoom notifications are best-effort and should not block graph interactions.
       }
     }
   }
@@ -725,12 +878,17 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     const normalizedKey = String(event.key || "").toLowerCase();
+    const normalizedCode = String(event.code || "").toLowerCase();
     const editableTarget = this.isEditableKeyboardTarget(event.target);
     const primaryModifierPressed = (event.metaKey || event.ctrlKey) && !event.altKey;
+    const fitSelectionShortcutPressed =
+      event.shiftKey && (normalizedCode === "digit1" || normalizedCode === "numpad1");
 
     if (primaryModifierPressed) {
       let handled = false;
-      if (!editableTarget) {
+      if (fitSelectionShortcutPressed) {
+        handled = this.fitSelectedGraphNodesInViewport();
+      } else if (!editableTarget) {
         if (normalizedKey === "c" && !event.shiftKey) {
           handled = this.copySelectedGraphNodesToClipboard();
         } else if (normalizedKey === "x" && !event.shiftKey) {
@@ -739,8 +897,6 @@ export class SystemSculptStudioView extends ItemView {
           handled = event.shiftKey ? this.redoGraphHistory() : this.undoGraphHistory();
         } else if (normalizedKey === "y") {
           handled = this.redoGraphHistory();
-        } else if (normalizedKey === "1" && !event.shiftKey) {
-          handled = this.fitSelectedGraphNodesInViewport();
         }
       }
 
@@ -2342,6 +2498,10 @@ export class SystemSculptStudioView extends ItemView {
     this.setGraphZoomAtViewportCenter(STUDIO_GRAPH_DEFAULT_ZOOM);
   }
 
+  fitSelectionInViewportFromCommand(): boolean {
+    return this.fitSelectedGraphNodesInViewport();
+  }
+
   private fitSelectedGraphNodesInViewport(): boolean {
     const fitted = this.graphInteraction.fitSelectedNodesInViewport({
       paddingPx: STUDIO_GRAPH_SELECTION_FIT_PADDING_PX,
@@ -3374,6 +3534,7 @@ export class SystemSculptStudioView extends ItemView {
     this.inspectorOverlay?.setGraphZoom(zoom);
     this.nodeContextMenuOverlay?.setGraphZoom(zoom);
     this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
+    this.notifyTerminalZoomChanges();
     this.captureGraphViewportState({ zoomOverride: zoom, requestLayoutSave: true });
   }
 
@@ -3723,6 +3884,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private renderGraphEditor(root: HTMLElement): void {
     const nodeDetailMode = this.readCurrentNodeDetailMode();
+    const terminalCandidates: StudioTerminalRenderCandidate[] = [];
     const result = renderStudioGraphWorkspace({
       root,
       busy: this.busy,
@@ -3804,6 +3966,7 @@ export class SystemSculptStudioView extends ItemView {
       mountTerminalNode: ({
         node,
         nodeEl,
+        terminalAnchorEl,
         interactionLocked,
         graphInteraction,
         onNodeConfigMutated,
@@ -3813,39 +3976,23 @@ export class SystemSculptStudioView extends ItemView {
         if (!projectPath) {
           return;
         }
-        const studio = this.plugin.getStudioService();
-        const disposeTerminalNode = mountStudioTerminalNode({
+        terminalCandidates.push({
+          projectPath,
           node,
           nodeEl,
-          projectPath,
+          terminalAnchorEl,
           interactionLocked,
-          ensureSession: (request) => studio.ensureTerminalSession(request),
-          restartSession: (request) => studio.restartTerminalSession(request),
-          stopSession: async (sessionOptions) => {
-            try {
-              await studio.stopTerminalSession(sessionOptions);
-            } catch (error) {
-              new Notice(
-                `Unable to stop terminal session: ${error instanceof Error ? error.message : String(error)}`
-              );
-            }
-          },
-          clearSessionHistory: (sessionOptions) => studio.clearTerminalSessionHistory(sessionOptions),
-          writeInput: (sessionOptions) => studio.writeTerminalInput(sessionOptions),
-          resizeSession: (sessionOptions) => studio.resizeTerminalSession(sessionOptions),
-          subscribe: (sessionOptions, listener) => studio.subscribeTerminalSession(sessionOptions, listener),
-          getSnapshot: (sessionOptions) => studio.getTerminalSessionSnapshot(sessionOptions),
+          graphInteraction,
           onNodeConfigMutated,
           onNodeGeometryMutated,
-          getGraphZoom: () => graphInteraction.getGraphZoom(),
         });
-        this.terminalNodeMountDisposers.push(disposeTerminalNode);
       },
     });
 
     this.graphViewportEl = result.viewportEl;
     this.graphViewportProjectPath = this.currentProjectPath;
     if (!this.graphViewportEl || !this.currentProject) {
+      this.reconcileTerminalMounts([]);
       this.graphViewportProjectPath = null;
       this.nodeDragInProgress = false;
       this.inspectorOverlay?.hide();
@@ -3883,6 +4030,7 @@ export class SystemSculptStudioView extends ItemView {
     contextMenu.mount(this.graphViewportEl);
     nodeActionMenu.mount(this.graphViewportEl);
     this.syncInspectorSelection();
+    this.reconcileTerminalMounts(terminalCandidates);
   }
 
   private captureGraphViewportState(options?: {
@@ -3951,7 +4099,6 @@ export class SystemSculptStudioView extends ItemView {
   private render(): void {
     this.captureGraphViewportState();
     this.resetViewportScrollingState();
-    this.clearTerminalNodeMountDisposers();
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
@@ -3964,6 +4111,7 @@ export class SystemSculptStudioView extends ItemView {
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });
 
     if (!Platform.isDesktopApp) {
+      this.clearTerminalMounts();
       this.inspectorOverlay?.hide();
       root.createEl("p", {
         text: "SystemSculpt Studio is desktop-only.",

@@ -7,96 +7,144 @@ import {
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
 } from "../graph-v3/StudioGraphNodeGeometry";
-import { applyTerminalNodeSize, clampTerminalInt } from "./StudioTerminalNodeConfig";
+import { applyTerminalNodeSize } from "./StudioTerminalNodeConfig";
 
 type StudioTerminalResizeHandleOptions = {
   node: StudioNodeInstance;
   nodeEl: HTMLElement;
+  sizeTargets: HTMLElement[];
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   getGraphZoom: () => number;
 };
 
+function clampSize(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function resolveSafeZoom(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(0.1, value);
+}
+
 export function mountTerminalResizeHandle(options: StudioTerminalResizeHandleOptions): () => void {
-  const { node, nodeEl, interactionLocked, onNodeConfigMutated, onNodeGeometryMutated, getGraphZoom } = options;
-  const handleEl = nodeEl.createDiv({
+  const handleEl = options.nodeEl.createDiv({
     cls: "ss-studio-terminal-resize-handle",
     attr: {
       title: "Resize terminal node",
       "aria-label": "Resize terminal node",
+      role: "slider",
     },
   });
 
-  let moveListener: ((event: PointerEvent) => void) | null = null;
-  let finishListener: ((event: PointerEvent) => void) | null = null;
+  handleEl.classList.toggle("is-disabled", options.interactionLocked);
+  if (options.interactionLocked) {
+    return () => {
+      handleEl.remove();
+    };
+  }
 
-  handleEl.addEventListener("pointerdown", (event) => {
-    const pointerEvent = event as PointerEvent;
-    if (interactionLocked || pointerEvent.button !== 0) {
+  const nodeConfig = options.node.config as Record<string, unknown>;
+
+  let activePointerId: number | null = null;
+  let startClientX = 0;
+  let startClientY = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+  let pendingWidth = 0;
+  let pendingHeight = 0;
+  let frameId: number | null = null;
+
+  const applyPendingSize = (): void => {
+    frameId = null;
+    const nextWidth = clampSize(pendingWidth, STUDIO_GRAPH_TERMINAL_MIN_WIDTH, STUDIO_GRAPH_TERMINAL_MAX_WIDTH);
+    const nextHeight = clampSize(pendingHeight, STUDIO_GRAPH_TERMINAL_MIN_HEIGHT, STUDIO_GRAPH_TERMINAL_MAX_HEIGHT);
+    const previousWidth = Number(nodeConfig.width);
+    const previousHeight = Number(nodeConfig.height);
+    if (previousWidth === nextWidth && previousHeight === nextHeight) {
       return;
     }
-    pointerEvent.preventDefault();
-    pointerEvent.stopPropagation();
+    nodeConfig.width = nextWidth;
+    nodeConfig.height = nextHeight;
+    for (const targetEl of options.sizeTargets) {
+      applyTerminalNodeSize(options.node, targetEl);
+    }
+    options.onNodeConfigMutated(options.node);
+    options.onNodeGeometryMutated(options.node);
+  };
 
-    const pointerId = pointerEvent.pointerId;
-    const startX = pointerEvent.clientX;
-    const startY = pointerEvent.clientY;
-    const startWidth = resolveStudioGraphNodeWidth(node);
-    const startHeight = resolveStudioGraphNodeMinHeight(node);
+  const scheduleApply = (): void => {
+    if (frameId !== null) {
+      return;
+    }
+    frameId = window.requestAnimationFrame(applyPendingSize);
+  };
 
-    moveListener = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-      const zoom = getGraphZoom() || 1;
-      const nextWidth = clampTerminalInt(
-        startWidth + (moveEvent.clientX - startX) / zoom,
-        startWidth,
-        STUDIO_GRAPH_TERMINAL_MIN_WIDTH,
-        STUDIO_GRAPH_TERMINAL_MAX_WIDTH
-      );
-      const nextHeight = clampTerminalInt(
-        startHeight + (moveEvent.clientY - startY) / zoom,
-        startHeight,
-        STUDIO_GRAPH_TERMINAL_MIN_HEIGHT,
-        STUDIO_GRAPH_TERMINAL_MAX_HEIGHT
-      );
-      node.config.width = nextWidth;
-      node.config.height = nextHeight;
-      applyTerminalNodeSize(node, nodeEl);
-      onNodeGeometryMutated(node);
-    };
+  const stopTracking = (): void => {
+    if (activePointerId === null) {
+      return;
+    }
+    if (frameId !== null) {
+      window.cancelAnimationFrame(frameId);
+      frameId = null;
+      applyPendingSize();
+    }
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerFinish);
+    window.removeEventListener("pointercancel", onPointerFinish);
+    activePointerId = null;
+    handleEl.classList.remove("is-active");
+  };
 
-    finishListener = (finishEvent: PointerEvent) => {
-      if (finishEvent.pointerId !== pointerId) {
-        return;
-      }
-      if (moveListener) {
-        window.removeEventListener("pointermove", moveListener);
-      }
-      if (finishListener) {
-        window.removeEventListener("pointerup", finishListener);
-        window.removeEventListener("pointercancel", finishListener);
-      }
-      moveListener = null;
-      finishListener = null;
-      onNodeConfigMutated(node);
-      onNodeGeometryMutated(node);
-    };
+  const onPointerMove = (event: PointerEvent): void => {
+    if (activePointerId === null || event.pointerId !== activePointerId) {
+      return;
+    }
+    const zoom = resolveSafeZoom(options.getGraphZoom());
+    const deltaX = (event.clientX - startClientX) / zoom;
+    const deltaY = (event.clientY - startClientY) / zoom;
+    pendingWidth = startWidth + deltaX;
+    pendingHeight = startHeight + deltaY;
+    scheduleApply();
+  };
 
-    window.addEventListener("pointermove", moveListener);
-    window.addEventListener("pointerup", finishListener);
-    window.addEventListener("pointercancel", finishListener);
-  });
+  const onPointerFinish = (event: PointerEvent): void => {
+    if (activePointerId === null || event.pointerId !== activePointerId) {
+      return;
+    }
+    stopTracking();
+  };
+
+  const onPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    activePointerId = event.pointerId;
+    startClientX = event.clientX;
+    startClientY = event.clientY;
+    startWidth = resolveStudioGraphNodeWidth(options.node);
+    startHeight = resolveStudioGraphNodeMinHeight(options.node);
+    pendingWidth = startWidth;
+    pendingHeight = startHeight;
+
+    handleEl.classList.add("is-active");
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerFinish);
+    window.addEventListener("pointercancel", onPointerFinish);
+  };
+
+  handleEl.addEventListener("pointerdown", onPointerDown);
 
   return () => {
-    if (moveListener) {
-      window.removeEventListener("pointermove", moveListener);
-    }
-    if (finishListener) {
-      window.removeEventListener("pointerup", finishListener);
-      window.removeEventListener("pointercancel", finishListener);
-    }
+    handleEl.removeEventListener("pointerdown", onPointerDown);
+    stopTracking();
+    handleEl.remove();
   };
 }

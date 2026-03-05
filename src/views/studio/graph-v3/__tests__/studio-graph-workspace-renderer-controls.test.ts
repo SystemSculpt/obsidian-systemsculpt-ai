@@ -125,4 +125,71 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     expect(toggleDetailSpy).toHaveBeenCalledTimes(1);
     expect(zoomLabel.value).toBe("100%");
   });
+
+  it("forwards wheel events from the graph viewport", () => {
+    const root = document.createElement("div");
+    const wheelSpy = jest.fn();
+
+    const renderResult = renderStudioGraphWorkspace({
+      root,
+      busy: false,
+      currentProject: projectFixture(),
+      currentProjectPath: "SystemSculpt/Studio/Controls.systemsculpt",
+      nodeDetailMode: "expanded",
+      graphInteraction: {
+        registerViewportElement: jest.fn(),
+        handleGraphViewportWheel: wheelSpy,
+        startMarqueeSelection: jest.fn(),
+        getGraphZoom: () => 1,
+        registerSurfaceElement: jest.fn(),
+        registerCanvasElement: jest.fn(),
+        registerMarqueeElement: jest.fn(),
+        clearGraphElementMaps: jest.fn(),
+        registerEdgesLayerElement: jest.fn(),
+        renderGroupLayer: jest.fn(),
+        refreshNodeSelectionClasses: jest.fn(),
+        applyGraphZoom: jest.fn(),
+        registerZoomLabelElement: jest.fn(),
+      } as any,
+      getNodeRunState: () => ({
+        status: "idle",
+        message: "",
+        updatedAt: null,
+        outputs: null,
+      }),
+      findNodeDefinition: () => null,
+      onRunGraph: jest.fn(),
+      onOpenAddNodeMenuAtViewportCenter: jest.fn(),
+      onZoomIn: jest.fn(),
+      onZoomOut: jest.fn(),
+      onZoomReset: jest.fn(),
+      onToggleNodeDetailMode: jest.fn(),
+      onOpenNodeContextMenu: jest.fn(),
+      onCreateLabelAtPosition: jest.fn(),
+      onRunNode: jest.fn(),
+      onCopyTextGenerationPromptBundle: jest.fn(),
+      onToggleTextGenerationOutputLock: jest.fn(),
+      onRemoveNode: jest.fn(),
+      onNodeTitleInput: jest.fn(),
+      onNodeConfigMutated: jest.fn(),
+      onNodeGeometryMutated: jest.fn(),
+      isLabelEditing: () => false,
+      consumeLabelAutoFocus: () => false,
+      onRequestLabelEdit: jest.fn(),
+      onStopLabelEdit: jest.fn(),
+      onRevealPathInFinder: jest.fn(),
+    });
+
+    const viewport = renderResult.viewportEl;
+    expect(viewport).not.toBeNull();
+    viewport?.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 48,
+      })
+    );
+
+    expect(wheelSpy).toHaveBeenCalledTimes(1);
+  });
 });

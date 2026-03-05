@@ -46,6 +46,7 @@ export type StudioGraphInteractionHost = {
   scheduleProjectSave: () => void;
   requestRender: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
+  onNodePositionsChanged?: () => void;
   resolveNodeDragHoverGroup?: (draggedNodeIds: string[]) => string | null;
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;

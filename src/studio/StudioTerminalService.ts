@@ -4,6 +4,8 @@ import type SystemSculptPlugin from "../main";
 import { StudioProjectStore } from "./StudioProjectStore";
 import {
   StudioTerminalSessionManager,
+  type StudioTerminalSidecarStatus,
+  type StudioTerminalSidecarStatusListener,
   type StudioTerminalSessionListener,
   type StudioTerminalSessionRequest,
   type StudioTerminalSessionSnapshot,
@@ -157,6 +159,17 @@ export class StudioTerminalService {
     return await this.terminalSessionManager.restartSession(normalized);
   }
 
+  async terminateProjectSessions(options: { projectPath: string; reason?: string }): Promise<void> {
+    const projectPath = normalizeStudioProjectPath(String(options.projectPath || "").trim());
+    if (!projectPath) {
+      return;
+    }
+    await this.terminalSessionManager.terminateProjectSessions({
+      projectPath,
+      reason: String(options.reason || "").trim(),
+    });
+  }
+
   async stopSession(options: { projectPath: string; nodeId: string }): Promise<void> {
     const projectPath = normalizeStudioProjectPath(String(options.projectPath || "").trim());
     const nodeId = String(options.nodeId || "").trim();
@@ -211,6 +224,15 @@ export class StudioTerminalService {
     return this.terminalSessionManager.getSnapshot({ projectPath, nodeId });
   }
 
+  async peekSession(options: { projectPath: string; nodeId: string }): Promise<StudioTerminalSessionSnapshot | null> {
+    const projectPath = normalizeStudioProjectPath(String(options.projectPath || "").trim());
+    const nodeId = String(options.nodeId || "").trim();
+    if (!projectPath || !nodeId) {
+      return null;
+    }
+    return await this.terminalSessionManager.peekSession({ projectPath, nodeId });
+  }
+
   subscribe(
     options: { projectPath: string; nodeId: string },
     listener: StudioTerminalSessionListener
@@ -221,6 +243,26 @@ export class StudioTerminalService {
       return () => {};
     }
     return this.terminalSessionManager.subscribe({ projectPath, nodeId }, listener);
+  }
+
+  getSidecarStatus(): StudioTerminalSidecarStatus | null {
+    return this.terminalSessionManager.getSidecarStatus();
+  }
+
+  subscribeSidecarStatus(listener: StudioTerminalSidecarStatusListener): () => void {
+    return this.terminalSessionManager.subscribeSidecarStatus(listener);
+  }
+
+  async refreshSidecarStatus(): Promise<StudioTerminalSidecarStatus | null> {
+    return await this.terminalSessionManager.refreshSidecarStatus();
+  }
+
+  buildSidecarStatusReport(): string {
+    const status = this.getSidecarStatus();
+    if (!status) {
+      return "Studio terminal sidecar status is unavailable.";
+    }
+    return JSON.stringify(status, null, 2);
   }
 
   async dispose(): Promise<void> {

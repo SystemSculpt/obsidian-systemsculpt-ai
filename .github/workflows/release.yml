@@ -20,6 +20,8 @@ jobs:
       - name: Build plugin
         run: |
           npm install
+          npm run check:plugin:fast
+          npm run test -- src/studio/__tests__/studio-terminal-runtime-bootstrap.test.ts src/studio/__tests__/studio-terminal-sidecar-client.test.ts src/studio/__tests__/studio-terminal-sidecar-backend.test.ts src/studio/__tests__/studio-terminal-sidecar-script.integration.test.ts src/studio/__tests__/studio-terminal-session-manager.test.ts --runInBand
           npm run build
           npm run build:terminal-runtime
 
@@ -32,6 +34,6 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
-            main.js manifest.json styles.css \
+            main.js manifest.json styles.css studio-terminal-sidecar.cjs \
             dist/terminal-runtime/studio-terminal-runtime-manifest.json \
             dist/terminal-runtime/*.tgz

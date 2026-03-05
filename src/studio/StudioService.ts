@@ -10,6 +10,8 @@ import { StudioRuntime } from "./StudioRuntime";
 import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
 import {
   StudioTerminalSessionManager,
+  type StudioTerminalSidecarStatus,
+  type StudioTerminalSidecarStatusListener,
   type StudioTerminalSessionListener,
   type StudioTerminalSessionRequest,
   type StudioTerminalSessionSnapshot,
@@ -135,6 +137,12 @@ export class StudioService {
 
   async openProject(path: string): Promise<StudioProjectV1> {
     const normalized = normalizeStudioProjectPath(path);
+    if (this.currentProjectPath && this.currentProjectPath !== normalized) {
+      await this.terminalService.terminateProjectSessions({
+        projectPath: this.currentProjectPath,
+        reason: "project_switch",
+      });
+    }
     let project = await this.projectStore.loadProject(normalized);
     const migration = migrateStudioProjectToPathOnlyPorts(project);
     if (migration.changed) {
@@ -244,6 +252,12 @@ export class StudioService {
     const seeded = starterGraph(created.project);
     await this.projectStore.saveProject(created.path, seeded);
     await this.ensureDefaultPolicy(seeded);
+    if (this.currentProjectPath && this.currentProjectPath !== created.path) {
+      await this.terminalService.terminateProjectSessions({
+        projectPath: this.currentProjectPath,
+        reason: "project_switch",
+      });
+    }
     this.currentProjectPath = created.path;
     return seeded;
   }
@@ -374,11 +388,53 @@ export class StudioService {
     return this.terminalService.getSnapshot(options);
   }
 
+  async peekTerminalSession(options: {
+    projectPath: string;
+    nodeId: string;
+  }): Promise<StudioTerminalSessionSnapshot | null> {
+    return await this.terminalService.peekSession(options);
+  }
+
   subscribeTerminalSession(
     options: { projectPath: string; nodeId: string },
     listener: StudioTerminalSessionListener
   ): () => void {
     return this.terminalService.subscribe(options, listener);
+  }
+
+  getTerminalSidecarStatus(): StudioTerminalSidecarStatus | null {
+    return this.terminalService.getSidecarStatus();
+  }
+
+  subscribeTerminalSidecarStatus(listener: StudioTerminalSidecarStatusListener): () => void {
+    return this.terminalService.subscribeSidecarStatus(listener);
+  }
+
+  async refreshTerminalSidecarStatus(): Promise<StudioTerminalSidecarStatus | null> {
+    return await this.terminalService.refreshSidecarStatus();
+  }
+
+  buildTerminalSidecarStatusReport(): string {
+    return this.terminalService.buildSidecarStatusReport();
+  }
+
+  async terminateProjectTerminalSessions(options: { projectPath: string; reason?: string }): Promise<void> {
+    await this.terminalService.terminateProjectSessions({
+      projectPath: normalizeStudioProjectPath(String(options.projectPath || "").trim()),
+      reason: String(options.reason || "").trim(),
+    });
+  }
+
+  async closeCurrentProject(options?: { terminateTerminalSessions?: boolean }): Promise<void> {
+    const previousProjectPath = this.currentProjectPath;
+    this.currentProjectPath = null;
+    if (!previousProjectPath || options?.terminateTerminalSessions === false) {
+      return;
+    }
+    await this.terminalService.terminateProjectSessions({
+      projectPath: previousProjectPath,
+      reason: "project_close",
+    });
   }
 
   async dispose(): Promise<void> {

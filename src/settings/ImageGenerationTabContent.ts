@@ -93,6 +93,26 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
     });
 
   new Setting(containerEl)
+    .setName("Studio terminal sidecar timeout (minutes)")
+    .setDesc(
+      "How long terminal sessions can stay alive after Obsidian disconnects. After this timeout, the sidecar shuts down and kills child terminal processes."
+    )
+    .addText((text) => {
+      text
+        .setPlaceholder("15 (5-120)")
+        .setValue(String(plugin.settings.studioTerminalSidecarTimeoutMinutes ?? 15))
+        .onChange(async (value) => {
+          const parsed = Number.parseInt(value, 10);
+          if (!Number.isFinite(parsed)) return;
+          const clamped = Math.max(5, Math.min(120, parsed));
+          await plugin.getSettingsManager().updateSettings({
+            studioTerminalSidecarTimeoutMinutes: clamped,
+          });
+        });
+      text.inputEl.inputMode = "numeric";
+    });
+
+  new Setting(containerEl)
     .setName("Studio telemetry (remote)")
     .setDesc("Keep full diagnostics local; enable this only if you want redacted Studio run telemetry sent to SystemSculpt.")
     .addToggle((toggle) => {

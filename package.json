@@ -43,6 +43,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.5.2",
     "@types/string-similarity": "^4.0.2",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.44.1",
     "@typescript-eslint/parser": "^8.44.1",
     "@wdio/cli": "^9.21.1",

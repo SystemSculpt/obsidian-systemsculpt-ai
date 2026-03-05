@@ -8,6 +8,7 @@ import * as tar from "tar";
 import type SystemSculptPlugin from "../main";
 
 const MANIFEST_FILE_NAME = "studio-terminal-runtime-manifest.json";
+const SIDECAR_SCRIPT_FILE_NAME = "studio-terminal-sidecar.cjs";
 const NODE_PTY_MODULE_NAME = "node-pty";
 const MANIFEST_SCHEMA = "studio.terminal-runtime-manifest.v1";
 const DEFAULT_RELEASE_REPO = "systemsculpt/obsidian-systemsculpt-ai";
@@ -38,6 +39,11 @@ export type StudioTerminalRuntimeBootstrapResult = {
   repairedPermissions: boolean;
   manifestUrl?: string;
   assetUrl?: string;
+};
+
+export type StudioTerminalSidecarBootstrapResult = {
+  downloadedEntrypoint: boolean;
+  sourceUrl?: string;
 };
 
 export type StudioTerminalRuntimeBootstrapOptions = {
@@ -199,6 +205,13 @@ export class StudioTerminalRuntimeBootstrap {
     return await fetcher(url);
   }
 
+  private resolveSidecarEntrypointUrlCandidates(): string[] {
+    const envUrl = String(process.env.SYSTEMSCULPT_STUDIO_TERMINAL_SIDECAR_URL || "").trim();
+    const releaseCandidate = `${this.resolveReleaseBaseUrl()}/${SIDECAR_SCRIPT_FILE_NAME}`;
+    const latestCandidate = `https://github.com/${DEFAULT_RELEASE_REPO}/releases/latest/download/${SIDECAR_SCRIPT_FILE_NAME}`;
+    return [envUrl, releaseCandidate, latestCandidate].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
+  }
+
   private async loadManifest(): Promise<{ manifest: RuntimeManifest; manifestUrl: string }> {
     const primaryUrl = this.resolveManifestUrl();
     const fallbacks = [
@@ -341,6 +354,43 @@ export class StudioTerminalRuntimeBootstrap {
       manifestUrl,
       assetUrl,
     };
+  }
+
+  async ensureSidecarEntrypoint(pluginInstallDir: string): Promise<StudioTerminalSidecarBootstrapResult> {
+    const entrypointPath = join(pluginInstallDir, SIDECAR_SCRIPT_FILE_NAME);
+    if (existsSync(entrypointPath)) {
+      const size = statSync(entrypointPath).size;
+      if (Number.isFinite(size) && size > 0) {
+        return {
+          downloadedEntrypoint: false,
+        };
+      }
+    }
+
+    const candidates = this.resolveSidecarEntrypointUrlCandidates();
+    const errors: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const payload = await this.fetchBinary(candidate);
+        const source = payload.toString("utf8");
+        if (!source.includes("studio.terminal.sidecar.v1")) {
+          throw new Error("Sidecar payload did not include expected protocol marker.");
+        }
+        await mkdir(dirname(entrypointPath), { recursive: true });
+        await writeFile(entrypointPath, source, "utf8");
+        return {
+          downloadedEntrypoint: true,
+          sourceUrl: candidate,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`${candidate}: ${message}`);
+      }
+    }
+
+    throw new Error(
+      `terminal sidecar bootstrap failed to fetch ${SIDECAR_SCRIPT_FILE_NAME} (${errors.join(" | ")})`
+    );
   }
 }
 

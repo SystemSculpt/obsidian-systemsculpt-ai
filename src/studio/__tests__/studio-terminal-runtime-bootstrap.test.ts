@@ -263,4 +263,84 @@ describe("StudioTerminalRuntimeBootstrap", () => {
       rmSync(pluginRoot, { recursive: true, force: true });
     }
   });
+
+  it("downloads sidecar entrypoint when missing", async () => {
+    const pluginRoot = join(tmpdir(), `studio-terminal-sidecar-entrypoint-${Date.now()}`);
+    rmSync(pluginRoot, { recursive: true, force: true });
+    mkdirSync(pluginRoot, { recursive: true });
+
+    try {
+      const sidecarUrl = "https://example.com/releases/studio-terminal-sidecar.cjs";
+      const sidecarSource = "#!/usr/bin/env node\nconst PROTOCOL = 'studio.terminal.sidecar.v1';\n";
+      const fetchBinary = jest.fn(async (url: string) => {
+        if (url === sidecarUrl) {
+          return Buffer.from(sidecarSource, "utf8");
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      });
+
+      const bootstrap = new StudioTerminalRuntimeBootstrap(createPluginStub(), {
+        releaseBaseUrl: "https://example.com/releases",
+        fetchBinary,
+      });
+
+      const result = await bootstrap.ensureSidecarEntrypoint(pluginRoot);
+      expect(result.downloadedEntrypoint).toBe(true);
+      expect(result.sourceUrl).toBe(sidecarUrl);
+      expect(fetchBinary).toHaveBeenCalledTimes(1);
+      expect(readFileSync(join(pluginRoot, "studio-terminal-sidecar.cjs"), "utf8")).toContain(
+        "studio.terminal.sidecar.v1"
+      );
+    } finally {
+      rmSync(pluginRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fetch sidecar entrypoint when already present", async () => {
+    const pluginRoot = join(tmpdir(), `studio-terminal-sidecar-existing-${Date.now()}`);
+    rmSync(pluginRoot, { recursive: true, force: true });
+    mkdirSync(pluginRoot, { recursive: true });
+    const existingSidecarPath = join(pluginRoot, "studio-terminal-sidecar.cjs");
+    writeFileSync(existingSidecarPath, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const fetchBinary = jest.fn(async () => {
+        throw new Error("fetch should not run when sidecar entrypoint exists");
+      });
+
+      const bootstrap = new StudioTerminalRuntimeBootstrap(createPluginStub(), {
+        fetchBinary,
+      });
+
+      const result = await bootstrap.ensureSidecarEntrypoint(pluginRoot);
+      expect(result.downloadedEntrypoint).toBe(false);
+      expect(fetchBinary).not.toHaveBeenCalled();
+    } finally {
+      rmSync(pluginRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails with clear error when sidecar entrypoint cannot be fetched", async () => {
+    const pluginRoot = join(tmpdir(), `studio-terminal-sidecar-missing-${Date.now()}`);
+    rmSync(pluginRoot, { recursive: true, force: true });
+    mkdirSync(pluginRoot, { recursive: true });
+
+    try {
+      const fetchBinary = jest.fn(async () => {
+        throw new Error("HTTP 404");
+      });
+
+      const bootstrap = new StudioTerminalRuntimeBootstrap(createPluginStub(), {
+        releaseBaseUrl: "https://example.com/releases",
+        fetchBinary,
+      });
+
+      await expect(bootstrap.ensureSidecarEntrypoint(pluginRoot)).rejects.toThrow(
+        "terminal sidecar bootstrap failed to fetch studio-terminal-sidecar.cjs"
+      );
+      expect(fetchBinary).toHaveBeenCalled();
+    } finally {
+      rmSync(pluginRoot, { recursive: true, force: true });
+    }
+  });
 });

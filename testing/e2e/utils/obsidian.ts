@@ -37,8 +37,16 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
   await fs.mkdir(targetDir, { recursive: true });
 
   const root = getRepoRoot();
-  const filesToCopy = ["manifest.json", "main.js", "styles.css"];
-  for (const file of filesToCopy) {
+  const requiredFiles = ["manifest.json", "main.js", "studio-terminal-sidecar.cjs"];
+  const optionalFiles = ["styles.css"];
+
+  for (const file of requiredFiles) {
+    const src = path.join(root, file);
+    const dest = path.join(targetDir, file);
+    await fs.copyFile(src, dest);
+  }
+
+  for (const file of optionalFiles) {
     const src = path.join(root, file);
     const dest = path.join(targetDir, file);
     try {
@@ -46,6 +54,15 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
     } catch (_) {
       // ignore missing optional files (e.g., styles.css during early dev)
     }
+  }
+
+  const runtimeModules = ["node-pty"];
+  for (const moduleName of runtimeModules) {
+    const src = path.join(root, "node_modules", moduleName);
+    const dest = path.join(targetDir, "node_modules", moduleName);
+    await fs.rm(dest, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.cp(src, dest, { recursive: true });
   }
 
   // Ensure Obsidian sees the plugin manifest, then enable it.

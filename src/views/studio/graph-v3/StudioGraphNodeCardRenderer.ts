@@ -218,15 +218,19 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     configPreviewEl.setAttribute("data-node-config-preview", node.id);
   }
 
-  if (node.kind === "studio.terminal" && mountTerminalNode) {
-    mountTerminalNode({
-      node,
-      nodeEl,
-      interactionLocked,
-      graphInteraction,
-      onNodeConfigMutated,
-      onNodeGeometryMutated,
-    });
+  if (node.kind === "studio.terminal") {
+    const terminalAnchorEl = nodeEl.createDiv({ cls: "ss-studio-terminal-anchor" });
+    if (mountTerminalNode) {
+      mountTerminalNode({
+        node,
+        nodeEl,
+        terminalAnchorEl,
+        interactionLocked,
+        graphInteraction,
+        onNodeConfigMutated,
+        onNodeGeometryMutated,
+      });
+    }
   }
 
   if (!isPlaceholder) {

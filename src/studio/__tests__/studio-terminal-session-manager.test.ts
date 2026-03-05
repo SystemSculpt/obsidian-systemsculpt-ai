@@ -2,6 +2,7 @@ import { Platform } from "obsidian";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodePtyTerminalBackend } from "../terminal/NodePtyTerminalBackend";
 import { StudioTerminalSessionManager } from "../StudioTerminalSessionManager";
 import { resolveInteractiveShellArgs } from "../terminal/StudioTerminalShell";
 
@@ -67,7 +68,7 @@ describe("StudioTerminalSessionManager", () => {
     Object.assign(Platform, originalPlatform);
   });
 
-  it("loads node-pty through runtime require when using the default backend", async () => {
+  it("loads node-pty through runtime require when using the node-pty backend", async () => {
     const logger = {
       warn: jest.fn(),
     };
@@ -100,7 +101,7 @@ describe("StudioTerminalSessionManager", () => {
 
     (globalThis as { require?: unknown }).require = requireMock;
     try {
-      const manager = new StudioTerminalSessionManager({
+      const plugin = {
         app: {
           vault: {
             configDir: ".obsidian",
@@ -114,7 +115,10 @@ describe("StudioTerminalSessionManager", () => {
           dir: pluginRoot,
         },
         getLogger: () => logger,
-      } as any);
+      } as any;
+      const manager = new StudioTerminalSessionManager(plugin, {
+        backend: new NodePtyTerminalBackend(plugin),
+      });
 
       const snapshot = await manager.ensureSession({
         projectPath: "SystemSculpt/Studio/RequireBackend.systemsculpt",
@@ -411,5 +415,86 @@ describe("StudioTerminalSessionManager", () => {
     expect(logger.warn).toHaveBeenCalled();
     expect(String(logger.warn.mock.calls[0]?.[0] || "")).toContain("Studio terminal failed to launch:");
     await manager.dispose();
+  });
+
+  it("keeps detached sidecar sessions alive during dispose when backend opts in", async () => {
+    const logger = {
+      warn: jest.fn(),
+    };
+    const terminalProcess = new TestTerminalProcess();
+    const killSpy = jest.spyOn(terminalProcess, "kill");
+    const backend = {
+      keepsSessionsOnDispose: true,
+      spawn: jest.fn(async () => terminalProcess as any),
+      dispose: jest.fn(async () => undefined),
+    };
+    const manager = new StudioTerminalSessionManager(
+      {
+        getLogger: () => logger,
+      } as any,
+      {
+        backend: backend as any,
+      }
+    );
+
+    const snapshot = await manager.ensureSession({
+      projectPath: "SystemSculpt/Studio/SidecarDispose.systemsculpt",
+      nodeId: "terminal_node_sidecar_dispose",
+      cwd: globalThis.process.cwd(),
+      shellProfile: "bash",
+    });
+
+    expect(snapshot.status).toBe("running");
+    await manager.dispose();
+    expect(killSpy).not.toHaveBeenCalled();
+    expect(backend.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates local snapshot state from sidecar peek results", async () => {
+    const logger = {
+      warn: jest.fn(),
+    };
+    const backend = {
+      spawn: jest.fn(async () => new TestTerminalProcess() as any),
+      peekSession: jest.fn(async () => ({
+        sessionId: "SystemSculpt/Studio/Peek.systemsculpt::terminal_node_peek",
+        projectPath: "SystemSculpt/Studio/Peek.systemsculpt",
+        nodeId: "terminal_node_peek",
+        status: "running",
+        cwd: globalThis.process.cwd(),
+        shellProfile: "bash",
+        shellCommand: "bash",
+        shellArgs: ["-i", "-l"],
+        cols: 120,
+        rows: 30,
+        history: "persisted output\\n",
+        historyRevision: 7,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        exitCode: null,
+        errorMessage: "",
+      })),
+    };
+    const manager = new StudioTerminalSessionManager(
+      {
+        getLogger: () => logger,
+      } as any,
+      {
+        backend: backend as any,
+      }
+    );
+
+    const peeked = await manager.peekSession({
+      projectPath: "SystemSculpt/Studio/Peek.systemsculpt",
+      nodeId: "terminal_node_peek",
+    });
+    expect(peeked?.status).toBe("running");
+    expect(peeked?.history).toContain("persisted output");
+
+    const snapshot = manager.getSnapshot({
+      projectPath: "SystemSculpt/Studio/Peek.systemsculpt",
+      nodeId: "terminal_node_peek",
+    });
+    expect(snapshot?.historyRevision).toBe(7);
   });
 });

@@ -199,7 +199,7 @@ const finalizeBuild = (startedAt, { watch } = {}) => {
 
 const syncArtifacts = () => {
 	if (!autoSyncTargets || autoSyncTargets.length === 0) return;
-	const requiredFiles = ["manifest.json", "main.js", "styles.css"];
+	const requiredFiles = ["manifest.json", "main.js", "styles.css", "studio-terminal-sidecar.cjs"];
 	const optionalFiles = ["README.md", "LICENSE", "versions.json"];
 	const runtimeNodeModules = ["node-pty"];
 
