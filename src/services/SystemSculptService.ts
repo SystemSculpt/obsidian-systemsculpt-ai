@@ -13,12 +13,14 @@ import {
 // License checks removed for Agent Mode access
 import { MCPService } from "../views/chatview/MCPService";
 import SystemSculptPlugin from "../main";
-import { DebugLogger } from "../utils/debugLogger";
 import { getImageCompatibilityInfo, getToolCompatibilityInfo } from "../utils/modelUtils";
 import { mapAssistantToolCallsForApi, normalizeJsonSchema, normalizeOpenAITools } from "../utils/tooling";
 import { deterministicId } from "../utils/id";
 import { Notice } from "obsidian";
+import { executeCustomProviderStream } from "./CustomProviderStreamExecutor";
+import { executeManagedAgentStream } from "./ManagedAgentStreamExecutor";
 import { PlatformContext } from "./PlatformContext";
+import { PlatformRequestClient } from "./PlatformRequestClient";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
@@ -26,7 +28,7 @@ import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 // Import the new service classes
 import { StreamingService } from "./StreamingService";
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
-import type { StreamEvent, StreamPipelineDiagnostics } from "../streaming/types";
+import type { StreamEvent } from "../streaming/types";
 import { LicenseService } from "./LicenseService";
 import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
@@ -34,37 +36,10 @@ import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import { AgentSessionClient, type AgentSessionRequest } from "./agent-v2/AgentSessionClient";
-import { normalizePiTools } from "./agent-v2/PiToolAdapter";
 import type { CustomProvider } from "../types/llm";
-import { postJsonStreaming } from "../utils/streaming";
-import { RuntimeIncompatibilityService } from "./RuntimeIncompatibilityService";
+import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 
-export interface StreamDebugCallbacks {
-  onRequest?: (data: {
-    provider: string;
-    endpoint: string;
-    headers: Record<string, string>;
-    body: Record<string, any>;
-    transport?: string;
-    canStream?: boolean;
-    isCustomProvider?: boolean;
-  }) => void;
-  onResponse?: (data: {
-    provider: string;
-    endpoint: string;
-    status: number;
-    headers: Record<string, string>;
-    isCustomProvider?: boolean;
-  }) => void;
-  onRawEvent?: (data: { line: string; payload: string }) => void;
-  onStreamEvent?: (data: { event: StreamEvent }) => void;
-  onStreamEnd?: (data: {
-    completed: boolean;
-    aborted: boolean;
-    diagnostics?: StreamPipelineDiagnostics;
-  }) => void;
-  onError?: (data: { error: string; details?: any }) => void;
-}
+export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
 export type CreditsBalanceSnapshot = {
   includedRemaining: number;
@@ -129,18 +104,6 @@ export type CreditsUsageHistoryPage = {
   nextBefore: string | null;
 };
 
-interface PreparedChatRequest {
-  isCustom: boolean;
-  customProvider?: CustomProvider;
-  actualModelId: string;
-  serverModelId: string;
-  preparedMessages: ChatMessage[];
-  requestTools: any[];
-  effectiveAgentMode: boolean;
-  resolvedWebSearchOptions?: { search_context_size?: "low" | "medium" | "high" };
-  finalSystemPrompt: string;
-}
-
 /**
  * Main service facade that delegates to specialized services
  */
@@ -160,6 +123,7 @@ export class SystemSculptService {
   private documentUploadService: DocumentUploadService;
   private audioUploadService: AudioUploadService;
   private agentSessionClient: AgentSessionClient;
+  private platformRequestClient: PlatformRequestClient;
 
   public get extractionsDirectory(): string {
     return this.settings.extractionsDirectory ?? "";
@@ -659,10 +623,15 @@ export class SystemSculptService {
       this.plugin.manifest?.version ?? "0.0.0"
     );
     this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
+    this.platformRequestClient = new PlatformRequestClient();
     this.agentSessionClient = new AgentSessionClient({
       baseUrl: this.baseUrl,
       licenseKey: this.settings.licenseKey,
-      request: (input) => this.requestAgentV2(input),
+      request: (input) =>
+        this.platformRequestClient.request({
+          ...input,
+          licenseKey: this.settings.licenseKey,
+        }),
       defaultHeaders: {
         "x-systemsculpt-surface": "chat",
       },
@@ -783,51 +752,9 @@ export class SystemSculptService {
   }
 
   private async requestAgentV2(input: AgentSessionRequest): Promise<Response> {
-    const platform = PlatformContext.get();
-    const transport = platform.preferredTransport({ endpoint: input.url });
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Accept: input.stream ? "text/event-stream" : "application/json",
-      "x-license-key": this.settings.licenseKey,
-      ...(input.headers || {}),
-    };
-    const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
-
-    if (transport === "fetch" && typeof fetch === "function") {
-      try {
-        return await fetch(input.url, {
-          method: input.method,
-          headers,
-          body,
-          cache: "no-store",
-        } as RequestInit);
-      } catch {}
-    }
-
-    const result = await requestUrl({
-      url: input.url,
-      method: input.method,
-      headers,
-      body,
-      throw: false,
-    });
-
-    const status = result.status || 500;
-    const textBody = typeof result.text === "string"
-      ? result.text
-      : JSON.stringify(result.json || {});
-
-    if (input.stream && status < 400) {
-      return new Response(textBody, {
-        status,
-        headers: { "Content-Type": "text/event-stream" },
-      });
-    }
-
-    return new Response(textBody, {
-      status,
-      headers: { "Content-Type": "application/json" },
+    return this.platformRequestClient.request({
+      ...input,
+      licenseKey: this.settings.licenseKey,
     });
   }
 
@@ -1163,22 +1090,22 @@ export class SystemSculptService {
     };
   }
 
-	  async *streamMessage({
-	    messages,
-	    model,
-	    onError,
-	    contextFiles,
-	    systemPromptType,
-	    systemPromptPath,
-	    systemPromptOverride,
-	    agentMode,
-	    signal,
-	    toolCallManager,
-	    forcedToolName,
-	    maxTokens,
-	    includeReasoning,
-	    debug,
-	    sessionId,
+  async *streamMessage({
+    messages,
+    model,
+    onError,
+    contextFiles,
+    systemPromptType,
+    systemPromptPath,
+    systemPromptOverride,
+    agentMode,
+    signal,
+    toolCallManager,
+    forcedToolName,
+    maxTokens,
+    includeReasoning,
+    debug,
+    sessionId,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -1186,560 +1113,133 @@ export class SystemSculptService {
     contextFiles?: Set<string>;
     systemPromptType?: string;
     systemPromptPath?: string;
-	    systemPromptOverride?: string;
-	    agentMode?: boolean;
-	    signal?: AbortSignal;
-	    toolCallManager?: any;
-	    forcedToolName?: string;
-	    maxTokens?: number;
-	    includeReasoning?: boolean;
-	    debug?: StreamDebugCallbacks;
+    systemPromptOverride?: string;
+    agentMode?: boolean;
+    signal?: AbortSignal;
+    toolCallManager?: any;
+    forcedToolName?: string;
+    maxTokens?: number;
+    includeReasoning?: boolean;
+    debug?: StreamDebugCallbacks;
     sessionId?: string;
   }): AsyncGenerator<StreamEvent, void, unknown> {
-    // DEVELOPMENT MODE LOGGING: Log development mode status and server configuration
-    const { DEVELOPMENT_MODE } = await import('../constants/api');
     const chatSessionId = sessionId || this.streamingService.generateRequestId();
-    
+
     this.refreshSettings();
-    const platform = PlatformContext.get();
-    
-    // No license gating here; provider APIs will enforce access if needed
-    
+
     try {
-      // Trace stream start when debug mode is enabled
-      errorLogger.debug('Starting streamMessage', {
-        source: 'SystemSculptService',
-        method: 'streamMessage',
-        metadata: { model, agentMode: !!agentMode }
+      errorLogger.debug("Starting streamMessage", {
+        source: "SystemSculptService",
+        method: "streamMessage",
+        metadata: { model, agentMode: !!agentMode },
       });
 
-	      const prepared = await this.prepareChatRequest({
-	        messages,
-	        model,
-	        contextFiles,
-	        systemPromptType,
-	        systemPromptPath,
-	        systemPromptOverride,
-	        agentMode,
-	        toolCallManager,
-	        emitNotices: true,
-	      });
+      const prepared = await this.prepareChatRequest({
+        messages,
+        model,
+        contextFiles,
+        systemPromptType,
+        systemPromptPath,
+        systemPromptOverride,
+        agentMode,
+        toolCallManager,
+        emitNotices: true,
+      });
 
       const {
         isCustom,
         customProvider,
         actualModelId,
         serverModelId,
-	        preparedMessages,
-	        requestTools,
-	        effectiveAgentMode,
-	        finalSystemPrompt,
-	      } = prepared;
+        preparedMessages,
+        requestTools,
+        effectiveAgentMode,
+      } = prepared;
 
       if (isCustom && customProvider) {
-        const adapter = this.plugin.customProviderService.getProviderAdapter(customProvider);
-        const endpoint = adapter.getChatEndpoint();
-
-        const headers = {
-          "Content-Type": "application/json",
-          ...adapter.getHeaders(),
-        };
-
-        const baseContextFiles = contextFiles ? new Set(contextFiles) : new Set<string>();
-        const baseMessages = Array.isArray(messages) ? [...messages] : [];
-
-        const trimToRecentMessages = (all: ChatMessage[], maxCount: number): ChatMessage[] => {
-          if (!Array.isArray(all)) return [];
-          if (maxCount <= 0) return [];
-          if (all.length <= maxCount) return all;
-          return all.slice(-maxCount);
-        };
-
-        const trimToMinimalMessages = (all: ChatMessage[]): ChatMessage[] => {
-          if (!Array.isArray(all) || all.length === 0) return [];
-          // Prefer the last user message; if missing, keep the last message.
-          const lastUser = [...all].reverse().find((msg) => msg?.role === "user");
-          return lastUser ? [lastUser] : [all[all.length - 1]];
-        };
-
-        const buildAttemptRequestBody = async (opts: {
-          attemptMessages: ChatMessage[];
-          attemptContextFiles: Set<string>;
-          attemptAgentMode: boolean;
-        }): Promise<{ requestBody: any; prepared: PreparedChatRequest }> => {
-	          const attemptPrepared = await this.prepareChatRequest({
-	            messages: opts.attemptMessages,
-	            model,
-	            contextFiles: opts.attemptContextFiles,
-	            systemPromptType,
-	            systemPromptPath,
-	            systemPromptOverride,
-	            agentMode: opts.attemptAgentMode,
-	            toolCallManager,
-	            emitNotices: false,
-	          });
-
-          const attemptRequestBody = adapter.buildRequestBody(
-            attemptPrepared.preparedMessages,
-            attemptPrepared.actualModelId,
-	            attemptPrepared.requestTools,
-	            true,
-	            {
-	              maxTokens,
-	              includeReasoning,
-	            }
-	          );
-
-          return { requestBody: attemptRequestBody, prepared: attemptPrepared };
-        };
-
-        // Initial attempt uses the already-prepared request (so notices and prompt assembly match).
-        let attemptAgentMode = !!agentMode;
-        let attemptContextFiles = baseContextFiles;
-        let attemptMessages = baseMessages;
-
-        let activePrepared: PreparedChatRequest = prepared;
-        let activeRequestBody: any = adapter.buildRequestBody(
-          preparedMessages,
-          actualModelId,
-	          requestTools,
-	          true,
-	          {
-	            maxTokens,
-	            includeReasoning,
-	          }
-	        );
-
-        let emittedAssistantOutput = false;
-        let attempt = 0;
-
-        let droppedContextFiles = false;
-        let trimmedHistory = false;
-        let trimmedMinimal = false;
-        let disabledToolsForToolRejection = false;
-        let disabledToolsForContextLimit = false;
-
-        const MAX_ATTEMPTS = 5;
-        while (attempt < MAX_ATTEMPTS) {
-          try {
-            try {
-              debug?.onRequest?.({
-                provider: customProvider.name || "custom-provider",
-                endpoint,
-                headers,
-                body: activeRequestBody,
-                transport: platform.preferredTransport({ endpoint }),
-                canStream: platform.supportsStreaming({ endpoint }),
-                isCustomProvider: true,
-              });
-            } catch {}
-
-            const response = await postJsonStreaming(endpoint, headers, activeRequestBody, platform.isMobile(), signal);
-
-            try {
-              const responseHeaders: Record<string, string> = {};
-              response.headers.forEach((value, key) => {
-                responseHeaders[key] = value;
-              });
-              debug?.onResponse?.({
-                provider: customProvider.name || "custom-provider",
-                endpoint,
-                status: response.status,
-                headers: responseHeaders,
-                isCustomProvider: true,
-              });
-            } catch {}
-
-            if (!response.ok) {
-              await StreamingErrorHandler.handleStreamError(response, true, {
-                provider: customProvider.name,
-                endpoint,
-                model: actualModelId,
-              });
-            }
-
-            const transformed = await adapter.transformStreamResponse(response, platform.isMobile());
-            const streamResponse = new Response(transformed.stream, {
-              status: response.status,
-              headers: transformed.headers,
-            });
-
-            let streamDiagnostics: StreamPipelineDiagnostics | null = null;
-            const streamIterator = this.streamingService.streamResponse(streamResponse, {
-              model: activePrepared.actualModelId,
-              isCustomProvider: true,
-              signal,
-              onRawEvent: (data) => {
-                try {
-                  debug?.onRawEvent?.(data);
-                } catch {}
-              },
-              onDiagnostics: (diagnostics) => {
-                streamDiagnostics = diagnostics;
-              },
-            });
-
-            let streamCompleted = false;
-            let streamAborted = false;
-            try {
-              for await (const event of streamIterator) {
-                if (event.type === "content" || event.type === "reasoning" || event.type === "tool-call") {
-                  emittedAssistantOutput = true;
-                }
-                try {
-                  debug?.onStreamEvent?.({ event });
-                } catch {}
-                yield event;
-              }
-              streamCompleted = true;
-            } finally {
-              streamAborted = !!signal?.aborted;
-              try {
-                debug?.onStreamEnd?.({
-                  completed: streamCompleted,
-                  aborted: streamAborted,
-                  diagnostics: streamDiagnostics ?? undefined,
-                });
-              } catch {}
-            }
-
-            return;
-          } catch (error) {
-            if (error instanceof DOMException && error.name === "AbortError") {
-              return;
-            }
-            if (signal?.aborted) {
-              return;
-            }
-
-            const canRetry = !emittedAssistantOutput && attempt < MAX_ATTEMPTS - 1;
-            const needsToolFallback = canRetry && !disabledToolsForToolRejection && this.shouldFallbackWithoutTools(error);
-
-            if (needsToolFallback) {
-              attempt += 1;
-              disabledToolsForToolRejection = true;
-              attemptAgentMode = false;
-
-              try {
-                const incompat = RuntimeIncompatibilityService.getInstance(this.plugin);
-                await incompat.markToolIncompatible(model);
-              } catch {}
-              try {
-                new Notice("Model rejected tools; continuing without Agent Mode tools.", 5000);
-              } catch {}
-
-              try {
-                yield { type: "meta", key: "inline-footnote", value: "Retrying without Agent Mode tools…" } as any;
-              } catch {}
-
-              const rebuilt = await buildAttemptRequestBody({
-                attemptMessages,
-                attemptContextFiles,
-                attemptAgentMode,
-              });
-              activePrepared = rebuilt.prepared;
-              activeRequestBody = rebuilt.requestBody;
-              continue;
-            }
-
-            const isContextOverflow = canRetry && this.isContextOverflowError(error);
-            if (isContextOverflow) {
-              // Prefer keeping Agent Mode when possible; shed context first.
-              if (!droppedContextFiles && attemptContextFiles.size > 0) {
-                attempt += 1;
-                droppedContextFiles = true;
-                attemptContextFiles = new Set<string>();
-                try {
-                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying without attached context files…" } as any;
-                } catch {}
-
-                const rebuilt = await buildAttemptRequestBody({
-                  attemptMessages,
-                  attemptContextFiles,
-                  attemptAgentMode,
-                });
-                activePrepared = rebuilt.prepared;
-                activeRequestBody = rebuilt.requestBody;
-                continue;
-              }
-
-              if (!trimmedHistory && attemptMessages.length > 8) {
-                attempt += 1;
-                trimmedHistory = true;
-                attemptMessages = trimToRecentMessages(baseMessages, 12);
-                try {
-                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying with shortened chat history…" } as any;
-                } catch {}
-
-                const rebuilt = await buildAttemptRequestBody({
-                  attemptMessages,
-                  attemptContextFiles,
-                  attemptAgentMode,
-                });
-                activePrepared = rebuilt.prepared;
-                activeRequestBody = rebuilt.requestBody;
-                continue;
-              }
-
-              if (!disabledToolsForContextLimit && attemptAgentMode) {
-                attempt += 1;
-                disabledToolsForContextLimit = true;
-                attemptAgentMode = false;
-                try {
-                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying without Agent Mode tools…" } as any;
-                } catch {}
-
-                const rebuilt = await buildAttemptRequestBody({
-                  attemptMessages,
-                  attemptContextFiles,
-                  attemptAgentMode,
-                });
-                activePrepared = rebuilt.prepared;
-                activeRequestBody = rebuilt.requestBody;
-                continue;
-              }
-
-              if (!trimmedMinimal) {
-                attempt += 1;
-                trimmedMinimal = true;
-                attemptMessages = trimToMinimalMessages(baseMessages);
-                try {
-                  yield { type: "meta", key: "inline-footnote", value: "Prompt too long. Retrying with minimal context…" } as any;
-                } catch {}
-
-                const rebuilt = await buildAttemptRequestBody({
-                  attemptMessages,
-                  attemptContextFiles,
-                  attemptAgentMode,
-                });
-                activePrepared = rebuilt.prepared;
-                activeRequestBody = rebuilt.requestBody;
-                continue;
-              }
-            }
-
-            throw error;
-          }
-        }
-
+        yield* executeCustomProviderStream({
+          plugin: this.plugin,
+          streamingService: this.streamingService,
+          prepared,
+          customProvider,
+          messages,
+          model,
+          contextFiles,
+          agentMode,
+          signal,
+          maxTokens,
+          includeReasoning,
+          debug,
+          rebuildPrepared: (options) =>
+            this.prepareChatRequest({
+              messages: options.messages,
+              model,
+              contextFiles: options.contextFiles,
+              systemPromptType,
+              systemPromptPath,
+              systemPromptOverride,
+              agentMode: options.agentMode,
+              toolCallManager,
+              emitNotices: options.emitNotices,
+            }),
+          shouldFallbackWithoutTools: (error) => this.shouldFallbackWithoutTools(error),
+          isContextOverflowError: (error) => this.isContextOverflowError(error),
+        });
         return;
       }
 
-      // Debug: log the final system prompt being sent (first system message)
       try {
         const debugMode = this.plugin.settings?.debugMode || false;
         if (debugMode) {
-          const sysMsg = preparedMessages.find(m => m.role === 'system');
-          const content = typeof sysMsg?.content === 'string' ? sysMsg.content : '';
+          const sysMsg = preparedMessages.find((message) => message.role === "system");
+          const content = typeof sysMsg?.content === "string" ? sysMsg.content : "";
           const preview = content.slice(0, 600);
-          errorLogger.debug('Prepared system prompt for request', {
-            source: 'SystemSculptService',
-            method: 'streamMessage',
+          errorLogger.debug("Prepared system prompt for request", {
+            source: "SystemSculptService",
+            method: "streamMessage",
             metadata: {
               hasSystemMessage: !!sysMsg,
               systemLength: content.length,
               agentMode: effectiveAgentMode,
-              systemPromptType: systemPromptType || 'undefined',
+              systemPromptType: systemPromptType || "undefined",
               systemPromptPath: systemPromptPath || undefined,
               preview,
-              systemPrompt: content
-            }
+              systemPrompt: content,
+            },
           });
         }
       } catch {}
 
       const apiMessages = this.toSystemSculptApiMessages(preparedMessages);
-      const endpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`;
-      const piTools = normalizePiTools(requestTools);
-      const requestBody = {
-        messages: apiMessages,
-        tools: piTools,
-        stream: true,
-      };
-
-      try {
-        debug?.onRequest?.({
-          provider: "systemsculpt-v2",
-          endpoint,
-          headers: {
-            "Content-Type": "application/json",
-            "x-license-key": this.settings.licenseKey,
-          },
-          body: requestBody,
-          transport: platform.preferredTransport({ endpoint }),
-          canStream: true,
-          isCustomProvider: false,
-        });
-      } catch {}
-
-      const logger = DebugLogger.getInstance();
-      const responseLogEndpoint = `${this.getAgentV2BaseUrl()}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`;
-      let emittedAssistantOutput = false;
-      let attempt = 0;
-      const MAX_PI_STREAM_ATTEMPTS = 3;
-
-      while (attempt < MAX_PI_STREAM_ATTEMPTS) {
-        if (signal?.aborted) {
-          return;
-        }
-        try {
-          const response = await this.agentSessionClient.startOrContinueTurn({
-            chatId: chatSessionId,
-            messages: apiMessages,
-            tools: piTools,
-            pluginVersion: (this.plugin as any)?.manifest?.version,
-          });
-
-          // Log API response status
-          logger?.logAPIResponse(responseLogEndpoint, response.status);
-
-          try {
-            const responseHeaders: Record<string, string> = {};
-            response.headers.forEach((value, key) => {
-              responseHeaders[key] = value;
-            });
-            debug?.onResponse?.({
-              provider: "systemsculpt",
-              endpoint: responseLogEndpoint,
-              status: response.status,
-              headers: responseHeaders,
-              isCustomProvider: false,
-            });
-          } catch {}
-
-          if (!response.ok) {
-            logger?.logAPIResponse(responseLogEndpoint, response.status, null, { message: `HTTP ${response.status}` });
-            await StreamingErrorHandler.handleStreamError(response, false, {
-              provider: "systemsculpt-v2",
-              endpoint: responseLogEndpoint,
-              model: serverModelId || actualModelId
-            });
-          }
-          if (!response.body) {
-            throw new SystemSculptError(
-              "Missing response body from streaming API",
-              ERROR_CODES.STREAM_ERROR,
-              response.status
-            );
-          }
-          // Log response meta for diagnostics
-          try {
-            errorLogger.debug('Streaming response received', {
-              source: 'SystemSculptService',
-              method: 'streamMessage',
-              metadata: {
-                status: response.status,
-                contentType: response.headers.get('content-type') || 'unknown',
-                hasBody: !!response.body,
-                attempt: attempt + 1,
-              }
-            });
-          } catch {}
-
-          let streamDiagnostics: StreamPipelineDiagnostics | null = null;
-          const streamIterator = this.streamingService.streamResponse(response, {
-            model: serverModelId || actualModelId,
-            isCustomProvider: false,
-            signal,
-            onRawEvent: (data) => {
-              try {
-                debug?.onRawEvent?.(data);
-              } catch {}
-            },
-            onDiagnostics: (diagnostics) => {
-              streamDiagnostics = diagnostics;
-            },
-          });
-
-          let streamCompleted = false;
-          let streamAborted = false;
-          try {
-            for await (const event of streamIterator) {
-              if (event.type === "content" || event.type === "reasoning" || event.type === "tool-call") {
-                emittedAssistantOutput = true;
-              }
-              try {
-                debug?.onStreamEvent?.({ event });
-              } catch {}
-              yield event;
-            }
-            streamCompleted = true;
-          } finally {
-            streamAborted = !!signal?.aborted;
-            try {
-              debug?.onStreamEnd?.({
-                completed: streamCompleted,
-                aborted: streamAborted,
-                diagnostics: streamDiagnostics ?? undefined,
-              });
-            } catch {}
-          }
-
-          return;
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-          if (signal?.aborted) {
-            return;
-          }
-
-          const retryHints = this.shouldRetryRateLimitedStreamTurn(error);
-          const canRetry =
-            !emittedAssistantOutput &&
-            retryHints !== null &&
-            attempt < MAX_PI_STREAM_ATTEMPTS - 1;
-          if (!canRetry) {
-            throw error;
-          }
-
-          attempt += 1;
-          const retryDelayMs = this.getRateLimitedRetryDelayMs(retryHints?.retryAfterSeconds, attempt);
-          try {
-            errorLogger.debug("Retrying PI turn after transient upstream rate limit", {
-              source: "SystemSculptService",
-              method: "streamMessage",
-              metadata: {
-                model: serverModelId || actualModelId,
-                attempt,
-                maxAttempts: MAX_PI_STREAM_ATTEMPTS,
-                delayMs: retryDelayMs,
-              },
-            });
-          } catch {}
-          await this.waitForRetryWindow(retryDelayMs, signal);
-          if (signal?.aborted) {
-            return;
-          }
-          // Yield one event-loop tick so aborts queued immediately after backoff
-          // are observed before issuing another upstream turn request.
-          await this.waitForRetryWindow(0, signal);
-          if (signal?.aborted) {
-            return;
-          }
-          try {
-            yield {
-              type: "meta",
-              key: "inline-footnote",
-              value: `Provider is temporarily rate-limited. Retrying automatically (${attempt + 1}/${MAX_PI_STREAM_ATTEMPTS})…`,
-            } as any;
-          } catch {}
-          continue;
-        }
-      }
-
-      return;
+      const agentBaseUrl = this.getAgentV2BaseUrl();
+      yield* executeManagedAgentStream({
+        agentSessionClient: this.agentSessionClient,
+        streamingService: this.streamingService,
+        chatSessionId,
+        pluginVersion: (this.plugin as any)?.manifest?.version,
+        actualModelId,
+        serverModelId,
+        apiMessages,
+        requestTools,
+        endpoint: `${agentBaseUrl}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`,
+        responseLogEndpoint: `${agentBaseUrl}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`,
+        licenseKey: this.settings.licenseKey,
+        signal,
+        debug,
+        shouldRetryRateLimitedStreamTurn: (error) => this.shouldRetryRateLimitedStreamTurn(error),
+        getRateLimitedRetryDelayMs: (retryAfterSeconds, retryAttempt) =>
+          this.getRateLimitedRetryDelayMs(retryAfterSeconds, retryAttempt),
+        waitForRetryWindow: (delayMs, streamSignal) => this.waitForRetryWindow(delayMs, streamSignal),
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        // Handle abort gracefully
         return;
       }
-      // Emit detailed error for diagnostics
       try {
-        errorLogger.error('Stream error in streamMessage', error, {
-          source: 'SystemSculptService',
-          method: 'streamMessage',
-          metadata: { model }
+        errorLogger.error("Stream error in streamMessage", error, {
+          source: "SystemSculptService",
+          method: "streamMessage",
+          metadata: { model },
         });
       } catch {}
       try {
@@ -1749,10 +1249,7 @@ export class SystemSculptService {
         });
       } catch {}
       if (onError) {
-        let errorMessage =
-          error instanceof Error
-            ? error.message
-            : "An unknown error occurred";
+        let errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
 
         if (
           error instanceof SystemSculptError &&

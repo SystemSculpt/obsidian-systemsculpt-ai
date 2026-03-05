@@ -16,6 +16,17 @@ import {
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { openExternalUrlForOAuth } from "../../utils/oauthUiHelpers";
 import { runStudioPiOAuthLoginFlow } from "../../studio/piAuth/StudioPiOAuthLoginFlow";
+import {
+  buildApiKeyHint,
+  getApiKeyEnvVarForProvider,
+  getStudioPiRegisteredProviderIds,
+  KNOWN_OAUTH_PROVIDER_IDS,
+  parseProviderIdsFromModelList,
+  providerIsListedByPiModelList,
+  resolveProviderLabel,
+  selectDefaultAuthMethod,
+  supportsOAuthLogin,
+} from "../../studio/piAuth/StudioPiProviderRegistry";
 
 export type StudioPiSetupWizardIssue =
   | "missing_cli"
@@ -50,137 +61,8 @@ type PendingPromptRequest = {
   reject: (error: Error) => void;
 };
 
-export const API_KEY_ENV_VAR_BY_PROVIDER: Record<string, string> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
-  google: "GEMINI_API_KEY",
-  mistral: "MISTRAL_API_KEY",
-  groq: "GROQ_API_KEY",
-  cerebras: "CEREBRAS_API_KEY",
-  xai: "XAI_API_KEY",
-  openrouter: "OPENROUTER_API_KEY",
-  "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
-  zai: "ZAI_API_KEY",
-  opencode: "OPENCODE_API_KEY",
-  "kimi-coding": "KIMI_API_KEY",
-  huggingface: "HF_TOKEN",
-  minimax: "MINIMAX_API_KEY",
-  "minimax-cn": "MINIMAX_CN_API_KEY",
-};
-
-export const PROVIDER_LABEL_OVERRIDES: Record<string, string> = {
-  "openai-codex": "OpenAI Codex (ChatGPT OAuth)",
-  "google-gemini-cli": "Google Gemini CLI",
-  "google-antigravity": "Google Antigravity",
-  "github-copilot": "GitHub Copilot",
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google Gemini",
-  openrouter: "OpenRouter",
-};
-
-export const PROVIDER_AUTH_HINT_OVERRIDES: Record<string, string> = {
-  "amazon-bedrock":
-    "Use AWS_PROFILE or AWS credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) or AWS_BEARER_TOKEN_BEDROCK in your environment.",
-  "google-vertex":
-    "Use `gcloud auth application-default login` and set GOOGLE_CLOUD_PROJECT plus GOOGLE_CLOUD_LOCATION.",
-  "azure-openai-responses":
-    "Requires AZURE_OPENAI_API_KEY plus Azure endpoint/resource environment configuration.",
-};
-
-/**
- * Providers we statically know support Pi OAuth login.
- * This supplements the runtime list from storage.getOAuthProviders(), which
- * may be incomplete across Pi versions.
- */
-export const KNOWN_OAUTH_PROVIDER_IDS = new Set<string>([
-  "anthropic",
-  "openai-codex",
-  "github-copilot",
-  "google-gemini-cli",
-  "google-antigravity",
-]);
-
-// ─── Pure helper functions (exported for testing) ──────────────────────────
-
 export function normalizeWizardProviderId(value: string): string {
   return String(value || "").trim().toLowerCase();
-}
-
-/**
- * Returns true when a provider supports Pi OAuth login — checks both the
- * static known list and the runtime-discovered list.
- */
-export function supportsOAuthLogin(
-  providerId: string,
-  dynamicOAuthProviders: ReadonlyMap<string, StudioPiOAuthProvider>
-): boolean {
-  const normalized = normalizeWizardProviderId(providerId);
-  if (!normalized) return false;
-  return KNOWN_OAUTH_PROVIDER_IDS.has(normalized) || dynamicOAuthProviders.has(normalized);
-}
-
-/**
- * Returns the best default auth method for a provider:
- * OAuth if it's OAuth-capable, otherwise API key.
- */
-export function selectDefaultAuthMethod(
-  providerId: string,
-  dynamicOAuthProviders: ReadonlyMap<string, StudioPiOAuthProvider>
-): AuthMethod {
-  return supportsOAuthLogin(providerId, dynamicOAuthProviders) ? "oauth" : "api_key";
-}
-
-/** Resolves a human-readable label for a provider ID. */
-export function resolveProviderLabel(
-  providerId: string,
-  dynamicOAuthProviders: ReadonlyMap<string, StudioPiOAuthProvider>
-): string {
-  const normalized = normalizeWizardProviderId(providerId);
-  if (!normalized) return "Unknown provider";
-  const oauth = dynamicOAuthProviders.get(normalized);
-  if (oauth?.name?.trim()) return oauth.name.trim();
-  if (PROVIDER_LABEL_OVERRIDES[normalized]) return PROVIDER_LABEL_OVERRIDES[normalized];
-  return normalized;
-}
-
-/** Parses `pi --list-models` stdout into an array of normalized provider IDs. */
-export function parseProviderIdsFromModelList(stdout: string): string[] {
-  const ids = new Set<string>();
-  const lines = String(stdout || "").split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const lower = line.toLowerCase();
-    if (lower.startsWith("provider") && lower.includes("model")) continue;
-    const columns = line.split(/\s{2,}/g).map((c) => c.trim()).filter(Boolean);
-    const provider = normalizeWizardProviderId(columns[0] || "");
-    if (provider) ids.add(provider);
-  }
-  return Array.from(ids.values());
-}
-
-/**
- * Returns true when the given provider appears in `pi --list-models` output.
- * An empty provider string always returns true (no filter).
- */
-export function providerIsListedByPiModelList(stdout: string, provider: string): boolean {
-  const normalized = normalizeWizardProviderId(provider);
-  if (!normalized) return true;
-  return parseProviderIdsFromModelList(stdout).includes(normalized);
-}
-
-/** Returns the API-key auth hint text for a given provider. */
-export function buildApiKeyHint(
-  providerId: string,
-  envVar: string | undefined
-): string {
-  const normalized = normalizeWizardProviderId(providerId);
-  const override = PROVIDER_AUTH_HINT_OVERRIDES[normalized];
-  if (override) return override;
-  if (envVar) return `Set the ${envVar} environment variable, or paste it below to save it in ~/.pi/agent/auth.json.`;
-  return "Paste your API key below to save it for Pi.";
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────
@@ -409,7 +291,7 @@ class StudioPiSetupWizardModal extends Modal {
   }
 
   private authEnvVar(providerId: string): string {
-    return API_KEY_ENV_VAR_BY_PROVIDER[normalizeWizardProviderId(providerId)] || "";
+    return getApiKeyEnvVarForProvider(providerId);
   }
 
   private supportsOAuth(providerId: string): boolean {
@@ -496,7 +378,7 @@ class StudioPiSetupWizardModal extends Modal {
   private async loadProviderMetadata(): Promise<void> {
     const providerSet = new Set<string>();
     if (this.providerFromError) providerSet.add(this.providerFromError);
-    for (const id of Object.keys(API_KEY_ENV_VAR_BY_PROVIDER)) providerSet.add(id);
+    for (const id of getStudioPiRegisteredProviderIds()) providerSet.add(id);
     this.providerLoadError = null;
 
     try {
@@ -871,7 +753,7 @@ class StudioPiSetupWizardModal extends Modal {
     // Show all providers under API key — every provider may accept a key
     const ids = [...all];
     // Ensure providers with known env vars are present even if not yet discovered
-    for (const id of Object.keys(API_KEY_ENV_VAR_BY_PROVIDER)) {
+    for (const id of getStudioPiRegisteredProviderIds()) {
       if (!ids.includes(id)) ids.push(id);
     }
     return ids.sort((a, b) => this.providerLabel(a).localeCompare(this.providerLabel(b)));

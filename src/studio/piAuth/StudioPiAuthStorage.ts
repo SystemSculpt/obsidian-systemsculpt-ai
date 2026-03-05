@@ -1,6 +1,10 @@
 import { Platform } from "obsidian";
 import { existsSync } from "node:fs";
 import { loginStudioPiProviderOAuthThroughNode } from "./StudioPiOAuthBridge";
+import {
+  getStudioPiProviderLabelOrUndefined,
+  supportsOAuthLogin,
+} from "./StudioPiProviderRegistry";
 import { normalizeStudioPiProviderHint } from "./StudioPiProviderUtils";
 
 const PI_PACKAGE_ROOT_CANDIDATES = [
@@ -287,11 +291,12 @@ export async function listStudioPiProviderAuthRecords(
         ? credential.expires
         : null;
     const oauthInfo = oauthProvidersById.get(provider);
+    const displayName = getStudioPiProviderLabelOrUndefined(provider, oauthProvidersById);
 
     records.push({
       provider,
-      displayName: oauthInfo?.name?.trim() || undefined,
-      supportsOAuth: oauthProvidersById.has(provider),
+      displayName: displayName || oauthInfo?.name?.trim() || undefined,
+      supportsOAuth: supportsOAuthLogin(provider, oauthProvidersById),
       hasAnyAuth,
       hasStoredCredential: hasStored,
       source,

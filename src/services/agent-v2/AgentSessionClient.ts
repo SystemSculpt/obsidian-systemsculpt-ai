@@ -1,4 +1,5 @@
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../../constants/api";
+import { PlatformRequestClient } from "../PlatformRequestClient";
 import { normalizePiTools } from "./PiToolAdapter";
 
 export type AgentSessionRequest = {
@@ -107,6 +108,7 @@ export class AgentSessionClient {
   private readonly defaultHeaders: Record<string, string>;
   private readonly managedInference: boolean;
   private readonly sessionByChatId = new Map<string, ChatSessionState>();
+  private readonly platformRequestClient: PlatformRequestClient;
 
   constructor(options: {
     baseUrl: string;
@@ -117,6 +119,7 @@ export class AgentSessionClient {
   }) {
     this.baseUrl = options.baseUrl;
     this.licenseKey = options.licenseKey;
+    this.platformRequestClient = new PlatformRequestClient();
     this.requestFn = options.request ?? this.defaultRequest.bind(this);
     this.defaultHeaders = { ...(options.defaultHeaders || {}) };
     this.managedInference = options.managedInference === true;
@@ -517,17 +520,9 @@ export class AgentSessionClient {
   }
 
   private async defaultRequest(input: AgentSessionRequest): Promise<Response> {
-    const response = await fetch(input.url, {
-      method: input.method,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: input.stream ? "text/event-stream" : "application/json",
-        "x-license-key": this.licenseKey,
-        ...(input.headers || {}),
-      },
-      body: typeof input.body === "undefined" ? undefined : JSON.stringify(input.body),
+    return this.platformRequestClient.request({
+      ...input,
+      licenseKey: this.licenseKey,
     });
-
-    return response;
   }
 }

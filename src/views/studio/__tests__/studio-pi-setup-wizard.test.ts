@@ -1,6 +1,6 @@
 import {
-  API_KEY_ENV_VAR_BY_PROVIDER,
   buildApiKeyHint,
+  getApiKeyEnvVarForProvider,
   KNOWN_OAUTH_PROVIDER_IDS,
   parseProviderIdsFromModelList,
   PROVIDER_AUTH_HINT_OVERRIDES,
@@ -9,7 +9,7 @@ import {
   resolveProviderLabel,
   selectDefaultAuthMethod,
   supportsOAuthLogin,
-} from "../StudioPiSetupWizardModal";
+} from "../../../studio/piAuth/StudioPiProviderRegistry";
 import type { StudioPiOAuthProvider } from "../../../studio/StudioLocalTextModelCatalog";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
@@ -274,26 +274,26 @@ describe("buildApiKeyHint", () => {
   });
 });
 
-// ─── API_KEY_ENV_VAR_BY_PROVIDER ─────────────────────────────────────────
+// ─── getApiKeyEnvVarForProvider ──────────────────────────────────────────
 
-describe("API_KEY_ENV_VAR_BY_PROVIDER", () => {
+describe("getApiKeyEnvVarForProvider", () => {
   it("maps anthropic to ANTHROPIC_API_KEY", () => {
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["anthropic"]).toBe("ANTHROPIC_API_KEY");
+    expect(getApiKeyEnvVarForProvider("anthropic")).toBe("ANTHROPIC_API_KEY");
   });
 
   it("maps openai to OPENAI_API_KEY", () => {
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["openai"]).toBe("OPENAI_API_KEY");
+    expect(getApiKeyEnvVarForProvider("openai")).toBe("OPENAI_API_KEY");
   });
 
   it("maps google to GEMINI_API_KEY", () => {
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["google"]).toBe("GEMINI_API_KEY");
+    expect(getApiKeyEnvVarForProvider("google")).toBe("GEMINI_API_KEY");
   });
 
   it("does not have entries for pure-OAuth providers", () => {
     // These providers use OAuth, not API keys, so should not be in this map
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["openai-codex"]).toBeUndefined();
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["github-copilot"]).toBeUndefined();
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["google-gemini-cli"]).toBeUndefined();
-    expect(API_KEY_ENV_VAR_BY_PROVIDER["google-antigravity"]).toBeUndefined();
+    expect(getApiKeyEnvVarForProvider("openai-codex")).toBe("");
+    expect(getApiKeyEnvVarForProvider("github-copilot")).toBe("");
+    expect(getApiKeyEnvVarForProvider("google-gemini-cli")).toBe("");
+    expect(getApiKeyEnvVarForProvider("google-antigravity")).toBe("");
   });
 });

@@ -158,6 +158,40 @@ describe("StudioLocalTextModelCatalog", () => {
     expect(openrouter?.credentialType).toBe("none");
   });
 
+  it("backfills known provider labels and OAuth support from the registry when Pi runtime metadata is absent", async () => {
+    const storage = {
+      getOAuthProviders: () => [],
+      login: jest.fn(),
+      set: jest.fn(),
+      remove: jest.fn(),
+      get: () => undefined,
+      hasAuth: () => false,
+      has: () => false,
+      list: () => ["openai-codex", "anthropic", "openai"],
+    } as any;
+
+    const records = await listStudioPiProviderAuthRecords({}, storage);
+
+    expect(records.find((record) => record.provider === "openai-codex")).toEqual(
+      expect.objectContaining({
+        displayName: "OpenAI Codex (ChatGPT OAuth)",
+        supportsOAuth: true,
+      })
+    );
+    expect(records.find((record) => record.provider === "anthropic")).toEqual(
+      expect.objectContaining({
+        displayName: "Anthropic",
+        supportsOAuth: true,
+      })
+    );
+    expect(records.find((record) => record.provider === "openai")).toEqual(
+      expect.objectContaining({
+        displayName: "OpenAI",
+        supportsOAuth: false,
+      })
+    );
+  });
+
   it("migrates API keys idempotently and skips existing credentials", async () => {
     const credentials: Record<string, any> = {
       "openai-codex": {
