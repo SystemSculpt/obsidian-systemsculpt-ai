@@ -5,6 +5,10 @@ export const STUDIO_GRAPH_DEFAULT_NODE_WIDTH = 280;
 export const STUDIO_GRAPH_DEFAULT_NODE_HEIGHT = 164;
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH = STUDIO_GRAPH_DEFAULT_NODE_WIDTH * 2;
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT = STUDIO_GRAPH_DEFAULT_NODE_HEIGHT * 2;
+export const STUDIO_GRAPH_NODE_MIN_WIDTH = 220;
+export const STUDIO_GRAPH_NODE_MAX_WIDTH = 2000;
+export const STUDIO_GRAPH_NODE_MIN_HEIGHT = 120;
+export const STUDIO_GRAPH_NODE_MAX_HEIGHT = 2000;
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_WIDTH = 640;
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_HEIGHT = 420;
 export const STUDIO_GRAPH_TERMINAL_MIN_WIDTH = 360;
@@ -19,6 +23,13 @@ export const STUDIO_GRAPH_LABEL_MAX_HEIGHT = 800;
 export const STUDIO_GRAPH_LABEL_MIN_FONT_SIZE = 10;
 export const STUDIO_GRAPH_LABEL_MAX_FONT_SIZE = 48;
 export const STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE = 14;
+
+export type StudioGraphNodeResizeBounds = {
+  minWidth: number;
+  maxWidth: number;
+  minHeight: number;
+  maxHeight: number;
+};
 
 function readFiniteNumber(value: unknown): number | null {
   const numeric = Number(value);
@@ -51,6 +62,39 @@ export function isStudioExpandedTextNodeKind(kind: string): boolean {
 
 export function isStudioTerminalNode(node: Pick<StudioNodeInstance, "kind">): boolean {
   return String(node.kind || "").trim() === "studio.terminal";
+}
+
+function isStudioLargeLayoutNodeKind(kind: string): boolean {
+  return kind === "studio.dataset" || isStudioExpandedTextNodeKind(kind);
+}
+
+export function resolveStudioGraphNodeResizeBounds(
+  node: Pick<StudioNodeInstance, "kind">
+): StudioGraphNodeResizeBounds {
+  if (isStudioLabelNode(node)) {
+    return {
+      minWidth: STUDIO_GRAPH_LABEL_MIN_WIDTH,
+      maxWidth: STUDIO_GRAPH_LABEL_MAX_WIDTH,
+      minHeight: STUDIO_GRAPH_LABEL_MIN_HEIGHT,
+      maxHeight: STUDIO_GRAPH_LABEL_MAX_HEIGHT,
+    };
+  }
+  if (isStudioTerminalNode(node)) {
+    return {
+      minWidth: STUDIO_GRAPH_TERMINAL_MIN_WIDTH,
+      maxWidth: STUDIO_GRAPH_TERMINAL_MAX_WIDTH,
+      minHeight: STUDIO_GRAPH_TERMINAL_MIN_HEIGHT,
+      maxHeight: STUDIO_GRAPH_TERMINAL_MAX_HEIGHT,
+    };
+  }
+  const kind = String(node.kind || "").trim();
+  const largeLayout = isStudioLargeLayoutNodeKind(kind);
+  return {
+    minWidth: largeLayout ? STUDIO_GRAPH_DEFAULT_NODE_WIDTH : STUDIO_GRAPH_NODE_MIN_WIDTH,
+    maxWidth: STUDIO_GRAPH_NODE_MAX_WIDTH,
+    minHeight: largeLayout ? STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT : STUDIO_GRAPH_NODE_MIN_HEIGHT,
+    maxHeight: STUDIO_GRAPH_NODE_MAX_HEIGHT,
+  };
 }
 
 export function resolveStudioLabelWidth(node: Pick<StudioNodeInstance, "kind" | "config">): number {
@@ -90,12 +134,13 @@ export function resolveStudioGraphNodeWidth(node: Pick<StudioNodeInstance, "kind
   if (isStudioLabelNode(node)) {
     return resolveStudioLabelWidth(node);
   }
+  const bounds = resolveStudioGraphNodeResizeBounds(node);
+  const configured = readFiniteNumber((node.config as Record<string, unknown>)?.width);
+  if (configured !== null) {
+    return clamp(configured, bounds.minWidth, bounds.maxWidth);
+  }
   if (isStudioTerminalNode(node)) {
-    const configured = readFiniteNumber((node.config as Record<string, unknown>)?.width);
-    if (configured === null) {
-      return STUDIO_GRAPH_TERMINAL_DEFAULT_WIDTH;
-    }
-    return clamp(configured, STUDIO_GRAPH_TERMINAL_MIN_WIDTH, STUDIO_GRAPH_TERMINAL_MAX_WIDTH);
+    return STUDIO_GRAPH_TERMINAL_DEFAULT_WIDTH;
   }
   if (String(node.kind || "").trim() === "studio.dataset") {
     return STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH;
@@ -107,12 +152,16 @@ export function resolveStudioGraphNodeWidth(node: Pick<StudioNodeInstance, "kind
 }
 
 export function resolveStudioGraphNodeMinHeight(node: Pick<StudioNodeInstance, "kind" | "config">): number {
+  if (isStudioLabelNode(node)) {
+    return resolveStudioLabelHeight(node);
+  }
+  const bounds = resolveStudioGraphNodeResizeBounds(node);
+  const configured = readFiniteNumber((node.config as Record<string, unknown>)?.height);
+  if (configured !== null) {
+    return clamp(configured, bounds.minHeight, bounds.maxHeight);
+  }
   if (isStudioTerminalNode(node)) {
-    const configured = readFiniteNumber((node.config as Record<string, unknown>)?.height);
-    if (configured === null) {
-      return STUDIO_GRAPH_TERMINAL_DEFAULT_HEIGHT;
-    }
-    return clamp(configured, STUDIO_GRAPH_TERMINAL_MIN_HEIGHT, STUDIO_GRAPH_TERMINAL_MAX_HEIGHT);
+    return STUDIO_GRAPH_TERMINAL_DEFAULT_HEIGHT;
   }
   if (isStudioExpandedTextNodeKind(node.kind)) {
     return STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT;

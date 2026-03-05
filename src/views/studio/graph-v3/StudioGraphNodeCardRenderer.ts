@@ -21,6 +21,7 @@ import {
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
 } from "./StudioGraphNodeGeometry";
+import { mountStudioGraphNodeResizeHandle } from "./StudioGraphNodeResizeHandle";
 
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
@@ -232,6 +233,37 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       });
     }
   }
+
+  mountStudioGraphNodeResizeHandle({
+    node,
+    nodeEl,
+    handleClassName: node.kind === "studio.terminal" ? "ss-studio-terminal-resize-handle" : undefined,
+    title: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
+    ariaLabel: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
+    interactionLocked,
+    getGraphZoom: () => graphInteraction.getGraphZoom(),
+    onNodeConfigMutated,
+    onNodeGeometryMutated,
+    applySize: ({ width, height }) => {
+      nodeEl.style.width = `${width}px`;
+      if (node.kind === "studio.terminal") {
+        nodeEl.style.height = `${height}px`;
+        return;
+      }
+      nodeEl.style.minHeight = `${height}px`;
+    },
+    readInitialSize: () => {
+      const measuredHeight = nodeEl.offsetHeight;
+      const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
+      return {
+        width: resolveStudioGraphNodeWidth(node),
+        height:
+          measuredHeight > 0
+            ? measuredHeight
+            : Math.max(resolvedMinHeight, 1),
+      };
+    },
+  });
 
   if (!isPlaceholder) {
     renderCollapsedVisibilityControls({

@@ -6,12 +6,9 @@ import {
   resolveStudioLabelWidth,
   STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE,
   STUDIO_GRAPH_LABEL_MAX_FONT_SIZE,
-  STUDIO_GRAPH_LABEL_MAX_HEIGHT,
-  STUDIO_GRAPH_LABEL_MAX_WIDTH,
   STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
-  STUDIO_GRAPH_LABEL_MIN_HEIGHT,
-  STUDIO_GRAPH_LABEL_MIN_WIDTH,
 } from "./StudioGraphNodeGeometry";
+import { mountStudioGraphNodeResizeHandle } from "./StudioGraphNodeResizeHandle";
 
 type RenderLabelNodeCardOptions = {
   nodeEl: HTMLElement;
@@ -207,84 +204,23 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     });
   }
 
-  const resizeHandle = nodeEl.createDiv({
-    cls: "ss-studio-label-resize-handle",
-    attr: {
-      title: "Resize label",
-      "aria-label": "Resize label",
+  mountStudioGraphNodeResizeHandle({
+    node,
+    nodeEl,
+    handleClassName: "ss-studio-label-resize-handle",
+    title: "Resize label",
+    ariaLabel: "Resize label",
+    interactionLocked: busy,
+    getGraphZoom: () => graphInteraction.getGraphZoom(),
+    onNodeConfigMutated,
+    onNodeGeometryMutated,
+    applySize: ({ width, height }) => {
+      nodeEl.style.width = `${width}px`;
+      nodeEl.style.height = `${height}px`;
     },
-  });
-  resizeHandle.addEventListener("pointerdown", (event) => {
-    const pointerEvent = event as PointerEvent;
-    if (busy || pointerEvent.button !== 0) {
-      return;
-    }
-    pointerEvent.preventDefault();
-    pointerEvent.stopPropagation();
-
-    const pointerId = pointerEvent.pointerId;
-    const startWidth = resolveStudioLabelWidth(node);
-    const startHeight = resolveStudioLabelHeight(node);
-    const startX = pointerEvent.clientX;
-    const startY = pointerEvent.clientY;
-    const zoom = graphInteraction.getGraphZoom() || 1;
-
-    if (typeof resizeHandle.setPointerCapture === "function") {
-      try {
-        resizeHandle.setPointerCapture(pointerId);
-      } catch {
-        // Ignore capture errors; window listeners are fallback.
-      }
-    }
-
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-      const nextWidth = clampLabelMetric(
-        startWidth + (moveEvent.clientX - startX) / zoom,
-        STUDIO_GRAPH_LABEL_MIN_WIDTH,
-        STUDIO_GRAPH_LABEL_MAX_WIDTH
-      );
-      const nextHeight = clampLabelMetric(
-        startHeight + (moveEvent.clientY - startY) / zoom,
-        STUDIO_GRAPH_LABEL_MIN_HEIGHT,
-        STUDIO_GRAPH_LABEL_MAX_HEIGHT
-      );
-      if (
-        Number(node.config.width) === nextWidth &&
-        Number(node.config.height) === nextHeight
-      ) {
-        return;
-      }
-      node.config.width = nextWidth;
-      node.config.height = nextHeight;
-      nodeEl.style.width = `${nextWidth}px`;
-      nodeEl.style.height = `${nextHeight}px`;
-      onNodeGeometryMutated(node);
-    };
-
-    const finishResize = (upEvent: PointerEvent): void => {
-      if (upEvent.pointerId !== pointerId) {
-        return;
-      }
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", finishResize);
-      window.removeEventListener("pointercancel", finishResize);
-      if (typeof resizeHandle.releasePointerCapture === "function") {
-        try {
-          resizeHandle.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release errors.
-        }
-      }
-      applyDimensions();
-      onNodeConfigMutated(node);
-      onNodeGeometryMutated(node);
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", finishResize);
-    window.addEventListener("pointercancel", finishResize);
+    readInitialSize: () => ({
+      width: resolveStudioLabelWidth(node),
+      height: resolveStudioLabelHeight(node),
+    }),
   });
 }

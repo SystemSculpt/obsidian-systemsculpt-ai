@@ -29,7 +29,7 @@ export function bindNodeCardPointerDown(options: {
     }
     if (
       target.closest(
-        "input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle, .ss-studio-label-display, .ss-studio-terminal-surface, .ss-studio-terminal-resize-handle, .ss-studio-terminal-panel"
+        "input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle, .ss-studio-node-resize-handle, .ss-studio-label-display, .ss-studio-terminal-surface, .ss-studio-terminal-resize-handle, .ss-studio-terminal-panel"
       )
     ) {
       return;

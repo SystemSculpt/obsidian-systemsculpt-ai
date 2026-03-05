@@ -110,7 +110,6 @@ import {
   type StudioNoteConfigItem,
 } from "../../studio/StudioNoteConfig";
 import { mountStudioTerminalNode } from "./StudioTerminalNodeRenderer";
-import { mountTerminalResizeHandle } from "./terminal/StudioTerminalResizeHandle";
 import {
   buildGraphClipboardPayload,
   cloneProjectSnapshot,
@@ -223,7 +222,6 @@ type StudioTerminalMount = {
   interactionLocked: boolean;
   containerEl: HTMLElement;
   dispose: () => void;
-  disposeResizeHandle: () => void;
 };
 
 export class SystemSculptStudioView extends ItemView {
@@ -402,11 +400,6 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.terminalMounts.delete(key);
     try {
-      mount.disposeResizeHandle();
-    } catch {
-      // Best effort cleanup.
-    }
-    try {
       mount.dispose();
     } catch {
       // Best effort cleanup.
@@ -441,16 +434,6 @@ export class SystemSculptStudioView extends ItemView {
           this.disposeTerminalMount(key);
         }
         const containerEl = candidate.terminalAnchorEl.createDiv({ cls: "ss-studio-terminal-host" });
-        const sizeTargets = [candidate.nodeEl];
-        const disposeResizeHandle = mountTerminalResizeHandle({
-          node: candidate.node,
-          nodeEl: candidate.nodeEl,
-          sizeTargets,
-          interactionLocked: candidate.interactionLocked,
-          onNodeConfigMutated: candidate.onNodeConfigMutated,
-          onNodeGeometryMutated: candidate.onNodeGeometryMutated,
-          getGraphZoom: () => candidate.graphInteraction.getGraphZoom(),
-        });
         const studio = this.plugin.getStudioService();
         const dispose = mountStudioTerminalNode({
           node: candidate.node,
@@ -493,7 +476,6 @@ export class SystemSculptStudioView extends ItemView {
           interactionLocked: candidate.interactionLocked,
           containerEl,
           dispose,
-          disposeResizeHandle,
         });
         continue;
       }
@@ -3483,6 +3465,31 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
+  private stopTerminalSessionsForRemovedNodes(nodes: StudioNodeInstance[]): void {
+    const projectPath = String(this.currentProjectPath || "").trim();
+    if (!projectPath || nodes.length === 0) {
+      return;
+    }
+    const studio = this.plugin.getStudioService();
+    for (const node of nodes) {
+      if (node.kind !== "studio.terminal") {
+        continue;
+      }
+      const nodeId = String(node.id || "").trim();
+      if (!nodeId) {
+        continue;
+      }
+      void studio
+        .stopTerminalSession({
+          projectPath,
+          nodeId,
+        })
+        .catch((error) => {
+          new Notice(`Unable to stop terminal session: ${error instanceof Error ? error.message : String(error)}`);
+        });
+    }
+  }
+
   private removeNodes(nodeIds: string[]): void {
     if (!this.currentProject) {
       return;
@@ -3497,6 +3504,11 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
+    const removedNodes = this.currentProject.graph.nodes.filter((node) => idsToRemove.has(node.id));
+    if (removedNodes.length === 0) {
+      return;
+    }
+
     const previousCount = this.currentProject.graph.nodes.length;
     this.currentProject.graph.nodes = this.currentProject.graph.nodes.filter(
       (node) => !idsToRemove.has(node.id)
@@ -3504,6 +3516,7 @@ export class SystemSculptStudioView extends ItemView {
     if (this.currentProject.graph.nodes.length === previousCount) {
       return;
     }
+    this.stopTerminalSessionsForRemovedNodes(removedNodes);
     this.currentProject.graph.edges = this.currentProject.graph.edges.filter(
       (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
     );
