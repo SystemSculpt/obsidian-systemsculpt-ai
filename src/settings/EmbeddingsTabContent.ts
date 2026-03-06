@@ -391,8 +391,6 @@ async function scanLocalEmbeddings(tabInstance: SystemSculptSettingTab, trigger?
     }
 
     await tabInstance.plugin.getSettingsManager().updateSettings({ customProviders: updated });
-    tabInstance.plugin.customProviderService.clearCache();
-    await tabInstance.plugin.modelService.refreshModels();
     new Notice(`Added or enabled ${chosen.length} local provider${chosen.length === 1 ? '' : 's'}.`);
     tabInstance.display();
   } catch (error: any) {

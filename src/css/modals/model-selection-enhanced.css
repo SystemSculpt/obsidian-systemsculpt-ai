@@ -81,248 +81,145 @@
   z-index: 10;
 }
 
-/* === Filter Bar === */
-.ss-model-filter-bar {
+.ss-model-provider-summary {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--background-primary);
-  border-bottom: 1px solid var(--background-modifier-border);
-  flex-shrink: 0;
-  min-height: 40px;
-  overflow: hidden; /* Prevent horizontal scroll */
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 10px 8px;
+  margin: 8px 10px 0;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary)) 0%, var(--background-primary) 100%);
 }
 
-.ss-model-filter-section {
+.ss-model-provider-summary__top {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0; /* Allow shrinking */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.ss-model-filter-label {
-  font-size: 10px;
-  font-weight: 600;
+.ss-model-provider-summary__glance {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ss-model-provider-summary__eyebrow {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text-accent);
+}
+
+.ss-model-provider-summary__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ss-model-provider-summary__stats {
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--text-muted);
-  white-space: nowrap;
-  margin-right: 2px;
 }
 
-.ss-model-filter-buttons {
+.ss-model-provider-summary__chips {
   display: flex;
-  gap: 4px;
-  flex-wrap: nowrap; /* Prevent wrapping */
-  overflow: hidden; /* Hide overflow instead of scrolling */
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
-.ss-model-filter-controls {
+.ss-model-provider-summary__controls {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-/* === Provider Selection Button - Native Style === */
-.ss-provider-selection-button {
+.ss-model-provider-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
+  gap: 5px;
+  min-height: 22px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 84%, var(--background-primary));
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ss-model-provider-chip.is-current {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+}
+
+.ss-model-provider-chip.is-managed {
+  border-color: color-mix(in srgb, var(--interactive-accent) 25%, var(--background-modifier-border));
+  color: var(--text-normal);
+}
+
+.ss-model-provider-chip.is-pi-auth {
+  border-color: color-mix(in srgb, var(--color-green) 45%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-green) 8%, var(--background-secondary));
+  color: var(--text-normal);
+}
+
+.ss-model-provider-chip.is-endpoint {
+  border-style: dashed;
+}
+
+.ss-model-provider-chip.is-overflow {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+
+.ss-model-provider-chip__name {
+  font-weight: 600;
+  color: inherit;
+}
+
+.ss-model-provider-chip__count {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-modifier-hover) 72%, var(--background-primary));
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+.ss-model-provider-chip__state {
+  color: var(--text-faint);
+}
+
+.ss-model-setup-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
   border-radius: 3px;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
   white-space: nowrap;
-  min-width: 100px;
 }
 
-.ss-provider-selection-button:hover {
+.ss-model-setup-button:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
   border-color: var(--interactive-accent);
-}
-
-.ss-provider-selection-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.ss-provider-selection-icon svg {
-  width: 12px;
-  height: 12px;
-}
-
-.ss-provider-selection-text {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-}
-
-.ss-provider-selection-label {
-  font-weight: 500;
-  font-size: 11px;
-  line-height: 1;
-}
-
-.ss-provider-selection-count {
-  font-size: 9px;
-  color: var(--text-faint);
-  font-weight: 600;
-  line-height: 1;
-}
-
-.ss-provider-selection-arrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-}
-
-.ss-provider-selection-arrow svg {
-  width: 10px;
-  height: 10px;
-  color: var(--text-faint);
-  transition: transform 0.1s ease;
-}
-
-.ss-provider-selection-button:hover .ss-provider-selection-arrow svg {
-  transform: translateX(1px);
-}
-
-/* === Provider Selection Modal === */
-.systemsculpt-provider-selection-description {
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.4;
-  margin-bottom: 16px;
-}
-
-.systemsculpt-provider-selection-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-/* === Provider Toggle Items === */
-.systemsculpt-provider-toggle-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-primary);
-  cursor: pointer;
-  transition: all 0.1s ease;
-}
-
-.systemsculpt-provider-toggle-item:hover {
-  background: var(--background-secondary);
-  border-color: var(--interactive-accent);
-}
-
-.systemsculpt-provider-toggle-item.is-selected {
-  background: var(--background-primary-alt);
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 1px var(--interactive-accent);
-}
-
-.systemsculpt-provider-toggle-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.systemsculpt-provider-toggle-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.systemsculpt-provider-toggle-item.is-selected .systemsculpt-provider-toggle-icon {
-  color: var(--interactive-accent);
-}
-
-.systemsculpt-provider-toggle-details {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.systemsculpt-provider-toggle-name {
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--text-normal);
-}
-
-.systemsculpt-provider-toggle-count {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.systemsculpt-provider-toggle-control {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.systemsculpt-provider-toggle-button {
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  cursor: pointer;
-  transition: all 0.1s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ss-layer-base);
-}
-
-.systemsculpt-provider-toggle-button:hover {
-  border-color: var(--interactive-accent);
-  background: var(--background-secondary);
-}
-
-.systemsculpt-provider-toggle-button.is-active {
-  background: var(--interactive-accent);
-  border-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-/* === Modal Button Container === */
-.systemsculpt-modal-button-container {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--background-modifier-border);
 }
 
 /* === Favorites Count === */
@@ -356,12 +253,12 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 3px 6px;
+  padding: 2px 5px;
   border-radius: 3px;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   border: none;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.1s ease;
@@ -392,9 +289,9 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 3px 6px;
+  padding: 2px 5px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
@@ -432,16 +329,16 @@
 
 /* === Search Area === */
 .systemsculpt-model-selection-modal .ss-modal__search {
-  margin: 8px 16px;
+  margin: 6px 10px 0;
   flex-shrink: 0;
 }
 
 .systemsculpt-model-selection-modal .ss-modal__search-input {
-  height: 32px;
+  height: 30px;
   padding: 0 32px 0 32px;
   border-radius: 16px;
   border: 1px solid var(--background-modifier-border);
-  font-size: 13px;
+  font-size: 12px;
   background: var(--background-primary);
 }
 
@@ -472,7 +369,7 @@
 
 /* === Model List === */
 .systemsculpt-model-selection-modal .ss-modal__list {
-  padding: 8px 16px 24px 16px; /* Increased bottom padding */
+  padding: 6px 10px 20px 10px;
   gap: 4px;
   background: var(--background-primary);
   /* Remove duplicate styles since we set them above */
@@ -520,6 +417,19 @@
 .systemsculpt-model-selection-modal .ss-modal__item.ss-active:hover {
   background: var(--background-secondary-alt) !important;
   box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-access-managed:not(.ss-active) {
+  border-color: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-access-pi-auth:not(.ss-active) {
+  border-color: color-mix(in srgb, var(--color-green) 35%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-green) 4%, var(--background-primary));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-access-endpoint:not(.ss-active) {
+  border-style: dashed;
 }
 
 /* Add "SELECTED" badge to the currently active model */
@@ -690,35 +600,30 @@
     height: 80vh;
     max-height: none;
   }
-  
-  .ss-model-filter-bar {
-    padding: 6px 8px;
+
+  .ss-model-provider-summary {
+    margin: 8px 8px 0;
+    padding: 8px 8px 7px;
+  }
+
+  .ss-model-provider-summary__chips {
     gap: 4px;
+  }
+
+  .ss-model-provider-summary__top {
     flex-direction: column;
-    min-height: auto;
-  }
-  
-  .ss-model-filter-section {
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  
-  .ss-model-filter-controls {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
     gap: 8px;
   }
-  
-  .ss-provider-filter-button {
-    padding: 2px 4px;
-    font-size: 10px;
+
+  .ss-model-provider-summary__controls {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
   }
-  
-  .ss-provider-label {
-    display: none; /* Hide labels on mobile */
+
+  .ss-model-provider-chip__state {
+    display: none;
   }
   
   .ss-model-refresh-button {
@@ -743,8 +648,13 @@
 }
 
 @media (max-width: 480px) {
-  .ss-model-filter-bar {
-    padding: 4px 6px;
+  .ss-model-provider-summary__title {
+    font-size: 13px;
+  }
+
+  .ss-model-provider-chip {
+    width: 100%;
+    justify-content: space-between;
   }
   
   .systemsculpt-model-selection-modal .ss-modal__item {
@@ -757,6 +667,79 @@
   
   .systemsculpt-model-selection-modal .ss-modal__item-description {
     font-size: 11px;
+  }
+}
+
+@media (max-height: 820px) {
+  .modal-container .systemsculpt-model-selection-modal.ss-modal,
+  .systemsculpt-model-selection-modal.ss-modal {
+    height: calc(92vh - 24px) !important;
+    max-height: calc(92vh - 24px) !important;
+    min-height: 320px;
+  }
+
+  .systemsculpt-model-selection-modal .ss-modal__list {
+    max-height: calc(92vh - 150px) !important;
+    padding-top: 4px;
+  }
+
+  .ss-model-provider-summary {
+    gap: 5px;
+    padding: 7px 8px 6px;
+    margin: 6px 8px 0;
+  }
+
+  .ss-model-provider-summary__top {
+    gap: 8px;
+  }
+
+  .ss-model-provider-summary__stats {
+    font-size: 10px;
+  }
+
+  .systemsculpt-model-selection-modal .ss-modal__search {
+    margin: 4px 8px 0;
+  }
+
+  .systemsculpt-model-selection-modal .ss-modal__search-input {
+    height: 28px;
+    font-size: 11px;
+  }
+}
+
+@media (max-height: 680px) {
+  .ss-model-provider-summary__eyebrow {
+    display: none;
+  }
+
+  .ss-model-provider-summary__chips {
+    display: none;
+  }
+
+  .ss-model-provider-summary__top {
+    align-items: center;
+  }
+
+  .ss-model-provider-summary__title {
+    font-size: 13px;
+  }
+
+  .ss-model-provider-summary__stats {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .ss-model-provider-summary__controls {
+    gap: 4px;
+  }
+
+  .ss-model-refresh-button span:last-child,
+  .ss-model-setup-button {
+    font-size: 9px;
+  }
+
+  .systemsculpt-model-selection-modal .ss-modal__list {
+    max-height: calc(92vh - 120px) !important;
   }
 }
 

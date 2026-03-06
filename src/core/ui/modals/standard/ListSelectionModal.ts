@@ -13,6 +13,7 @@ export interface ListItem {
   icon?: string;
   badge?: string;
   selected?: boolean;
+  disabled?: boolean;
   thumbnail?: string; // URL or path to thumbnail image
   filePath?: string;  // Full file path for retrieval
   fileType?: string;  // File type/extension for identifying images
@@ -334,13 +335,19 @@ export class ListSelectionModal extends StandardModal {
       itemEl.setAttribute("data-item-id", item.id);
       
       // Make element focusable
-      itemEl.setAttribute("tabindex", "0");
+      itemEl.setAttribute("tabindex", item.disabled ? "-1" : "0");
+      itemEl.setAttribute("aria-disabled", item.disabled ? "true" : "false");
       
       // Store item element for keyboard navigation
       this.itemElements.push(itemEl);
       
       // Add click handler for selection (ignore clicks on favorite toggle)
       this.registerDomEvent(itemEl, "click", (ev: MouseEvent) => {
+        if (item.disabled) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
         const target = ev.target as HTMLElement;
         if (target && target.closest && target.closest('.systemsculpt-favorite-toggle')) {
           return; // Let the favorite toggle handle its own click
@@ -415,10 +422,18 @@ export class ListSelectionModal extends StandardModal {
     
     // Add additional classes if provided
     if ((itemData as any).additionalClasses) {
-       itemEl.classList.add((itemData as any).additionalClasses);
+       const additionalClasses = String((itemData as any).additionalClasses)
+         .split(/\s+/)
+         .filter(Boolean);
+       if (additionalClasses.length > 0) {
+         itemEl.classList.add(...additionalClasses);
+       }
     }
     if ((itemData as any).providerAuthenticated || itemData.metadata?.providerAuthenticated) {
       itemEl.classList.add("ss-provider-authenticated-model");
+    }
+    if (itemData.disabled) {
+      itemEl.classList.add("is-disabled");
     }
     
     // Use properties from itemData

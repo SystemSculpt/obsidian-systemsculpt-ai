@@ -48,11 +48,13 @@ describe("StudioLocalTextModelOptionAuth", () => {
         {
           provider: "anthropic",
           displayName: "Anthropic",
+          hasAnyAuth: true,
           hasStoredCredential: false,
           credentialType: "oauth",
         },
         {
           provider: "openrouter",
+          hasAnyAuth: true,
           displayName: "OpenRouter",
           hasStoredCredential: true,
           credentialType: "none",

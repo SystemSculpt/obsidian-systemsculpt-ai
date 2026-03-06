@@ -1,15 +1,14 @@
-import { App, setIcon, Setting, Notice, Modal, ButtonComponent } from "obsidian";
+import { App, setIcon, Notice } from "obsidian";
 import { ListItem, ListSelectionModal } from "../core/ui/modals/standard";
 import SystemSculptPlugin from "../main";
-import { SystemPromptService } from "../services/SystemPromptService";
+import { SystemPromptService, normalizeDesktopPromptSelectionType } from "../services/SystemPromptService";
 import { GENERAL_USE_PRESET, CONCISE_PRESET } from "../constants/prompts";
 import { SearchService, SearchableField } from "../services/SearchService";
 import { SystemPromptCreatorModal } from "./SystemPromptCreatorModal";
-import * as path from 'path';
 
 // Define the result type for the onSelect callback
 export interface SystemPromptSelectionResult {
-  type: "general-use" | "concise" | "agent" | "custom";
+  type: "general-use" | "concise" | "custom";
   prompt: string;
   path?: string;
 }
@@ -29,7 +28,7 @@ interface SystemPromptItem {
   id: string;
   name: string;
   description: string;
-  type: "general-use" | "concise" | "agent" | "custom";
+  type: "general-use" | "concise" | "custom";
   path?: string;
   prompt?: string;
 }
@@ -55,7 +54,7 @@ export class StandardSystemPromptSelectionModal {
   constructor(options: SystemPromptSelectionOptions) {
     this.app = options.app;
     this.plugin = options.plugin;
-    this.currentType = options.currentType;
+    this.currentType = normalizeDesktopPromptSelectionType(options.currentType);
     this.currentPath = options.currentPath;
     this.onSelect = options.onSelect;
     this.modalTitle = options.title || "Select System Prompt";
@@ -145,8 +144,6 @@ export class StandardSystemPromptSelectionModal {
         return "message-square";
       case "concise":
         return "zap";
-      case "agent":
-        return "cpu";
       case "custom":
         return "file-text";
       default:
@@ -294,52 +291,10 @@ export class StandardSystemPromptSelectionModal {
   }
 
   /**
-   * Show warning when agent prompt is selected but agent mode is disabled
-   */
-  private async showAgentModeWarning(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      const modal = new Modal(this.app);
-      modal.titleEl.textContent = "Agent Mode Required";
-      
-      const content = modal.contentEl;
-      content.empty();
-      
-      content.createEl("p", {
-        text: "The Agent prompt requires Agent Mode to be enabled for full functionality. Agent Mode provides the AI with vault exploration and file operation capabilities."
-      });
-      
-      content.createEl("p", {
-        text: "Would you like to enable Agent Mode now?"
-      });
-      
-      const buttonContainer = content.createDiv({ cls: "ss-modal-button-container ss-modal-margin-top-16" });
-      
-      new ButtonComponent(buttonContainer)
-        .setButtonText("Cancel")
-        .onClick(() => {
-          modal.close();
-          resolve(false);
-        });
-        
-      new ButtonComponent(buttonContainer)
-        .setButtonText("Enable Agent Mode")
-        .setCta()
-        .onClick(() => {
-          modal.close();
-          resolve(true);
-        });
-      
-      modal.open();
-    });
-  }
-
-  /**
    * Open the modal and get selection
    */
   async open() {
     try {
-      // Note: Agent mode check is now handled at the chat view level since it's per-chat
-
       // Load all system prompt items
       this.allItems = await this.loadSystemPromptItems();
       const items = this.convertToListItems(this.allItems);
@@ -379,8 +334,6 @@ export class StandardSystemPromptSelectionModal {
         const item = this.allItems.find(i => i.id === selectedItem.id);
 
         if (item) {
-          // Note: Agent prompt selection is now handled at the chat view level since agent mode is per-chat
-
           let result: SystemPromptSelectionResult;
 
           if (item.type === "custom" && item.path) {

@@ -29,8 +29,7 @@ export class TranscriptAssembler {
     }
 
     // Shallow-clone parts so we can mutate timestamps/data during streaming without
-    // accidentally mutating the caller's array. ToolCall objects are intentionally
-    // not deep-cloned so their state stays in sync with the ToolCallManager.
+    // accidentally mutating the caller's array.
     const cloned = seedParts.map((part) => ({ ...part } as MessagePart));
     cloned.sort((a, b) => a.timestamp - b.timestamp);
 
@@ -57,7 +56,7 @@ export class TranscriptAssembler {
         this.flushPendingContent(false);
         break;
       case "tool-call":
-        // Tool calls are attached separately once the ToolCallManager creates them.
+        // Tool calls are attached separately once the stream controller finalizes them.
         this.flushPendingContent(true);
         this.activeReasoningIndex = null;
         break;

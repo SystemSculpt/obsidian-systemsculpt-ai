@@ -1,74 +1,60 @@
-import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import {
-  listStudioLocalTextModelOptions,
-  listStudioPiProviderAuthRecords,
-} from "./StudioLocalTextModelCatalog";
-import {
-  decorateStudioLocalTextModelOptionsWithAuth,
-  resolveStudioLocalTextModelProviderId,
-} from "./StudioLocalTextModelOptionAuth";
+import { resolveProviderLabel } from "./piAuth/StudioPiProviderRegistry";
+import { hasAuthenticatedStudioPiProvider } from "./piAuth/StudioPiProviderAuthUtils";
+import { loadPiTextProviderAuth, piTextProviderRequiresAuth } from "../services/pi-native/PiTextAuth";
 import type {
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
 } from "./types";
+import type { SystemSculptModel } from "../types/llm";
 
-function normalizeOptionText(value: unknown): string {
+function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function modelIsSystemSculpt(model: any): boolean {
-  const provider = normalizeOptionText(model?.identifier?.providerId || model?.provider).toLowerCase();
-  if (provider === "systemsculpt") {
-    return true;
+function formatContextLength(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return "";
   }
-  const id = normalizeOptionText(model?.id).toLowerCase();
-  return id.startsWith("systemsculpt@@");
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1)}M context`;
+  }
+  if (tokens >= 1_000) {
+    return `${Math.round(tokens / 1_000)}K context`;
+  }
+  return `${tokens} context`;
 }
 
-function modelIsTextCapable(model: any): boolean {
-  const capabilities = Array.isArray(model?.capabilities)
-    ? model.capabilities.map((entry: unknown) => String(entry || "").trim().toLowerCase())
-    : [];
-  if (capabilities.length === 0) {
-    return true;
+function describeModel(model: SystemSculptModel): string {
+  const parts: string[] = ["Local Pi runtime"];
+  const context = formatContextLength(model.context_length);
+  if (context) {
+    parts.push(context);
   }
-  if (capabilities.includes("embeddings")) {
-    return capabilities.some((capability: string) =>
-      capability === "text" ||
-      capability === "chat" ||
-      capability === "code" ||
-      capability === "tools" ||
-      capability === "function_calling" ||
-      capability === "vision"
-    );
-  }
-  return true;
+  return parts.join(" • ");
 }
 
-function toSystemSculptTextModelOption(model: any): StudioNodeConfigSelectOption | null {
-  const value = normalizeOptionText(model?.identifier?.modelId) || normalizeOptionText(model?.id);
-  if (!value) {
-    return null;
-  }
-  const label = normalizeOptionText(model?.identifier?.displayName || model?.name || model?.identifier?.modelId || value);
-  const contextLength = Number(model?.context_length);
-  const descriptionParts: string[] = [];
-  if (Number.isFinite(contextLength) && contextLength > 0) {
-    descriptionParts.push(`context ${contextLength.toLocaleString()}`);
-  }
-  const description = descriptionParts.join(" • ");
+function buildKeywords(model: SystemSculptModel): string[] {
+  return [
+    normalizeText(model.name),
+    normalizeText(model.id),
+    normalizeText(model.piExecutionModelId),
+    normalizeText(model.provider),
+    normalizeText(model.identifier?.modelId),
+  ].filter((entry) => entry.length > 0);
+}
+
+function toPiTextOption(
+  model: SystemSculptModel,
+  providerAuthenticated: boolean
+): StudioNodeConfigSelectOption {
   return {
-    value,
-    label: label || value,
-    description: description || undefined,
-    badge: "SystemSculpt",
-    keywords: [
-      normalizeOptionText(model?.name),
-      normalizeOptionText(model?.id),
-      normalizeOptionText(model?.identifier?.modelId),
-      normalizeOptionText(model?.provider),
-    ].filter((entry) => entry.length > 0),
+    value: model.id,
+    label: normalizeText(model.name) || normalizeText(model.identifier?.modelId) || model.id,
+    description: describeModel(model) || undefined,
+    badge: resolveProviderLabel(model.provider || "systemsculpt"),
+    keywords: buildKeywords(model),
+    providerAuthenticated,
   };
 }
 
@@ -77,48 +63,39 @@ export async function resolveStudioDynamicSelectOptions(options: {
   source: StudioNodeConfigDynamicOptionsSource;
 }): Promise<StudioNodeConfigSelectOption[]> {
   const { plugin, source } = options;
-  if (source === "studio.local_text_models") {
-    const localOptions = await listStudioLocalTextModelOptions(plugin);
-    const baseOptions = localOptions.map((option) => ({
-      value: option.value,
-      label: option.label,
-      description: option.description,
-      badge: option.badge,
-      keywords: option.keywords,
-    }));
-    if (!Platform.isDesktopApp || baseOptions.length === 0) {
-      return baseOptions;
-    }
-
-    const providerHints = Array.from(
-      new Set(
-        baseOptions
-          .map((option) => resolveStudioLocalTextModelProviderId(option))
-          .filter((providerId) => providerId.length > 0)
-      )
-    );
-
-    if (providerHints.length === 0) {
-      return baseOptions;
-    }
-
-    try {
-      const records = await listStudioPiProviderAuthRecords({ providerHints });
-      return decorateStudioLocalTextModelOptionsWithAuth(baseOptions, records);
-    } catch {
-      return baseOptions;
-    }
+  if (
+    source !== "studio.pi_text_models" &&
+    source !== "studio.systemsculpt_text_models" &&
+    source !== "studio.local_text_models"
+  ) {
+    return [];
   }
 
-  if (source === "studio.systemsculpt_text_models") {
-    const models = await plugin.modelService.getModels().catch(() => [] as any[]);
-    const options = models
-      .filter((model) => modelIsSystemSculpt(model) && modelIsTextCapable(model))
-      .map((model) => toSystemSculptTextModelOption(model))
-      .filter((option): option is StudioNodeConfigSelectOption => option !== null)
-      .sort((left, right) => left.label.localeCompare(right.label));
-    return options;
-  }
+  const models = await plugin.modelService.getModels().catch(() => [] as SystemSculptModel[]);
+  const providerHints = Array.from(
+    new Set(
+      models
+        .map((model) => normalizeText(model.sourceProviderId || model.provider).toLowerCase())
+        .filter((providerId) => providerId.length > 0)
+    )
+  );
+  const providerAuthById = await loadPiTextProviderAuth(providerHints);
 
-  return [];
+  return models
+    .map((model) => {
+      const providerId = normalizeText(model.sourceProviderId || model.provider).toLowerCase();
+      const authRecord = providerAuthById.get(providerId);
+      const localReady =
+        !!model.piLocalAvailable &&
+        (!piTextProviderRequiresAuth(providerId) || hasAuthenticatedStudioPiProvider(authRecord));
+      const providerAuthenticated = localReady;
+      return toPiTextOption(model, providerAuthenticated);
+    })
+    .sort((left, right) => {
+      const authCompare = Number(Boolean(right.providerAuthenticated)) - Number(Boolean(left.providerAuthenticated));
+      if (authCompare !== 0) {
+        return authCompare;
+      }
+      return left.label.localeCompare(right.label);
+    });
 }

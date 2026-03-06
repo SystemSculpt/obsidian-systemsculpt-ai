@@ -98,7 +98,7 @@
   height: 14px;
 }
 
-/* Locked system prompt state when agent mode is active */
+/* Locked system prompt state */
 .systemsculpt-system-prompt-locked {
   opacity: 0.7;
   cursor: default !important;
@@ -117,7 +117,7 @@
   color: var(--text-accent);
 }
 
-/* Locked model state when agent mode is active */
+/* Locked model state */
 .systemsculpt-model-locked {
   opacity: 0.7;
   cursor: default !important;
@@ -141,7 +141,7 @@
   max-width: 280px;
 }
 
-/* Toggle state styling for agent mode chip */
+/* Toggle state styling for status chips */
 .systemsculpt-chip.is-on {
   border-color: var(--interactive-accent);
   color: var(--text-normal);

@@ -1,7 +1,6 @@
 import { Component } from "obsidian";
 import { ChatMessage, MessagePart, Annotation } from "../../../types";
 import type { StreamEvent, StreamToolCall } from "../../../streaming/types";
-import { ToolCallManager } from "../ToolCallManager";
 import { ScrollManagerService } from "../ScrollManagerService";
 import { MessageRenderer } from "../MessageRenderer";
 import { SystemSculptError, ERROR_CODES } from "../../../utils/errors";
@@ -13,7 +12,6 @@ import { createToolCallIdState, sanitizeToolCallId, ToolCallIdState } from "../.
 import { StreamingMetricsTracker, StreamingMetrics } from "../StreamingMetricsTracker";
 
 export interface StreamingControllerOptions {
-  toolCallManager: ToolCallManager;
   scrollManager: ScrollManagerService;
   messageRenderer: MessageRenderer;
   saveChat: () => Promise<void>;
@@ -56,7 +54,6 @@ export class StreamingController extends Component {
     skipIndicatorLifecycle?: boolean,
   ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
     const {
-      toolCallManager,
       scrollManager,
       updateStreamingStatus,
       showStreamingStatus,
@@ -366,9 +363,6 @@ export class StreamingController extends Component {
       toolCallIdState,
     } = params;
 
-    const { toolCallManager } = this.opts;
-    if (!toolCallManager) return;
-
     const callIndex = typeof event.call.index === "number" ? event.call.index : 0;
     const sanitizedId = sanitizeToolCallId(event.call.id, callIndex, toolCallIdState);
 
@@ -435,19 +429,17 @@ export class StreamingController extends Component {
       },
     };
 
-    const toolCall = toolCallManager.createToolCall(request, messageId);
-    if (!toolCall) {
-      try {
-        errorLogger.debug("Tool call manager returned null", {
-          source: "StreamingController",
-          method: "handleToolCallEvent",
-          metadata: { messageId, toolCallId: sanitizedId },
-        });
-      } catch {}
-      return;
-    }
+    const toolCall: ToolCall = {
+      id: sanitizedId,
+      messageId,
+      request,
+      state: "completed",
+      timestamp: Date.now(),
+      executionStartedAt: Date.now(),
+      executionCompletedAt: Date.now(),
+    };
 
-    emittedToolCalls.add(toolCall.id);
+    emittedToolCalls.add(sanitizedId);
     assembler.attachToolCall(toolCall);
     this.updateMessageRendering(assembler, messageEl, assistantMessage, true);
   }

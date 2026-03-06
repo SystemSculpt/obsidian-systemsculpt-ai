@@ -56,27 +56,6 @@ export const messageHandling = {
    * Render assistant messages with unified parts and proper tool call registration
    */
   renderAssistantMessage: async function(chatView: ChatView, messageEl: HTMLElement, message: ChatMessage): Promise<void> {
-    // CRITICAL FIX: Register tool calls with ToolCallManager when loading from storage
-    if (message.tool_calls && message.tool_calls.length > 0 && chatView.toolCallManager) {
-      for (const toolCall of message.tool_calls) {
-        // Check if the tool call is already registered
-        const existingToolCall = chatView.toolCallManager.getToolCall(toolCall.id);
-        if (!existingToolCall) {
-          // Tool call not in manager, register it
-          const serializedToolCall = {
-            id: toolCall.id,
-            request: toolCall.request,
-            state: toolCall.state,
-            timestamp: toolCall.timestamp,
-            executionStartedAt: toolCall.executionStartedAt,
-            executionCompletedAt: toolCall.executionCompletedAt,
-            result: toolCall.result,
-          };
-          chatView.toolCallManager.restoreToolCall(serializedToolCall, message.message_id);
-        }
-      }
-    }
-
     // Tool call lines are always rendered inline in the tree UI.
 
     // Always use sequential rendering for consistency
@@ -117,27 +96,34 @@ export const messageHandling = {
       const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
       if (index === -1) return;
 
-      // Remove all messages from the resubmitted one onward
-      chatView.messages.splice(index);
-
-      if (chatView.messages.length === 0) {
-        // We just cleared the entire chat.  Treat this as starting a brand-new
-        // conversation rather than trying to "update" an existing file with
-        // zero messages (which triggers the empty-save safeguard).
-
-        chatView.chatId = "";           // Force new chat ID on next save
-        chatView.chatVersion = 0;
-        chatView.isFullyLoaded = false;  // Allow initial save again
-
-        // No need to save now – we'll persist once the user actually sends
-        // their freshly-edited message.
+      if (chatView.getPiSessionFile()) {
+        try {
+          const forkResult = await chatView.forkPiSessionFromMessage(messageId);
+          if (forkResult.cancelled) {
+            new Notice("Pi cancelled the fork request for that message.");
+            return;
+          }
+        } catch (error) {
+          new Notice(
+            `Unable to fork Pi session from this message: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return;
+        }
       } else {
-        // Normal case (resubmit midway through a chat) – save remaining history
-        await chatView.saveChat();
-      }
+        // Legacy local-only chats still fall back to truncating local history.
+        chatView.messages.splice(index);
+        chatView.clearPiSessionState({ save: false });
 
-      // Re-render visual state to reflect deletion
-      await this.reloadAllMessages(chatView);
+        if (chatView.messages.length === 0) {
+          chatView.chatId = "";
+          chatView.chatVersion = 0;
+          chatView.isFullyLoaded = false;
+        } else {
+          await chatView.saveChat();
+        }
+
+        await this.reloadAllMessages(chatView);
+      }
 
       // Put the text back in the input box for editing, trimming outer blank lines
       if (chatView.inputHandler) {
@@ -169,6 +155,11 @@ export const messageHandling = {
     };
     
     const editHandler = async (e: CustomEvent) => {
+      if (chatView.getPiSessionFile()) {
+        new Notice("Editing previous Pi-backed messages isn't supported yet. Fork from that user message instead.");
+        return;
+      }
+
       const { messageId, newContent } = e.detail;
       const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
       if (index !== -1) {
@@ -179,6 +170,7 @@ export const messageHandling = {
           messageParts: undefined
         };
         chatView.messages[index] = updatedMessage;
+        chatView.clearPiSessionState({ save: false });
         
         await chatView.saveChat();
         
@@ -206,10 +198,16 @@ export const messageHandling = {
     };
     
     const deleteHandler = async (e: CustomEvent) => {
+      if (chatView.getPiSessionFile()) {
+        new Notice("Deleting individual messages is disabled for Pi-backed chats. Fork from a user message instead.");
+        return;
+      }
+
       const { messageId } = e.detail;
       const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
       if (index !== -1) {
         chatView.messages.splice(index, 1);
+        chatView.clearPiSessionState({ save: false });
         await chatView.saveChat();
 
         const parentGroup = messageEl.parentElement as HTMLElement | null;

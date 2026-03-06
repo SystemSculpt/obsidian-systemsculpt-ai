@@ -4,6 +4,7 @@ import builtins from "builtin-modules";
 import fs from "fs";
 import path from "path";
 import { BuildLogger, formatBytes, formatDuration } from "./build-logger.mjs";
+import { collectPiRuntimePackageRoots } from "./scripts/pi-runtime-package-set.mjs";
 
 const banner =
 `/*
@@ -18,6 +19,9 @@ const cssLogger = new BuildLogger("CSS");
 
 const cssDir = path.join(process.cwd(), "src", "css");
 const indexCssPath = path.join(cssDir, "index.css");
+const piRuntimePackageRoots = collectPiRuntimePackageRoots({
+	rootDir: process.cwd(),
+}).map((entry) => entry.relativePath);
 
 // Auto-sync built artifacts after each build/rebuild.
 // - Set `SYSTEMSCULPT_AUTO_SYNC_PATH` to a plugin directory to sync into a real vault.
@@ -201,7 +205,10 @@ const syncArtifacts = () => {
 	if (!autoSyncTargets || autoSyncTargets.length === 0) return;
 	const requiredFiles = ["manifest.json", "main.js", "styles.css", "studio-terminal-sidecar.cjs"];
 	const optionalFiles = ["README.md", "LICENSE", "versions.json"];
-	const runtimeNodeModules = ["node-pty"];
+	const runtimePaths = [
+		"node_modules/node-pty",
+		...piRuntimePackageRoots,
+	];
 
 	const copyDirectoryRecursive = (src, dest) => {
 		const stats = fs.statSync(src);
@@ -239,12 +246,12 @@ const syncArtifacts = () => {
 				const dest = path.join(target, path.basename(file));
 				fs.copyFileSync(src, dest);
 			}
-			for (const moduleName of runtimeNodeModules) {
-				const srcModulePath = path.join(process.cwd(), "node_modules", moduleName);
+			for (const relativeRuntimePath of runtimePaths) {
+				const srcModulePath = path.join(process.cwd(), relativeRuntimePath);
 				if (!fs.existsSync(srcModulePath)) {
 					throw new Error(`Runtime dependency missing: ${srcModulePath}`);
 				}
-				const destModulePath = path.join(target, "node_modules", moduleName);
+				const destModulePath = path.join(target, relativeRuntimePath);
 				fs.rmSync(destModulePath, { recursive: true, force: true });
 				copyDirectoryRecursive(srcModulePath, destModulePath);
 			}

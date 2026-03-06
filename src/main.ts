@@ -18,7 +18,7 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  * Version: 1.5.3
  */
-import { Plugin, Notice, MarkdownView, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter } from "obsidian";
+import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter } from "obsidian";
 import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptModel } from "./types/llm";
@@ -32,7 +32,6 @@ import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { ViewManager } from "./core/plugin/views";
 import { CommandManager } from "./core/plugin/commands";
-import { CustomProviderService } from "./services/CustomProviderService";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { UnifiedModelService } from "./services/providers/UnifiedModelService";
@@ -68,6 +67,11 @@ import { ReadwiseService } from "./services/readwise";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
 import { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./views/studio/SystemSculptStudioView";
+import {
+  clearPiRuntimeBootstrapContext,
+  ensureBundledPiRuntime,
+  registerPiRuntimeBootstrapContext,
+} from "./services/pi/PiRuntimeBootstrap";
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
@@ -79,7 +83,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   private _aiService: SystemSculptService | undefined;
   settingsTab: SystemSculptSettingTab;
-  customProviderService: CustomProviderService;
   private recorderService: RecorderService | null = null;
   private videoRecorderService: VideoRecorderService | null = null;
   private transcriptionService: TranscriptionService;
@@ -142,9 +145,6 @@ export default class SystemSculptPlugin extends Plugin {
   // Lazy service getters to avoid blocking startup
   public get aiService(): SystemSculptService {
     if (!this._aiService) {
-      if (!this.customProviderService) {
-        this.customProviderService = new CustomProviderService(this, this.app);
-      }
       this._aiService = SystemSculptService.getInstance(this);
     }
     return this._aiService;
@@ -545,6 +545,7 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     try {
+      registerPiRuntimeBootstrapContext({ plugin: this });
       this.configureLifecycle(loadStart);
       if (!this.lifecycleCoordinator) {
         throw new Error("Lifecycle coordinator failed to initialize");
@@ -812,6 +813,46 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
+    coordinator.registerTask("layout", {
+      id: "pi.runtime.prewarm",
+      label: "Pi runtime bootstrap",
+      optional: true,
+      diagnostics: {
+        slowThresholdMs: 30_000,
+        timeoutMs: 120_000,
+      },
+      run: async () => {
+        if (!Platform.isDesktopApp) {
+          return;
+        }
+
+        const tracer = this.getInitializationTracer();
+        await new Promise<void>((resolve) => {
+          const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
+          timer(() => {
+            const piRuntimePhase = tracer.startPhase("pi.runtime.prewarm", {
+              slowThresholdMs: 6000,
+              timeoutMs: 90000,
+              successLevel: "debug",
+            });
+
+            this.runAfterIdleAsync(() => ensureBundledPiRuntime({ plugin: this }), 1500)
+              .then(({ result }) => {
+                piRuntimePhase.complete({
+                  installedRuntime: result.installedRuntime,
+                  packageCount: result.packageCount,
+                });
+                resolve();
+              })
+              .catch((error) => {
+                piRuntimePhase.fail(error);
+                resolve();
+              });
+          }, 5000);
+        });
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "updates.schedule",
       label: "version check",
@@ -1466,7 +1507,6 @@ export default class SystemSculptPlugin extends Plugin {
     const logger = this.getLogger();
 
     try {
-      this.customProviderService = new CustomProviderService(this, this.app);
       this._aiService = SystemSculptService.getInstance(this);
       this.favoritesService = FavoritesService.getInstance(this);
       // Initialize runtime incompatibility tracking (persists model tool/image rejections)
@@ -1475,7 +1515,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       const metadata = {
         services: [
-          "CustomProviderService",
           "SystemSculptService",
           "FavoritesService",
           "RuntimeIncompatibilityService",
@@ -1493,7 +1532,6 @@ export default class SystemSculptPlugin extends Plugin {
       this.failures.push("basic services");
       phase.fail(error, {
         services: [
-          "CustomProviderService",
           "SystemSculptService",
           "FavoritesService",
           "UnifiedModelService",
@@ -1819,6 +1857,8 @@ export default class SystemSculptPlugin extends Plugin {
     // Plugin unloading silently
 
     try {
+      clearPiRuntimeBootstrapContext();
+
       // Embeddings cleanup
       // Clean up version checker service
       if (this.versionCheckerService) {
@@ -1964,15 +2004,12 @@ export default class SystemSculptPlugin extends Plugin {
       FavoritesService.clearInstance();
       RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
-      CustomProviderService.clearStaticCaches();
       
       // Clear service references without reassignment
       // @ts-ignore - Cleanup is handled by garbage collection
       this._modelService = undefined;
       // @ts-ignore - Cleanup is handled by garbage collection
       this._aiService = undefined;
-      // @ts-ignore - Cleanup is handled by garbage collection
-      this.customProviderService = undefined;
 
       // Clean up the PreviewService
       try {

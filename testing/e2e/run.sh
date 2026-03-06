@@ -27,6 +27,7 @@ PRIVATE_VAULT_FALLBACK="${SYSTEMSCULPT_E2E_PRIVATE_VAULT_FALLBACK:-$HOME/gits/pr
 DISABLE_PRIVATE_VAULT_FALLBACK="${SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK:-0}"
 SKIP_BUILD="${SYSTEMSCULPT_E2E_SKIP_BUILD:-0}"
 ALLOW_PAID_LIVE_TESTS="${SYSTEMSCULPT_E2E_ALLOW_PAID_LIVE_TESTS:-0}"
+PLUGIN_INSTALL_MODE="${SYSTEMSCULPT_E2E_PLUGIN_INSTALL_MODE:-synced-dev}"
 MOCK_SERVER_PID=""
 DEFAULT_LIVE_SERVER_URL="https://api.systemsculpt.com/api/v1"
 
@@ -226,6 +227,22 @@ run_build_if_needed() {
     return
   fi
   npm run build >/dev/null
+  if [[ "${PLUGIN_INSTALL_MODE}" == "release-assets" || "${PLUGIN_INSTALL_MODE}" == "fresh-desktop" ]]; then
+    npm run build:pi-runtime >/dev/null
+    npm run build:terminal-runtime >/dev/null
+  fi
+}
+
+configure_mock_release_asset_env() {
+  if [[ "${PLUGIN_INSTALL_MODE}" != "release-assets" && "${PLUGIN_INSTALL_MODE}" != "fresh-desktop" ]]; then
+    return
+  fi
+
+  local asset_base="http://127.0.0.1:${SYSTEMSCULPT_E2E_MOCK_PORT}/_e2e/release-assets"
+  export SYSTEMSCULPT_PI_RUNTIME_BASE_URL="${asset_base}/pi-runtime"
+  export SYSTEMSCULPT_PI_RUNTIME_MANIFEST_URL="${asset_base}/pi-runtime/studio-pi-runtime-manifest.json"
+  export SYSTEMSCULPT_STUDIO_TERMINAL_RUNTIME_BASE_URL="${asset_base}/terminal-runtime"
+  export SYSTEMSCULPT_STUDIO_TERMINAL_RUNTIME_MANIFEST_URL="${asset_base}/terminal-runtime/studio-terminal-runtime-manifest.json"
 }
 
 cleanup_e2e() {
@@ -303,6 +320,7 @@ case "$MODE" in
     ;;
   mock)
     start_mock_server
+    configure_mock_release_asset_env
     hydrate_e2e_env_from_settings_json
     require_e2e_license_key
     if [[ "${SYSTEMSCULPT_E2E_ALLOW_EXTERNAL_SERVER_IN_MOCK:-0}" != "1" ]]; then

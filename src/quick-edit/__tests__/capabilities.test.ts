@@ -17,14 +17,18 @@ const createFile = (path: string): TFile => {
 };
 
 describe("evaluateQuickEditReadiness", () => {
-  it("returns ok when model is selected and file is supported", async () => {
+  it("reports the Pi-native upgrade gate even when model and file are otherwise supported", async () => {
     const plugin = createPlugin();
     const file = createFile("Notes/Example.md");
 
     const result = await evaluateQuickEditReadiness({ plugin, file });
 
-    expect(result.ok).toBe(true);
-    expect(result.issues).toHaveLength(0);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "pi-native-upgrade" }),
+      ])
+    );
   });
 
   it("flags missing model selection", async () => {
@@ -41,13 +45,18 @@ describe("evaluateQuickEditReadiness", () => {
     );
   });
 
-  it("ignores unrelated settings and still reports ready", async () => {
+  it("still reports the Pi-native upgrade gate when unrelated settings are present", async () => {
     const plugin = createPlugin({ debugMode: true } as any);
     const file = createFile("Docs/Example.md");
 
     const result = await evaluateQuickEditReadiness({ plugin, file });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "pi-native-upgrade" }),
+      ])
+    );
   });
 
   it("flags unsupported file extensions", async () => {

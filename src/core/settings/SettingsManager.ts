@@ -1,5 +1,4 @@
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflowEngineSettings } from "../../types";
-import { AGENT_CONFIG } from "../../constants/agent";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
@@ -523,12 +522,12 @@ export class SettingsManager {
 
     // Validate string settings that should never be null - using a simpler approach
     if (typeof validatedSettings.selectedModelId !== 'string') {
-      validatedSettings.selectedModelId = defaultSettings.selectedModelId;
+      validatedSettings.selectedModelId =
+        typeof defaultSettings.selectedModelId === "string" ? defaultSettings.selectedModelId : "";
     }
-    // Ensure a sensible out-of-the-box default model in Standard mode
-    if (!validatedSettings.selectedModelId || validatedSettings.selectedModelId.trim().length === 0) {
-      validatedSettings.selectedModelId = AGENT_CONFIG.MODEL_ID;
-    }
+    validatedSettings.selectedModelId = validatedSettings.selectedModelId.trim().length > 0
+      ? validatedSettings.selectedModelId
+      : "";
 
     if (typeof validatedSettings.titleGenerationModelId !== 'string') {
       validatedSettings.titleGenerationModelId = defaultSettings.titleGenerationModelId;
@@ -578,8 +577,8 @@ export class SettingsManager {
       validatedSettings.systemPromptType = defaultSettings.systemPromptType;
     }
 
-    // CRITICAL: Check if systemPromptType is "agent" - this is no longer valid as a default.
-    // Agent Mode is now per-chat only, so force switch to general-use if user has this set.
+    // CRITICAL: Check if systemPromptType is "agent" - this legacy preset is no longer valid as a default.
+    // Desktop Pi chat always uses General Use unless the user explicitly selects another supported preset.
     if (validatedSettings.systemPromptType === 'agent') {
       validatedSettings.systemPromptType = 'general-use';
       validatedSettings.systemPromptPath = ''; // Clear any associated path

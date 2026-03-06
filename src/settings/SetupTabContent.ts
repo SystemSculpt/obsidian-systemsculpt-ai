@@ -8,7 +8,6 @@ import {
   type StudioPiAuthMigrationSkip,
   type StudioPiAuthMigrationSkipReason,
 } from "./setup/SetupTabPiAuthSection";
-import { renderProvidersSection } from "./setup/SetupTabProvidersSection";
 import { renderSupportSection } from "./setup/SetupTabSupportSection";
 
 export type {
@@ -31,6 +30,5 @@ export function displaySetupTabContent(
 
   renderAccountSection(containerEl, tabInstance, isProActive);
   renderLocalPiAuthSection(containerEl, tabInstance);
-  renderProvidersSection(containerEl, tabInstance);
   renderSupportSection(containerEl, tabInstance, isProActive);
 }

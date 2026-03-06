@@ -172,7 +172,7 @@ function describeChatPrompt(app: App, plugin: PluginInstance): PromptSummary {
     case 'concise':
       return { text: 'Concise preset' };
     case 'agent':
-      return { text: 'Agent mode preset' };
+      return { text: 'Legacy Agent preset' };
     case 'custom':
       if (path) {
         return describeCustomFile(app, path, 'Custom prompt');
@@ -242,7 +242,7 @@ function formatPromptSelection(result: {
     case 'concise':
       return 'Concise';
     case 'agent':
-      return 'Agent mode';
+      return 'Legacy Agent';
     case 'custom':
       if (result.path) {
         const fileName = result.path.split('/').pop() || result.path;

@@ -16,7 +16,6 @@ import { VideoRecorderService } from "../../services/VideoRecorderService";
 import { hasMacWindowShellRecordingSupport } from "../../services/video/MacShellVideoSupport";
 import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
-import { ToolCallManager } from "./ToolCallManager";
 import { MessagePart } from "../../types";
 import { SlashCommandMenu, SlashCommand } from "./SlashCommandMenu";
 import { StreamingController } from "./controllers/StreamingController";
@@ -37,7 +36,7 @@ import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleS
 // Turn lifecycle handling
 import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
 import { errorLogger } from "../../utils/errorLogger";
-import { mentionsObsidianBases } from "../../utils/obsidianBases";
+import { resolvePiTextExecutionPlan } from "../../services/pi-native/PiTextRuntime";
 
 export interface InputHandlerOptions {
   app: App;
@@ -64,7 +63,6 @@ export interface InputHandlerOptions {
   addMessageToHistory: (message: ChatMessage) => Promise<void>;
   chatStorage: any; // ChatStorageService
   getChatId: () => string;
-  toolCallManager: ToolCallManager;
   chatView: any; // ChatView reference for message grouping
 }
 
@@ -123,13 +121,11 @@ export class InputHandler extends Component {
   private sendButton: ButtonComponent;
   private chatStorage: any; // ChatStorageService
   private getChatId: () => string;
-  private toolCallManager: ToolCallManager;
   private chatView: any;
   private slashCommandMenu?: SlashCommandMenu;
   private atMentionMenu?: AtMentionMenu;
   private agentSelectionMenu?: AgentSelectionMenu;
   private liveRegionEl: HTMLElement | null = null;
-  private hasPromptedAgentModeForBases = false;
   private recorderToggleUnsubscribe: (() => void) | null = null;
   private videoRecorderToggleUnsubscribe: (() => void) | null = null;
 
@@ -180,7 +176,6 @@ export class InputHandler extends Component {
     this.addFileToContext = options.addFileToContext;
     this.chatStorage = options.chatStorage;
     this.getChatId = options.getChatId;
-    this.toolCallManager = options.toolCallManager;
     this.chatView = options.chatView;
 
     // InputHandler initialized with RecorderService - silent setup
@@ -256,7 +251,6 @@ export class InputHandler extends Component {
     // Extracted streaming logic controller
     // ----------------------------------------------------------------------
     this.streamingController = new StreamingController({
-      toolCallManager: this.toolCallManager,
       scrollManager: this.scrollManager,
       messageRenderer: this.messageRenderer,
       saveChat: this.saveChatImmediate.bind(this),
@@ -267,7 +261,6 @@ export class InputHandler extends Component {
       hideStreamingStatus: this.hideStreamingStatus.bind(this),
       updateStreamingStatus: this.updateStreamingStatus.bind(this),
       toggleStopButton: this.toggleStopButton.bind(this),
-      // Use centralized policy on ToolCallManager
       onAssistantResponse: this.onAssistantResponse,
       onError: this.onError,
       setStreamingFootnote: this.setStreamingFootnote.bind(this),
@@ -283,8 +276,7 @@ export class InputHandler extends Component {
 
   private async streamAssistantTurn(
     signal: AbortSignal,
-    includeContextFiles: boolean,
-    agentModeOverride?: boolean
+    includeContextFiles: boolean
   ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
     const { messageEl } = this.createAssistantMessageContainer();
     let messageId = messageEl.dataset.messageId;
@@ -295,8 +287,6 @@ export class InputHandler extends Component {
 
     const sys = this.getSystemPrompt();
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
-    const agentModeForTurn = typeof agentModeOverride === "boolean" ? agentModeOverride : (this.chatView?.agentMode || false);
-
 	    const stream = this.aiService.streamMessage({
 	      messages: this.getMessages(),
 	      model: this.getSelectedModelId(),
@@ -304,9 +294,10 @@ export class InputHandler extends Component {
 	      systemPromptType: sys.type,
 	      systemPromptPath: sys.path,
 	      signal,
-	      agentMode: agentModeForTurn,
-	      toolCallManager: agentModeForTurn ? this.toolCallManager : undefined,
-	      sessionId: this.getChatId(),
+        sessionFile: this.chatView?.getPiSessionFile?.(),
+        onPiSessionReady: (session) => {
+          this.chatView?.setPiSessionState?.(session);
+        },
 	      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
 	        chatId: this.getChatId(),
 	        assistantMessageId: messageId,
@@ -321,66 +312,6 @@ export class InputHandler extends Component {
 	      signal
 	    );
 	  }
-
-  private areToolCallsSettledForMessage(messageId: string): boolean {
-    const toolCalls = this.toolCallManager.getToolCallsForMessage(messageId);
-    if (toolCalls.length === 0) return true;
-    return toolCalls.every((toolCall) => toolCall.state !== "executing");
-  }
-
-  private async waitForToolCallsToSettle(messageId: string, signal: AbortSignal): Promise<void> {
-    if (this.areToolCallsSettledForMessage(messageId)) return;
-
-    await new Promise<void>((resolve) => {
-      let unsubscribe: (() => void) | null = null;
-      const cleanup = () => {
-        if (unsubscribe) {
-          unsubscribe();
-          unsubscribe = null;
-        }
-        signal.removeEventListener("abort", onAbort);
-      };
-      const onAbort = () => {
-        cleanup();
-        resolve();
-      };
-
-      unsubscribe = this.toolCallManager.on("tool-call:state-changed", ({ toolCall }) => {
-        if (toolCall.messageId !== messageId) return;
-        if (!this.areToolCallsSettledForMessage(messageId)) return;
-        cleanup();
-        resolve();
-      });
-
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-  }
-
-  private async shouldContinuePiTurn(
-    turnResult: { messageId: string; message: ChatMessage; completed: boolean; stopReason?: string },
-    signal: AbortSignal
-  ): Promise<boolean> {
-    if (signal.aborted) return false;
-    if (!this.chatView?.agentMode) return false;
-    if (!turnResult.completed) return false;
-
-    const stopReason =
-      typeof turnResult.stopReason === "string"
-        ? turnResult.stopReason
-        : typeof (turnResult.message as any)?.stopReason === "string"
-          ? String((turnResult.message as any).stopReason)
-          : "";
-    if (stopReason !== "toolUse") return false;
-
-    const messageId = (turnResult.message as any)?.message_id || turnResult.messageId;
-    if (!messageId || typeof messageId !== "string") return false;
-
-    await this.waitForToolCallsToSettle(messageId, signal);
-    if (signal.aborted) return false;
-
-    const settledToolCalls = this.toolCallManager.getToolCallsForMessage(messageId);
-    return settledToolCalls.length > 0;
-  }
 
   private setupInput(): void {
     // Create an aria-live region for streaming status updates (a11y)
@@ -547,7 +478,7 @@ export class InputHandler extends Component {
     // this.scrollManager.resetScrollState();
   }
 
-  private async handleSendMessage(overrides?: { includeContextFiles?: boolean; agentModeOverride?: boolean }): Promise<void> {
+  private async handleSendMessage(overrides?: { includeContextFiles?: boolean }): Promise<void> {
     let messageText: string = this.input.value.trim();
     if (!messageText) return;
 
@@ -567,10 +498,7 @@ export class InputHandler extends Component {
       return;
     }
 
-    await this.maybePromptEnableAgentModeForBases(messageText);
-
     const includeContextFiles = overrides?.includeContextFiles ?? true;
-    const agentModeOverride = overrides?.agentModeOverride;
 
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
@@ -584,13 +512,8 @@ export class InputHandler extends Component {
         } as any;
         await this.onMessageSubmit(userMessage);
 
-        // Keep taking PI-native turns until PI signals we're done.
-        let shouldContinue = true;
-        while (shouldContinue && !signal.aborted) {
-          const turnResult = await this.streamAssistantTurn(signal, includeContextFiles, agentModeOverride);
-          void this.chatView.refreshCreditsBalance();
-          shouldContinue = await this.shouldContinuePiTurn(turnResult, signal);
-        }
+        await this.streamAssistantTurn(signal, includeContextFiles);
+        void this.chatView.refreshCreditsBalance();
       });
     } catch (err) {
       // StreamingController already forwards errors into ChatView.handleError via onError.
@@ -613,36 +536,8 @@ export class InputHandler extends Component {
     }
   }
 
-  public async submitWithOverrides(overrides: { includeContextFiles?: boolean; agentModeOverride?: boolean }): Promise<void> {
+  public async submitWithOverrides(overrides: { includeContextFiles?: boolean }): Promise<void> {
     await this.handleSendMessage(overrides);
-  }
-
-  private async maybePromptEnableAgentModeForBases(messageText: string): Promise<void> {
-    if (!mentionsObsidianBases(messageText)) return;
-    if (this.chatView?.agentMode) return;
-    if (this.hasPromptedAgentModeForBases) return;
-    this.hasPromptedAgentModeForBases = true;
-
-    const result = await showPopup(
-      this.app,
-      "This looks like an Obsidian Bases request (.base files), but Agent Mode is OFF. Without Agent Mode, the assistant can't search/read your vault to find or edit bases. Enable Agent Mode now?",
-      {
-        title: "Enable Agent Mode for Bases",
-        icon: "wrench",
-        primaryButton: "Enable Agent Mode",
-        secondaryButton: "Send without tools",
-      }
-    );
-
-    if (result?.confirmed) {
-      try {
-        if (typeof this.chatView?.setAgentMode === "function") {
-          await this.chatView.setAgentMode(true);
-        } else {
-          this.chatView.agentMode = true;
-        }
-      } catch {}
-    }
   }
 
   private handleMicClick(): void {
@@ -1353,17 +1248,16 @@ export class InputHandler extends Component {
     }
   }
 
-  private hasConfiguredProviderFallback(): boolean {
-    const settings = this.plugin.settings;
-    const hasSystemSculpt = !!(settings.enableSystemSculptProvider && settings.licenseKey?.trim() && settings.licenseValid === true);
-    const hasCustomProvider = Array.isArray(settings.customProviders) && settings.customProviders.some((provider) => provider?.isEnabled);
-    return hasSystemSculpt || hasCustomProvider;
-  }
-
   private async ensureProviderReadyForChat(): Promise<boolean> {
-    const providerConfigured = this.chatView?.hasConfiguredProvider?.() ?? this.hasConfiguredProviderFallback();
-    if (!providerConfigured) {
-      await this.invokeProviderSetupPrompt("Connect an AI provider before sending a message.");
+    let models: any[] = [];
+    try {
+      models = await this.plugin.modelService.getModels();
+    } catch {}
+
+    if (!models || models.length === 0) {
+      await this.invokeProviderSetupPrompt(
+        "No local Pi models are available yet. Open Setup to connect Pi providers, then refresh your model list."
+      );
       return false;
     }
 
@@ -1376,17 +1270,13 @@ export class InputHandler extends Component {
     try {
       const model = await this.plugin.modelService.getModelById(selectedModelId);
       if (model) {
+        await resolvePiTextExecutionPlan(model);
         return true;
       }
-    } catch {}
-
-    let models: any[] = [];
-    try {
-      models = await this.plugin.modelService.getModels();
-    } catch {}
-
-    if (!models || models.length === 0) {
-      await this.invokeProviderSetupPrompt("SystemSculpt AI couldn't find any available models. Connect a provider or activate your license to continue.");
+    } catch (error: any) {
+      await this.invokeProviderSetupPrompt(
+        error?.message || "The selected Pi model is not ready yet. Open Setup to finish Pi authentication."
+      );
       return false;
     }
 
@@ -1405,9 +1295,9 @@ export class InputHandler extends Component {
   private async promptProviderSetupFallback(message?: string): Promise<void> {
     const result = await showPopup(
       this.app,
-      message ?? "Connect SystemSculpt AI or add your own provider in Settings → Overview & Setup.",
+      message ?? "Connect Pi providers in Settings → Overview & Setup, then refresh your local Pi model list.",
       {
-        title: "Connect An AI Provider",
+        title: "Connect Pi",
         icon: "plug-zap",
         primaryButton: "Open Setup",
         secondaryButton: "Not Now",
@@ -1422,7 +1312,7 @@ export class InputHandler extends Component {
     try {
       this.plugin.openSettingsTab(tabId);
     } catch (error) {
-      new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
+      new Notice("Open Settings → SystemSculpt AI → Overview & Setup to connect Pi.", 6000);
     }
   }
 

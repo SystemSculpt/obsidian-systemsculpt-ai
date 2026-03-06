@@ -427,7 +427,6 @@ export class QuickFileEditModal extends StandardModal {
         file: resolvedFile,
         prompt,
         selection,
-        toolCallManager: this.runtime.toolCallManager,
       });
     } catch (error: any) {
       errorLogger.error("Quick Edit modal start failed", error, {

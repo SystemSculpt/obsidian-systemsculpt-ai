@@ -6,6 +6,7 @@ const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
+const PI_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
 const RESEND_DEFAULT_MAX_RETRIES = 3;
 
@@ -114,6 +115,48 @@ function clampFiniteInt(
   }
   const rounded = Math.floor(parsed);
   return Math.max(bounds.min, Math.min(bounds.max, rounded));
+}
+
+function migrateTextGenerationNodes(
+  nodes: StudioProjectV1["graph"]["nodes"]
+): {
+  nodes: StudioProjectV1["graph"]["nodes"];
+  changed: boolean;
+} {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    if (node.kind !== "studio.text_generation") {
+      return node;
+    }
+
+    const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
+    const sourceMode = asText(currentConfig.sourceMode).trim().toLowerCase();
+    const localModelId = asText(currentConfig.localModelId).trim();
+    const managedModelId = asText(currentConfig.modelId).trim();
+    const nextModelId = sourceMode === "local_pi" ? localModelId || managedModelId : managedModelId;
+
+    const nextConfig: Record<string, StudioJsonValue> = {
+      ...currentConfig,
+      modelId: nextModelId,
+    };
+    delete nextConfig.sourceMode;
+    delete nextConfig.localModelId;
+
+    if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
+      changed = true;
+      return {
+        ...node,
+        config: nextConfig,
+      };
+    }
+
+    return node;
+  });
+
+  return {
+    nodes: nextNodes,
+    changed,
+  };
 }
 
 function migrateResendAudienceSyncNodes(
@@ -459,6 +502,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     edges = resendMigration.edges;
   }
 
+  const textGenerationMigration = migrateTextGenerationNodes(nodes);
+  if (textGenerationMigration.changed) {
+    changed = true;
+    nodes = textGenerationMigration.nodes;
+  }
+
   let entryNodeIds = project.graph.entryNodeIds;
   let groups = project.graph.groups;
   const promptTemplateMigration = migratePromptTemplateNodes(nodes, edges, entryNodeIds, groups);
@@ -497,6 +546,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (noteMigrationChanged && !appliedMigrationIds.has(NOTE_NODE_CANONICAL_MIGRATION_ID)) {
     nextApplied.push({
       id: NOTE_NODE_CANONICAL_MIGRATION_ID,
+      at: nowIso(),
+    });
+  }
+  if (textGenerationMigration.changed && !appliedMigrationIds.has(PI_TEXT_NODE_MODEL_MIGRATION_ID)) {
+    nextApplied.push({
+      id: PI_TEXT_NODE_MODEL_MIGRATION_ID,
       at: nowIso(),
     });
   }

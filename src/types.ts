@@ -841,7 +841,6 @@ export interface InputHandlerOptions {
   onAddContextFile: () => void;
   onEditSystemPrompt: () => void;
   plugin: SystemSculptPlugin;
-  toolCallManager?: any; // Optional for backward compatibility
 }
 
 export interface UrlCitation {
@@ -885,6 +884,7 @@ export interface ChatMessage {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   message_id: string;
+  pi_entry_id?: string;
   documentContext?: {
     documentIds: string[];
   };

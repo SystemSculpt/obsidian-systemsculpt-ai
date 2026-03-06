@@ -166,14 +166,6 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
     toolbar.appendChild(replyBtn);
   }
 
-  const deleteBtn = createIconButton("trash", "Delete message", () => {
-    messageEl.dispatchEvent(
-      new CustomEvent("delete", { bubbles: true, detail: { messageId } })
-    );
-  });
-
-  toolbar.appendChild(deleteBtn);
-
   anchor.appendChild(toolbar);
 
   let lastLayoutSignature: string | null = null;

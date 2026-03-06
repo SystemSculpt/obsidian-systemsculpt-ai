@@ -63,12 +63,12 @@ async function getCurrentDefaultPresetDisplayName(plugin: SystemSculptPlugin, ap
 
 function formatPromptSelection(result: { type: string; path?: string }): string {
     switch (result.type) {
-        case 'general-use':
-            return 'General use';
-        case 'concise':
-            return 'Concise';
-        case 'agent':
-            return 'Agent mode';
+    case 'general-use':
+      return 'General use';
+    case 'concise':
+      return 'Concise';
+    case 'agent':
+      return 'Legacy Agent';
         case 'custom':
             if (result.path) {
                 const fileName = result.path.split('/').pop() || result.path;

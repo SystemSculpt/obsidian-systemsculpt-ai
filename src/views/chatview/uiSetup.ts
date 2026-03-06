@@ -1,19 +1,18 @@
-import { App, ItemView, Notice, WorkspaceLeaf, TFile, setIcon } from "obsidian";
+import { Notice, TFile, setIcon } from "obsidian";
 import { ChatView } from "./ChatView";
 import { ChatMessage, ToolCall, type SystemSculptSettings } from "../../types";
-import { StandardModelSelectionModal, ModelSelectionResult, ModelSelectionOptions } from "../../modals/StandardModelSelectionModal";
+import { StandardModelSelectionModal, ModelSelectionResult } from "../../modals/StandardModelSelectionModal";
 import { showPopup } from "../../core/ui/";
 import { FileContextManager } from "./FileContextManager";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { InputHandler } from "./InputHandler";
-import { ensureCanonicalId, getCanonicalId, getModelLabelWithProvider, getDisplayName, getToolCompatibilityInfo, getImageCompatibilityInfo } from '../../utils/modelUtils';
+import { ensureCanonicalId, getModelLabelWithProvider, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
 import { attachOverlapInsetManager } from "../../core/ui/services/OverlapInsetService";
+import { normalizeDesktopPromptSelectionType } from "../../services/SystemPromptService";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Utility: Build the label for the Agent Tooling indicator with counts
+// Utility helpers for desktop Pi chat UI
 // ────────────────────────────────────────────────────────────────────────────
-import type SystemSculptPlugin from '../../main';
-
 export const uiSetup = {
   onOpen: async function(chatView: ChatView): Promise<void> {
     // Ensure core Mermaid plugin is enabled for diagram rendering
@@ -251,7 +250,6 @@ export const uiSetup = {
       addFileToContext: (file: TFile) => chatView.addFileToContext(file),
       chatStorage: chatView.chatStorage,
       getChatId: () => chatView.chatId,
-      toolCallManager: chatView.toolCallManager,
       addMessageToHistory: chatView.addMessageToHistory.bind(chatView),
       chatView: chatView,
     });
@@ -286,7 +284,6 @@ export const uiSetup = {
     
     // Initialize system prompt indicator
     void chatView.updateSystemPromptIndicator();
-    void chatView.updateAgentModeIndicator();
     void chatView.updateCreditsIndicator();
 
     // Check if we need to prompt for initial model selection
@@ -334,44 +331,6 @@ export const uiSetup = {
       }
     }
 
-    chatView.toolCallManager.on('tool-call:state-changed', async ({ toolCall }) => {
-      // Find the message this tool call belongs to
-      const message = chatView.messages.find(m => m.message_id === toolCall.messageId);
-      if (!message) return;
-
-      // Find the specific tool call in the message's array
-      const toolCallInMessage = message.tool_calls?.find(tc => tc.id === toolCall.id);
-      if (!toolCallInMessage) return;
-
-      // Update the state and result
-      toolCallInMessage.state = toolCall.state;
-      toolCallInMessage.result = toolCall.result;
-
-      // Keep messageParts in sync with tool_calls – update matching part.data by id
-      if (Array.isArray(message.messageParts)) {
-        for (const part of message.messageParts) {
-          if (part.type === 'tool_call' && (part.data as any)?.id === toolCall.id) {
-            (part as any).data = toolCallInMessage;
-          }
-        }
-      }
-      
-      // Persist the change (but only after the chat has completed loading)
-      if (chatView.isFullyLoaded) {
-        await chatView.saveChat();
-      }
-      
-      // Find the message element and re-render its parts
-      const messageEl = chatView.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement;
-      if (messageEl) {
-      // Tool call lines are always rendered inline in the tree.
-
-        // Targeted re-render with non-streaming flag
-        const partList = chatView.messageRenderer.normalizeMessageToParts(message);
-        chatView.messageRenderer.renderUnifiedMessageParts(messageEl, partList.parts, false);
-      }
-    });
-
     // After ensuring Mermaid is enabled, configure theme variables once
     try {
       const m = (globalThis as any).mermaid;
@@ -414,7 +373,6 @@ export const uiSetup = {
    * Ensures buttons are always in the correct order:
    * 1. Model button
    * 2. System Prompt button
-   * 3. Agent Mode button
    */
   ensureButtonOrder: function(chatView: ChatView): void {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -432,11 +390,6 @@ export const uiSetup = {
     // 2. System Prompt button (always second)
     if (chatView.systemPromptIndicator) {
       buttons.push(chatView.systemPromptIndicator);
-    }
-
-    // 3. Agent Mode button (always third)
-    if (chatView.agentModeIndicator) {
-      buttons.push(chatView.agentModeIndicator);
     }
 
     // Remove all buttons from the section
@@ -584,6 +537,7 @@ export const uiSetup = {
             } else {
               chatView.systemPromptPath = undefined;
             }
+            chatView.clearPiSessionState({ save: false });
             
             // Update current prompt
             chatView.currentPrompt = result.prompt;
@@ -638,15 +592,12 @@ export const uiSetup = {
     // Show the actual prompt type and allow changes
     let promptLabel = "System Prompt";
     
-    switch (chatView.systemPromptType) {
+    switch (normalizeDesktopPromptSelectionType(chatView.systemPromptType)) {
         case "general-use":
           promptLabel = "General Use";
           break;
         case "concise":
           promptLabel = "Concise";
-          break;
-        case "agent":
-          promptLabel = "Agent Prompt";
           break;
         case "custom":
           if (chatView.systemPromptPath) {
@@ -661,7 +612,7 @@ export const uiSetup = {
 
       // Add appropriate icon based on prompt type
       const iconSpan = chatView.systemPromptIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-      setIcon(iconSpan, chatView.systemPromptType === "agent" ? "folder-open" : "sparkles");
+      setIcon(iconSpan, chatView.systemPromptType === "custom" ? "file-text" : "sparkles");
       
       chatView.systemPromptIndicator.createSpan({ text: promptLabel });
       
@@ -669,10 +620,7 @@ export const uiSetup = {
       const arrowSpan = chatView.systemPromptIndicator.createSpan({ cls: "systemsculpt-model-indicator-arrow" });
       setIcon(arrowSpan, "chevron-down");
       
-    const agentModeNote = (chatView.systemPromptType === "agent" && !chatView.agentMode)
-      ? " Agent Mode is off; enable it to use tools."
-      : "";
-    const promptTitle = `Current system prompt: ${promptLabel}. Click to change.${agentModeNote}`;
+    const promptTitle = `Current system prompt: ${promptLabel}. Click to change.`;
     chatView.systemPromptIndicator.setAttr('aria-label', promptTitle);
     chatView.systemPromptIndicator.setAttr('title', promptTitle);
     if (chatView.systemPromptIndicator) {
@@ -683,52 +631,6 @@ export const uiSetup = {
     this.ensureButtonOrder(chatView);
 
     // Token counter update removed
-  },
-
-  updateAgentModeIndicator: async function(chatView: ChatView): Promise<void> {
-    const container = chatView.containerEl.children[1] as HTMLElement;
-    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    if (!modelSection) return;
-
-    if (!chatView.agentModeIndicator) {
-      chatView.agentModeIndicator = modelSection.createEl("div", {
-        cls: "systemsculpt-model-indicator systemsculpt-chip systemsculpt-agent-mode-indicator",
-      }) as HTMLElement;
-
-      chatView.registerDomEvent(chatView.agentModeIndicator, "click", async () => {
-        await chatView.setAgentMode(!chatView.agentMode);
-      });
-
-      chatView.registerDomEvent(chatView.agentModeIndicator, "keydown", (event: KeyboardEvent) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          (event.target as HTMLElement)?.click();
-        }
-      });
-    } else {
-      chatView.agentModeIndicator.empty();
-    }
-
-    const isOn = !!chatView.agentMode;
-    chatView.agentModeIndicator.toggleClass("is-on", isOn);
-    chatView.agentModeIndicator.toggleClass("is-off", !isOn);
-
-    chatView.agentModeIndicator.setAttrs({
-      role: "button",
-      tabindex: 0,
-      "aria-label": isOn
-        ? "Agent Mode enabled. Click to disable."
-        : "Agent Mode disabled. Click to enable.",
-      title: isOn
-        ? "Agent Mode enabled (click to disable)"
-        : "Agent Mode disabled (click to enable)",
-    });
-
-    const iconSpan = chatView.agentModeIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-    setIcon(iconSpan, "wrench");
-    chatView.agentModeIndicator.createSpan({ text: `Agent ${isOn ? "On" : "Off"}` });
-
-    this.ensureButtonOrder(chatView);
   },
 
   updateCreditsIndicator: async function(chatView: ChatView): Promise<void> {
@@ -813,9 +715,8 @@ export const uiSetup = {
   },
 
   /**
-   * Updates the tool compatibility warning banner.
-   * Shows a warning when the current model doesn't support tools or images.
-   * Tool warnings are suppressed when Agent Mode is disabled.
+   * Updates the compatibility warning banner.
+   * Desktop Pi chat only warns about unsupported image inputs.
    */
   updateToolCompatibilityWarning: async function(chatView: ChatView): Promise<void> {
     const container = chatView.containerEl.children[1] as HTMLElement;
@@ -843,17 +744,12 @@ export const uiSetup = {
         return;
       }
 
-      const toolCompat = getToolCompatibilityInfo(model);
       const imageCompat = getImageCompatibilityInfo(model);
 
-      // Check for HIGH confidence incompatibilities (includes runtime-discovered)
-      const toolIncompat = !toolCompat.isCompatible && toolCompat.confidence === "high";
       const imageIncompat = !imageCompat.isCompatible && imageCompat.confidence === "high";
-
-      const shouldWarnTools = chatView.agentMode && toolIncompat;
       const shouldWarnImages = imageIncompat;
 
-      if (shouldWarnTools || shouldWarnImages) {
+      if (shouldWarnImages) {
         // Create banner if it doesn't exist
         if (!banner) {
           const composer = container.querySelector(".systemsculpt-chat-composer");
@@ -881,13 +777,7 @@ export const uiSetup = {
         const textEl = banner.querySelector(".systemsculpt-tool-warning-text");
         if (textEl) {
           const modelName = getDisplayName(canonicalId);
-          if (shouldWarnTools && shouldWarnImages) {
-            textEl.textContent = `${modelName} doesn't support agent tools or images.`;
-          } else if (shouldWarnTools) {
-            textEl.textContent = `${modelName} doesn't support agent tools. Switch to Claude, GPT-4, etc.`;
-          } else {
-            textEl.textContent = `${modelName} doesn't support images. Image context will be skipped.`;
-          }
+          textEl.textContent = `${modelName} doesn't support images. Image context will be skipped.`;
         }
         banner.style.display = "flex";
       } else {

@@ -702,7 +702,6 @@ export class QuickEditWidget extends FloatingWidget {
         file: resolvedFile,
         prompt,
         selection,
-        toolCallManager: this.runtime.toolCallManager,
       });
     } catch (error: any) {
       errorLogger.error("Quick Edit start failed", error, {

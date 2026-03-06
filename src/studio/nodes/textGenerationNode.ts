@@ -14,9 +14,7 @@ export const textGenerationNode: StudioNodeDefinition = {
   inputPorts: [{ id: "prompt", type: "text", required: true }],
   outputPorts: [{ id: "text", type: "text" }],
   configDefaults: {
-    sourceMode: "systemsculpt",
     modelId: "",
-    localModelId: "",
     reasoningEffort: "medium",
     systemPrompt: "",
     textDisplayMode: "rendered",
@@ -24,39 +22,12 @@ export const textGenerationNode: StudioNodeDefinition = {
   configSchema: {
     fields: [
       {
-        key: "sourceMode",
-        label: "Text Source",
-        type: "select",
-        required: true,
-        selectPresentation: "button_group",
-        options: [
-          { value: "systemsculpt", label: "SystemSculpt" },
-          { value: "local_pi", label: "Local (Pi)" },
-        ],
-      },
-      {
         key: "modelId",
         label: "Model",
         type: "select",
-        required: false,
-        selectPresentation: "searchable_dropdown",
-        optionsSource: "studio.systemsculpt_text_models",
-        visibleWhen: {
-          key: "sourceMode",
-          equals: "systemsculpt",
-        },
-      },
-      {
-        key: "localModelId",
-        label: "Model",
-        type: "select",
         required: true,
         selectPresentation: "searchable_dropdown",
-        optionsSource: "studio.local_text_models",
-        visibleWhen: {
-          key: "sourceMode",
-          equals: "local_pi",
-        },
+        optionsSource: "studio.pi_text_models",
       },
       {
         key: "reasoningEffort",
@@ -102,10 +73,7 @@ export const textGenerationNode: StudioNodeDefinition = {
     const templateVariables = resolveTemplateVariables(context);
     const configuredSystemPrompt = renderTemplate(configuredTemplate, templateVariables).trim();
     const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim() || undefined;
-    const sourceModeRaw = getText(context.node.config.sourceMode as StudioJsonValue).trim().toLowerCase();
-    const sourceMode = sourceModeRaw === "local_pi" ? "local_pi" : "systemsculpt";
     const modelId = getText(context.node.config.modelId as StudioJsonValue).trim() || undefined;
-    const localModelId = getText(context.node.config.localModelId as StudioJsonValue).trim() || undefined;
     const reasoningEffortRaw = getText(context.node.config.reasoningEffort as StudioJsonValue).trim().toLowerCase();
     const reasoningEffort =
       reasoningEffortRaw === "off" ||
@@ -119,9 +87,7 @@ export const textGenerationNode: StudioNodeDefinition = {
     const result = await context.services.api.generateText({
       prompt,
       systemPrompt,
-      sourceMode,
       modelId,
-      localModelId,
       reasoningEffort,
       runId: context.runId,
       nodeId: context.node.id,

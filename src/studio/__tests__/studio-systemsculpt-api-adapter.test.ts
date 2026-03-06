@@ -1,5 +1,15 @@
+import { Platform } from "obsidian";
 import { StudioApiExecutionAdapter } from "../StudioApiExecutionAdapter";
 import * as StudioLocalTextModelCatalog from "../StudioLocalTextModelCatalog";
+import { hasPiTextProviderAuth } from "../../services/pi-native/PiTextAuth";
+
+jest.mock("../../services/pi-native/PiTextAuth", () => {
+  const actual = jest.requireActual("../../services/pi-native/PiTextAuth");
+  return {
+    ...actual,
+    hasPiTextProviderAuth: jest.fn().mockResolvedValue(true),
+  };
+});
 
 jest.mock("../StudioLocalTextModelCatalog", () => {
   const actual = jest.requireActual("../StudioLocalTextModelCatalog");
@@ -10,6 +20,54 @@ jest.mock("../StudioLocalTextModelCatalog", () => {
 });
 
 function createPluginStub() {
+  const modelsById = {
+    "openai@@gpt-5-mini": {
+      id: "openai@@gpt-5-mini",
+      name: "GPT-5 Mini",
+      provider: "openai",
+      piExecutionModelId: "openai/gpt-5-mini",
+      piRemoteAvailable: true,
+      piLocalAvailable: false,
+      piAuthMode: "hosted",
+    },
+    "google@@gemini-2.5-flash": {
+      id: "google@@gemini-2.5-flash",
+      name: "Gemini 2.5 Flash",
+      provider: "google",
+      piExecutionModelId: "google/gemini-2.5-flash",
+      piRemoteAvailable: false,
+      piLocalAvailable: true,
+      piAuthMode: "local",
+    },
+    "openai-codex@@gpt-5.3-codex": {
+      id: "openai-codex@@gpt-5.3-codex",
+      name: "GPT-5.3 Codex",
+      provider: "openai-codex",
+      piExecutionModelId: "openai-codex/gpt-5.3-codex",
+      piRemoteAvailable: false,
+      piLocalAvailable: true,
+      piAuthMode: "local",
+    },
+    "github-copilot@@gpt-5.2-codex": {
+      id: "github-copilot@@gpt-5.2-codex",
+      name: "GPT-5.2 Codex",
+      provider: "github-copilot",
+      piExecutionModelId: "github-copilot/gpt-5.2-codex",
+      piRemoteAvailable: false,
+      piLocalAvailable: true,
+      piAuthMode: "local",
+    },
+    "ollama@@llama3.1:8b": {
+      id: "ollama@@llama3.1:8b",
+      name: "Llama 3.1 8B",
+      provider: "ollama",
+      piExecutionModelId: "ollama/llama3.1:8b",
+      piRemoteAvailable: false,
+      piLocalAvailable: true,
+      piAuthMode: "local",
+    },
+  } as const;
+
   const streamMessage = jest.fn(
     async function* (): AsyncGenerator<{ type: "content"; text: string }> {
       yield { type: "content", text: "local " };
@@ -23,24 +81,14 @@ function createPluginStub() {
     settings: {
       serverUrl: "https://api.systemsculpt.com",
       licenseKey: "license_test",
-      selectedModelId: "openai/gpt-5-mini",
+      selectedModelId: "openai@@gpt-5-mini",
       imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
-      customProviders: [
-        {
-          id: "ollama",
-          name: "Ollama",
-          isEnabled: true,
-        },
-      ],
+      customProviders: [],
     },
     modelService: {
-      getModels: jest.fn(async () => [
-        {
-          id: "ollama@@llama3.1:8b",
-          name: "Llama 3.1 8B",
-          provider: "ollama",
-        },
-      ]),
+      getModels: jest.fn(async () => Object.values(modelsById)),
+      getCachedModels: jest.fn(() => Object.values(modelsById)),
+      getModelById: jest.fn(async (id: string) => modelsById[id as keyof typeof modelsById]),
     },
     aiService: {
       requestAgentSession: jest.fn(),
@@ -51,136 +99,15 @@ function createPluginStub() {
 }
 
 describe("StudioApiExecutionAdapter", () => {
-  it("serializes 3-way fan-out text turns and scopes chat sessions by run + node", async () => {
-    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
-    const seenChatIds: string[] = [];
-    let inFlightTurns = 0;
-    let maxInFlightTurns = 0;
-
-    (adapter as any).sessionClient = {
-      updateConfig: jest.fn(),
-      startOrContinueTurn: jest.fn(async (args: { chatId: string }) => {
-        seenChatIds.push(args.chatId);
-        inFlightTurns += 1;
-        maxInFlightTurns = Math.max(maxInFlightTurns, inFlightTurns);
-        return { ok: true } as Response;
-      }),
-    };
-
-    (adapter as any).streamer = {
-      streamResponse: jest.fn(() =>
-        (async function* () {
-          await new Promise((resolve) => setTimeout(resolve, 16));
-          yield { type: "content" as const, text: "ok" };
-          inFlightTurns -= 1;
-        })()
-      ),
-    };
-
-    const [first, second, third] = await Promise.all([
-      adapter.generateText({
-        prompt: "first",
-        systemPrompt: "system",
-        modelId: "openai/gpt-5-mini",
-        runId: "run_test",
-        nodeId: "node_a",
-        projectPath: "Studio/Test.systemsculpt",
-      }),
-      adapter.generateText({
-        prompt: "second",
-        systemPrompt: "system",
-        modelId: "openai/gpt-5-mini",
-        runId: "run_test",
-        nodeId: "node_b",
-        projectPath: "Studio/Test.systemsculpt",
-      }),
-      adapter.generateText({
-        prompt: "third",
-        systemPrompt: "system",
-        modelId: "openai/gpt-5-mini",
-        runId: "run_test",
-        nodeId: "node_c",
-        projectPath: "Studio/Test.systemsculpt",
-      }),
-    ]);
-
-    expect(first).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
-    expect(second).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
-    expect(third).toEqual({ text: "ok", modelId: "systemsculpt/managed" });
-    expect(maxInFlightTurns).toBe(1);
-    expect(inFlightTurns).toBe(0);
-    expect(seenChatIds).toEqual([
-      "studio:run_test:node_a",
-      "studio:run_test:node_b",
-      "studio:run_test:node_c",
-    ]);
-  });
-
-  it("ignores client model and reasoning controls in SystemSculpt mode", async () => {
-    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
-    const startOrContinueTurn = jest.fn(async () => ({ ok: true } as Response));
-
-    (adapter as any).sessionClient = {
-      updateConfig: jest.fn(),
-      startOrContinueTurn,
-    };
-    (adapter as any).streamer = {
-      streamResponse: jest.fn(() =>
-        (async function* () {
-          yield { type: "content" as const, text: "ok" };
-        })()
-      ),
-    };
-
-    await adapter.generateText({
-      prompt: "Summarize this transcript.",
-      modelId: "openai/gpt-5-mini",
-      reasoningEffort: "xhigh",
-      runId: "run_test",
-      nodeId: "node_reasoning",
-      projectPath: "Studio/Test.systemsculpt",
+  beforeEach(() => {
+    Object.defineProperty(Platform, "isDesktopApp", {
+      configurable: true,
+      value: true,
     });
-
-    const turnArgs = startOrContinueTurn.mock.calls[0]?.[0];
-    expect(turnArgs).toMatchObject({
-      chatId: "studio:run_test:node_reasoning",
-      pluginVersion: "4.13.0",
-      messages: expect.any(Array),
-    });
-    expect(turnArgs).not.toHaveProperty("modelId");
-    expect(turnArgs).not.toHaveProperty("reasoningEffort");
+    (hasPiTextProviderAuth as jest.Mock).mockResolvedValue(true);
   });
 
-  it("surfaces lock_until details for turn_in_flight conflicts", async () => {
-    const adapter = new StudioApiExecutionAdapter(createPluginStub(), {} as any);
-    (adapter as any).sessionClient = {
-      updateConfig: jest.fn(),
-      startOrContinueTurn: jest.fn(async () => ({
-        ok: false,
-        status: 409,
-        text: async () =>
-          JSON.stringify({
-            error: {
-              code: "turn_in_flight",
-              lock_until: "2026-02-23 06:14:32.832+00",
-            },
-          }),
-      })),
-    };
-
-    await expect(
-      adapter.generateText({
-        prompt: "first",
-        systemPrompt: "system",
-        modelId: "openai/gpt-5-mini",
-        runId: "run_test",
-        nodeId: "node_a",
-        projectPath: "Studio/Test.systemsculpt",
-      })
-    ).rejects.toThrow("lock_until=2026-02-23 06:14:32.832+00");
-  });
-
-  it("routes local Pi text generation through the pi CLI adapter", async () => {
+  it("routes Studio text generation through the local Pi executor with the Pi execution model id", async () => {
     const plugin = createPluginStub();
     const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
     const localPiMock = StudioLocalTextModelCatalog
@@ -201,8 +128,7 @@ describe("StudioApiExecutionAdapter", () => {
 
     const result = await adapter.generateText({
       prompt: "Summarize this transcript.",
-      sourceMode: "local_pi",
-      localModelId: "google/gemini-2.5-flash",
+      modelId: "google@@gemini-2.5-flash",
       reasoningEffort: "xhigh",
       runId: "run_local",
       nodeId: "node_local",
@@ -218,10 +144,9 @@ describe("StudioApiExecutionAdapter", () => {
       })
     );
     expect(plugin.aiService.streamMessage).not.toHaveBeenCalled();
-    expect(startOrContinueTurn).not.toHaveBeenCalled();
     expect(result).toEqual({
       text: "local result",
-      modelId: "google/gemini-2.5-flash",
+      modelId: "google@@gemini-2.5-flash",
     });
     localPiMock.mockReset();
   });
@@ -246,27 +171,18 @@ describe("StudioApiExecutionAdapter", () => {
         modelId: String(options.modelId),
       };
     });
-    const startOrContinueTurn = jest.fn(async () => {
-      throw new Error("SystemSculpt session client should not be called in local mode.");
-    });
-    (adapter as any).sessionClient = {
-      updateConfig: jest.fn(),
-      startOrContinueTurn,
-    };
 
     const [first, second] = await Promise.all([
       adapter.generateText({
         prompt: "first",
-        sourceMode: "local_pi",
-        localModelId: "openai-codex/gpt-5.3-codex",
+        modelId: "openai-codex@@gpt-5.3-codex",
         runId: "run_local",
         nodeId: "node_a",
         projectPath: "Studio/Test.systemsculpt",
       }),
       adapter.generateText({
         prompt: "second",
-        sourceMode: "local_pi",
-        localModelId: "openai-codex/gpt-5.3-codex",
+        modelId: "openai-codex@@gpt-5.3-codex",
         runId: "run_local",
         nodeId: "node_b",
         projectPath: "Studio/Test.systemsculpt",
@@ -275,15 +191,14 @@ describe("StudioApiExecutionAdapter", () => {
 
     expect(first).toEqual({
       text: "local:first",
-      modelId: "openai-codex/gpt-5.3-codex",
+      modelId: "openai-codex@@gpt-5.3-codex",
     });
     expect(second).toEqual({
       text: "local:second",
-      modelId: "openai-codex/gpt-5.3-codex",
+      modelId: "openai-codex@@gpt-5.3-codex",
     });
     expect(localPiMock).toHaveBeenCalledTimes(2);
     expect(maxInFlight).toBe(1);
-    expect(startOrContinueTurn).not.toHaveBeenCalled();
     localPiMock.mockReset();
   });
 
@@ -301,8 +216,7 @@ describe("StudioApiExecutionAdapter", () => {
     await adapter
       .generateText({
         prompt: "Summarize this transcript.",
-        sourceMode: "local_pi",
-        localModelId: "openai-codex/gpt-5.3-codex",
+        modelId: "openai-codex@@gpt-5.3-codex",
         runId: "run_local",
         nodeId: "node_local",
         projectPath: "Studio/Test.systemsculpt",
@@ -311,10 +225,10 @@ describe("StudioApiExecutionAdapter", () => {
         capturedMessage = error instanceof Error ? error.message : String(error);
       });
 
-    expect(capturedMessage).toContain("pi CLI not found");
-    expect(capturedMessage).toContain("Install/setup checklist");
-    expect(capturedMessage).toContain("command -v pi");
-    expect(capturedMessage).toContain("pi --list-models");
+    expect(capturedMessage).toContain("bundled Pi runtime is unavailable");
+    expect(capturedMessage).toContain("Recovery checklist");
+    expect(capturedMessage).toContain("Keep Obsidian open for a few seconds");
+    expect(capturedMessage).toContain("rerun Verify Models");
     localPiMock.mockReset();
   });
 
@@ -332,8 +246,7 @@ describe("StudioApiExecutionAdapter", () => {
     await adapter
       .generateText({
         prompt: "Summarize this transcript.",
-        sourceMode: "local_pi",
-        localModelId: "openai-codex/gpt-5.3-codex",
+        modelId: "openai-codex@@gpt-5.3-codex",
         runId: "run_local",
         nodeId: "node_local",
         projectPath: "Studio/Test.systemsculpt",
@@ -344,7 +257,7 @@ describe("StudioApiExecutionAdapter", () => {
 
     expect(capturedMessage).toContain("provider authentication is missing or invalid");
     expect(capturedMessage).toContain("pi /login openai-codex");
-    expect(capturedMessage).toContain("pi --list-models");
+    expect(capturedMessage).toContain("Refresh the local Pi model catalog in Studio");
     localPiMock.mockReset();
   });
 
@@ -364,8 +277,7 @@ describe("StudioApiExecutionAdapter", () => {
     await adapter
       .generateText({
         prompt: "Summarize this transcript.",
-        sourceMode: "local_pi",
-        localModelId: "github-copilot/gpt-5.2-codex",
+        modelId: "github-copilot@@gpt-5.2-codex",
         runId: "run_local",
         nodeId: "node_local",
         projectPath: "Studio/Test.systemsculpt",
@@ -376,8 +288,64 @@ describe("StudioApiExecutionAdapter", () => {
 
     expect(capturedMessage).toContain("credentials are not accepted for this endpoint");
     expect(capturedMessage).toContain("pi /login github-copilot");
-    expect(capturedMessage).toContain("pi --list-models");
+    expect(capturedMessage).toContain("rerun the setup wizard verification step");
     localPiMock.mockReset();
+  });
+
+  it("requires SystemSculpt credits when the Studio graph contains API-backed nodes", async () => {
+    const plugin = createPluginStub();
+    plugin.aiService.getCreditsBalance = jest.fn(async () => ({ totalRemaining: 0 }));
+    const adapter = new StudioApiExecutionAdapter(plugin, {} as any);
+
+    const estimate = await adapter.estimateRunCredits({
+      schema: "studio.project.v1",
+      projectId: "proj_test",
+      name: "Test",
+      createdAt: "2026-02-23T00:00:00.000Z",
+      updatedAt: "2026-02-23T00:00:00.000Z",
+      engine: {
+        apiMode: "systemsculpt_only",
+        minPluginVersion: "0.0.0",
+      },
+      graph: {
+        nodes: [
+          {
+            id: "image_remote",
+            kind: "studio.image_generation",
+            version: "1.0.0",
+            title: "Image",
+            position: { x: 0, y: 0 },
+            config: {},
+            continueOnError: false,
+            disabled: false,
+          },
+        ],
+        edges: [],
+        entryNodeIds: ["image_remote"],
+      },
+      permissionsRef: {
+        policyVersion: 1,
+        policyPath: "Studio/Test.systemsculpt-assets/policy/grants.json",
+      },
+      settings: {
+        runConcurrency: "adaptive",
+        defaultFsScope: "vault",
+        retention: {
+          maxRuns: 100,
+          maxArtifactsMb: 1024,
+        },
+      },
+      migrations: {
+        projectSchemaVersion: "1.0.0",
+        applied: [],
+      },
+    });
+
+    expect(estimate).toEqual({
+      ok: false,
+      reason: "Insufficient SystemSculpt credits for API-dependent Studio nodes.",
+    });
+    expect(plugin.aiService.getCreditsBalance).toHaveBeenCalledTimes(1);
   });
 
   it("skips SystemSculpt credit checks when all text nodes run in local Pi mode", async () => {
@@ -404,8 +372,7 @@ describe("StudioApiExecutionAdapter", () => {
             title: "Local text",
             position: { x: 0, y: 0 },
             config: {
-              sourceMode: "local_pi",
-              localModelId: "ollama@@llama3.1:8b",
+              modelId: "ollama@@llama3.1:8b",
             },
             continueOnError: false,
             disabled: false,

@@ -6,17 +6,10 @@ import {
   deriveStudioPiMigrationCandidates,
 } from "../settings/SetupTabContent";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
-import { App } from "obsidian";
+import { App, Platform } from "obsidian";
 import * as StudioPiCatalog from "../studio/StudioLocalTextModelCatalog";
 import * as SetupPiOAuthFlow from "../settings/piAuth/SetupPiOAuthFlow";
-
-jest.mock("../services/providers/LocalLLMScanner", () => ({
-  scanLocalLLMProviders: jest.fn().mockResolvedValue([]),
-}));
-
-jest.mock("../modals/CustomProviderModal", () => ({
-  showCustomProviderModal: jest.fn().mockResolvedValue(null),
-}));
+import { ensureBundledPiRuntime } from "../services/pi/PiRuntimeBootstrap";
 
 jest.mock("../studio/StudioLocalTextModelCatalog", () => ({
   listStudioPiProviderAuthRecords: jest.fn().mockResolvedValue([]),
@@ -32,6 +25,16 @@ jest.mock("../studio/StudioLocalTextModelCatalog", () => ({
 
 jest.mock("../settings/piAuth/SetupPiOAuthFlow", () => ({
   runSetupPiOAuthLogin: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../services/pi/PiRuntimeBootstrap", () => ({
+  ensureBundledPiRuntime: jest.fn().mockResolvedValue({
+    pluginInstallDir: "/tmp/test-vault/.obsidian/plugins/systemsculpt-ai",
+    result: {
+      installedRuntime: false,
+      packageCount: 2,
+    },
+  }),
 }));
 
 var getCreditsBalanceMock: jest.Mock;
@@ -84,14 +87,25 @@ const createPluginStub = () => {
   } as any;
 };
 
+async function flushSetupSectionRender(): Promise<void> {
+  for (let index = 0; index < 6; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe("Setup tab native layout", () => {
   let app: App;
   let windowOpenSpy: jest.SpyInstance;
+  const ensureBundledPiRuntimeMock = ensureBundledPiRuntime as jest.MockedFunction<typeof ensureBundledPiRuntime>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
     app = new App();
+    Object.defineProperty(Platform, "isDesktopApp", {
+      configurable: true,
+      value: true,
+    });
     windowOpenSpy = jest.spyOn(window, "open").mockImplementation(() => null);
     getCreditsBalanceMock.mockResolvedValue({
       totalRemaining: 2500,
@@ -108,6 +122,13 @@ describe("Setup tab native layout", () => {
         annualPriceCents: 9900,
         monthlyEquivalentAnnualCents: 22800,
         checkoutUrl: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+      },
+    });
+    ensureBundledPiRuntimeMock.mockResolvedValue({
+      pluginInstallDir: "/tmp/test-vault/.obsidian/plugins/systemsculpt-ai",
+      result: {
+        installedRuntime: false,
+        packageCount: 2,
       },
     });
   });
@@ -127,8 +148,7 @@ describe("Setup tab native layout", () => {
     expect(container.querySelector('.systemsculpt-pro-promotion-redesigned')).toBeNull();
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
     expect(container.querySelector('.ss-help-link')).not.toBeNull();
-    expect(container.textContent).toContain("Local Pi Auth");
-    expect(container.textContent).toContain("Custom Endpoint Providers (Advanced Fallback)");
+    expect(container.textContent).toContain("Pi Providers & Auth");
   });
 
   it("opens credits details from setup when pro is active", async () => {
@@ -140,7 +160,7 @@ describe("Setup tab native layout", () => {
     const container = document.createElement("div");
 
     displaySetupTabContent(container, tab, true);
-    await Promise.resolve();
+    await flushSetupSectionRender();
 
     const detailsButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.trim() === "Details");
@@ -160,7 +180,7 @@ describe("Setup tab native layout", () => {
     const container = document.createElement("div");
 
     displaySetupTabContent(container, tab, true);
-    await Promise.resolve();
+    await flushSetupSectionRender();
 
     const annualSwitchButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.trim() === "Switch to annual");
@@ -296,8 +316,7 @@ describe("Setup tab native layout", () => {
     const container = document.createElement("div");
 
     displaySetupTabContent(container, tab, false);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushSetupSectionRender();
 
     const piRows = Array.from(container.querySelectorAll(".ss-setup-pi-auth-list .setting-item"));
     const getRowByName = (name: string) =>
@@ -340,8 +359,7 @@ describe("Setup tab native layout", () => {
     const container = document.createElement("div");
 
     displaySetupTabContent(container, tab, false);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushSetupSectionRender();
 
     const oauthRow = Array.from(
       container.querySelectorAll(".ss-setup-pi-auth-list .setting-item")
@@ -373,8 +391,7 @@ describe("Setup tab native layout", () => {
     const container = document.createElement("div");
 
     displaySetupTabContent(container, tab, false);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushSetupSectionRender();
 
     const piRows = Array.from(container.querySelectorAll(".ss-setup-pi-auth-list .setting-item"));
     const anthropicRow = piRows.find(
@@ -383,5 +400,22 @@ describe("Setup tab native layout", () => {
 
     expect(anthropicRow).toBeTruthy();
     expect(anthropicRow?.textContent).toContain("OAuth login");
+  });
+
+  it("shows concise bundled-runtime recovery copy when bootstrap is still resolving", async () => {
+    ensureBundledPiRuntimeMock.mockRejectedValue(
+      new Error("Unable to resolve the SystemSculpt plugin installation directory for Pi runtime bootstrap.")
+    );
+
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, false);
+    await flushSetupSectionRender();
+
+    expect(container.textContent).toContain("Preparing bundled Pi runtime");
+    expect(container.textContent).toContain("Wait a moment, then press Refresh.");
+    expect(container.textContent).not.toContain("Unable to resolve the SystemSculpt plugin installation directory");
   });
 });

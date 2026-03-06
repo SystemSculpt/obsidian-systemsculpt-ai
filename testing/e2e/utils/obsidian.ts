@@ -3,6 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const enabledVaults = new Set<string>();
+const BASE_RELEASE_FILES = ["manifest.json", "main.js", "studio-terminal-sidecar.cjs"];
+const OPTIONAL_RELEASE_FILES = ["styles.css"];
+const DEV_RUNTIME_PATHS = ["node_modules/node-pty"];
+
+export type PluginInstallMode = "synced-dev" | "release-assets";
 
 function getRepoRoot(): string {
   // This file lives at `testing/e2e/utils/obsidian.ts`.
@@ -14,7 +19,7 @@ function getRepoRoot(): string {
   return path.resolve(__dir, "..", "..", "..");
 }
 
-async function getActiveVaultBasePath(): Promise<string> {
+export async function getActiveVaultBasePath(): Promise<string> {
   const basePath = await browser.executeObsidian(({ app }) => {
     const adapter: any = (app as any)?.vault?.adapter;
     const candidate =
@@ -29,24 +34,23 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
   // passed in from helpers is a template path, not necessarily the active vault on disk.
   // Always resolve the base path from the running Obsidian instance.
   const activeVaultPath = await getActiveVaultBasePath();
-  const cacheKey = `${activeVaultPath || vaultPath}::${pluginId}`;
+  const installMode = resolvePluginInstallMode();
+  const cacheKey = `${activeVaultPath || vaultPath}::${pluginId}::${installMode}`;
   if (enabledVaults.has(cacheKey)) return;
 
   const targetVault = activeVaultPath || vaultPath;
   const targetDir = path.join(targetVault, ".obsidian", "plugins", pluginId);
+  await fs.rm(targetDir, { recursive: true, force: true });
   await fs.mkdir(targetDir, { recursive: true });
 
   const root = getRepoRoot();
-  const requiredFiles = ["manifest.json", "main.js", "studio-terminal-sidecar.cjs"];
-  const optionalFiles = ["styles.css"];
-
-  for (const file of requiredFiles) {
+  for (const file of BASE_RELEASE_FILES) {
     const src = path.join(root, file);
     const dest = path.join(targetDir, file);
     await fs.copyFile(src, dest);
   }
 
-  for (const file of optionalFiles) {
+  for (const file of OPTIONAL_RELEASE_FILES) {
     const src = path.join(root, file);
     const dest = path.join(targetDir, file);
     try {
@@ -56,13 +60,14 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
     }
   }
 
-  const runtimeModules = ["node-pty"];
-  for (const moduleName of runtimeModules) {
-    const src = path.join(root, "node_modules", moduleName);
-    const dest = path.join(targetDir, "node_modules", moduleName);
-    await fs.rm(dest, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.cp(src, dest, { recursive: true });
+  if (installMode === "synced-dev") {
+    for (const relativePath of DEV_RUNTIME_PATHS) {
+      const src = path.join(root, relativePath);
+      const dest = path.join(targetDir, relativePath);
+      await fs.rm(dest, { recursive: true, force: true });
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.cp(src, dest, { recursive: true });
+    }
   }
 
   // Ensure Obsidian sees the plugin manifest, then enable it.
@@ -150,6 +155,16 @@ export async function ensurePluginEnabled(pluginId: string, vaultPath: string) {
   }
 
   enabledVaults.add(cacheKey);
+}
+
+function resolvePluginInstallMode(): PluginInstallMode {
+  const normalized = String(process.env.SYSTEMSCULPT_E2E_PLUGIN_INSTALL_MODE || "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "release-assets" || normalized === "fresh-desktop") {
+    return "release-assets";
+  }
+  return "synced-dev";
 }
 
 export async function runCommand(command: string) {

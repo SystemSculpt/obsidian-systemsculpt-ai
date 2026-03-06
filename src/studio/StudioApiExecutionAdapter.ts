@@ -1,8 +1,6 @@
 import { normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { resolveSystemSculptApiBaseUrl } from "../utils/urlHelpers";
-import { AgentSessionClient } from "../services/agent-v2/AgentSessionClient";
-import { StreamingService } from "../services/StreamingService";
 import {
   SystemSculptImageGenerationService,
   type SystemSculptImageInput,
@@ -14,21 +12,17 @@ import type {
   StudioProjectV1,
   StudioTextGenerationRequest,
   StudioTextGenerationResult,
-  StudioTextProviderMode,
   StudioTextReasoningEffort,
   StudioTranscriptionRequest,
   StudioTranscriptionResult,
 } from "./types";
 import { StudioAssetStore } from "./StudioAssetStore";
-import {
-  normalizeStudioLocalPiModelId,
-  runStudioLocalPiTextGeneration,
-} from "./StudioLocalTextModelCatalog";
+import { runStudioLocalPiTextGeneration } from "./StudioLocalTextModelCatalog";
+import { resolvePiTextExecutionPlan, shouldUseLocalPiExecution } from "../services/pi-native/PiTextRuntime";
 import { randomId } from "./utils";
 
 const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
 const STUDIO_MANAGED_IMAGE_MODEL_ID = "systemsculpt/managed-image";
-const STUDIO_MANAGED_TEXT_MODEL_ID = "systemsculpt/managed";
 const STUDIO_IMAGE_POLL_MAX_WAIT_MS = 8 * 60_000;
 const STUDIO_IMAGE_RETRY_INITIAL_DELAY_MS = 2_000;
 const STUDIO_IMAGE_RETRY_MAX_DELAY_MS = 60_000;
@@ -154,34 +148,16 @@ type VaultBinaryAdapter = {
 };
 
 export class StudioApiExecutionAdapter implements StudioApiAdapter {
-  private readonly streamer = new StreamingService();
-  private readonly sessionClient: AgentSessionClient;
   private imageClient: SystemSculptImageGenerationService | null = null;
-  private textTurnQueue: Promise<void> = Promise.resolve();
   private localPiTextTurnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
     private readonly assetStore: StudioAssetStore
-  ) {
-    this.sessionClient = new AgentSessionClient({
-      baseUrl: this.apiBaseUrl(),
-      licenseKey: this.licenseKey(),
-      request: (input) => this.plugin.aiService.requestAgentSession(input),
-      defaultHeaders: {
-        "x-systemsculpt-surface": "studio",
-      },
-      managedInference: true,
-    });
-  }
+  ) {}
 
   private apiBaseUrl(): string {
     return resolveSystemSculptApiBaseUrl(this.plugin.settings.serverUrl);
-  }
-
-  private readTextProviderMode(request: StudioTextGenerationRequest): StudioTextProviderMode {
-    const normalized = String(request.sourceMode || "systemsculpt").trim().toLowerCase();
-    return normalized === "local_pi" ? "local_pi" : "systemsculpt";
   }
 
   private readReasoningEffort(request: StudioTextGenerationRequest): StudioTextReasoningEffort | undefined {
@@ -199,14 +175,17 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     return undefined;
   }
 
-  private async resolveLocalTextModelId(request: StudioTextGenerationRequest): Promise<string> {
-    const rawLocalModelId = String(request.localModelId || "").trim();
-    if (!rawLocalModelId) {
-      throw new Error(
-        'Text generation node is set to Local (Pi), but no model is selected. Choose a Local model and rerun.'
-      );
+  private async resolveSelectedTextModel(request: StudioTextGenerationRequest) {
+    const requestedModelId = String(request.modelId || "").trim();
+    if (!requestedModelId) {
+      throw new Error("Text generation node requires a Pi model selection before it can run.");
     }
-    return normalizeStudioLocalPiModelId(rawLocalModelId);
+
+    const model = await this.plugin.modelService.getModelById(requestedModelId);
+    if (!model) {
+      throw new Error(`Selected Pi model "${requestedModelId}" is unavailable. Refresh models and choose another.`);
+    }
+    return model;
   }
 
   private isLikelyMissingPiCli(message: string): boolean {
@@ -218,6 +197,10 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       normalized.includes("spawn pi enoent") ||
       normalized.includes("pi: command not found") ||
       normalized.includes("command not found: pi") ||
+      normalized.includes("pi sdk package is unavailable") ||
+      normalized.includes("pi runtime bootstrap") ||
+      normalized.includes("bundled pi runtime") ||
+      normalized.includes("unable to resolve a pi runtime") ||
       normalized.includes("no such file or directory") && normalized.includes("pi")
     );
   }
@@ -226,26 +209,15 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     modelId: string;
     rawMessage: string;
   }): string {
-    const pathValue = String(process?.env?.PATH || "").trim();
     return [
-      `Local (Pi) text generation failed for model "${options.modelId}": pi CLI not found.`,
+      `Local (Pi) text generation failed for model "${options.modelId}": the bundled Pi runtime is unavailable.`,
       `Original error: ${options.rawMessage}`,
       "",
-      "Install/setup checklist:",
-      "1) Install the Pi CLI on this machine (the executable must be named \"pi\").",
-      "   Default install command:",
-      "   npm install -g @mariozechner/pi-coding-agent",
-      "2) Verify it is reachable from the shell:",
-      "   command -v pi",
-      "   pi --version",
-      "3) If not found, add the install directory to PATH (macOS zsh example):",
-      "   echo 'export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"' >> ~/.zshrc",
-      "   source ~/.zshrc",
-      "4) Verify models are visible to Studio:",
-      "   pi --list-models",
-      "5) Restart Obsidian after PATH or auth/env changes.",
-      "",
-      `PATH seen by Studio: ${pathValue || "(empty)"}`,
+      "Recovery checklist:",
+      "1) Keep Obsidian open for a few seconds, then retry so SystemSculpt can finish downloading the bundled Pi runtime.",
+      "2) If this was a fresh install or update, reopen Obsidian and retry the Studio run.",
+      "3) Open Setup -> Local Pi and rerun Verify Models to force a runtime check.",
+      "4) If your network blocks GitHub release downloads, allow them and retry the bootstrap.",
     ].join("\n");
   }
 
@@ -277,11 +249,11 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       `Original error: ${options.rawMessage}`,
       "",
       "Fix checklist:",
-      "1) Re-authenticate in terminal:",
-      `   ${loginCommand}`,
-      "2) Verify model/provider availability:",
-      "   pi --list-models",
-      "3) Retry the Studio run.",
+      "1) Open SystemSculpt Setup and complete the provider login again.",
+      "2) If you need the terminal fallback, launch it from the setup wizard so it uses the bundled Pi runtime.",
+      `   Manual command: ${loginCommand}`,
+      "3) Refresh the local Pi model catalog in Studio or retry the setup wizard's Verify Models step.",
+      "4) Retry the Studio run.",
       "",
       "If you use API-key providers, you can also export the required provider API key env vars before launching Obsidian.",
     ];
@@ -299,8 +271,9 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       `Original error: ${options.rawMessage}`,
       "",
       "Fix checklist:",
-      `1) Re-authenticate with OAuth in terminal: pi /login ${provider}`,
-      "2) Confirm the provider/model appears in: pi --list-models",
+      "1) Re-authenticate from SystemSculpt Setup so the bundled Pi runtime is used.",
+      `   Manual command: pi /login ${provider}`,
+      "2) Refresh the local Pi model catalog in Studio or rerun the setup wizard verification step.",
       "3) Retry the Studio run.",
     ].join("\n");
   }
@@ -352,22 +325,6 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       pluginVersion: this.plugin.manifest.version,
     });
     return this.imageClient;
-  }
-
-  private refreshSessionConfig(): void {
-    this.sessionClient.updateConfig({
-      baseUrl: this.apiBaseUrl(),
-      licenseKey: this.licenseKey(),
-    });
-  }
-
-  private async runTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.textTurnQueue.then(operation, operation);
-    this.textTurnQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
   }
 
   private async runLocalPiTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -506,10 +463,16 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     if (node.kind !== "studio.text_generation") {
       return false;
     }
-    const sourceMode = String((node.config as Record<string, unknown>)?.sourceMode || "systemsculpt")
-      .trim()
-      .toLowerCase();
-    return sourceMode !== "local_pi";
+    const requestedModelId = String((node.config as Record<string, unknown>)?.modelId || "").trim();
+    if (!requestedModelId) {
+      return true;
+    }
+    const models = this.plugin.modelService.getCachedModels();
+    const model = models.find((candidate) => candidate.id === requestedModelId);
+    if (!model) {
+      return true;
+    }
+    return !shouldUseLocalPiExecution(model);
   }
 
   async estimateRunCredits(project: StudioProjectV1): Promise<{ ok: boolean; reason?: string }> {
@@ -538,112 +501,40 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   async generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult> {
-    const sourceMode = this.readTextProviderMode(request);
     const reasoningEffort = this.readReasoningEffort(request);
     const systemPrompt = String(request.systemPrompt || "").trim();
-    const messages: Array<{ role: "system" | "user"; content: string; message_id: string }> = [];
-    if (systemPrompt) {
-      messages.push({
-        role: "system" as const,
-        content: systemPrompt,
-        message_id: randomId("msg"),
-      });
-    }
-    messages.push({
-      role: "user" as const,
-      content: request.prompt,
-      message_id: randomId("msg"),
-    });
-
-    if (sourceMode === "local_pi") {
-      const localModelId = await this.resolveLocalTextModelId(request);
-      try {
-        // Pi CLI uses a shared startup/settings lock, so concurrent invocations can fail
-        // transiently with lock/auth initialization races.
-        const result = await this.runLocalPiTextTurnExclusive(() => runStudioLocalPiTextGeneration({
+    const selectedModel = await this.resolveSelectedTextModel(request);
+    const executionPlan = await resolvePiTextExecutionPlan(selectedModel);
+    try {
+      const result = await this.runLocalPiTextTurnExclusive(() =>
+        runStudioLocalPiTextGeneration({
           plugin: this.plugin,
-          modelId: localModelId,
+          modelId: executionPlan.actualModelId,
           prompt: request.prompt,
           systemPrompt,
           reasoningEffort,
-        }));
-        return result;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (this.isLikelyMissingPiCli(message)) {
-          throw new Error(
-            this.buildLocalPiInstallGuidanceMessage({
-              modelId: localModelId,
-              rawMessage: message,
-            })
-          );
-        }
-        const enrichedMessage = this.enrichLocalPiRuntimeErrorMessage({
-          modelId: localModelId,
-          rawMessage: message,
-        });
-        throw new Error(`Local (Pi) text generation failed: ${enrichedMessage}`);
-      }
-    }
-
-    this.refreshSessionConfig();
-    const modelId = STUDIO_MANAGED_TEXT_MODEL_ID;
-
-    // API turn locking is account-scoped server-side, so serialize Studio text turns locally.
-    return this.runTextTurnExclusive(async () => {
-      const response = await this.sessionClient.startOrContinueTurn({
-        chatId: `studio:${request.runId}:${request.nodeId}`,
-        messages,
-        pluginVersion: this.plugin.manifest.version,
-      });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        if (response.status === 409) {
-          let conflictCode = "";
-          let lockUntil = "";
-          try {
-            const parsed = JSON.parse(body) as {
-              error?: { code?: string; lock_until?: string; message?: string } | string;
-              message?: string;
-            };
-            const errorObject = parsed?.error && typeof parsed.error === "object"
-              ? parsed.error
-              : null;
-            conflictCode = String(errorObject?.code || parsed?.error || "").trim().toLowerCase();
-            lockUntil = String(errorObject?.lock_until || "").trim();
-          } catch {
-            // Fall through to generic error with raw response snippet.
-          }
-          if (conflictCode === "turn_in_flight") {
-            const suffix = lockUntil ? ` lock_until=${lockUntil}` : "";
-            throw new Error(
-              `SystemSculpt text generation failed (409 turn_in_flight): another turn is already running for this account.${suffix}`
-            );
-          }
-        }
+        })
+      );
+      return {
+        text: result.text,
+        modelId: selectedModel.id,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.isLikelyMissingPiCli(message)) {
         throw new Error(
-          `SystemSculpt text generation failed (${response.status}): ${body.slice(0, 240)}`
+          this.buildLocalPiInstallGuidanceMessage({
+            modelId: executionPlan.actualModelId,
+            rawMessage: message,
+          })
         );
       }
-
-      let text = "";
-      const events = this.streamer.streamResponse(response, {
-        model: modelId,
-        isCustomProvider: false,
+      const enrichedMessage = this.enrichLocalPiRuntimeErrorMessage({
+        modelId: executionPlan.actualModelId,
+        rawMessage: message,
       });
-
-      for await (const event of events) {
-        if (event.type === "content") {
-          text += event.text;
-        }
-      }
-
-      return {
-        text: text.trim(),
-        modelId,
-      };
-    });
+      throw new Error(`Local (Pi) text generation failed: ${enrichedMessage}`);
+    }
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {

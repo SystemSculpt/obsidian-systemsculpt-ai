@@ -28,7 +28,6 @@ describe("SystemPromptService", () => {
 
     mockApp = new App();
     mockGetSettings = () => ({
-      agentMode: false,
       systemPromptsDirectory: "SystemSculpt/System Prompts",
     });
 
@@ -44,8 +43,8 @@ describe("SystemPromptService", () => {
     });
 
     it("updates settings getter on subsequent calls", () => {
-      const settings1 = { agentMode: false };
-      const settings2 = { agentMode: true };
+      const settings1 = { systemPromptsDirectory: "Prompts/A" };
+      const settings2 = { systemPromptsDirectory: "Prompts/B" };
       const getter1 = () => settings1;
       const getter2 = () => settings2;
 
@@ -70,26 +69,26 @@ describe("SystemPromptService", () => {
       expect(content).toBe("Default concise prompt");
     });
 
-    it("returns agent prompt when agent mode is enabled", async () => {
-      const content = await service.getSystemPromptContent("agent", undefined, true);
-
-      expect(content).toBe("Default agent prompt");
-    });
-
-    it("falls back to general when agent mode is off but agent type selected", async () => {
-      const content = await service.getSystemPromptContent("agent", undefined, false);
+    it("maps legacy agent prompt selection to general-use", async () => {
+      const content = await service.getSystemPromptContent("agent");
 
       expect(content).toBe("Default general use prompt");
     });
 
-    it("uses settings agentMode when not explicitly provided", async () => {
-      mockGetSettings = () => ({ agentMode: true });
+    it("maps legacy agent prompt selection to general-use when no mode is provided", async () => {
+      const content = await service.getSystemPromptContent("agent");
+
+      expect(content).toBe("Default general use prompt");
+    });
+
+    it("ignores unrelated settings for legacy agent selections", async () => {
+      mockGetSettings = () => ({ foo: true });
       (SystemPromptService as any).instance = null;
       service = SystemPromptService.getInstance(mockApp, mockGetSettings);
 
       const content = await service.getSystemPromptContent("agent");
 
-      expect(content).toBe("Default agent prompt");
+      expect(content).toBe("Default general use prompt");
     });
 
     it("reads custom prompt from file", async () => {
@@ -159,80 +158,12 @@ describe("SystemPromptService", () => {
     });
   });
 
-  describe("combineWithAgentPrefix", () => {
-    it("returns base prompt when agent mode is off", async () => {
-      const result = await service.combineWithAgentPrefix("Base prompt", "general-use", false);
-
-      expect(result).toBe("Base prompt");
-    });
-
-    it("returns base prompt when selected type is agent", async () => {
-      const result = await service.combineWithAgentPrefix("Agent base", "agent", true);
-
-      expect(result).toBe("Agent base");
-    });
-
-    it("prefixes agent prompt when agent mode is on", async () => {
-      const result = await service.combineWithAgentPrefix("Base prompt", "general-use", true);
-
-      expect(result).toBe("Default agent prompt\n\nBase prompt");
-    });
-
-    it("uses GENERAL_USE_PRESET when base is empty", async () => {
-      const result = await service.combineWithAgentPrefix("", "general-use", false);
-
-      expect(result).toBe("Default general use prompt");
-    });
-
-    it("uses GENERAL_USE_PRESET when base is undefined", async () => {
-      const result = await service.combineWithAgentPrefix(undefined, "general-use", false);
-
-      expect(result).toBe("Default general use prompt");
-    });
-
-    it("handles case-insensitive type matching", async () => {
-      const result = await service.combineWithAgentPrefix("Base", "AGENT", true);
-
-      expect(result).toBe("Base");
-    });
-
-    it("handles empty selectedType", async () => {
-      const result = await service.combineWithAgentPrefix("Base", undefined, false);
-
-      expect(result).toBe("Base");
-    });
-  });
-
-  describe("appendToolsHint", () => {
-    it("returns prompt unchanged when hasTools is false", () => {
-      const result = service.appendToolsHint("Original prompt", false);
-
-      expect(result).toBe("Original prompt");
-    });
-
-    it("appends tools hint when hasTools is true", () => {
-      const result = service.appendToolsHint("Original prompt", true);
-
-      expect(result).toContain("Original prompt");
-      expect(result).toContain("web_search");
-      expect(result).toContain("mcp-filesystem_read");
-      expect(result).toContain("JSON");
-    });
-
-    it("handles empty prompt with tools hint", () => {
-      const result = service.appendToolsHint("", true);
-
-      expect(result).toContain("web_search");
-      expect(result.startsWith("\n")).toBe(false);
-    });
-  });
-
   describe("getLocalPresets", () => {
     it("returns local system prompts", () => {
       const presets = service.getLocalPresets();
 
-      expect(presets).toHaveLength(3);
-      expect(presets[0].id).toBe("general-use");
+      expect(presets).toHaveLength(2);
+      expect(presets.map((preset) => preset.id)).toEqual(["general-use", "concise"]);
     });
   });
 

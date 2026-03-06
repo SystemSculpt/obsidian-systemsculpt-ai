@@ -333,6 +333,8 @@ export class ChatMarkdownSerializer {
         path: systemMessagePath,
       },
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
+      piSessionFile: typeof parsed.piSessionFile === "string" ? parsed.piSessionFile : undefined,
+      piSessionId: typeof parsed.piSessionId === "string" ? parsed.piSessionId : undefined,
     };
   }
 
@@ -431,4 +433,6 @@ interface ChatMetadata {
     path?: string;
   };
   chatFontSize?: "small" | "medium" | "large";
+  piSessionFile?: string;
+  piSessionId?: string;
 }

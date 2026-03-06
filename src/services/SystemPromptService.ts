@@ -1,6 +1,22 @@
 import { App, TFile } from "obsidian";
 import { SystemPromptPreset } from "../types";
-import { LOCAL_SYSTEM_PROMPTS, GENERAL_USE_PRESET, CONCISE_PRESET, AGENT_PRESET } from "../constants/prompts";
+import { LOCAL_SYSTEM_PROMPTS, GENERAL_USE_PRESET, CONCISE_PRESET } from "../constants/prompts";
+
+export type SystemPromptSelectionType = "general-use" | "concise" | "agent" | "custom";
+export type DesktopPromptSelectionType = "general-use" | "concise" | "custom";
+
+export function normalizeDesktopPromptSelectionType(type?: string): DesktopPromptSelectionType {
+  switch ((type || "").toLowerCase()) {
+    case "concise":
+      return "concise";
+    case "custom":
+      return "custom";
+    case "agent":
+    case "general-use":
+    default:
+      return "general-use";
+  }
+}
 
 /**
  * Simple service for managing system prompts.
@@ -31,87 +47,30 @@ export class SystemPromptService {
   }
 
   /**
-   * Get the content of a system prompt based on type and agent mode
+   * Get the content of a system prompt based on the selected preset.
+   * Legacy "agent" selections are normalized to the desktop Pi default.
    */
   async getSystemPromptContent(
-    type: "general-use" | "concise" | "agent" | "custom", 
-    path?: string,
-    agentMode?: boolean
+    type: SystemPromptSelectionType,
+    path?: string
   ): Promise<string> {
-    const settings = this.pluginSettings();
-    // Use the passed agentMode parameter if provided, otherwise fall back to global settings
-    const effectiveAgentMode = agentMode !== undefined ? agentMode : (settings?.agentMode || false);
+    const normalizedType = normalizeDesktopPromptSelectionType(type);
 
-    // Handle each prompt type based on the selected type and agent mode status
-    if (type === "general-use") {
+    if (normalizedType === "general-use") {
       return GENERAL_USE_PRESET.systemPrompt;
-    } 
-    else if (type === "concise") {
+    }
+    if (normalizedType === "concise") {
       return CONCISE_PRESET.systemPrompt;
     }
-    else if (type === "agent") {
-      if (effectiveAgentMode) {
-        // Agent mode is ON and agent prompt selected = use base agent prompt
-        return AGENT_PRESET.systemPrompt;
-      } else {
-        // Agent prompt selected but agent mode is OFF - show warning and fall back
-        return GENERAL_USE_PRESET.systemPrompt;
-      }
-    } 
-    else if (type === "custom" && path) {
+    if (normalizedType === "custom" && path) {
       try {
         return await this.readCustomPromptFile(path);
       } catch (error) {
-        return GENERAL_USE_PRESET.systemPrompt; // Fall back to general prompt
+        return GENERAL_USE_PRESET.systemPrompt;
       }
     }
-    
-    // Default fallback
+
     return GENERAL_USE_PRESET.systemPrompt;
-  }
-
-  /**
-   * Compose the final system prompt by prefixing the agent prompt when
-   * agent mode is enabled and the selected type is not already the agent
-   * preset. If basePrompt is empty, the agent prompt alone is returned.
-   */
-  async combineWithAgentPrefix(
-    basePrompt: string | undefined,
-    selectedType?: string,
-    agentMode?: boolean
-  ): Promise<string> {
-    const normalized = (selectedType || '').toLowerCase();
-    const effectiveBase = basePrompt && basePrompt.length > 0
-      ? basePrompt
-      : GENERAL_USE_PRESET.systemPrompt;
-
-    if (!agentMode) return effectiveBase;
-    if (normalized === 'agent') return effectiveBase;
-
-    try {
-      const agentPrompt = await this.getSystemPromptContent('agent', undefined, true);
-      if (agentPrompt && agentPrompt.length > 0) {
-        return effectiveBase ? `${agentPrompt}\n\n${effectiveBase}` : agentPrompt;
-      }
-    } catch (_) {}
-    return effectiveBase;
-  }
-
-  /**
-   * Append a concise tools hint to the end of the assembled system prompt
-   * when tools are available for this turn.
-   */
-  appendToolsHint(prompt: string, hasTools: boolean): string {
-    if (!hasTools) return prompt;
-    const hint = [
-      "You have access to tools to interact with the user's vault and the public web (web_search, web_fetch).",
-      "Only use web_search/web_fetch when the user explicitly asks you to look something up online, verify something on the web, or provides a URL to fetch.",
-      "Use the tool names exactly as listed (for example, mcp-filesystem_read).",
-      "Tool arguments must be valid JSON that matches the tool schema exactly (no extra keys).",
-      "Never fabricate file contents or tool results—when you need an exact string from the vault, use a tool and copy it verbatim.",
-      "Prefer batching reads into a single call when possible (e.g., mcp-filesystem_read with multiple paths). If multiple independent tool calls are needed, you may call them in parallel.",
-    ].join(" ");
-    return prompt && prompt.length > 0 ? `${prompt}\n\n${hint}` : hint;
   }
 
   /**
@@ -170,7 +129,9 @@ export class SystemPromptService {
    * Get available system prompt presets
    */
   getLocalPresets(): SystemPromptPreset[] {
-    return LOCAL_SYSTEM_PROMPTS;
+    return LOCAL_SYSTEM_PROMPTS.filter(
+      (preset) => normalizeDesktopPromptSelectionType(preset.id) === preset.id
+    );
   }
 
   /**

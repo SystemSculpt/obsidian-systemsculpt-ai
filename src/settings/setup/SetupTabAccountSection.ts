@@ -19,7 +19,7 @@ export function renderAccountSection(
     .setDesc(
       isProActive
         ? userStatus.greeting || "Pro features enabled."
-        : "Activate a license to unlock SystemSculpt hosted models."
+        : "Activate a license to unlock SystemSculpt credits-backed features and account services."
     );
 
   if (!isProActive) {
@@ -96,9 +96,6 @@ export function renderAccountSection(
           const success = await plugin.getLicenseManager().validateLicenseKey(true, false);
           validatingNotice.hide();
           if (success) {
-            try {
-              plugin.customProviderService.clearCache();
-            } catch {}
             try {
               await plugin.modelService.refreshModels();
             } catch {}

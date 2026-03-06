@@ -7,6 +7,11 @@ const __dirname = path.dirname(__filename);
 
 const maxInstances = Number(process.env.SYSTEMSCULPT_E2E_INSTANCES || 2);
 const appVersion = process.env.SYSTEMSCULPT_E2E_APP_VERSION || "1.11.7";
+const installMode = String(process.env.SYSTEMSCULPT_E2E_PLUGIN_INSTALL_MODE || "").trim().toLowerCase();
+const pluginRoots =
+  installMode === "release-assets" || installMode === "fresh-desktop"
+    ? []
+    : [path.resolve(__dirname, "..", "..")];
 
 export const config = {
   runner: "local",
@@ -31,7 +36,7 @@ export const config = {
       "obsidian",
       {
         obsidianOptions: {
-          plugins: [path.resolve(__dirname, "..", "..")],
+          plugins: pluginRoots,
           vault: path.join(__dirname, "fixtures", "vault"),
           emulateMobile: false,
           appVersion,

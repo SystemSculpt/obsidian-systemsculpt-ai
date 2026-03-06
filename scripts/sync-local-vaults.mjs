@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { collectPiRuntimePackageRoots } from './pi-runtime-package-set.mjs';
 
 const usage = () => {
   console.log(`Usage: node scripts/sync-local-vaults.mjs [--config <path>]
@@ -53,7 +54,12 @@ const requiredFiles = [
   'studio-terminal-sidecar.cjs',
 ];
 const optionalFiles = ['README.md', 'LICENSE', 'versions.json'];
-const runtimeNodeModules = ['node-pty'];
+const runtimePaths = [
+  'node_modules/node-pty',
+  ...collectPiRuntimePackageRoots({
+    rootDir: process.cwd(),
+  }).map((entry) => entry.relativePath),
+];
 
 const resolvePath = (maybeRelative) => (
   path.isAbsolute(maybeRelative)
@@ -126,13 +132,13 @@ const syncTarget = (target) => {
     }
   });
 
-  runtimeNodeModules.forEach(moduleName => {
-    const sourcePath = path.join(process.cwd(), 'node_modules', moduleName);
+  runtimePaths.forEach(relativeRuntimePath => {
+    const sourcePath = path.join(process.cwd(), relativeRuntimePath);
     if (!fs.existsSync(sourcePath)) {
       throw new Error(`Runtime dependency missing: ${sourcePath}`);
     }
-    const destinationPath = path.join(targetPath, 'node_modules', moduleName);
-    console.log(`[sync]  └─ syncing runtime module ${moduleName}`);
+    const destinationPath = path.join(targetPath, relativeRuntimePath);
+    console.log(`[sync]  └─ syncing runtime path ${relativeRuntimePath}`);
     fs.rmSync(destinationPath, { recursive: true, force: true });
     copyDirectory(sourcePath, destinationPath);
   });

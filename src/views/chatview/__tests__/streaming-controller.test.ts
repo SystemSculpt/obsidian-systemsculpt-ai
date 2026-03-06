@@ -12,11 +12,6 @@ const createController = () => {
 
   return {
     controller: new StreamingController({
-      toolCallManager: {
-        shouldAutoApprove: jest.fn(() => false),
-        createToolCall: jest.fn(),
-        getToolCall: jest.fn(),
-      } as any,
       scrollManager: {
         requestStickToBottom: jest.fn(),
       } as any,
@@ -91,27 +86,8 @@ describe("StreamingController stream behavior", () => {
     const onAssistantResponse = jest.fn().mockResolvedValue(undefined);
 
     const toolCallId = "tool_default_api:mcp-filesystem_read_szyfwOy5FpnrUXatzq4y";
-    const toolCall = {
-      id: toolCallId,
-      messageId: "assistant-tools",
-      request: {
-        id: toolCallId,
-        type: "function",
-        function: {
-          name: "mcp-filesystem_read",
-          arguments: "{\"paths\":[\"a.md\"]}",
-        },
-      },
-      state: "pending",
-      timestamp: Date.now(),
-    };
 
     const controller = new StreamingController({
-      toolCallManager: {
-        shouldAutoApprove: jest.fn(() => false),
-        createToolCall: jest.fn(() => toolCall),
-        getToolCall: jest.fn(),
-      } as any,
       scrollManager: {
         requestStickToBottom: jest.fn(),
       } as any,
@@ -161,6 +137,8 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-tools", abortController.signal);
 
     expect(result.completed).toBe(true);
+    expect(result.message.tool_calls?.[0]?.id).toBe(toolCallId);
+    expect(result.message.tool_calls?.[0]?.state).toBe("completed");
     expect(Array.isArray((result.message as any).reasoning_details)).toBe(true);
     expect((result.message as any).reasoning_details[0].id).toBe(toolCallId);
   });

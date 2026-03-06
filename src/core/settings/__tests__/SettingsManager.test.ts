@@ -78,13 +78,6 @@ jest.mock("../../../types", () => ({
   },
 }));
 
-// Mock agent config
-jest.mock("../../../constants/agent", () => ({
-  AGENT_CONFIG: {
-    DEFAULT_BUDGET: 10,
-  },
-}));
-
 import { SettingsManager } from "../SettingsManager";
 import { DEFAULT_SETTINGS, LogLevel } from "../../../types";
 
@@ -199,6 +192,7 @@ describe("SettingsManager", () => {
         const result = migrateSettings({});
         expect(result.activeProvider).toBe("openai");
       });
+
     });
 
     describe("array migrations", () => {
@@ -419,6 +413,14 @@ describe("SettingsManager", () => {
         transcriptionOutputFormat: "invalid",
       });
       expect(result.transcriptionOutputFormat).toBe("markdown");
+    });
+
+    it("keeps selectedModelId empty instead of forcing an agent default", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        selectedModelId: "   ",
+      });
+      expect(result.selectedModelId).toBe("");
     });
 
     it("defaults invalid modal format chooser visibility", () => {

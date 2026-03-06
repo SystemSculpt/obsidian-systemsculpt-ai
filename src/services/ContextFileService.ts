@@ -2,10 +2,7 @@ import { App, TFile } from "obsidian";
 import { ChatMessage } from "../types";
 import { ImageProcessor } from "../utils/ImageProcessor";
 import { SystemPromptService } from "./SystemPromptService";
-import { errorLogger } from "../utils/errorLogger";
 import { simpleHash } from "../utils/cryptoUtils";
-import { mapAssistantToolCallsForApi, buildToolResultMessagesFromToolCalls, pruneToolMessagesNotFollowingToolCalls } from "../utils/tooling";
-import { ToolCall } from "../types/toolCalls";
 import { mentionsObsidianBases } from "../utils/obsidianBases";
 import { OBSIDIAN_BASES_SYNTAX_GUIDE } from "../constants/prompts/obsidianBasesSyntaxGuide";
 
@@ -28,63 +25,6 @@ export class ContextFileService {
     // Pad with more hashing if needed to get 24 chars
     const extendedHash = simpleHash(hash + input) + simpleHash(input + hash);
     return `${prefix}_${extendedHash.slice(0, 24)}`;
-  }
-
-  private hydrateToolCalls(
-    toolCalls: ToolCall[] | undefined,
-    toolCallManager?: { getToolCall?: (id: string) => ToolCall | undefined }
-  ): ToolCall[] {
-    if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
-      return [];
-    }
-
-    return toolCalls.map((call) => {
-      if (!toolCallManager?.getToolCall || !call?.id) {
-        return call;
-      }
-
-      const managerCall = toolCallManager.getToolCall(call.id);
-      if (!managerCall) {
-        return call;
-      }
-
-      const merged: ToolCall = {
-        ...managerCall,
-        request: managerCall.request || call.request,
-        messageId: managerCall.messageId || call.messageId,
-        timestamp: managerCall.timestamp ?? call.timestamp,
-      } as ToolCall;
-
-      if (!merged.result && call.result) {
-        merged.result = call.result;
-      }
-
-      if (!merged.state && call.state) {
-        merged.state = call.state;
-      }
-
-      if (!merged.executionCompletedAt && (call as any).executionCompletedAt) {
-        (merged as any).executionCompletedAt = (call as any).executionCompletedAt;
-      }
-
-      if (!merged.executionStartedAt && (call as any).executionStartedAt) {
-        (merged as any).executionStartedAt = (call as any).executionStartedAt;
-      }
-
-      try {
-        errorLogger.debug('Hydrated tool call from manager', {
-          source: 'ContextFileService',
-          method: 'hydrateToolCalls',
-          metadata: {
-            toolCallId: merged.id,
-            hasResult: !!merged.result,
-            state: merged.state,
-          }
-        });
-      } catch {}
-
-      return merged;
-    });
   }
 
   private shouldInjectObsidianBasesGuide(messages: ChatMessage[], contextFiles: Set<string>): boolean {
@@ -262,9 +202,7 @@ export class ContextFileService {
     contextFiles: Set<string>,
     systemPromptType?: string,
     systemPromptPath?: string,
-    agentMode?: boolean,
     includeImages?: boolean,
-    toolCallManager?: any,
     finalSystemPrompt?: string
   ): Promise<ChatMessage[]> {
     const shouldIncludeImages = includeImages !== false;
@@ -280,9 +218,9 @@ export class ContextFileService {
         if (normalizedType === "custom" && systemPromptPath) {
           systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent("custom", systemPromptPath);
         } else if (normalizedType === "general-use" || normalizedType === "concise" || normalizedType === "agent") {
-          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent(normalizedType as any, undefined, agentMode);
+          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent(normalizedType as any, undefined);
         } else {
-          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent("general-use", undefined, agentMode);
+          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent("general-use", undefined);
         }
       } catch (_) {}
       // As a final fallback
@@ -349,148 +287,11 @@ export class ContextFileService {
     }
 
     // Add the actual chat messages, injecting context right before the latest user message.
-    // NOTE: For strict providers (e.g., MiniMax), tool result messages must immediately follow
-    // the assistant message that declared the corresponding tool_calls.
     let idx = 0;
     while (idx < messages.length) {
       const msg = messages[idx];
 
       if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        if (agentMode) {
-          // Hydrate tool calls with results/state from the ToolCallManager when available.
-          const enrichedToolCalls = this.hydrateToolCalls(msg.tool_calls as any, toolCallManager);
-          (msg as any).tool_calls = enrichedToolCalls;
-
-          const toolCallsForApi = mapAssistantToolCallsForApi(enrichedToolCalls as any);
-          const declaredToolCallIds = new Set(
-            toolCallsForApi
-              .map((tc: any) => tc?.id)
-              .filter((id: any): id is string => typeof id === "string" && id.length > 0)
-          );
-
-          // Capture any explicit tool messages that immediately follow this assistant message
-          // in the provided history. These can be used if ToolCallManager hydration isn't available.
-          const followingToolMessages: ChatMessage[] = [];
-          let lookahead = idx + 1;
-          while (lookahead < messages.length && messages[lookahead]?.role === "tool") {
-            followingToolMessages.push(messages[lookahead]);
-            lookahead += 1;
-          }
-
-          const toolMessagesFromInput = followingToolMessages
-            .filter((m) => {
-              const toolCallId = (m as any)?.tool_call_id;
-              return typeof toolCallId === "string" && declaredToolCallIds.has(toolCallId);
-            })
-            .map((m) => {
-              const toolCallId = (m as any).tool_call_id as string;
-              const rawContent: any = (m as any).content;
-              const content =
-                typeof rawContent === "string"
-                  ? rawContent
-                  : rawContent == null
-                    ? ""
-                    : (() => {
-                        try {
-                          return JSON.stringify(rawContent);
-                        } catch {
-                          return String(rawContent);
-                        }
-                      })();
-
-              return {
-                role: "tool",
-                tool_call_id: toolCallId,
-                content,
-                message_id: m.message_id ?? this.deterministicId(`${toolCallId}:${content}`, "tool"),
-              } as ChatMessage;
-            });
-
-          const toolMessagesFromManager = buildToolResultMessagesFromToolCalls(enrichedToolCalls as any);
-
-          const byIdFromManager = new Map<string, ChatMessage>();
-          for (const toolMessage of toolMessagesFromManager) {
-            const toolCallId = (toolMessage as any)?.tool_call_id;
-            if (typeof toolCallId === "string" && declaredToolCallIds.has(toolCallId)) {
-              byIdFromManager.set(toolCallId, toolMessage);
-            }
-          }
-
-          const byIdFromInput = new Map<string, ChatMessage>();
-          for (const toolMessage of toolMessagesFromInput) {
-            const toolCallId = (toolMessage as any)?.tool_call_id;
-            if (typeof toolCallId === "string") {
-              byIdFromInput.set(toolCallId, toolMessage);
-            }
-          }
-
-          const idsWithResults = new Set<string>([
-            ...byIdFromManager.keys(),
-            ...byIdFromInput.keys(),
-          ]);
-
-          const filteredToolCallsForApi = toolCallsForApi.filter((tc: any) => idsWithResults.has(tc?.id));
-
-          // Add the assistant message with a tool_calls array only if we can also include the corresponding tool results.
-          const assistantApiMessage: Partial<ChatMessage> = {
-            role: "assistant",
-            message_id: msg.message_id,
-            content: msg.content || "",
-          };
-          if (filteredToolCallsForApi.length > 0) {
-            assistantApiMessage.tool_calls = filteredToolCallsForApi as any;
-          }
-
-          // OpenRouter Gemini: reasoning_details entries must correspond to the tool_calls ids being preserved.
-          // If we send mismatched reasoning_details, Google can reject with "Corrupted thought signature."
-          const rawReasoningDetails = Array.isArray((msg as any).reasoning_details)
-            ? ((msg as any).reasoning_details as any[])
-            : null;
-          if (rawReasoningDetails && filteredToolCallsForApi.length > 0) {
-            const allowed = new Set(
-              filteredToolCallsForApi
-                .map((tc: any) => tc?.id)
-                .filter((id: any): id is string => typeof id === "string" && id.length > 0)
-            );
-            const filteredReasoningDetails = rawReasoningDetails.filter((detail) => {
-              const id = detail?.id;
-              return typeof id === "string" && allowed.has(id);
-            });
-            if (filteredReasoningDetails.length > 0) {
-              (assistantApiMessage as any).reasoning_details = filteredReasoningDetails;
-            } else {
-              try {
-                errorLogger.warn("Dropped reasoning_details that did not match tool_calls ids", {
-                  source: "ContextFileService",
-                  method: "prepareMessagesWithContext",
-                  metadata: {
-                    messageId: msg.message_id,
-                    allowedToolCallIds: Array.from(allowed),
-                    reasoningDetailIds: rawReasoningDetails
-                      .map((d) => d?.id)
-                      .filter((id) => typeof id === "string"),
-                  },
-                });
-              } catch {}
-            }
-          }
-          preparedMessages.push(assistantApiMessage as ChatMessage);
-
-          // Add tool results in the same order as tool_calls for providers that validate adjacency/order.
-          for (const tc of filteredToolCallsForApi) {
-            const toolCallId = tc.id;
-            const toolMessage = byIdFromManager.get(toolCallId) ?? byIdFromInput.get(toolCallId);
-            if (toolMessage) {
-              preparedMessages.push(toolMessage);
-            }
-          }
-
-          // Skip tool role messages from the input history; they've been consumed or intentionally dropped.
-          idx = lookahead;
-          continue;
-        }
-
-        // Agent mode OFF: strip tool calls and skip any following tool messages.
         const assistantMessageWithoutTools: Partial<ChatMessage> = {
           role: "assistant",
           message_id: msg.message_id,
@@ -534,25 +335,8 @@ export class ContextFileService {
       }
       preparedMessages.push(messageToPush as ChatMessage);
 
-      idx += 1;
-    }
-
-    // Defensive: ensure tool result messages always directly follow their declaring assistant tool_calls message.
-    // Some providers (e.g., MiniMax) hard-fail invalid sequences with HTTP 400.
-    if (agentMode) {
-      const { messages: sanitized, dropped } = pruneToolMessagesNotFollowingToolCalls(preparedMessages);
-      if (dropped > 0) {
-        try {
-          errorLogger.warn("Dropped tool messages that did not follow tool_calls", {
-            source: "ContextFileService",
-            method: "prepareMessagesWithContext",
-            metadata: { dropped },
-          });
-        } catch {}
-        preparedMessages.length = 0;
-        preparedMessages.push(...sanitized);
+        idx += 1;
       }
-    }
 
     return preparedMessages;
   }

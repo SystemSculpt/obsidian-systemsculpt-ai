@@ -343,7 +343,8 @@ ${additionalContext}
                         titleGenerationProviderId: parsed.providerId,
                         titleGenerationModelId: result.modelId
                       });
-                      new Notice(`Title generation model set to: ${parsed.providerId} / ${parsed.modelId}`);
+                      const { getModelLabelWithProvider } = await import("../utils/modelUtils");
+                      new Notice(`Title generation model set to: ${getModelLabelWithProvider(result.modelId)}`);
                     }
                     resolve(result);
                   } else {

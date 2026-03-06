@@ -109,6 +109,7 @@ export class SlashCommandMenu extends Component {
                 chatView.chatId = '';
                 chatView.chatVersion = 0;
                 chatView.isFullyLoaded = false;
+                chatView.clearPiSessionState({ save: false });
 
                 // Clear UI
                 chatView.chatContainer.empty();
@@ -148,16 +149,11 @@ export class SlashCommandMenu extends Component {
       },
       {
         id: 'agent',
-        name: 'Switch Agent',
-        description: 'Change the system prompt/agent for this chat',
+        name: 'Switch Prompt',
+        description: 'Change the system prompt for this chat',
         icon: 'user-check',
         execute: async (chatView: ChatView) => {
-          // Trigger the agent selection menu
-          // This will be handled by typing /agent followed by space
-          // For now, just close this menu and let the user type /agent
           this.hide();
-          
-          // Insert /agent into the input if not already there
           const currentValue = this.inputElement.value;
           if (!currentValue.startsWith('/agent')) {
             this.inputElement.value = '/agent ';
@@ -279,135 +275,10 @@ export class SlashCommandMenu extends Component {
 
           confirmModal.open();
         }
-      },
-      {
-        id: 'agent-status',
-        name: 'Agent Status',
-        description: 'Show agent tools and model compatibility status',
-        icon: 'activity',
-        execute: async (chatView: ChatView) => {
-          await this.showAgentStatus(chatView);
-        }
       }
     ];
 
     this.filteredCommands = [...this.commands];
-  }
-
-  /**
-   * Shows agent status information including available tools and model compatibility
-   */
-  private async showAgentStatus(chatView: ChatView): Promise<void> {
-    const statusModal = new Modal(this.plugin.app);
-
-    statusModal.onOpen = async () => {
-      const { contentEl } = statusModal;
-      contentEl.empty();
-
-      contentEl.createEl('h2', { text: 'Agent Status' });
-
-      // Loading state
-      const loadingEl = contentEl.createEl('p', { text: 'Loading status...' });
-
-      try {
-        // Import utilities dynamically
-        const { MCPService } = await import('./MCPService');
-        const { getToolCompatibilityInfo, ensureCanonicalId, getDisplayName } = await import('../../utils/modelUtils');
-
-        // Get MCP service and tools
-        const mcpService = new MCPService(this.plugin, this.plugin.app);
-        const tools = await mcpService.getAvailableTools();
-
-        // Get model info
-        let modelCompatibility: { isCompatible: boolean; confidence: 'high' | 'medium' | 'low'; reason: string } = {
-          isCompatible: true,
-          confidence: 'low',
-          reason: 'No model selected'
-        };
-        let modelName = 'No model selected';
-
-        if (chatView.selectedModelId) {
-          const models = await this.plugin.modelService.getModels();
-          const canonicalId = ensureCanonicalId(chatView.selectedModelId);
-          const model = models.find(m => ensureCanonicalId(m.id) === canonicalId);
-          modelName = getDisplayName(canonicalId);
-
-          if (model) {
-            modelCompatibility = getToolCompatibilityInfo(model);
-          }
-        }
-
-        // Remove loading
-        loadingEl.remove();
-
-        // Model section
-        const modelSection = contentEl.createDiv({ cls: 'systemsculpt-agent-status-section' });
-        modelSection.createEl('h3', { text: 'Current Model' });
-        const modelInfo = modelSection.createEl('p');
-        modelInfo.textContent = modelName;
-
-        // Tool compatibility
-        const compatSection = contentEl.createDiv({ cls: 'systemsculpt-agent-status-section' });
-        compatSection.createEl('h3', { text: 'Tool Support' });
-        const compatInfo = compatSection.createEl('p');
-
-        if (modelCompatibility.isCompatible) {
-          compatInfo.textContent = `✓ Compatible (${modelCompatibility.confidence} confidence)`;
-          compatInfo.style.color = 'var(--text-success)';
-        } else {
-          compatInfo.textContent = `✗ Not Compatible - ${modelCompatibility.reason}`;
-          compatInfo.style.color = 'var(--text-error)';
-        }
-
-        // Tools section
-        const toolsSection = contentEl.createDiv({ cls: 'systemsculpt-agent-status-section' });
-        toolsSection.createEl('h3', { text: `Available Tools (${tools.length})` });
-
-        if (tools.length === 0) {
-          toolsSection.createEl('p', { text: 'No tools available' });
-        } else {
-          const toolList = toolsSection.createEl('ul', { cls: 'systemsculpt-agent-status-tools' });
-
-          // Group tools by server
-          const toolsByServer: Record<string, string[]> = {};
-          for (const tool of tools) {
-            const name = tool.function?.name || 'unknown';
-            const [serverId] = name.split('_');
-            if (!toolsByServer[serverId]) toolsByServer[serverId] = [];
-            toolsByServer[serverId].push(name.replace(`${serverId}_`, ''));
-          }
-
-          for (const [serverId, serverTools] of Object.entries(toolsByServer)) {
-            const serverItem = toolList.createEl('li');
-            serverItem.createEl('strong', { text: serverId });
-            serverItem.createEl('span', { text: ` (${serverTools.length} tools)` });
-
-            const toolSubList = serverItem.createEl('ul');
-            // Show first 5 tools, then "and X more"
-            const displayTools = serverTools.slice(0, 5);
-            const remaining = serverTools.length - 5;
-
-            for (const t of displayTools) {
-              toolSubList.createEl('li', { text: t });
-            }
-
-            if (remaining > 0) {
-              toolSubList.createEl('li', { text: `...and ${remaining} more`, cls: 'systemsculpt-agent-status-more' });
-            }
-          }
-        }
-
-        // Close button
-        const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
-        const closeBtn = buttonContainer.createEl('button', { text: 'Close' });
-        closeBtn.addEventListener('click', () => statusModal.close());
-
-      } catch (error) {
-        loadingEl.textContent = `Error loading status: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      }
-    };
-
-    statusModal.open();
   }
 
   private createMenuElement(): void {

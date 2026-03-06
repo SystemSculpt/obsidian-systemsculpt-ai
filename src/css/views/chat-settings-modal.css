@@ -104,7 +104,7 @@
   border-color: var(--interactive-accent);
 }
 
-/* Disabled preset button state for agent mode */
+/* Disabled preset button state for legacy prompt migrations */
 .ss-preset-button-disabled {
   opacity: 0.5;
   cursor: not-allowed;

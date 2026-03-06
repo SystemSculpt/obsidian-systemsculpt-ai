@@ -140,7 +140,7 @@ export class EventEmitter {
    * @param providerType Optional provider type context
    * @param args Arguments to pass to listeners
    */
-  public emitWithProvider(event: string, providerType: 'systemsculpt' | 'custom', ...args: any[]): void {
+  public emitWithProvider(event: string, providerType: 'systemsculpt' | 'custom' | 'local-pi', ...args: any[]): void {
     // Emit the original event
     this.emit(event, ...args);
     
@@ -156,8 +156,8 @@ export class EventEmitter {
    * @param listener Function to call when event is emitted
    * @returns Unsubscribe function
    */
-  public onProvider(event: string, providerType: 'systemsculpt' | 'custom', listener: (...args: any[]) => void): () => void {
+  public onProvider(event: string, providerType: 'systemsculpt' | 'custom' | 'local-pi', listener: (...args: any[]) => void): () => void {
     const namespacedEvent = `${providerType}:${event}`;
     return this.on(namespacedEvent, listener);
   }
-} 
+}

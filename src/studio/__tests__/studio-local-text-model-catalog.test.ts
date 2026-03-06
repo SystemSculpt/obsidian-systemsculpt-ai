@@ -5,12 +5,58 @@ import {
   migrateStudioPiProviderApiKeys,
   normalizeStudioLocalPiModelId,
   runStudioLocalPiTextGeneration,
-  type PiCommandResult,
-  type StudioPiCommandRunner,
 } from "../StudioLocalTextModelCatalog";
+import { loadPiSdkModule } from "../../services/pi/PiSdk";
 
-function createPiRunner(result: PiCommandResult): jest.MockedFunction<StudioPiCommandRunner> {
-  return jest.fn(async () => result);
+jest.mock("../../services/pi-native/PiLocalAgentExecutor", () => ({
+  runPiLocalTextGeneration: jest.fn(),
+}));
+
+jest.mock("../../services/pi/PiSdk", () => ({
+  loadPiSdkModule: jest.fn(),
+}));
+
+const loadPiSdkModuleMock = loadPiSdkModule as jest.MockedFunction<typeof loadPiSdkModule>;
+
+function createSdkMock(models: Array<Record<string, unknown>>) {
+  class MockModelRegistry {
+    constructor(_authStorage: unknown) {}
+
+    getAll() {
+      return models;
+    }
+
+    getAvailable() {
+      return models;
+    }
+
+    async getApiKey() {
+      return "test-key";
+    }
+
+    async getApiKeyForProvider() {
+      return "test-key";
+    }
+
+    isUsingOAuth() {
+      return false;
+    }
+  }
+
+  return {
+    AuthStorage: {
+      create: () => ({
+        getOAuthProviders: () => [],
+        login: jest.fn(),
+        set: jest.fn(),
+        remove: jest.fn(),
+        logout: jest.fn(),
+        get: jest.fn(),
+        hasAuth: jest.fn(() => false),
+      }),
+    },
+    ModelRegistry: MockModelRegistry,
+  } as any;
 }
 
 describe("StudioLocalTextModelCatalog", () => {
@@ -24,22 +70,46 @@ describe("StudioLocalTextModelCatalog", () => {
     },
   } as any;
 
-  it("maps pi --list-models output into searchable local model options", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 0,
-      timedOut: false,
-      stderr: "",
-      stdout: [
-        "provider            model                       context  max-out  thinking  images",
-        "openai              gpt-5                       400K     128K     yes       yes",
-        "google-antigravity  gpt-oss-120b-medium        131.1K   32.8K    no        no",
-        "openai-codex        gpt-5.2-codex              272K     128K     yes       yes",
-      ].join("\n"),
-    });
+  beforeEach(() => {
+    loadPiSdkModuleMock.mockReset();
+  });
 
-    const options = await listStudioLocalTextModelOptions(plugin, runCommand);
+  it("maps Pi's available model catalog into searchable local model options", async () => {
+    loadPiSdkModuleMock.mockResolvedValue(
+      createSdkMock([
+        {
+          provider: "openai",
+          id: "gpt-5",
+          name: "gpt-5",
+          contextWindow: 400_000,
+          maxTokens: 128_000,
+          reasoning: true,
+          input: ["text", "image"],
+        },
+        {
+          provider: "google-antigravity",
+          id: "gpt-oss-120b-medium",
+          name: "gpt-oss-120b-medium",
+          contextWindow: 131_100,
+          maxTokens: 32_800,
+          reasoning: false,
+          input: ["text"],
+        },
+        {
+          provider: "openai-codex",
+          id: "gpt-5.2-codex",
+          name: "gpt-5.2-codex",
+          contextWindow: 272_000,
+          maxTokens: 128_000,
+          reasoning: true,
+          input: ["text", "image"],
+        },
+      ])
+    );
 
-    expect(runCommand).toHaveBeenCalledWith(plugin, ["--list-models"], 60_000);
+    const options = await listStudioLocalTextModelOptions(plugin);
+
+    expect(loadPiSdkModuleMock).toHaveBeenCalledTimes(1);
     expect(options).toEqual([
       {
         value: "google-antigravity/gpt-oss-120b-medium",
@@ -53,7 +123,6 @@ describe("StudioLocalTextModelCatalog", () => {
           "131.1K",
           "32.8K",
           "no",
-          "no",
         ],
       },
       {
@@ -61,7 +130,7 @@ describe("StudioLocalTextModelCatalog", () => {
         label: "gpt-5",
         description: "context 400K • max out 128K • thinking yes • images yes",
         badge: "openai",
-        keywords: ["openai/gpt-5", "openai", "gpt-5", "400K", "128K", "yes", "yes"],
+        keywords: ["openai/gpt-5", "openai", "gpt-5", "400K", "128K", "yes"],
       },
       {
         value: "openai-codex/gpt-5.2-codex",
@@ -75,22 +144,16 @@ describe("StudioLocalTextModelCatalog", () => {
           "272K",
           "128K",
           "yes",
-          "yes",
         ],
       },
     ]);
   });
 
-  it("throws an actionable error when pi model listing fails", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 1,
-      timedOut: false,
-      stdout: "",
-      stderr: "pi: command not found",
-    });
+  it("throws an actionable error when the Pi SDK catalog lookup fails", async () => {
+    loadPiSdkModuleMock.mockRejectedValue(new Error("Pi SDK unavailable"));
 
-    await expect(listStudioLocalTextModelOptions(plugin, runCommand)).rejects.toThrow(
-      "pi: command not found"
+    await expect(listStudioLocalTextModelOptions(plugin)).rejects.toThrow(
+      "Pi SDK unavailable"
     );
   });
 
@@ -246,196 +309,31 @@ describe("StudioLocalTextModelCatalog", () => {
     expect(report.errors).toEqual([]);
   });
 
-  it("executes local pi text generation and parses ndjson assistant output", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 0,
-      timedOut: false,
-      stderr: "",
-      stdout: [
-        "Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.",
-        '{"type":"session","version":3}',
-        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}}',
-        '{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}]}',
-      ].join("\n"),
+  it("delegates local text generation to the native Pi agent executor", async () => {
+    const { runPiLocalTextGeneration } = jest.requireMock("../../services/pi-native/PiLocalAgentExecutor") as {
+      runPiLocalTextGeneration: jest.Mock;
+    };
+    runPiLocalTextGeneration.mockResolvedValue({
+      text: "hello local pi",
+      modelId: "google/gemini-2.5-flash",
     });
 
-    const result = await runStudioLocalPiTextGeneration(
-      {
+    const result = await runStudioLocalPiTextGeneration({
+      plugin,
+      modelId: "google/gemini-2.5-flash",
+      prompt: "Say hello",
+      systemPrompt: "Be brief",
+      reasoningEffort: "xhigh",
+    } as any);
+
+    expect(runPiLocalTextGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
         plugin,
         modelId: "google/gemini-2.5-flash",
         prompt: "Say hello",
         systemPrompt: "Be brief",
-      },
-      runCommand
-    );
-
-    expect(runCommand).toHaveBeenCalledWith(
-      plugin,
-      [
-        "--mode",
-        "json",
-        "--print",
-        "--no-session",
-        "--model",
-        "google/gemini-2.5-flash",
-        "--system-prompt",
-        "Be brief",
-        "Say hello",
-      ],
-      300_000
-    );
-    expect(result).toEqual({
-      text: "hello local pi",
-      modelId: "google/gemini-2.5-flash",
-    });
-  });
-
-  it("passes Pi thinking level when reasoning effort is configured", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 0,
-      timedOut: false,
-      stderr: "",
-      stdout: [
-        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}}',
-      ].join("\n"),
-    });
-
-    const result = await runStudioLocalPiTextGeneration(
-      {
-        plugin,
-        modelId: "google/gemini-2.5-flash",
-        prompt: "Say hello",
-        reasoningEffort: "xhigh",
-      },
-      runCommand
-    );
-
-    expect(runCommand).toHaveBeenCalledWith(
-      plugin,
-      [
-        "--mode",
-        "json",
-        "--print",
-        "--no-session",
-        "--model",
-        "google/gemini-2.5-flash",
-        "--thinking",
-        "xhigh",
-        "Say hello",
-      ],
-      300_000
-    );
-    expect(result).toEqual({
-      text: "hello local pi",
-      modelId: "google/gemini-2.5-flash",
-    });
-  });
-
-  it("surfaces pi runtime errors from assistant output", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 0,
-      timedOut: false,
-      stderr: "",
-      stdout: [
-        '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Bad API key"}}',
-        '{"type":"agent_end","messages":[{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Bad API key"}]}',
-      ].join("\n"),
-    });
-
-    await expect(
-      runStudioLocalPiTextGeneration(
-        {
-          plugin,
-          modelId: "google/gemini-2.5-flash",
-          prompt: "Say hello",
-        },
-        runCommand
-      )
-    ).rejects.toThrow("Bad API key");
-  });
-
-  it("extracts a meaningful message from stack-like stderr output", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 1,
-      timedOut: false,
-      stdout: "",
-      stderr: [
-        "file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js:556",
-        "            throw new Error(`No API key found for openai-codex.\\n\\n` +",
-        "                  ^",
-        "",
-        "Error: No API key found for openai-codex.",
-        "",
-        "Use /login or set an API key environment variable. See /docs/providers.md",
-        "    at AgentSession.prompt (file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js:556:19)",
-      ].join("\n"),
-    });
-
-    await expect(
-      runStudioLocalPiTextGeneration(
-        {
-          plugin,
-          modelId: "openai-codex/gpt-5.3-codex",
-          prompt: "Say hello",
-        },
-        runCommand
-      )
-    ).rejects.toThrow("No API key found for openai-codex.");
-  });
-
-  it("parses message_update text deltas when final assistant message is missing", async () => {
-    const runCommand = createPiRunner({
-      exitCode: 0,
-      timedOut: false,
-      stderr: "",
-      stdout: [
-        '{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}',
-        '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"hello "}}',
-        '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"local pi"}}',
-      ].join("\n"),
-    });
-
-    const result = await runStudioLocalPiTextGeneration(
-      {
-        plugin,
-        modelId: "google/gemini-2.5-flash",
-        prompt: "Say hello",
-      },
-      runCommand
-    );
-
-    expect(result).toEqual({
-      text: "hello local pi",
-      modelId: "google/gemini-2.5-flash",
-    });
-  });
-
-  it("retries once when local pi exits successfully but emits no assistant text", async () => {
-    const runCommand = jest
-      .fn<ReturnType<StudioPiCommandRunner>, Parameters<StudioPiCommandRunner>>()
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        timedOut: false,
-        stderr: "",
-        stdout: '{"type":"turn_start"}',
       })
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        timedOut: false,
-        stderr: "",
-        stdout: '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello local pi"}],"stopReason":"stop"}}',
-      });
-
-    const result = await runStudioLocalPiTextGeneration(
-      {
-        plugin,
-        modelId: "google/gemini-2.5-flash",
-        prompt: "Say hello",
-      },
-      runCommand
     );
-
-    expect(runCommand).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
       text: "hello local pi",
       modelId: "google/gemini-2.5-flash",

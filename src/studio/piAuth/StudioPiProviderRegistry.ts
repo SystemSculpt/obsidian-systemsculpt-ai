@@ -193,27 +193,6 @@ export function buildApiKeyHint(
   return "Paste your API key below to save it for Pi.";
 }
 
-export function parseProviderIdsFromModelList(stdout: string): string[] {
-  const ids = new Set<string>();
-  const lines = String(stdout || "").split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const lower = line.toLowerCase();
-    if (lower.startsWith("provider") && lower.includes("model")) continue;
-    const columns = line.split(/\s{2,}/g).map((c) => c.trim()).filter(Boolean);
-    const provider = normalizeProviderId(columns[0] || "");
-    if (provider) ids.add(provider);
-  }
-  return Array.from(ids.values());
-}
-
-export function providerIsListedByPiModelList(stdout: string, provider: string): boolean {
-  const normalized = normalizeProviderId(provider);
-  if (!normalized) return true;
-  return parseProviderIdsFromModelList(stdout).includes(normalized);
-}
-
 function normalizeEndpoint(endpoint: string): string {
   return String(endpoint || "").trim().toLowerCase().replace(/\/+$/, "");
 }

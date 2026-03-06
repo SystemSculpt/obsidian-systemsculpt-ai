@@ -3,6 +3,12 @@ import { AgentSelectionMenu } from "../AgentSelectionMenu";
 import { SystemPromptService } from "../../../services/SystemPromptService";
 
 jest.mock("../../../services/SystemPromptService", () => ({
+  normalizeDesktopPromptSelectionType: jest.fn((type?: string) => {
+    if (type === "concise" || type === "custom") {
+      return type;
+    }
+    return "general-use";
+  }),
   SystemPromptService: {
     getInstance: jest.fn(),
   },
@@ -72,7 +78,10 @@ describe("AgentSelectionMenu", () => {
     const chatView: any = {
       systemPromptType: "general-use",
       systemPromptPath: "",
+      currentPrompt: "",
+      messages: [],
       updateSystemPromptIndicator: jest.fn(async () => {}),
+      displayChatStatus: jest.fn(),
       saveChat: jest.fn(async () => {}),
     };
     const plugin: any = { app: {}, settings: {} };
@@ -91,8 +100,8 @@ describe("AgentSelectionMenu", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(chatView.updateSystemPromptIndicator).toHaveBeenCalled();
+    expect(chatView.displayChatStatus).toHaveBeenCalled();
     expect(chatView.saveChat).toHaveBeenCalled();
     expect(input.value.includes("/agent")).toBe(false);
   });
 });
-

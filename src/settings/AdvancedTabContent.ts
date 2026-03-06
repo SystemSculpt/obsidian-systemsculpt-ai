@@ -105,9 +105,6 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
         }
 
         try {
-            // Clear custom provider cache first
-            plugin.customProviderService?.clearCache();
-
             // Reset settings to default
             await plugin.saveData(null);
             // Ensure DEFAULT_SETTINGS includes the new title gen fields

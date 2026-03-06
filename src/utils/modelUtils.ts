@@ -1,4 +1,5 @@
 import { SystemSculptModel, ModelIdentifier } from "../types/llm";
+import { resolveProviderLabel } from "../studio/piAuth/StudioPiProviderRegistry";
 
 /**
  * Model ID utilities
@@ -10,6 +11,7 @@ import { SystemSculptModel, ModelIdentifier } from "../types/llm";
 
 // Canonical separator used in all model IDs
 export const MODEL_ID_SEPARATOR = '@@';
+const LOCAL_PI_PROVIDER_PREFIX = "local-pi-";
 
 /**
  * Creates a canonical model ID from provider and model components
@@ -29,14 +31,24 @@ export function createCanonicalId(providerId: string, modelId: string): string {
  * @returns An object containing providerId and modelId, or null if the format is invalid
  */
 export function parseCanonicalId(canonicalId: string): { providerId: string; modelId: string } | null {
-  if (!canonicalId?.includes(MODEL_ID_SEPARATOR)) {
+  const normalized = String(canonicalId || "");
+  if (!normalized) {
     return null;
   }
-  
-  const [providerId, ...modelIdParts] = canonicalId.split(MODEL_ID_SEPARATOR);
+
+  const separator = normalized.includes(MODEL_ID_SEPARATOR)
+    ? MODEL_ID_SEPARATOR
+    : normalized.includes("::")
+      ? "::"
+      : "";
+  if (!separator) {
+    return null;
+  }
+
+  const [providerId, ...modelIdParts] = normalized.split(separator);
   return {
     providerId: providerId.toLowerCase(),
-    modelId: modelIdParts.join(MODEL_ID_SEPARATOR) // Rejoin in case model ID contains separator
+    modelId: modelIdParts.join(separator) // Rejoin in case model ID contains separator
   };
 }
 
@@ -219,6 +231,12 @@ export function getProviderDisplayPrefix(providerId: string): string {
   if (normalized === 'systemsculpt') {
     return '[SS AI] ';
   }
+  if (normalized.startsWith(LOCAL_PI_PROVIDER_PREFIX)) {
+    const piProviderId = normalized.slice(LOCAL_PI_PROVIDER_PREFIX.length);
+    const piLabel = resolveProviderLabel(piProviderId).replace(/\s*\(.*?\)\s*$/g, "").trim();
+    const rendered = (piLabel || piProviderId || "pi").toUpperCase();
+    return `[${rendered} PI] `;
+  }
   return `[${normalized.toUpperCase()}] `;
 }
 
@@ -325,7 +343,7 @@ export function getImageCompatibilityInfo(model: SystemSculptModel): {
  * @returns A canonical model ID
  */
 export function ensureCanonicalId(modelId: string, defaultProvider: string = "systemsculpt"): string {
-  // If null/undefined, return empty string - agent model should only be set explicitly
+  // If null/undefined, return empty string so callers only persist an explicit model choice
   if (!modelId) {
     return "";
   }

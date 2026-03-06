@@ -1,6 +1,5 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component, Platform } from "obsidian";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import { registerWebResearchTools } from "../../services/web/registerWebResearchTools";
 import { ChatMessage, ChatRole, MultiPartContent, SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
@@ -10,15 +9,13 @@ import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from ".
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
-import { SystemPromptService } from "../../services/SystemPromptService";
+import { normalizeDesktopPromptSelectionType, SystemPromptService } from "../../services/SystemPromptService";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 import { StandardModelSelectionModal } from "../../modals/StandardModelSelectionModal";
 
 import { ensureCanonicalId, getDisplayName, getModelLabelWithProvider } from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
 import { GENERAL_USE_PRESET } from "../../constants/prompts";
-import { ToolCallManager } from "./ToolCallManager";
-import { MCPService } from "./MCPService";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
@@ -27,7 +24,9 @@ import { classifyQuotaExceededError } from "./utils/quotaError";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
-// import { AGENT_CONFIG } from "../../constants/agent"; // no longer force agent model
+import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
+import { loadPiSessionMirror } from "../../services/pi/PiSessionMirror";
+import { PiRpcProcessClient } from "../../services/pi/PiRpcProcessClient";
 
 import { uiSetup } from "./uiSetup";
 import { messageHandling } from "./messageHandling";
@@ -44,11 +43,9 @@ export class ChatView extends ItemView {
   public inputHandler: InputHandler;
   public plugin: SystemSculptPlugin;
   public chatId: string;
-  public toolCallManager: ToolCallManager;
   public selectedModelId: string;
   public modelIndicator: HTMLElement;
   public systemPromptIndicator: HTMLElement;
-  public agentModeIndicator: HTMLElement;
   public creditsIndicator: HTMLElement;
   public currentModelName: string = "";
   public isGenerating = false;
@@ -64,7 +61,8 @@ export class ChatView extends ItemView {
   public chatTitle: string;
   public chatVersion: number = 0;
   public currentPrompt?: string;
-  public agentMode: boolean = true;
+  public piSessionFile?: string;
+  public piSessionId?: string;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
@@ -72,7 +70,6 @@ export class ChatView extends ItemView {
   private settings: SystemSculptSettings;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
-  private warnedToolIncompatModels: Set<string> = new Set();
   private warnedImageIncompatModels: Set<string> = new Set();
   /**
    * Virtualized chat rendering state
@@ -114,7 +111,6 @@ export class ChatView extends ItemView {
         systemPromptPath?: string;
         version?: number;
         chatFontSize?: "small" | "medium" | "large";
-        agentMode?: boolean;
     }) || {};
 
     this.messages = [];
@@ -144,10 +140,6 @@ export class ChatView extends ItemView {
     if (this.systemPromptType === "custom" && !this.systemPromptPath) {
       this.systemPromptPath = plugin.settings.systemPromptPath;
     }
-
-    // Initialize agentMode from state or default to true
-    this.agentMode = initialState.agentMode !== undefined ? initialState.agentMode : true;
-
     this.layoutChangeHandler = this.onLayoutChange.bind(this);
   }
 
@@ -156,22 +148,12 @@ export class ChatView extends ItemView {
       this.aiService = SystemSculptService.getInstance(this.plugin);
     }
 
-    if (!this.toolCallManager) {
-      this.toolCallManager = new ToolCallManager(new MCPService(this.plugin, this.app), this);
-      // PI extension: web research tools (web_search, web_fetch)
-      registerWebResearchTools({
-        toolCallManager: this.toolCallManager,
-        plugin: this.plugin,
-        chatView: this,
-      });
-    }
-
     if (!this.chatStorage) {
       this.chatStorage = new ChatStorageService(this.app, this.plugin.settings.chatsDirectory);
     }
 
     if (!this.messageRenderer) {
-      this.messageRenderer = new MessageRenderer(this.app, this.toolCallManager);
+      this.messageRenderer = new MessageRenderer(this.app);
     }
 
     if (!this.systemPromptService) {
@@ -200,7 +182,6 @@ export class ChatView extends ItemView {
   }
   updateModelIndicator = () => uiSetup.updateModelIndicator(this);
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
-  updateAgentModeIndicator = () => uiSetup.updateAgentModeIndicator(this);
   updateCreditsIndicator = () => uiSetup.updateCreditsIndicator(this);
   updateToolCompatibilityWarning = () => uiSetup.updateToolCompatibilityWarning(this);
   addMessage = (role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage) =>
@@ -262,7 +243,8 @@ export class ChatView extends ItemView {
         this.systemPromptPath,
         this.chatTitle,
         this.chatFontSize,
-        this.agentMode
+        this.piSessionFile,
+        this.piSessionId
       );
       this.chatVersion = savedChat.version || this.chatVersion;
 
@@ -346,7 +328,7 @@ export class ChatView extends ItemView {
 
       if (result?.action === "secondary") {
         try {
-          await this.inputHandler?.submitWithOverrides?.({ includeContextFiles: false, agentModeOverride: false });
+          await this.inputHandler?.submitWithOverrides?.({ includeContextFiles: false });
         } catch {}
       }
 
@@ -452,7 +434,7 @@ export class ChatView extends ItemView {
 
           if (!this.hasConfiguredProvider()) {
             await this.promptProviderSetup(
-              "Connect SystemSculpt AI or add your own provider in Settings → Overview & Setup before starting a chat."
+              "Connect Pi providers in Settings → Overview & Setup before starting a chat."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -466,7 +448,7 @@ export class ChatView extends ItemView {
 
           if (!models || models.length === 0) {
             await this.promptProviderSetup(
-              "No AI providers are ready yet. Connect a provider or activate your license to continue."
+              "No local Pi models are ready yet. Connect Pi providers, refresh models, and try again."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -524,36 +506,20 @@ export class ChatView extends ItemView {
   }
 
   public async notifyCompatibilityNotice(info: { modelId: string; tools?: boolean; images?: boolean; source?: "cached" | "runtime" }): Promise<void> {
-    const tools = !!info.tools && this.agentMode;
     const images = !!info.images;
-    if (!tools && !images) return;
+    if (!images) return;
 
     const canonicalId = info.modelId ? ensureCanonicalId(info.modelId) : "";
     const modelLabel = canonicalId ? getModelLabelWithProvider(canonicalId) : (info.modelId || "this model");
 
-    let shouldNotify = false;
-    if (tools && !this.warnedToolIncompatModels.has(canonicalId)) {
-      this.warnedToolIncompatModels.add(canonicalId);
-      shouldNotify = true;
-    }
-    if (images && !this.warnedImageIncompatModels.has(canonicalId)) {
+    if (!this.warnedImageIncompatModels.has(canonicalId)) {
       this.warnedImageIncompatModels.add(canonicalId);
-      shouldNotify = true;
-    }
-
-    if (shouldNotify) {
-      let message = "";
-      if (tools && images) {
-        message = `Agent tools and images are disabled for ${modelLabel}. Switch to a compatible model to use them.`;
-      } else if (tools) {
-        const reason = info.source === "runtime" ? " because the provider rejected tool calls" : "";
-        message = `Agent tools are disabled for ${modelLabel}${reason}. Switch to a tool-capable model or run /agent status.`;
-      } else {
-        const reason = info.source === "runtime" ? " because the provider rejected image inputs" : "";
-        message = `Image context was skipped for ${modelLabel}${reason}. Switch to a vision-capable model to include images.`;
-      }
+      const reason = info.source === "runtime" ? " because the provider rejected image inputs" : "";
       try {
-        new Notice(message, 8000);
+        new Notice(
+          `Image context was skipped for ${modelLabel}${reason}. Switch to a vision-capable model to include images.`,
+          8000
+        );
       } catch {}
     }
 
@@ -610,10 +576,11 @@ export class ChatView extends ItemView {
   }
 
   public hasConfiguredProvider(): boolean {
-    const settings = this.plugin.settings;
-    const hasSystemSculpt = !!(settings.enableSystemSculptProvider && settings.licenseKey?.trim() && settings.licenseValid === true);
-    const hasCustomProvider = Array.isArray(settings.customProviders) && settings.customProviders.some((provider) => provider?.isEnabled);
-    return hasSystemSculpt || hasCustomProvider;
+    try {
+      const cachedModels = this.plugin.modelService.getCachedModels();
+      return cachedModels.length > 0;
+    } catch {}
+    return false;
   }
 
   public openSetupTab(targetTab: string = "overview"): void {
@@ -622,9 +589,9 @@ export class ChatView extends ItemView {
 
   public async promptProviderSetup(customMessage?: string): Promise<void> {
     const message = customMessage ??
-      "Connect SystemSculpt AI or bring your own API provider to start chatting.";
+      "Connect Pi and choose a local Pi model to start chatting.";
     const result = await showPopup(this.app, message, {
-      title: "Connect An AI Provider",
+      title: "Connect Pi",
       icon: "plug-zap",
       primaryButton: "Open Setup",
       secondaryButton: "Not Now",
@@ -733,10 +700,10 @@ export class ChatView extends ItemView {
       const iconWrapper = alert.createSpan({ cls: "ss-status-alert-icon" });
       setIcon(iconWrapper, "plug-zap");
       const content = alert.createDiv({ cls: "ss-status-alert-content" });
-      content.createDiv({ cls: "ss-status-alert-title", text: "Connect an AI provider to start chatting" });
+      content.createDiv({ cls: "ss-status-alert-title", text: "Connect Pi to start chatting" });
       content.createDiv({
         cls: "ss-status-alert-description",
-        text: "Activate your SystemSculpt license or add a custom provider in Settings → Overview & Setup."
+        text: "Open Setup to connect Pi providers, then refresh and choose a local Pi model."
       });
       const actions = content.createDiv({ cls: "ss-status-alert-actions" });
       const button = actions.createEl("button", {
@@ -787,13 +754,13 @@ export class ChatView extends ItemView {
 
     // Model
     const modelLabel = needsProviderSetup
-      ? 'Connect provider'
+      ? 'Connect Pi'
       : this.currentModelName || this.selectedModelId || 'Select…';
     createPill({
       icon: 'bot',
       label: 'Model',
       value: modelLabel,
-      title: needsProviderSetup ? 'Connect a provider to pick a model' : (modelLabel ? `Current model: ${modelLabel}` : 'Choose a model'),
+      title: needsProviderSetup ? 'Connect Pi to pick a local model' : (modelLabel ? `Current model: ${modelLabel}` : 'Choose a model'),
       onClick: () => {
         if (needsProviderSetup) {
           this.openSetupTab();
@@ -814,15 +781,12 @@ export class ChatView extends ItemView {
 
     // System Prompt
     let promptLabel = '';
-    switch (this.systemPromptType) {
+    switch (normalizeDesktopPromptSelectionType(this.systemPromptType)) {
       case "general-use":
         promptLabel = "General Use";
         break;
       case "concise":
         promptLabel = "Concise";
-        break;
-      case "agent":
-        promptLabel = "Agent Prompt";
         break;
       case "custom":
         if (this.systemPromptPath) {
@@ -837,14 +801,11 @@ export class ChatView extends ItemView {
         promptLabel = "General Use";
         break;
     }
-    const promptNote = (this.systemPromptType === "agent" && !this.agentMode)
-      ? " (Agent Mode off)"
-      : "";
     createPill({
-      icon: this.systemPromptType === 'agent' ? 'folder-open' : 'sparkles',
+      icon: normalizeDesktopPromptSelectionType(this.systemPromptType) === 'custom' ? 'file-text' : 'sparkles',
       label: 'Prompt',
       value: promptLabel,
-      title: `Current system prompt: ${promptLabel}${promptNote}`,
+      title: `Current system prompt: ${promptLabel}`,
       onClick: async () => {
         const { StandardSystemPromptSelectionModal } = await import('../../modals/StandardSystemPromptSelectionModal');
         const modal = new StandardSystemPromptSelectionModal({
@@ -856,6 +817,7 @@ export class ChatView extends ItemView {
             this.systemPromptType = result.type;
             this.systemPromptPath = result.type === 'custom' ? result.path : undefined;
             this.currentPrompt = result.prompt;
+            this.clearPiSessionState({ save: false });
             try {
               const useLatestPrompt = this.plugin.settings.useLatestSystemPromptForNewChats ?? true;
               const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
@@ -893,24 +855,8 @@ export class ChatView extends ItemView {
       },
     });
 
-    // Agent Mode
-    const agentModeEnabled = !!this.agentMode;
-	    createPill({
-	      icon: 'wrench',
-	      label: 'Agent Mode',
-	      value: agentModeEnabled ? 'On' : 'Off',
-      isOn: agentModeEnabled,
-      title: agentModeEnabled
-        ? 'Agent Mode enabled (click to disable tools)'
-        : 'Agent Mode disabled (click to enable tools)',
-      onClick: async () => {
-        await this.setAgentMode(!this.agentMode);
-	      }
-	    });
-
-	    // Font Size
-	    const fontLabel = this.chatFontSize.charAt(0).toUpperCase() + this.chatFontSize.slice(1);
-	    createPill({
+    const fontLabel = this.chatFontSize.charAt(0).toUpperCase() + this.chatFontSize.slice(1);
+    createPill({
       icon: 'type',
       label: 'Font',
       value: fontLabel,
@@ -987,7 +933,8 @@ export class ChatView extends ItemView {
       systemPromptPath: this.systemPromptPath,
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
-      agentMode: this.agentMode,
+      piSessionFile: this.piSessionFile,
+      piSessionId: this.piSessionId,
     };
   }
 
@@ -1007,7 +954,8 @@ export class ChatView extends ItemView {
       this.chatId = "";
       this.initializeChatTitle();
       // Ensure the selectedModelId for a new chat defaults to the plugin's setting
-      this.agentMode = state?.agentMode !== undefined ? state.agentMode : true;
+      this.piSessionFile = undefined;
+      this.piSessionId = undefined;
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       // Respect policy for default system prompt when starting new chats
@@ -1039,7 +987,6 @@ export class ChatView extends ItemView {
       this.contextManager?.clearContext();
       this.updateModelIndicator();
       this.updateSystemPromptIndicator();
-      this.updateAgentModeIndicator();
       // Don't render messages here - let onOpen handle it after UI is ready
       // this.renderMessagesInChunks();
       this.isFullyLoaded = true; // New chat is immediately loaded
@@ -1068,7 +1015,8 @@ export class ChatView extends ItemView {
       this.systemPromptType = state.systemPromptType || 'general-use';
       this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
-      this.agentMode = state.agentMode !== undefined ? state.agentMode : true;
+      this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
+      this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
 
       if (state.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
@@ -1104,7 +1052,8 @@ export class ChatView extends ItemView {
     // Only set path for custom prompts
     this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
-    this.agentMode = state.agentMode !== undefined ? state.agentMode : true;
+    this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
+    this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
     // Restore chat font size
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
@@ -1184,13 +1133,14 @@ export class ChatView extends ItemView {
           this.setTitle("Chat not found");
           this.systemPromptType = 'general-use';
           this.systemPromptPath = undefined;
+          this.piSessionFile = undefined;
+          this.piSessionId = undefined;
           this.contextManager?.clearContext();
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
           // UI indicators can update asynchronously
           void this.updateModelIndicator();
           void this.updateSystemPromptIndicator();
-          void this.updateAgentModeIndicator();
           return;
         }
 
@@ -1198,15 +1148,43 @@ export class ChatView extends ItemView {
         this.selectedModelId = chatData.selectedModelId || this.plugin.settings.selectedModelId;
         this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
-        this.messages = chatData.messages || [];
+        let hydratedMessages = chatData.messages || [];
         this.chatVersion = chatData.version || 0;
 
         // Simplified system prompt handling
         this.systemPromptType = chatData.systemPromptType || 'general-use';
         this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
 
-        // Load agentMode from chat data, default to true for backward compatibility
-        this.agentMode = chatData.agentMode !== undefined ? chatData.agentMode : true;
+        this.piSessionFile = chatData.piSessionFile;
+        this.piSessionId = chatData.piSessionId;
+
+        if (Platform.isDesktopApp && this.piSessionFile) {
+          try {
+            await this.hydrateFromPiSession({
+              sessionFile: this.piSessionFile,
+              sessionId: this.piSessionId,
+              syncTitle: true,
+              render: false,
+              save: false,
+            });
+            if (loadEpoch !== this.loadEpoch) return;
+            hydratedMessages = this.messages;
+          } catch (error) {
+            try {
+              errorLogger.warn("Failed to hydrate chat history from Pi session file", {
+                source: "ChatView",
+                method: "loadChatById",
+                metadata: {
+                  chatId,
+                  sessionFile: this.piSessionFile,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              });
+            } catch {}
+          }
+        }
+
+        this.messages = hydratedMessages;
 
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
@@ -1237,7 +1215,6 @@ export class ChatView extends ItemView {
         // Update UI indicators (async; do not block chat readiness)
         void this.updateModelIndicator();
         void this.updateSystemPromptIndicator();
-        void this.updateAgentModeIndicator();
         void this.refreshModelMetadata();
 
         if (this.inputHandler) {
@@ -1655,17 +1632,11 @@ export class ChatView extends ItemView {
       async () => {
         const basePrompt = await this.systemPromptService.getSystemPromptContent(
           this.systemPromptType || "general-use",
-          this.systemPromptPath,
-          this.agentMode
-        );
-        const combinedPrompt = await this.systemPromptService.combineWithAgentPrefix(
-          basePrompt,
-          this.systemPromptType,
-          this.agentMode
+          this.systemPromptPath
         );
         return {
           basePrompt,
-          combinedPrompt,
+          combinedPrompt: basePrompt,
         };
       },
       null
@@ -1874,12 +1845,6 @@ export class ChatView extends ItemView {
       null
     );
 
-    const toolState = safe<ReturnType<ToolCallManager["getDebugSnapshot"]> | null>(
-      "tool-state",
-      () => this.toolCallManager?.getDebugSnapshot?.() ?? null,
-      null
-    );
-
     const snapshot = {
       generatedAt: now.toISOString(),
       warnings: [
@@ -1914,7 +1879,6 @@ export class ChatView extends ItemView {
         isGenerating: this.isGenerating,
         selectedModelId: this.selectedModelId,
         currentModelName: this.currentModelName,
-        agentMode: this.agentMode,
         systemPromptType: this.systemPromptType,
         systemPromptPath: this.systemPromptPath,
         systemPrompt: systemPromptDetails,
@@ -1935,7 +1899,6 @@ export class ChatView extends ItemView {
         files: contextFiles,
         processingEntries,
       },
-      tools: toolState,
       ui: {
         input: inputState,
         scroll: scrollState,
@@ -1988,13 +1951,190 @@ export class ChatView extends ItemView {
     return this.selectedModelId;
   }
 
+  public getPiSessionFile(): string | undefined {
+    return typeof this.piSessionFile === "string" && this.piSessionFile.trim().length > 0
+      ? this.piSessionFile
+      : undefined;
+  }
+
+  private resolvePiSessionRef(nextState?: {
+    sessionFile?: string;
+    sessionId?: string;
+  }): { sessionFile?: string; sessionId?: string } {
+    const sessionFile = String(nextState?.sessionFile || this.piSessionFile || "").trim();
+    const sessionId = String(nextState?.sessionId || this.piSessionId || "").trim();
+    return {
+      sessionFile: sessionFile || undefined,
+      sessionId: sessionId || undefined,
+    };
+  }
+
+  public async hydrateFromPiSession(options?: {
+    sessionFile?: string;
+    sessionId?: string;
+    syncTitle?: boolean;
+    render?: boolean;
+    save?: boolean;
+  }): Promise<void> {
+    const sessionRef = this.resolvePiSessionRef(options);
+    if (!Platform.isDesktopApp || !sessionRef.sessionFile) {
+      return;
+    }
+
+    const snapshot = await loadPiSessionMirror({
+      plugin: this.plugin,
+      sessionFile: sessionRef.sessionFile,
+    });
+
+    this.messages = snapshot.messages;
+    this.piSessionFile = snapshot.sessionFile || sessionRef.sessionFile;
+    this.piSessionId = snapshot.sessionId || sessionRef.sessionId;
+
+    const sessionName = String(snapshot.sessionName || "").trim();
+    if (options?.syncTitle !== false && sessionName) {
+      this.chatTitle = sessionName;
+    }
+
+    this.updateViewState();
+
+    if (options?.render !== false) {
+      await this.renderMessagesInChunks();
+    }
+
+    if (options?.save && this.chatId && this.isFullyLoaded) {
+      await this.saveChat();
+    }
+  }
+
+  private async resolvePiForkEntryId(client: PiRpcProcessClient, messageId: string): Promise<string> {
+    const userMessages = this.messages.filter((message) => message.role === "user");
+    const userIndex = userMessages.findIndex((message) => message.message_id === messageId);
+    if (userIndex === -1) {
+      return "";
+    }
+
+    const forkMessages = await client.getForkMessages();
+    if (userIndex >= forkMessages.length) {
+      return "";
+    }
+
+    return String(forkMessages[userIndex]?.entryId || "").trim();
+  }
+
+  public async forkPiSessionFromMessage(messageId: string): Promise<{
+    text: string;
+    cancelled: boolean;
+  }> {
+    const sessionFile = this.getPiSessionFile();
+    if (!Platform.isDesktopApp || !sessionFile) {
+      throw new Error("This chat does not have an active Pi session to fork.");
+    }
+
+    const targetMessage = this.messages.find(
+      (message) => message.message_id === messageId && message.role === "user"
+    );
+    if (!targetMessage) {
+      throw new Error("Only Pi-backed user messages can be forked.");
+    }
+
+    const client = new PiRpcProcessClient({
+      plugin: this.plugin,
+      sessionFile,
+    });
+
+    await client.start();
+    try {
+      const entryId =
+        String(targetMessage.pi_entry_id || "").trim() ||
+        (await this.resolvePiForkEntryId(client, messageId));
+      if (!entryId) {
+        throw new Error("Pi could not resolve a fork point for this message.");
+      }
+
+      const result = await client.fork(entryId);
+      if (result.cancelled) {
+        return result;
+      }
+
+      const state = await client.getState();
+      await this.hydrateFromPiSession({
+        sessionFile: String(state.sessionFile || "").trim() || sessionFile,
+        sessionId: String(state.sessionId || "").trim() || this.piSessionId,
+        syncTitle: true,
+        render: true,
+        save: true,
+      });
+
+      return result;
+    } finally {
+      await client.stop();
+    }
+  }
+
+  private async syncPiSessionName(name: string): Promise<void> {
+    const sessionFile = this.getPiSessionFile();
+    const sessionName = String(name || "").trim();
+    if (!Platform.isDesktopApp || !sessionFile || !sessionName) {
+      return;
+    }
+
+    const client = new PiRpcProcessClient({
+      plugin: this.plugin,
+      sessionFile,
+    });
+
+    await client.start();
+    try {
+      await client.setSessionName(sessionName);
+      const state = await client.getState();
+      this.piSessionFile = String(state.sessionFile || "").trim() || sessionFile;
+      this.piSessionId = String(state.sessionId || "").trim() || this.piSessionId;
+      this.updateViewState();
+    } finally {
+      await client.stop();
+    }
+  }
+
+  public clearPiSessionState(options?: { save?: boolean; updateViewState?: boolean }): void {
+    const hadSession = !!this.piSessionFile || !!this.piSessionId;
+    this.piSessionFile = undefined;
+    this.piSessionId = undefined;
+
+    if (options?.updateViewState !== false) {
+      this.updateViewState();
+    }
+
+    if (hadSession && options?.save && this.chatId && this.isFullyLoaded) {
+      void this.saveChat();
+    }
+  }
+
+  public setPiSessionState(session: { sessionFile?: string; sessionId: string }): void {
+    const nextSessionFile =
+      typeof session.sessionFile === "string" && session.sessionFile.trim().length > 0
+        ? session.sessionFile.trim()
+        : undefined;
+    const nextSessionId = String(session.sessionId || "").trim() || undefined;
+
+    if (this.piSessionFile === nextSessionFile && this.piSessionId === nextSessionId) {
+      return;
+    }
+
+    this.piSessionFile = nextSessionFile;
+    this.piSessionId = nextSessionId;
+    this.updateViewState();
+
+    if (this.chatId && this.isFullyLoaded) {
+      void this.saveChat();
+    }
+  }
+
   public async setSelectedModelId(modelId: string): Promise<void> {
     const canonicalId = ensureCanonicalId(modelId);
 
     this.selectedModelId = canonicalId;
     // Update display name immediately so any displayChatStatus() calls use the correct value
     this.currentModelName = getDisplayName(canonicalId);
-
     // If global policy is to use latest everywhere (or Standard mode), make this the global default
     try {
       const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
@@ -2008,31 +2148,13 @@ export class ChatView extends ItemView {
       const model = await this.plugin.modelService.getModelById(canonicalId);
 
       if (model) {
-
-        const customProvider = this.plugin.settings.customProviders.find(
-          (p) => p.name.toLowerCase() === model.provider.toLowerCase()
-        );
-
-        if (customProvider) {
-          await this.plugin.getSettingsManager().updateSettings({
-            activeProvider: {
-              id: customProvider.id,
-              name: customProvider.name,
-              type: "custom",
-            }
-          });
-        } else {
-          await this.plugin.getSettingsManager().updateSettings({
-            activeProvider: {
-              id: "systemsculpt",
-              name: "SystemSculpt",
-              type: "native",
-            }
-          });
-        }
-
-        // Settings are saved by the provider selection method
-      } else {
+        await this.plugin.getSettingsManager().updateSettings({
+          activeProvider: {
+            id: model.provider,
+            name: resolveProviderLabel(model.sourceProviderId || model.provider),
+            type: "native",
+          }
+        });
       }
     } catch (error) {
     }
@@ -2051,38 +2173,6 @@ export class ChatView extends ItemView {
     this.focusInput();
     // Centralized sync + broadcast
     this.notifySettingsChanged();
-  }
-
-  public async setAgentMode(enabled: boolean, options?: { showNotice?: boolean }): Promise<void> {
-    const nextValue = !!enabled;
-    if (this.agentMode === nextValue) return;
-
-    this.agentMode = nextValue;
-    this.updateViewState();
-
-    await this.saveChat();
-
-    try {
-      await this.updateAgentModeIndicator();
-    } catch {}
-    try {
-      await this.updateSystemPromptIndicator();
-    } catch {}
-    try {
-      await this.updateToolCompatibilityWarning();
-    } catch {}
-
-    if (this.messages.length === 0) {
-      this.displayChatStatus();
-    }
-
-    this.notifySettingsChanged();
-
-    if (options?.showNotice !== false) {
-      try {
-        new Notice(`Agent Mode ${nextValue ? "enabled" : "disabled"}`, 2000);
-      } catch {}
-    }
   }
 
   private getChatExportService(): ChatExportService {
@@ -2121,6 +2211,7 @@ export class ChatView extends ItemView {
     this.updateViewState();
 
     if (shouldSave) {
+      await this.syncPiSessionName(newTitle);
       await this.saveChat();
       this.app.workspace.requestSaveLayout();
     }
@@ -2191,13 +2282,6 @@ export class ChatView extends ItemView {
         (this.messageRenderer as any).destroy();
       }
       this.messageRenderer = null as any;
-    }
-    
-    if (this.toolCallManager) {
-      if (typeof (this.toolCallManager as any).destroy === 'function') {
-        (this.toolCallManager as any).destroy();
-      }
-      this.toolCallManager = null as any;
     }
     
     if (this.inputHandler) {

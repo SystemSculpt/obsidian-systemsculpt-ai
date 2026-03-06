@@ -23,7 +23,7 @@ describe("ChatStorageService.normalizeLegacyToolMessages", () => {
     autoApproved: true,
   });
 
-  const service = new ChatStorageService({} as any, "", undefined);
+  const service = new ChatStorageService({} as any, "");
 
   it("coalesces consecutive assistant messages into one assistant turn", () => {
     const firstToolCall = createToolCall("call_emlistitems0", "msg-1", "mcp-filesystem_list_items");

@@ -279,7 +279,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["sourceMode", "modelId", "localModelId", "reasoningEffort", "systemPrompt"],
+      orderedFieldKeys: ["modelId", "reasoningEffort", "systemPrompt"],
       interactionLocked,
       onNodeConfigMutated,
       panelClassName: "ss-studio-node-inline-config--text-generation",

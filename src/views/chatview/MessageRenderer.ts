@@ -2,7 +2,6 @@ import { App, Component, MarkdownRenderer, setIcon, ButtonComponent, Modal, Text
 import { showPopup } from "../../core/ui";
 import { ChatRole, ImageContent, MultiPartContent, Annotation, UrlCitation, MessagePart, ChatMessage } from "../../types";
 import type { ToolCall, SerializedToolCall } from "../../types/toolCalls";
-import type { ToolCallManager } from "./ToolCallManager";
 import { findLeafByPath, openFileInMainWorkspace } from '../../utils/workspaceUtils';
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 import { MessagePartList } from "./utils/MessagePartList";
@@ -60,7 +59,6 @@ export interface MessageRenderOptions {
 
 export class MessageRenderer extends Component {
   private app: App;
-  private toolCallManager?: ToolCallManager;
   private throttledRenderers = new WeakMap<HTMLElement, { timeoutId: any, content: string }>();
   private readonly RENDER_THROTTLE_MS = 100;
 
@@ -71,20 +69,14 @@ export class MessageRenderer extends Component {
 
 
 
-  constructor(app: App, toolCallManager?: ToolCallManager) {
+  constructor(app: App) {
     super();
     this.app = app;
-    this.toolCallManager = toolCallManager;
     this.markdownRenderer = new MarkdownMessageRenderer(app);
     this.toolCallRenderer = new ToolCallTreeRenderer(this);
     this.addChild(this.toolCallRenderer);
 
     // No periodic drawer cleanup required now that reasoning uses structured layout
-  }
-
-  /** Get the tool call manager for tool-call state and rendering integration */
-  public getToolCallManager(): ToolCallManager | undefined {
-    return this.toolCallManager;
   }
 
   /** Get the app instance for vault access */

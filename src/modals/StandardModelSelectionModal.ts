@@ -1,176 +1,274 @@
-import { App, Platform, setIcon, DropdownComponent, Notice, ButtonComponent } from "obsidian";
-import { ListItem, ListSelectionModal } from "../core/ui/modals/standard";
-import { SystemSculptModel } from "../types/llm";
-import SystemSculptPlugin from "../main";
-import { SearchService, SearchableField } from "../services/SearchService";
-import {
-  ensureCanonicalId,
-  getCanonicalId,
-  parseCanonicalId,
-  MODEL_ID_SEPARATOR,
-  filterChatModels
-} from "../utils/modelUtils";
-import { FavoritesService } from "../services/FavoritesService";
-import { FavoritesFilter } from "../components/FavoritesFilter";
-import { FavoriteToggle } from "../components/FavoriteToggle";
+import { App, Notice } from "obsidian";
 import { EmptyFavoritesState } from "../components/EmptyFavoritesState";
-import type { StudioPiProviderAuthRecord } from "../studio/piAuth/StudioPiAuthStorage";
+import { FavoritesFilter } from "../components/FavoritesFilter";
+import { ListItem, ListSelectionModal } from "../core/ui/modals/standard";
+import SystemSculptPlugin from "../main";
+import { FavoritesService } from "../services/FavoritesService";
+import { SearchService } from "../services/SearchService";
+import type { SearchableField } from "../services/SearchService";
+import type { SystemSculptModel } from "../types/llm";
+import { resolveProviderLabel } from "../studio/piAuth/StudioPiProviderRegistry";
+import { ensureCanonicalId, filterChatModels } from "../utils/modelUtils";
+import { buildModelSelectionListItems, getModelSelectionSearchableFields } from "./model-selection/ModelSelectionItems";
 import {
-  hasAuthenticatedStudioPiProvider,
-  normalizeStudioPiProviderId,
-  type StudioPiProviderAuthRecordLike,
-} from "../studio/piAuth/StudioPiProviderAuthUtils";
-// Define the result type for the onSelect callback
+  buildModelSelectionProviderSummary, createEmptyModelSelectionProviderSummary, loadModelSelectorProviderAuth,
+  normalizeModelSelectorProviderId, resolveModelSelectionAccessStateForModel,
+  type ModelSelectionProviderSummarySnapshot, type ModelSelectorProviderAuthRecord,
+} from "./model-selection/ModelSelectionProviderAuth";
+import { renderModelSelectionSummaryBar, type ModelSelectionSummaryBarHandle } from "./model-selection/ModelSelectionSummaryBar";
+import {
+  updateModelSelectionEmptyState,
+  updateModelSelectionFavoritesButtonCount,
+} from "./model-selection/ModelSelectionModalUi";
+
+export { hasAuthenticatedModelSelectorProvider, normalizeModelSelectorProviderId } from "./model-selection/ModelSelectionProviderAuth";
+
 export interface ModelSelectionResult {
   modelId: string;
 }
 
-// Define options for the modal constructor
 export interface ModelSelectionOptions {
   app: App;
   plugin: SystemSculptPlugin;
   currentModelId: string;
   onSelect: (result: ModelSelectionResult) => void;
-  title?: string; // Optional custom title
-  description?: string; // Optional custom description
+  title?: string;
+  description?: string;
 }
 
-type ModelSelectorProviderAuthRecord = StudioPiProviderAuthRecordLike &
-  Pick<StudioPiProviderAuthRecord, "displayName">;
-
-export function normalizeModelSelectorProviderId(value: unknown): string {
-  return normalizeStudioPiProviderId(value);
-}
-
-export function hasAuthenticatedModelSelectorProvider(
-  record: ModelSelectorProviderAuthRecord | null | undefined
-): boolean {
-  return hasAuthenticatedStudioPiProvider(record);
-}
-
-/**
- * StandardModelSelectionModal provides a standardized model selection experience
- * using the new modal system.
- */
 export class StandardModelSelectionModal {
   private allModels: SystemSculptModel[] = [];
   private filteredModels: SystemSculptModel[] = [];
   private selectedModelId: string;
-  // Updated onSelect type
   private onSelect: (result: ModelSelectionResult) => void;
   private plugin: SystemSculptPlugin;
   private app: App;
   private searchService: SearchService;
   private favoritesService: FavoritesService;
-  private modalInstance: ListSelectionModal | null = null; // Store modal instance reference
+  private modalInstance: ListSelectionModal | null = null;
   private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
   private favoritesFilter: FavoritesFilter | null = null;
   private emptyState: EmptyFavoritesState | null = null;
-  private modalTitle: string; // Custom title for the modal
-  private modalDescription: string; // Custom description for the modal
-  private isLoadingModels: boolean = true; // Track loading state for lazy UI
-
-  // Cache for provider name lookups
-  private static providerNameCache: Record<string, string> = {};
+  private modalTitle: string;
+  private modalDescription: string;
+  private isLoadingModels = true;
+  private chromeHandle: ModelSelectionSummaryBarHandle | null = null;
+  private providerSummary: ModelSelectionProviderSummarySnapshot =
+    createEmptyModelSelectionProviderSummary();
+  private emitterUnsubscribers: Array<() => void> = [];
   private providerAuthById = new Map<string, ModelSelectorProviderAuthRecord>();
   private providerAuthRequestId = 0;
 
-  // Updated constructor to use options object
+  private static providerNameCache: Record<string, string> = {};
+
   constructor(options: ModelSelectionOptions) {
     this.app = options.app;
     this.plugin = options.plugin;
     this.selectedModelId = options.currentModelId;
     this.onSelect = options.onSelect;
     this.modalTitle = options.title || "Select AI Model";
-    this.modalDescription = options.description || "Choose a model for your conversation";
-
-    // Initialize services
+    this.modalDescription = options.description || "Choose a local Pi model from your connected providers.";
     this.searchService = SearchService.getInstance();
     this.favoritesService = FavoritesService.getInstance(this.plugin);
 
-    // Load all models from the model service
-    this.plugin.modelService.getModels().then(models => {
-      // Filter out embedding models - only show chat models
-      this.allModels = filterChatModels(models);
-
-      // Process favorites to ensure they're marked correctly
-      this.favoritesService.processFavorites(this.allModels);
-
-      this.filteredModels = this.applyAllFilters(this.allModels);
-      void this.refreshProviderAuthState(this.allModels);
-    }).catch(error => {
-      this.allModels = [];
-      this.filteredModels = [];
-      this.providerAuthById.clear();
-    });
-
+    void this.loadModels(() => this.plugin.modelService.getModels());
   }
 
-  /**
-   * Register an event listener and track it for cleanup
-   * (Ensure this is only used for listeners we *know* we need to clean up)
-   */
-  private registerListener(element: HTMLElement, type: string, listener: EventListener) {
+  public static cleanupProviderPreferences(plugin: SystemSculptPlugin): void {
+    try {
+      if (plugin.settings.selectedModelProviders?.length) {
+        plugin.settings.selectedModelProviders = [];
+        plugin.saveSettings();
+      }
+    } catch {
+      // Ignore stale preference cleanup failures at startup.
+    }
+  }
+
+  private registerListener(element: HTMLElement, type: string, listener: EventListener): void {
     element.addEventListener(type, listener);
     this.listeners.push({ element, type, listener });
   }
 
-  /**
-   * Remove all registered event listeners
-   */
-  private removeAllListeners() {
-    this.listeners.forEach(({ element, type, listener }) => {
-      element.removeEventListener(type, listener);
-    });
-    this.listeners = [];
-    // Also remove emitter listeners if any were registered
-    this.removeAllEmitterListeners();
-  }
-
-  // Track emitter unsubscribers for cleanup
-  private emitterUnsubscribers: Array<() => void> = [];
-
-  private registerEmitterListener(unsub: () => void) {
+  private registerEmitterListener(unsub: () => void): void {
     this.emitterUnsubscribers.push(unsub);
   }
 
-  private removeAllEmitterListeners() {
+  private removeAllEmitterListeners(): void {
     this.emitterUnsubscribers.forEach((off) => {
-      try { off(); } catch {}
+      try {
+        off();
+      } catch {
+        // Ignore cleanup errors from provider emitters.
+      }
     });
     this.emitterUnsubscribers = [];
   }
 
-  /**
-   * Apply modal filters (favorites, current selection pinning, sorting)
-   */
-  private applyAllFilters(models: SystemSculptModel[]): SystemSculptModel[] {
-    // No longer restrict models based on agent prompt - agent mode is now independent of model selection
-    let filteredModels = models;
-
-    // Then filter by favorites if needed
-    filteredModels = this.favoritesService.filterModelsByFavorites(filteredModels);
-
-    // Always include the current model if it exists and isn't already in the filtered list
-    const currentModel = models.find(m => this.isModelSelected(m.id));
-    if (currentModel && !filteredModels.some(m => this.isModelSelected(m.id))) {
-      filteredModels.unshift(currentModel); // Add to beginning
-    }
-
-    // Then sort with favorites first
-    filteredModels = this.favoritesService.sortModelsByFavorites(filteredModels);
-
-    // Store the filtered models for reference
-    this.filteredModels = filteredModels;
-
-    return filteredModels;
+  private removeAllListeners(): void {
+    this.listeners.forEach(({ element, type, listener }) => {
+      element.removeEventListener(type, listener);
+    });
+    this.listeners = [];
+    this.removeAllEmitterListeners();
   }
 
-  /**
-   * Search models based on query
-   */
+  private async loadModels(
+    loader: () => Promise<SystemSculptModel[]>
+  ): Promise<boolean> {
+    this.isLoadingModels = true;
+    this.updateProviderSummaryView();
+
+    try {
+      const models = await loader();
+      await this.applyLoadedModels(models);
+      return true;
+    } catch {
+      this.allModels = [];
+      this.filteredModels = [];
+      this.providerAuthById.clear();
+      this.providerSummary = createEmptyModelSelectionProviderSummary();
+      this.updateDerivedState();
+      return false;
+    } finally {
+      this.isLoadingModels = false;
+      this.updateProviderSummaryView();
+    }
+  }
+
+  private async applyLoadedModels(models: SystemSculptModel[]): Promise<void> {
+    this.allModels = filterChatModels(models);
+    this.favoritesService.processFavorites(this.allModels);
+    await this.refreshProviderAuthState(this.allModels);
+    this.updateDerivedState();
+  }
+
+  private async refreshAllModels(noticeOnSuccess: boolean = false): Promise<void> {
+    const success = await this.loadModels(() => this.plugin.modelService.refreshModels());
+    if (success && noticeOnSuccess) {
+      new Notice("Models refreshed");
+    }
+    if (!success) {
+      new Notice("Failed to refresh models");
+    }
+  }
+
+  private applyAllFilters(models: SystemSculptModel[]): SystemSculptModel[] {
+    let nextModels = this.favoritesService.filterModelsByFavorites(models);
+
+    const currentModel = models.find((model) => this.isModelSelected(model.id));
+    if (currentModel && !nextModels.some((model) => this.isModelSelected(model.id))) {
+      nextModels = [currentModel, ...nextModels];
+    }
+
+    return this.favoritesService.sortModelsByFavorites(nextModels);
+  }
+
+  private updateDerivedState(): void {
+    this.filteredModels = this.applyAllFilters(this.allModels);
+    this.updateProviderSummaryView();
+    this.updateModelList();
+    this.updateFavoritesButtonCount();
+    this.updateEmptyState();
+  }
+
+  private async refreshProviderAuthState(models: SystemSculptModel[]): Promise<void> {
+    const requestId = ++this.providerAuthRequestId;
+    const next = await loadModelSelectorProviderAuth(models);
+
+    if (requestId !== this.providerAuthRequestId) {
+      return;
+    }
+
+    this.providerAuthById = next;
+    for (const [providerId, record] of next.entries()) {
+      const displayName = String(record.displayName || "").trim();
+      if (displayName) {
+        StandardModelSelectionModal.providerNameCache[providerId] = displayName;
+      }
+    }
+    this.updateProviderSummaryView();
+  }
+
+  private updateProviderSummaryView(): void {
+    this.providerSummary = buildModelSelectionProviderSummary(this.allModels, this.providerAuthById, {
+      selectedModelId: this.selectedModelId,
+      resolveProviderLabel: (providerName) => this.resolveCustomProviderDisplayName(providerName),
+    });
+    this.chromeHandle?.update(this.providerSummary, { loading: this.isLoadingModels });
+  }
+
+  private resolveModelAccessState(model: SystemSculptModel) {
+    return resolveModelSelectionAccessStateForModel(model, this.providerAuthById);
+  }
+
+  private resolveCustomProviderDisplayName(providerName: string): string {
+    const providerId = normalizeModelSelectorProviderId(providerName);
+    if (!providerId) {
+      return "Pi";
+    }
+
+    if (!StandardModelSelectionModal.providerNameCache[providerId]) {
+      StandardModelSelectionModal.providerNameCache[providerId] =
+        resolveProviderLabel(providerId) || (providerName ? providerName : providerId);
+    }
+
+    return StandardModelSelectionModal.providerNameCache[providerId];
+  }
+
+  private createModalChrome(containerEl: HTMLElement): void {
+    this.chromeHandle = renderModelSelectionSummaryBar(containerEl, {
+      onOpenSetup: () => this.openProviderSetup(),
+      onRefresh: async () => { await this.refreshAllModels(true); },
+    });
+
+    this.favoritesFilter = new FavoritesFilter(
+      this.chromeHandle.favoritesContainerEl,
+      this.favoritesService,
+      () => {
+        this.updateModelList();
+        this.updateFavoritesButtonCount();
+        this.updateEmptyState();
+      }
+    );
+
+    this.updateFavoritesButtonCount();
+    this.updateProviderSummaryView();
+  }
+
+  private openProviderSetup(): void {
+    this.modalInstance?.close();
+    this.removeAllListeners();
+    window.setTimeout(() => this.plugin.openSettingsTab("overview"), 0);
+  }
+
+  private updateFavoritesButtonCount(): void {
+    if (!this.favoritesFilter) {
+      return;
+    }
+
+    updateModelSelectionFavoritesButtonCount(
+      this.modalInstance,
+      this.filteredModels.filter((model) => model.isFavorite).length
+    );
+  }
+
+  private getSearchableFields(model: SystemSculptModel): SearchableField[] {
+    return getModelSelectionSearchableFields(model, (providerName) =>
+      this.resolveCustomProviderDisplayName(providerName)
+    );
+  }
+
+  private convertModelsToListItems(models: SystemSculptModel[]): ListItem[] {
+    return buildModelSelectionListItems(models, {
+      selectedModelId: this.selectedModelId,
+      resolveProviderLabel: (providerName) => this.resolveCustomProviderDisplayName(providerName),
+      resolveModelAccessState: (model) => this.resolveModelAccessState(model),
+    });
+  }
+
   private searchModels(models: SystemSculptModel[], query: string): ListItem[] {
-    if (!query || query.trim() === '') {
+    if (!query || query.trim() === "") {
       return this.convertModelsToListItems(models);
     }
 
@@ -184,529 +282,73 @@ export class StandardModelSelectionModal {
       }
     );
 
-    // Filter out results with no matches or low scores
     let filteredResults = results
-      .filter(result => result.matches.length > 0 && result.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map(result => result.item);
+      .filter((result) => result.matches.length > 0 && result.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .map((result) => result.item);
 
-    // Always include the current model in search results if it exists
-    const currentModel = models.find(m => this.isModelSelected(m.id));
-    if (currentModel && !filteredResults.some(m => this.isModelSelected(m.id))) {
-      filteredResults.unshift(currentModel); // Add to beginning
+    const currentModel = models.find((model) => this.isModelSelected(model.id));
+    if (currentModel && !filteredResults.some((model) => this.isModelSelected(model.id))) {
+      filteredResults = [currentModel, ...filteredResults];
     }
 
     return this.convertModelsToListItems(filteredResults);
   }
 
-  /**
-   * Create filter controls (providers and favorites)
-   */
-  private createFilters(containerEl: HTMLElement): void {
-    // Create a compact filter bar
-    const filterBar = containerEl.createDiv("ss-model-filter-bar");
-
-    // Controls section
-    const controlsSection = filterBar.createDiv("ss-model-filter-controls");
-
-    // Favorites toggle (with count integrated)
-    const favoritesButton = controlsSection.createDiv("ss-favorites-button");
-    this.favoritesFilter = new FavoritesFilter(
-      favoritesButton,
-      this.favoritesService,
-      () => {
-        this.updateModelList();
-        this.updateFavoritesButtonCount(); // Update favorites count
-        this.updateEmptyState();
-      }
-    );
-
-    // Initialize favorites count
-    this.updateFavoritesButtonCount();
-
-    // Simple refresh button
-    const refreshButton = controlsSection.createEl("button", {
-      cls: "ss-model-refresh-button",
-    });
-    const refreshIcon = refreshButton.createSpan();
-    setIcon(refreshIcon, "refresh-cw");
-    const refreshText = refreshButton.createSpan();
-    refreshText.textContent = "Refresh";
-
-    refreshButton.addEventListener("click", async () => {
-      refreshIcon.addClass("ss-spin");
-      refreshText.textContent = "...";
-
-      try {
-        this.allModels = await this.plugin.modelService.refreshModels();
-        this.favoritesService.processFavorites(this.allModels);
-        void this.refreshProviderAuthState(this.allModels);
-        this.updateModelList();
-        this.updateFavoritesButtonCount();
-        this.updateEmptyState();
-        new Notice("Models refreshed");
-      } catch (error) {
-        new Notice("Failed to refresh models");
-      } finally {
-        refreshIcon.removeClass("ss-spin");
-        refreshText.textContent = "Refresh";
-      }
-    });
+  private async searchModelsAsync(models: SystemSculptModel[], query: string): Promise<ListItem[]> {
+    return Promise.resolve(this.searchModels(models, query));
   }
 
-  /**
-   * Handle incremental provider model updates and refresh the UI
-   */
-  private handleProviderModelsUpdate(providerType: 'systemsculpt' | 'custom', models: SystemSculptModel[]): void {
-    try {
-      const chatModels = filterChatModels(models);
-      // Remove previous models for the provider and append fresh ones
-      const keepProvider = (m: SystemSculptModel) => providerType === 'systemsculpt' ? m.provider !== 'systemsculpt' : m.provider === 'systemsculpt';
-      this.allModels = [
-        ...this.allModels.filter(keepProvider),
-        ...chatModels,
-      ];
-
-      // Re-process favorites flags and update filtered view
-      this.favoritesService.processFavorites(this.allModels);
-      void this.refreshProviderAuthState(this.allModels);
-      this.updateModelList();
-      this.updateFavoritesButtonCount();
-      this.updateEmptyState();
-    } catch {}
-  }
-
-  /**
-   * Clean up invalid provider preferences on settings load
-   * This should be called when the plugin loads to ensure saved preferences are still valid
-   */
-  public static cleanupProviderPreferences(plugin: SystemSculptPlugin): void {
-    try {
-      if (plugin.settings.selectedModelProviders?.length) {
-        plugin.settings.selectedModelProviders = [];
-        plugin.saveSettings();
-      }
-    } catch (error) {
-    }
-  }
-
-  private async refreshProviderAuthState(models: SystemSculptModel[]): Promise<void> {
-    const providerHints = Array.from(
-      new Set(
-        models
-          .map((model) => normalizeModelSelectorProviderId(model.provider))
-          .filter((providerId) => providerId.length > 0 && providerId !== "systemsculpt")
-      )
-    );
-    const requestId = ++this.providerAuthRequestId;
-
-    if (!providerHints.length || !Platform.isDesktopApp) {
-      if (requestId !== this.providerAuthRequestId) {
-        return;
-      }
-      this.providerAuthById.clear();
-      this.updateModelList();
-      return;
+  private isModelSelected(modelId: string): boolean {
+    if (this.selectedModelId === modelId) {
+      return true;
     }
 
-    try {
-      const authModule = await import("../studio/piAuth/StudioPiAuthStorage");
-      const records = await authModule.listStudioPiProviderAuthRecords({ providerHints });
-      if (requestId !== this.providerAuthRequestId) {
-        return;
-      }
-      const next = new Map<string, ModelSelectorProviderAuthRecord>();
-      for (const record of records) {
-        const providerId = normalizeModelSelectorProviderId(record.provider);
-        if (!providerId) {
-          continue;
-        }
-        next.set(providerId, record);
-        const displayName = String(record.displayName || "").trim();
-        if (displayName) {
-          StandardModelSelectionModal.providerNameCache[providerId] = displayName;
-        }
-      }
-      this.providerAuthById = next;
-    } catch {
-      if (requestId !== this.providerAuthRequestId) {
-        return;
-      }
-      this.providerAuthById.clear();
-    }
-
-    this.updateModelList();
+    const selectedCanonicalId = ensureCanonicalId(this.selectedModelId || "");
+    const candidateCanonicalId = ensureCanonicalId(modelId || "");
+    return selectedCanonicalId.length > 0 && selectedCanonicalId === candidateCanonicalId;
   }
 
-  private getProviderAuthRecord(providerName: string): ModelSelectorProviderAuthRecord | null {
-    const providerId = normalizeModelSelectorProviderId(providerName);
-    if (!providerId || providerId === "systemsculpt") {
-      return null;
-    }
-    return this.providerAuthById.get(providerId) ?? null;
-  }
-
-  private providerHasStoredAuth(providerName: string): boolean {
-    return hasAuthenticatedModelSelectorProvider(this.getProviderAuthRecord(providerName));
-  }
-
-  private resolveCustomProviderDisplayName(providerName: string): string {
-    const providerId = normalizeModelSelectorProviderId(providerName);
-    if (!providerId) {
-      return "Custom";
-    }
-
-    if (!StandardModelSelectionModal.providerNameCache[providerId]) {
-      const matchingProvider = this.plugin.settings.customProviders.find(
-        (provider) =>
-          normalizeModelSelectorProviderId(provider.name) === providerId ||
-          normalizeModelSelectorProviderId(provider.id) === providerId
-      );
-      const resolved = matchingProvider?.name || (providerName ? providerName : "Custom");
-      StandardModelSelectionModal.providerNameCache[providerId] = resolved;
-    }
-
-    return StandardModelSelectionModal.providerNameCache[providerId];
-  }
-
-  /**
-   * Update favorites button to show the count
-   */
-  private updateFavoritesButtonCount(): void {
-    if (!this.favoritesFilter) return;
-
-    const favorites = this.filteredModels.filter(m => m.isFavorite).length;
-
-    // Find the favorites filter element and update its count
-    const favoritesEl = this.modalInstance?.contentEl.querySelector('.systemsculpt-favorites-filter');
-    if (favoritesEl) {
-      // Remove existing count if present
-      const existingCount = favoritesEl.querySelector('.ss-favorites-count');
-      if (existingCount) {
-        existingCount.remove();
-      }
-
-      // Add count if there are favorites
-      if (favorites > 0) {
-        const countSpan = favoritesEl.createSpan("ss-favorites-count");
-        countSpan.textContent = favorites.toString();
-      }
-    }
-  }
-
-
-
-
-  /**
-   * Update the model list with current filters
-   */
   private updateModelList(): void {
     if (!this.modalInstance) {
       return;
     }
 
-    // Apply filters and update items
     try {
-      // Get filtered models
-      this.filteredModels = this.applyAllFilters(this.allModels); // Ensure filteredModels is updated
-      const items = this.convertModelsToListItems(this.filteredModels);
-
-      // Update the list with the new items
-      this.modalInstance.setItems(items);
-
-      // Update empty state if needed
+      this.filteredModels = this.applyAllFilters(this.allModels);
+      this.modalInstance.setItems(this.convertModelsToListItems(this.filteredModels));
       this.updateEmptyState();
-    } catch (error) {
+    } catch {
+      // Keep the modal interactive even if one provider item fails to shape.
     }
   }
 
-  /**
-   * Show or hide empty state based on current filters
-   */
   private updateEmptyState(): void {
-    if (!this.modalInstance) return;
-
-    // Use the already filtered list from updateModelList
-    const modalContent = this.modalInstance.contentEl;
-
-    // If we have no models to show
-    if (this.filteredModels.length === 0) {
-      // Create empty state if it doesn't exist
-      if (!this.emptyState) {
-        this.emptyState = new EmptyFavoritesState(
-          modalContent,
-          this.favoritesService.getShowFavoritesOnly()
-        );
-      } else {
-        // Update existing empty state
-        this.emptyState.updateForFilterState(
-          this.favoritesService.getShowFavoritesOnly()
-        );
-
-        // Make sure it's visible and in the right place
-        modalContent.appendChild(this.emptyState.element);
-      }
-
-      // Hide the list - Target the correct list element used by ListSelectionModal
-      const listEl = modalContent.querySelector(".ss-modal__list");
-      if (listEl) {
-        listEl.addClass("systemsculpt-hidden");
-      }
-
-
-
-    } else {
-      // We have models to show
-
-      // Hide empty state if it exists
-      if (this.emptyState && this.emptyState.element.parentNode) {
-        this.emptyState.element.detach();
-      }
-
-      // Show the list - Target the correct list element used by ListSelectionModal
-      const listEl = modalContent.querySelector(".ss-modal__list");
-      if (listEl) {
-        listEl.removeClass("systemsculpt-hidden");
-      }
-    }
-  }
-
-  /**
-   * Get searchable fields from a model
-   */
-  private getSearchableFields(model: SystemSculptModel): SearchableField[] {
-    return [
-      { field: "name", text: model.name || "", weight: 2.0 },
-      { field: "description", text: model.description || "", weight: 0.5 },
-      { field: "provider", text: model.provider || "", weight: 0.8 },
-      { field: "id", text: model.id || "", weight: 0.6 }
-    ];
-  }
-
-  /**
-   * Convert models to list items for the list selection modal
-   */
-  private convertModelsToListItems(models: SystemSculptModel[]): ListItem[] {
-    // Sort models with selected one first, then favorites, then others
-    const sortedModels = models.sort((a, b) => {
-      const aSelected = this.isModelSelected(a.id) ? 1 : 0;
-      const bSelected = this.isModelSelected(b.id) ? 1 : 0;
-      const aFavorite = a.isFavorite ? 1 : 0;
-      const bFavorite = b.isFavorite ? 1 : 0;
-
-      // Selected models come first
-      if (aSelected !== bSelected) {
-        return bSelected - aSelected;
-      }
-
-
-      // Then favorites
-      if (aFavorite !== bFavorite) {
-        return bFavorite - aFavorite;
-      }
-
-      // Then providers with stored Pi auth so working providers are easier to find.
-      const aAuthenticated = this.providerHasStoredAuth(a.provider) ? 1 : 0;
-      const bAuthenticated = this.providerHasStoredAuth(b.provider) ? 1 : 0;
-      if (aAuthenticated !== bAuthenticated) {
-        return bAuthenticated - aAuthenticated;
-      }
-
-      // Then alphabetical by name
-      return a.name.localeCompare(b.name);
-    });
-
-    return sortedModels.map(model => {
-      const isCurrentModel = this.isModelSelected(model.id);
-      const providerAuthenticated = this.providerHasStoredAuth(model.provider);
-
-      // Create an enhanced list item for each model
-      const item: ListItem = {
-        id: model.id,
-        title: model.name,
-        description: this.getModelDescription(model),
-        icon: this.getModelIcon(model),
-        selected: isCurrentModel,
-        badge: this.getModelBadge(model),
-        // Store additional data for enhanced display
-        metadata: {
-          provider: model.provider,
-          contextLength: model.context_length,
-          isFavorite: model.isFavorite || false,
-          isNew: (model as any).is_new || false,
-          isBeta: (model as any).is_beta || false,
-          isDeprecated: (model as any).is_deprecated || false,
-          capabilities: this.getModelCapabilities(model),
-          isCurrentModel: isCurrentModel, // Add flag for current model
-          providerAuthenticated,
-        }
-      } as ListItem;
-
-      // Store a reference to the model for use in rendering
-      (item as any)._ssModel = model;
-
-      // Add provider-specific class
-      if (model.provider === "systemsculpt") {
-        (item as any).providerClass = "provider-systemsculpt";
-      } else {
-        (item as any).providerClass = "provider-custom";
-      }
-
-      // Add special class for current model
-      if (isCurrentModel) {
-        (item as any).additionalClasses = "ss-current-model";
-      }
-
-      if (providerAuthenticated) {
-        (item as any).providerAuthenticated = true;
-      }
-
-      return item;
+    this.emptyState = updateModelSelectionEmptyState({
+      modalInstance: this.modalInstance,
+      emptyState: this.emptyState,
+      favoritesService: this.favoritesService,
+      filteredCount: this.filteredModels.length,
     });
   }
 
-  /**
-   * Get model capabilities for display
-   */
-  private getModelCapabilities(model: SystemSculptModel): string[] {
-    const capabilities: string[] = [];
-
-    if ((model as any).supports_vision) capabilities.push("Vision");
-    if ((model as any).supports_functions) capabilities.push("Functions");
-    if ((model as any).supports_streaming !== false) capabilities.push("Streaming");
-    if (model.context_length && model.context_length >= 100000) capabilities.push("Long Context");
-
-    return capabilities;
-  }
-
-  /**
-   * Check if a model is selected
-   */
-  private isModelSelected(modelId: string): boolean {
-    // Check exact match
-    if (this.selectedModelId === modelId) {
-      return true;
-    }
-
-    // Normalize and compare
-    const normalizedSelected = ensureCanonicalId(this.selectedModelId);
-    const normalizedCandidate = ensureCanonicalId(modelId);
-
-    return normalizedSelected === normalizedCandidate;
-  }
-
-  /**
-   * Get a model description for the UI
-   */
-  private getModelDescription(model: SystemSculptModel): string {
-    const parts: string[] = [];
-
-    // Add model context length with better formatting
-    if (model.context_length) {
-      const tokens = model.context_length;
-      let formattedTokens: string;
-
-      if (tokens >= 1000000) {
-        formattedTokens = `${(tokens / 1000000).toFixed(1)}M tokens`;
-      } else if (tokens >= 1000) {
-        formattedTokens = `${(tokens / 1000).toFixed(0)}K tokens`;
-      } else {
-        formattedTokens = `${tokens} tokens`;
-      }
-
-      parts.push(formattedTokens);
-    }
-
-    // Add pricing info if available
-    if ((model as any).pricing) {
-      const pricing = (model as any).pricing;
-      if (pricing.input && pricing.output) {
-        parts.push(`$${pricing.input}/$${pricing.output} per 1K`);
-      }
-    }
-
-    // Add model capabilities
-    const capabilities: string[] = [];
-    if ((model as any).supports_vision) capabilities.push("Vision");
-    if ((model as any).supports_functions) capabilities.push("Functions");
-    if ((model as any).supports_streaming) capabilities.push("Streaming");
-
-    if (capabilities.length > 0) {
-      parts.push(capabilities.join(" · "));
-    }
-
-    // Add model description if available and not too long
-    if (model.description && model.description.length > 0 && model.description.length < 100) {
-      parts.push(model.description);
-    }
-
-    return parts.join(' • ');
-  }
-
-  /**
-   * Get an icon for a model
-   */
-  private getModelIcon(model: SystemSculptModel): string {
-    // Check if this is the Vault Agent model
-    const canonicalId = getCanonicalId(model);
-    if (canonicalId === "systemsculpt@@vault-agent") {
-      return "folder-open"; // Special icon for Vault Agent
-    }
-
-    // Use different icons based on provider
-    if (model.provider === "systemsculpt") {
-      return "bot";
-    } else {
-      return "server";
+  private async applyProviderModelsUpdate(
+    _providerType: "systemsculpt" | "custom" | "local-pi",
+    _models: SystemSculptModel[]
+  ): Promise<void> {
+    try {
+      await this.refreshAllModels();
+    } catch {
+      // Ignore incremental refresh failures and keep the last rendered list.
     }
   }
 
-  /**
-   * Get a badge label for a model
-   */
-  private getModelBadge(model: SystemSculptModel): string {
-    // Check if this is the Vault Agent model
-    const canonicalId = getCanonicalId(model);
-    if (canonicalId === "systemsculpt@@vault-agent") {
-      return "Agent";
-    }
-
-    // Check for special model types
-    if ((model as any).is_new) {
-      return "New";
-    }
-
-    if ((model as any).is_beta) {
-      return "Beta";
-    }
-
-    if ((model as any).is_deprecated) {
-      return "Legacy";
-    }
-
-    // Show provider name for all providers
-    if (model.provider === "systemsculpt") {
-      return "SystemSculpt";
-    }
-
-    const providerLabel = this.resolveCustomProviderDisplayName(model.provider || "");
-    if (this.providerHasStoredAuth(model.provider || "")) {
-      return `${providerLabel} ✓`;
-    }
-    return providerLabel;
-  }
-
-  /**
-   * Register events for updates
-   */
   private registerEventsForUpdates(): void {
-    // Use the registerListener method to properly track and clean up event listeners
-    const favChangedListener = () => this.updateModelList();
-    const favFilterChangedListener = () => this.updateModelList();
-    // Add listener for when a favorite toggle is clicked in the list item
-    const favToggledListener = (event: CustomEvent) => {
+    const favoritesChanged = () => this.updateModelList();
+    const favoritesFilterChanged = () => this.updateModelList();
+    const favoriteToggled = (event: CustomEvent) => {
       const { modelId, isFavorite } = event.detail;
-      const modelIndex = this.filteredModels.findIndex(m => m.id === modelId);
+      const modelIndex = this.filteredModels.findIndex((model) => model.id === modelId);
       if (modelIndex !== -1) {
         this.filteredModels[modelIndex].isFavorite = isFavorite;
       }
@@ -715,22 +357,17 @@ export class StandardModelSelectionModal {
       this.updateEmptyState();
     };
 
-    this.registerListener(document.body, 'systemsculpt:favorites-changed', favChangedListener);
-    this.registerListener(document.body, 'systemsculpt:favorites-filter-changed', favFilterChangedListener);
-    this.registerListener(document.body, 'ss-list-item-favorite-toggled', favToggledListener as EventListener);
+    this.registerListener(document.body, "systemsculpt:favorites-changed", favoritesChanged);
+    this.registerListener(document.body, "systemsculpt:favorites-filter-changed", favoritesFilterChanged);
+    this.registerListener(document.body, "ss-list-item-favorite-toggled", favoriteToggled as EventListener);
   }
 
-  /**
-   * Open the modal and get selection
-   */
-  async open() {
+  async open(): Promise<void> {
     try {
-      // Clean up any existing listeners from previous opens
       this.removeAllListeners();
+      this.chromeHandle = null;
 
-      // Prepare initial, non-blocking UI with an empty list and a loading message
-      const initialItems: ListItem[] = [];
-      const modal = new ListSelectionModal(this.app, initialItems, {
+      const modal = new ListSelectionModal(this.app, [], {
         title: this.modalTitle,
         description: this.modalDescription,
         emptyText: "Loading models…",
@@ -740,79 +377,55 @@ export class StandardModelSelectionModal {
         closeOnSelect: true,
         favoritesService: this.favoritesService,
         customContent: (containerEl: HTMLElement) => {
-          // Add native-style filters immediately
-          this.createFilters(containerEl);
-        }
+          this.createModalChrome(containerEl);
+        },
       });
 
-      // Store the modal instance for later use
       this.modalInstance = modal;
-
-      // Add custom class to modal for native styling
       modal.contentEl.addClass("systemsculpt-model-selection-modal");
+      modal.setCustomSearchHandler((query: string) => this.searchModelsAsync(this.filteredModels, query));
 
-      // Custom search handler returns a Promise
-      modal.setCustomSearchHandler((query: string) => {
-        // Search within the currently filtered models (respecting all active filters)
-        return this.searchModelsAsync(this.filteredModels, query);
-      });
-
-      // Register event listener for favorite toggle events on the modal element
-      modal.contentEl.addEventListener('ss-list-item-favorite-toggled', (_event: Event) => {
-        // No additional action required here; FavoriteToggle updates itself
-      });
-
-      // Register event listeners for updates (favorites, filters, etc.)
       this.registerEventsForUpdates();
 
-      // Subscribe to provider-specific incremental updates so the list fills progressively
       if (this.plugin?.emitter) {
-        const offSystem = this.plugin.emitter.onProvider('modelsUpdated', 'systemsculpt', (models: SystemSculptModel[]) => {
-          this.handleProviderModelsUpdate('systemsculpt', models);
-        });
-        const offCustom = this.plugin.emitter.onProvider('modelsUpdated', 'custom', (models: SystemSculptModel[]) => {
-          this.handleProviderModelsUpdate('custom', models);
-        });
+        const offSystem = this.plugin.emitter.onProvider(
+          "modelsUpdated",
+          "systemsculpt",
+          (models: SystemSculptModel[]) => {
+            void this.applyProviderModelsUpdate("systemsculpt", models);
+          }
+        );
+        const offCustom = this.plugin.emitter.onProvider(
+          "modelsUpdated",
+          "custom",
+          (models: SystemSculptModel[]) => {
+            void this.applyProviderModelsUpdate("custom", models);
+          }
+        );
+        const offLocalPi = this.plugin.emitter.onProvider(
+          "modelsUpdated",
+          "local-pi",
+          (models: SystemSculptModel[]) => {
+            void this.applyProviderModelsUpdate("local-pi", models);
+          }
+        );
         this.registerEmitterListener(offSystem);
         this.registerEmitterListener(offCustom);
+        this.registerEmitterListener(offLocalPi);
       }
 
-      // Force a complete model load (not deferred) to ensure all providers are fetched
-      this.plugin.modelService.refreshModels().then((models) => {
-        this.allModels = filterChatModels(models);
-        this.favoritesService.processFavorites(this.allModels);
-        void this.refreshProviderAuthState(this.allModels);
-        this.filteredModels = this.applyAllFilters(this.allModels);
-        const items = this.convertModelsToListItems(this.filteredModels);
-        this.modalInstance?.setItems(items);
-        this.updateFavoritesButtonCount();
-        this.updateEmptyState();
-      }).catch(() => {
-        // Leave the loading/empty state as-is on failure
-      });
+      void this.refreshAllModels();
 
-      // Open the modal immediately and wait only for user selection to resolve
       const selectedItems = await modal.openAndGetSelection();
-
-      // Clean up listeners *after* selection is made or modal is closed
       this.removeAllListeners();
+      this.chromeHandle = null;
+      this.modalInstance = null;
 
-      // Process the selection if an item was chosen
       if (selectedItems && selectedItems.length > 0) {
-        const selectedItem = selectedItems[0]; // Single select mode
-        const result: ModelSelectionResult = { modelId: selectedItem.id };
-        this.onSelect(result);
+        this.onSelect({ modelId: selectedItems[0].id });
       }
-
-    } catch (error) {
-      // Non-fatal; modal may have been closed early
+    } catch {
+      // Keep modal failures non-fatal for callers that offer a selector fallback.
     }
   }
-
-  // Wrap search methods to return Promises
-  private async searchModelsAsync(models: SystemSculptModel[], query: string): Promise<ListItem[]> {
-    return Promise.resolve(this.searchModels(models, query));
-  }
-
-
 }

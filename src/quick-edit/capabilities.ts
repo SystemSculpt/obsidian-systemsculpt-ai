@@ -3,7 +3,8 @@ import type SystemSculptPlugin from "../main";
 
 export type QuickEditIssueCode =
   | "missing-model"
-  | "unsupported-file";
+  | "unsupported-file"
+  | "pi-native-upgrade";
 
 export interface QuickEditIssue {
   code: QuickEditIssueCode;
@@ -30,6 +31,12 @@ export async function evaluateQuickEditReadiness(
   const { plugin, file } = options;
   const allowedExtensions = options.allowedExtensions ?? DEFAULT_EXTENSIONS;
   const issues: QuickEditIssue[] = [];
+
+  issues.push({
+    code: "pi-native-upgrade",
+    message: "Quick Edit is temporarily unavailable while its Pi-native replacement is being rebuilt.",
+    action: "Use regular Pi chat or Studio for now.",
+  });
 
   const modelId = plugin?.settings?.selectedModelId ?? "";
   if (!modelId || typeof modelId !== "string" || modelId.trim().length === 0) {

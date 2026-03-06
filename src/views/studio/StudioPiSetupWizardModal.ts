@@ -1,9 +1,9 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { App, Modal, Notice, Platform, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import {
+  buildStudioPiResolvedLoginCommand,
   buildStudioPiLoginCommand,
   clearStudioPiProviderAuth,
-  installStudioLocalPiCli,
   launchStudioPiProviderLoginInTerminal,
   listStudioPiOAuthProviders,
   readStudioPiProviderAuthState,
@@ -21,12 +21,11 @@ import {
   getApiKeyEnvVarForProvider,
   getStudioPiRegisteredProviderIds,
   KNOWN_OAUTH_PROVIDER_IDS,
-  parseProviderIdsFromModelList,
-  providerIsListedByPiModelList,
   resolveProviderLabel,
   selectDefaultAuthMethod,
   supportsOAuthLogin,
 } from "../../studio/piAuth/StudioPiProviderRegistry";
+import { listLocalPiProviderIds, listLocalPiTextModels } from "../../services/pi/PiTextModels";
 
 export type StudioPiSetupWizardIssue =
   | "missing_cli"
@@ -149,7 +148,8 @@ class StudioPiSetupWizardModal extends Modal {
   private providerIds: string[] = [];
   private oauthProvidersById = new Map<string, StudioPiOAuthProvider>();
   private providerLoadError: string | null = null;
-  private latestModelListStdout = "";
+  private availableProviderIds: string[] = [];
+  private availableModelCount = 0;
 
   // Auth state
   private authMethod: AuthMethod = "oauth";
@@ -194,7 +194,7 @@ class StudioPiSetupWizardModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText("Local (Pi) Setup");
+    this.titleEl.setText("Pi Provider Setup");
     this.render();
     void this.initializeWizard();
   }
@@ -228,7 +228,7 @@ class StudioPiSetupWizardModal extends Modal {
   private issueHeading(): string {
     switch (this.issue) {
       case "missing_cli":
-        return "Pi CLI not found";
+        return "Pi runtime unavailable";
       case "provider_auth":
         return "Provider authentication required";
       case "token_type":
@@ -241,7 +241,7 @@ class StudioPiSetupWizardModal extends Modal {
   private issueHint(): string {
     switch (this.issue) {
       case "missing_cli":
-        return "Install the Pi CLI below, then authenticate your provider and retry.";
+        return "Verify the bundled Pi runtime below, then authenticate your provider and retry.";
       case "provider_auth":
         return "Choose OAuth or API key in Step 2, verify models, then retry.";
       case "token_type":
@@ -341,12 +341,12 @@ class StudioPiSetupWizardModal extends Modal {
 
   private async checkCliAvailability(): Promise<void> {
     await this.runAction("check-cli", async () => {
-      this.setStepStatus("cli", "running", "Checking pi --version…");
+      this.setStepStatus("cli", "running", "Checking bundled Pi runtime…");
       this.render();
       try {
         const result = await runStudioPiCommand(this.plugin, ["--version"], 30_000);
         if (result.timedOut) {
-          this.setStepStatus("cli", "error", "Timed out while checking pi --version.");
+          this.setStepStatus("cli", "error", "Timed out while checking the bundled Pi runtime.");
           return;
         }
         if (result.exitCode !== 0) {
@@ -354,24 +354,13 @@ class StudioPiSetupWizardModal extends Modal {
           return;
         }
         const version = parsePiVersion(result.stdout);
-        this.setStepStatus("cli", "success", `Pi ${version} detected and ready.`);
+        this.setStepStatus("cli", "success", `Bundled Pi ${version} detected and ready.`);
       } catch (error) {
         const message = normalizeEscapedNewlines(
           error instanceof Error ? error.message : String(error || "")
         );
         this.setStepStatus("cli", "error", firstNonEmptyLine(message));
       }
-    });
-  }
-
-  private async installCli(): Promise<void> {
-    await this.runAction("install-cli", async () => {
-      this.setStepStatus("cli", "running", "Installing @mariozechner/pi-coding-agent…");
-      this.render();
-      const result = await installStudioLocalPiCli(this.plugin);
-      this.setStepStatus("cli", "success", `Pi ${result.version} installed.`);
-      new Notice(`Local (Pi) CLI installed (${result.version}).`);
-      await this.loadProviderMetadata();
     });
   }
 
@@ -402,13 +391,14 @@ class StudioPiSetupWizardModal extends Modal {
     }
 
     try {
-      const listResult = await runStudioPiCommand(this.plugin, ["--list-models"], 60_000);
-      if (!listResult.timedOut && listResult.exitCode === 0) {
-        this.latestModelListStdout = String(listResult.stdout || "");
-        for (const id of parseProviderIdsFromModelList(listResult.stdout)) providerSet.add(id);
-      }
+      const availableProviders = await listLocalPiProviderIds(this.plugin);
+      const availableModels = await listLocalPiTextModels(this.plugin);
+      this.availableProviderIds = availableProviders;
+      this.availableModelCount = availableModels.length;
+      for (const id of availableProviders) providerSet.add(id);
     } catch {
-      // Best-effort
+      this.availableProviderIds = [];
+      this.availableModelCount = 0;
     }
 
     this.providerIds = Array.from(providerSet.values()).sort((a, b) =>
@@ -449,7 +439,7 @@ class StudioPiSetupWizardModal extends Modal {
       if (isPiModuleLoadError(message)) {
         // Can't load Pi auth-storage in Obsidian's sandbox — treat as no credentials
         // detected rather than a hard error. Auth flow can still proceed.
-        this.setStepStatus("auth", "idle", "Auth state unavailable until Pi CLI is authenticated.");
+        this.setStepStatus("auth", "idle", "Auth state unavailable until Pi has valid provider credentials.");
       } else {
         this.setStepStatus("auth", "error", firstNonEmptyLine(message));
       }
@@ -492,7 +482,7 @@ class StudioPiSetupWizardModal extends Modal {
   private async startOAuthLoginInModal(): Promise<void> {
     await this.runAction("oauth-login-modal", async () => {
       if (this.cliStatus !== "success") {
-        this.setStepStatus("auth", "error", "Install or verify Pi CLI first (Step 1).");
+        this.setStepStatus("auth", "error", "Verify the bundled Pi runtime first (Step 1).");
         return;
       }
       const provider = normalizeWizardProviderId(this.selectedProvider);
@@ -573,7 +563,7 @@ class StudioPiSetupWizardModal extends Modal {
   private async saveApiKeyInModal(): Promise<void> {
     await this.runAction("save-api-key", async () => {
       if (this.cliStatus !== "success") {
-        this.setStepStatus("auth", "error", "Install or verify Pi CLI first (Step 1).");
+        this.setStepStatus("auth", "error", "Verify the bundled Pi runtime first (Step 1).");
         return;
       }
       const provider = normalizeWizardProviderId(this.selectedProvider);
@@ -616,7 +606,7 @@ class StudioPiSetupWizardModal extends Modal {
   private async launchProviderLoginInTerminal(): Promise<void> {
     await this.runAction("launch-login-terminal", async () => {
       if (this.cliStatus !== "success") {
-        this.setStepStatus("auth", "error", "Install or verify Pi CLI first (Step 1).");
+        this.setStepStatus("auth", "error", "Verify the bundled Pi runtime first (Step 1).");
         return;
       }
       const provider = normalizeWizardProviderId(this.selectedProvider);
@@ -624,7 +614,7 @@ class StudioPiSetupWizardModal extends Modal {
         this.setStepStatus("auth", "error", "Select a provider first.");
         return;
       }
-      const loginCommand = buildStudioPiLoginCommand(provider);
+      const loginCommand = await buildStudioPiResolvedLoginCommand(this.plugin, provider);
       this.setStepStatus("auth", "running", `Launching Terminal: ${loginCommand}…`);
       this.render();
       await launchStudioPiProviderLoginInTerminal(this.plugin, provider);
@@ -635,7 +625,14 @@ class StudioPiSetupWizardModal extends Modal {
 
   private async copyLoginCommand(): Promise<void> {
     const provider = normalizeWizardProviderId(this.selectedProvider);
-    const loginCommand = buildStudioPiLoginCommand(provider);
+    let loginCommand = buildStudioPiLoginCommand(provider);
+    if (Platform.isDesktopApp) {
+      try {
+        loginCommand = await buildStudioPiResolvedLoginCommand(this.plugin, provider);
+      } catch {
+        loginCommand = buildStudioPiLoginCommand(provider);
+      }
+    }
     const copied = await tryCopyToClipboard(loginCommand);
     new Notice(copied ? "Pi login command copied." : "Unable to copy Pi login command.");
   }
@@ -649,27 +646,33 @@ class StudioPiSetupWizardModal extends Modal {
   private async verifyModels(): Promise<void> {
     await this.runAction("verify-models", async () => {
       if (this.cliStatus !== "success") {
-        this.setStepStatus("model", "error", "Install or verify Pi CLI first (Step 1).");
+        this.setStepStatus("model", "error", "Verify the bundled Pi runtime first (Step 1).");
         return;
       }
-      this.setStepStatus("model", "running", "Running pi --list-models…");
+      this.setStepStatus("model", "running", "Loading Pi's available model catalog…");
       this.render();
-      const result = await runStudioPiCommand(this.plugin, ["--list-models"], 60_000);
-      if (result.timedOut) {
-        this.setStepStatus("model", "error", "Timed out while loading models.");
-        return;
-      }
-      if (result.exitCode !== 0) {
-        this.setStepStatus("model", "error", summarizePiCommandResult(result));
-        return;
-      }
-      this.latestModelListStdout = String(result.stdout || "");
+      const models = await listLocalPiTextModels(this.plugin);
+      const availableProviders = Array.from(
+        new Set(
+          models
+            .map((model) => normalizeWizardProviderId(model.providerId))
+            .filter(Boolean)
+        )
+      ).sort((left, right) => left.localeCompare(right));
+      this.availableProviderIds = availableProviders;
+      this.availableModelCount = models.length;
       const provider = normalizeWizardProviderId(this.selectedProvider);
-      if (!providerIsListedByPiModelList(result.stdout, provider)) {
+      if (provider && !availableProviders.includes(provider)) {
         this.setStepStatus("model", "error", `"${this.providerLabel(provider)}" not listed yet. Complete auth and try again.`);
         return;
       }
-      this.setStepStatus("model", "success", `Models loaded — "${this.providerLabel(provider)}" is available.`);
+      const providerCount = availableProviders.length;
+      const providerLabel = provider ? this.providerLabel(provider) : "Pi";
+      this.setStepStatus(
+        "model",
+        "success",
+        `Loaded ${models.length} model${models.length === 1 ? "" : "s"} across ${providerCount} provider${providerCount === 1 ? "" : "s"} — "${providerLabel}" is available.`
+      );
       if (this.issue === "provider_auth" || this.issue === "token_type") {
         this.setStepStatus("auth", "success", `Provider auth ready for ${this.providerLabel(provider)}.`);
       }
@@ -770,23 +773,19 @@ class StudioPiSetupWizardModal extends Modal {
     });
     this.renderStepHeader(card, {
       index: 1,
-      title: "Install & verify Pi CLI",
-      description: "Studio needs a working pi binary accessible in the desktop runtime.",
+      title: "Verify bundled Pi runtime",
+      description: "Studio runs Pi from the plugin bundle, so this checks the embedded runtime instead of a global install.",
       status: this.cliStatus,
     });
     this.renderStepDetail(card, this.cliDetail);
 
     const actions = card.createDiv({ cls: "ss-pi-wizard__actions" });
-    const checkBtn = actions.createEl("button", { text: "Check CLI" });
+    const checkBtn = actions.createEl("button", {
+      cls: this.cliStatus !== "success" ? "mod-cta" : "",
+      text: "Check Runtime",
+    });
     checkBtn.disabled = this.actionRunning;
     checkBtn.addEventListener("click", () => void this.checkCliAvailability());
-
-    const installBtn = actions.createEl("button", {
-      cls: this.cliStatus !== "success" ? "mod-cta" : "",
-      text: "Install CLI",
-    });
-    installBtn.disabled = this.actionRunning || this.cliStatus === "success";
-    installBtn.addEventListener("click", () => void this.installCli());
   }
 
   private renderAuthStep(): void {
@@ -911,7 +910,7 @@ class StudioPiSetupWizardModal extends Modal {
         // Terminal is the only path — make it the obvious primary action.
         panel.createDiv({
           cls: "ss-pi-wizard__sandbox-notice",
-          text: "Obsidian's sandbox prevents in-app OAuth. Use Terminal to complete the login flow — it opens automatically.",
+          text: "Obsidian's sandbox prevents in-app OAuth. Use Terminal to complete the Pi login flow — it opens automatically.",
         });
       }
 
@@ -1073,11 +1072,11 @@ class StudioPiSetupWizardModal extends Modal {
     });
     this.renderStepDetail(card, this.modelDetail);
 
-    if (this.latestModelListStdout.trim()) {
-      const count = parseProviderIdsFromModelList(this.latestModelListStdout).length;
+    if (this.availableModelCount > 0 || this.availableProviderIds.length > 0) {
+      const count = this.availableProviderIds.length;
       card.createDiv({
         cls: "ss-pi-wizard__hint",
-        text: `${count} provider${count !== 1 ? "s" : ""} detected in Pi model list.`,
+        text: `${count} provider${count !== 1 ? "s" : ""} currently available in Pi.`,
       });
     }
 

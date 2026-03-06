@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const LEGACY_API_PREFIX = "/api/v1";
 const AGENT_API_PREFIX = "/api/v1/agent";
 const DEFAULT_PORT = 43111;
@@ -144,6 +145,14 @@ const app = express();
 app.disable("x-powered-by");
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+app.use(
+  "/_e2e/release-assets/pi-runtime",
+  express.static(path.join(REPO_ROOT, "dist", "pi-runtime"), { fallthrough: false })
+);
+app.use(
+  "/_e2e/release-assets/terminal-runtime",
+  express.static(path.join(REPO_ROOT, "dist", "terminal-runtime"), { fallthrough: false })
+);
 
 const sessions = new Map();
 const imageJobs = new Map();

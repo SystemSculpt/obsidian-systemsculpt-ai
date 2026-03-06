@@ -464,7 +464,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "text-node",
         kind: "studio.text_generation",
         config: {
-          modelId: "openai/gpt-5-mini",
+          modelId: "openai@@gpt-5-mini",
         },
         inputs: {
           prompt: {
@@ -482,9 +482,7 @@ describe("Studio built-in text/image node execution", () => {
         prompt:
           "Transcript: We built a ComfyUI-like graph in Obsidian and extracted audio first.",
         systemPrompt: "Generate one high-click YouTube title.",
-        sourceMode: "systemsculpt",
-        modelId: "openai/gpt-5-mini",
-        localModelId: undefined,
+        modelId: "openai@@gpt-5-mini",
         nodeId: "text-node",
       })
     );
@@ -504,7 +502,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "text-node",
         kind: "studio.text_generation",
         config: {
-          modelId: "openai/gpt-5-mini",
+          modelId: "openai@@gpt-5-mini",
           systemPrompt: "Follow these rules for {{prompt}}",
         },
         inputs: {
@@ -518,9 +516,7 @@ describe("Studio built-in text/image node execution", () => {
       expect.objectContaining({
         prompt: "Plain user prompt",
         systemPrompt: "Follow these rules for Plain user prompt",
-        sourceMode: "systemsculpt",
-        modelId: "openai/gpt-5-mini",
-        localModelId: undefined,
+        modelId: "openai@@gpt-5-mini",
       })
     );
     expect(result.outputs.text).toBe("Generated body");
@@ -539,7 +535,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "text-node",
         kind: "studio.text_generation",
         config: {
-          modelId: "openai/gpt-5-mini",
+          modelId: "openai@@gpt-5-mini",
           reasoningEffort: "xhigh",
         },
         inputs: {
@@ -551,14 +547,13 @@ describe("Studio built-in text/image node execution", () => {
 
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMode: "systemsculpt",
-        modelId: "openai/gpt-5-mini",
+        modelId: "openai@@gpt-5-mini",
         reasoningEffort: "xhigh",
       })
     );
   });
 
-  it("routes text generation to Local Pi when source mode is local_pi", async () => {
+  it("passes the selected Pi model through to the API adapter", async () => {
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).toBeDefined();
     const generateTextMock = jest.fn(async () => ({
@@ -571,9 +566,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "text-node",
         kind: "studio.text_generation",
         config: {
-          sourceMode: "local_pi",
-          localModelId: "ollama@@llama3.1:8b",
-          modelId: "openai/gpt-5-mini",
+          modelId: "ollama@@llama3.1:8b",
           reasoningEffort: "xhigh",
         },
         inputs: {
@@ -586,9 +579,7 @@ describe("Studio built-in text/image node execution", () => {
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "Use local model.",
-        sourceMode: "local_pi",
-        localModelId: "ollama@@llama3.1:8b",
-        modelId: "openai/gpt-5-mini",
+        modelId: "ollama@@llama3.1:8b",
         reasoningEffort: "xhigh",
       })
     );
@@ -610,9 +601,7 @@ describe("Studio built-in text/image node execution", () => {
         config: {
           lockOutput: true,
           value: "Pinned draft body",
-          sourceMode: "local_pi",
-          localModelId: "ollama@@llama3.1:8b",
-          modelId: "openai/gpt-5-mini",
+          modelId: "ollama@@llama3.1:8b",
         },
         inputs: {
           prompt: "Fresh upstream prompt that should be ignored.",

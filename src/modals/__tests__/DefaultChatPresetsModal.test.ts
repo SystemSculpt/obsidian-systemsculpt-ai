@@ -75,6 +75,12 @@ jest.mock("../StandardModelSelectionModal", () => ({
 
 // Mock SystemPromptService
 jest.mock("../../services/SystemPromptService", () => ({
+  normalizeDesktopPromptSelectionType: jest.fn((type?: string) => {
+    if (type === "concise" || type === "custom") {
+      return type;
+    }
+    return "general-use";
+  }),
   SystemPromptService: {
     getInstance: jest.fn().mockReturnValue({
       getCustomPromptFiles: jest.fn().mockResolvedValue([

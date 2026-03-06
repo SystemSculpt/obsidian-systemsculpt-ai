@@ -215,7 +215,6 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true
       );
 
@@ -232,9 +231,7 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true,
-        undefined,
         "Custom system prompt"
       );
 
@@ -257,7 +254,6 @@ describe("ContextFileService", () => {
         new Set(["[[notes/context.md]]"]),
         undefined,
         undefined,
-        false,
         true
       );
 
@@ -277,7 +273,6 @@ describe("ContextFileService", () => {
         new Set(["doc:12345"]),
         undefined,
         undefined,
-        false,
         true
       );
 
@@ -285,7 +280,7 @@ describe("ContextFileService", () => {
       expect(userMessage?.documentContext?.documentIds).toContain("12345");
     });
 
-    it("strips tool calls when agent mode is off", async () => {
+    it("strips tool calls from assistant history before sending to Pi", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool" },
         {
@@ -300,7 +295,6 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false, // agent mode off
         true
       );
 
@@ -308,7 +302,7 @@ describe("ContextFileService", () => {
       expect(assistantMessage?.tool_calls).toBeUndefined();
     });
 
-    it("includes tool calls when agent mode is on", async () => {
+    it("drops tool calls even if legacy history still contains them", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool" },
         {
@@ -325,15 +319,14 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        true, // agent mode on
         true
       );
 
       const assistantMessage = result.find((m) => m.role === "assistant");
-      expect(assistantMessage?.tool_calls).toBeDefined();
+      expect(assistantMessage?.tool_calls).toBeUndefined();
     });
 
-    it("keeps tool messages that follow tool_calls when results are not available", async () => {
+    it("drops tool role messages that follow stripped tool calls", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool", message_id: "u1" },
         {
@@ -356,14 +349,13 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        true,
         true
       );
 
-      const assistantIndex = result.findIndex((m) => m.role === "assistant" && Array.isArray((m as any).tool_calls));
+      const assistantIndex = result.findIndex((m) => m.role === "assistant");
       expect(assistantIndex).toBeGreaterThan(-1);
-      expect(result[assistantIndex + 1]?.role).toBe("tool");
-      expect((result[assistantIndex + 1] as any).tool_call_id).toBe("call-1");
+      expect(result[assistantIndex + 1]?.role).toBe("user");
+      expect(result.filter((m) => m.role === "tool")).toHaveLength(0);
     });
 
     it("drops tool_calls when no matching tool results exist", async () => {
@@ -383,7 +375,6 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        true,
         true
       );
 
@@ -403,7 +394,6 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true
       );
 
@@ -426,7 +416,6 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true
       );
 
@@ -442,9 +431,7 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true,
-        undefined,
         "Custom system prompt"
       );
 
@@ -475,9 +462,7 @@ describe("ContextFileService", () => {
         new Set(),
         undefined,
         undefined,
-        false,
         true,
-        undefined,
         "Custom system prompt"
       );
 
@@ -486,43 +471,4 @@ describe("ContextFileService", () => {
     });
   });
 
-  describe("hydrateToolCalls", () => {
-    it("merges tool call data from manager", async () => {
-      const mockToolCallManager = {
-        getToolCall: jest.fn((id) => {
-          if (id === "call-1") {
-            return {
-              id: "call-1",
-              request: { name: "test_tool", arguments: { key: "value" } },
-              result: { success: true },
-              state: "completed",
-            };
-          }
-          return undefined;
-        }),
-        getToolResultsForContext: jest.fn(() => []),
-      };
-
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Use tool" },
-        {
-          role: "assistant",
-          content: "",
-          tool_calls: [{ id: "call-1" }] as any,
-        },
-      ];
-
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        undefined,
-        undefined,
-        true, // agent mode
-        true,
-        mockToolCallManager
-      );
-
-      expect(mockToolCallManager.getToolCall).toHaveBeenCalledWith("call-1");
-    });
-  });
 });

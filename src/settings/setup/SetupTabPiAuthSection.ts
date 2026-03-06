@@ -1,4 +1,4 @@
-import { Notice, Setting } from "obsidian";
+import { Notice, Platform, Setting } from "obsidian";
 import type { CustomProvider } from "../../types/llm";
 import {
   clearStudioPiProviderAuth,
@@ -19,8 +19,9 @@ import {
   resolvePiProviderFromEndpoint,
   resolveProviderLabel,
 } from "../../studio/piAuth/StudioPiProviderRegistry";
+import { ensureBundledPiRuntime } from "../../services/pi/PiRuntimeBootstrap";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
-import { runSetupPiOAuthLogin } from "../piAuth/SetupPiOAuthFlow";
+import { runSetupPiOAuthLogin, showPiAuthPromptModal } from "../piAuth/SetupPiOAuthFlow";
 
 const STUDIO_PI_AUTH_MIGRATION_VERSION = 1;
 
@@ -301,20 +302,72 @@ function collectPiProviderHints(customProviders: CustomProvider[]): string[] {
   return Array.from(hintSet.values());
 }
 
+type PiAuthAvailabilityMessage = {
+  summary: string;
+  detail?: string;
+};
+
+function describePiAuthAvailabilityError(error: unknown): PiAuthAvailabilityMessage {
+  const rawMessage = String((error as { message?: unknown })?.message || error || "").trim();
+  const normalized = rawMessage.toLowerCase();
+
+  if (
+    normalized.includes("plugin installation directory") ||
+    normalized.includes("pi sdk package is unavailable")
+  ) {
+    return {
+      summary: "Preparing bundled Pi runtime…",
+      detail: "Wait a moment, then press Refresh. If this keeps happening, reopen Obsidian once.",
+    };
+  }
+
+  if (
+    normalized.includes("failed to download manifest") ||
+    normalized.includes("http ") ||
+    normalized.includes("checksum mismatch") ||
+    normalized.includes("asset for") ||
+    normalized.includes("size mismatch")
+  ) {
+    return {
+      summary: "Bundled Pi runtime could not finish installing.",
+      detail: "Check your internet connection, then press Refresh. If it still fails, reopen Obsidian once.",
+    };
+  }
+
+  if (normalized.includes("does not support target") || normalized.includes("does not currently support linux")) {
+    return {
+      summary: "Local Pi setup is available on macOS and Windows desktop.",
+    };
+  }
+
+  return {
+    summary: "Pi setup is temporarily unavailable.",
+    detail: "Press Refresh in a moment. If it keeps failing, reopen Obsidian once.",
+  };
+}
+
 export function renderLocalPiAuthSection(root: HTMLElement, tabInstance: SystemSculptSettingTab): void {
-  root.createEl("h3", { text: "Local Pi Auth" });
+  root.createEl("h3", { text: "Pi Providers & Auth" });
 
   const summarySetting = new Setting(root)
     .setName("Pi-first authentication")
-    .setDesc("Manage Local Pi OAuth and API keys proactively. Credentials stay local in ~/.pi/agent/auth.json.");
+    .setDesc("Manage Pi OAuth and API keys proactively. Credentials stay local in ~/.pi/agent/auth.json.");
 
   const recordsRoot = root.createDiv({ cls: "ss-setup-pi-auth-list" });
 
   const refreshRecords = async () => {
-    summarySetting.setDesc("Loading Local Pi auth providers…");
     recordsRoot.empty();
 
     try {
+      if (!Platform.isDesktopApp) {
+        summarySetting.setDesc("Local Pi setup is available on macOS and Windows desktop.");
+        return;
+      }
+
+      summarySetting.setDesc("Preparing bundled Pi runtime…");
+      await ensureBundledPiRuntime({ plugin: tabInstance.plugin });
+
+      summarySetting.setDesc("Loading Pi providers…");
       await maybeRunStudioPiAuthMigration(tabInstance);
 
       const providerHints = collectPiProviderHints(tabInstance.plugin.settings.customProviders || []);
@@ -335,7 +388,7 @@ export function renderLocalPiAuthSection(root: HTMLElement, tabInstance: SystemS
       }
 
       if (records.length === 0) {
-        summarySetting.setDesc("No Local Pi providers detected yet. Add credentials below or run `pi --list-models` once.");
+        summarySetting.setDesc("No Pi providers detected yet. Add credentials below, then refresh this section.");
         return;
       }
 
@@ -359,11 +412,16 @@ export function renderLocalPiAuthSection(root: HTMLElement, tabInstance: SystemS
             .setTooltip(getPiApiKeyButtonTooltip(record))
             .onClick(async () => {
               const actionLabel = record.credentialType === "api_key" ? "Update" : "Set";
-              const rawValue = window.prompt(
-                `${actionLabel} API key for ${formatPiProviderLabel(record)} (${record.provider}):`,
-                ""
-              );
-              if (rawValue === null) {
+              let rawValue: string;
+              try {
+                rawValue = await showPiAuthPromptModal(tabInstance.app, {
+                  title: `${actionLabel} Pi API Key`,
+                  message: `${actionLabel} API key for ${formatPiProviderLabel(record)} (${record.provider}):`,
+                  placeholder: "",
+                  allowEmpty: false,
+                  submitLabel: actionLabel,
+                });
+              } catch {
                 return;
               }
               const apiKey = String(rawValue || "").trim();
@@ -427,12 +485,14 @@ export function renderLocalPiAuthSection(root: HTMLElement, tabInstance: SystemS
         });
       }
     } catch (error: any) {
-      const message = error?.message || String(error);
-      summarySetting.setDesc(`Local Pi auth is unavailable right now: ${message}`);
-      recordsRoot.createEl("p", {
-        text: "If Pi auth storage is unavailable in this runtime, use Studio's recovery wizard or run `pi /login <provider>` in Terminal.",
-        cls: "setting-item-description",
-      });
+      const message = describePiAuthAvailabilityError(error);
+      summarySetting.setDesc(message.summary);
+      if (message.detail) {
+        recordsRoot.createEl("p", {
+          text: message.detail,
+          cls: "setting-item-description",
+        });
+      }
     }
   };
 

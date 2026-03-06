@@ -1,17 +1,16 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import {
   appendStudioPiOutput,
   isLikelyMissingStudioPiExecutableError,
   mergeStudioPiCliPath,
 } from "./StudioPiProcessUtils";
 import type { StudioPiAuthPrompt, StudioPiOAuthLoginOptions } from "./StudioPiAuthStorage";
+import { buildPiNodeChildEnv, resolvePiNodeCommandCandidates } from "../../services/pi/PiNodeRuntime";
 
-const COMMON_NODE_PATHS = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node", "/bin/node"];
 const PI_OAUTH_BRIDGE_TIMEOUT_MS = 10 * 60_000;
 const PI_OAUTH_ELECTRON_RUNTIME_MARKER = "SS_PI_OAUTH_ELECTRON_RUNTIME";
 const PI_OAUTH_BRIDGE_SCRIPT = String.raw`
-const authModulePath = process.argv[1];
+const sdkEntryPath = process.argv[1];
 const providerId = process.argv[2];
 const readline = require("node:readline");
 const ELECTRON_RUNTIME_MARKER = "${PI_OAUTH_ELECTRON_RUNTIME_MARKER}";
@@ -77,8 +76,8 @@ rl.on("line", (line) => {
       process.exit(86);
       return;
     }
-    const authStorageModule = require(authModulePath);
-    const storage = authStorageModule.AuthStorage.create();
+    const sdkModule = require(sdkEntryPath);
+    const storage = sdkModule.AuthStorage.create();
     await storage.login(providerId, {
       onAuth: (info) => {
         emit({
@@ -149,56 +148,6 @@ type StudioPiOAuthBridgeEvent =
       type: "done";
     };
 
-function isLikelyNodeExecutablePath(commandPath: string): boolean {
-  const normalized = String(commandPath || "").trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  const basename = normalized.split(/[\\/]/).pop() || normalized;
-  if (!basename) {
-    return false;
-  }
-  return basename === "node" || basename.startsWith("node-");
-}
-
-function resolveNodeCommandCandidates(): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const add = (value: string) => {
-    const normalized = String(value || "").trim();
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  const processVersions = (process as unknown as { versions?: Record<string, unknown> })?.versions;
-  const runningInsideElectron = Boolean(processVersions?.electron);
-  const execPath = String(process.execPath || "").trim();
-  if (!runningInsideElectron && isLikelyNodeExecutablePath(execPath)) {
-    add(execPath);
-  }
-
-  const envNodeCandidates = [
-    String(process.env.SYSTEMSCULPT_PI_OAUTH_NODE_PATH || "").trim(),
-    String(process.env.SYSTEMSCULPT_NODE_PATH || "").trim(),
-    String(process.env.NODE || "").trim(),
-    String(process.env.npm_node_execpath || "").trim(),
-  ];
-  for (const candidate of envNodeCandidates) {
-    add(candidate);
-  }
-
-  for (const candidate of COMMON_NODE_PATHS) {
-    if (existsSync(candidate)) {
-      add(candidate);
-    }
-  }
-  add("node");
-  return candidates;
-}
-
 function isLikelyElectronRuntimeError(error: unknown): boolean {
   const message = String((error as { message?: unknown })?.message || "").trim();
   if (!message) {
@@ -213,7 +162,7 @@ function isLikelyElectronRuntimeError(error: unknown): boolean {
 
 async function runStudioPiOAuthBridgeWithNodeCommand(
   nodeCommand: string,
-  authStoragePath: string,
+  sdkEntryPath: string,
   providerId: string,
   options: StudioPiOAuthLoginOptions
 ): Promise<void> {
@@ -222,6 +171,10 @@ async function runStudioPiOAuthBridgeWithNodeCommand(
     ...(process.env as Record<string, string>),
   };
   mergedEnv.PATH = mergeStudioPiCliPath(String(mergedEnv.PATH || ""));
+  const childEnv = buildPiNodeChildEnv({
+    baseEnv: mergedEnv,
+    runtimeCommand: nodeCommand,
+  }) as Record<string, string>;
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -233,9 +186,9 @@ async function runStudioPiOAuthBridgeWithNodeCommand(
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const writeQueue: Promise<void>[] = [];
 
-    const child = spawn(nodeCommand, ["-e", PI_OAUTH_BRIDGE_SCRIPT, authStoragePath, providerId], {
+    const child = spawn(nodeCommand, ["-e", PI_OAUTH_BRIDGE_SCRIPT, sdkEntryPath, providerId], {
       cwd,
-      env: mergedEnv,
+      env: childEnv,
       shell: false,
     });
 
@@ -440,16 +393,18 @@ async function runStudioPiOAuthBridgeWithNodeCommand(
 
 export async function loginStudioPiProviderOAuthThroughNode(
   providerId: string,
-  authStoragePath: string,
+  sdkEntryPath: string,
   options: StudioPiOAuthLoginOptions
 ): Promise<void> {
-  const nodeCommandCandidates = resolveNodeCommandCandidates();
+  const nodeCommandCandidates = resolvePiNodeCommandCandidates({
+    baseEnv: process.env,
+  });
   let lastMissingExecutableError: unknown = null;
   let lastElectronRuntimeError: unknown = null;
 
   for (const nodeCommand of nodeCommandCandidates) {
     try {
-      await runStudioPiOAuthBridgeWithNodeCommand(nodeCommand, authStoragePath, providerId, options);
+      await runStudioPiOAuthBridgeWithNodeCommand(nodeCommand, sdkEntryPath, providerId, options);
       return;
     } catch (error) {
       if (isLikelyMissingStudioPiExecutableError(error, ["node", "pi"])) {
@@ -465,7 +420,9 @@ export async function loginStudioPiProviderOAuthThroughNode(
   }
 
   if (lastMissingExecutableError || lastElectronRuntimeError) {
-    throw new Error("Unable to launch Node.js runtime for Pi OAuth login. Ensure `node` is installed and available in PATH.");
+    throw new Error(
+      "Unable to launch the bundled Node.js runtime for Pi OAuth login. Reopen Obsidian and retry after bootstrap completes."
+    );
   }
-  throw new Error("Unable to launch Node.js runtime for Pi OAuth login.");
+  throw new Error("Unable to launch the bundled Node.js runtime for Pi OAuth login.");
 }

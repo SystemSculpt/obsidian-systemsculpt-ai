@@ -1,20 +1,13 @@
-import { App, ButtonComponent, Setting, SuggestModal, TFile, Notice, ToggleComponent, setIcon } from "obsidian";
-import { SystemPromptPreset } from "../types";
-import { SystemSculptModel } from "../types/llm";
+import { App, ButtonComponent, Setting, SuggestModal, Notice } from "obsidian";
 import { ChatMessage } from "../types";
-import { showPopup } from "../core/ui";
-import { SystemPromptService } from "../services/SystemPromptService";
+import { SystemPromptService, normalizeDesktopPromptSelectionType } from "../services/SystemPromptService";
 import { StandardModelSelectionModal, ModelSelectionResult } from "./StandardModelSelectionModal";
-import { TextEditModal } from "../core/ui/modals/standard/TextEditModal";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
-import { SystemSculptService } from "../services/SystemSculptService";
 import { TitleGenerationService } from "../services/TitleGenerationService";
 import SystemSculptPlugin from "../main";
-import { findModelById, getDisplayName, ensureCanonicalId, getModelLabelWithProvider } from "../utils/modelUtils";
+import { getDisplayName, ensureCanonicalId, getModelLabelWithProvider } from "../utils/modelUtils";
 import { ChatView } from "../views/chatview/ChatView";
-import { GENERAL_USE_PRESET, CONCISE_PRESET, AGENT_PRESET } from "../constants/prompts";
-// License checks removed for Agent Mode access
-import * as path from 'path'; // Import path for basename
+import { GENERAL_USE_PRESET, CONCISE_PRESET } from "../constants/prompts";
 
 export interface ChatSystemPromptModalOptions {
   plugin: SystemSculptPlugin; // Required for model list, title generation, etc.
@@ -91,7 +84,6 @@ export class StandardChatSettingsModal extends StandardModal {
   private changeDefaultButton: ButtonComponent;
   private selectedFileInfo: HTMLElement;
   private promptTextEditor: HTMLTextAreaElement;
-  private agentModeToggle?: ToggleComponent;
 
   // State
   private currentPrompt: string;
@@ -100,7 +92,6 @@ export class StandardChatSettingsModal extends StandardModal {
   private currentTitle: string;
   private currentModelId: string;
   private currentChatFontSize: "small" | "medium" | "large";
-  private currentAgentMode: boolean;
   private isGeneratingTitle: boolean = false;
   private settingsChangedListener: (() => void) | null = null;
 
@@ -112,12 +103,11 @@ export class StandardChatSettingsModal extends StandardModal {
 
     // Initialize state from options
     this.currentPrompt = options.currentPrompt ?? "";
-    this.currentType = options.currentSystemPromptType ?? "general-use";
+    this.currentType = normalizeDesktopPromptSelectionType(options.currentSystemPromptType);
     this.currentPath = options.systemPromptPath;
     this.currentTitle = options.chatTitle ?? "";
     this.currentModelId = options.currentModelId ?? "";
     this.currentChatFontSize = options.chatView?.chatFontSize || options.plugin.settings.chatFontSize || "medium";
-    this.currentAgentMode = options.chatView?.agentMode !== undefined ? options.chatView.agentMode : true;
 
     // --- Apply New CSS Class ---
     this.modalEl.addClass("ss-chat-settings-modal");
@@ -210,7 +200,6 @@ export class StandardChatSettingsModal extends StandardModal {
       // Full chat settings mode
       this.createTitleSection(leftPanel);
       this.createModelSection(leftPanel);
-      this.createAgentModeSection(leftPanel);
       this.createChatFontSizeSection(leftPanel);
       this.createSystemPromptTypeSection(leftPanel, false);
       this.createPromptEditorSection(rightPanel);
@@ -294,32 +283,6 @@ export class StandardChatSettingsModal extends StandardModal {
 
     // Initial update
     this.updateModelDisplay();
-  }
-
-  private createAgentModeSection(containerEl: HTMLElement) {
-    const section = containerEl.createDiv("ss-chat-settings-modal__section");
-    section.createEl("h3", { text: "Agent Mode (Tools)", cls: "ss-chat-settings-modal__section-title" });
-
-    const agentModeSetting = new Setting(section)
-      .setName("Enable Agent Mode")
-      .setDesc("Allow the AI to use tools like web search, file operations, and other capabilities. When disabled, the AI can only respond with text.")
-      .addToggle(toggle => {
-        this.agentModeToggle = toggle;
-        toggle
-          .setValue(this.currentAgentMode)
-          .onChange(async (value: boolean) => {
-            if (value === this.currentAgentMode) return;
-            this.currentAgentMode = value;
-            if (this.options.chatView) {
-              if (typeof this.options.chatView.setAgentMode === "function") {
-                await this.options.chatView.setAgentMode(value, { showNotice: false });
-              } else {
-                this.options.chatView.agentMode = value;
-                await this.options.chatView.saveChat();
-              }
-            }
-          });
-      });
   }
 
   private createChatFontSizeSection(containerEl: HTMLElement) {
@@ -423,11 +386,6 @@ export class StandardChatSettingsModal extends StandardModal {
 
   // --- Helper and Update Methods (Adjust classes if needed) ---
 
-  private isAgentModeAvailable(): boolean {
-    // Agent Mode is available to all users; gate usage by model tool support elsewhere
-    return true;
-  }
-
   private createPresetButtons(container: HTMLElement) {
     const presets: { id: "general-use" | "concise" | "custom"; label: string }[] = [
       { id: "general-use", label: "General Use Preset" },
@@ -441,19 +399,6 @@ export class StandardChatSettingsModal extends StandardModal {
         .setClass("ss-preset-button") // Use class defined in new CSS
         .onClick(() => this.selectPreset(preset.id));
     });
-
-    // Add agent mode button (only for individual chats, not defaults)
-    if (this.options.mode !== "defaults-only") {
-      const isAgentAvailable = this.isAgentModeAvailable();
-      const agentButton = new ButtonComponent(container)
-        .setButtonText("Agent Mode")
-        .setClass("ss-preset-button")
-        .onClick(() => this.selectPreset("agent"));
-      
-      // Agent Mode is always available; no disable needed
-      
-      this.presetButtons["agent"] = agentButton;
-    }
   }
 
   private updatePresetButtons() {
@@ -461,18 +406,6 @@ export class StandardChatSettingsModal extends StandardModal {
       if (this.presetButtons.hasOwnProperty(id)) {
         const isActive = id === this.currentType;
         this.presetButtons[id].buttonEl.toggleClass("is-active", isActive);
-        
-        // Handle agent mode button state
-        if (id === "agent") {
-          const isAgentAvailable = this.isAgentModeAvailable();
-          if (!isAgentAvailable) {
-            this.presetButtons[id].buttonEl.setAttribute("disabled", "true");
-            this.presetButtons[id].buttonEl.addClass("ss-preset-button-disabled");
-          } else {
-            this.presetButtons[id].buttonEl.removeAttribute("disabled");
-            this.presetButtons[id].buttonEl.removeClass("ss-preset-button-disabled");
-          }
-        }
       }
     }
     // Show/hide change file button based on type
@@ -505,29 +438,21 @@ export class StandardChatSettingsModal extends StandardModal {
       }
     } else {
        let presetLabel: string;
-       if (this.currentType === 'general-use') {
+       const normalizedType = normalizeDesktopPromptSelectionType(this.currentType);
+       if (normalizedType === 'general-use') {
          presetLabel = 'General Use';
-       } else if (this.currentType === 'concise') {
+       } else if (normalizedType === 'concise') {
          presetLabel = 'Concise';
-       } else if (this.currentType === 'agent') {
-         presetLabel = 'Agent Mode';
        } else {
          // Handle invalid/unknown system prompt types
-         let validTypes: string[];
-         if (this.options.mode === "defaults-only") {
-           // For default settings, "agent" is not allowed since it's per-chat only
-           validTypes = ['general-use', 'concise', 'custom'];
-         } else {
-           // For individual chat settings, "agent" is allowed
-           validTypes = ['general-use', 'concise', 'custom', 'agent'];
-         }
-         
-         if (!validTypes.includes(this.currentType as string)) {
+         const validTypes = ['general-use', 'concise', 'custom'];
+
+         if (!validTypes.includes(normalizedType as string)) {
            this.currentType = 'general-use';
            this.currentPrompt = GENERAL_USE_PRESET.systemPrompt;
            presetLabel = 'General Use (auto-switched from invalid type)';
          } else {
-           presetLabel = 'General Use'; // Final fallback
+           presetLabel = 'General Use';
          }
        }
        this.selectedFileInfo.createEl("span", { text: `Using ${presetLabel} Preset` });
@@ -540,7 +465,7 @@ export class StandardChatSettingsModal extends StandardModal {
       defaultType = this.currentType;
       defaultPath = this.currentPath;
     } else {
-      defaultType = this.options.plugin.settings.systemPromptType || 'general-use';
+      defaultType = normalizeDesktopPromptSelectionType(this.options.plugin.settings.systemPromptType || 'general-use');
       defaultPath = this.options.plugin.settings.systemPromptPath;
     }
 
@@ -561,21 +486,18 @@ export class StandardChatSettingsModal extends StandardModal {
 
   private async loadInitialPrompt() {
       try {
+          const normalizedType = normalizeDesktopPromptSelectionType(this.currentType);
           let promptContent = "";
-          if (this.currentType === "general-use") {
-              promptContent = GENERAL_USE_PRESET.systemPrompt;
-          } else if (this.currentType === "concise") {
-              promptContent = CONCISE_PRESET.systemPrompt;
-          } else if (this.currentType === "agent") {
-              promptContent = AGENT_PRESET.systemPrompt;
-          } else if (this.currentType === "custom" && this.currentPath) {
+          if (normalizedType === "custom" && this.currentPath) {
               promptContent = await this.systemPromptService.getSystemPromptContent("custom", this.currentPath);
+          } else if (normalizedType === "custom") {
+             promptContent = this.currentPrompt || "";
           } else {
-             // Handle case where type is custom but path is missing, or initial load
-             promptContent = this.currentPrompt || ""; // Use existing if available
+              promptContent = await this.systemPromptService.getSystemPromptContent(normalizedType);
           }
 
           this.currentPrompt = promptContent;
+          this.currentType = normalizedType;
           if (this.promptTextEditor) {
               this.promptTextEditor.value = this.currentPrompt;
           }
@@ -588,46 +510,16 @@ export class StandardChatSettingsModal extends StandardModal {
   }
 
   private selectPreset = async (type: "general-use" | "concise" | "agent" | "custom") => {
-    if (type === "agent" && !this.currentAgentMode) {
-      const result = await showPopup(
-        this.app,
-        "The Agent prompt works best with Agent Mode enabled so the assistant can use tools. Enable Agent Mode now?",
-        {
-          title: "Agent Mode Required",
-          icon: "wrench",
-          primaryButton: "Enable Agent Mode",
-          secondaryButton: "Cancel",
-        }
-      );
-      if (!result?.confirmed) {
-        return;
-      }
+    const normalizedType = normalizeDesktopPromptSelectionType(type);
+    this.currentType = normalizedType;
 
-      this.currentAgentMode = true;
-      this.agentModeToggle?.setValue(true);
-      if (this.options.chatView) {
-        if (typeof this.options.chatView.setAgentMode === "function") {
-          await this.options.chatView.setAgentMode(true, { showNotice: false });
-        } else {
-          this.options.chatView.agentMode = true;
-          await this.options.chatView.saveChat();
-        }
-      }
-    }
-
-    this.currentType = type;
-
-    if (type === "general-use") {
+    if (normalizedType === "general-use") {
         this.currentPrompt = GENERAL_USE_PRESET.systemPrompt;
         this.currentPath = undefined;
-    } else if (type === "concise") {
+    } else if (normalizedType === "concise") {
         this.currentPrompt = CONCISE_PRESET.systemPrompt;
         this.currentPath = undefined;
-    } else if (type === "agent") {
-        this.currentPrompt = AGENT_PRESET.systemPrompt;
-        this.currentPath = undefined;
-        
-    } else if (type === "custom") {
+    } else if (normalizedType === "custom") {
         // If switching TO custom, prompt user to select a file immediately
         // unless a path is already somehow defined (e.g., initial state)
         if (!this.currentPath) {
@@ -709,12 +601,6 @@ export class StandardChatSettingsModal extends StandardModal {
     if (!this.modelNameDisplay || !this.currentModelId) return;
 
     try {
-      let modelInfo: SystemSculptModel | undefined | null = null;
-      if (this.options.plugin) {
-         const allModels = await this.options.plugin.modelService.getModels();
-         modelInfo = await findModelById(allModels, this.currentModelId);
-      }
-
       const canonicalId = ensureCanonicalId(this.currentModelId);
       const displayLabel = getModelLabelWithProvider(canonicalId);
       (this.modelNameDisplay as HTMLInputElement).value = displayLabel;
@@ -822,7 +708,7 @@ export class StandardChatSettingsModal extends StandardModal {
 
     // Save current state automatically on close
     const result: ChatSystemPromptResult = {
-      type: this.currentType,
+      type: normalizeDesktopPromptSelectionType(this.currentType),
       prompt: this.currentPrompt,
       path: this.currentPath,
       modelId: this.currentModelId,
@@ -841,13 +727,8 @@ export class StandardChatSettingsModal extends StandardModal {
       if (this.options.chatView) {
         this.options.chatView.systemPromptType = result.type;
         this.options.chatView.systemPromptPath = result.path;
-        if (this.options.chatView.agentMode !== this.currentAgentMode) {
-          if (typeof this.options.chatView.setAgentMode === "function") {
-            await this.options.chatView.setAgentMode(this.currentAgentMode, { showNotice: false });
-          } else {
-            this.options.chatView.agentMode = this.currentAgentMode;
-          }
-        }
+        this.options.chatView.currentPrompt = result.prompt;
+        this.options.chatView.clearPiSessionState({ save: false });
         // Apply model change via ChatView API if provided; this persists and updates indicators
         if (result.modelId && typeof this.options.chatView.setSelectedModelId === 'function') {
           await this.options.chatView.setSelectedModelId(result.modelId);
@@ -867,7 +748,6 @@ export class StandardChatSettingsModal extends StandardModal {
         // Update UI elements
         this.options.chatView.updateModelIndicator();
         this.options.chatView.updateSystemPromptIndicator();
-        this.options.chatView.updateAgentModeIndicator();
         // Keep the empty-chat status panel in sync
         if (this.options.chatView.messages.length === 0) {
           this.options.chatView.displayChatStatus();
@@ -895,22 +775,6 @@ export class StandardChatSettingsModal extends StandardModal {
       if (this.resolvePromise) this.resolvePromise(null);
     }
   }
-
-  private async switchToVaultAgentModel() {
-    const vaultAgentModelId = "systemsculpt/vault-agent";
-    this.currentModelId = vaultAgentModelId;
-    
-    // Update model display
-    await this.updateModelDisplay();
-    
-    // If we have a model select callback, call it
-    if (this.options.onModelSelect) {
-      await this.options.onModelSelect(vaultAgentModelId);
-    }
-    
-    new Notice("Switched to Vault Agent model for agent prompt", 3000);
-  }
-
   // Promise interface for awaiting result
   private resolvePromise: ((value: ChatSystemPromptResult | null) => void) | null = null;
   openModal(): Promise<ChatSystemPromptResult | null> {

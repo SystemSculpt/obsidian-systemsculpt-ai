@@ -7,7 +7,7 @@ import type { StudioNodeConfigSelectOption } from "./types";
 
 type StudioLocalTextModelProviderAuthRecord = Pick<
   StudioPiProviderAuthRecord,
-  "provider" | "displayName" | "hasStoredCredential" | "credentialType"
+  "provider" | "displayName" | "hasAnyAuth" | "hasStoredCredential" | "credentialType"
 >;
 
 function trimText(value: unknown): string {

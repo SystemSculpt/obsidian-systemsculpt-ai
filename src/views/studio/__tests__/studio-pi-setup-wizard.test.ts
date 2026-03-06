@@ -2,10 +2,8 @@ import {
   buildApiKeyHint,
   getApiKeyEnvVarForProvider,
   KNOWN_OAUTH_PROVIDER_IDS,
-  parseProviderIdsFromModelList,
   PROVIDER_AUTH_HINT_OVERRIDES,
   PROVIDER_LABEL_OVERRIDES,
-  providerIsListedByPiModelList,
   resolveProviderLabel,
   selectDefaultAuthMethod,
   supportsOAuthLogin,
@@ -26,15 +24,6 @@ function oauthMap(
 }
 
 const EMPTY_OAUTH = new Map<string, StudioPiOAuthProvider>();
-
-const MODEL_LIST_STDOUT = [
-  "provider            model                       context  max-out  thinking  images",
-  "anthropic           claude-opus-4-6             200K     32K      yes       no",
-  "openai              gpt-5                       400K     128K     yes       yes",
-  "openai-codex        gpt-5.2-codex               272K     128K     yes       yes",
-  "google-gemini-cli   gemini-2.5-pro              1000K    65K      yes       no",
-  "github-copilot      gpt-4.1                     128K     16K      no        no",
-].join("\n");
 
 // ─── KNOWN_OAUTH_PROVIDER_IDS ─────────────────────────────────────────────
 
@@ -182,69 +171,6 @@ describe("resolveProviderLabel", () => {
   it("prefers dynamic name even when a PROVIDER_LABEL_OVERRIDE exists", () => {
     const dynamic = oauthMap([{ id: "github-copilot", name: "GitHub Copilot (Enterprise)" }]);
     expect(resolveProviderLabel("github-copilot", dynamic)).toBe("GitHub Copilot (Enterprise)");
-  });
-});
-
-// ─── parseProviderIdsFromModelList ────────────────────────────────────────
-
-describe("parseProviderIdsFromModelList", () => {
-  it("extracts all provider ids from standard pi --list-models output", () => {
-    const ids = parseProviderIdsFromModelList(MODEL_LIST_STDOUT);
-    expect(ids).toContain("anthropic");
-    expect(ids).toContain("openai");
-    expect(ids).toContain("openai-codex");
-    expect(ids).toContain("google-gemini-cli");
-    expect(ids).toContain("github-copilot");
-  });
-
-  it("skips the header row", () => {
-    const ids = parseProviderIdsFromModelList(MODEL_LIST_STDOUT);
-    expect(ids).not.toContain("provider");
-  });
-
-  it("de-duplicates providers with multiple models", () => {
-    const stdout = [
-      "openai   gpt-5         400K  128K  yes  yes",
-      "openai   gpt-4.1       128K  16K   no   no",
-    ].join("\n");
-    const ids = parseProviderIdsFromModelList(stdout);
-    expect(ids.filter((id) => id === "openai")).toHaveLength(1);
-  });
-
-  it("returns an empty array for empty input", () => {
-    expect(parseProviderIdsFromModelList("")).toEqual([]);
-    expect(parseProviderIdsFromModelList("   \n  \n  ")).toEqual([]);
-  });
-
-  it("normalizes provider ids to lowercase", () => {
-    const ids = parseProviderIdsFromModelList("OpenAI   gpt-5   400K  128K  yes  yes");
-    expect(ids).toContain("openai");
-    expect(ids).not.toContain("OpenAI");
-  });
-});
-
-// ─── providerIsListedByPiModelList ────────────────────────────────────────
-
-describe("providerIsListedByPiModelList", () => {
-  it("returns true for providers in the model list", () => {
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "anthropic")).toBe(true);
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "openai-codex")).toBe(true);
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "github-copilot")).toBe(true);
-  });
-
-  it("returns false for providers not in the model list", () => {
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "groq")).toBe(false);
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "mistral")).toBe(false);
-  });
-
-  it("returns true for an empty provider string (no filter)", () => {
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "")).toBe(true);
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "   ")).toBe(true);
-  });
-
-  it("is case-insensitive", () => {
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "Anthropic")).toBe(true);
-    expect(providerIsListedByPiModelList(MODEL_LIST_STDOUT, "OPENAI-CODEX")).toBe(true);
   });
 });
 

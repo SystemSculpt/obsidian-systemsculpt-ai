@@ -1,17 +1,17 @@
 import { Platform } from "obsidian";
-import { existsSync } from "node:fs";
 import { loginStudioPiProviderOAuthThroughNode } from "./StudioPiOAuthBridge";
+import {
+  loadPiSdkModule,
+  resolvePiPackageEntryPath,
+  type PiSdkAuthCredential,
+  type PiSdkAuthStorageInstance,
+} from "../../services/pi/PiSdk";
+import { ensureBundledPiRuntime } from "../../services/pi/PiRuntimeBootstrap";
 import {
   getStudioPiProviderLabelOrUndefined,
   supportsOAuthLogin,
 } from "./StudioPiProviderRegistry";
 import { normalizeStudioPiProviderHint } from "./StudioPiProviderUtils";
-
-const PI_PACKAGE_ROOT_CANDIDATES = [
-  "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent",
-  "/usr/local/lib/node_modules/@mariozechner/pi-coding-agent",
-];
-const PI_AUTH_STORAGE_MODULE_RELATIVE = "dist/core/auth-storage.js";
 
 export type StudioPiOAuthProvider = {
   id: string;
@@ -84,11 +84,7 @@ export type StudioPiOAuthLoginOptions = {
   signal?: AbortSignal;
 };
 
-type StudioPiAuthCredentialRecord = {
-  type?: unknown;
-  expires?: unknown;
-};
-
+type StudioPiAuthCredentialRecord = PiSdkAuthCredential;
 type StudioPiAuthStorageData = Record<string, StudioPiAuthCredentialRecord>;
 
 type StudioPiOAuthProviderRecord = {
@@ -97,78 +93,7 @@ type StudioPiOAuthProviderRecord = {
   usesCallbackServer?: unknown;
 };
 
-export type StudioPiAuthStorageInstance = {
-  getOAuthProviders: () => StudioPiOAuthProviderRecord[];
-  login: (
-    providerId: string,
-    callbacks: {
-      onAuth: (info: StudioPiAuthInfo) => void;
-      onPrompt: (prompt: StudioPiAuthPrompt) => Promise<string>;
-      onProgress?: (message: string) => void;
-      onManualCodeInput?: () => Promise<string>;
-      signal?: AbortSignal;
-    }
-  ) => Promise<void>;
-  set: (provider: string, credential: { type: "api_key"; key: string }) => void;
-  remove: (provider: string) => void;
-  get: (provider: string) => StudioPiAuthCredentialRecord | undefined;
-  hasAuth: (provider: string) => boolean;
-  has?: (provider: string) => boolean;
-  list?: () => string[];
-  getAll?: () => StudioPiAuthStorageData;
-};
-
-type StudioPiAuthStorageModule = {
-  AuthStorage: {
-    create: (authPath?: string) => StudioPiAuthStorageInstance;
-  };
-};
-
-function resolvePiPackageRoot(): string | null {
-  for (const candidate of PI_PACKAGE_ROOT_CANDIDATES) {
-    const authStoragePath = `${candidate}/${PI_AUTH_STORAGE_MODULE_RELATIVE}`;
-    if (existsSync(authStoragePath)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function resolvePiAuthStorageModulePath(): string {
-  const packageRoot = resolvePiPackageRoot();
-  if (!packageRoot) {
-    throw new Error("Pi auth module is unavailable. Reinstall @mariozechner/pi-coding-agent.");
-  }
-  return `${packageRoot}/${PI_AUTH_STORAGE_MODULE_RELATIVE}`;
-}
-
-async function importPiModule<T>(absolutePath: string): Promise<T> {
-  const importFn = new Function("specifier", "return import(specifier);") as (
-    specifier: string
-  ) => Promise<T>;
-  const moduleUrl = `file://${absolutePath}`;
-  return await importFn(moduleUrl);
-}
-
-async function loadPiAuthStorageModule(): Promise<StudioPiAuthStorageModule> {
-  const absolutePath = resolvePiAuthStorageModulePath();
-
-  // Prefer Electron's window.require (CommonJS) — Obsidian's renderer exposes
-  // this and it can load local files, unlike dynamic import() of file:// URLs
-  // which Obsidian's security policy blocks.
-  const windowRequire = typeof window !== "undefined"
-    ? (window as unknown as Record<string, unknown>)?.require
-    : undefined;
-  if (typeof windowRequire === "function") {
-    try {
-      return (windowRequire as (path: string) => StudioPiAuthStorageModule)(absolutePath);
-    } catch {
-      // Fall through to dynamic import if require fails.
-    }
-  }
-
-  return await importPiModule<StudioPiAuthStorageModule>(absolutePath);
-}
+export type StudioPiAuthStorageInstance = PiSdkAuthStorageInstance;
 
 function normalizeAuthSource(credentialType: unknown, hasAnyAuth: boolean): StudioPiAuthState["source"] {
   if (credentialType === "oauth") {
@@ -202,8 +127,35 @@ async function resolvePiAuthStorage(
   if (storageOverride) {
     return storageOverride;
   }
-  const authStorageModule = await loadPiAuthStorageModule();
-  return authStorageModule.AuthStorage.create();
+  const sdk = await loadPiSdkModule();
+  return sdk.AuthStorage.create();
+}
+
+async function resolveProviderApiKeyFromStorage(
+  storage: StudioPiAuthStorageInstance,
+  provider: string
+): Promise<string> {
+  const getApiKey = storage.getApiKey;
+  if (typeof getApiKey !== "function") {
+    return "";
+  }
+
+  try {
+    return String((await getApiKey.call(storage, provider)) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveProviderHasAnyAuth(
+  storage: StudioPiAuthStorageInstance,
+  provider: string
+): Promise<boolean> {
+  const resolvedApiKey = await resolveProviderApiKeyFromStorage(storage, provider);
+  if (resolvedApiKey) {
+    return true;
+  }
+  return storage.hasAuth(provider);
 }
 
 function getStoredProviderIds(storage: StudioPiAuthStorageInstance): string[] {
@@ -282,7 +234,7 @@ export async function listStudioPiProviderAuthRecords(
   const records: StudioPiProviderAuthRecord[] = [];
   for (const provider of providerIds.values()) {
     const credential = storage.get(provider);
-    const hasAnyAuth = storage.hasAuth(provider);
+    const hasAnyAuth = await resolveProviderHasAnyAuth(storage, provider);
     const credentialType = normalizeCredentialType(credential?.type);
     const source = normalizeAuthSource(credential?.type, hasAnyAuth);
     const hasStored = hasStoredCredential(storage, provider, credential);
@@ -395,8 +347,9 @@ export async function loginStudioPiProviderOAuth(options: StudioPiOAuthLoginOpti
   if (!Platform.isDesktopApp) {
     throw new Error("OAuth login is only available on desktop.");
   }
-  const authStoragePath = resolvePiAuthStorageModulePath();
-  await loginStudioPiProviderOAuthThroughNode(providerId, authStoragePath, options);
+  await ensureBundledPiRuntime();
+  const sdkEntryPath = resolvePiPackageEntryPath();
+  await loginStudioPiProviderOAuthThroughNode(providerId, sdkEntryPath, options);
 }
 
 export async function setStudioPiProviderApiKey(providerHint: string, apiKey: string): Promise<void> {
@@ -435,10 +388,21 @@ export async function readStudioPiProviderAuthState(providerHint: string): Promi
   }
   const storage = await resolvePiAuthStorage();
   const credentialType = storage.get(provider)?.type;
-  const hasAnyAuth = storage.hasAuth(provider);
+  const hasAnyAuth = await resolveProviderHasAnyAuth(storage, provider);
   return {
     provider,
     hasAnyAuth,
     source: normalizeAuthSource(credentialType, hasAnyAuth),
   };
+}
+
+export async function resolveStudioPiProviderApiKey(providerHint: string): Promise<string | null> {
+  const provider = normalizeStudioPiProviderHint(providerHint);
+  if (!provider) {
+    return null;
+  }
+
+  const storage = await resolvePiAuthStorage();
+  const apiKey = await resolveProviderApiKeyFromStorage(storage, provider);
+  return apiKey || null;
 }

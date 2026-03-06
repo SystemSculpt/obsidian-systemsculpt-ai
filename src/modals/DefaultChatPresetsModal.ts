@@ -1,8 +1,8 @@
-import { App, Modal, Setting, Notice, SuggestModal, TFile } from "obsidian";
+import { App, Modal, Setting, Notice, SuggestModal } from "obsidian";
 import SystemSculptPlugin from "../main";
-import { getDisplayName, ensureCanonicalId, parseCanonicalId, getModelLabelWithProvider } from "../utils/modelUtils";
+import { ensureCanonicalId, parseCanonicalId, getModelLabelWithProvider } from "../utils/modelUtils";
 import { StandardModelSelectionModal, ModelSelectionResult } from "./StandardModelSelectionModal";
-import { SystemPromptService } from "../services/SystemPromptService";
+import { SystemPromptService, normalizeDesktopPromptSelectionType } from "../services/SystemPromptService";
 
 /**
  * Custom file suggester modal for system prompt files
@@ -115,7 +115,7 @@ export class DefaultChatPresetsModal extends Modal {
 
     const buttonContainer = promptSetting.controlEl.createDiv({ cls: "ss-modal-button-container--grid" });
 
-    // Create buttons for each prompt type (agent prompt removed; controlled via Agent Mode toggle)
+    // Create buttons for the desktop Pi prompt presets.
     ["general-use", "concise", "custom"].forEach((type) => {
       const displayText = type === "general-use" ? "General Use" : type.charAt(0).toUpperCase() + type.slice(1);
 
@@ -177,17 +177,16 @@ export class DefaultChatPresetsModal extends Modal {
     const type = this.plugin.settings.systemPromptType;
     let displayText = "";
 
-    // CRITICAL: Check if user has "agent" as their default system prompt type.
-    // Since Agent Mode is now per-chat only, this is no longer valid as a default.
+    // Migrate the legacy desktop Agent preset to General Use.
     if (type === "agent") {
       await this.plugin.getSettingsManager().updateSettings({
         systemPromptType: 'general-use',
         systemPromptPath: ''
       });
-      displayText = "General Use (auto-switched from Agent Mode - now per-chat only)";
-    } else if (type === "general-use") {
+      displayText = "General Use (auto-switched from legacy Agent prompt)";
+    } else if (normalizeDesktopPromptSelectionType(type) === "general-use") {
       displayText = "General Use";
-    } else if (type === "concise") {
+    } else if (normalizeDesktopPromptSelectionType(type) === "concise") {
       displayText = "Concise";
     } else if (type === "custom") {
       if (this.plugin.settings.systemPromptPath) {
@@ -209,8 +208,8 @@ export class DefaultChatPresetsModal extends Modal {
         displayText = "Custom (no file selected)";
       }
     } else {
-      // Handle invalid/unknown system prompt types (excluding "agent" which is now handled above)
-      const validDefaultTypes = ['general-use', 'concise', 'custom']; // Removed 'agent' from valid defaults
+      // Handle invalid/unknown system prompt types.
+      const validDefaultTypes = ['general-use', 'concise', 'custom'];
       if (!validDefaultTypes.includes(type as string)) {
         // Unknown or invalid type, fall back to general-use
         await this.plugin.getSettingsManager().updateSettings({

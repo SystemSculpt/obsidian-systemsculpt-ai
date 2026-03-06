@@ -3,6 +3,12 @@ import { ChatExportService } from "../ChatExportService";
 import { SystemPromptService } from "../../../../services/SystemPromptService";
 
 jest.mock("../../../../services/SystemPromptService", () => ({
+  normalizeDesktopPromptSelectionType: jest.fn((type?: string) => {
+    if (type === "concise" || type === "custom") {
+      return type;
+    }
+    return "general-use";
+  }),
   SystemPromptService: {
     getInstance: jest.fn(),
   },
@@ -29,7 +35,6 @@ const createChatView = () => {
     webSearchEnabled: true,
     systemPromptType: "general-use",
     systemPromptPath: "",
-    agentMode: false,
     contextManager: {
       getContextFiles: jest.fn(() => new Set(["[[Note]]", "[[Image.png]]", "doc:extract.md"])),
     },
@@ -71,7 +76,6 @@ describe("ChatExportService", () => {
 
     const promptService = {
       getSystemPromptContent: jest.fn(async () => "PROMPT"),
-      combineWithAgentPrefix: jest.fn(async () => "COMBINED"),
     };
     (SystemPromptService.getInstance as jest.Mock).mockReturnValue(promptService);
 
@@ -88,7 +92,7 @@ describe("ChatExportService", () => {
       includeSystemPrompt: true,
     });
 
-    expect(result.context.systemPrompt?.content).toBe("COMBINED");
+    expect(result.context.systemPrompt?.content).toBe("PROMPT");
     expect(result.context.summary.totalMessages).toBe(3);
     expect(result.context.summary.userMessages).toBe(1);
     expect(result.context.summary.assistantMessages).toBe(2);
@@ -105,4 +109,3 @@ describe("ChatExportService", () => {
     );
   });
 });
-

@@ -298,9 +298,9 @@ export class StreamPipeline {
         done = done || isFinalFlush;
       }
 
-      // Tool-use continuation is PI-native, but many OpenAI-compatible providers only expose
-      // a finish_reason like "tool_calls". Map those to PI stop reasons so the UI can
-      // continue the turn loop when Agent Mode is enabled.
+      // Tool-use continuation is Pi-native, but many OpenAI-compatible providers only expose
+      // a finish_reason like "tool_calls". Map those to Pi stop reasons so the UI can
+      // continue the same Pi-owned turn loop.
       const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason.trim() : "";
       if (finishReason && !this.emittedStopReasonFromFinishReason) {
         const mappedStopReason = this.mapFinishReasonToPiStopReason(finishReason);

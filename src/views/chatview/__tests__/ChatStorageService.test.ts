@@ -52,7 +52,6 @@ describe("ChatStorageService", () => {
   let service: ChatStorageService;
   let mockApp: App;
   let mockVault: any;
-  let mockToolCallManager: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -75,12 +74,7 @@ describe("ChatStorageService", () => {
       },
     } as unknown as App;
 
-    mockToolCallManager = {
-      getToolCall: jest.fn().mockReturnValue(null),
-      processToolResult: jest.fn((content) => content),
-    };
-
-    service = new ChatStorageService(mockApp, "SystemSculpt/Chats", mockToolCallManager);
+    service = new ChatStorageService(mockApp, "SystemSculpt/Chats");
   });
 
   describe("constructor", () => {
@@ -92,14 +86,6 @@ describe("ChatStorageService", () => {
       expect((service as any).chatDirectory).toBe("SystemSculpt/Chats");
     });
 
-    it("stores tool call manager", () => {
-      expect((service as any).toolCallManager).toBe(mockToolCallManager);
-    });
-
-    it("works without tool call manager", () => {
-      const serviceNoToolManager = new ChatStorageService(mockApp, "Chats");
-      expect((serviceNoToolManager as any).toolCallManager).toBeUndefined();
-    });
   });
 
   describe("saveChat", () => {
@@ -263,11 +249,9 @@ Content here`;
   });
 });
 
-describe("processMessageToolCalls", () => {
-  // This function is module-level, test its behavior indirectly through saveChat
+describe("ChatStorageService tool message persistence", () => {
   let service: ChatStorageService;
   let mockApp: App;
-  let mockToolCallManager: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -288,22 +272,10 @@ describe("processMessageToolCalls", () => {
       plugins: { plugins: {} },
     } as unknown as App;
 
-    mockToolCallManager = {
-      getToolCall: jest.fn().mockReturnValue({
-        id: "tool-1",
-        request: {
-          function: {
-            name: "test_tool",
-          },
-        },
-      }),
-      processToolResult: jest.fn((content) => ({ processed: true, ...content })),
-    };
-
-    service = new ChatStorageService(mockApp, "Chats", mockToolCallManager);
+    service = new ChatStorageService(mockApp, "Chats");
   });
 
-  it("processes tool messages with tool call manager", async () => {
+  it("passes tool messages through unchanged when saving", async () => {
     const toolMessage: ChatMessage = {
       role: "tool" as ChatRole,
       content: '{"result": "success"}',
@@ -312,10 +284,13 @@ describe("processMessageToolCalls", () => {
 
     await service.saveChat("test", [toolMessage], "gpt-4");
 
-    expect(mockToolCallManager.getToolCall).toHaveBeenCalledWith("tool-1");
+    const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
+      ChatMarkdownSerializer: { serializeMessages: jest.Mock };
+    };
+    expect(ChatMarkdownSerializer.serializeMessages).toHaveBeenCalledWith([toolMessage]);
   });
 
-  it("leaves non-tool messages unchanged", async () => {
+  it("does not depend on tool manager state for non-tool messages", async () => {
     const userMessage: ChatMessage = {
       role: "user" as ChatRole,
       content: "Hello",
@@ -323,8 +298,10 @@ describe("processMessageToolCalls", () => {
 
     await service.saveChat("test", [userMessage], "gpt-4");
 
-    // Tool call manager should not be invoked for user messages
-    expect(mockToolCallManager.getToolCall).not.toHaveBeenCalled();
+    const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
+      ChatMarkdownSerializer: { serializeMessages: jest.Mock };
+    };
+    expect(ChatMarkdownSerializer.serializeMessages).toHaveBeenCalledWith([userMessage]);
   });
 });
 

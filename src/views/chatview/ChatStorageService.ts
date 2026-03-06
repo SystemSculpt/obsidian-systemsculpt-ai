@@ -1,57 +1,8 @@
 import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
 import { ChatMessage, MessagePart } from "../../types";
 import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
-import type { ToolCallManager } from "./ToolCallManager";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
-
-// Helper function to process tool calls in a message
-function processMessageToolCalls(message: ChatMessage, toolCallManager?: ToolCallManager): ChatMessage {
-  if (message.role === 'tool' && message.content && toolCallManager) {
-    try {
-      const toolCall = toolCallManager.getToolCall(message.tool_call_id || '');
-      if (toolCall) {
-        // Safely parse JSON content
-        let parsedContent;
-        try {
-          parsedContent = JSON.parse(message.content as string);
-        } catch (parseError) {
-          return message; // Return original message if JSON parse fails
-        }
-        
-        const processedContent = toolCallManager.processToolResult(
-          parsedContent,
-          toolCall.request.function.name
-        );
-        
-        // Safely serialize back to JSON with size checks
-        try {
-          const serialized = JSON.stringify(processedContent, null, 2);
-          
-          // Check size before returning
-          if (serialized.length > 50000) { // 50KB limit for message content
-            return {
-              ...message,
-              content: JSON.stringify({
-                ...processedContent,
-                truncation_info: `Content truncated - original size: ${serialized.length} characters`
-              }, null, 2)
-            };
-          }
-          
-          return { ...message, content: serialized };
-        } catch (stringifyError) {
-          // Return original message if serialization fails
-          return message;
-        }
-      }
-    } catch (error) {
-      // Return original message on any error
-      return message;
-    }
-  }
-  return message;
-}
 
 interface ContextFile {
   path: string;
@@ -72,18 +23,17 @@ interface ChatMetadata {
     path?: string;
   };
   chatFontSize?: "small" | "medium" | "large";
-  agentMode?: boolean;
+  piSessionFile?: string;
+  piSessionId?: string;
 }
 
 export class ChatStorageService {
   private app: App;
   private chatDirectory: string;
-  private toolCallManager?: ToolCallManager;
 
-  constructor(app: App, chatDirectory: string, toolCallManager?: ToolCallManager) {
+  constructor(app: App, chatDirectory: string) {
     this.app = app;
     this.chatDirectory = chatDirectory;
-    this.toolCallManager = toolCallManager;
   }
 
   private normalizeTag(tag: string): string {
@@ -154,7 +104,8 @@ export class ChatStorageService {
     systemPromptPath?: string,
     title?: string,
     chatFontSize?: "small" | "medium" | "large",
-    agentMode?: boolean
+    piSessionFile?: string,
+    piSessionId?: string
   ): Promise<{ version: number }> {
     try {
       const { version } = await this.saveChatSimple(
@@ -167,7 +118,8 @@ export class ChatStorageService {
         systemPromptPath,
         title,
         chatFontSize,
-        agentMode
+        piSessionFile,
+        piSessionId
       );
       return { version };
     } catch (error) {
@@ -185,7 +137,8 @@ export class ChatStorageService {
     systemPromptPath?: string,
     title?: string,
     chatFontSize?: "small" | "medium" | "large",
-    agentMode?: boolean
+    piSessionFile?: string,
+    piSessionId?: string
   ): Promise<{ filePath: string; version: number }> {
     let filePath = `[unknown-path]/${chatId}.md`;
     try {
@@ -232,7 +185,8 @@ export class ChatStorageService {
           path: (systemPromptType === 'custom' && systemPromptPath) ? systemPromptPath : undefined
         },
         chatFontSize: chatFontSize || "medium",
-        agentMode: agentMode !== undefined ? agentMode : true
+        piSessionFile: String(piSessionFile || "").trim() || undefined,
+        piSessionId: String(piSessionId || "").trim() || undefined,
       };
 
       if (mergedTags.length > 0) {
@@ -246,8 +200,7 @@ export class ChatStorageService {
         }));
       }
 
-      const processedMessages = messages.map(msg => processMessageToolCalls(msg, this.toolCallManager));
-      const messagesContent = ChatMarkdownSerializer.serializeMessages(processedMessages);
+      const messagesContent = ChatMarkdownSerializer.serializeMessages(messages);
 
       const fullContent = `---\n${stringifyYaml(metadata)}---\n\n${messagesContent}`;
 
@@ -359,7 +312,8 @@ export class ChatStorageService {
     systemPromptType: "general-use" | "concise" | "agent" | "custom";
     systemPromptPath?: string;
     chatFontSize?: "small" | "medium" | "large";
-    agentMode?: boolean;
+    piSessionFile?: string;
+    piSessionId?: string;
   } | null> {
     try {
       const filePath = `${this.chatDirectory}/${chatId}.md`;
@@ -464,7 +418,9 @@ export class ChatStorageService {
           type: systemMessageType,
           path: systemMessagePath
         },
-        chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined
+        chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
+        piSessionFile: typeof (parsed as any).piSessionFile === "string" ? (parsed as any).piSessionFile : undefined,
+        piSessionId: typeof (parsed as any).piSessionId === "string" ? (parsed as any).piSessionId : undefined,
       };
     } catch (error) {
       return null;
@@ -482,7 +438,8 @@ export class ChatStorageService {
     systemPromptType: 'general-use' | 'concise' | 'agent' | 'custom';
     systemPromptPath?: string;
     chatFontSize?: "small" | "medium" | "large";
-    agentMode?: boolean;
+    piSessionFile?: string;
+    piSessionId?: string;
   } | null {
     // NEW: Delegate modern parsing logic to central serializer
     const parsed = ChatMarkdownSerializer.parseMarkdown(content);
@@ -508,7 +465,8 @@ export class ChatStorageService {
       systemPromptType: metadata.systemMessage?.type || 'general-use',
       systemPromptPath: metadata.systemMessage?.path,
       chatFontSize: metadata.chatFontSize,
-      agentMode: metadata.agentMode !== undefined ? metadata.agentMode : true,
+      piSessionFile: metadata.piSessionFile,
+      piSessionId: metadata.piSessionId,
     };
   }
 

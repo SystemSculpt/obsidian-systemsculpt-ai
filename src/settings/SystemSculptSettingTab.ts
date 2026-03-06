@@ -264,7 +264,7 @@ async display(): Promise<void> {
         button.setDisabled(true);
         await this.plugin.getSettingsManager().updateSettings({
           settingsMode: "standard",
-          selectedModelId: this.plugin.settings.selectedModelId || "systemsculpt@@systemsculpt/ai-agent",
+          selectedModelId: this.plugin.settings.selectedModelId || "",
           systemPromptType: "general-use",
           systemPromptPath: "",
           chatFontSize: "medium",

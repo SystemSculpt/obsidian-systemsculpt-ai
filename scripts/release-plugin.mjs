@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
+const PI_RUNTIME_DIR = path.join(cwd, "dist", "pi-runtime");
+const PI_RUNTIME_MANIFEST_NAME = "studio-pi-runtime-manifest.json";
 const TERMINAL_RUNTIME_DIR = path.join(cwd, "dist", "terminal-runtime");
 const TERMINAL_RUNTIME_MANIFEST_NAME = "studio-terminal-runtime-manifest.json";
 
@@ -379,8 +381,42 @@ function runChecks(skipChecks) {
   logStep("Running npm run build");
   run("npm", ["run", "build"]);
 
+  logStep("Running npm run build:pi-runtime");
+  run("npm", ["run", "build:pi-runtime"]);
+
   logStep("Running npm run build:terminal-runtime");
   run("npm", ["run", "build:terminal-runtime"]);
+}
+
+function collectPiRuntimeAssets() {
+  const manifestPath = path.join(PI_RUNTIME_DIR, PI_RUNTIME_MANIFEST_NAME);
+  if (!fs.existsSync(manifestPath)) {
+    fail(`Required release asset missing after build: ${path.relative(cwd, manifestPath)}`);
+  }
+
+  const manifest = readJson(manifestPath);
+  const assets = manifest?.assets;
+  if (!assets || typeof assets !== "object") {
+    fail(`Pi runtime manifest is invalid: ${path.relative(cwd, manifestPath)}`);
+  }
+
+  const runtimeFiles = [];
+  for (const target of Object.keys(assets).sort()) {
+    const fileName = String(assets[target]?.fileName || "").trim();
+    if (!fileName) {
+      fail(`Pi runtime manifest entry for ${target} is missing fileName.`);
+    }
+    const assetPath = path.join(PI_RUNTIME_DIR, fileName);
+    if (!fs.existsSync(assetPath)) {
+      fail(`Pi runtime asset missing for ${target}: ${path.relative(cwd, assetPath)}`);
+    }
+    runtimeFiles.push(path.relative(cwd, assetPath));
+  }
+
+  return {
+    manifestFile: path.relative(cwd, manifestPath),
+    runtimeFiles,
+  };
 }
 
 function collectTerminalRuntimeAssets() {
@@ -422,8 +458,15 @@ function ensureReleaseAssets() {
     }
   }
 
+  const piRuntimeAssets = collectPiRuntimeAssets();
   const runtimeAssets = collectTerminalRuntimeAssets();
-  return [...baseAssets, runtimeAssets.manifestFile, ...runtimeAssets.runtimeFiles];
+  return [
+    ...baseAssets,
+    piRuntimeAssets.manifestFile,
+    ...piRuntimeAssets.runtimeFiles,
+    runtimeAssets.manifestFile,
+    ...runtimeAssets.runtimeFiles,
+  ];
 }
 
 function ensureGitHubAuth(dryRun) {

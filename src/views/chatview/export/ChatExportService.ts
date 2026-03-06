@@ -1,7 +1,6 @@
 import { TFile } from 'obsidian';
 import type { ChatMessage, MultiPartContent, MessagePart } from '../../../types';
-import type { ToolCall } from '../../../types/toolCalls';
-import { SystemPromptService } from '../../../services/SystemPromptService';
+import { SystemPromptService, normalizeDesktopPromptSelectionType } from '../../../services/SystemPromptService';
 import { getModelLabelWithProvider } from '../../../utils/modelUtils';
 import { errorLogger } from '../../../utils/errorLogger';
 import type { ChatView } from '../ChatView';
@@ -142,16 +141,15 @@ export class ChatExportService {
 
   private async resolveSystemPrompt() {
     try {
-      const type = this.chatView.systemPromptType || 'general-use';
+      const type = normalizeDesktopPromptSelectionType(this.chatView.systemPromptType || 'general-use');
       const path = this.chatView.systemPromptPath;
       const service = SystemPromptService.getInstance(this.chatView.app, () => this.chatView.plugin.settings);
-      const basePrompt = await service.getSystemPromptContent(type as any, path, this.chatView.agentMode);
-      const combined = await service.combineWithAgentPrefix(basePrompt, type, this.chatView.agentMode);
+      const content = await service.getSystemPromptContent(type as any, path);
 
       return {
         type,
         label: this.deriveSystemPromptLabel(type, path),
-        content: combined,
+        content,
       };
     } catch (error) {
       errorLogger.warn('Failed to resolve system prompt for export', {
@@ -167,7 +165,7 @@ export class ChatExportService {
   }
 
   private deriveSystemPromptLabel(type: string, path?: string): string {
-    const normalized = (type || '').toLowerCase();
+    const normalized = normalizeDesktopPromptSelectionType(type || 'general-use');
     if (normalized === 'custom' && path) {
       const segments = path.split('/');
       return segments[segments.length - 1] || 'Custom';
@@ -177,9 +175,6 @@ export class ChatExportService {
     }
     if (normalized === 'concise') {
       return 'Concise';
-    }
-    if (normalized === 'agent') {
-      return 'Agent';
     }
     return this.capitalize(type || 'System Prompt');
   }

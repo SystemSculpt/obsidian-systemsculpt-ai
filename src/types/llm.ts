@@ -23,6 +23,19 @@ export interface ModelIdentifier {
   displayName?: string; // Optional display name override
 }
 
+export type SystemSculptTextModelSourceMode =
+  | "systemsculpt"
+  | "custom_endpoint"
+  | "local_pi"
+  | "pi_managed"
+  | "pi_local";
+
+export type SystemSculptPiTextAuthMode =
+  | "hosted"
+  | "byok"
+  | "both"
+  | "local";
+
 export interface SystemSculptModel {
   identifier: ModelIdentifier; // New structured identifier
   id: string; // Kept for backward compatibility
@@ -44,6 +57,12 @@ export interface SystemSculptModel {
     request: string;
   };
   provider: string;
+  sourceMode?: SystemSculptTextModelSourceMode;
+  sourceProviderId?: string;
+  piExecutionModelId?: string;
+  piAuthMode?: SystemSculptPiTextAuthMode;
+  piRemoteAvailable?: boolean;
+  piLocalAvailable?: boolean;
   top_provider?: {
     context_length: number;
     max_completion_tokens: number | null;

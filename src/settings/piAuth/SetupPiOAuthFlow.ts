@@ -6,7 +6,7 @@ import {
 import { runStudioPiOAuthLoginFlow } from "../../studio/piAuth/StudioPiOAuthLoginFlow";
 import { isOAuthCodePrompt, openExternalUrlForOAuth } from "../../utils/oauthUiHelpers";
 
-type PiAuthPromptModalOptions = {
+export type PiAuthPromptModalOptions = {
   title: string;
   message: string;
   placeholder?: string;
@@ -115,21 +115,22 @@ function closePiAuthPromptModal(modal: PiAuthPromptModal | null): void {
   modal.closeSilently();
 }
 
-async function requestPiAuthPromptInput(prompt: StudioPiAuthPrompt): Promise<string> {
-  const message = String(prompt?.message || "").trim() || "Enter value:";
-  const placeholder = String(prompt?.placeholder || "").trim();
-  const allowEmpty = Boolean(prompt?.allowEmpty);
-  while (true) {
-    const raw = window.prompt(message, placeholder);
-    if (raw === null) {
-      throw new Error("Authentication cancelled.");
-    }
-    const value = String(raw);
-    if (allowEmpty || value.trim()) {
-      return value;
-    }
-    new Notice("Input is required to continue OAuth login.");
-  }
+export async function showPiAuthPromptModal(
+  app: App,
+  options: PiAuthPromptModalOptions
+): Promise<string> {
+  const modal = openPiAuthPromptModal(app, options);
+  return await modal.result;
+}
+
+async function requestPiAuthPromptInput(app: App, prompt: StudioPiAuthPrompt): Promise<string> {
+  return await showPiAuthPromptModal(app, {
+    title: "Pi Authentication",
+    message: String(prompt?.message || "").trim() || "Enter value:",
+    placeholder: String(prompt?.placeholder || "").trim(),
+    allowEmpty: Boolean(prompt?.allowEmpty),
+    submitLabel: "Continue",
+  });
 }
 
 export async function runSetupPiOAuthLogin(options: RunSetupPiOAuthLoginOptions): Promise<void> {
@@ -152,16 +153,15 @@ export async function runSetupPiOAuthLogin(options: RunSetupPiOAuthLoginOptions)
       },
       onPrompt: async (prompt) => {
         if (!isOAuthCodePrompt(prompt)) {
-          return await requestPiAuthPromptInput(prompt);
+          return await requestPiAuthPromptInput(options.app, prompt);
         }
-        const promptModal = openPiAuthPromptModal(options.app, {
+        return await showPiAuthPromptModal(options.app, {
           title: `${providerLabel} OAuth`,
           message: String(prompt.message || "Paste the authorization code."),
           placeholder: String(prompt.placeholder || "Paste the authorization code or redirect URL"),
           allowEmpty: Boolean(prompt.allowEmpty),
           submitLabel: "Submit Code",
         });
-        return await promptModal.result;
       },
       onManualCodeInput: async () => {
         closePiAuthPromptModal(manualCodeModal);

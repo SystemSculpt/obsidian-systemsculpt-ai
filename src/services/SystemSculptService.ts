@@ -1,4 +1,4 @@
-import { App, TFile, requestUrl } from "obsidian";
+import { TFile, requestUrl } from "obsidian";
 import {
   ChatMessage,
   SystemSculptModel,
@@ -8,17 +8,13 @@ import {
 import {
   SystemSculptError,
   ERROR_CODES,
-  isContextOverflowErrorMessage,
 } from "../utils/errors";
-// License checks removed for Agent Mode access
-import { MCPService } from "../views/chatview/MCPService";
 import SystemSculptPlugin from "../main";
-import { getImageCompatibilityInfo, getToolCompatibilityInfo } from "../utils/modelUtils";
-import { mapAssistantToolCallsForApi, normalizeJsonSchema, normalizeOpenAITools } from "../utils/tooling";
+import { getImageCompatibilityInfo } from "../utils/modelUtils";
+import { mapAssistantToolCallsForApi } from "../utils/tooling";
 import { deterministicId } from "../utils/id";
 import { Notice } from "obsidian";
-import { executeCustomProviderStream } from "./CustomProviderStreamExecutor";
-import { executeManagedAgentStream } from "./ManagedAgentStreamExecutor";
+import { executeLocalPiStream } from "./LocalPiStreamExecutor";
 import { PlatformContext } from "./PlatformContext";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
@@ -35,9 +31,8 @@ import { ContextFileService } from "./ContextFileService";
 import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
-import { AgentSessionClient, type AgentSessionRequest } from "./agent-v2/AgentSessionClient";
-import type { CustomProvider } from "../types/llm";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
+import { resolvePiTextExecutionPlan } from "./pi-native/PiTextRuntime";
 
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
@@ -110,7 +105,6 @@ export type CreditsUsageHistoryPage = {
 export class SystemSculptService {
   private settings: SystemSculptSettings;
   private static instance: SystemSculptService | null = null;
-  private mcpService: MCPService;
   public baseUrl: string;
   private plugin: SystemSculptPlugin;
   private warnedImageIncompatibilityModels = new Set<string>();
@@ -122,78 +116,10 @@ export class SystemSculptService {
   private contextFileService: ContextFileService;
   private documentUploadService: DocumentUploadService;
   private audioUploadService: AudioUploadService;
-  private agentSessionClient: AgentSessionClient;
   private platformRequestClient: PlatformRequestClient;
 
   public get extractionsDirectory(): string {
     return this.settings.extractionsDirectory ?? "";
-  }
-
-  private buildRequestTools(tools: any[]): any[] {
-    const validTools = normalizeOpenAITools(tools);
-    if (validTools.length === 0) return [];
-    return validTools.map((tool) => ({
-      type: "function",
-      function: {
-        name: tool.function.name,
-        description: tool.function.description || "",
-        parameters: normalizeJsonSchema(tool.function.parameters || {}),
-      },
-    }));
-  }
-
-  private shouldFallbackWithoutTools(error: unknown): boolean {
-    if (!error) return false;
-
-    if (error instanceof SystemSculptError) {
-      if (error.metadata?.shouldResubmitWithoutTools) {
-        return true;
-      }
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-    const lc = (message || "").toLowerCase();
-    if (!lc) return false;
-
-    return (
-      lc.includes("does not support tools") ||
-      lc.includes("tools not supported") ||
-      lc.includes("tool calling not supported") ||
-      lc.includes("tool calling is not supported") ||
-      lc.includes("tool_calls not supported") ||
-      lc.includes("function calling not supported") ||
-      lc.includes("function_calling not supported") ||
-      lc.includes("function_call not supported") ||
-      lc.includes("additional properties are not allowed: 'tools'") ||
-      lc.includes("unknown field: tools") ||
-      lc.includes("unsupported parameter: tools") ||
-      (lc.includes("extra fields not permitted") && lc.includes("tools"))
-    );
-  }
-
-  private isContextOverflowError(error: unknown): boolean {
-    if (!error) return false;
-
-    if (error instanceof SystemSculptError) {
-      const upstreamMessage =
-        typeof error.metadata?.upstreamMessage === "string"
-          ? String(error.metadata.upstreamMessage)
-          : "";
-      if (isContextOverflowErrorMessage(upstreamMessage || error.message)) {
-        return true;
-      }
-
-      const raw = error.metadata?.rawError as any;
-      const rawMessage = typeof raw?.message === "string" ? raw.message : "";
-      const rawType = typeof raw?.type === "string" ? raw.type : "";
-      const rawCode = typeof raw?.code === "string" ? raw.code : "";
-      if (isContextOverflowErrorMessage(rawMessage || rawType || rawCode)) {
-        return true;
-      }
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-    return isContextOverflowErrorMessage(message);
   }
 
   private shouldRetryRateLimitedStreamTurn(error: unknown): { retryAfterSeconds?: number } | null {
@@ -476,8 +402,6 @@ export class SystemSculptService {
     systemPromptType?: string;
     systemPromptPath?: string;
     systemPromptOverride?: string;
-    agentMode?: boolean;
-    toolCallManager?: any;
     emitNotices?: boolean;
   }): Promise<PreparedChatRequest> {
     this.refreshSettings();
@@ -489,84 +413,69 @@ export class SystemSculptService {
 	      systemPromptType,
 	      systemPromptPath,
 	      systemPromptOverride,
-	      agentMode,
-	      toolCallManager,
 	      emitNotices = false,
 	    } = options;
 
     const modelInfo = await this.modelManagementService.getModelInfo(model);
-    const { actualModelId } = modelInfo;
-    const serverModelId = this.normalizeServerModelId(actualModelId);
+    const modelSource = modelInfo.modelSource;
+    const actualModelId = modelInfo.actualModelId;
+    const providerId = actualModelId.split("/")[0] || "unknown";
+    const providerModelId = actualModelId.split("/").slice(1).join("/") || actualModelId;
+    const resolvedModel =
+      modelInfo.model ||
+      ({
+        id: model,
+        name: providerModelId,
+        description: "",
+        provider: providerId,
+        sourceMode: modelSource,
+        sourceProviderId: providerId,
+        identifier: {
+          providerId,
+          modelId: providerModelId,
+          displayName: providerModelId,
+        },
+        piExecutionModelId: actualModelId,
+        piAuthMode: modelSource === "pi_local" ? "local" : "both",
+        piRemoteAvailable: modelSource === "pi_managed",
+        piLocalAvailable: modelSource === "pi_local",
+        context_length: 0,
+        capabilities: [],
+        architecture: {
+          modality: "text->text",
+          tokenizer: "",
+          instruct_type: null,
+        },
+        pricing: {
+          prompt: "0",
+          completion: "0",
+          image: "0",
+          request: "0",
+        },
+      } as SystemSculptModel);
     const contextFileSet = contextFiles || new Set<string>();
     const imageContextCount = this.countImageContextFiles(contextFileSet);
 
-    // Compute available tools (when requested) so prompt + request body stay consistent.
-    let mcpTools: any[] = [];
-    if (agentMode) {
-      if (toolCallManager && typeof (toolCallManager as any).getOpenAITools === "function") {
-        mcpTools = await (toolCallManager as any).getOpenAITools();
-      } else {
-        mcpTools = await this.mcpService.getAvailableTools();
-      }
-    }
-
     // Decide whether tools/images are actually usable for this model.
-    let modelToCheck: SystemSculptModel | undefined;
-    if ((agentMode && mcpTools.length > 0) || imageContextCount > 0) {
-      try {
-        const allModels = await this.plugin.modelService.getModels();
-        modelToCheck = allModels.find((m) => m.id === model || m.id === actualModelId);
-      } catch {}
-    }
-
-    let compatibleTools: any[] = [];
-    let toolsEnabledForRequest = false;
-
-    if (agentMode && mcpTools.length > 0) {
-      if (modelToCheck) {
-        const compatibility = getToolCompatibilityInfo(modelToCheck);
-
-        if (!compatibility.isCompatible && compatibility.confidence === "high") {
-          // Show notice every time tools are stripped (not just once)
-          if (emitNotices) {
-            new Notice(
-              `Model does not support tools. Switch to Claude, GPT-4, etc. for agent features.`,
-              4000
-            );
-          }
-          toolsEnabledForRequest = false;
-        } else {
-          compatibleTools = mcpTools;
-          toolsEnabledForRequest = true;
-        }
-      } else {
-        // If we can't find the model, be optimistic.
-        compatibleTools = mcpTools;
-        toolsEnabledForRequest = true;
-      }
-    }
+    const modelToCheck: SystemSculptModel | undefined = resolvedModel;
 
     let imagesEnabledForRequest = true;
     if (imageContextCount > 0 && modelToCheck) {
-      const imageCompatibility = getImageCompatibilityInfo(modelToCheck);
-      if (!imageCompatibility.isCompatible && imageCompatibility.confidence === "high") {
-        imagesEnabledForRequest = false;
+        const imageCompatibility = getImageCompatibilityInfo(modelToCheck);
+        if (!imageCompatibility.isCompatible && imageCompatibility.confidence === "high") {
+          imagesEnabledForRequest = false;
 
-        const warnKey = modelToCheck.id || actualModelId || model;
-        if (emitNotices && !this.warnedImageIncompatibilityModels.has(warnKey)) {
-          this.warnedImageIncompatibilityModels.add(warnKey);
-          const imageLabel = imageContextCount === 1 ? "image attachment" : "image attachments";
-          new Notice(
-            `Selected model does not support image input. Sending message without ${imageContextCount} ${imageLabel}. Switch to a vision-capable model to include images.`,
-            7000
-          );
+          const warnKey = modelToCheck.id || actualModelId || model;
+          if (emitNotices && !this.warnedImageIncompatibilityModels.has(warnKey)) {
+            this.warnedImageIncompatibilityModels.add(warnKey);
+            const imageLabel = imageContextCount === 1 ? "image attachment" : "image attachments";
+            new Notice(
+              `Selected model does not support image input. Sending message without ${imageContextCount} ${imageLabel}. Switch to a vision-capable model to include images.`,
+              7000
+            );
+          }
         }
-      }
     }
-
-    const requestTools = toolsEnabledForRequest ? this.buildRequestTools(compatibleTools) : [];
-    const hasRequestTools = requestTools.length > 0;
-    const effectiveAgentMode = !!agentMode && hasRequestTools;
 
     // Compose final system prompt including agent prefix and tooling hint when applicable.
     let finalSystemPrompt = systemPromptOverride;
@@ -575,7 +484,7 @@ export class SystemSculptService {
       finalSystemPrompt = await PromptBuilder.buildSystemPrompt(
         this.plugin.app,
         () => this.plugin.settings,
-        { type: (systemPromptType as any) || "general-use", path: systemPromptPath, agentMode: effectiveAgentMode, hasTools: hasRequestTools }
+        { type: (systemPromptType as any) || "general-use", path: systemPromptPath }
       );
     }
 
@@ -584,20 +493,15 @@ export class SystemSculptService {
 	      contextFileSet,
 	      systemPromptType,
 	      systemPromptPath,
-	      effectiveAgentMode,
 	      imagesEnabledForRequest,
-	      toolCallManager,
 	      finalSystemPrompt
 	    );
 
 	    return {
-	      isCustom: modelInfo.isCustom,
-	      customProvider: modelInfo.isCustom ? (modelInfo.provider as CustomProvider) : undefined,
+	      modelSource,
+	      resolvedModel,
 	      actualModelId,
-	      serverModelId,
 	      preparedMessages,
-	      requestTools,
-	      effectiveAgentMode,
 	      finalSystemPrompt,
 	    };
 	  }
@@ -605,8 +509,6 @@ export class SystemSculptService {
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = plugin.settings;
-    
-    this.mcpService = new MCPService(plugin, plugin.app);
     
     // Ensure baseUrl is never empty - use development mode aware default if needed
     this.baseUrl = this.getValidServerUrl();
@@ -624,19 +526,6 @@ export class SystemSculptService {
     );
     this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
     this.platformRequestClient = new PlatformRequestClient();
-    this.agentSessionClient = new AgentSessionClient({
-      baseUrl: this.baseUrl,
-      licenseKey: this.settings.licenseKey,
-      request: (input) =>
-        this.platformRequestClient.request({
-          ...input,
-          licenseKey: this.settings.licenseKey,
-        }),
-      defaultHeaders: {
-        "x-systemsculpt-surface": "chat",
-      },
-      managedInference: true,
-    });
   }
 
   /**
@@ -723,43 +612,6 @@ export class SystemSculptService {
       this.plugin.manifest?.version ?? "0.0.0"
     );
     this.audioUploadService.updateConfig(this.baseUrl, this.settings.licenseKey);
-    this.agentSessionClient.updateConfig({
-      baseUrl: this.baseUrl,
-      licenseKey: this.settings.licenseKey,
-    });
-  }
-
-  /**
-   * Normalize a server-facing model id to a canonical provider prefix when missing.
-   * - Preserve Groq vendor-qualified IDs (e.g., 'groq/openai/gpt-4o') as-is.
-   * - Preserve explicit 'openrouter/...' and 'groq/...' prefixes.
-   * - If only a vendor is provided (e.g., 'openai/gpt-4o'), default to OpenRouter.
-   */
-  private normalizeServerModelId(id: string): string {
-    if (!id) return id;
-    const lower = id.toLowerCase();
-    if (lower.startsWith('openrouter/') || lower.startsWith('groq/')) return id;
-    const vendorPrefixes = ['openai/', 'anthropic/', 'google/', 'perplexity/', 'mistral/', 'meta/', 'cohere/', 'xai/', 'deepseek/'];
-    if (vendorPrefixes.some(p => lower.startsWith(p))) {
-      return `openrouter/${id}`;
-    }
-    return id;
-  }
-
-  private getAgentV2BaseUrl(): string {
-    const trimmed = this.baseUrl.replace(/\/+$/, '');
-    return trimmed.replace(/\/api\/v1$/i, '');
-  }
-
-  private async requestAgentV2(input: AgentSessionRequest): Promise<Response> {
-    return this.platformRequestClient.request({
-      ...input,
-      licenseKey: this.settings.licenseKey,
-    });
-  }
-
-  public requestAgentSession(input: AgentSessionRequest): Promise<Response> {
-    return this.requestAgentV2(input);
   }
 
   // DELEGATE TO LICENSE SERVICE
@@ -1098,14 +950,13 @@ export class SystemSculptService {
     systemPromptType,
     systemPromptPath,
     systemPromptOverride,
-    agentMode,
     signal,
-    toolCallManager,
     forcedToolName,
     maxTokens,
     includeReasoning,
     debug,
-    sessionId,
+    sessionFile,
+    onPiSessionReady,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -1114,24 +965,21 @@ export class SystemSculptService {
     systemPromptType?: string;
     systemPromptPath?: string;
     systemPromptOverride?: string;
-    agentMode?: boolean;
     signal?: AbortSignal;
-    toolCallManager?: any;
     forcedToolName?: string;
     maxTokens?: number;
     includeReasoning?: boolean;
     debug?: StreamDebugCallbacks;
-    sessionId?: string;
+    sessionFile?: string;
+    onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
   }): AsyncGenerator<StreamEvent, void, unknown> {
-    const chatSessionId = sessionId || this.streamingService.generateRequestId();
-
     this.refreshSettings();
 
     try {
       errorLogger.debug("Starting streamMessage", {
         source: "SystemSculptService",
         method: "streamMessage",
-        metadata: { model, agentMode: !!agentMode },
+        metadata: { model },
       });
 
       const prepared = await this.prepareChatRequest({
@@ -1141,95 +989,22 @@ export class SystemSculptService {
         systemPromptType,
         systemPromptPath,
         systemPromptOverride,
-        agentMode,
-        toolCallManager,
         emitNotices: true,
       });
 
       const {
-        isCustom,
-        customProvider,
-        actualModelId,
-        serverModelId,
-        preparedMessages,
-        requestTools,
-        effectiveAgentMode,
+        resolvedModel,
       } = prepared;
 
-      if (isCustom && customProvider) {
-        yield* executeCustomProviderStream({
-          plugin: this.plugin,
-          streamingService: this.streamingService,
-          prepared,
-          customProvider,
-          messages,
-          model,
-          contextFiles,
-          agentMode,
-          signal,
-          maxTokens,
-          includeReasoning,
-          debug,
-          rebuildPrepared: (options) =>
-            this.prepareChatRequest({
-              messages: options.messages,
-              model,
-              contextFiles: options.contextFiles,
-              systemPromptType,
-              systemPromptPath,
-              systemPromptOverride,
-              agentMode: options.agentMode,
-              toolCallManager,
-              emitNotices: options.emitNotices,
-            }),
-          shouldFallbackWithoutTools: (error) => this.shouldFallbackWithoutTools(error),
-          isContextOverflowError: (error) => this.isContextOverflowError(error),
-        });
-        return;
-      }
+      await resolvePiTextExecutionPlan(resolvedModel);
 
-      try {
-        const debugMode = this.plugin.settings?.debugMode || false;
-        if (debugMode) {
-          const sysMsg = preparedMessages.find((message) => message.role === "system");
-          const content = typeof sysMsg?.content === "string" ? sysMsg.content : "";
-          const preview = content.slice(0, 600);
-          errorLogger.debug("Prepared system prompt for request", {
-            source: "SystemSculptService",
-            method: "streamMessage",
-            metadata: {
-              hasSystemMessage: !!sysMsg,
-              systemLength: content.length,
-              agentMode: effectiveAgentMode,
-              systemPromptType: systemPromptType || "undefined",
-              systemPromptPath: systemPromptPath || undefined,
-              preview,
-              systemPrompt: content,
-            },
-          });
-        }
-      } catch {}
-
-      const apiMessages = this.toSystemSculptApiMessages(preparedMessages);
-      const agentBaseUrl = this.getAgentV2BaseUrl();
-      yield* executeManagedAgentStream({
-        agentSessionClient: this.agentSessionClient,
-        streamingService: this.streamingService,
-        chatSessionId,
-        pluginVersion: (this.plugin as any)?.manifest?.version,
-        actualModelId,
-        serverModelId,
-        apiMessages,
-        requestTools,
-        endpoint: `${agentBaseUrl}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS}`,
-        responseLogEndpoint: `${agentBaseUrl}${SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE}`,
-        licenseKey: this.settings.licenseKey,
+      yield* executeLocalPiStream({
+        plugin: this.plugin,
+        prepared,
+        sessionFile,
+        onSessionReady: onPiSessionReady,
         signal,
         debug,
-        shouldRetryRateLimitedStreamTurn: (error) => this.shouldRetryRateLimitedStreamTurn(error),
-        getRateLimitedRetryDelayMs: (retryAfterSeconds, retryAttempt) =>
-          this.getRateLimitedRetryDelayMs(retryAfterSeconds, retryAttempt),
-        waitForRetryWindow: (delayMs, streamSignal) => this.waitForRetryWindow(delayMs, streamSignal),
       });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -1274,18 +1049,12 @@ export class SystemSculptService {
     contextFiles,
     systemPromptType,
     systemPromptPath,
-    agentMode,
-    toolCallManager,
-    sessionId,
   }: {
     messages: ChatMessage[];
     model: string;
     contextFiles?: Set<string>;
     systemPromptType?: string;
     systemPromptPath?: string;
-    agentMode?: boolean;
-    toolCallManager?: any;
-    sessionId?: string;
   }): Promise<{ requestBody: Record<string, any>; preparedMessages: ChatMessage[]; actualModelId: string }> {
     const prepared = await this.prepareChatRequest({
       messages,
@@ -1293,33 +1062,23 @@ export class SystemSculptService {
       contextFiles,
       systemPromptType,
       systemPromptPath,
-      agentMode,
-      toolCallManager,
       emitNotices: false,
     });
 
+    const executionPlan = await resolvePiTextExecutionPlan(prepared.resolvedModel);
+
     const requestBody: Record<string, any> = {
-      model: prepared.serverModelId,
-      messages: this.toSystemSculptApiMessages(prepared.preparedMessages),
-      stream: true,
-      include_reasoning: true,
-      provider: { allow_fallbacks: false },
+      modelId: executionPlan.actualModelId,
+      context: {
+        messages: prepared.preparedMessages,
+      },
+      transport: "pi-rpc",
     };
-
-    if (sessionId) {
-      requestBody.session_id = deterministicId(sessionId, "sess");
-    }
-
-    if (prepared.requestTools.length > 0) {
-      requestBody.tools = prepared.requestTools;
-      requestBody.tool_choice = "auto";
-      requestBody.parallel_tool_calls = false;
-    }
 
     return {
       requestBody,
       preparedMessages: prepared.preparedMessages,
-      actualModelId: prepared.serverModelId,
+      actualModelId: executionPlan.actualModelId,
     };
   }
 

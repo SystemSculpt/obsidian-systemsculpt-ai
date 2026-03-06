@@ -245,7 +245,7 @@ export class ViewManager {
 
     // Validate system prompt type if present
     if ("systemPromptType" in state.state) {
-      const validTypes = ["general-use", "concise", "agent", "custom"]; // Note: "agent" is allowed for individual chats when agent mode is enabled
+      const validTypes = ["general-use", "concise", "agent", "custom"]; // Keep "agent" only so older chat states migrate cleanly.
       // Make case-insensitive comparison
       if (!validTypes.includes(state.state.systemPromptType?.toLowerCase())) {
         state.state.systemPromptType = "general-use";
