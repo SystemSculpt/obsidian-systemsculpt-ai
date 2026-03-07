@@ -47,6 +47,8 @@ run.sh
 
 # Obsidian vaults / local state
 .obsidian/
+.obsidian-cache/
+.obsidian-cache.broken*/
 vault/
 
 # E2E artifacts (generated)
