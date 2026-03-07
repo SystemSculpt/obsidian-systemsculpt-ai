@@ -64,22 +64,21 @@ export const pdfAiAssistantScenes = [
         { id: "prompt", label: "General Use", icon: "sparkles" },
       ],
       attachments: [],
-      eyebrow: "Ready to chat",
-      title: "Start with Pi",
+      eyebrow: "Ready",
+      title: "New chat",
       description:
-        "Choose a model, switch prompts, attach context, or jump back to this chat's saved transcript.",
+        "Type below or attach context.",
       chips: [
         { id: "sc1", label: "Model", value: "gpt-5.3-codex-spark", icon: "bot" },
         { id: "sc2", label: "Prompt", value: "General Use", icon: "sparkles" },
         { id: "sc3", label: "Context", value: "No context yet", icon: "paperclip" },
       ],
       actions: [
-        { id: "sa1", label: "Choose Model", icon: "bot", primary: true },
+        { id: "sa1", label: "Add Context", icon: "paperclip", primary: true },
         { id: "sa2", label: "Switch Prompt", icon: "sparkles" },
-        { id: "sa3", label: "Add Context", icon: "paperclip" },
-        { id: "sa4", label: "Copy Log Paths", icon: "copy" },
+        { id: "sa3", label: "Switch Model", icon: "bot" },
       ],
-      note: "The chat file path appears after the conversation is saved. Use / for export, save-as-note, and debug actions.",
+      note: "Use / for export and debug tools once this chat is saved.",
       draft: {
         text: "",
         placeholder: "Write a message...",

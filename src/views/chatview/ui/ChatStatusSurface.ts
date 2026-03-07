@@ -17,7 +17,7 @@ export interface ChatStatusActionSpec {
 export interface ChatStatusPanelSpec {
   eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
   chips: readonly ChatStatusChipSpec[];
   actions: readonly ChatStatusActionSpec[];
   note?: string;
@@ -72,10 +72,12 @@ export function renderChatStatusSurface(
     text: spec.title,
   });
 
-  container.createEl("p", {
-    cls: "systemsculpt-chat-status-description",
-    text: spec.description,
-  });
+  if (spec.description) {
+    container.createEl("p", {
+      cls: "systemsculpt-chat-status-description",
+      text: spec.description,
+    });
+  }
 
   const summary = container.createDiv({ cls: "systemsculpt-chat-status-summary" });
   spec.chips.forEach((chip) => {

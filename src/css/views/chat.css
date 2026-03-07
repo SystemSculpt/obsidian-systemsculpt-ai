@@ -823,19 +823,19 @@
    ╚═══════════════════════════════════════════════════════════╝ */
 
 .systemsculpt-chat-status {
-  max-width: 680px;
-  margin: 24px auto;
-  padding: 18px;
+  max-width: 560px;
+  margin: 14px auto;
+  padding: 12px 14px;
   background:
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)),
       color-mix(in srgb, var(--background-primary) 90%, var(--background-secondary))
     );
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, var(--background-primary));
   box-shadow:
-    0 14px 30px color-mix(in srgb, rgb(0, 0, 0) 10%, transparent),
+    0 8px 18px color-mix(in srgb, rgb(0, 0, 0) 8%, transparent),
     inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 8%, transparent);
   animation: systemsculpt-fadeIn 0.3s ease-out;
 }
@@ -846,41 +846,41 @@
 }
 
 .systemsculpt-chat-status-eyebrow {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-accent);
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 
 .systemsculpt-chat-status-title {
   margin: 0;
-  font-size: 24px;
-  line-height: 1.15;
+  font-size: 19px;
+  line-height: 1.2;
   color: var(--text-normal);
 }
 
 .systemsculpt-chat-status-description {
-  margin: 8px 0 0 0;
+  margin: 4px 0 0 0;
   color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .systemsculpt-chat-status-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .systemsculpt-chat-status-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 10px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--background-primary) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--background-modifier-border) 75%, var(--background-primary));
@@ -890,37 +890,37 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   color: var(--text-muted);
 }
 
 .systemsculpt-chat-status-chip-label {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .systemsculpt-chat-status-chip-value {
   color: var(--text-normal);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
 .systemsculpt-chat-status-actions {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .systemsculpt-chat-status-action {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 8px;
   border: 1px solid var(--background-modifier-border);
   background: color-mix(in srgb, var(--background-primary) 92%, transparent);
   color: var(--text-normal);
@@ -936,7 +936,7 @@
   transform: translateY(-1px);
   background: color-mix(in srgb, var(--background-primary-alt) 94%, transparent);
   border-color: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
-  box-shadow: 0 8px 20px color-mix(in srgb, rgb(0, 0, 0) 10%, transparent);
+  box-shadow: 0 6px 14px color-mix(in srgb, rgb(0, 0, 0) 8%, transparent);
 }
 
 .systemsculpt-chat-status-action.mod-cta {
@@ -948,32 +948,32 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   color: inherit;
 }
 
 .systemsculpt-chat-status-action-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
 .systemsculpt-chat-status-note {
-  margin: 12px 0 0 0;
-  font-size: 12px;
+  margin: 8px 0 0 0;
+  font-size: 11px;
   color: var(--text-muted);
-  line-height: 1.45;
+  line-height: 1.35;
 }
 
 @media (max-width: 640px) {
   .systemsculpt-chat-status {
-    margin: 16px auto;
-    padding: 14px;
-    border-radius: 14px;
+    margin: 10px auto;
+    padding: 10px 12px;
+    border-radius: 10px;
   }
 
   .systemsculpt-chat-status-title {
-    font-size: 20px;
+    font-size: 17px;
   }
 
   .systemsculpt-chat-status-actions {

@@ -456,7 +456,7 @@ export class ChatView extends ItemView {
 
           if (!this.hasConfiguredProvider()) {
             await this.promptProviderSetup(
-              "Finish Pi setup in Settings → Overview & Setup before starting a chat."
+              "Finish setup in Settings → Overview & Setup before starting a chat."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -470,7 +470,7 @@ export class ChatView extends ItemView {
 
           if (!models || models.length === 0) {
             await this.promptProviderSetup(
-              "No Pi models are ready yet. Finish setup, refresh your model list, and try again."
+              "No models are ready yet. Finish setup, refresh your model list, and try again."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -600,9 +600,11 @@ export class ChatView extends ItemView {
   public hasConfiguredProvider(): boolean {
     try {
       const cachedModels = this.plugin.modelService.getCachedModels();
-      return cachedModels.length > 0;
+      if (cachedModels.length > 0) {
+        return true;
+      }
     } catch {}
-    return false;
+    return String(this.selectedModelId || this.plugin.settings.selectedModelId || "").trim().length > 0;
   }
 
   public openSetupTab(targetTab: string = "overview"): void {
@@ -613,7 +615,7 @@ export class ChatView extends ItemView {
     const message = customMessage ??
       "Open Setup to sign in with ChatGPT, Claude, Gemini, or add an API key, then refresh your model list.";
     const result = await showPopup(this.app, message, {
-      title: "Set Up Pi",
+      title: "Finish setup",
       icon: "plug-zap",
       primaryButton: "Open Setup",
       secondaryButton: "Not Now",
@@ -711,6 +713,7 @@ export class ChatView extends ItemView {
     }
 
     const needsProviderSetup = !this.hasConfiguredProvider();
+    const hasSelectedModel = String(this.selectedModelId || "").trim().length > 0;
     const modelLabel = needsProviderSetup
       ? 'Finish setup'
       : this.currentModelName || this.selectedModelId || 'Select…';
@@ -728,11 +731,11 @@ export class ChatView extends ItemView {
       title?: string;
     }> = [];
 
-    actionSpecs.push({
-      label: needsProviderSetup ? "Open Setup" : "Choose Model",
+    const modelActionSpec = {
+      label: needsProviderSetup ? "Open Setup" : hasSelectedModel ? "Switch Model" : "Choose Model",
       icon: needsProviderSetup ? "plug-zap" : "bot",
-      primary: true,
-      title: needsProviderSetup ? "Set up Pi sign-in or API key access" : `Current model: ${modelLabel}`,
+      primary: needsProviderSetup || !hasSelectedModel,
+      title: needsProviderSetup ? "Set up provider sign-in or API key access" : `Current model: ${modelLabel}`,
       onClick: () => {
         if (needsProviderSetup) {
           this.openSetupTab();
@@ -749,9 +752,9 @@ export class ChatView extends ItemView {
         });
         modal.open();
       },
-    });
+    };
 
-    actionSpecs.push({
+    const promptActionSpec = {
       label: "Switch Prompt",
       icon: normalizeDesktopPromptSelectionType(this.systemPromptType) === "custom" ? "file-text" : "sparkles",
       title: `Current system prompt: ${promptLabel}`,
@@ -786,63 +789,45 @@ export class ChatView extends ItemView {
         });
         modal.open();
       },
-    });
+    };
 
-    actionSpecs.push({
+    const contextActionSpec = {
       label: "Add Context",
       icon: "paperclip",
+      primary: !needsProviderSetup && hasSelectedModel,
       title: "Attach notes, documents, images, or audio to this chat",
       onClick: async () => {
         await this.contextManager?.addContextFile?.();
       },
-    });
+    };
+
+    if (needsProviderSetup) {
+      actionSpecs.push(modelActionSpec);
+    } else if (hasSelectedModel) {
+      actionSpecs.push(contextActionSpec, promptActionSpec, modelActionSpec);
+    } else {
+      actionSpecs.push(modelActionSpec, promptActionSpec);
+    }
 
     if (hasHistoryFile) {
       actionSpecs.push({
-        label: "Open History",
+        label: "Open Transcript",
         icon: "file-text",
         title: "Open the saved markdown file for this chat",
         onClick: async () => {
           await this.inputHandler?.handleOpenChatHistoryFile?.();
         },
       });
-
-      actionSpecs.push({
-        label: "Copy Path",
-        icon: "copy",
-        title: "Copy the full filesystem path to this chat",
-        onClick: async () => {
-          await this.copyCurrentChatFilePathToClipboard();
-        },
-      });
-    }
-
-    actionSpecs.push({
-      label: "Copy Log Paths",
-      icon: "folder-search",
-      title: "Copy the expected filesystem paths for this chat's debug artifacts",
-      onClick: async () => {
-        await this.copyChatArtifactPathsToClipboard();
-      },
-    });
-
-    if (this.chatId) {
-      actionSpecs.push({
-        label: "Copy Debug",
-        icon: "bug",
-        title: "Copy the full debug index for this chat",
-        onClick: async () => {
-          await this.copyDebugSnapshotToClipboard();
-        },
-      });
     }
 
     renderChatStatusSurface(statusContainer, {
-      eyebrow: needsProviderSetup ? "Pi setup required" : "Ready to chat",
-      title: needsProviderSetup ? "Finish Pi setup" : "Start with Pi",
+      eyebrow: needsProviderSetup ? "Setup required" : hasSelectedModel ? "Ready" : "Almost ready",
+      title: needsProviderSetup ? "Finish setup" : hasSelectedModel ? "New chat" : "Choose a model",
       description: needsProviderSetup
-        ? "Sign in with ChatGPT, Claude, Gemini, or add an API key in Setup, then pick a model."
-        : "Choose a model, switch prompts, attach context, or jump back to this chat's saved transcript.",
+        ? "Connect a provider, then choose a model."
+        : hasSelectedModel
+          ? "Type below or attach context."
+          : "Pick a model to get started.",
       chips: [
         {
           label: "Model",
@@ -866,7 +851,7 @@ export class ChatView extends ItemView {
           ? [
               {
                 label: "Session",
-                value: "Pi-linked",
+                value: "Linked",
                 icon: "git-fork",
               },
             ]
@@ -874,8 +859,8 @@ export class ChatView extends ItemView {
       ],
       actions: actionSpecs,
       note: hasHistoryFile
-        ? "Use / for export, save-as-note, debug, and other chat actions."
-        : "The chat file path appears after the conversation is saved. Use / for export, save-as-note, and debug actions.",
+        ? "Use / for export and debug tools."
+        : "Use / for export and debug tools once this chat is saved.",
     }, {
       registerDomEvent: this.registerDomEvent.bind(this),
     });
