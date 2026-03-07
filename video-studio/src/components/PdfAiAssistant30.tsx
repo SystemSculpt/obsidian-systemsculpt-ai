@@ -7,6 +7,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { KineticHeadline } from "./KineticHeadline";
+import { PromoSurfaceFrame } from "./PromoSurfaceFrame";
 import { SystemSculptSurface } from "./SystemSculptSurface";
 import { getSceneOffsets, type SceneSpec, type Storyboard } from "../lib/storyboard";
 import { pdfAiAssistantStoryboard } from "../data/pdfAiAssistantStoryboard";
@@ -103,6 +104,53 @@ const SupportingCopy: React.FC<{ text?: string; align?: "left" | "center" }> = (
   );
 };
 
+const getCopyDriftRange = (
+  layout: SceneSpec["layout"]
+): { fromX: number; toX: number } => {
+  switch (layout) {
+    case "split-left":
+      return { fromX: -14, toX: 8 };
+    case "split-right":
+      return { fromX: 14, toX: -8 };
+    case "stacked":
+      return { fromX: -8, toX: 8 };
+    case "center-lockup":
+    default:
+      return { fromX: -10, toX: 10 };
+  }
+};
+
+const EditorialCopyLockup: React.FC<{
+  scene: SceneSpec;
+  align?: "left" | "center";
+}> = ({ scene, align = "left" }) => {
+  const frame = useCurrentFrame();
+  const maxFrame = Math.max(scene.durationInFrames - 1, 1);
+  const { fromX, toX } = getCopyDriftRange(scene.layout);
+  const driftX = interpolate(frame, [0, maxFrame], [fromX, toX], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  return (
+    <div
+      style={{
+        transform: `translate3d(${driftX}px, 0, 0)`,
+        willChange: "transform",
+      }}
+    >
+      <KineticHeadline
+        kicker={scene.kicker}
+        lines={scene.headlineLines}
+        accentLineIndex={scene.accentLineIndex}
+        accentColor={scene.accentColor}
+        align={align}
+      />
+      <SupportingCopy text={scene.supportingText} align={align} />
+    </div>
+  );
+};
+
 const SceneComposition: React.FC<{
   scene: SceneSpec;
 }> = ({ scene }) => {
@@ -119,7 +167,9 @@ const SceneComposition: React.FC<{
         flex: "0 0 auto",
       }}
     >
-      <SystemSculptSurface scene={scene} />
+      <PromoSurfaceFrame>
+        <SystemSculptSurface scene={scene} />
+      </PromoSurfaceFrame>
     </div>
   );
 
@@ -155,14 +205,7 @@ const SceneComposition: React.FC<{
               flex: "0 0 auto",
             }}
           >
-            <KineticHeadline
-              kicker={scene.kicker}
-              lines={scene.headlineLines}
-              accentLineIndex={scene.accentLineIndex}
-              accentColor={scene.accentColor}
-              align="center"
-            />
-            <SupportingCopy text={scene.supportingText} align="center" />
+            <EditorialCopyLockup scene={scene} align="center" />
           </div>
           <div
             style={{
@@ -216,13 +259,7 @@ const SceneComposition: React.FC<{
             flexDirection: "column",
           }}
         >
-          <KineticHeadline
-            kicker={scene.kicker}
-            lines={scene.headlineLines}
-            accentLineIndex={scene.accentLineIndex}
-            accentColor={scene.accentColor}
-          />
-          <SupportingCopy text={scene.supportingText} />
+          <EditorialCopyLockup scene={scene} />
         </div>
         <div
           style={{

@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useLayoutEffect, useRef } from "react";
+import { useCurrentFrame, useVideoConfig } from "remotion";
 import { createChatComposer } from "@plugin-ui/createInputUI";
 import { ContextSelectionModal } from "@plugin-ui/ContextSelectionModal";
 import { createInlineBlock, getBlockContent } from "@plugin-ui/InlineCollapsibleBlock";
@@ -28,6 +29,7 @@ import type {
   ViewActionSpec,
   ViewChromeSpec,
 } from "../lib/storyboard";
+import { resolveTextReveal, resolveTextRevealLines } from "../lib/textReveal";
 
 ensureObsidianDomCompat();
 
@@ -150,6 +152,18 @@ const hostControlCss = `
 .workspace-leaf-content[data-type="systemsculpt-chat-view"] .systemsculpt-attachment-pill-remove:hover,
 .workspace-leaf-content[data-type="systemsculpt-chat-view"] .systemsculpt-attachment-pill-remove:focus-visible {
   color: var(--text-normal);
+}
+
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] input,
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] textarea {
+  caret-color: transparent;
+}
+
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] .ss-reveal-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--text-accent);
+  font-weight: 600;
 }
 `;
 
@@ -363,7 +377,41 @@ const getActiveContextFilter = (
   }
 };
 
-const renderInlineBlock = (container: HTMLElement, block: InlineBlockSpec) => {
+const DEFAULT_STREAM_REVEAL = {
+  mode: "stream" as const,
+  startFrame: 18,
+  durationInFrames: 84,
+  lineDelayInFrames: 12,
+  showCursor: true,
+};
+
+const appendRevealCursor = (target: HTMLElement, frame: number) => {
+  const cursor = target.createSpan({ cls: "ss-reveal-cursor" });
+  cursor.textContent = "|";
+  cursor.style.opacity = Math.floor(frame / 8) % 2 === 0 ? "0.9" : "0.28";
+};
+
+const appendRevealText = (
+  target: HTMLElement,
+  text: string,
+  showCursor: boolean,
+  frame: number
+) => {
+  if (text) {
+    target.appendChild(document.createTextNode(text));
+  }
+  if (showCursor) {
+    appendRevealCursor(target, frame);
+  }
+};
+
+const renderInlineBlock = (
+  container: HTMLElement,
+  block: InlineBlockSpec,
+  frame: number,
+  fps: number
+) => {
+  const reveal = block.reveal ?? (block.streaming ? DEFAULT_STREAM_REVEAL : undefined);
   const wrapper = createInlineBlock({
     type: block.kind,
     partId: block.id,
@@ -389,8 +437,15 @@ const renderInlineBlock = (container: HTMLElement, block: InlineBlockSpec) => {
   if (content) {
     if (block.kind === "reasoning") {
       const body = content.createDiv({ cls: "systemsculpt-inline-reasoning-text" });
-      block.textLines.forEach((line) => {
-        body.createEl("p", { text: line });
+      const revealLines = resolveTextRevealLines(
+        block.textLines,
+        frame,
+        fps,
+        reveal
+      );
+      revealLines.forEach((line) => {
+        const paragraph = body.createEl("p");
+        appendRevealText(paragraph, line.text, line.showCursor, frame);
       });
     } else {
       const structured = content.createDiv({ cls: "systemsculpt-chat-structured-block" });
@@ -428,7 +483,12 @@ const renderInlineBlock = (container: HTMLElement, block: InlineBlockSpec) => {
   container.appendChild(wrapper);
 };
 
-const renderMessage = (container: HTMLElement, message: ChatMessageSpec) => {
+const renderMessage = (
+  container: HTMLElement,
+  message: ChatMessageSpec,
+  frame: number,
+  fps: number
+) => {
   const messageEl = document.createElement("div");
   messageEl.className = `systemsculpt-message systemsculpt-${message.role}-message`;
   messageEl.dataset.messageId = message.id;
@@ -451,13 +511,27 @@ const renderMessage = (container: HTMLElement, message: ChatMessageSpec) => {
     return contentPart;
   };
 
-  message.paragraphs?.forEach((paragraph) => {
-    ensureContentPart().createEl("p", { text: paragraph });
+  const paragraphLines = resolveTextRevealLines(
+    message.paragraphs ?? [],
+    frame,
+    fps,
+    message.reveal
+  );
+  paragraphLines.forEach((paragraph) => {
+    const paragraphEl = ensureContentPart().createEl("p");
+    appendRevealText(paragraphEl, paragraph.text, paragraph.showCursor, frame);
   });
-  if (message.bullets?.length) {
+  if ((message.bullets?.length ?? 0) > 0) {
+    const bulletLines = resolveTextRevealLines(
+      message.bullets ?? [],
+      frame,
+      fps,
+      message.reveal
+    );
     const list = ensureContentPart().createEl("ul");
-    message.bullets.forEach((bullet) => {
-      list.createEl("li", { text: bullet });
+    bulletLines.forEach((bullet) => {
+      const item = list.createEl("li");
+      appendRevealText(item, bullet.text, bullet.showCursor, frame);
     });
   }
   if (message.citations?.length) {
@@ -472,7 +546,7 @@ const renderMessage = (container: HTMLElement, message: ChatMessageSpec) => {
   }
 
   message.inlineBlocks?.forEach((block) => {
-    renderInlineBlock(messageEl, block);
+    renderInlineBlock(messageEl, block, frame, fps);
   });
 
   appendMessageToGroupedContainer(container, messageEl, message.role, {
@@ -688,10 +762,11 @@ const mountComposer = (
   root: HTMLElement,
   toolbarChips: readonly ToolbarChipSpec[],
   attachments: readonly AttachmentPillSpec[],
-  draftText: string | undefined,
-  placeholder: string | undefined,
+  draft: ChatThreadSurfaceSpec["draft"] | ChatStatusSurfaceSpec["draft"],
   recording: ChatThreadSurfaceSpec["recording"] | "none",
-  stopVisible: boolean
+  stopVisible: boolean,
+  frame: number,
+  fps: number
 ) => {
   const composer = createChatComposer(root, {
     onEditSystemPrompt: () => {},
@@ -747,9 +822,15 @@ const mountComposer = (
     });
   }
 
-  composer.input.value = draftText ?? "";
-  composer.input.placeholder = placeholder ?? "Write a message...";
-  if ((draftText ?? "").trim().length > 0) {
+  const draftResult = resolveTextReveal(
+    draft?.text ?? "",
+    frame,
+    fps,
+    draft?.reveal
+  );
+  composer.input.value = draftResult.text;
+  composer.input.placeholder = draft?.placeholder ?? "Write a message...";
+  if (draftResult.text.trim().length > 0) {
     composer.inputWrap.classList.add("has-value", "is-focused");
     composer.sendButton.setDisabled(false);
   }
@@ -766,7 +847,12 @@ const mountComposer = (
   }
 };
 
-const mountContextModal = (overlayRoot: HTMLElement, surface: ContextModalSurfaceSpec) => {
+const mountContextModal = (
+  overlayRoot: HTMLElement,
+  surface: ContextModalSurfaceSpec,
+  frame: number,
+  fps: number
+) => {
   overlayRoot.empty();
 
   const overlay = overlayRoot.createDiv();
@@ -782,6 +868,12 @@ const mountContextModal = (overlayRoot: HTMLElement, surface: ContextModalSurfac
   const selectedPaths = new Set(
     surface.rows.filter((row) => row.state === "selected").map((row) => row.path)
   );
+  const searchResult = resolveTextReveal(
+    surface.searchValue,
+    frame,
+    fps,
+    surface.searchReveal
+  );
   const app = {
     vault: {
       getFiles: () => files,
@@ -795,8 +887,9 @@ const mountContextModal = (overlayRoot: HTMLElement, surface: ContextModalSurfac
     {
       isFileAlreadyInContext: (file: TFile) => attachedPaths.has(file.path),
       initialFilter: getActiveContextFilter(surface.filters),
-      initialSearchQuery: surface.searchValue,
+      initialSearchQuery: searchResult.text,
       initialSelectedPaths: Array.from(selectedPaths),
+      autoFocusSearch: false,
     }
   );
 
@@ -837,7 +930,9 @@ const mountScrollChrome = (root: HTMLElement, showButton = false) => {
 const mountChatStatus = (
   root: HTMLElement,
   surface: ChatStatusSurfaceSpec,
-  chrome: Required<ViewChromeSpec>
+  chrome: Required<ViewChromeSpec>,
+  frame: number,
+  fps: number
 ) => {
   root.empty();
   if (chrome.showDragOverlay) {
@@ -871,17 +966,20 @@ const mountChatStatus = (
     root,
     surface.toolbarChips,
     surface.attachments,
-    surface.draft?.text,
-    surface.draft?.placeholder,
+    surface.draft,
     "none",
-    false
+    false,
+    frame,
+    fps
   );
 };
 
 const mountChatThread = (
   root: HTMLElement,
   surface: ChatThreadSurfaceSpec,
-  chrome: Required<ViewChromeSpec>
+  chrome: Required<ViewChromeSpec>,
+  frame: number,
+  fps: number
 ) => {
   root.empty();
   if (chrome.showDragOverlay) {
@@ -892,7 +990,7 @@ const mountChatThread = (
     cls: `systemsculpt-messages-container systemsculpt-chat-${chrome.chatFontSize}`,
   });
   surface.messages.forEach((message) => {
-    renderMessage(messages, message);
+    renderMessage(messages, message, frame, fps);
   });
   messages.createDiv({ cls: "systemsculpt-scroll-sentinel" });
   mountScrollChrome(root, chrome.showScrollToBottom);
@@ -901,16 +999,19 @@ const mountChatThread = (
     root,
     surface.toolbarChips,
     surface.attachments,
-    surface.draft?.text,
-    surface.draft?.placeholder,
+    surface.draft,
     surface.recording ?? "none",
-    surface.stopVisible ?? false
+    surface.stopVisible ?? false,
+    frame,
+    fps
   );
 };
 
 export const SystemSculptSurface: React.FC<{
   scene: SceneSpec;
 }> = ({ scene }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const headerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -931,18 +1032,18 @@ export const SystemSculptSurface: React.FC<{
 
     switch (scene.surface.kind) {
       case "context-modal":
-        mountContextModal(overlay, scene.surface);
+        mountContextModal(overlay, scene.surface, frame, fps);
         break;
       case "chat-status":
-        mountChatStatus(content, scene.surface, chrome);
+        mountChatStatus(content, scene.surface, chrome, frame, fps);
         break;
       case "chat-thread":
-        mountChatThread(content, scene.surface, chrome);
+        mountChatThread(content, scene.surface, chrome, frame, fps);
         break;
     }
 
     content.appendChild(overlay);
-  }, [chrome, scene.surface]);
+  }, [chrome, fps, frame, scene.surface]);
 
   return (
     <div style={{ ...obsidianThemeStyle, width: "100%", height: "100%" }}>

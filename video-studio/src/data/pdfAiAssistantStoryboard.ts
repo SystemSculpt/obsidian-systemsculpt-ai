@@ -17,18 +17,15 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#FF7A59",
     background: ["#FBF6F0", "#F3E5D8"],
-    panelMotion: {
-      fromScale: 1.08,
-      toScale: 1.02,
-      fromX: 20,
-      toX: -10,
-      fromY: 16,
-      toY: -12,
-    },
     surface: {
       kind: "context-modal",
       title: "Add Context Files",
       searchValue: "pdf",
+      searchReveal: {
+        mode: "type",
+        startFrame: 8,
+        durationInFrames: 42,
+      },
       filters: [
         { id: "all", label: "All", active: false },
         { id: "docs", label: "Documents", icon: "file", active: true },
@@ -60,14 +57,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#3A7BFF",
     background: ["#F6F8FF", "#E1E8FF"],
-    panelMotion: {
-      fromScale: 1.04,
-      toScale: 1,
-      fromX: -18,
-      toX: 4,
-      fromY: 14,
-      toY: -8,
-    },
     surface: {
       kind: "chat-status",
       toolbarChips: [
@@ -108,14 +97,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#00A676",
     background: ["#F2FBF8", "#D7F3E8"],
-    panelMotion: {
-      fromScale: 1.03,
-      toScale: 1.08,
-      fromX: -24,
-      toX: 18,
-      fromY: 0,
-      toY: -10,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [
@@ -134,6 +115,12 @@ export const pdfAiAssistantScenes = [
           id: "m1",
           role: "system",
           paragraphs: ["Indexing 24 new documents. OCR and extraction are still running."],
+          reveal: {
+            mode: "stream",
+            startFrame: 16,
+            durationInFrames: 70,
+            showCursor: true,
+          },
         },
       ],
       draft: {
@@ -154,14 +141,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#FFB800",
     background: ["#FFF9ED", "#FDE7BD"],
-    panelMotion: {
-      fromScale: 1.02,
-      toScale: 1.09,
-      fromX: 12,
-      toX: -22,
-      fromY: 8,
-      toY: -10,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [
@@ -193,6 +172,13 @@ export const pdfAiAssistantScenes = [
               status: "Running",
               statusTone: "pending",
               streaming: true,
+              reveal: {
+                mode: "stream",
+                startFrame: 34,
+                durationInFrames: 96,
+                lineDelayInFrames: 18,
+                showCursor: true,
+              },
               textLines: [
                 "Searching attached documents for planning assumptions and changed numbers.",
                 "Prioritizing sections that mention hiring, launch timing, and budget deltas.",
@@ -203,7 +189,11 @@ export const pdfAiAssistantScenes = [
       ],
       draft: {
         text: "What changed between the Q2 forecast and the board memo?",
-        reveal: "type",
+        reveal: {
+          mode: "type",
+          startFrame: 0,
+          durationInFrames: 104,
+        },
       },
       stopVisible: true,
     },
@@ -219,14 +209,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#8D5CF6",
     background: ["#F7F3FF", "#E7DBFF"],
-    panelMotion: {
-      fromScale: 1.01,
-      toScale: 1.07,
-      fromX: -10,
-      toX: 16,
-      fromY: 12,
-      toY: -8,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [
@@ -293,14 +275,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#FF5A87",
     background: ["#FFF3F6", "#FFD7E0"],
-    panelMotion: {
-      fromScale: 1.02,
-      toScale: 1.06,
-      fromX: 18,
-      toX: -18,
-      fromY: 14,
-      toY: -6,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [
@@ -357,14 +331,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 1,
     accentColor: "#0F9DFF",
     background: ["#F2FAFF", "#D3EDFF"],
-    panelMotion: {
-      fromScale: 1.01,
-      toScale: 1.08,
-      fromX: -12,
-      toX: 18,
-      fromY: 12,
-      toY: -12,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [
@@ -423,14 +389,6 @@ export const pdfAiAssistantScenes = [
     accentLineIndex: 0,
     accentColor: "#121417",
     background: ["#F8F8F6", "#EAE8E1"],
-    panelMotion: {
-      fromScale: 1,
-      toScale: 1.03,
-      fromX: 0,
-      toX: 0,
-      fromY: 0,
-      toY: -6,
-    },
     surface: {
       kind: "chat-thread",
       toolbarChips: [

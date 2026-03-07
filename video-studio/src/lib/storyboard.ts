@@ -34,15 +34,6 @@ export type SurfaceIconName =
   | "loader-2"
   | "x";
 
-export interface PanelMotion {
-  fromScale: number;
-  toScale: number;
-  fromX: number;
-  toX: number;
-  fromY: number;
-  toY: number;
-}
-
 export type SceneLayout = "center-lockup" | "split-left" | "split-right" | "stacked";
 
 export interface ToolbarChipSpec {
@@ -74,6 +65,17 @@ export interface StructuredLineSpec {
   active?: boolean;
 }
 
+export type TextRevealMode = "type" | "stream";
+
+export interface TextRevealSpec {
+  mode: TextRevealMode;
+  startFrame?: number;
+  durationInFrames?: number;
+  unitsPerSecond?: number;
+  lineDelayInFrames?: number;
+  showCursor?: boolean;
+}
+
 export interface BaseInlineBlockSpec {
   id: string;
   title: string;
@@ -81,6 +83,7 @@ export interface BaseInlineBlockSpec {
   statusTone?: "pending" | "success" | "error";
   collapsed?: boolean;
   streaming?: boolean;
+  reveal?: TextRevealSpec;
 }
 
 export interface ReasoningBlockSpec extends BaseInlineBlockSpec {
@@ -98,17 +101,17 @@ export type InlineBlockSpec = ReasoningBlockSpec | ToolCallBlockSpec;
 export interface ChatMessageSpec {
   id: string;
   role: "assistant" | "user" | "system";
-  label?: string;
   paragraphs?: readonly string[];
   bullets?: readonly string[];
   citations?: readonly CitationSpec[];
   inlineBlocks?: readonly InlineBlockSpec[];
+  reveal?: TextRevealSpec;
 }
 
 export interface ComposerDraftSpec {
   text: string;
   placeholder?: string;
-  reveal?: "static" | "type";
+  reveal?: TextRevealSpec;
 }
 
 export interface FilterChipSpec {
@@ -145,6 +148,7 @@ export interface ContextModalSurfaceSpec {
   kind: "context-modal";
   title: string;
   searchValue: string;
+  searchReveal?: TextRevealSpec;
   filters: readonly FilterChipSpec[];
   rows: readonly ContextRowSpec[];
   primaryActionLabel: string;
@@ -209,7 +213,6 @@ export interface SceneSpec {
   accentLineIndex?: number;
   accentColor: string;
   background: readonly [string, string];
-  panelMotion: PanelMotion;
 }
 
 export interface AudioCue {
