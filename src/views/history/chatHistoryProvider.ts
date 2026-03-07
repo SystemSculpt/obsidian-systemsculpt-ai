@@ -1,6 +1,6 @@
 import type SystemSculptPlugin from "../../main";
-import { CHAT_VIEW_TYPE } from "../chatview/ChatView";
 import { ChatFavoritesService } from "../chatview/ChatFavoritesService";
+import { openChatResumeDescriptor } from "../chatview/ChatResumeUtils";
 import { ChatStorageService } from "../chatview/ChatStorageService";
 import type { SystemSculptHistoryEntry, SystemSculptHistoryProvider } from "./types";
 
@@ -41,11 +41,13 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
         const timestampMs = asTimestamp(summary.lastModified);
         const title = String(summary.title || "Untitled Chat").trim() || "Untitled Chat";
         const isFavorite = chatFavorites.isFavorite(summary.id);
-        const subtitle = `${Array.isArray(summary.messages) ? summary.messages.length : 0} messages`;
+        const messageCount = Array.isArray(summary.messages) ? summary.messages.length : 0;
+        const subtitle = `${messageCount} messages${selectedModelId ? ` · ${selectedModelId}` : ""}`;
         const searchText = [
           title,
           summary.id,
           selectedModelId,
+          summary.chatBackend,
           joinMessageContent(summary.messages || []),
         ]
           .filter((segment) => segment.length > 0)
@@ -59,25 +61,31 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
           subtitle,
           timestampMs,
           searchText,
-          badge: "Chat",
-          metadataPath: `${plugin.settings.chatsDirectory || "SystemSculpt/Chats"}/${summary.id}.md`,
+          badge: summary.chatBackend === "pi" ? "Pi" : "Legacy",
+          metadataPath: summary.chatPath,
           isFavorite,
           toggleFavorite: async () => {
             await chatFavorites.toggleFavorite(summary.id);
             return chatFavorites.isFavorite(summary.id);
           },
           openPrimary: async () => {
-            const { workspace } = plugin.app;
-            const leaf = workspace.getLeaf("tab");
-            await leaf.setViewState({
-              type: CHAT_VIEW_TYPE,
-              state: {
-                chatId: summary.id,
-                chatTitle: title,
-                selectedModelId,
-              },
+            await openChatResumeDescriptor(plugin, {
+              chatId: summary.id,
+              title,
+              modelId: selectedModelId,
+              chatPath: summary.chatPath,
+              chatBackend: summary.chatBackend,
+              lastModified: timestampMs,
+              messageCount,
+              pi: summary.chatBackend === "pi"
+                ? {
+                    sessionFile: summary.piSessionFile,
+                    sessionId: summary.piSessionId,
+                    lastEntryId: summary.piLastEntryId,
+                    lastSyncedAt: summary.piLastSyncedAt,
+                  }
+                : undefined,
             });
-            workspace.setActiveLeaf(leaf, { focus: true });
           },
         };
       });

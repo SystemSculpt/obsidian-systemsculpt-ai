@@ -3,29 +3,27 @@ import { ChatMessage, MessagePart } from "../../types";
 import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
+import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
+import { getLastMessagePiEntryId, resolveChatBackend } from "./storage/ChatPersistenceTypes";
 
-interface ContextFile {
-  path: string;
-  type: "source" | "extraction";
-}
-
-interface ChatMetadata {
+type LoadedChatRecord = {
   id: string;
-  model: string;
-  created: string;
-  lastModified: string;
+  messages: ChatMessage[];
+  selectedModelId: string;
+  lastModified: number;
   title: string;
   version?: number;
-  tags?: string[];
-  context_files?: ContextFile[];
-  systemMessage?: {
-    type: "general-use" | "concise" | "agent" | "custom";
-    path?: string;
-  };
+  context_files?: string[];
+  systemPromptType: "general-use" | "concise" | "agent" | "custom";
+  systemPromptPath?: string;
   chatFontSize?: "small" | "medium" | "large";
+  chatPath: string;
+  chatBackend: ChatBackend;
   piSessionFile?: string;
   piSessionId?: string;
-}
+  piLastEntryId?: string;
+  piLastSyncedAt?: string;
+};
 
 export class ChatStorageService {
   private app: App;
@@ -105,7 +103,10 @@ export class ChatStorageService {
     title?: string,
     chatFontSize?: "small" | "medium" | "large",
     piSessionFile?: string,
-    piSessionId?: string
+    piSessionId?: string,
+    piLastEntryId?: string,
+    piLastSyncedAt?: string,
+    chatBackend?: ChatBackend,
   ): Promise<{ version: number }> {
     try {
       const { version } = await this.saveChatSimple(
@@ -119,7 +120,10 @@ export class ChatStorageService {
         title,
         chatFontSize,
         piSessionFile,
-        piSessionId
+        piSessionId,
+        piLastEntryId,
+        piLastSyncedAt,
+        chatBackend,
       );
       return { version };
     } catch (error) {
@@ -138,7 +142,10 @@ export class ChatStorageService {
     title?: string,
     chatFontSize?: "small" | "medium" | "large",
     piSessionFile?: string,
-    piSessionId?: string
+    piSessionId?: string,
+    piLastEntryId?: string,
+    piLastSyncedAt?: string,
+    chatBackend?: ChatBackend,
   ): Promise<{ filePath: string; version: number }> {
     let filePath = `[unknown-path]/${chatId}.md`;
     try {
@@ -185,8 +192,14 @@ export class ChatStorageService {
           path: (systemPromptType === 'custom' && systemPromptPath) ? systemPromptPath : undefined
         },
         chatFontSize: chatFontSize || "medium",
+        chatBackend: resolveChatBackend({
+          explicitBackend: chatBackend,
+          piSessionFile,
+        }),
         piSessionFile: String(piSessionFile || "").trim() || undefined,
         piSessionId: String(piSessionId || "").trim() || undefined,
+        piLastEntryId: String(piLastEntryId || "").trim() || getLastMessagePiEntryId(messages),
+        piLastSyncedAt: String(piLastSyncedAt || "").trim() || undefined,
       };
 
       if (mergedTags.length > 0) {
@@ -227,18 +240,7 @@ export class ChatStorageService {
     }
   }
 
-  async loadChats(): Promise<
-    {
-      id: string;
-      messages: ChatMessage[];
-      selectedModelId: string;
-      lastModified: number;
-      title: string;
-      version?: number;
-      context_files?: string[];
-      customPromptFilePath?: string;
-    }[]
-  > {
+  async loadChats(): Promise<LoadedChatRecord[]> {
     try {
       const files = await this.app.vault.adapter.list(this.chatDirectory);
       const chatFiles = files.files.filter((f) => f.endsWith(".md"));
@@ -262,7 +264,7 @@ export class ChatStorageService {
               return null;
             }
             
-            const parsed = this.parseMarkdownContent(content);
+            const parsed = this.parseMarkdownContent(content, filePath);
 
             if (!parsed) return null;
 
@@ -300,21 +302,7 @@ export class ChatStorageService {
     return;
   }
 
-  async loadChat(chatId: string): Promise<{
-    id: string;
-    messages: ChatMessage[];
-    selectedModelId: string;
-    lastModified: number;
-    title: string;
-    version?: number;
-    context_files?: string[];
-    customPromptFilePath?: string;
-    systemPromptType: "general-use" | "concise" | "agent" | "custom";
-    systemPromptPath?: string;
-    chatFontSize?: "small" | "medium" | "large";
-    piSessionFile?: string;
-    piSessionId?: string;
-  } | null> {
+  async loadChat(chatId: string): Promise<LoadedChatRecord | null> {
     try {
       const filePath = `${this.chatDirectory}/${chatId}.md`;
       const file = this.app.vault.getAbstractFileByPath(filePath);
@@ -324,7 +312,7 @@ export class ChatStorageService {
       }
 
       const content = await this.app.vault.read(file);
-      return this.parseMarkdownContent(content);
+      return this.parseMarkdownContent(content, filePath);
     } catch (error) {
       return null;
     }
@@ -366,7 +354,7 @@ export class ChatStorageService {
 
       // Process context files (simple approach)
       const processedContextFiles = Array.isArray(context_files) ? context_files.map(
-        (file: any): ContextFile => {
+        (file: any): NonNullable<ChatMetadata["context_files"]>[number] => {
           if (typeof file === "string") {
             const isExtraction = file.includes("/Extractions/");
             return { path: file, type: isExtraction ? "extraction" : "source" };
@@ -419,41 +407,38 @@ export class ChatStorageService {
           path: systemMessagePath
         },
         chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
+        chatBackend: resolveChatBackend({
+          explicitBackend: (parsed as any).chatBackend,
+          piSessionFile: (parsed as any).piSessionFile,
+        }),
         piSessionFile: typeof (parsed as any).piSessionFile === "string" ? (parsed as any).piSessionFile : undefined,
         piSessionId: typeof (parsed as any).piSessionId === "string" ? (parsed as any).piSessionId : undefined,
+        piLastEntryId: typeof (parsed as any).piLastEntryId === "string" ? (parsed as any).piLastEntryId : undefined,
+        piLastSyncedAt: typeof (parsed as any).piLastSyncedAt === "string" ? (parsed as any).piLastSyncedAt : undefined,
       };
     } catch (error) {
       return null;
     }
   }
 
-  private parseMarkdownContent(content: string): {
-    id: string;
-    messages: ChatMessage[];
-    selectedModelId: string;
-    lastModified: number;
-    title: string;
-    version?: number;
-    context_files?: string[];
-    systemPromptType: 'general-use' | 'concise' | 'agent' | 'custom';
-    systemPromptPath?: string;
-    chatFontSize?: "small" | "medium" | "large";
-    piSessionFile?: string;
-    piSessionId?: string;
-  } | null {
+  private parseMarkdownContent(content: string, filePath?: string): LoadedChatRecord | null {
     // NEW: Delegate modern parsing logic to central serializer
     const parsed = ChatMarkdownSerializer.parseMarkdown(content);
     if (parsed) {
       const { metadata, messages } = parsed;
-      return this.finalizeParsedData(metadata as any, messages);
+      return this.finalizeParsedData(metadata, messages, filePath);
     }
 
     return null;
   }
 
   // Utility to finalize the parsed data into the expected return format
-  private finalizeParsedData(metadata: ChatMetadata, messages: ChatMessage[]): any {
-     const normalizedMessages = this.normalizeLegacyToolMessages(messages);
+  private finalizeParsedData(metadata: ChatMetadata, messages: ChatMessage[], filePath?: string): LoadedChatRecord {
+     const chatBackend = resolveChatBackend({
+      explicitBackend: metadata.chatBackend,
+      piSessionFile: metadata.piSessionFile,
+     });
+     const normalizedMessages = chatBackend === "legacy" ? this.normalizeLegacyToolMessages(messages) : messages;
      return {
       id: metadata.id,
       messages: normalizedMessages,
@@ -465,8 +450,37 @@ export class ChatStorageService {
       systemPromptType: metadata.systemMessage?.type || 'general-use',
       systemPromptPath: metadata.systemMessage?.path,
       chatFontSize: metadata.chatFontSize,
+      chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
+      chatBackend,
       piSessionFile: metadata.piSessionFile,
       piSessionId: metadata.piSessionId,
+      piLastEntryId: metadata.piLastEntryId || getLastMessagePiEntryId(normalizedMessages),
+      piLastSyncedAt: metadata.piLastSyncedAt,
+    };
+  }
+
+  public async getChatResumeDescriptor(chatId: string): Promise<ChatResumeDescriptor | null> {
+    const record = await this.loadChat(chatId);
+    if (!record) {
+      return null;
+    }
+
+    return {
+      chatId: record.id,
+      title: record.title,
+      modelId: record.selectedModelId,
+      chatPath: record.chatPath,
+      chatBackend: record.chatBackend,
+      lastModified: record.lastModified,
+      messageCount: record.messages.length,
+      pi: record.chatBackend === "pi"
+        ? {
+            sessionFile: record.piSessionFile,
+            sessionId: record.piSessionId,
+            lastEntryId: record.piLastEntryId,
+            lastSyncedAt: record.piLastSyncedAt,
+          }
+        : undefined,
     };
   }
 

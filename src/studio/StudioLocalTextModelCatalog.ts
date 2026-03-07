@@ -1,8 +1,11 @@
 export * from "../services/pi/PiTextModels";
 export {
+  buildStudioPiApiKeyEnvCommandHint,
   buildStudioPiResolvedLoginCommand,
   buildStudioPiLoginCommand,
   clearStudioPiProviderAuth,
+  getStudioPiAuthStoragePathHintForPlatform,
+  getStudioPiLoginSurfaceLabel,
   installStudioLocalPiCli,
   launchStudioPiProviderLoginInTerminal,
   listStudioPiOAuthProviders,

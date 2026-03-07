@@ -106,7 +106,11 @@ describe("SlashCommandMenu", () => {
     const input = document.createElement("textarea");
     input.value = "/debug";
     const copyDebugSnapshotToClipboard = jest.fn(async () => {});
-    const chatView = { copyDebugSnapshotToClipboard } as any;
+    const chatView = {
+      copyCurrentChatFilePathToClipboard: jest.fn(async () => {}),
+      copyChatArtifactPathsToClipboard: jest.fn(async () => {}),
+      copyDebugSnapshotToClipboard,
+    } as any;
 
     const menu = new SlashCommandMenu({
       plugin: {
@@ -132,5 +136,77 @@ describe("SlashCommandMenu", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(copyDebugSnapshotToClipboard).toHaveBeenCalled();
+  });
+
+  it("executes the chat path command when selected", async () => {
+    const input = document.createElement("textarea");
+    input.value = "/path";
+    const copyCurrentChatFilePathToClipboard = jest.fn(async () => {});
+    const chatView = {
+      copyCurrentChatFilePathToClipboard,
+      copyChatArtifactPathsToClipboard: jest.fn(async () => {}),
+      copyDebugSnapshotToClipboard: jest.fn(async () => {}),
+    } as any;
+
+    const menu = new SlashCommandMenu({
+      plugin: {
+        app: { workspace: { getLeaf: jest.fn(), setActiveLeaf: jest.fn() } },
+        settings: { selectedModelId: "systemsculpt@@systemsculpt/ai-agent" },
+      } as any,
+      chatView,
+      inputElement: input,
+      inputHandler: { handleOpenChatHistoryFile: jest.fn(async () => {}) },
+      onClose: jest.fn(),
+      onExecute: async (command) => {
+        await command.execute(chatView);
+      },
+    });
+
+    menu.show("path");
+
+    const pathItem = Array.from(document.querySelectorAll(".systemsculpt-slash-result-item")).find(
+      (el) => el.textContent?.includes("Copy Chat Path")
+    );
+    expect(pathItem).not.toBeNull();
+    pathItem?.dispatchEvent(new dom.window.Event("click"));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(copyCurrentChatFilePathToClipboard).toHaveBeenCalled();
+  });
+
+  it("executes the chat log paths command when selected", async () => {
+    const input = document.createElement("textarea");
+    input.value = "/log";
+    const copyChatArtifactPathsToClipboard = jest.fn(async () => {});
+    const chatView = {
+      copyCurrentChatFilePathToClipboard: jest.fn(async () => {}),
+      copyChatArtifactPathsToClipboard,
+      copyDebugSnapshotToClipboard: jest.fn(async () => {}),
+    } as any;
+
+    const menu = new SlashCommandMenu({
+      plugin: {
+        app: { workspace: { getLeaf: jest.fn(), setActiveLeaf: jest.fn() } },
+        settings: { selectedModelId: "systemsculpt@@systemsculpt/ai-agent" },
+      } as any,
+      chatView,
+      inputElement: input,
+      inputHandler: { handleOpenChatHistoryFile: jest.fn(async () => {}) },
+      onClose: jest.fn(),
+      onExecute: async (command) => {
+        await command.execute(chatView);
+      },
+    });
+
+    menu.show("log");
+
+    const logPathItem = Array.from(document.querySelectorAll(".systemsculpt-slash-result-item")).find(
+      (el) => el.textContent?.includes("Copy Chat Log Paths")
+    );
+    expect(logPathItem).not.toBeNull();
+    logPathItem?.dispatchEvent(new dom.window.Event("click"));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(copyChatArtifactPathsToClipboard).toHaveBeenCalled();
   });
 });

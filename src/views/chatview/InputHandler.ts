@@ -1,4 +1,4 @@
-import { App, TFile, setIcon, Component, Notice, Modal, Setting, ButtonComponent, Platform } from "obsidian";
+import { App, TFile, Component, Notice, Modal, Setting, ButtonComponent, Platform } from "obsidian";
 import {
   ChatMessage,
   SystemPromptInfo,
@@ -27,6 +27,7 @@ import { ERROR_CODES } from "../../utils/errors";
 import { showPopup } from "../../core/ui/";
 
 import { createChatComposer } from "./ui/createInputUI";
+import { renderContextAttachmentPill } from "./ui/ContextAttachmentPills";
 import { handlePaste as handlePasteExternal, handleLargeTextPaste as handleLargeTextPasteExternal, showLargeTextWarning as showLargeTextWarningExternal } from "./handlers/LargePasteHandlers";
 import { handleKeyDown as handleKeyDownExternal, handleInputChange as handleInputChangeExternal } from "./handlers/UIKeyHandlers";
 import { createAssistantMessageContainer as createAssistantMessageContainerExternal, getStatusIndicator as getStatusIndicatorExternal, addMessageToContainer as addMessageToContainerExternal, updateStreamingStatus as updateStreamingStatusExternal, hideStreamingStatus as hideStreamingStatusExternal, showStreamingStatus as showStreamingStatusExternal, setStreamingFootnote as setStreamingFootnoteExternal, clearStreamingFootnote as clearStreamingFootnoteExternal } from "./handlers/MessageElements";
@@ -494,6 +495,11 @@ export class InputHandler extends Component {
       return;
     }
 
+    if (this.chatView?.isLegacyReadOnlyChat?.()) {
+      new Notice("This legacy chat is read-only. Open a new Pi chat to continue the conversation.", 6000);
+      return;
+    }
+
     if (!(await this.ensureProviderReadyForChat())) {
       return;
     }
@@ -761,21 +767,9 @@ export class InputHandler extends Component {
         this.attachmentPillsByKey.set(item.key, pill);
       }
 
-      pill.empty();
-      pill.setAttr("role", "button");
-      pill.setAttr("tabindex", "0");
-
       if (item.kind === "processing") {
-        pill.className = "systemsculpt-attachment-pill mod-processing";
-        pill.dataset.kind = "processing";
-        pill.dataset.processingKey = item.processingKey;
-        pill.dataset.linkText = item.file.path;
-
         const progress = Number.isFinite(item.event?.progress) ? Math.round(item.event.progress) : 0;
         const label = typeof item.event?.label === "string" ? item.event.label : "Processing…";
-        pill.setAttr("title", `${item.file.path} — ${label}${Number.isFinite(progress) ? ` (${progress}%)` : ""}`);
-
-        const iconEl = pill.createSpan({ cls: "systemsculpt-attachment-pill-icon" });
         const ext = item.file.extension?.toLowerCase?.() || "";
         const iconName =
           ["png", "jpg", "jpeg", "webp", "svg"].includes(ext)
@@ -783,35 +777,22 @@ export class InputHandler extends Component {
             : ["mp3", "wav", "ogg", "m4a", "webm"].includes(ext)
               ? "file-audio"
               : "file-text";
-        setIcon(iconEl, iconName);
-
-        pill.createSpan({ cls: "systemsculpt-attachment-pill-label", text: item.file.basename });
-
-        const statusEl = pill.createSpan({ cls: "systemsculpt-attachment-pill-status" });
         const statusIcon = typeof item.event?.icon === "string" && item.event.icon.length > 0 ? item.event.icon : "loader-2";
-        setIcon(statusEl, statusIcon);
-        if (item.event?.stage !== "ready" && item.event?.stage !== "error") {
-          statusEl.addClass("is-spinning");
-        }
-
-        const removeButton = pill.createEl("button", {
-          cls: "clickable-icon systemsculpt-attachment-pill-remove",
-          attr: { type: "button", "aria-label": "Dismiss processing status" },
+        renderContextAttachmentPill(pill, {
+          kind: "processing",
+          processingKey: item.processingKey,
+          linkText: item.file.path,
+          label: item.file.basename,
+          icon: iconName,
+          title: `${item.file.path} — ${label}${Number.isFinite(progress) ? ` (${progress}%)` : ""}`,
+          statusIcon,
+          spinning: item.event?.stage !== "ready" && item.event?.stage !== "error",
+          removeAriaLabel: "Dismiss processing status",
         });
-        setIcon(removeButton, "x");
       } else {
-        pill.className = "systemsculpt-attachment-pill";
-        pill.dataset.kind = "file";
-        pill.dataset.wikiLink = item.wikiLink;
-
         const linkText = item.wikiLink.replace(/^\[\[(.*?)\]\]$/, "$1");
-        pill.dataset.linkText = linkText;
-
         const resolved = this.app.metadataCache.getFirstLinkpathDest(linkText, "") ?? this.app.vault.getAbstractFileByPath(linkText);
         const label = resolved instanceof TFile ? resolved.basename : linkText.split("/").pop() || linkText;
-        pill.setAttr("title", linkText);
-
-        const iconEl = pill.createSpan({ cls: "systemsculpt-attachment-pill-icon" });
         const iconName =
           resolved instanceof TFile
             ? ["png", "jpg", "jpeg", "webp", "svg"].includes(resolved.extension.toLowerCase())
@@ -820,15 +801,15 @@ export class InputHandler extends Component {
                 ? "file-audio"
                 : "file-text"
             : "file-text";
-        setIcon(iconEl, iconName);
-
-        pill.createSpan({ cls: "systemsculpt-attachment-pill-label", text: label });
-
-        const removeButton = pill.createEl("button", {
-          cls: "clickable-icon systemsculpt-attachment-pill-remove",
-          attr: { type: "button", "aria-label": "Remove file from context" },
+        renderContextAttachmentPill(pill, {
+          kind: "file",
+          wikiLink: item.wikiLink,
+          linkText,
+          label,
+          icon: iconName,
+          title: linkText,
+          removeAriaLabel: "Remove file from context",
         });
-        setIcon(removeButton, "x");
       }
 
       this.attachmentsEl.appendChild(pill);
@@ -1256,7 +1237,7 @@ export class InputHandler extends Component {
 
     if (!models || models.length === 0) {
       await this.invokeProviderSetupPrompt(
-        "No local Pi models are available yet. Open Setup to connect Pi providers, then refresh your model list."
+        "No Pi models are available yet. Open Setup, finish Pi sign-in or API-key setup, then refresh your model list."
       );
       return false;
     }
@@ -1275,7 +1256,7 @@ export class InputHandler extends Component {
       }
     } catch (error: any) {
       await this.invokeProviderSetupPrompt(
-        error?.message || "The selected Pi model is not ready yet. Open Setup to finish Pi authentication."
+        error?.message || "The selected Pi model is not ready yet. Open Setup to finish Pi sign-in or API-key setup."
       );
       return false;
     }
@@ -1295,9 +1276,9 @@ export class InputHandler extends Component {
   private async promptProviderSetupFallback(message?: string): Promise<void> {
     const result = await showPopup(
       this.app,
-      message ?? "Connect Pi providers in Settings → Overview & Setup, then refresh your local Pi model list.",
+      message ?? "Open Settings → Overview & Setup to finish Pi sign-in or API-key setup, then refresh your model list.",
       {
-        title: "Connect Pi",
+        title: "Set Up Pi",
         icon: "plug-zap",
         primaryButton: "Open Setup",
         secondaryButton: "Not Now",
@@ -1312,7 +1293,7 @@ export class InputHandler extends Component {
     try {
       this.plugin.openSettingsTab(tabId);
     } catch (error) {
-      new Notice("Open Settings → SystemSculpt AI → Overview & Setup to connect Pi.", 6000);
+      new Notice("Open Settings → SystemSculpt AI → Overview & Setup to finish Pi setup.", 6000);
     }
   }
 

@@ -26,7 +26,7 @@ export const messageHandling = {
 
     // Insert message into provided target container or the chat container with grouping support
     const container = (targetContainer as (HTMLElement | DocumentFragment) | undefined) || chatView.chatContainer;
-    appendMessageToGroupedContainer(container, messageEl, role);
+    appendMessageToGroupedContainer(container, messageEl, role, { breakGroup: true });
     
     // Toolbars removed entirely (no message or group toolbars)
 
@@ -96,6 +96,11 @@ export const messageHandling = {
       const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
       if (index === -1) return;
 
+      if (chatView.isLegacyReadOnlyChat()) {
+        new Notice("This legacy chat is read-only. Start a new Pi chat to continue from here.");
+        return;
+      }
+
       if (chatView.getPiSessionFile()) {
         try {
           const forkResult = await chatView.forkPiSessionFromMessage(messageId);
@@ -155,6 +160,11 @@ export const messageHandling = {
     };
     
     const editHandler = async (e: CustomEvent) => {
+      if (chatView.isLegacyReadOnlyChat()) {
+        new Notice("Editing old legacy chats is disabled. Start a new Pi chat instead.");
+        return;
+      }
+
       if (chatView.getPiSessionFile()) {
         new Notice("Editing previous Pi-backed messages isn't supported yet. Fork from that user message instead.");
         return;
@@ -198,6 +208,11 @@ export const messageHandling = {
     };
     
     const deleteHandler = async (e: CustomEvent) => {
+      if (chatView.isLegacyReadOnlyChat()) {
+        new Notice("Deleting turns from old legacy chats is disabled. Start a new Pi chat instead.");
+        return;
+      }
+
       if (chatView.getPiSessionFile()) {
         new Notice("Deleting individual messages is disabled for Pi-backed chats. Fork from a user message instead.");
         return;

@@ -19,6 +19,7 @@ export interface ContextSelectionModalOptions {
   initialFilter?: keyof typeof FILE_TYPES | "all";
   initialSearchQuery?: string;
   initialSelectedPaths?: string[];
+  autoFocusSearch?: boolean;
 }
 
 export class ContextSelectionModal extends Modal {
@@ -37,6 +38,7 @@ export class ContextSelectionModal extends Modal {
   private loadMoreButton: HTMLButtonElement | null = null;
   private fileItemControlsByPath = new Map<string, { el: HTMLElement; checkbox: HTMLInputElement }>();
   private readonly initialSearchQuery: string;
+  private readonly autoFocusSearch: boolean;
 
   constructor(app: App, onSelect: (files: TFile[]) => void, plugin: SystemSculptPlugin, options?: ContextSelectionModalOptions) {
     super(app);
@@ -44,6 +46,7 @@ export class ContextSelectionModal extends Modal {
     this.plugin = plugin;
     this.isFileAlreadyInContext = options?.isFileAlreadyInContext;
     this.initialSearchQuery = options?.initialSearchQuery?.trim() ?? "";
+    this.autoFocusSearch = options?.autoFocusSearch ?? true;
     this.currentFilter = options?.initialFilter ?? "all";
     this.searchQuery = this.initialSearchQuery.toLowerCase();
     this.initializeFiles();
@@ -70,8 +73,9 @@ export class ContextSelectionModal extends Modal {
             this.searchQuery = value.toLowerCase();
             this.applyFilters();
           });
-        // Auto-focus
-        setTimeout(() => text.inputEl.focus(), 100);
+        if (this.autoFocusSearch) {
+          setTimeout(() => text.inputEl.focus(), 100);
+        }
       });
 
     // Filter buttons using simple div

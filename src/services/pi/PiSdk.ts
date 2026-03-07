@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   ensureBundledPiRuntime,
   resolvePiPluginInstallDir,
@@ -194,11 +195,51 @@ export function resolvePiPackageRoot(): string {
   return dirname(dirname(entryPath));
 }
 
+function looksLikeWindowsAbsolutePath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+export function buildPiSdkModuleImportSpecifier(entryPath: string): string {
+  const normalized = String(entryPath || "").trim();
+  if (looksLikeWindowsAbsolutePath(normalized)) {
+    const slashPath = normalized.replace(/\\/g, "/");
+    if (slashPath.startsWith("//")) {
+      return encodeURI(`file:${slashPath}`);
+    }
+    return encodeURI(`file:///${slashPath}`);
+  }
+  return pathToFileURL(normalized).href;
+}
+
 async function importPiSdkModule<T>(entryPath: string): Promise<T> {
   const importFn = new Function("specifier", "return import(specifier);") as (
     specifier: string
   ) => Promise<T>;
-  return await importFn(`file://${entryPath}`);
+  return await importFn(buildPiSdkModuleImportSpecifier(entryPath));
+}
+
+export function shouldRetryPiSdkRequireWithDynamicImport(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const normalized = message.toLowerCase();
+  const code =
+    typeof error === "object" && error && "code" in error
+      ? String((error as { code?: unknown }).code || "").toLowerCase()
+      : "";
+
+  if (code === "err_require_esm") {
+    return true;
+  }
+
+  return (
+    normalized.includes("unexpected token 'export'") ||
+    normalized.includes("must use import") ||
+    normalized.includes("err_require_esm") ||
+    normalized.includes("require() of es module") ||
+    normalized.includes("require of es module") ||
+    normalized.includes("dynamic import()") ||
+    normalized.includes("use import()") ||
+    (normalized.includes("es module") && normalized.includes("not supported"))
+  );
 }
 
 export async function loadPiSdkModule(): Promise<PiSdkModule> {
@@ -209,13 +250,7 @@ export async function loadPiSdkModule(): Promise<PiSdkModule> {
     try {
       return runtimeRequire(entryPath) as PiSdkModule;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "");
-      const normalized = message.toLowerCase();
-      if (
-        !normalized.includes("unexpected token 'export'") &&
-        !normalized.includes("must use import") &&
-        !normalized.includes("err_require_esm")
-      ) {
+      if (!shouldRetryPiSdkRequireWithDynamicImport(error)) {
         throw error;
       }
     }

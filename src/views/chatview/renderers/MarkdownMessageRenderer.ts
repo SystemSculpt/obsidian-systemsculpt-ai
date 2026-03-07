@@ -2,6 +2,7 @@ import { App, Component, MarkdownRenderer, Notice } from "obsidian";
 import { UrlCitation } from "../../../types";
 import { setIcon } from "obsidian";
 import { MermaidPreviewModal } from "../../../modals/MermaidPreviewModal";
+import { renderCitationFooter } from "./CitationFooter";
 
 /**
  * MarkdownMessageRenderer – isolated helper responsible solely for
@@ -113,47 +114,7 @@ export class MarkdownMessageRenderer extends Component {
   //  Citations
   // ────────────────────────────────────────────────────────────────────────────
   public renderCitations(contentEl: HTMLElement, citations: UrlCitation[]): void {
-    if (citations.length === 0) return;
-
-    const citationsContainer = contentEl.createEl("div", {
-      cls: "systemsculpt-citations-container",
-    });
-
-    // Visual separator between answer and footnotes
-    citationsContainer.createEl("hr", { cls: "systemsculpt-citations-divider" });
-
-    citationsContainer.createEl("div", {
-      cls: "systemsculpt-citations-header",
-      text: "Sources",
-    });
-
-    const citationsList = citationsContainer.createEl("ol", {
-      cls: "systemsculpt-citations-list",
-    });
-
-    citations.forEach((citation, index) => {
-      const li = citationsList.createEl("li", { cls: "systemsculpt-citation-item" });
-
-      // Display the title (or domain if missing)
-      const displayTitle = citation.title || new URL(citation.url).hostname;
-
-      // Clickable title
-      li.createEl("a", {
-        cls: "systemsculpt-citation-title",
-        text: displayTitle,
-        attr: {
-          href: citation.url,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        },
-      });
-
-      // Small muted URL underneath
-      li.createEl("div", {
-        cls: "systemsculpt-citation-url",
-        text: citation.url,
-      });
-    });
+    renderCitationFooter(contentEl, citations);
   }
 
   // ────────────────────────────────────────────────────────────────────────────

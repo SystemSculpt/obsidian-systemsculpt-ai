@@ -212,7 +212,6 @@ describe("SystemSculptService", () => {
     const service = SystemSculptService.getInstance(plugin);
     const onPiSessionReady = jest.fn();
     const streamed = [
-      { type: "meta", key: "inline-footnote", value: "Running through Pi RPC session." },
       { type: "content", text: "hello" },
     ];
 

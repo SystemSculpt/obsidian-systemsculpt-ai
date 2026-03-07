@@ -66,7 +66,7 @@ describe("MessageRenderer reasoning layout", () => {
     renderer.unload();
   });
 
-  test("does not merge reasoning when separated by tool calls", async () => {
+  test("collapses reasoning into one block even when tool calls appear between segments", async () => {
     const app = new App();
     const renderer = new TestMessageRenderer(app as any);
 
@@ -124,16 +124,17 @@ describe("MessageRenderer reasoning layout", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Use new inline reasoning class
+    // Pi-first assistant UX keeps one collapsed reasoning block for the turn.
     const wrappers = messageEl.querySelectorAll(".systemsculpt-inline-reasoning");
-    expect(wrappers.length).toBe(2);
-    expect(markdownSpy).toHaveBeenCalledTimes(2);
+    expect(wrappers.length).toBe(1);
+    expect(markdownSpy).toHaveBeenCalledTimes(1);
+    expect(markdownSpy.mock.calls[0][1]).toBe("FirstSecond");
 
     markdownSpy.mockRestore();
     renderer.unload();
   });
 
-  test("interleaves tool call groups between reasoning blocks in chronological order", async () => {
+  test("renders one activity block and one reasoning block for a mixed Pi turn", async () => {
     const app = new App();
     const renderer = new TestMessageRenderer(app as any);
 
@@ -253,34 +254,18 @@ describe("MessageRenderer reasoning layout", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // With the new inline structure, parts are rendered in chronological order directly in the message
-    const unifiedParts = messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part");
-    expect(unifiedParts.length).toBeGreaterThan(0);
+    const blocks = Array.from(messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-collapsible"));
+    expect(blocks.map((el) => el.dataset.aggregateSection)).toEqual(["activity", "reasoning"]);
 
-    const sequence = Array.from(unifiedParts).map((el) => {
-      if (el.classList.contains("systemsculpt-inline-reasoning")) {
-        return `reasoning:${el.dataset.partId}`;
-      }
-      if (el.classList.contains("systemsculpt-inline-tool_call")) {
-        return `tool:${el.dataset.partId}`;
-      }
-      if (el.classList.contains("systemsculpt-content-part")) {
-        return `content:${el.dataset.partId}`;
-      }
-      return `other:${el.className}`;
-    });
+    const summaries = Array.from(
+      messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
+    ).map((el) => el.textContent?.trim());
+    expect(summaries).toHaveLength(3);
+    expect(summaries[0]).toContain("Moving");
+    expect(summaries[1]).toMatch(/Browsed|Listed/);
+    expect(summaries[2]).toContain("Searched");
 
-    // Verify chronological order: reasoning, tool, reasoning, tool, reasoning, tool, reasoning, content
-    expect(sequence).toEqual([
-      "reasoning:reasoning-1",
-      "tool:tool_call_part-call_move",
-      "reasoning:reasoning-2",
-      "tool:tool_call_part-call_list",
-      "reasoning:reasoning-3",
-      "tool:tool_call_part-call_find",
-      "reasoning:reasoning-4",
-      "content:content-1",
-    ]);
+    expect(markdownSpy.mock.calls.some((call) => call[1] === "Done")).toBe(true);
 
     markdownSpy.mockRestore();
     renderer.unload();

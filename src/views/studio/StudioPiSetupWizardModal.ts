@@ -1,15 +1,17 @@
 import { App, Modal, Notice, Platform, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import {
+  buildStudioPiApiKeyEnvCommandHint,
   buildStudioPiResolvedLoginCommand,
   buildStudioPiLoginCommand,
   clearStudioPiProviderAuth,
+  getStudioPiAuthStoragePathHintForPlatform,
+  getStudioPiLoginSurfaceLabel,
+  installStudioLocalPiCli,
   launchStudioPiProviderLoginInTerminal,
   listStudioPiOAuthProviders,
   readStudioPiProviderAuthState,
-  runStudioPiCommand,
   setStudioPiProviderApiKey,
-  type PiCommandResult,
   type StudioPiAuthPrompt,
   type StudioPiOAuthProvider,
 } from "../../studio/StudioLocalTextModelCatalog";
@@ -61,7 +63,15 @@ type PendingPromptRequest = {
 };
 
 export function normalizeWizardProviderId(value: string): string {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[,:;!?]+$/g, "")
+    .replace(/\.$/g, "");
+}
+
+function getPiLoginSurfaceLabel(): string {
+  return getStudioPiLoginSurfaceLabel(process.platform);
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────
@@ -71,26 +81,6 @@ function normalizeEscapedNewlines(message: string): string {
     .replace(/\\r\\n/g, "\n")
     .replace(/\\n/g, "\n")
     .replace(/\\r/g, "\n");
-}
-
-function summarizePiCommandResult(result: PiCommandResult): string {
-  const stderr = String(result.stderr || "").trim();
-  if (stderr) {
-    const line = stderr
-      .split(/\r?\n/)
-      .map((entry) => entry.trim())
-      .find((entry) => entry.length > 0);
-    if (line) return line;
-  }
-  const stdout = String(result.stdout || "").trim();
-  if (stdout) {
-    const line = stdout
-      .split(/\r?\n/)
-      .map((entry) => entry.trim())
-      .find((entry) => entry.length > 0);
-    if (line) return line;
-  }
-  return `pi exited with code ${result.exitCode}.`;
 }
 
 function firstNonEmptyLine(message: string): string {
@@ -114,16 +104,7 @@ function isPiModuleLoadError(message: string): boolean {
   );
 }
 
-function parsePiVersion(stdout: string): string {
-  return (
-    String(stdout || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) || "unknown"
-  );
-}
-
-class StudioPiSetupWizardModal extends Modal {
+export class StudioPiSetupWizardModal extends Modal {
   private readonly plugin: SystemSculptPlugin;
   private readonly issue: StudioPiSetupWizardIssue;
   private readonly modelId: string;
@@ -194,7 +175,7 @@ class StudioPiSetupWizardModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText("Pi Provider Setup");
+    this.titleEl.setText("Set Up Pi");
     this.render();
     void this.initializeWizard();
   }
@@ -218,43 +199,7 @@ class StudioPiSetupWizardModal extends Modal {
   }
 
   private initialAuthDetail(): string {
-    const provider = this.selectedProvider || "<provider>";
-    if (this.issue === "provider_auth" || this.issue === "token_type") {
-      return `Provider "${provider}" needs authentication.`;
-    }
-    return "Select a provider and authenticate if needed.";
-  }
-
-  private issueHeading(): string {
-    switch (this.issue) {
-      case "missing_cli":
-        return "Pi runtime unavailable";
-      case "provider_auth":
-        return "Provider authentication required";
-      case "token_type":
-        return "Wrong token type for this model";
-      default:
-        return "Local (Pi) runtime issue";
-    }
-  }
-
-  private issueHint(): string {
-    switch (this.issue) {
-      case "missing_cli":
-        return "Verify the bundled Pi runtime below, then authenticate your provider and retry.";
-      case "provider_auth":
-        return "Choose OAuth or API key in Step 2, verify models, then retry.";
-      case "token_type":
-        return "This model requires OAuth credentials. Use OAuth login in Step 2.";
-      default:
-        return "Follow the steps below to diagnose and recover.";
-    }
-  }
-
-  private issueVariant(): "info" | "warn" | "error" {
-    if (this.issue === "missing_cli") return "warn";
-    if (this.issue === "provider_auth" || this.issue === "token_type") return "error";
-    return "error";
+    return "";
   }
 
   private log(label: string, details: Record<string, unknown>): void {
@@ -298,10 +243,46 @@ class StudioPiSetupWizardModal extends Modal {
     return supportsOAuthLogin(providerId, this.oauthProvidersById);
   }
 
+  private selectedProviderIsReady(): boolean {
+    const provider = normalizeWizardProviderId(this.selectedProvider);
+    return Boolean(provider) && this.availableProviderIds.includes(provider);
+  }
+
+  private syncSelectedProviderReadiness(): void {
+    const provider = normalizeWizardProviderId(this.selectedProvider);
+    if (!provider) {
+      this.setStepStatus("model", "idle", "Choose a provider to continue.");
+      return;
+    }
+
+    if (this.cliStatus !== "success") {
+      this.setStepStatus("model", "idle", "Waiting for Pi to finish loading.");
+      return;
+    }
+
+    if (this.selectedProviderIsReady()) {
+      this.setStepStatus("auth", "success", `${this.providerActionLabel(provider)} is connected.`);
+      this.setStepStatus("model", "success", `${this.providerActionLabel(provider)} is ready to use in Studio.`);
+      return;
+    }
+
+    if (this.authStatus === "running") {
+      this.setStepStatus("model", "idle", `Finish the ${this.providerActionLabel(provider)} login, then come back here.`);
+      return;
+    }
+
+    if (this.authStatus === "success") {
+      this.setStepStatus("model", "idle", `Checking ${this.providerActionLabel(provider)} in Pi.`);
+      return;
+    }
+
+    this.setStepStatus("model", "idle", `${this.providerActionLabel(provider)} is not connected yet.`);
+  }
+
   private canRetry(): boolean {
     if (this.cliStatus !== "success") return false;
     if (this.issue === "provider_auth" || this.issue === "token_type") {
-      return this.modelStatus === "success" || this.authStatus === "success";
+      return this.selectedProviderIsReady();
     }
     return true;
   }
@@ -341,20 +322,12 @@ class StudioPiSetupWizardModal extends Modal {
 
   private async checkCliAvailability(): Promise<void> {
     await this.runAction("check-cli", async () => {
-      this.setStepStatus("cli", "running", "Checking bundled Pi runtime…");
+      this.setStepStatus("cli", "running", "Studio is installing or checking Pi for you.");
       this.render();
       try {
-        const result = await runStudioPiCommand(this.plugin, ["--version"], 30_000);
-        if (result.timedOut) {
-          this.setStepStatus("cli", "error", "Timed out while checking the bundled Pi runtime.");
-          return;
-        }
-        if (result.exitCode !== 0) {
-          this.setStepStatus("cli", "error", summarizePiCommandResult(result));
-          return;
-        }
-        const version = parsePiVersion(result.stdout);
-        this.setStepStatus("cli", "success", `Bundled Pi ${version} detected and ready.`);
+        const result = await installStudioLocalPiCli(this.plugin);
+        this.setStepStatus("cli", "success", `Pi ${result.version} is installed and ready.`);
+        this.syncSelectedProviderReadiness();
       } catch (error) {
         const message = normalizeEscapedNewlines(
           error instanceof Error ? error.message : String(error || "")
@@ -404,8 +377,12 @@ class StudioPiSetupWizardModal extends Modal {
     this.providerIds = Array.from(providerSet.values()).sort((a, b) =>
       this.providerLabel(a).localeCompare(this.providerLabel(b))
     );
+    const preferredDefaultProvider =
+      (providerSet.has("openai-codex") ? "openai-codex" : "") ||
+      this.providerIds[0] ||
+      "";
     if (!this.selectedProvider || !providerSet.has(this.selectedProvider)) {
-      this.selectedProvider = this.providerFromError || this.providerIds[0] || "";
+      this.selectedProvider = this.providerFromError || preferredDefaultProvider;
     }
 
     // Auto-select auth method based on provider capabilities
@@ -413,37 +390,58 @@ class StudioPiSetupWizardModal extends Modal {
     this.authMethod = selectDefaultAuthMethod(provider, this.oauthProvidersById);
 
     await this.refreshAuthStateDetail();
+    this.syncSelectedProviderReadiness();
     this.render();
   }
 
   private async refreshAuthStateDetail(): Promise<void> {
     const provider = normalizeWizardProviderId(this.selectedProvider);
     if (!provider) {
-      this.setStepStatus("auth", "idle", "Select a provider to configure authentication.");
+      this.setStepStatus("auth", "idle", "");
       return;
     }
     try {
       const authState = await readStudioPiProviderAuthState(provider);
+      const providerLabel = this.providerActionLabel(provider);
       const sourceText =
         authState.source === "oauth"
-          ? "OAuth token stored in auth.json."
+          ? `${providerLabel} is connected.`
           : authState.source === "api_key"
-            ? "API key stored in auth.json."
+            ? `${providerLabel} is connected with an API key.`
             : authState.source === "environment_or_fallback"
-              ? "Credentials found in environment."
-              : "No credentials found.";
+              ? `${providerLabel} is connected from your environment.`
+              : "";
       const status: StepStatus = authState.hasAnyAuth ? "success" : "idle";
       this.setStepStatus("auth", status, sourceText);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "");
       if (isPiModuleLoadError(message)) {
-        // Can't load Pi auth-storage in Obsidian's sandbox — treat as no credentials
-        // detected rather than a hard error. Auth flow can still proceed.
-        this.setStepStatus("auth", "idle", "Auth state unavailable until Pi has valid provider credentials.");
+        this.setStepStatus("auth", "idle", "");
       } else {
         this.setStepStatus("auth", "error", firstNonEmptyLine(message));
       }
     }
+  }
+
+  private async refreshConnectionStatus(): Promise<void> {
+    await this.runAction("refresh-connection-status", async () => {
+      if (this.cliStatus !== "success") {
+        this.setStepStatus("auth", "error", "Pi is still loading. Try again in a moment.");
+        return;
+      }
+      const provider = normalizeWizardProviderId(this.selectedProvider);
+      if (!provider) {
+        this.setStepStatus("auth", "error", "Choose a provider first.");
+        return;
+      }
+      this.setStepStatus("auth", "running", `Checking ${this.providerActionLabel(provider)}…`);
+      this.syncSelectedProviderReadiness();
+      this.render();
+      await this.loadProviderMetadata();
+      if (this.selectedProviderIsReady()) {
+        new Notice(`${this.providerActionLabel(provider)} is ready in Pi.`);
+      }
+    });
   }
 
   private async openExternalUrl(url: string): Promise<void> {
@@ -497,8 +495,14 @@ class StudioPiSetupWizardModal extends Modal {
       // Pi auth-storage module is blocked in Obsidian's sandbox — fall back to terminal
       if (!this.inModalAuthAvailable) {
         await launchStudioPiProviderLoginInTerminal(this.plugin, provider);
-        this.setStepStatus("auth", "success", `Terminal opened for ${this.providerLabel(provider)}. Complete login, then verify models.`);
-        new Notice("Opened Terminal for Pi provider login.");
+        const loginSurface = getPiLoginSurfaceLabel();
+        this.setStepStatus(
+          "auth",
+          "running",
+          `Finish the ${this.providerActionLabel(provider)} login in ${loginSurface}, then come back here.`
+        );
+        this.syncSelectedProviderReadiness();
+        new Notice(`Opened ${loginSurface} for Pi provider login.`);
         return;
       }
 
@@ -507,7 +511,7 @@ class StudioPiSetupWizardModal extends Modal {
       this.oauthAbortController = abortController;
       this.authUrl = null;
       this.authInstructions = null;
-      this.setStepStatus("auth", "running", `Starting OAuth login for ${this.providerLabel(provider)}…`);
+      this.setStepStatus("auth", "running", `Starting ${this.providerActionLabel(provider)} login…`);
       this.render();
 
       await runStudioPiOAuthLoginFlow({
@@ -542,9 +546,9 @@ class StudioPiSetupWizardModal extends Modal {
       this.pendingPrompt = null;
       this.authUrl = null;
       this.authInstructions = null;
-      this.setStepStatus("auth", "success", `OAuth login complete for ${this.providerLabel(provider)}.`);
-      new Notice(`Pi OAuth login complete for ${this.providerLabel(provider)}.`);
-      await this.refreshAuthStateDetail();
+      this.setStepStatus("auth", "success", `${this.providerActionLabel(provider)} login complete.`);
+      new Notice(`Pi OAuth login complete for ${this.providerActionLabel(provider)}.`);
+      await this.loadProviderMetadata();
     });
   }
 
@@ -584,7 +588,7 @@ class StudioPiSetupWizardModal extends Modal {
       this.apiKeyDraft = "";
       this.setStepStatus("auth", "success", `API key saved for ${this.providerLabel(provider)}.`);
       new Notice(`Saved Pi API key for ${this.providerLabel(provider)}.`);
-      await this.refreshAuthStateDetail();
+      await this.loadProviderMetadata();
     });
   }
 
@@ -599,7 +603,7 @@ class StudioPiSetupWizardModal extends Modal {
       this.apiKeyDraft = "";
       this.setStepStatus("auth", "idle", `Cleared stored auth for ${this.providerLabel(provider)}.`);
       new Notice(`Cleared Pi auth for ${this.providerLabel(provider)}.`);
-      await this.refreshAuthStateDetail();
+      await this.loadProviderMetadata();
     });
   }
 
@@ -615,11 +619,17 @@ class StudioPiSetupWizardModal extends Modal {
         return;
       }
       const loginCommand = await buildStudioPiResolvedLoginCommand(this.plugin, provider);
-      this.setStepStatus("auth", "running", `Launching Terminal: ${loginCommand}…`);
+      this.setStepStatus("auth", "running", `Launching ${getPiLoginSurfaceLabel()}: ${loginCommand}…`);
       this.render();
       await launchStudioPiProviderLoginInTerminal(this.plugin, provider);
-      this.setStepStatus("auth", "success", `Terminal opened for ${this.providerLabel(provider)}. Complete login and verify models.`);
-      new Notice("Opened Terminal for Pi provider login.");
+      const loginSurface = getPiLoginSurfaceLabel();
+      this.setStepStatus(
+        "auth",
+        "running",
+        `Finish the ${this.providerActionLabel(provider)} login in ${loginSurface}, then come back here.`
+      );
+      this.syncSelectedProviderReadiness();
+      new Notice(`Opened ${loginSurface} for Pi provider login.`);
     });
   }
 
@@ -682,32 +692,6 @@ class StudioPiSetupWizardModal extends Modal {
 
   // ─── Render helpers ────────────────────────────────────────────────────────
 
-  private renderBanner(): void {
-    const variant = this.issueVariant();
-    const banner = this.contentEl.createDiv({ cls: `ss-pi-wizard__banner ss-pi-wizard__banner--${variant}` });
-
-    const iconEl = banner.createDiv({ cls: "ss-pi-wizard__banner-icon" });
-    setIcon(iconEl, variant === "warn" ? "alert-circle" : "alert-triangle");
-
-    const body = banner.createDiv({ cls: "ss-pi-wizard__banner-body" });
-    body.createDiv({ cls: "ss-pi-wizard__banner-heading", text: this.issueHeading() });
-    body.createDiv({ cls: "ss-pi-wizard__banner-hint", text: this.issueHint() });
-
-    if (this.modelId || this.projectPath) {
-      const meta = body.createDiv({ cls: "ss-pi-wizard__banner-meta" });
-      if (this.modelId) {
-        const chip = meta.createDiv({ cls: "ss-pi-wizard__meta-chip" });
-        chip.createSpan({ cls: "ss-pi-wizard__meta-chip-label", text: "Model" });
-        chip.createSpan({ cls: "ss-pi-wizard__meta-chip-value", text: this.modelId });
-      }
-      if (this.projectPath) {
-        const chip = meta.createDiv({ cls: "ss-pi-wizard__meta-chip" });
-        chip.createSpan({ cls: "ss-pi-wizard__meta-chip-label", text: "Project" });
-        chip.createSpan({ cls: "ss-pi-wizard__meta-chip-value", text: this.projectPath });
-      }
-    }
-  }
-
   private renderStepHeader(
     container: HTMLElement,
     options: { index: number; title: string; description: string; status: StepStatus }
@@ -753,11 +737,19 @@ class StudioPiSetupWizardModal extends Modal {
   /** Providers filtered to those with a known API-key env var (plus any in the full list). */
   private apiKeyProviderIds(): string[] {
     const all = this.providerIds.length > 0 ? this.providerIds : [this.selectedProvider].filter(Boolean);
-    // Show all providers under API key — every provider may accept a key
-    const ids = [...all];
-    // Ensure providers with known env vars are present even if not yet discovered
+    const ids = all.filter((id) => {
+      return Boolean(this.authEnvVar(id)) || !this.supportsOAuth(id);
+    });
     for (const id of getStudioPiRegisteredProviderIds()) {
-      if (!ids.includes(id)) ids.push(id);
+      if (ids.includes(id)) {
+        continue;
+      }
+      if (this.authEnvVar(id) || !this.supportsOAuth(id)) {
+        ids.push(id);
+      }
+    }
+    if (this.selectedProvider && !ids.includes(this.selectedProvider) && (this.authEnvVar(this.selectedProvider) || !this.supportsOAuth(this.selectedProvider))) {
+      ids.unshift(this.selectedProvider);
     }
     return ids.sort((a, b) => this.providerLabel(a).localeCompare(this.providerLabel(b)));
   }
@@ -767,14 +759,140 @@ class StudioPiSetupWizardModal extends Modal {
     return this.authMethod === "oauth" ? this.oauthProviderIds() : this.apiKeyProviderIds();
   }
 
+  private oauthChoiceIds(): string[] {
+    const preferred = [
+      "openai-codex",
+      "anthropic",
+      "google-antigravity",
+      "google-gemini-cli",
+      "github-copilot",
+    ];
+    const available = this.oauthProviderIds();
+    const ordered: string[] = [];
+    for (const id of preferred) {
+      if (available.includes(id)) {
+        ordered.push(id);
+      }
+    }
+    if (this.selectedProvider && available.includes(this.selectedProvider) && !ordered.includes(this.selectedProvider)) {
+      ordered.unshift(this.selectedProvider);
+    }
+    for (const id of available) {
+      if (!ordered.includes(id)) {
+        ordered.push(id);
+      }
+    }
+    return ordered;
+  }
+
+  private oauthChoiceTitle(providerId: string): string {
+    switch (normalizeWizardProviderId(providerId)) {
+      case "openai-codex":
+        return "ChatGPT subscription";
+      case "anthropic":
+        return "Claude subscription";
+      case "google-antigravity":
+        return "Google Antigravity subscription";
+      case "google-gemini-cli":
+        return "Google Gemini CLI subscription";
+      case "github-copilot":
+        return "GitHub Copilot subscription";
+      default:
+        return this.providerLabel(providerId);
+    }
+  }
+
+  private oauthChoiceActionLabel(providerId: string): string {
+    switch (normalizeWizardProviderId(providerId)) {
+      case "openai-codex":
+        return "ChatGPT";
+      case "anthropic":
+        return "Claude";
+      case "google-antigravity":
+        return "Google Antigravity";
+      case "google-gemini-cli":
+        return "Google Gemini CLI";
+      case "github-copilot":
+        return "GitHub Copilot";
+      default:
+        return this.providerLabel(providerId);
+    }
+  }
+
+  private providerActionLabel(providerId: string): string {
+    return this.supportsOAuth(providerId)
+      ? this.oauthChoiceActionLabel(providerId)
+      : this.providerLabel(providerId);
+  }
+
+  private oauthChoiceHint(providerId: string): string {
+    switch (normalizeWizardProviderId(providerId)) {
+      case "openai-codex":
+        return "Use your ChatGPT subscription. Recommended for most people.";
+      case "anthropic":
+        return "Use your Claude subscription.";
+      case "google-antigravity":
+        return "Use your Google Antigravity subscription.";
+      case "google-gemini-cli":
+        return "Use your Google Gemini CLI subscription.";
+      case "github-copilot":
+        return "Use your GitHub Copilot subscription.";
+      default:
+        return `Use your ${this.providerLabel(providerId)} account.`;
+    }
+  }
+
+  private authCardTitle(): string {
+    if (this.selectedProviderIsReady()) {
+      return `${this.providerActionLabel(this.selectedProvider)} is ready`;
+    }
+    return "How do you want to connect?";
+  }
+
+  private authCardDescription(): string {
+    const provider = normalizeWizardProviderId(this.selectedProvider);
+    const label = provider ? this.providerActionLabel(provider) : "your provider";
+    if (this.selectedProviderIsReady()) {
+      return "Everything is connected. Retry the Studio run when you're ready.";
+    }
+    if (this.issue === "token_type") {
+      return `This model needs a ${label} subscription login instead of an API key.`;
+    }
+    return "Pick one way to add a provider to Pi. You can switch between subscription login and API key at any time.";
+  }
+
+  private hasTechnicalDetails(): boolean {
+    if (String(this.providerLoadError || "").trim()) {
+      return true;
+    }
+    if (this.cliStatus === "error" || this.modelStatus === "error") {
+      return true;
+    }
+    if (this.issue === "runtime_error") {
+      return true;
+    }
+    return this.issue === "missing_cli" && this.cliStatus !== "success";
+  }
+
+  private renderDisclosure(
+    container: HTMLElement,
+    summaryText: string,
+    renderBody: (body: HTMLElement) => void
+  ): void {
+    const details = container.createEl("details", { cls: "ss-pi-wizard__details" });
+    details.createEl("summary", { cls: "ss-pi-wizard__details-summary", text: summaryText });
+    const body = details.createDiv({ cls: "ss-pi-wizard__details-body" });
+    renderBody(body);
+  }
+
   private renderCliStep(): void {
     const card = this.contentEl.createDiv({
       cls: `ss-pi-wizard__step ss-pi-wizard__step--${this.cliStatus}`,
     });
     this.renderStepHeader(card, {
       index: 1,
-      title: "Verify bundled Pi runtime",
-      description: "Studio runs Pi from the plugin bundle, so this checks the embedded runtime instead of a global install.",
+      title: "Install Pi",
+      description: "Studio can install Pi automatically before you sign in.",
       status: this.cliStatus,
     });
     this.renderStepDetail(card, this.cliDetail);
@@ -782,81 +900,98 @@ class StudioPiSetupWizardModal extends Modal {
     const actions = card.createDiv({ cls: "ss-pi-wizard__actions" });
     const checkBtn = actions.createEl("button", {
       cls: this.cliStatus !== "success" ? "mod-cta" : "",
-      text: "Check Runtime",
+      text: this.cliStatus === "running" ? "Installing Pi…" : "Install Pi",
     });
-    checkBtn.disabled = this.actionRunning;
+    checkBtn.disabled = this.actionRunning || this.cliStatus === "running";
     checkBtn.addEventListener("click", () => void this.checkCliAvailability());
   }
 
   private renderAuthStep(): void {
+    const cardStatus: StepStatus = this.selectedProviderIsReady() ? "success" : this.authStatus;
     const card = this.contentEl.createDiv({
-      cls: `ss-pi-wizard__step ss-pi-wizard__step--${this.authStatus}`,
+      cls: `ss-pi-wizard__step ss-pi-wizard__step--${cardStatus}`,
     });
     this.renderStepHeader(card, {
-      index: 2,
-      title: "Authenticate provider",
-      description: "Pick an auth method, choose your provider, then authenticate.",
-      status: this.authStatus,
+      index: this.cliStatus === "success" ? 1 : 2,
+      title: this.authCardTitle(),
+      description: this.authCardDescription(),
+      status: cardStatus,
     });
     this.renderStepDetail(card, this.authDetail);
 
-    // 1. Auth method tabs — always first
-    this.renderAuthMethodTabs(card);
-
-    // 2. Provider dropdown — filtered to the selected method
-    this.renderProviderSelector(card);
-
-    // 3. Auth action — panel for the selected method
+    this.renderConnectionMethodChoices(card);
     if (this.authMethod === "oauth") {
+      this.renderOAuthSubscriptionChoices(card);
       this.renderOAuthPanel(card);
     } else {
+      this.renderProviderSelector(card);
       this.renderApiKeyPanel(card);
     }
   }
 
-  private renderAuthMethodTabs(container: HTMLElement): void {
+  private renderConnectionMethodChoices(container: HTMLElement): void {
     const oauthIds = this.oauthProviderIds();
-    const hasOAuthProviders = oauthIds.length > 0;
+    const apiKeyIds = this.apiKeyProviderIds();
+    const choices = container.createDiv({ cls: "ss-pi-wizard__method-list" });
 
-    const tabs = container.createDiv({ cls: "ss-pi-wizard__auth-tabs" });
-
-    const oauthTab = tabs.createEl("button", {
-      cls: `ss-pi-wizard__auth-tab${this.authMethod === "oauth" ? " ss-pi-wizard__auth-tab--active" : ""}`,
+    const oauthChoice = choices.createEl("button", {
+      cls: `ss-pi-wizard__method-choice${this.authMethod === "oauth" ? " ss-pi-wizard__method-choice--active" : ""}`,
     });
-    const oauthIconEl = oauthTab.createSpan({ cls: "ss-pi-wizard__tab-icon" });
+    oauthChoice.disabled = this.actionRunning;
+    const oauthText = oauthChoice.createDiv({ cls: "ss-pi-wizard__method-choice-text" });
+    oauthText.createDiv({ cls: "ss-pi-wizard__method-choice-title", text: "Subscription login" });
+    oauthText.createDiv({
+      cls: "ss-pi-wizard__method-choice-hint",
+      text: "Examples: ChatGPT, Claude, Google Antigravity, Gemini CLI, GitHub Copilot.",
+    });
+    const oauthIconEl = oauthChoice.createDiv({ cls: "ss-pi-wizard__method-choice-icon" });
     setIcon(oauthIconEl, "log-in");
-    oauthTab.createSpan({ text: "OAuth Login" });
 
-    const apiKeyTab = tabs.createEl("button", {
-      cls: `ss-pi-wizard__auth-tab${this.authMethod === "api_key" ? " ss-pi-wizard__auth-tab--active" : ""}`,
+    const apiKeyChoice = choices.createEl("button", {
+      cls: `ss-pi-wizard__method-choice${this.authMethod === "api_key" ? " ss-pi-wizard__method-choice--active" : ""}`,
     });
-    const keyIconEl = apiKeyTab.createSpan({ cls: "ss-pi-wizard__tab-icon" });
+    apiKeyChoice.disabled = this.actionRunning || this.issue === "token_type";
+    const apiKeyText = apiKeyChoice.createDiv({ cls: "ss-pi-wizard__method-choice-text" });
+    apiKeyText.createDiv({ cls: "ss-pi-wizard__method-choice-title", text: "API key" });
+    apiKeyText.createDiv({
+      cls: "ss-pi-wizard__method-choice-hint",
+      text: "Examples: OpenAI, Anthropic, OpenRouter, Groq, Mistral.",
+    });
+    const keyIconEl = apiKeyChoice.createDiv({ cls: "ss-pi-wizard__method-choice-icon" });
     setIcon(keyIconEl, "key");
-    apiKeyTab.createSpan({ text: "API Key" });
 
-    oauthTab.addEventListener("click", () => {
+    oauthChoice.addEventListener("click", () => {
       if (this.authMethod === "oauth") return;
       this.authMethod = "oauth";
-      // If current provider isn't an OAuth provider, switch to the first one
       if (!this.supportsOAuth(this.selectedProvider)) {
         this.selectedProvider = oauthIds[0] || this.selectedProvider;
         this.authUrl = null;
         this.authInstructions = null;
         this.apiKeyDraft = "";
-        void this.refreshAuthStateDetail();
+        void this.refreshAuthStateDetail().then(() => {
+          this.syncSelectedProviderReadiness();
+          this.render();
+        });
       }
       this.render();
     });
 
-    apiKeyTab.addEventListener("click", () => {
+    apiKeyChoice.addEventListener("click", () => {
       if (this.authMethod === "api_key") return;
       this.authMethod = "api_key";
+      if (!apiKeyIds.includes(this.selectedProvider)) {
+        this.selectedProvider = this.providerFromError && apiKeyIds.includes(this.providerFromError)
+          ? this.providerFromError
+          : apiKeyIds[0] || this.selectedProvider;
+      }
       this.authUrl = null;
       this.authInstructions = null;
-      this.render();
+      this.apiKeyDraft = "";
+      void this.refreshAuthStateDetail().then(() => {
+        this.syncSelectedProviderReadiness();
+        this.render();
+      });
     });
-
-    void hasOAuthProviders; // suppress unused warning; used implicitly via oauthIds
   }
 
   private renderProviderSelector(container: HTMLElement): void {
@@ -867,7 +1002,10 @@ class StudioPiSetupWizardModal extends Modal {
     // Ensure selectedProvider is valid for the current method; snap to first if not
     if (!ids.includes(this.selectedProvider) && ids.length > 0) {
       this.selectedProvider = ids[0];
-      void this.refreshAuthStateDetail();
+      void this.refreshAuthStateDetail().then(() => {
+        this.syncSelectedProviderReadiness();
+        this.render();
+      });
     }
 
     const row = container.createDiv({ cls: "ss-pi-wizard__provider-row" });
@@ -887,15 +1025,47 @@ class StudioPiSetupWizardModal extends Modal {
       this.authUrl = null;
       this.authInstructions = null;
       this.apiKeyDraft = "";
-      void this.refreshAuthStateDetail();
-      this.render();
-    });
-
-    if (this.providerLoadError) {
-      container.createDiv({
-        cls: "ss-pi-wizard__hint ss-pi-wizard__hint--warn",
-        text: `Provider list warning: ${this.providerLoadError}`,
+      void this.refreshAuthStateDetail().then(() => {
+        this.syncSelectedProviderReadiness();
+        this.render();
       });
+    });
+  }
+
+  private renderOAuthSubscriptionChoices(container: HTMLElement): void {
+    const choices = this.oauthChoiceIds();
+    if (choices.length === 0) {
+      return;
+    }
+
+    const list = container.createDiv({ cls: "ss-pi-wizard__oauth-choice-list" });
+    for (const providerId of choices) {
+      const selected = providerId === this.selectedProvider;
+      const option = list.createEl("button", {
+        cls: `ss-pi-wizard__oauth-choice${selected ? " ss-pi-wizard__oauth-choice--active" : ""}`,
+      });
+      option.disabled = this.actionRunning;
+      option.addEventListener("click", () => {
+        if (providerId === this.selectedProvider) {
+          return;
+        }
+        this.selectedProvider = providerId;
+        this.authUrl = null;
+        this.authInstructions = null;
+        this.apiKeyDraft = "";
+        void this.refreshAuthStateDetail().then(() => {
+          this.syncSelectedProviderReadiness();
+          this.render();
+        });
+      });
+
+      const text = option.createDiv({ cls: "ss-pi-wizard__oauth-choice-text" });
+      text.createDiv({ cls: "ss-pi-wizard__oauth-choice-title", text: this.oauthChoiceTitle(providerId) });
+      text.createDiv({ cls: "ss-pi-wizard__oauth-choice-hint", text: this.oauthChoiceHint(providerId) });
+      if (selected) {
+        const check = option.createDiv({ cls: "ss-pi-wizard__oauth-choice-check" });
+        setIcon(check, "check");
+      }
     }
   }
 
@@ -903,40 +1073,52 @@ class StudioPiSetupWizardModal extends Modal {
     const provider = normalizeWizardProviderId(this.selectedProvider);
     const panel = container.createDiv({ cls: "ss-pi-wizard__auth-panel" });
     const isOAuthRunning = this.oauthAbortController !== null;
+    const isWaitingForExternalLogin = !this.inModalAuthAvailable && this.authStatus === "running";
 
     if (!isOAuthRunning) {
       if (!this.inModalAuthAvailable) {
-        // Obsidian blocks file:// dynamic imports, so in-modal OAuth is unavailable.
-        // Terminal is the only path — make it the obvious primary action.
+        const loginSurface = getPiLoginSurfaceLabel();
         panel.createDiv({
           cls: "ss-pi-wizard__sandbox-notice",
-          text: "Obsidian's sandbox prevents in-app OAuth. Use Terminal to complete the Pi login flow — it opens automatically.",
+          text: isWaitingForExternalLogin
+            ? `Finish the ${this.oauthChoiceActionLabel(provider)} login in ${loginSurface}, then come back here.`
+            : `We’ll open ${loginSurface} and continue the ${this.oauthChoiceActionLabel(provider)} login for you.`,
         });
       }
 
       const loginBtn = panel.createEl("button", {
         cls: "mod-cta ss-pi-wizard__oauth-login-btn",
-        text: `Login with ${this.providerLabel(provider)}`,
+        text: isWaitingForExternalLogin
+          ? `I Finished in ${getPiLoginSurfaceLabel()}`
+          : `Continue with ${this.oauthChoiceActionLabel(provider)}`,
       });
       loginBtn.disabled = this.actionRunning || this.cliStatus !== "success";
-      // When in-modal auth is unavailable, clicking this falls back to terminal
-      loginBtn.addEventListener("click", () => void this.startOAuthLoginInModal());
+      loginBtn.addEventListener("click", () => {
+        if (isWaitingForExternalLogin) {
+          void this.refreshConnectionStatus();
+          return;
+        }
+        void this.startOAuthLoginInModal();
+      });
 
       if (this.inModalAuthAvailable) {
-        // Secondary terminal/copy options only shown alongside the in-modal path
-        const secondary = panel.createDiv({ cls: "ss-pi-wizard__actions ss-pi-wizard__actions--secondary" });
-        const terminalBtn = secondary.createEl("button", { text: "Open in Terminal" });
-        terminalBtn.disabled = this.actionRunning || this.cliStatus !== "success";
-        terminalBtn.addEventListener("click", () => void this.launchProviderLoginInTerminal());
-        const copyBtn = secondary.createEl("button", { text: "Copy Command" });
-        copyBtn.disabled = this.actionRunning;
-        copyBtn.addEventListener("click", () => void this.copyLoginCommand());
-      } else {
-        // Copy command is still useful so users can run it themselves
-        const copyBtn = panel.createEl("button", { text: "Copy Login Command" });
-        copyBtn.disabled = this.actionRunning;
-        copyBtn.addEventListener("click", () => void this.copyLoginCommand());
+        panel.createDiv({
+          cls: "ss-pi-wizard__hint",
+          text: `Studio will open the ${this.oauthChoiceActionLabel(provider)} login for you.`,
+        });
       }
+
+      this.renderDisclosure(panel, "Other ways to connect", (body) => {
+        const actions = body.createDiv({ cls: "ss-pi-wizard__actions ss-pi-wizard__actions--secondary" });
+        if (this.inModalAuthAvailable) {
+          const terminalBtn = actions.createEl("button", { text: `Open in ${getPiLoginSurfaceLabel()}` });
+          terminalBtn.disabled = this.actionRunning || this.cliStatus !== "success";
+          terminalBtn.addEventListener("click", () => void this.launchProviderLoginInTerminal());
+        }
+        const copyBtn = actions.createEl("button", { text: "Copy Login Command" });
+        copyBtn.disabled = this.actionRunning;
+        copyBtn.addEventListener("click", () => void this.copyLoginCommand());
+      });
     } else {
       // OAuth in progress (only reachable when inModalAuthAvailable = true)
       const progress = panel.createDiv({ cls: "ss-pi-wizard__oauth-progress" });
@@ -977,13 +1159,13 @@ class StudioPiSetupWizardModal extends Modal {
     const panel = container.createDiv({ cls: "ss-pi-wizard__auth-panel" });
 
     if (!this.inModalAuthAvailable) {
-      // Pi auth module blocked — can't save keys in-modal. Show env var instructions.
+      const loginSurface = getPiLoginSurfaceLabel();
       panel.createDiv({
         cls: "ss-pi-wizard__sandbox-notice",
-        text: "Obsidian's sandbox prevents saving keys in-app. Set the environment variable before launching Obsidian:",
+        text: `Set your ${this.providerLabel(provider)} API key in ${loginSurface}, then reopen Obsidian.`,
       });
       if (envVar) {
-        const cmd = `export ${envVar}="your-api-key-here"`;
+        const cmd = buildStudioPiApiKeyEnvCommandHint(envVar, process.platform);
         const cmdRow = panel.createDiv({ cls: "ss-pi-wizard__cmd-row" });
         cmdRow.createEl("code", { cls: "ss-pi-wizard__cmd-code", text: cmd });
         const copyCmd = cmdRow.createEl("button", { text: "Copy" });
@@ -992,16 +1174,18 @@ class StudioPiSetupWizardModal extends Modal {
           new Notice(copied ? "Command copied." : "Unable to copy.");
         });
       }
-      panel.createDiv({
-        cls: "ss-pi-wizard__hint",
-        text: "Or manually add your key to ~/.pi/agent/auth.json, then restart Obsidian.",
+      this.renderDisclosure(panel, "Alternative manual setup", (body) => {
+        body.createDiv({
+          cls: "ss-pi-wizard__hint",
+          text: `You can also add your key to ${getStudioPiAuthStoragePathHintForPlatform(process.platform)} and then reopen Obsidian.`,
+        });
       });
       return;
     }
 
     panel.createDiv({
       cls: "ss-pi-wizard__hint",
-      text: buildApiKeyHint(provider, envVar || undefined),
+      text: envVar ? `Paste your ${this.providerLabel(provider)} key. We’ll save it for future runs.` : buildApiKeyHint(provider, envVar || undefined),
     });
 
     const fieldLabel = panel.createEl("label", {
@@ -1025,7 +1209,7 @@ class StudioPiSetupWizardModal extends Modal {
     });
 
     const actions = panel.createDiv({ cls: "ss-pi-wizard__actions" });
-    const saveBtn = actions.createEl("button", { cls: "mod-cta", text: "Save API Key" });
+    const saveBtn = actions.createEl("button", { cls: "mod-cta", text: "Save and Continue" });
     saveBtn.disabled = this.actionRunning || !provider;
     saveBtn.addEventListener("click", () => void this.saveApiKeyInModal());
 
@@ -1065,7 +1249,7 @@ class StudioPiSetupWizardModal extends Modal {
       cls: `ss-pi-wizard__step ss-pi-wizard__step--${this.modelStatus}`,
     });
     this.renderStepHeader(card, {
-      index: 3,
+      index: this.cliStatus === "success" ? 2 : 3,
       title: "Verify models",
       description: "Confirms that your provider's models are accessible after auth.",
       status: this.modelStatus,
@@ -1088,25 +1272,38 @@ class StudioPiSetupWizardModal extends Modal {
 
   private render(): void {
     this.contentEl.empty();
-    this.renderBanner();
-    this.renderCliStep();
-    this.renderAuthStep();
-    this.renderModelStep();
+    if (this.cliStatus !== "success") {
+      this.renderCliStep();
+    }
+    if (this.cliStatus === "success" || this.issue !== "missing_cli") {
+      this.renderAuthStep();
+    }
+    if (this.cliStatus === "success" && this.modelStatus === "error") {
+      this.renderModelStep();
+    }
 
-    // Collapsible error details
-    const details = this.contentEl.createEl("details", { cls: "ss-pi-wizard__error-details" });
-    details.createEl("summary", { text: "Technical error details" });
-    details.createEl("pre", { cls: "ss-pi-wizard__error-pre", text: this.errorMessage });
+    if (this.hasTechnicalDetails()) {
+      const technicalDetailText = [
+        this.providerLoadError ? `Provider metadata: ${this.providerLoadError}` : "",
+        this.errorMessage,
+      ]
+        .filter((value) => String(value || "").trim().length > 0)
+        .join("\n\n");
+      if (technicalDetailText) {
+        const details = this.contentEl.createEl("details", { cls: "ss-pi-wizard__error-details" });
+        details.createEl("summary", { text: "Show technical details" });
+        details.createEl("pre", { cls: "ss-pi-wizard__error-pre", text: technicalDetailText });
+      }
+    }
 
-    // Footer
     const footer = this.contentEl.createDiv({ cls: "ss-pi-wizard__footer" });
-    const closeBtn = footer.createEl("button", { text: "Close" });
+    const closeBtn = footer.createEl("button", { text: "Not Now" });
     closeBtn.disabled = this.actionRunning;
     closeBtn.addEventListener("click", () => this.close());
 
     const retryBtn = footer.createEl("button", {
       cls: "mod-cta",
-      text: "Retry Studio Run",
+      text: this.selectedProviderIsReady() ? "Retry Studio Run" : "Retry When Ready",
     });
     retryBtn.disabled = this.actionRunning || !this.canRetry();
     retryBtn.addEventListener("click", () => {

@@ -391,7 +391,7 @@ export class CommandManager {
           
           if (chatId) {
             // Resume the chat
-            this.plugin.resumeChatService.openChat(chatId, modelId);
+            this.plugin.resumeChatService.openChat(chatId, activeFile.path, modelId);
           } else {
             new Notice("Could not extract chat ID from this file.", 5000);
           }
@@ -942,6 +942,14 @@ export class CommandManager {
     const activeLeafPath = this.resolveLeafFilePath(activeLeaf);
     if (activeLeafPath) {
       return activeLeafPath;
+    }
+
+    const activeChatView = this.app.workspace.getActiveViewOfType(ChatView);
+    if (activeChatView) {
+      const chatFilePath = this.resolveVaultFilePath(activeChatView.getChatHistoryFilePath?.());
+      if (chatFilePath) {
+        return chatFilePath;
+      }
     }
 
     const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);

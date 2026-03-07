@@ -12,7 +12,7 @@ describe("PiSessionMirror", () => {
     jest.clearAllMocks();
   });
 
-  it("maps Pi session entries into chatview-friendly transcript messages", async () => {
+  it("rebuilds a canonical transcript from Pi session entries", async () => {
     const entries = [
       {
         type: "message",
@@ -30,7 +30,7 @@ describe("PiSessionMirror", () => {
       },
       {
         type: "message",
-        id: "entry_assistant",
+        id: "entry_assistant_start",
         parentId: "entry_user",
         timestamp: "200",
         message: {
@@ -48,7 +48,7 @@ describe("PiSessionMirror", () => {
       {
         type: "message",
         id: "entry_tool",
-        parentId: "entry_assistant",
+        parentId: "entry_assistant_start",
         timestamp: "300",
         message: {
           role: "toolResult",
@@ -56,6 +56,30 @@ describe("PiSessionMirror", () => {
           toolCallId: "call_1",
           toolName: "read",
           content: [{ type: "text", text: "file contents" }],
+        },
+      },
+      {
+        type: "message",
+        id: "entry_assistant_end",
+        parentId: "entry_tool",
+        timestamp: "350",
+        message: {
+          role: "assistant",
+          timestamp: 350,
+          provider: "openai",
+          model: "gpt-5.3-codex-spark",
+          content: [{ type: "text", text: "I also found a summary." }],
+        },
+      },
+      {
+        type: "message",
+        id: "entry_user_2",
+        parentId: "entry_assistant_end",
+        timestamp: "400",
+        message: {
+          role: "user",
+          timestamp: 400,
+          content: "Look at this image\n\nNow summarize the note",
         },
       },
     ];
@@ -87,6 +111,7 @@ describe("PiSessionMirror", () => {
       sessionId: "sess_pi",
       sessionName: "Pi Session Name",
       actualModelId: "openai/gpt-5.3-codex-spark",
+      lastEntryId: "entry_user_2",
       messages: [
         expect.objectContaining({
           role: "user",
@@ -101,8 +126,8 @@ describe("PiSessionMirror", () => {
         }),
         expect.objectContaining({
           role: "assistant",
-          pi_entry_id: "entry_assistant",
-          content: "It looks like a diagram.",
+          pi_entry_id: "entry_assistant_end",
+          content: "It looks like a diagram.\n\nI also found a summary.",
           reasoning: "Need to inspect the image.",
           tool_calls: [
             expect.objectContaining({
@@ -118,13 +143,12 @@ describe("PiSessionMirror", () => {
           ],
         }),
         expect.objectContaining({
-          role: "tool",
-          pi_entry_id: "entry_tool",
-          tool_call_id: "call_1",
-          name: "read",
-          content: "file contents",
+          role: "user",
+          pi_entry_id: "entry_user_2",
+          content: "Now summarize the note",
         }),
       ],
     });
+    expect(snapshot.messages.some((message) => message.role === "tool")).toBe(false);
   });
 });

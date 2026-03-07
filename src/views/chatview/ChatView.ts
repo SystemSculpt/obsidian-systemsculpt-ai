@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, setIcon, Component, Platform } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, Component, Platform } from "obsidian";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { ChatMessage, ChatRole, MultiPartContent, SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
@@ -22,16 +22,19 @@ import type { ChatExportResult } from "./export/ChatExportTypes";
 import { removeGroupIfEmpty } from "./utils/MessageGrouping";
 import { classifyQuotaExceededError } from "./utils/quotaError";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
 import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
 import { loadPiSessionMirror } from "../../services/pi/PiSessionMirror";
 import { PiRpcProcessClient } from "../../services/pi/PiRpcProcessClient";
+import { resolveChatBackend, type ChatBackend } from "./storage/ChatPersistenceTypes";
 
 import { uiSetup } from "./uiSetup";
 import { messageHandling } from "./messageHandling";
 import { eventHandling } from "./eventHandling";
 import { systemPromptHandling } from "./systemPromptHandling";
+import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
 
 export const CHAT_VIEW_TYPE = "systemsculpt-chat-view";
 
@@ -61,8 +64,11 @@ export class ChatView extends ItemView {
   public chatTitle: string;
   public chatVersion: number = 0;
   public currentPrompt?: string;
+  public chatBackend: ChatBackend;
   public piSessionFile?: string;
   public piSessionId?: string;
+  public piLastEntryId?: string;
+  public piLastSyncedAt?: string;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
@@ -111,6 +117,11 @@ export class ChatView extends ItemView {
         systemPromptPath?: string;
         version?: number;
         chatFontSize?: "small" | "medium" | "large";
+        chatBackend?: ChatBackend;
+        piSessionFile?: string;
+        piSessionId?: string;
+        piLastEntryId?: string;
+        piLastSyncedAt?: string;
     }) || {};
 
     this.messages = [];
@@ -127,6 +138,14 @@ export class ChatView extends ItemView {
     this.systemPromptPath = initialState.systemPromptPath;
     // Use -1 as uninitialized state to distinguish from actual version 0
     this.chatVersion = initialState.version !== undefined ? initialState.version : -1;
+    this.chatBackend = resolveChatBackend({
+      explicitBackend: initialState.chatBackend,
+      piSessionFile: initialState.piSessionFile,
+    });
+    this.piSessionFile = typeof initialState.piSessionFile === "string" ? initialState.piSessionFile : undefined;
+    this.piSessionId = typeof initialState.piSessionId === "string" ? initialState.piSessionId : undefined;
+    this.piLastEntryId = typeof initialState.piLastEntryId === "string" ? initialState.piLastEntryId : undefined;
+    this.piLastSyncedAt = typeof initialState.piLastSyncedAt === "string" ? initialState.piLastSyncedAt : undefined;
 
     this.ensureCoreServicesReady();
 
@@ -244,7 +263,10 @@ export class ChatView extends ItemView {
         this.chatTitle,
         this.chatFontSize,
         this.piSessionFile,
-        this.piSessionId
+        this.piSessionId,
+        this.piLastEntryId,
+        this.piLastSyncedAt,
+        this.chatBackend,
       );
       this.chatVersion = savedChat.version || this.chatVersion;
 
@@ -434,7 +456,7 @@ export class ChatView extends ItemView {
 
           if (!this.hasConfiguredProvider()) {
             await this.promptProviderSetup(
-              "Connect Pi providers in Settings → Overview & Setup before starting a chat."
+              "Finish Pi setup in Settings → Overview & Setup before starting a chat."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -448,7 +470,7 @@ export class ChatView extends ItemView {
 
           if (!models || models.length === 0) {
             await this.promptProviderSetup(
-              "No local Pi models are ready yet. Connect Pi providers, refresh models, and try again."
+              "No Pi models are ready yet. Finish setup, refresh your model list, and try again."
             );
             await this.resetFailedAssistantTurn();
             return;
@@ -589,9 +611,9 @@ export class ChatView extends ItemView {
 
   public async promptProviderSetup(customMessage?: string): Promise<void> {
     const message = customMessage ??
-      "Connect Pi and choose a local Pi model to start chatting.";
+      "Open Setup to sign in with ChatGPT, Claude, Gemini, or add an API key, then refresh your model list.";
     const result = await showPopup(this.app, message, {
-      title: "Connect Pi",
+      title: "Set Up Pi",
       icon: "plug-zap",
       primaryButton: "Open Setup",
       secondaryButton: "Not Now",
@@ -688,79 +710,29 @@ export class ChatView extends ItemView {
       });
     }
 
-    // Header
-    statusContainer.createEl("h3", {
-      text: "Chat Settings",
-      cls: "systemsculpt-status-header"
-    });
-
     const needsProviderSetup = !this.hasConfiguredProvider();
-    if (needsProviderSetup) {
-      const alert = statusContainer.createDiv({ cls: "systemsculpt-status-alert" });
-      const iconWrapper = alert.createSpan({ cls: "ss-status-alert-icon" });
-      setIcon(iconWrapper, "plug-zap");
-      const content = alert.createDiv({ cls: "ss-status-alert-content" });
-      content.createDiv({ cls: "ss-status-alert-title", text: "Connect Pi to start chatting" });
-      content.createDiv({
-        cls: "ss-status-alert-description",
-        text: "Open Setup to connect Pi providers, then refresh and choose a local Pi model."
-      });
-      const actions = content.createDiv({ cls: "ss-status-alert-actions" });
-      const button = actions.createEl("button", {
-        cls: "mod-cta systemsculpt-status-alert-button",
-        text: "Open Setup"
-      });
-      button.setAttr('type', 'button');
-      this.registerDomEvent(button, "click", () => this.openSetupTab());
-    }
-
-    // Pills row
-    const pills = statusContainer.createEl("div", { cls: "systemsculpt-status-pills" });
-
-    // Helper to create a pill button
-    const createPill = (options: {
-      icon: string;
-      label: string;
-      value: string;
-      isOn?: boolean;
-      isDisabled?: boolean;
-      title?: string;
-      onClick?: () => void | Promise<void>;
-    }): HTMLElement => {
-      const btn = pills.createEl('button', { cls: 'systemsculpt-status-pill' });
-      const iconSpan = btn.createSpan({ cls: 'ss-pill-icon' });
-      setIcon(iconSpan, options.icon);
-      btn.createSpan({ cls: 'ss-pill-label', text: options.label });
-      btn.createSpan({ cls: 'ss-pill-sep', text: '·' });
-      btn.createSpan({ cls: 'ss-pill-value', text: options.value });
-      if (options.isOn !== undefined) {
-        btn.addClass(options.isOn ? 'is-on' : 'is-off');
-      }
-      if (options.isDisabled) {
-        btn.addClass('is-disabled');
-        btn.setAttr('aria-disabled', 'true');
-      } else {
-        btn.setAttr('aria-disabled', 'false');
-      }
-      if (options.title) btn.setAttr('title', options.title);
-      if (!options.isDisabled && options.onClick) {
-        this.registerDomEvent(btn, 'click', async () => {
-          await options.onClick?.();
-          // Note: Each handler manages its own UI updates via notifySettingsChanged()
-        });
-      }
-      return btn;
-    };
-
-    // Model
     const modelLabel = needsProviderSetup
-      ? 'Connect Pi'
+      ? 'Finish setup'
       : this.currentModelName || this.selectedModelId || 'Select…';
-    createPill({
-      icon: 'bot',
-      label: 'Model',
-      value: modelLabel,
-      title: needsProviderSetup ? 'Connect Pi to pick a local model' : (modelLabel ? `Current model: ${modelLabel}` : 'Choose a model'),
+    const promptLabel = this.getChatPromptLabel();
+    const contextCount = this.contextManager?.getContextFiles?.().size ?? 0;
+    const contextLabel = contextCount === 0 ? "No context yet" : `${contextCount} file${contextCount === 1 ? "" : "s"} attached`;
+    const historyPath = this.getChatHistoryFilePath();
+    const hasHistoryFile = !!historyPath;
+
+    const actionSpecs: Array<{
+      label: string;
+      icon: string;
+      onClick: () => void | Promise<void>;
+      primary?: boolean;
+      title?: string;
+    }> = [];
+
+    actionSpecs.push({
+      label: needsProviderSetup ? "Open Setup" : "Choose Model",
+      icon: needsProviderSetup ? "plug-zap" : "bot",
+      primary: true,
+      title: needsProviderSetup ? "Set up Pi sign-in or API key access" : `Current model: ${modelLabel}`,
       onClick: () => {
         if (needsProviderSetup) {
           this.openSetupTab();
@@ -769,114 +741,261 @@ export class ChatView extends ItemView {
         const modal = new StandardModelSelectionModal({
           app: this.app,
           plugin: this.plugin,
-          currentModelId: this.selectedModelId || '',
+          currentModelId: this.selectedModelId || "",
           onSelect: async (result) => {
             await this.setSelectedModelId(result.modelId);
-            new Notice('Model updated for this chat.', 3000);
+            new Notice("Model updated for this chat.", 3000);
           }
         });
         modal.open();
-      }
+      },
     });
 
-    // System Prompt
-    let promptLabel = '';
-    switch (normalizeDesktopPromptSelectionType(this.systemPromptType)) {
-      case "general-use":
-        promptLabel = "General Use";
-        break;
-      case "concise":
-        promptLabel = "Concise";
-        break;
-      case "custom":
-        if (this.systemPromptPath) {
-          const filename = this.systemPromptPath.split('/').pop() || 'Custom';
-          const baseName = filename.replace('.md', '');
-          promptLabel = baseName;
-        } else {
-          promptLabel = "Custom";
-        }
-        break;
-      default:
-        promptLabel = "General Use";
-        break;
-    }
-    createPill({
-      icon: normalizeDesktopPromptSelectionType(this.systemPromptType) === 'custom' ? 'file-text' : 'sparkles',
-      label: 'Prompt',
-      value: promptLabel,
+    actionSpecs.push({
+      label: "Switch Prompt",
+      icon: normalizeDesktopPromptSelectionType(this.systemPromptType) === "custom" ? "file-text" : "sparkles",
       title: `Current system prompt: ${promptLabel}`,
       onClick: async () => {
-        const { StandardSystemPromptSelectionModal } = await import('../../modals/StandardSystemPromptSelectionModal');
+        const { StandardSystemPromptSelectionModal } = await import("../../modals/StandardSystemPromptSelectionModal");
         const modal = new StandardSystemPromptSelectionModal({
           app: this.app,
           plugin: this.plugin,
-          currentType: this.systemPromptType || 'general-use',
+          currentType: this.systemPromptType || "general-use",
           currentPath: this.systemPromptPath,
           onSelect: async (result) => {
             this.systemPromptType = result.type;
-            this.systemPromptPath = result.type === 'custom' ? result.path : undefined;
+            this.systemPromptPath = result.type === "custom" ? result.path : undefined;
             this.currentPrompt = result.prompt;
             this.clearPiSessionState({ save: false });
             try {
               const useLatestPrompt = this.plugin.settings.useLatestSystemPromptForNewChats ?? true;
-              const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
+              const isStandardMode = this.plugin.settings.settingsMode !== "advanced";
               if (useLatestPrompt || isStandardMode) {
                 await this.plugin.getSettingsManager().updateSettings({
                   systemPromptType: result.type,
-                  systemPromptPath: result.type === 'custom' ? (result.path || '') : ''
+                  systemPromptPath: result.type === "custom" ? (result.path || "") : "",
                 });
-                this.plugin.emitter?.emit?.('systemPromptSettingsChanged');
+                this.plugin.emitter?.emit?.("systemPromptSettingsChanged");
               }
             } catch {}
             await this.saveChat();
             await this.updateSystemPromptIndicator();
-            new Notice('System prompt updated for this chat.', 3000);
-            // Keep status synced
+            new Notice("System prompt updated for this chat.", 3000);
             this.notifySettingsChanged();
           }
         });
         modal.open();
-      }
+      },
     });
 
-    // Context
-    const contextCount = this.contextManager?.getContextFiles?.().size ?? 0;
-    createPill({
+    actionSpecs.push({
+      label: "Add Context",
       icon: "paperclip",
-      label: "Context",
-      value: contextCount === 0 ? "None" : `${contextCount} file${contextCount === 1 ? "" : "s"}`,
-      title:
-        contextCount === 0
-          ? "Attach notes, documents, images, or audio to this chat"
-          : `Context files attached: ${contextCount} (click to add more)`,
+      title: "Attach notes, documents, images, or audio to this chat",
       onClick: async () => {
         await this.contextManager?.addContextFile?.();
       },
     });
 
-    const fontLabel = this.chatFontSize.charAt(0).toUpperCase() + this.chatFontSize.slice(1);
-    createPill({
-      icon: 'type',
-      label: 'Font',
-      value: fontLabel,
-      title: 'Click to cycle font size',
+    if (hasHistoryFile) {
+      actionSpecs.push({
+        label: "Open History",
+        icon: "file-text",
+        title: "Open the saved markdown file for this chat",
+        onClick: async () => {
+          await this.inputHandler?.handleOpenChatHistoryFile?.();
+        },
+      });
+
+      actionSpecs.push({
+        label: "Copy Path",
+        icon: "copy",
+        title: "Copy the full filesystem path to this chat",
+        onClick: async () => {
+          await this.copyCurrentChatFilePathToClipboard();
+        },
+      });
+    }
+
+    actionSpecs.push({
+      label: "Copy Log Paths",
+      icon: "folder-search",
+      title: "Copy the expected filesystem paths for this chat's debug artifacts",
       onClick: async () => {
-        const order: Array<'small' | 'medium' | 'large'> = ['small', 'medium', 'large'];
-        const idx = order.indexOf(this.chatFontSize);
-        const next = order[(idx + 1) % order.length];
-        await this.setChatFontSize(next);
-      }
+        await this.copyChatArtifactPathsToClipboard();
+      },
     });
 
-    // Tip
-    statusContainer.createEl("p", {
-      text: "Click any setting above to change it.",
-      cls: "systemsculpt-status-tip"
+    if (this.chatId) {
+      actionSpecs.push({
+        label: "Copy Debug",
+        icon: "bug",
+        title: "Copy the full debug index for this chat",
+        onClick: async () => {
+          await this.copyDebugSnapshotToClipboard();
+        },
+      });
+    }
+
+    renderChatStatusSurface(statusContainer, {
+      eyebrow: needsProviderSetup ? "Pi setup required" : "Ready to chat",
+      title: needsProviderSetup ? "Finish Pi setup" : "Start with Pi",
+      description: needsProviderSetup
+        ? "Sign in with ChatGPT, Claude, Gemini, or add an API key in Setup, then pick a model."
+        : "Choose a model, switch prompts, attach context, or jump back to this chat's saved transcript.",
+      chips: [
+        {
+          label: "Model",
+          value: modelLabel,
+          icon: "bot",
+        },
+        {
+          label: "Prompt",
+          value: promptLabel,
+          icon:
+            normalizeDesktopPromptSelectionType(this.systemPromptType) === "custom"
+              ? "file-text"
+              : "sparkles",
+        },
+        {
+          label: "Context",
+          value: contextLabel,
+          icon: "paperclip",
+        },
+        ...(this.getPiSessionFile()
+          ? [
+              {
+                label: "Session",
+                value: "Pi-linked",
+                icon: "git-fork",
+              },
+            ]
+          : []),
+      ],
+      actions: actionSpecs,
+      note: hasHistoryFile
+        ? "Use / for export, save-as-note, debug, and other chat actions."
+        : "The chat file path appears after the conversation is saved. Use / for export, save-as-note, and debug actions.",
+    }, {
+      registerDomEvent: this.registerDomEvent.bind(this),
     });
 
     // Remove no-animate after refresh so future first-time displays can animate again
     try { statusContainer.removeClass('no-animate'); } catch {}
+  }
+
+  private getChatPromptLabel(): string {
+    switch (normalizeDesktopPromptSelectionType(this.systemPromptType)) {
+      case "general-use":
+        return "General Use";
+      case "concise":
+        return "Concise";
+      case "custom": {
+        if (this.systemPromptPath) {
+          const filename = this.systemPromptPath.split("/").pop() || "Custom";
+          return filename.replace(/\.md$/i, "");
+        }
+        return "Custom";
+      }
+      default:
+        return "General Use";
+    }
+  }
+
+  public getExpectedChatHistoryFilePath(): string | null {
+    const chatId = String(this.chatId || "").trim();
+    if (!chatId) {
+      return null;
+    }
+
+    const configuredDirectory = String(this.plugin.settings.chatsDirectory || "").trim();
+    const chatDirectory = configuredDirectory || "SystemSculpt/Chats";
+    return `${chatDirectory}/${chatId}.md`;
+  }
+
+  public getChatHistoryFilePath(): string | null {
+    const expectedPath = this.getExpectedChatHistoryFilePath();
+    if (!expectedPath) {
+      return null;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(expectedPath);
+    return file instanceof TFile ? file.path : null;
+  }
+
+  public getChatHistoryAbsolutePath(): string | null {
+    const chatHistoryPath = this.getChatHistoryFilePath();
+    return chatHistoryPath ? resolveAbsoluteVaultPath(this.app.vault.adapter, chatHistoryPath) : null;
+  }
+
+  public async copyCurrentChatFilePathToClipboard(): Promise<void> {
+    const absolutePath = this.getChatHistoryAbsolutePath();
+    if (!absolutePath) {
+      new Notice(
+        this.chatId
+          ? "Chat history file is not available yet. Send a message or reopen a saved chat first."
+          : "Start or open a chat before copying its path.",
+        5000
+      );
+      return;
+    }
+
+    const copied = await tryCopyToClipboard(absolutePath);
+    if (!copied) {
+      new Notice("Unable to copy chat file path to clipboard.", 5000);
+      return;
+    }
+
+    new Notice("Chat file path copied to clipboard.", 4000);
+  }
+
+  public async copyChatArtifactPathsToClipboard(): Promise<void> {
+    const logger = this.getDebugLogService();
+    const expectedHistoryPath = this.getExpectedChatHistoryFilePath();
+    const historyPath = this.getChatHistoryFilePath();
+    const expectedHistoryAbsolutePath = expectedHistoryPath
+      ? resolveAbsoluteVaultPath(this.app.vault.adapter, expectedHistoryPath)
+      : null;
+    const logPaths = logger?.buildLogPathsDetailed();
+
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      chat: {
+        chatId: this.chatId || null,
+        chatTitle: this.chatTitle || null,
+        modelId: this.selectedModelId || null,
+        chatBackend: this.chatBackend || null,
+        piSessionFile: this.piSessionFile || null,
+        piSessionId: this.piSessionId || null,
+        piLastEntryId: this.piLastEntryId || null,
+        piLastSyncedAt: this.piLastSyncedAt || null,
+      },
+      history: {
+        path: historyPath,
+        absolutePath: historyPath ? this.getChatHistoryAbsolutePath() : null,
+        exists: !!historyPath,
+        expectedPath: expectedHistoryPath,
+        expectedAbsolutePath: expectedHistoryAbsolutePath,
+      },
+      logFiles: {
+        ui: {
+          expectedPath: logPaths?.ui.relative ?? null,
+          expectedAbsolutePath: logPaths?.ui.absolute ?? null,
+        },
+        stream: {
+          expectedPath: logPaths?.stream.relative ?? null,
+          expectedAbsolutePath: logPaths?.stream.absolute ?? null,
+        },
+      },
+    };
+
+    const copied = await tryCopyToClipboard(JSON.stringify(payload, null, 2));
+    if (!copied) {
+      new Notice("Unable to copy chat file and log paths (clipboard unavailable).", 5000);
+      return;
+    }
+
+    new Notice("Chat file and log paths copied to clipboard.", 4000);
   }
 
 	  private async refreshModelMetadata(): Promise<void> {
@@ -933,8 +1052,12 @@ export class ChatView extends ItemView {
       systemPromptPath: this.systemPromptPath,
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
+      chatBackend: this.chatBackend,
       piSessionFile: this.piSessionFile,
       piSessionId: this.piSessionId,
+      piLastEntryId: this.piLastEntryId,
+      piLastSyncedAt: this.piLastSyncedAt,
+      file: this.getExpectedChatHistoryFilePath() || undefined,
     };
   }
 
@@ -954,8 +1077,11 @@ export class ChatView extends ItemView {
       this.chatId = "";
       this.initializeChatTitle();
       // Ensure the selectedModelId for a new chat defaults to the plugin's setting
+      this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
       this.piSessionFile = undefined;
       this.piSessionId = undefined;
+      this.piLastEntryId = undefined;
+      this.piLastSyncedAt = undefined;
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       // Respect policy for default system prompt when starting new chats
@@ -1015,8 +1141,14 @@ export class ChatView extends ItemView {
       this.systemPromptType = state.systemPromptType || 'general-use';
       this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
+      this.chatBackend = resolveChatBackend({
+        explicitBackend: state.chatBackend,
+        piSessionFile: state.piSessionFile,
+      });
       this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
       this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
+      this.piLastEntryId = typeof state.piLastEntryId === "string" ? state.piLastEntryId : undefined;
+      this.piLastSyncedAt = typeof state.piLastSyncedAt === "string" ? state.piLastSyncedAt : undefined;
 
       if (state.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
@@ -1052,8 +1184,14 @@ export class ChatView extends ItemView {
     // Only set path for custom prompts
     this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
+    this.chatBackend = resolveChatBackend({
+      explicitBackend: state.chatBackend,
+      piSessionFile: state.piSessionFile,
+    });
     this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
     this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
+    this.piLastEntryId = typeof state.piLastEntryId === "string" ? state.piLastEntryId : undefined;
+    this.piLastSyncedAt = typeof state.piLastSyncedAt === "string" ? state.piLastSyncedAt : undefined;
     // Restore chat font size
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
@@ -1080,6 +1218,11 @@ export class ChatView extends ItemView {
       this.contextManager?.clearContext();
       this.systemPromptType = 'general-use';
       this.systemPromptPath = undefined;
+      this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
+      this.piSessionFile = undefined;
+      this.piSessionId = undefined;
+      this.piLastEntryId = undefined;
+      this.piLastSyncedAt = undefined;
       // Don't render here if UI not ready yet
       if (this.chatContainer) {
         this.renderMessagesInChunks();
@@ -1133,8 +1276,11 @@ export class ChatView extends ItemView {
           this.setTitle("Chat not found");
           this.systemPromptType = 'general-use';
           this.systemPromptPath = undefined;
+          this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
           this.piSessionFile = undefined;
           this.piSessionId = undefined;
+          this.piLastEntryId = undefined;
+          this.piLastSyncedAt = undefined;
           this.contextManager?.clearContext();
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
@@ -1148,43 +1294,20 @@ export class ChatView extends ItemView {
         this.selectedModelId = chatData.selectedModelId || this.plugin.settings.selectedModelId;
         this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
-        let hydratedMessages = chatData.messages || [];
+        const persistedMessages = chatData.messages || [];
         this.chatVersion = chatData.version || 0;
 
         // Simplified system prompt handling
         this.systemPromptType = chatData.systemPromptType || 'general-use';
         this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
 
+        this.chatBackend = chatData.chatBackend;
         this.piSessionFile = chatData.piSessionFile;
         this.piSessionId = chatData.piSessionId;
-
-        if (Platform.isDesktopApp && this.piSessionFile) {
-          try {
-            await this.hydrateFromPiSession({
-              sessionFile: this.piSessionFile,
-              sessionId: this.piSessionId,
-              syncTitle: true,
-              render: false,
-              save: false,
-            });
-            if (loadEpoch !== this.loadEpoch) return;
-            hydratedMessages = this.messages;
-          } catch (error) {
-            try {
-              errorLogger.warn("Failed to hydrate chat history from Pi session file", {
-                source: "ChatView",
-                method: "loadChatById",
-                metadata: {
-                  chatId,
-                  sessionFile: this.piSessionFile,
-                  error: error instanceof Error ? error.message : String(error),
-                },
-              });
-            } catch {}
-          }
-        }
-
-        this.messages = hydratedMessages;
+        this.piLastEntryId = chatData.piLastEntryId;
+        this.piLastSyncedAt = chatData.piLastSyncedAt;
+        const hasPiSession = this.isPiBackedChat() && !!this.piSessionFile;
+        this.messages = persistedMessages;
 
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
@@ -1206,8 +1329,45 @@ export class ChatView extends ItemView {
           }
         }
 
-        await this.renderMessagesInChunks();
-        if (loadEpoch !== this.loadEpoch) return;
+        if (persistedMessages.length > 0 || !hasPiSession) {
+          await this.renderMessagesInChunks();
+          if (loadEpoch !== this.loadEpoch) return;
+        }
+
+        if (hasPiSession) {
+          this.showChatLoadingBanner(persistedMessages.length > 0 ? "Syncing Pi session…" : "Restoring Pi chat…");
+          await yieldToPaint();
+          try {
+            await this.syncPiSessionTranscript({
+              sessionFile: this.piSessionFile,
+              sessionId: this.piSessionId,
+              syncTitle: true,
+              render: true,
+              persist: false,
+            });
+            if (loadEpoch !== this.loadEpoch) return;
+          } catch (error) {
+            try {
+              errorLogger.warn("Failed to hydrate chat history from Pi session file", {
+                source: "ChatView",
+                method: "loadChatById",
+                metadata: {
+                  chatId,
+                  sessionFile: this.piSessionFile,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              });
+            } catch {}
+
+            if (persistedMessages.length === 0) {
+              this.messages = persistedMessages;
+              await this.renderMessagesInChunks();
+              if (loadEpoch !== this.loadEpoch) return;
+            }
+          }
+
+          this.removeChatLoadingBanner();
+        }
 
         this.isFullyLoaded = true; // Mark as loaded after messages are rendered
         this.inputHandler?.notifyChatReadyChanged?.();
@@ -1562,6 +1722,11 @@ export class ChatView extends ItemView {
           chatTitle: this.chatTitle || null,
           modelId: this.selectedModelId || null,
           chatVersion: this.chatVersion,
+          chatBackend: this.chatBackend || null,
+          piSessionFile: this.piSessionFile || null,
+          piSessionId: this.piSessionId || null,
+          piLastEntryId: this.piLastEntryId || null,
+          piLastSyncedAt: this.piLastSyncedAt || null,
         },
         logFiles: {
           ui: {
@@ -1664,7 +1829,7 @@ export class ChatView extends ItemView {
       null
     );
 
-    const chatFilePath = this.chatId ? `${this.plugin.settings.chatsDirectory}/${this.chatId}.md` : null;
+    const chatFilePath = this.getExpectedChatHistoryFilePath();
     const chatFile = await safeAsync(
       "chat-file",
       async () => {
@@ -1957,6 +2122,14 @@ export class ChatView extends ItemView {
       : undefined;
   }
 
+  public isPiBackedChat(): boolean {
+    return Platform.isDesktopApp && this.chatBackend === "pi";
+  }
+
+  public isLegacyReadOnlyChat(): boolean {
+    return Platform.isDesktopApp && this.chatBackend === "legacy" && String(this.chatId || "").trim().length > 0;
+  }
+
   private resolvePiSessionRef(nextState?: {
     sessionFile?: string;
     sessionId?: string;
@@ -1969,16 +2142,17 @@ export class ChatView extends ItemView {
     };
   }
 
-  public async hydrateFromPiSession(options?: {
+  public async syncPiSessionTranscript(options?: {
     sessionFile?: string;
     sessionId?: string;
     syncTitle?: boolean;
     render?: boolean;
-    save?: boolean;
-  }): Promise<void> {
+    persist?: boolean;
+    force?: boolean;
+  }): Promise<boolean> {
     const sessionRef = this.resolvePiSessionRef(options);
-    if (!Platform.isDesktopApp || !sessionRef.sessionFile) {
-      return;
+    if (!this.isPiBackedChat() || !sessionRef.sessionFile) {
+      return false;
     }
 
     const snapshot = await loadPiSessionMirror({
@@ -1986,24 +2160,55 @@ export class ChatView extends ItemView {
       sessionFile: sessionRef.sessionFile,
     });
 
-    this.messages = snapshot.messages;
+    const nextLastEntryId = String(snapshot.lastEntryId || "").trim() || this.piLastEntryId;
+    const shouldReplaceTranscript =
+      options?.force === true ||
+      this.messages.length === 0 ||
+      !this.piLastEntryId ||
+      (!!nextLastEntryId && nextLastEntryId !== this.piLastEntryId);
+
+    if (shouldReplaceTranscript && snapshot.messages.length > 0) {
+      this.messages = snapshot.messages;
+    }
+    this.chatBackend = "pi";
     this.piSessionFile = snapshot.sessionFile || sessionRef.sessionFile;
     this.piSessionId = snapshot.sessionId || sessionRef.sessionId;
+    this.piLastEntryId = nextLastEntryId;
+    this.piLastSyncedAt = new Date().toISOString();
 
     const sessionName = String(snapshot.sessionName || "").trim();
     if (options?.syncTitle !== false && sessionName) {
-      this.chatTitle = sessionName;
+      this.setTitle(sessionName, false);
     }
 
     this.updateViewState();
 
-    if (options?.render !== false) {
+    if (options?.render !== false && shouldReplaceTranscript) {
       await this.renderMessagesInChunks();
     }
 
-    if (options?.save && this.chatId && this.isFullyLoaded) {
+    if (options?.persist && this.chatId && this.isFullyLoaded) {
       await this.saveChat();
     }
+
+    return shouldReplaceTranscript;
+  }
+
+  public async hydrateFromPiSession(options?: {
+    sessionFile?: string;
+    sessionId?: string;
+    syncTitle?: boolean;
+    render?: boolean;
+    save?: boolean;
+  }): Promise<void> {
+    await this.syncPiSessionTranscript({
+      sessionFile: options?.sessionFile,
+      sessionId: options?.sessionId,
+      syncTitle: options?.syncTitle,
+      render: options?.render,
+      persist: options?.save,
+      force: true,
+    });
   }
 
   private async resolvePiForkEntryId(client: PiRpcProcessClient, messageId: string): Promise<string> {
@@ -2057,12 +2262,13 @@ export class ChatView extends ItemView {
       }
 
       const state = await client.getState();
-      await this.hydrateFromPiSession({
+      await this.syncPiSessionTranscript({
         sessionFile: String(state.sessionFile || "").trim() || sessionFile,
         sessionId: String(state.sessionId || "").trim() || this.piSessionId,
         syncTitle: true,
         render: true,
-        save: true,
+        persist: true,
+        force: true,
       });
 
       return result;
@@ -2087,6 +2293,7 @@ export class ChatView extends ItemView {
     try {
       await client.setSessionName(sessionName);
       const state = await client.getState();
+      this.chatBackend = "pi";
       this.piSessionFile = String(state.sessionFile || "").trim() || sessionFile;
       this.piSessionId = String(state.sessionId || "").trim() || this.piSessionId;
       this.updateViewState();
@@ -2099,6 +2306,8 @@ export class ChatView extends ItemView {
     const hadSession = !!this.piSessionFile || !!this.piSessionId;
     this.piSessionFile = undefined;
     this.piSessionId = undefined;
+    this.piLastEntryId = undefined;
+    this.piLastSyncedAt = undefined;
 
     if (options?.updateViewState !== false) {
       this.updateViewState();
@@ -2120,6 +2329,7 @@ export class ChatView extends ItemView {
       return;
     }
 
+    this.chatBackend = "pi";
     this.piSessionFile = nextSessionFile;
     this.piSessionId = nextSessionId;
     this.updateViewState();

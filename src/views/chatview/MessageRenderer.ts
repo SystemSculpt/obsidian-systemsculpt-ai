@@ -296,104 +296,184 @@ export class MessageRenderer extends Component {
 
   /**
    * Unified rendering for message parts using diff-based updates.
-   * All parts (reasoning, content, tool_calls) are rendered in chronological
-   * order as inline collapsible blocks. Reasoning and tool call blocks are
-   * expanded during streaming and auto-collapsed when streaming completes.
+   * Pi-first assistant turns render as one calm answer card with compact
+   * activity and reasoning sections beneath it.
    */
   public renderUnifiedMessageParts(messageEl: HTMLElement, parts: MessagePart[], isActivelyStreaming: boolean = false): void {
-    if (!parts || parts.length === 0) {
-      const legacyContent = messageEl.querySelector('.systemsculpt-message-content:not(.systemsculpt-unified-part)');
-      if (legacyContent) {
-        (legacyContent as HTMLElement).style.display = '';
-      }
+    const contentEl = messageEl.querySelector('.systemsculpt-message-content') as HTMLElement | null;
+    if (!contentEl) {
       return;
     }
 
-    // Hide legacy content when we have unified parts
-    const legacyContent = messageEl.querySelector('.systemsculpt-message-content:not(.systemsculpt-unified-part)');
-    if (legacyContent) {
-      (legacyContent as HTMLElement).style.display = 'none';
+    if (!parts || parts.length === 0) {
+      void this.renderMarkdownContent("", contentEl, isActivelyStreaming);
+      this.removeAggregateBlock(messageEl, "activity");
+      this.removeAggregateBlock(messageEl, "reasoning");
+      messageEl.classList.remove("has-reasoning");
+      this.ensureToolbarAnchored(messageEl);
+      return;
     }
 
     const sortedParts = [...parts].sort((a, b) => a.timestamp - b.timestamp);
     const normalizedParts = mergeAdjacentReasoningParts(sortedParts);
-
-    // Track existing parts for efficient DOM updates
-    const existingParts = new Map<string, HTMLElement>();
-    messageEl.querySelectorAll('.systemsculpt-unified-part[data-part-id]').forEach((el: HTMLElement) => {
-      const partId = el.dataset.partId;
-      if (partId) existingParts.set(partId, el);
-    });
-
-    const processedPartIds = new Set<string>();
-    let insertAfterElement: HTMLElement | null = null;
-    let toolCallIndex = 0;
-
-    // Render ALL parts in chronological order (reasoning, content, and tool_calls interleaved)
-    for (const part of normalizedParts) {
-      if (!part.id) continue;
-      processedPartIds.add(part.id);
-
-      const existingElement = existingParts.get(part.id);
-
-      if (existingElement) {
-        // Update existing element
-        const needsUpdate = this.partNeedsUpdate(part, isActivelyStreaming, existingElement);
-        if (needsUpdate) {
-          this.updateExistingPart(existingElement, part, isActivelyStreaming);
-        }
-        // Track anchor for insertion - for tool calls, use the anchor from the renderer
-        if (part.type === 'tool_call') {
-          const anchor = this.toolCallRenderer.getAnchorElement(existingElement);
-          insertAfterElement = anchor ?? existingElement;
-        } else {
-          insertAfterElement = existingElement;
-        }
-      } else {
-        // Create new element based on type
-        let newElement: HTMLElement | null = null;
-
-        switch (part.type) {
-          case 'reasoning':
-            newElement = this.renderInlineReasoning(messageEl, part.data, insertAfterElement, isActivelyStreaming, part.id);
-            break;
-          case 'content':
-            newElement = this.renderUnifiedContent(messageEl, part.data, insertAfterElement, part.id, isActivelyStreaming, part);
-            break;
-          case 'tool_call':
-            newElement = this.renderInlineToolCall(messageEl, part.data as ToolCall, toolCallIndex, insertAfterElement, part.id, isActivelyStreaming);
-            break;
-        }
-
-        if (newElement) {
-          // For tool calls, use the anchor from the renderer
-          if (part.type === 'tool_call') {
-            const anchor = this.toolCallRenderer.getAnchorElement(newElement);
-            insertAfterElement = anchor ?? newElement;
-          } else {
-            insertAfterElement = newElement;
-          }
-        }
-      }
-
-      if (part.type === 'tool_call') {
-        toolCallIndex++;
-      }
+    const partList = new MessagePartList(normalizedParts);
+    const answerMarkdown = partList.contentMarkdown("\n\n");
+    if (answerMarkdown.trim().length > 0) {
+      void this.renderMarkdownContent(answerMarkdown, contentEl, isActivelyStreaming);
+    } else {
+      contentEl.empty();
     }
 
-    // Remove orphaned parts
-    existingParts.forEach((element, partId) => {
-      if (!processedPartIds.has(partId)) {
-        if (element.classList.contains('systemsculpt-chat-structured-line')) {
-          this.toolCallRenderer.removeToolCallElement(element);
-        } else {
-          element.remove();
-        }
-      }
+    this.pruneLegacyUnifiedParts(messageEl);
+    this.renderAggregateActivityBlock(messageEl, partList.toolCalls, isActivelyStreaming, contentEl);
+    this.renderAggregateReasoningBlock(messageEl, partList.reasoningMarkdown(), isActivelyStreaming, contentEl);
+    this.ensureToolbarAnchored(messageEl);
+  }
+
+  private pruneLegacyUnifiedParts(messageEl: HTMLElement): void {
+    messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part:not([data-aggregate-section])").forEach((el) => {
+      el.remove();
+    });
+  }
+
+  private getAggregateBlock(messageEl: HTMLElement, section: "activity" | "reasoning"): HTMLElement | null {
+    return messageEl.querySelector(`.systemsculpt-inline-collapsible[data-aggregate-section="${section}"]`) as HTMLElement | null;
+  }
+
+  private removeAggregateBlock(messageEl: HTMLElement, section: "activity" | "reasoning"): void {
+    this.getAggregateBlock(messageEl, section)?.remove();
+  }
+
+  private ensureAggregateBlock(
+    messageEl: HTMLElement,
+    section: "activity" | "reasoning",
+    options: {
+      type: InlineBlockType;
+      title: string;
+      icon: string;
+      statusText?: string;
+      statusState?: string;
+      isStreaming: boolean;
+      anchorEl: HTMLElement;
+    },
+  ): HTMLElement {
+    let block = this.getAggregateBlock(messageEl, section);
+    if (!block) {
+      block = createInlineBlock({
+        type: options.type,
+        partId: `${messageEl.dataset.messageId || "message"}-${section}`,
+        isStreaming: options.isStreaming,
+        title: options.title,
+        icon: options.icon,
+        statusText: options.statusText,
+        statusState: options.statusState,
+      });
+      block.classList.add("systemsculpt-unified-part");
+      block.dataset.aggregateSection = section;
+      options.anchorEl.insertAdjacentElement("afterend", block);
+    }
+
+    setTitle(block, options.title);
+    setStatus(block, options.statusText, options.statusState);
+    setStreaming(block, options.isStreaming);
+    return block;
+  }
+
+  private renderAggregateActivityBlock(
+    messageEl: HTMLElement,
+    toolCalls: ToolCall[],
+    isActivelyStreaming: boolean,
+    anchorEl: HTMLElement,
+  ): void {
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+      this.removeAggregateBlock(messageEl, "activity");
+      return;
+    }
+
+    const failedCount = toolCalls.filter((toolCall) => toolCall.state === "failed").length;
+    const executingCount = toolCalls.filter((toolCall) => toolCall.state === "executing").length;
+    const statusText = failedCount > 0
+      ? `${failedCount} failed`
+      : executingCount > 0
+        ? `${executingCount} running`
+        : `${toolCalls.length} step${toolCalls.length === 1 ? "" : "s"}`;
+    const statusState = failedCount > 0 ? "failed" : executingCount > 0 ? "executing" : "completed";
+
+    const block = this.ensureAggregateBlock(messageEl, "activity", {
+      type: "tool_call",
+      title: "Activity",
+      icon: "wrench",
+      statusText,
+      statusState,
+      isStreaming: isActivelyStreaming || executingCount > 0,
+      anchorEl,
     });
 
-    this.refreshStructuredBlocks(messageEl);
-    this.ensureToolbarAnchored(messageEl);
+    const contentContainer = getBlockContent(block);
+    if (!contentContainer) {
+      return;
+    }
+
+    contentContainer.empty();
+    toolCalls.forEach((toolCall, index) => {
+      this.toolCallRenderer.renderToolCallInline(contentContainer, toolCall, index);
+    });
+
+    if (isActivelyStreaming || executingCount > 0) {
+      setExpanded(block, true);
+      return;
+    }
+
+    if (!isUserExpanded(block)) {
+      setExpanded(block, false);
+    }
+  }
+
+  private renderAggregateReasoningBlock(
+    messageEl: HTMLElement,
+    reasoning: string,
+    isActivelyStreaming: boolean,
+    anchorEl: HTMLElement,
+  ): void {
+    const normalizedReasoning = String(reasoning || "");
+    if (!normalizedReasoning.trim()) {
+      this.removeAggregateBlock(messageEl, "reasoning");
+      messageEl.classList.remove("has-reasoning");
+      return;
+    }
+
+    messageEl.classList.add("has-reasoning");
+    const activityBlock = this.getAggregateBlock(messageEl, "activity");
+    const blockAnchor = activityBlock ?? anchorEl;
+    const block = this.ensureAggregateBlock(messageEl, "reasoning", {
+      type: "reasoning",
+      title: "Reasoning",
+      icon: "brain",
+      isStreaming: isActivelyStreaming,
+      anchorEl: blockAnchor,
+    });
+
+    const contentContainer = getBlockContent(block);
+    if (!contentContainer) {
+      return;
+    }
+
+    let textEl = contentContainer.querySelector(".systemsculpt-inline-reasoning-text") as HTMLElement | null;
+    if (!textEl) {
+      contentContainer.empty();
+      textEl = contentContainer.createDiv({ cls: "systemsculpt-inline-reasoning-text markdown-rendered" });
+    }
+
+    if (isActivelyStreaming) {
+      this.appendReasoningStream(textEl, normalizedReasoning);
+      setExpanded(block, true);
+      return;
+    }
+
+    this.finalizeReasoningStream(textEl, normalizedReasoning);
+    if (!isUserExpanded(block)) {
+      setExpanded(block, false);
+    }
   }
 
   /**

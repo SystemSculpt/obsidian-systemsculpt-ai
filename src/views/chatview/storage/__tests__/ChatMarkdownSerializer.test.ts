@@ -46,6 +46,16 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain("<!-- SYSTEMSCULPT-MESSAGE-END -->");
     });
 
+    it("persists pi entry ids on serialized messages", () => {
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Hello!", message_id: "user-1", pi_entry_id: "entry-user-1" },
+      ];
+
+      const result = ChatMarkdownSerializer.serializeMessages(messages);
+
+      expect(result).toContain('pi-entry-id="entry-user-1"');
+    });
+
     it("serializes assistant message", () => {
       const messages: ChatMessage[] = [
         { role: "assistant", content: "Hi there!", message_id: "asst-1" },
@@ -221,6 +231,26 @@ describe("ChatMarkdownSerializer", () => {
       const result = ChatMarkdownSerializer.parseMarkdown(content);
 
       expect(result).toBeNull();
+    });
+
+    it("parses pi entry ids from message markers", () => {
+      const content = createMarkdown(
+        { id: "chat-1", model: "gpt-4", created: "2026-03-06T00:00:00.000Z", lastModified: "2026-03-06T00:00:00.000Z", title: "Test" },
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" pi-entry-id="entry-user-1" -->
+Hello!
+<!-- SYSTEMSCULPT-MESSAGE-END -->`,
+      );
+
+      const result = ChatMarkdownSerializer.parseMarkdown(content);
+
+      expect(result?.messages[0]).toEqual(
+        expect.objectContaining({
+          role: "user",
+          message_id: "user-1",
+          pi_entry_id: "entry-user-1",
+        }),
+      );
+      expect(String(result?.messages[0]?.content || "").trim()).toBe("Hello!");
     });
 
     it("parses basic metadata", () => {

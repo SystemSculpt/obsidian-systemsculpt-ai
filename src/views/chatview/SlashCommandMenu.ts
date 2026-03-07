@@ -172,6 +172,24 @@ export class SlashCommandMenu extends Component {
         }
       },
       {
+        id: 'copy-path',
+        name: 'Copy Chat Path',
+        description: 'Copy the saved chat markdown file path',
+        icon: 'copy',
+        execute: async (chatView: ChatView) => {
+          await chatView.copyCurrentChatFilePathToClipboard();
+        }
+      },
+      {
+        id: 'copy-log-paths',
+        name: 'Copy Chat Log Paths',
+        description: 'Copy the expected file paths for chat debug artifacts',
+        icon: 'folder-search',
+        execute: async (chatView: ChatView) => {
+          await chatView.copyChatArtifactPathsToClipboard();
+        }
+      },
+      {
         id: 'debug',
         name: 'Copy Chat Debug',
         description: 'Copy a full chat debug snapshot to the clipboard',

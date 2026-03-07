@@ -819,16 +819,24 @@
 }
 
 /* ╔═══════════════════════════════════════════════════════════╗
-   ║  Chat Status Display - Settings overview for empty chats  ║
+   ║  Chat Status Display - Pi-first empty chat actions         ║
    ╚═══════════════════════════════════════════════════════════╝ */
 
 .systemsculpt-chat-status {
-  max-width: 600px;
+  max-width: 680px;
   margin: 24px auto;
-  padding: 16px;
-  background: var(--background-secondary);
-  border-radius: 12px;
-  border: 1px solid var(--background-modifier-border);
+  padding: 18px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)),
+      color-mix(in srgb, var(--background-primary) 90%, var(--background-secondary))
+    );
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, var(--background-primary));
+  box-shadow:
+    0 14px 30px color-mix(in srgb, rgb(0, 0, 0) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 8%, transparent);
   animation: systemsculpt-fadeIn 0.3s ease-out;
 }
 
@@ -837,126 +845,151 @@
   animation: none !important;
 }
 
-.systemsculpt-status-header {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-normal);
-  margin-bottom: 10px;
+.systemsculpt-chat-status-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-accent);
+  margin-bottom: 8px;
 }
 
-.systemsculpt-status-pills {
+.systemsculpt-chat-status-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  color: var(--text-normal);
+}
+
+.systemsculpt-chat-status-description {
+  margin: 8px 0 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.systemsculpt-chat-status-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 14px;
 }
 
-.systemsculpt-status-pill {
+.systemsculpt-chat-status-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 10px;
   border-radius: 999px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 75%, var(--background-primary));
 }
 
-.systemsculpt-status-pill:hover {
-  background: var(--background-secondary);
-}
-
-.systemsculpt-status-pill.is-on {
-  border-color: var(--interactive-accent);
-  color: var(--text-normal);
-}
-
-.systemsculpt-status-pill.is-off {
-  opacity: 0.85;
-}
-
-.systemsculpt-status-pill.is-disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.systemsculpt-status-pill .ss-pill-icon {
-  width: 14px;
-  height: 14px;
+.systemsculpt-chat-status-chip-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 15px;
+  height: 15px;
   color: var(--text-muted);
 }
 
-.systemsculpt-status-pill .ss-pill-label {
+.systemsculpt-chat-status-chip-label {
   color: var(--text-muted);
+  font-size: 12px;
 }
 
-.systemsculpt-status-pill .ss-pill-sep {
-  color: var(--text-faint);
-}
-
-.systemsculpt-status-pill .ss-pill-value {
+.systemsculpt-chat-status-chip-value {
+  color: var(--text-normal);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.systemsculpt-status-tip {
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: left;
-  margin: 8px 0 0 0;
+.systemsculpt-chat-status-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 14px;
 }
 
-.systemsculpt-status-alert {
-  display: flex;
-  gap: 10px;
-  padding: 12px;
+.systemsculpt-chat-status-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  margin-bottom: 12px;
+  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  color: var(--text-normal);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.systemsculpt-status-alert .ss-status-alert-icon {
-  width: 20px;
-  height: 20px;
-  display: flex;
+.systemsculpt-chat-status-action:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--background-primary-alt) 94%, transparent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
+  box-shadow: 0 8px 20px color-mix(in srgb, rgb(0, 0, 0) 10%, transparent);
+}
+
+.systemsculpt-chat-status-action.mod-cta {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 10%, transparent);
+}
+
+.systemsculpt-chat-status-action-icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-accent);
-  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  color: inherit;
 }
 
-.systemsculpt-status-alert-content {
-  flex: 1;
-}
-
-.systemsculpt-status-alert-title {
-  font-size: 13px;
+.systemsculpt-chat-status-action-label {
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-normal);
 }
 
-.systemsculpt-status-alert-description {
+.systemsculpt-chat-status-note {
+  margin: 12px 0 0 0;
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 2px;
+  line-height: 1.45;
 }
 
+@media (max-width: 640px) {
+  .systemsculpt-chat-status {
+    margin: 16px auto;
+    padding: 14px;
+    border-radius: 14px;
+  }
 
-.systemsculpt-status-alert-actions {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
+  .systemsculpt-chat-status-title {
+    font-size: 20px;
+  }
 
-.systemsculpt-status-alert-button {
-  flex: 0 0 auto;
+  .systemsculpt-chat-status-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .systemsculpt-chat-status-action {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .systemsculpt-chat-status-chip {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 @keyframes systemsculpt-fadeIn {

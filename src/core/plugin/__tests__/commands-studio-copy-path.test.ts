@@ -19,12 +19,25 @@ describe("CommandManager copy-current-file-path command", () => {
     activeFile?: TFile | null;
     activeLeafViewFile?: string | null;
     activeLeafStateFile?: string | null;
+    activeChatViewFile?: string | null;
     knownVaultFiles?: string[];
     getFullPath?: (vaultPath: string) => string;
     basePath?: string;
   }) {
     const app = new App();
     (app.workspace.getActiveFile as jest.Mock).mockReturnValue(options?.activeFile ?? null);
+    (app.workspace.getActiveViewOfType as jest.Mock).mockImplementation((viewType: unknown) => {
+      const viewName =
+        typeof viewType === "function" && typeof viewType.name === "string"
+          ? viewType.name
+          : String(viewType);
+      if (options?.activeChatViewFile && viewName.includes("ChatView")) {
+        return {
+          getChatHistoryFilePath: jest.fn(() => options.activeChatViewFile),
+        };
+      }
+      return null;
+    });
 
     if (options?.activeLeafViewFile || options?.activeLeafStateFile) {
       const activeLeaf = new WorkspaceLeaf(app);
@@ -56,6 +69,9 @@ describe("CommandManager copy-current-file-path command", () => {
       }
       if (options?.activeLeafStateFile) {
         knownVaultFiles.add(options.activeLeafStateFile);
+      }
+      if (options?.activeChatViewFile) {
+        knownVaultFiles.add(options.activeChatViewFile);
       }
     }
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
@@ -154,6 +170,26 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Research/Papers/SystemSculpt.pdf");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    consoleLogSpy.mockRestore();
+  });
+
+  it("copies path from the active chat view history file when the chat view is focused", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    mockedTryCopyToClipboard.mockResolvedValue(true);
+
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: null,
+      activeChatViewFile: "SystemSculpt/Chats/2026-03-06 12-42-10.md",
+      getFullPath: (vaultPath) => `/vault/${vaultPath}`,
+    });
+
+    expect(copyCommand.checkCallback(true)).toBe(true);
+    expect(copyCommand.checkCallback(false)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Chats/2026-03-06 12-42-10.md");
     expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });

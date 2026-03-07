@@ -303,9 +303,6 @@
 /* Reasoning container styles removed - using unified collapsible drawer */
 
 /* Reasoning container styles removed - using unified collapsible drawer */
-  transform: translateY(-4px);
-  transition: all 0.2s ease;
-}
 
 .systemsculpt-custom-input-container {
   position: relative;

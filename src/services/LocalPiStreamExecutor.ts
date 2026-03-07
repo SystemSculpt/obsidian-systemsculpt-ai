@@ -36,12 +36,6 @@ export async function* executeLocalPiStream(
     });
   } catch {}
 
-  yield {
-    type: "meta",
-    key: "inline-footnote",
-    value: "Running through Pi RPC session.",
-  };
-
   for await (const event of streamPiLocalAgentTurn({
     plugin: input.plugin,
     modelId: input.prepared.actualModelId,

@@ -4,6 +4,7 @@ import * as obsidianApi from "obsidian";
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
+import type { ChatMetadata, ParsedChatMarkdown } from "./ChatPersistenceTypes";
 
 /**
  * ChatMarkdownSerializer – central place for converting between in-memory
@@ -29,7 +30,7 @@ export class ChatMarkdownSerializer {
   // ────────────────────────────────────────────────────────────────────────────
 
   /** Parse markdown of a chat file and return metadata + messages. */
-  public static parseMarkdown(content: string): { metadata: ChatMetadata; messages: ChatMessage[] } | null {
+  public static parseMarkdown(content: string): ParsedChatMarkdown | null {
     const metadata = this.parseMetadata(content);
     if (!metadata) return null;
 
@@ -57,6 +58,7 @@ export class ChatMarkdownSerializer {
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
+      const piEntryIdMatch = attrs.match(/pi-entry-id="(.*?)"/);
       if (!roleMatch || !idMatch) continue;
 
       const role = roleMatch[1] as ChatRole;
@@ -163,7 +165,11 @@ export class ChatMarkdownSerializer {
       }
 
       if (parts.length > 0) {
-        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
+        const message = this.reconstructMessageFromParts(role, message_id, parts);
+        if (piEntryIdMatch?.[1]) {
+          message.pi_entry_id = piEntryIdMatch[1];
+        }
+        messages.push(message);
       }
     }
 
@@ -181,6 +187,7 @@ export class ChatMarkdownSerializer {
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
+      const piEntryIdMatch = attrs.match(/pi-entry-id="(.*?)"/);
       if (!roleMatch || !idMatch) continue;
 
       const role = roleMatch[1] as ChatRole;
@@ -245,7 +252,11 @@ export class ChatMarkdownSerializer {
       }
 
       if (parts.length > 0) {
-        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
+        const message = this.reconstructMessageFromParts(role, message_id, parts);
+        if (piEntryIdMatch?.[1]) {
+          message.pi_entry_id = piEntryIdMatch[1];
+        }
+        messages.push(message);
       }
     }
 
@@ -289,7 +300,7 @@ export class ChatMarkdownSerializer {
     if (!id) return null;
 
     const processedContextFiles = Array.isArray(context_files)
-      ? context_files.map((file: any): ContextFile => {
+      ? context_files.map((file: any): NonNullable<ChatMetadata["context_files"]>[number] => {
           if (typeof file === "string") {
             const isExtraction = file.includes("/Extractions/");
             return { path: file, type: isExtraction ? "extraction" : "source" };
@@ -333,8 +344,11 @@ export class ChatMarkdownSerializer {
         path: systemMessagePath,
       },
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
+      chatBackend: parsed.chatBackend === "pi" || parsed.chatBackend === "legacy" ? parsed.chatBackend : undefined,
       piSessionFile: typeof parsed.piSessionFile === "string" ? parsed.piSessionFile : undefined,
       piSessionId: typeof parsed.piSessionId === "string" ? parsed.piSessionId : undefined,
+      piLastEntryId: typeof parsed.piLastEntryId === "string" ? parsed.piLastEntryId : undefined,
+      piLastSyncedAt: typeof parsed.piLastSyncedAt === "string" ? parsed.piLastSyncedAt : undefined,
     };
   }
 
@@ -403,6 +417,7 @@ export class ChatMarkdownSerializer {
     const isStreaming = !!msg.streaming;
 
     let attributes = `role="${msg.role}" message-id="${msg.message_id}"`;
+    if (msg.pi_entry_id) attributes += ` pi-entry-id="${msg.pi_entry_id}"`;
     if (hasToolCalls) attributes += " has-tool-calls=\"true\"";
     if (hasReasoning) attributes += " has-reasoning=\"true\"";
     if (isStreaming) attributes += " streaming=\"true\"";
@@ -414,25 +429,3 @@ export class ChatMarkdownSerializer {
 }
 
 // ───────────────────────── Local interfaces ─────────────────────────
-
-interface ContextFile {
-  path: string;
-  type: "source" | "extraction";
-}
-
-interface ChatMetadata {
-  id: string;
-  model: string;
-  created: string;
-  lastModified: string;
-  title: string;
-  version?: number;
-  context_files?: ContextFile[];
-  systemMessage?: {
-    type: "general-use" | "concise" | "agent" | "custom";
-    path?: string;
-  };
-  chatFontSize?: "small" | "medium" | "large";
-  piSessionFile?: string;
-  piSessionId?: string;
-}

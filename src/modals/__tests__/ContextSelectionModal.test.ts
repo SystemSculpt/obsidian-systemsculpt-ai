@@ -388,6 +388,35 @@ describe("ContextSelectionModal", () => {
       expect(searchInput?.value).toBe("report");
       expect(activeFilter?.textContent).toContain("Documents");
     });
+
+    it("auto-focuses the search input by default", () => {
+      jest.useFakeTimers();
+      const focusSpy = jest.spyOn(HTMLInputElement.prototype, "focus");
+
+      modal.onOpen();
+      jest.runAllTimers();
+
+      expect(focusSpy).toHaveBeenCalled();
+
+      focusSpy.mockRestore();
+      jest.useRealTimers();
+    });
+
+    it("skips search autofocus when disabled", () => {
+      jest.useFakeTimers();
+      const focusSpy = jest.spyOn(HTMLInputElement.prototype, "focus");
+      modal = new ContextSelectionModal(app, onSelect, plugin, {
+        autoFocusSearch: false,
+      });
+
+      modal.onOpen();
+      jest.runAllTimers();
+
+      expect(focusSpy).not.toHaveBeenCalled();
+
+      focusSpy.mockRestore();
+      jest.useRealTimers();
+    });
   });
 
   describe("onClose", () => {

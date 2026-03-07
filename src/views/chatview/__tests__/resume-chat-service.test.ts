@@ -3,6 +3,7 @@
  */
 import { TFile, Notice } from "obsidian";
 import { ResumeChatService } from "../ResumeChatService";
+import * as ChatResumeUtils from "../ChatResumeUtils";
 
 // Mock Notice
 jest.mock("obsidian", () => {
@@ -12,6 +13,10 @@ jest.mock("obsidian", () => {
     Notice: jest.fn(),
   };
 });
+
+jest.mock("../ChatResumeUtils", () => ({
+  openChatResumeDescriptor: jest.fn(),
+}));
 
 const createPluginStub = () => {
   const workspace = {
@@ -234,45 +239,64 @@ describe("ResumeChatService", () => {
   });
 
   describe("openChat", () => {
-    it("opens chat view with provided chat id and model", async () => {
-      const { app, plugin } = createPluginStub();
-      const leaf = { setViewState: jest.fn(async () => {}) };
-      app.workspace.getLeaf.mockReturnValue(leaf);
-
+    it("opens chat through the shared resume descriptor when chat metadata exists", async () => {
+      const { plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
-      await service.openChat("chat-3", "systemsculpt@@systemsculpt/ai-agent");
-
-      expect(leaf.setViewState).toHaveBeenCalledWith({
-        type: "systemsculpt-chat-view",
-        state: {
-          chatId: "chat-3",
-          selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      const descriptor = {
+        chatId: "chat-3",
+        title: "Chat 3",
+        modelId: "systemsculpt@@systemsculpt/ai-agent",
+        chatPath: "SystemSculpt/Chats/chat-3.md",
+        chatBackend: "pi",
+        pi: {
+          sessionFile: "/tmp/chat-3.jsonl",
+          sessionId: "session-3",
+          lastEntryId: "entry-3",
+          lastSyncedAt: "2026-03-06T10:00:00.000Z",
         },
-      });
-      expect(app.workspace.setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
+      };
+      (service as any).chatStorage = {
+        getChatResumeDescriptor: jest.fn().mockResolvedValue(descriptor),
+      };
+      const openSpy = ChatResumeUtils.openChatResumeDescriptor as jest.Mock;
+      openSpy.mockResolvedValue(undefined);
+
+      await service.openChat("chat-3", "SystemSculpt/Chats/chat-3.md");
+
+      expect(openSpy).toHaveBeenCalledWith(plugin, descriptor);
     });
 
-    it("requests a new tab leaf", async () => {
+    it("falls back to opening a tab directly when descriptor lookup is unavailable", async () => {
       const { app, plugin } = createPluginStub();
       const leaf = { setViewState: jest.fn(async () => {}) };
       app.workspace.getLeaf.mockReturnValue(leaf);
 
       const service = new ResumeChatService(plugin);
+      (service as any).chatStorage = {
+        getChatResumeDescriptor: jest.fn().mockResolvedValue(null),
+      };
+
       await service.openChat("chat-4", "openai@@gpt-4");
 
       expect(app.workspace.getLeaf).toHaveBeenCalledWith("tab");
+      expect(leaf.setViewState).toHaveBeenCalledWith({
+        type: "systemsculpt-chat-view",
+        state: {
+          chatId: "chat-4",
+          selectedModelId: "openai@@gpt-4",
+        },
+      });
     });
 
     it("shows notice on error", async () => {
-      const { app, plugin } = createPluginStub();
-      const leaf = {
-        setViewState: jest.fn(async () => {
+      const { plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      (service as any).chatStorage = {
+        getChatResumeDescriptor: jest.fn(async () => {
           throw new Error("Test error");
         }),
       };
-      app.workspace.getLeaf.mockReturnValue(leaf);
 
-      const service = new ResumeChatService(plugin);
       await service.openChat("chat-5", "openai@@gpt-4");
 
       expect(Notice).toHaveBeenCalledWith("Error opening chat. Please try again.");
@@ -449,4 +473,3 @@ describe("ResumeChatService", () => {
     });
   });
 });
-

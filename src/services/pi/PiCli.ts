@@ -14,6 +14,13 @@ import {
   resolvePiRuntimes,
   startPiProcess as startResolvedPiProcess,
 } from "./PiProcessRuntime";
+import {
+  buildStudioPiApiKeyEnvCommand,
+  buildStudioPiDesktopLoginWindowLaunch,
+  buildStudioPiShellInvocationCommand,
+  getStudioPiAuthStoragePathHint,
+  getStudioPiDesktopShellLabel,
+} from "./PiDesktopSetupUtils";
 import { ensureBundledPiRuntime } from "./PiRuntimeBootstrap";
 
 export {
@@ -113,20 +120,6 @@ function resolvePiCommandCwd(plugin: SystemSculptPlugin): string {
     }
   }
   return "/";
-}
-
-function quoteShellSingle(value: string): string {
-  const normalized = String(value || "");
-  if (!normalized) {
-    return "''";
-  }
-  return `'${normalized.replace(/'/g, `'\\''`)}'`;
-}
-
-function escapeAppleScriptDoubleQuoted(value: string): string {
-  return String(value || "")
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"');
 }
 
 async function spawnPiCommand(options: {
@@ -483,18 +476,14 @@ export async function buildStudioPiTerminalLoginCommand(
     return fallbackCommand;
   }
 
-  const commandParts: string[] = [];
-  if (runtime.env?.ELECTRON_RUN_AS_NODE === "1") {
-    commandParts.push("ELECTRON_RUN_AS_NODE=1");
-  }
-  commandParts.push(quoteShellSingle(runtime.command));
-  for (const arg of runtime.argsPrefix) {
-    commandParts.push(quoteShellSingle(arg));
-  }
-  for (const arg of loginArgs) {
-    commandParts.push(quoteShellSingle(arg));
-  }
-  return commandParts.join(" ");
+  return buildStudioPiShellInvocationCommand({
+    platform: process.platform,
+    command: runtime.command,
+    args: [...runtime.argsPrefix, ...loginArgs],
+    envAssignments: runtime.env?.ELECTRON_RUN_AS_NODE === "1"
+      ? { ELECTRON_RUN_AS_NODE: "1" }
+      : {},
+  });
 }
 
 export async function installLocalPiCli(plugin: SystemSculptPlugin): Promise<{ version: string }> {
@@ -532,34 +521,31 @@ export async function launchPiProviderLoginInTerminal(
   const loginCommand = await buildStudioPiTerminalLoginCommand(plugin, providerHint);
   const cwd = resolvePiCommandCwd(plugin);
   const mergedEnv = createPiCommandEnv();
+  const launch = buildStudioPiDesktopLoginWindowLaunch({
+    platform: process.platform,
+    cwd,
+    shellCommand: loginCommand,
+  });
 
-  if (process.platform === "darwin") {
-    const shellCommand = `cd ${quoteShellSingle(cwd)}; ${loginCommand}`;
-    const script = escapeAppleScriptDoubleQuoted(shellCommand);
-    const result = await spawnPiCommand({
-      command: "osascript",
-      args: [
-        "-e",
-        'tell application "Terminal" to activate',
-        "-e",
-        `tell application "Terminal" to do script "${script}"`,
-      ],
-      cwd,
-      env: mergedEnv,
-      timeoutMs: PI_TERMINAL_LAUNCH_TIMEOUT_MS,
-    });
-    if (result.timedOut) {
-      throw new Error("Timed out while launching Terminal for Pi login.");
-    }
-    if (result.exitCode !== 0) {
-      throw new Error(`Failed to launch Terminal for Pi login: ${summarizeCommandFailure("osascript", result)}`);
-    }
-    return;
+  if (!launch) {
+    throw new Error(
+      `Automatic Pi login launch is currently only implemented for macOS and Windows desktop shells. Run this command in your terminal: ${loginCommand}`
+    );
   }
 
-  throw new Error(
-    `Automatic Pi login launch is currently only implemented for macOS Terminal. Run this command in your terminal: ${loginCommand}`
-  );
+  const result = await spawnPiCommand({
+    command: launch.command,
+    args: launch.args,
+    cwd,
+    env: mergedEnv,
+    timeoutMs: PI_TERMINAL_LAUNCH_TIMEOUT_MS,
+  });
+  if (result.timedOut) {
+    throw new Error(`Timed out while launching ${launch.appLabel} for Pi login.`);
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to launch ${launch.appLabel} for Pi login: ${summarizeCommandFailure(launch.command, result)}`);
+  }
 }
 
 export async function runLocalPiTextGeneration(options: {
@@ -849,4 +835,7 @@ export const runStudioPiCommand = runPiCommand;
 export const installStudioLocalPiCli = installLocalPiCli;
 export const buildStudioPiResolvedLoginCommand = buildStudioPiTerminalLoginCommand;
 export const launchStudioPiProviderLoginInTerminal = launchPiProviderLoginInTerminal;
+export const buildStudioPiApiKeyEnvCommandHint = buildStudioPiApiKeyEnvCommand;
+export const getStudioPiAuthStoragePathHintForPlatform = getStudioPiAuthStoragePathHint;
+export const getStudioPiLoginSurfaceLabel = getStudioPiDesktopShellLabel;
 export const runStudioLocalPiTextGeneration = runLocalPiTextGeneration;

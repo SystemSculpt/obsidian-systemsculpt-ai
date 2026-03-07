@@ -60,15 +60,19 @@ describe("MessageRenderer tool call ordering", () => {
 
     renderer.renderUnifiedMessageParts(messageEl, [first, second], false);
 
-    // With the new inline structure, each tool call is a separate inline collapsible block
+    // Pi-first assistant UX collapses tool work into one activity block.
     const initialBlocks = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool_call")
     );
-    expect(initialBlocks.length).toBe(2);
+    expect(initialBlocks.length).toBe(1);
 
-    // Check data-part-id ordering matches chronological order
-    const initialPartIds = initialBlocks.map((el) => el.dataset.partId);
-    expect(initialPartIds).toEqual(["part-1", "part-2"]);
+    const initialSummaries = Array.from(
+      messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
+    ).map((el) => el.textContent?.trim());
+    expect(initialSummaries).toEqual([
+      "Searched 1",
+      "Searched 2",
+    ]);
 
     const third = createToolCallPart("3", 3);
     renderer.renderUnifiedMessageParts(messageEl, [first, second, third], false);
@@ -76,15 +80,14 @@ describe("MessageRenderer tool call ordering", () => {
     const blocks = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool_call")
     );
-    expect(blocks.length).toBe(3);
-
-    // Verify chronological order by part IDs
-    const partIds = blocks.map((el) => el.dataset.partId);
-    expect(partIds).toEqual(["part-1", "part-2", "part-3"]);
+    expect(blocks.length).toBe(1);
+    expect(blocks[0]?.dataset.aggregateSection).toBe("activity");
 
     // Verify tool summaries contain search info
-    const summaries = blocks.map(
-      (el) => el.querySelector(".systemsculpt-inline-tool-summary")?.textContent?.trim()
+    const summaries = Array.from(
+      messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
+    ).map(
+      (el) => el.textContent?.trim()
     );
     expect(summaries).toEqual([
       "Searched 1",
@@ -120,7 +123,7 @@ describe("MessageRenderer tool call ordering", () => {
     renderer.renderUnifiedMessageParts(messageEl, [webSearchPart], false);
 
     const title = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-collapsible-title");
-    expect(title?.textContent).toBe("Web Search");
+    expect(title?.textContent).toBe("Activity");
 
     const summary = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-tool-summary");
     expect(summary?.textContent?.trim()).toBe("Searched systemsculpt pricing");

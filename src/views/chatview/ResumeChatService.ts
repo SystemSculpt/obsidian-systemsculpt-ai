@@ -1,12 +1,14 @@
 import { App, MarkdownView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { SystemSculptSettings } from "../../types";
-import { CHAT_VIEW_TYPE } from "./ChatView";
+import { ChatStorageService } from "./ChatStorageService";
+import { openChatResumeDescriptor } from "./ChatResumeUtils";
 
 export class ResumeChatService {
   private app: App;
   private plugin: SystemSculptPlugin;
   private settings: SystemSculptSettings;
+  private chatStorage: ChatStorageService;
   private listeners: Array<{ element: HTMLElement; type: string; listener: EventListener }> = [];
   // Track inserted resume buttons per leaf to avoid broad DOM scans
   private resumeButtonByLeaf: WeakMap<WorkspaceLeaf, HTMLElement> = new WeakMap();
@@ -15,6 +17,7 @@ export class ResumeChatService {
     this.plugin = plugin;
     this.app = plugin.app;
     this.settings = plugin.settings;
+    this.chatStorage = new ChatStorageService(this.app, this.settings.chatsDirectory || "SystemSculpt/Chats");
 
     // ResumeChatService initialized - silent success
 
@@ -145,11 +148,8 @@ export class ResumeChatService {
     button.className = 'systemsculpt-resume-chat-btn';
     button.textContent = 'Resume this chat';
 
-    // Get the selected model from metadata if available
-    const selectedModelId = this.getModelFromFile(file);
-
     const clickHandler = async () => {
-      await this.openChat(chatId, selectedModelId);
+      await this.openChat(chatId, file.path);
     };
 
     this.registerListener(button, 'click', clickHandler);
@@ -159,21 +159,28 @@ export class ResumeChatService {
     return buttonContainer;
   }
 
-  public async openChat(chatId: string, selectedModelId: string): Promise<void> {
+  public async openChat(chatId: string, chatPathOrModelId?: string, modelId?: string): Promise<void> {
     try {
-      const { workspace } = this.app;
-      const leaf = workspace.getLeaf("tab");
+      const chatPath = chatPathOrModelId?.endsWith(".md") ? chatPathOrModelId : undefined;
+      const selectedModelId = chatPath ? modelId : (modelId || chatPathOrModelId || this.settings.selectedModelId);
+      const descriptor = await this.chatStorage.getChatResumeDescriptor(chatId);
+      if (descriptor) {
+        await openChatResumeDescriptor(this.plugin, {
+          ...descriptor,
+          chatPath: chatPath || descriptor.chatPath,
+        });
+        return;
+      }
 
-      // Set view state with chat ID and model
-      await leaf.setViewState({
-        type: CHAT_VIEW_TYPE,
+      const targetLeaf = this.app.workspace.getLeaf("tab");
+      await targetLeaf.setViewState({
+        type: "systemsculpt-chat-view",
         state: {
-          chatId: chatId,
-          selectedModelId: selectedModelId
-        }
+          chatId,
+          selectedModelId,
+        },
       });
-
-      workspace.setActiveLeaf(leaf, { focus: true });
+      this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
     } catch (e) {
       new Notice("Error opening chat. Please try again.");
     }

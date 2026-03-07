@@ -6,13 +6,109 @@ import { showPopup } from "../../core/ui/";
 import { FileContextManager } from "./FileContextManager";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { InputHandler } from "./InputHandler";
-import { ensureCanonicalId, getModelLabelWithProvider, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
+import { ensureCanonicalId, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
 import { attachOverlapInsetManager } from "../../core/ui/services/OverlapInsetService";
-import { normalizeDesktopPromptSelectionType } from "../../services/SystemPromptService";
+import {
+  renderChatCreditsIndicator,
+  renderChatModelIndicator,
+  renderChatPromptIndicator,
+} from "./ui/ChatComposerIndicators";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Utility helpers for desktop Pi chat UI
 // ────────────────────────────────────────────────────────────────────────────
+const TOOL_WARNING_BANNER_CLASS = "systemsculpt-tool-warning-banner";
+const IMAGE_CONTEXT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "svg"]);
+
+const isImageExtension = (extension?: string | null): boolean => {
+  const normalized = String(extension || "").trim().toLowerCase();
+  return normalized !== "" && IMAGE_CONTEXT_EXTENSIONS.has(normalized);
+};
+
+const resolvesToImageContextFile = (chatView: ChatView, entry: string): boolean => {
+  if (!entry || typeof entry !== "string" || entry.startsWith("doc:")) {
+    return false;
+  }
+
+  const linkText = entry.replace(/^\[\[(.*?)\]\]$/, "$1").trim();
+  if (!linkText) {
+    return false;
+  }
+
+  const directExtension = linkText.split(".").pop();
+  if (isImageExtension(directExtension)) {
+    return true;
+  }
+
+  const resolved =
+    chatView.app.metadataCache.getFirstLinkpathDest(linkText, "") ??
+    chatView.app.vault.getAbstractFileByPath(linkText);
+
+  if (resolved instanceof TFile) {
+    return isImageExtension(resolved.extension);
+  }
+
+  if (resolved && typeof resolved === "object" && "extension" in resolved) {
+    return isImageExtension((resolved as { extension?: string | null }).extension);
+  }
+
+  return false;
+};
+
+const hasImageContextInComposer = (chatView: ChatView): boolean => {
+  const contextManager = chatView.contextManager as {
+    getContextFiles?: () => Set<string>;
+    getProcessingEntries?: () => Array<{ file?: TFile | { extension?: string | null } }>;
+  } | null | undefined;
+
+  const contextFiles = contextManager?.getContextFiles?.();
+  if (contextFiles) {
+    for (const entry of contextFiles) {
+      if (resolvesToImageContextFile(chatView, entry)) {
+        return true;
+      }
+    }
+  }
+
+  const processingEntries = contextManager?.getProcessingEntries?.() ?? [];
+  for (const entry of processingEntries) {
+    if (isImageExtension(entry?.file?.extension)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const ensureToolWarningBanner = (container: HTMLElement): HTMLElement | null => {
+  let banner = container.querySelector(`.${TOOL_WARNING_BANNER_CLASS}`) as HTMLElement | null;
+  if (!banner) {
+    const composer = container.querySelector(".systemsculpt-chat-composer");
+    if (!composer) return null;
+
+    banner = document.createElement("div");
+    banner.className = TOOL_WARNING_BANNER_CLASS;
+    composer.parentNode?.insertBefore(banner, composer);
+  }
+
+  const hasIcon = !!banner.querySelector(".systemsculpt-tool-warning-icon");
+  const hasText = !!banner.querySelector(".systemsculpt-tool-warning-text");
+  if (!hasIcon || !hasText) {
+    banner.empty();
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "systemsculpt-tool-warning-icon";
+    setIcon(iconSpan, "alert-triangle");
+    banner.appendChild(iconSpan);
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "systemsculpt-tool-warning-text";
+    banner.appendChild(textSpan);
+  }
+
+  return banner;
+};
+
 export const uiSetup = {
   onOpen: async function(chatView: ChatView): Promise<void> {
     // Ensure core Mermaid plugin is enabled for diagram rendering
@@ -98,6 +194,7 @@ export const uiSetup = {
         if (chatView.messages.length === 0) {
           chatView.displayChatStatus();
         }
+        void uiSetup.updateToolCompatibilityWarning(chatView);
       },
       plugin: chatView.plugin,
     });
@@ -227,6 +324,22 @@ export const uiSetup = {
         } else {
           chatView.messages.push(message);
         }
+
+        if (chatView.isPiBackedChat() && chatView.getPiSessionFile()) {
+          try {
+            await chatView.syncPiSessionTranscript({
+              syncTitle: true,
+              render: true,
+              persist: true,
+              force: true,
+            });
+            return;
+          } catch (error) {
+            new Notice("Pi finished the turn, but transcript sync failed. The last synced chat snapshot is still preserved.", 7000);
+            return;
+          }
+        }
+
         await chatView.saveChat();
       },
       onContextFileAdd: async (wikilink) => {
@@ -445,37 +558,18 @@ export const uiSetup = {
       'aria-label': 'Change chat model'
     });
 
-    if (!chatView.selectedModelId || chatView.selectedModelId.trim() === "" || chatView.selectedModelId === "unknown" || chatView.selectedModelId.includes("unknown")) {
-      if (chatView.modelIndicator) {
-        // Add bot icon
-        const iconSpan = chatView.modelIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-        setIcon(iconSpan, "bot");
-        
-        chatView.modelIndicator.createSpan({ text: "No model selected" });
-        chatView.modelIndicator.addClass("systemsculpt-no-model");
-        chatView.modelIndicator.setAttr('aria-label', 'No model selected, click to choose one');
-      }
-      return;
-    }
-
     try {
-      // Build display purely from the stored ID to avoid network fetches
-      const canonicalId = ensureCanonicalId(chatView.selectedModelId);
-      chatView.currentModelName = getDisplayName(canonicalId);
-      if (chatView.modelIndicator) {
-        chatView.modelIndicator.removeClass("systemsculpt-no-model");
-      }
+      const rendered = renderChatModelIndicator(chatView.modelIndicator, {
+        selectedModelId: chatView.selectedModelId,
+      });
+      chatView.currentModelName = rendered.currentModelName;
+      chatView.modelIndicator.setAttr("aria-label", rendered.ariaLabel);
+      chatView.modelIndicator.setAttr("title", rendered.title);
+      chatView.modelIndicator.removeClass("systemsculpt-model-locked");
 
-      // Always show current model and allow changing it
-      const iconSpan = chatView.modelIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-      setIcon(iconSpan, "bot");
-      const labelText = getModelLabelWithProvider(canonicalId);
-      chatView.modelIndicator.createSpan({ text: labelText });
-      const arrowSpan = chatView.modelIndicator.createSpan({ cls: "systemsculpt-model-indicator-arrow" });
-      setIcon(arrowSpan, "chevron-down");
-      chatView.modelIndicator.setAttr('aria-label', `Current model: ${labelText}. Click to change.`);
-      chatView.modelIndicator.setAttr('title', `Current model: ${labelText}`);
-      chatView.modelIndicator.removeClass('systemsculpt-model-locked');
+      if (rendered.isEmpty) {
+        return;
+      }
     } catch (error) {
       chatView.currentModelName = chatView.selectedModelId || 'Error';
       if (chatView.modelIndicator) {
@@ -590,39 +684,12 @@ export const uiSetup = {
     });
 
     // Show the actual prompt type and allow changes
-    let promptLabel = "System Prompt";
-    
-    switch (normalizeDesktopPromptSelectionType(chatView.systemPromptType)) {
-        case "general-use":
-          promptLabel = "General Use";
-          break;
-        case "concise":
-          promptLabel = "Concise";
-          break;
-        case "custom":
-          if (chatView.systemPromptPath) {
-            const filename = chatView.systemPromptPath.split('/').pop() || 'Custom';
-            const baseName = filename.replace('.md', '');
-            promptLabel = baseName;
-          } else {
-            promptLabel = "Custom";
-          }
-          break;
-      }
-
-      // Add appropriate icon based on prompt type
-      const iconSpan = chatView.systemPromptIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-      setIcon(iconSpan, chatView.systemPromptType === "custom" ? "file-text" : "sparkles");
-      
-      chatView.systemPromptIndicator.createSpan({ text: promptLabel });
-      
-      // Show dropdown arrow to indicate it can be changed
-      const arrowSpan = chatView.systemPromptIndicator.createSpan({ cls: "systemsculpt-model-indicator-arrow" });
-      setIcon(arrowSpan, "chevron-down");
-      
-    const promptTitle = `Current system prompt: ${promptLabel}. Click to change.`;
-    chatView.systemPromptIndicator.setAttr('aria-label', promptTitle);
-    chatView.systemPromptIndicator.setAttr('title', promptTitle);
+    const rendered = renderChatPromptIndicator(chatView.systemPromptIndicator, {
+      promptType: chatView.systemPromptType,
+      promptPath: chatView.systemPromptPath,
+    });
+    chatView.systemPromptIndicator.setAttr('aria-label', rendered.ariaLabel);
+    chatView.systemPromptIndicator.setAttr('title', rendered.title);
     if (chatView.systemPromptIndicator) {
       chatView.systemPromptIndicator.removeClass('systemsculpt-system-prompt-locked');
     }
@@ -677,41 +744,16 @@ export const uiSetup = {
     chatView.creditsIndicator.style.display = "";
     chatView.creditsIndicator.classList.toggle("is-loading", !chatView.creditsBalance);
 
-    const formatCredits = (value: number): string => {
-      try {
-        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-      } catch {
-        return String(value);
-      }
-    };
-
-    const formatDate = (iso: string): string => {
-      if (!iso) return "unknown";
-      const date = new Date(iso);
-      if (Number.isNaN(date.getTime())) return "unknown";
-      try {
-        return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
-      } catch {
-        return date.toISOString().slice(0, 10);
-      }
-    };
-
-    const balance = chatView.creditsBalance;
-    const lowCreditsThreshold = 1000;
-    const isLowBalance = !!balance && balance.totalRemaining <= lowCreditsThreshold;
-    chatView.creditsIndicator.classList.toggle("is-low", isLowBalance);
-
-    const iconSpan = chatView.creditsIndicator.createSpan({ cls: "systemsculpt-model-indicator-icon" });
-    setIcon(iconSpan, "coins");
-
-    const title = balance
-      ? `Credits remaining: ${formatCredits(balance.totalRemaining)} (Included ${formatCredits(balance.includedRemaining)}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(balance.addOnRemaining)}). Resets ${formatDate(balance.cycleEndsAt)}.`
-      : "Credits balance (click to view)";
+    const rendered = renderChatCreditsIndicator(chatView.creditsIndicator, {
+      balance: chatView.creditsBalance,
+    });
 
     chatView.creditsIndicator.setAttrs({
-      "aria-label": title,
-      title,
+      "aria-label": rendered.title,
+      title: rendered.title,
     });
+    chatView.creditsIndicator.classList.toggle("is-loading", rendered.isLoading);
+    chatView.creditsIndicator.classList.toggle("is-low", rendered.isLow);
   },
 
   /**
@@ -723,8 +765,7 @@ export const uiSetup = {
     if (!container) return;
 
     // Find or create the warning banner
-    const BANNER_CLASS = "systemsculpt-tool-warning-banner";
-    let banner = container.querySelector(`.${BANNER_CLASS}`) as HTMLElement | null;
+    let banner = container.querySelector(`.${TOOL_WARNING_BANNER_CLASS}`) as HTMLElement | null;
 
     // If no model selected, hide warning
     if (!chatView.selectedModelId || chatView.selectedModelId.trim() === "") {
@@ -747,31 +788,11 @@ export const uiSetup = {
       const imageCompat = getImageCompatibilityInfo(model);
 
       const imageIncompat = !imageCompat.isCompatible && imageCompat.confidence === "high";
-      const shouldWarnImages = imageIncompat;
+      const shouldWarnImages = imageIncompat && hasImageContextInComposer(chatView);
 
       if (shouldWarnImages) {
-        // Create banner if it doesn't exist
-        if (!banner) {
-          const composer = container.querySelector(".systemsculpt-chat-composer");
-          if (!composer) return;
-
-          banner = document.createElement("div");
-          banner.className = BANNER_CLASS;
-
-          // Create icon span using safe DOM methods
-          const iconSpan = document.createElement("span");
-          iconSpan.className = "systemsculpt-tool-warning-icon";
-          setIcon(iconSpan, "alert-triangle");
-          banner.appendChild(iconSpan);
-
-          // Create text span
-          const textSpan = document.createElement("span");
-          textSpan.className = "systemsculpt-tool-warning-text";
-          banner.appendChild(textSpan);
-
-          // Insert banner before the composer
-          composer.parentNode?.insertBefore(banner, composer);
-        }
+        banner = ensureToolWarningBanner(container);
+        if (!banner) return;
 
         // Build warning message based on incompatibilities
         const textEl = banner.querySelector(".systemsculpt-tool-warning-text");
