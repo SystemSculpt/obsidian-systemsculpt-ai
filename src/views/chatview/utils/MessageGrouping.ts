@@ -1,4 +1,6 @@
-import { ChatRole } from "../../../types";
+// Keep this utility dependency-light so it can be reused in non-plugin hosts
+// like video-studio without pulling in the full runtime type graph.
+type ChatRole = "user" | "assistant" | "system" | "tool";
 
 const GROUP_CLASS = "systemsculpt-message-group";
 const GROUP_ROLE_DATA_ATTR = "role";

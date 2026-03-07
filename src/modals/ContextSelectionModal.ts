@@ -16,6 +16,9 @@ interface FileItem {
 
 export interface ContextSelectionModalOptions {
   isFileAlreadyInContext?: (file: TFile) => boolean;
+  initialFilter?: keyof typeof FILE_TYPES | "all";
+  initialSearchQuery?: string;
+  initialSelectedPaths?: string[];
 }
 
 export class ContextSelectionModal extends Modal {
@@ -33,13 +36,19 @@ export class ContextSelectionModal extends Modal {
   private listContainer: HTMLElement | null = null;
   private loadMoreButton: HTMLButtonElement | null = null;
   private fileItemControlsByPath = new Map<string, { el: HTMLElement; checkbox: HTMLInputElement }>();
+  private readonly initialSearchQuery: string;
 
   constructor(app: App, onSelect: (files: TFile[]) => void, plugin: SystemSculptPlugin, options?: ContextSelectionModalOptions) {
     super(app);
     this.onSelect = onSelect;
     this.plugin = plugin;
     this.isFileAlreadyInContext = options?.isFileAlreadyInContext;
+    this.initialSearchQuery = options?.initialSearchQuery?.trim() ?? "";
+    this.currentFilter = options?.initialFilter ?? "all";
+    this.searchQuery = this.initialSearchQuery.toLowerCase();
     this.initializeFiles();
+    this.applyInitialSelection(options?.initialSelectedPaths);
+    this.applyFilters();
   }
 
   onOpen() {
@@ -54,6 +63,7 @@ export class ContextSelectionModal extends Modal {
     new Setting(contentEl)
       .setName("Search files")
       .addText(text => {
+        text.inputEl.value = this.initialSearchQuery;
         text
           .setPlaceholder("Type to search...")
           .onChange(value => {
@@ -66,21 +76,30 @@ export class ContextSelectionModal extends Modal {
 
     // Filter buttons using simple div
     const filterContainer = contentEl.createDiv("ss-context-filter-container");
-    
-    // All filter
-    const allBtn = filterContainer.createEl("button", { 
-      text: "All",
-      cls: "ss-context-filter-btn is-active"
-    });
-    allBtn.onclick = () => this.setFilter("all", allBtn);
-    
+
+    const createFilterButton = (
+      filter: keyof typeof FILE_TYPES | "all",
+      label: string,
+      icon?: string
+    ) => {
+      const isActive = this.currentFilter === filter;
+      const btn = filterContainer.createEl("button", {
+        cls: `ss-context-filter-btn${isActive ? " is-active" : ""}`,
+      });
+      if (icon) {
+        const iconEl = btn.createSpan();
+        setIcon(iconEl, icon);
+      }
+      btn.createSpan({ text: label });
+      btn.onclick = () => this.setFilter(filter, btn);
+      return btn;
+    };
+
+    createFilterButton("all", "All");
+
     // Type filters
     Object.entries(FILE_TYPES).forEach(([type, info]) => {
-      const btn = filterContainer.createEl("button", { cls: "ss-context-filter-btn" });
-      const icon = btn.createSpan();
-      setIcon(icon, info.icon);
-      btn.createSpan({ text: info.label });
-      btn.onclick = () => this.setFilter(type as keyof typeof FILE_TYPES, btn);
+      createFilterButton(type as keyof typeof FILE_TYPES, info.label, info.icon);
     });
 
     // File list container
@@ -131,6 +150,19 @@ export class ContextSelectionModal extends Modal {
     
     this.files.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
     this.filteredFiles = [...this.files];
+  }
+
+  private applyInitialSelection(paths?: string[]) {
+    if (!paths || paths.length === 0) {
+      return;
+    }
+
+    const selectedPaths = new Set(paths);
+    for (const item of this.files) {
+      if (selectedPaths.has(item.file.path)) {
+        this.selectedFiles.add(item.file);
+      }
+    }
   }
 
   private setFilter(filter: keyof typeof FILE_TYPES | "all", buttonEl: HTMLElement) {

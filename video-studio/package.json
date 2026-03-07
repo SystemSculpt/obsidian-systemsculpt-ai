@@ -1,0 +1,25 @@
+{
+  "name": "@systemsculpt/video-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts PdfAiAssistant30 dist/pdf-ai-assistant-30.mp4",
+    "render:preview": "remotion render src/index.ts PdfAiAssistant30 dist/pdf-ai-assistant-preview.mp4 --frames=0-179",
+    "test": "node --import tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.434",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "remotion": "4.0.434"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -63,6 +63,19 @@ describe("ContextSelectionModal", () => {
     it("initializes with empty selection", () => {
       expect((modal as any).selectedFiles.size).toBe(0);
     });
+
+    it("applies initial filter, search, and selected paths", () => {
+      modal = new ContextSelectionModal(app, onSelect, plugin, {
+        initialFilter: "documents",
+        initialSearchQuery: "report",
+        initialSelectedPaths: ["documents/report.pdf"],
+      });
+
+      expect((modal as any).currentFilter).toBe("documents");
+      expect((modal as any).searchQuery).toBe("report");
+      expect((modal as any).filteredFiles).toHaveLength(1);
+      expect((modal as any).selectedFiles.size).toBe(1);
+    });
   });
 
   describe("file listing", () => {
@@ -355,6 +368,25 @@ describe("ContextSelectionModal", () => {
 
       const allBtn = modal.contentEl.querySelector(".ss-context-filter-btn.is-active");
       expect(allBtn?.textContent).toBe("All");
+    });
+
+    it("renders the initial search query and active filter", () => {
+      modal = new ContextSelectionModal(app, onSelect, plugin, {
+        initialFilter: "documents",
+        initialSearchQuery: "report",
+      });
+
+      modal.onOpen();
+
+      const searchInput = modal.contentEl.querySelector(
+        ".setting-item-control input"
+      ) as HTMLInputElement | null;
+      const activeFilter = modal.contentEl.querySelector(
+        ".ss-context-filter-btn.is-active"
+      ) as HTMLButtonElement | null;
+
+      expect(searchInput?.value).toBe("report");
+      expect(activeFilter?.textContent).toContain("Documents");
     });
   });
 
