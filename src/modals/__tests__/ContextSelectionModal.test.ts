@@ -44,10 +44,6 @@ describe("ContextSelectionModal", () => {
       expect((modal as any).onSelect).toBe(onSelect);
     });
 
-    it("stores plugin reference", () => {
-      expect((modal as any).plugin).toBe(plugin);
-    });
-
     it("initializes files from vault", () => {
       expect((modal as any).files.length).toBeGreaterThan(0);
     });

@@ -1,5 +1,4 @@
 import { App, TFile, Modal, Setting, setIcon, ButtonComponent } from "obsidian";
-import SystemSculptPlugin from "../main";
 
 const FILE_TYPES = {
   text: { extensions: ["md", "txt"], icon: "file-text", label: "Text" },
@@ -29,7 +28,6 @@ export class ContextSelectionModal extends Modal {
   private currentFilter: keyof typeof FILE_TYPES | "all" = "all";
   private searchQuery = "";
   private onSelect: (files: TFile[]) => void;
-  private plugin: SystemSculptPlugin;
   private addButton: ButtonComponent | null = null;
   private readonly isFileAlreadyInContext?: (file: TFile) => boolean;
   private readonly MAX_RENDERED_FILES = 100;
@@ -40,10 +38,9 @@ export class ContextSelectionModal extends Modal {
   private readonly initialSearchQuery: string;
   private readonly autoFocusSearch: boolean;
 
-  constructor(app: App, onSelect: (files: TFile[]) => void, plugin: SystemSculptPlugin, options?: ContextSelectionModalOptions) {
+  constructor(app: App, onSelect: (files: TFile[]) => void, _plugin: unknown, options?: ContextSelectionModalOptions) {
     super(app);
     this.onSelect = onSelect;
-    this.plugin = plugin;
     this.isFileAlreadyInContext = options?.isFileAlreadyInContext;
     this.initialSearchQuery = options?.initialSearchQuery?.trim() ?? "";
     this.autoFocusSearch = options?.autoFocusSearch ?? true;

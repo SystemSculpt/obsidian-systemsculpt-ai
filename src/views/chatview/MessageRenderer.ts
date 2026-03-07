@@ -1,6 +1,13 @@
 import { App, Component, MarkdownRenderer, setIcon, ButtonComponent, Modal, TextAreaComponent, TFile, normalizePath, Notice, WorkspaceLeaf, TAbstractFile } from "obsidian";
-import { showPopup } from "../../core/ui";
-import { ChatRole, ImageContent, MultiPartContent, Annotation, UrlCitation, MessagePart, ChatMessage } from "../../types";
+import type {
+  Annotation,
+  ChatMessage,
+  ChatRole,
+  ImageContent,
+  MessagePart,
+  MultiPartContent,
+  UrlCitation,
+} from "../../types";
 import type { ToolCall, SerializedToolCall } from "../../types/toolCalls";
 import { findLeafByPath, openFileInMainWorkspace } from '../../utils/workspaceUtils';
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";

@@ -24,6 +24,7 @@ declare global {
     removeClass(...classes: string[]): void;
     toggleClass(className: string | string[], value?: boolean): void;
     setText(text: string): void;
+    appendText(text: string): void;
     setAttr(name: string, value: string): void;
     setAttrs(attrs: Record<string, string | number | boolean>): void;
   }
@@ -169,6 +170,10 @@ export const ensureObsidianDomCompat = (): void => {
 
   HTMLElement.prototype.setText = function setText(text: string): void {
     this.textContent = text;
+  };
+
+  HTMLElement.prototype.appendText = function appendText(text: string): void {
+    this.appendChild(document.createTextNode(text));
   };
 
   HTMLElement.prototype.setAttr = function setAttr(name: string, value: string): void {

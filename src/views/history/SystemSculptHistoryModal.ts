@@ -1,8 +1,11 @@
 import { Notice, SearchComponent, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
-import { loadSystemSculptHistoryEntries } from "./historyProviders";
 import type { SystemSculptHistoryEntry } from "./types";
+
+interface SystemSculptHistoryModalOptions {
+  loadEntries?: () => Promise<SystemSculptHistoryEntry[]>;
+}
 
 export class SystemSculptHistoryModal extends StandardModal {
   private entries: SystemSculptHistoryEntry[] = [];
@@ -14,7 +17,10 @@ export class SystemSculptHistoryModal extends StandardModal {
   private rowElements: HTMLElement[] = [];
   private isLoading = false;
 
-  constructor(private readonly plugin: SystemSculptPlugin) {
+  constructor(
+    private readonly plugin: SystemSculptPlugin,
+    private readonly options: SystemSculptHistoryModalOptions = {}
+  ) {
     super(plugin.app);
     this.setSize("large");
     this.modalEl.addClass("systemsculpt-history-modal");
@@ -65,7 +71,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.showEmptyState("Loading history...");
 
     try {
-      this.entries = await loadSystemSculptHistoryEntries(this.plugin);
+      this.entries = await this.loadEntries();
     } catch (error) {
       this.entries = [];
       const message = error instanceof Error ? error.message : String(error);
@@ -74,6 +80,15 @@ export class SystemSculptHistoryModal extends StandardModal {
       this.isLoading = false;
       this.applyFilters();
     }
+  }
+
+  private async loadEntries(): Promise<SystemSculptHistoryEntry[]> {
+    if (this.options.loadEntries) {
+      return this.options.loadEntries();
+    }
+
+    const historyProviders = await import("./historyProviders");
+    return historyProviders.loadSystemSculptHistoryEntries(this.plugin);
   }
 
   private applyFilters(): void {

@@ -10,7 +10,6 @@ import { KineticHeadline } from "./KineticHeadline";
 import { PromoSurfaceFrame } from "./PromoSurfaceFrame";
 import { SystemSculptSurface } from "./SystemSculptSurface";
 import { getSceneOffsets, type SceneSpec, type Storyboard } from "../lib/storyboard";
-import { pdfAiAssistantStoryboard } from "../data/pdfAiAssistantStoryboard";
 
 const fontStack =
   '"SF Pro Display", "Inter Tight", "Inter", "Helvetica Neue", Arial, sans-serif';
@@ -40,8 +39,19 @@ const containSize = (
 
 const getSurfaceAspectRatio = (scene: SceneSpec): number => {
   switch (scene.surface.kind) {
+    case "search-modal":
     case "context-modal":
+      return 1.34;
+    case "history-modal":
+    case "credits-modal":
+    case "embeddings-status-modal":
       return 1.36;
+    case "settings-panel":
+      return 1.46;
+    case "studio-graph-view":
+      return 1.72;
+    case "bench-results-view":
+      return 1.58;
     case "chat-status":
       return 1.58;
     case "chat-thread":
@@ -229,19 +239,19 @@ const SceneComposition: React.FC<{
 
   return (
     <AbsoluteFill
-        style={{
-          fontFamily: fontStack,
-          background: `linear-gradient(145deg, ${scene.background[0]}, ${scene.background[1]})`,
-        }}
-      >
+      style={{
+        fontFamily: fontStack,
+        background: `linear-gradient(145deg, ${scene.background[0]}, ${scene.background[1]})`,
+      }}
+    >
       <div
         style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at top left, rgba(255,255,255,0.52), rgba(255,255,255,0) 42%)",
-          }}
-        />
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(circle at top left, rgba(255,255,255,0.52), rgba(255,255,255,0) 42%)",
+        }}
+      />
       <div
         style={{
           position: "absolute",
@@ -280,9 +290,9 @@ const SceneComposition: React.FC<{
   );
 };
 
-export const PdfAiAssistant30: React.FC<{
-  storyboard?: Storyboard;
-}> = ({ storyboard = pdfAiAssistantStoryboard }) => {
+export const PromoStoryboardComposition: React.FC<{
+  storyboard: Storyboard;
+}> = ({ storyboard }) => {
   const offsets = getSceneOffsets(storyboard.scenes);
 
   return (

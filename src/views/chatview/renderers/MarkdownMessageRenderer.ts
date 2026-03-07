@@ -1,5 +1,5 @@
 import { App, Component, MarkdownRenderer, Notice } from "obsidian";
-import { UrlCitation } from "../../../types";
+import type { UrlCitation } from "../../../types";
 import { setIcon } from "obsidian";
 import { MermaidPreviewModal } from "../../../modals/MermaidPreviewModal";
 import { renderCitationFooter } from "./CitationFooter";

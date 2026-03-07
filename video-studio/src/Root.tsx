@@ -1,21 +1,24 @@
 import { Composition } from "remotion";
-import { PdfAiAssistant30 } from "./components/PdfAiAssistant30";
-import { pdfAiAssistantStoryboard } from "./data/pdfAiAssistantStoryboard";
+import { PromoStoryboardComposition } from "./components/PromoStoryboardComposition";
+import { storyboardCatalog } from "./data/storyboardCatalog";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <>
-      <Composition
-        id="PdfAiAssistant30"
-        component={PdfAiAssistant30}
-        durationInFrames={pdfAiAssistantStoryboard.durationInFrames}
-        fps={pdfAiAssistantStoryboard.fps}
-        width={pdfAiAssistantStoryboard.width}
-        height={pdfAiAssistantStoryboard.height}
-        defaultProps={{
-          storyboard: pdfAiAssistantStoryboard,
-        }}
-      />
+      {storyboardCatalog.map(({ id, storyboard }) => (
+        <Composition
+          key={id}
+          id={id}
+          component={PromoStoryboardComposition}
+          durationInFrames={storyboard.durationInFrames}
+          fps={storyboard.fps}
+          width={storyboard.width}
+          height={storyboard.height}
+          defaultProps={{
+            storyboard,
+          }}
+        />
+      ))}
     </>
   );
 };

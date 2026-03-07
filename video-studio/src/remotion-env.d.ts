@@ -16,6 +16,8 @@ declare module "@plugin-ui/ContextSelectionModal" {
 declare module "@plugin-ui/InlineCollapsibleBlock" {
   export function createInlineBlock(options: any): HTMLElement;
   export function getBlockContent(block: HTMLElement): HTMLElement | null;
+  export function setExpanded(block: HTMLElement, expanded: boolean): void;
+  export function setStreaming(block: HTMLElement, streaming: boolean): void;
 }
 
 declare module "@plugin-ui/CitationFooter" {
@@ -134,4 +136,65 @@ declare module "@plugin-ui/MessageGrouping" {
     groupEl: HTMLElement;
     isNewGroup: boolean;
   };
+}
+
+declare module "@plugin-ui/MessageRenderer" {
+  export class MessageRenderer {
+    constructor(app: any);
+    getApp(): any;
+    renderMessageParts(
+      messageEl: HTMLElement,
+      message: any,
+      isActivelyStreaming?: boolean
+    ): void | Promise<void>;
+    renderCitations(contentEl: HTMLElement, citations: readonly any[]): void;
+  }
+}
+
+declare module "@plugin-ui/SystemSculptSearchModal" {
+  export class SystemSculptSearchModal {
+    constructor(plugin: any);
+    modalEl: HTMLDivElement;
+    onOpen(): void;
+    onClose(): void;
+    [key: string]: any;
+  }
+}
+
+declare module "@plugin-ui/SystemSculptHistoryModal" {
+  export class SystemSculptHistoryModal {
+    constructor(plugin: any, options?: any);
+    modalEl: HTMLDivElement;
+    onOpen(): Promise<void>;
+    onClose(): void;
+    [key: string]: any;
+  }
+}
+
+declare module "@plugin-ui/CreditsBalanceModal" {
+  export class CreditsBalanceModal {
+    constructor(app: any, options: any);
+    modalEl: HTMLDivElement;
+    onOpen(): void;
+    onClose(): void;
+    [key: string]: any;
+  }
+}
+
+declare module "@plugin-ui/EmbeddingsStatusModal" {
+  export class EmbeddingsStatusModal {
+    constructor(app: any, plugin: any);
+    modalEl: HTMLDivElement;
+    onOpen(): Promise<void>;
+    onClose(): void;
+    [key: string]: any;
+  }
+}
+
+declare module "@plugin-ui/BenchResultsView" {
+  export class BenchResultsView {
+    constructor(leaf: any, plugin: any);
+    containerEl: HTMLDivElement;
+    [key: string]: any;
+  }
 }

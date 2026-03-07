@@ -1,4 +1,5 @@
 import { ensureObsidianDomCompat } from "./domCompat";
+import { marked } from "marked";
 
 ensureObsidianDomCompat();
 
@@ -149,6 +150,9 @@ const iconShapes: Record<string, IconShape> = {
   "refresh-ccw": {
     paths: ["M3 12a9 9 0 1 0 3-6.7", "M3 4v5h5"],
   },
+  "refresh-cw": {
+    paths: ["M21 12a9 9 0 1 1-3-6.7", "M21 4v5h-5"],
+  },
   "corner-down-left": {
     paths: ["M20 10v4a4 4 0 0 1-4 4H8", "m12 14-4 4-4-4"],
   },
@@ -168,6 +172,70 @@ const iconShapes: Record<string, IconShape> = {
     ],
   },
   info: { circles: [{ cx: 12, cy: 12, r: 9 }], paths: ["M12 10v6", "M12 7h.01"] },
+  loader: {
+    paths: ["M12 2a10 10 0 0 1 10 10", "M20 12a8 8 0 0 1-8 8", "M12 20a8 8 0 0 1-8-8"],
+  },
+  play: {
+    paths: ["M8 5v14l11-7Z"],
+  },
+  list: {
+    paths: ["M9 6h11", "M9 12h11", "M9 18h11"],
+    circles: [{ cx: 5, cy: 6, r: 1 }, { cx: 5, cy: 12, r: 1 }, { cx: 5, cy: 18, r: 1 }],
+  },
+  cpu: {
+    rects: [{ x: 7, y: 7, width: 10, height: 10, rx: 2 }],
+    paths: [
+      "M9 1v3",
+      "M15 1v3",
+      "M9 20v3",
+      "M15 20v3",
+      "M20 9h3",
+      "M20 14h3",
+      "M1 9h3",
+      "M1 14h3",
+    ],
+  },
+  box: {
+    paths: ["M12 2 4 6v12l8 4 8-4V6l-8-4Z", "M4 6l8 4 8-4", "M12 10v12"],
+  },
+  tag: {
+    paths: ["M20 10 11 19 3 11V3h8l9 7Z"],
+    circles: [{ cx: 7.5, cy: 7.5, r: 1.2 }],
+  },
+  files: {
+    rects: [
+      { x: 7, y: 6, width: 10, height: 13, rx: 2 },
+      { x: 4, y: 3, width: 10, height: 13, rx: 2 },
+    ],
+  },
+  "check-circle": {
+    circles: [{ cx: 12, cy: 12, r: 9 }],
+    paths: ["m8.5 12.5 2.5 2.5 5-6"],
+  },
+  "alert-circle": {
+    circles: [{ cx: 12, cy: 12, r: 9 }],
+    paths: ["M12 8v5", "M12 16h.01"],
+  },
+  trophy: {
+    paths: [
+      "M8 4h8v3a4 4 0 0 1-8 0V4Z",
+      "M8 5H5a2 2 0 0 0 0 4h3",
+      "M16 5h3a2 2 0 0 1 0 4h-3",
+      "M12 11v4",
+      "M9 20h6",
+      "M10 15h4",
+    ],
+  },
+  "flask-conical": {
+    paths: ["M10 3v5l-6 10a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3L14 8V3", "M8 14h8"],
+  },
+  clipboard: {
+    rects: [{ x: 7, y: 5, width: 10, height: 14, rx: 2 }],
+    paths: ["M9 5h6", "M10 3h4"],
+  },
+  "external-link": {
+    paths: ["M14 5h5v5", "M10 14 19 5", "M19 13v5H5V5h5"],
+  },
 };
 
 const appendSvg = (target: HTMLElement, name: string) => {
@@ -180,7 +248,12 @@ const appendSvg = (target: HTMLElement, name: string) => {
   svg.setAttribute("stroke-width", "1.8");
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
   svg.classList.add("svg-icon");
+  svg.style.width = "16px";
+  svg.style.height = "16px";
+  svg.style.flexShrink = "0";
 
   for (const rectSpec of shape.rects ?? []) {
     const rect = document.createElementNS(SVG_NS, "rect");
@@ -210,6 +283,29 @@ const appendSvg = (target: HTMLElement, name: string) => {
 
   target.appendChild(svg);
 };
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const renderInternalLinks = (markdown: string): string =>
+  markdown
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_match, href: string, label: string) => {
+      return `<a class="internal-link" href="${escapeHtml(href.trim())}">${escapeHtml(
+        label.trim()
+      )}</a>`;
+    })
+    .replace(/\[\[([^\]]+)\]\]/g, (_match, href: string) => {
+      const normalizedHref = href.trim();
+      const defaultLabel = normalizedHref.split("/").pop() ?? normalizedHref;
+      return `<a class="internal-link" href="${escapeHtml(normalizedHref)}">${escapeHtml(
+        defaultLabel
+      )}</a>`;
+    });
 
 export class Component {
   private cleanups: Array<() => void> = [];
@@ -244,6 +340,22 @@ export class Component {
       cleanup();
     }
     this.cleanups = [];
+  }
+}
+
+export class MarkdownRenderer {
+  static async render(
+    _app: any,
+    markdown: string,
+    container: HTMLElement,
+    _sourcePath: string,
+    _component: Component
+  ): Promise<void> {
+    marked.setOptions({
+      gfm: true,
+      breaks: true,
+    });
+    container.innerHTML = marked.parse(renderInternalLinks(markdown)) as string;
   }
 }
 
@@ -313,6 +425,97 @@ class TextComponent extends Component {
     return this;
   }
 
+  setValue(value: string): this {
+    this.inputEl.value = value;
+    return this;
+  }
+
+  setDisabled(disabled: boolean): this {
+    this.inputEl.disabled = disabled;
+    return this;
+  }
+
+  onChange(callback: (value: string) => void): this {
+    this.inputEl.addEventListener("input", () => callback(this.inputEl.value));
+    return this;
+  }
+}
+
+class DropdownComponent extends Component {
+  public selectEl: HTMLSelectElement;
+
+  constructor(container: HTMLElement) {
+    super();
+    this.selectEl = document.createElement("select");
+    container.appendChild(this.selectEl);
+  }
+
+  addOption(value: string, label: string): this {
+    this.selectEl.createEl("option", { value, text: label });
+    return this;
+  }
+
+  setValue(value: string): this {
+    this.selectEl.value = value;
+    return this;
+  }
+
+  setDisabled(disabled: boolean): this {
+    this.selectEl.disabled = disabled;
+    return this;
+  }
+
+  onChange(callback: (value: string) => void): this {
+    this.selectEl.addEventListener("change", () => callback(this.selectEl.value));
+    return this;
+  }
+}
+
+class ToggleComponent extends Component {
+  public toggleEl: HTMLInputElement;
+
+  constructor(container: HTMLElement) {
+    super();
+    const wrapper = container.createEl("label", { cls: "checkbox-container" });
+    this.toggleEl = wrapper.createEl("input", { type: "checkbox" });
+    wrapper.createSpan({ cls: "checkbox-slider" });
+  }
+
+  setValue(value: boolean): this {
+    this.toggleEl.checked = value;
+    return this;
+  }
+
+  setDisabled(disabled: boolean): this {
+    this.toggleEl.disabled = disabled;
+    return this;
+  }
+
+  onChange(callback: (value: boolean) => void): this {
+    this.toggleEl.addEventListener("change", () => callback(this.toggleEl.checked));
+    return this;
+  }
+}
+
+export class TextAreaComponent extends Component {
+  public inputEl: HTMLTextAreaElement;
+
+  constructor(container: HTMLElement) {
+    super();
+    this.inputEl = document.createElement("textarea");
+    container.appendChild(this.inputEl);
+  }
+
+  setPlaceholder(text: string): this {
+    this.inputEl.placeholder = text;
+    return this;
+  }
+
+  setValue(value: string): this {
+    this.inputEl.value = value;
+    return this;
+  }
+
   onChange(callback: (value: string) => void): this {
     this.inputEl.addEventListener("input", () => callback(this.inputEl.value));
     return this;
@@ -361,18 +564,27 @@ export class SearchComponent extends Component {
 
 export class Setting extends Component {
   public settingEl: HTMLDivElement;
+  public infoEl: HTMLDivElement;
   public nameEl: HTMLDivElement;
+  public descEl: HTMLDivElement;
   public controlEl: HTMLDivElement;
 
   constructor(container: HTMLElement) {
     super();
     this.settingEl = container.createDiv({ cls: "setting-item" });
-    this.nameEl = this.settingEl.createDiv({ cls: "setting-item-name" });
+    this.infoEl = this.settingEl.createDiv({ cls: "setting-item-info" });
+    this.nameEl = this.infoEl.createDiv({ cls: "setting-item-name" });
+    this.descEl = this.infoEl.createDiv({ cls: "setting-item-description" });
     this.controlEl = this.settingEl.createDiv({ cls: "setting-item-control" });
   }
 
   setName(text: string): this {
     this.nameEl.textContent = text;
+    return this;
+  }
+
+  setDesc(text: string): this {
+    this.descEl.textContent = text;
     return this;
   }
 
@@ -382,8 +594,27 @@ export class Setting extends Component {
     return this;
   }
 
+  addDropdown(callback: (component: DropdownComponent) => void): this {
+    const component = new DropdownComponent(this.controlEl);
+    callback(component);
+    return this;
+  }
+
+  addToggle(callback: (component: ToggleComponent) => void): this {
+    const component = new ToggleComponent(this.controlEl);
+    callback(component);
+    return this;
+  }
+
   addButton(callback: (component: ButtonComponent) => void): this {
     const component = new ButtonComponent(this.controlEl);
+    callback(component);
+    return this;
+  }
+
+  addExtraButton(callback: (component: ButtonComponent) => void): this {
+    const component = new ButtonComponent(this.controlEl);
+    component.buttonEl.classList.add("clickable-icon");
     callback(component);
     return this;
   }
@@ -420,27 +651,122 @@ export class Modal extends Component {
   }
 }
 
-export class TFile {
+export class ItemView extends Component {
+  public app: any;
+  public leaf: WorkspaceLeaf;
+  public containerEl: HTMLDivElement;
+  public contentEl: HTMLDivElement;
+
+  constructor(leaf: WorkspaceLeaf) {
+    super();
+    this.app = (leaf as any).app;
+    this.leaf = leaf;
+    this.containerEl = document.createElement("div");
+    this.containerEl.className = "workspace-leaf-content";
+    this.containerEl.createDiv({ cls: "view-header" });
+    this.contentEl = this.containerEl.createDiv({ cls: "view-content" });
+    this.leaf.view = this;
+  }
+}
+
+export class TAbstractFile {
   public path: string;
-  public basename: string;
-  public extension: string;
 
   constructor(path: string) {
     this.path = path;
+  }
+}
+
+export class TFolder extends TAbstractFile {}
+
+export class TFile extends TAbstractFile {
+  public basename: string;
+  public extension: string;
+  public stat: { mtime: number; size: number };
+
+  constructor(
+    input: string | { path: string; stat?: { mtime?: number; size?: number } },
+    stat?: { mtime?: number; size?: number }
+  ) {
+    const path = typeof input === "string" ? input : input.path;
+    const resolvedStat = typeof input === "string" ? stat : input.stat;
+    super(path);
     const fileName = path.split("/").pop() ?? path;
     const lastDot = fileName.lastIndexOf(".");
     this.basename = lastDot === -1 ? fileName : fileName.slice(0, lastDot);
     this.extension = lastDot === -1 ? "" : fileName.slice(lastDot + 1);
+    this.stat = {
+      mtime: resolvedStat?.mtime ?? Date.now(),
+      size: resolvedStat?.size ?? 0,
+    };
   }
 }
+
+export class WorkspaceLeaf {
+  public view: any = null;
+  public app: any;
+  private viewState: { type: string; state: Record<string, unknown> } = {
+    type: "",
+    state: {},
+  };
+
+  constructor(app?: any) {
+    this.app = app;
+  }
+
+  getViewState(): { type: string; state: Record<string, unknown> } {
+    return this.viewState;
+  }
+
+  async setViewState(
+    viewState: { type: string; state?: Record<string, unknown> },
+    _opts?: unknown
+  ): Promise<void> {
+    this.viewState = {
+      type: viewState.type,
+      state: viewState.state ?? {},
+    };
+  }
+
+  async openFile(_file: TFile): Promise<void> {}
+}
+
+export type EventRef = { id?: string };
 
 export class App {
   [key: string]: unknown;
 
   constructor(init?: Record<string, unknown>) {
-    if (init) {
-      Object.assign(this, init);
-    }
+    const defaultLeaf = new WorkspaceLeaf(this);
+    const defaultWorkspace = {
+      activeLeaf: defaultLeaf,
+      trigger: () => {},
+      openLinkText: () => {},
+      on: () => ({ id: "workspace-event" }),
+      getLeavesOfType: () => [] as WorkspaceLeaf[],
+      getLeaf: () => new WorkspaceLeaf(this),
+      setActiveLeaf: () => {},
+    };
+    const defaultVault = {
+      getFiles: () => [] as TFile[],
+      getAbstractFileByPath: () => null as TAbstractFile | null,
+      on: () => ({ id: "vault-event" }),
+      offref: (_eventRef: EventRef) => {},
+      read: async () => "",
+      adapter: {
+        read: async () => "",
+        list: async () => ({ files: [] as string[], folders: [] as string[] }),
+      },
+    };
+
+    Object.assign(this, {
+      workspace: defaultWorkspace,
+      vault: defaultVault,
+      plugins: {
+        plugins: {},
+      },
+    });
+    Object.assign(this, init);
   }
 }
 
@@ -450,6 +776,7 @@ export class Notice {
 
 export const Platform = {
   isDesktop: true,
+  isDesktopApp: true,
   isMacOS: true,
   isMobile: false,
 };
@@ -459,4 +786,30 @@ export const normalizePath = (value: string): string =>
 
 export const setIcon = (el: HTMLElement, icon: string): void => {
   appendSvg(el, icon);
+};
+
+export const debounce = <TArgs extends unknown[]>(
+  callback: (...args: TArgs) => void,
+  wait: number,
+  immediate = false
+): ((...args: TArgs) => void) => {
+  let timeoutId: number | null = null;
+
+  return (...args: TArgs) => {
+    const shouldCallNow = immediate && timeoutId === null;
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+
+    timeoutId = window.setTimeout(() => {
+      timeoutId = null;
+      if (!immediate) {
+        callback(...args);
+      }
+    }, wait);
+
+    if (shouldCallNow) {
+      callback(...args);
+    }
+  };
 };

@@ -1,5 +1,5 @@
 import { App, setIcon, Platform } from "obsidian";
-import { ChatRole } from "../../../types";
+import type { ChatRole } from "../../../types";
 import { PlatformContext } from "../../../services/PlatformContext";
 
 type ToolbarOptions = {

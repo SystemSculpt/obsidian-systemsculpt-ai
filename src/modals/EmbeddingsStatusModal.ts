@@ -1,5 +1,5 @@
 import { App, setIcon, Notice } from "obsidian";
-import SystemSculptPlugin from "../main";
+import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { EMBEDDING_SCHEMA_VERSION } from "../constants/embeddings";
 import { EmbeddingsPendingFilesModal } from "./EmbeddingsPendingFilesModal";

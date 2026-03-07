@@ -1,7 +1,7 @@
 import { Notice } from "obsidian";
-import SystemSculptPlugin from "../main";
+import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
-import {
+import type {
   SystemSculptSearchEngine,
   SearchMode,
   SortMode,

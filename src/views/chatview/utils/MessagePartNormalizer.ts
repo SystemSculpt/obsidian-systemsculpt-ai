@@ -1,4 +1,4 @@
-import { ChatMessage, MessagePart, MultiPartContent } from "../../../types";
+import type { ChatMessage, MessagePart, MultiPartContent } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 
 /**

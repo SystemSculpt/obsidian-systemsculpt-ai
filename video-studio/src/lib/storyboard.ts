@@ -32,7 +32,16 @@ export type SurfaceIconName =
   | "star-off"
   | "more-horizontal"
   | "loader-2"
-  | "x";
+  | "x"
+  | "history"
+  | "settings"
+  | "network"
+  | "trophy"
+  | "refresh-ccw"
+  | "clipboard"
+  | "external-link"
+  | "play"
+  | "list";
 
 export type SceneLayout = "center-lockup" | "split-left" | "split-right" | "stacked";
 
@@ -91,9 +100,23 @@ export interface ReasoningBlockSpec extends BaseInlineBlockSpec {
   textLines: readonly string[];
 }
 
+export interface ToolCallResultSpec {
+  success: boolean;
+  data?: unknown;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
 export interface ToolCallBlockSpec extends BaseInlineBlockSpec {
   kind: "tool_call";
-  lines: readonly StructuredLineSpec[];
+  lines?: readonly StructuredLineSpec[];
+  toolName?: string;
+  arguments?: Record<string, unknown>;
+  result?: ToolCallResultSpec;
+  serverId?: string;
 }
 
 export type InlineBlockSpec = ReasoningBlockSpec | ToolCallBlockSpec;
@@ -101,6 +124,7 @@ export type InlineBlockSpec = ReasoningBlockSpec | ToolCallBlockSpec;
 export interface ChatMessageSpec {
   id: string;
   role: "assistant" | "user" | "system";
+  markdown?: string;
   paragraphs?: readonly string[];
   bullets?: readonly string[];
   citations?: readonly CitationSpec[];
@@ -130,6 +154,216 @@ export interface ContextRowSpec {
   state?: "default" | "selected" | "attached";
 }
 
+export type SearchModeSpec = "smart" | "lexical" | "semantic";
+export type SearchSortSpec = "relevance" | "recency";
+export type SearchOriginSpec = "lexical" | "semantic" | "blend" | "recent";
+
+export interface SearchResultSpec {
+  id: string;
+  path: string;
+  title: string;
+  excerpt?: string;
+  score: number;
+  origin: SearchOriginSpec;
+  updatedAt?: number;
+  size?: number;
+}
+
+export interface SearchMetricsSpec {
+  totalMs: number;
+  lexMs?: number;
+  semMs?: number;
+  indexMs?: number;
+  indexedCount: number;
+  inspectedCount: number;
+  mode: SearchModeSpec;
+  usedEmbeddings: boolean;
+}
+
+export interface SearchEmbeddingsIndicatorSpec {
+  enabled: boolean;
+  ready: boolean;
+  available: boolean;
+  reason?: string;
+  processed?: number;
+  total?: number;
+}
+
+export interface HistoryEntrySpec {
+  id: string;
+  kind: "chat" | "studio";
+  title: string;
+  subtitle?: string;
+  badge: string;
+  timestampMs: number;
+  searchText?: string;
+  isFavorite?: boolean;
+}
+
+export interface CreditsBalanceSpec {
+  includedRemaining: number;
+  addOnRemaining: number;
+  totalRemaining: number;
+  includedPerMonth: number;
+  cycleStartedAt: string;
+  cycleEndsAt: string;
+  cycleAnchorAt?: string | null;
+  turnInFlightUntil?: string | null;
+  purchaseUrl?: string | null;
+}
+
+export interface CreditsUsageEntrySpec {
+  id: string;
+  createdAt: string;
+  transactionType: "agent_turn";
+  endpoint: string | null;
+  usageKind:
+    | "audio_transcription"
+    | "embeddings"
+    | "document_processing"
+    | "youtube_transcript"
+    | "agent_turn"
+    | "request";
+  durationSeconds: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  pageCount: number;
+  creditsCharged: number;
+  includedDelta: number;
+  addOnDelta: number;
+  totalDelta: number;
+  includedBefore: number;
+  includedAfter: number;
+  addOnBefore: number;
+  addOnAfter: number;
+  totalBefore: number;
+  totalAfter: number;
+  rawUsd?: number;
+  fileSizeBytes: number | null;
+  fileFormat: string | null;
+  billingFormulaVersion?: string | null;
+  billingCreditsPerUsd?: number | null;
+  billingMarkupMultiplier?: number | null;
+  billingCreditsExact?: number | null;
+}
+
+export interface CreditsUsagePageSpec {
+  items: readonly CreditsUsageEntrySpec[];
+  nextBefore: string | null;
+}
+
+export interface EmbeddingsStatsSpec {
+  total: number;
+  processed: number;
+  present: number;
+  needsProcessing: number;
+  failed: number;
+}
+
+export interface BenchLeaderboardEntrySpec {
+  id: string;
+  modelId: string;
+  modelDisplayName: string;
+  scorePercent: number;
+  totalPointsEarned: number;
+  totalMaxPoints: number;
+  runId: string;
+  runDate: string;
+  suiteId: string;
+  suiteVersion: string;
+}
+
+export interface SettingsSidebarTabSpec {
+  id: string;
+  label: string;
+  active?: boolean;
+}
+
+export type SettingsControlSpec =
+  | {
+      kind: "toggle";
+      value: boolean;
+      disabled?: boolean;
+    }
+  | {
+      kind: "dropdown";
+      value: string;
+      options: readonly string[];
+      disabled?: boolean;
+    }
+  | {
+      kind: "text";
+      value: string;
+      placeholder?: string;
+      secret?: boolean;
+      disabled?: boolean;
+    }
+  | {
+      kind: "button";
+      label: string;
+      tone?: "default" | "warning" | "accent";
+      disabled?: boolean;
+    };
+
+export interface SettingsFieldSpec {
+  id: string;
+  label: string;
+  description?: string;
+  note?: string;
+  control: SettingsControlSpec;
+}
+
+export interface SettingsSectionSpec {
+  id: string;
+  title: string;
+  description?: string;
+  fields: readonly SettingsFieldSpec[];
+}
+
+export interface StudioGraphNodeSpec {
+  id: string;
+  kind: string;
+  version: string;
+  title: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  config: Record<string, unknown>;
+}
+
+export interface StudioGraphEdgeSpec {
+  id: string;
+  fromNodeId: string;
+  fromPortId: string;
+  toNodeId: string;
+  toPortId: string;
+}
+
+export interface StudioGraphGroupSpec {
+  id: string;
+  name: string;
+  color?: string;
+  nodeIds: string[];
+}
+
+export interface StudioGraphViewportSpec {
+  zoom: number;
+  scrollLeft?: number;
+  scrollTop?: number;
+}
+
+export interface StudioGraphNodeStateSpec {
+  nodeId: string;
+  status: "idle" | "pending" | "running" | "cached" | "succeeded" | "failed";
+  message?: string;
+  updatedAt?: string | null;
+  outputs?: Record<string, unknown> | null;
+}
+
 export interface StatusChipSpec {
   id: string;
   label: string;
@@ -153,6 +387,77 @@ export interface ContextModalSurfaceSpec {
   rows: readonly ContextRowSpec[];
   primaryActionLabel: string;
   secondaryActionLabel: string;
+}
+
+export interface SearchModalSurfaceSpec {
+  kind: "search-modal";
+  query: string;
+  queryReveal?: TextRevealSpec;
+  mode: SearchModeSpec;
+  sort: SearchSortSpec;
+  recents: readonly SearchResultSpec[];
+  results: readonly SearchResultSpec[];
+  metrics: SearchMetricsSpec;
+  embeddings: SearchEmbeddingsIndicatorSpec;
+  stateText?: string;
+}
+
+export interface HistoryModalSurfaceSpec {
+  kind: "history-modal";
+  searchValue: string;
+  searchReveal?: TextRevealSpec;
+  entries: readonly HistoryEntrySpec[];
+}
+
+export interface CreditsModalSurfaceSpec {
+  kind: "credits-modal";
+  balance: CreditsBalanceSpec;
+  usage?: CreditsUsagePageSpec;
+  activeTab?: "balance" | "usage";
+}
+
+export interface EmbeddingsStatusSurfaceSpec {
+  kind: "embeddings-status-modal";
+  embeddingsEnabled?: boolean;
+  provider: string;
+  model: string;
+  schema: number;
+  stats: EmbeddingsStatsSpec;
+  isProcessing?: boolean;
+  errorMessage?: string;
+}
+
+export interface BenchResultsSurfaceSpec {
+  kind: "bench-results-view";
+  status?: "success" | "empty" | "error";
+  errorMessage?: string;
+  entries: readonly BenchLeaderboardEntrySpec[];
+}
+
+export interface SettingsPanelSurfaceSpec {
+  kind: "settings-panel";
+  searchValue?: string;
+  tabs: readonly SettingsSidebarTabSpec[];
+  sections: readonly SettingsSectionSpec[];
+}
+
+export interface StudioGraphSurfaceSpec {
+  kind: "studio-graph-view";
+  projectName: string;
+  projectPath: string;
+  nodes: readonly StudioGraphNodeSpec[];
+  edges: readonly StudioGraphEdgeSpec[];
+  entryNodeIds: readonly string[];
+  groups?: readonly StudioGraphGroupSpec[];
+  viewport?: StudioGraphViewportSpec;
+  nodeDetailMode?: "expanded" | "collapsed";
+  nodeStates?: readonly StudioGraphNodeStateSpec[];
+  modelOptions?: ReadonlyArray<{
+    value: string;
+    label: string;
+    description?: string;
+    badge?: string;
+  }>;
 }
 
 export interface ViewActionSpec {
@@ -196,7 +501,14 @@ export interface ChatThreadSurfaceSpec {
 }
 
 export type SurfaceSpec =
+  | SearchModalSurfaceSpec
   | ContextModalSurfaceSpec
+  | HistoryModalSurfaceSpec
+  | CreditsModalSurfaceSpec
+  | EmbeddingsStatusSurfaceSpec
+  | BenchResultsSurfaceSpec
+  | SettingsPanelSurfaceSpec
+  | StudioGraphSurfaceSpec
   | ChatStatusSurfaceSpec
   | ChatThreadSurfaceSpec;
 

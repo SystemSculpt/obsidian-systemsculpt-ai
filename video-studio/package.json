@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts PdfAiAssistant30 dist/pdf-ai-assistant-30.mp4",
-    "render:preview": "remotion render src/index.ts PdfAiAssistant30 dist/pdf-ai-assistant-preview.mp4 --frames=0-179",
+    "render": "remotion render src/index.ts SystemSculptOverview30 dist/systemsculpt-overview-30.mp4",
+    "render:preview": "remotion render src/index.ts SystemSculptOverview30 dist/systemsculpt-overview-preview.mp4 --frames=0-179",
     "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
