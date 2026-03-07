@@ -61,6 +61,159 @@ function shouldSkipDependency(dependencyName) {
   return BUILTIN_MODULE_SET.has(String(dependencyName || "").trim());
 }
 
+function normalizePackageSpecifier(specifier) {
+  const normalized = String(specifier || "").trim();
+  if (!normalized || normalized.startsWith(".") || normalized.startsWith("/") || normalized.startsWith("file:")) {
+    return null;
+  }
+  if (BUILTIN_MODULE_SET.has(normalized)) {
+    return null;
+  }
+
+  if (normalized.startsWith("@")) {
+    const [scope, name] = normalized.split("/");
+    return scope && name ? `${scope}/${name}` : null;
+  }
+
+  const [name] = normalized.split("/");
+  return name || null;
+}
+
+function walkRuntimeSourceFiles(basePath, sink) {
+  if (!fs.existsSync(basePath)) {
+    return;
+  }
+
+  const stats = fs.statSync(basePath);
+  if (stats.isFile()) {
+    if (/\.(?:c|m)?js$/i.test(basePath)) {
+      sink.add(basePath);
+    }
+    return;
+  }
+
+  const skipDirectoryNames = new Set([
+    ".git",
+    ".hg",
+    ".svn",
+    "coverage",
+    "docs",
+    "example",
+    "examples",
+    "node_modules",
+    "spec",
+    "src",
+    "test",
+    "tests",
+  ]);
+
+  const queue = [basePath];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const absolutePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!skipDirectoryNames.has(entry.name)) {
+          queue.push(absolutePath);
+        }
+        continue;
+      }
+      if (entry.isFile() && /\.(?:c|m)?js$/i.test(entry.name)) {
+        sink.add(absolutePath);
+      }
+    }
+  }
+}
+
+function addExportTargetPaths(target, packageDir, sink) {
+  if (!target) {
+    return;
+  }
+
+  if (typeof target === "string") {
+    if (target.startsWith("./")) {
+      walkRuntimeSourceFiles(path.join(packageDir, target), sink);
+    }
+    return;
+  }
+
+  if (Array.isArray(target)) {
+    for (const entry of target) {
+      addExportTargetPaths(entry, packageDir, sink);
+    }
+    return;
+  }
+
+  if (typeof target === "object") {
+    for (const value of Object.values(target)) {
+      addExportTargetPaths(value, packageDir, sink);
+    }
+  }
+}
+
+function collectRuntimeSourcePaths(packageDir, packageJson) {
+  const sourcePaths = new Set();
+
+  if (fs.existsSync(path.join(packageDir, "dist"))) {
+    walkRuntimeSourceFiles(path.join(packageDir, "dist"), sourcePaths);
+  }
+  if (fs.existsSync(path.join(packageDir, "lib"))) {
+    walkRuntimeSourceFiles(path.join(packageDir, "lib"), sourcePaths);
+  }
+
+  for (const fieldName of ["main", "module", "browser"]) {
+    const fieldValue = packageJson[fieldName];
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      walkRuntimeSourceFiles(path.join(packageDir, fieldValue), sourcePaths);
+    }
+  }
+
+  const binField = packageJson.bin;
+  if (typeof binField === "string" && binField.trim()) {
+    walkRuntimeSourceFiles(path.join(packageDir, binField), sourcePaths);
+  } else if (binField && typeof binField === "object") {
+    for (const candidate of Object.values(binField)) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        walkRuntimeSourceFiles(path.join(packageDir, candidate), sourcePaths);
+      }
+    }
+  }
+
+  addExportTargetPaths(packageJson.exports, packageDir, sourcePaths);
+
+  if (sourcePaths.size === 0) {
+    walkRuntimeSourceFiles(packageDir, sourcePaths);
+  }
+
+  return Array.from(sourcePaths.values()).sort();
+}
+
+function collectImportedPackageNames(packageDir, packageJson) {
+  const importedPackages = new Set();
+  const sourcePaths = collectRuntimeSourcePaths(packageDir, packageJson);
+  const importPatterns = [
+    /\bimport\s*\(\s*["']([^"'`]+)["']\s*\)/g,
+    /\brequire\(\s*["']([^"'`]+)["']\s*\)/g,
+    /^\s*import\s+(?:[^"'`\n]+?\s+from\s+)?["']([^"'`\n]+)["']/gm,
+    /^\s*export\s+[^"'`\n]+?\s+from\s+["']([^"'`\n]+)["']/gm,
+  ];
+
+  for (const sourcePath of sourcePaths) {
+    const source = fs.readFileSync(sourcePath, "utf8");
+    for (const pattern of importPatterns) {
+      for (const match of source.matchAll(pattern)) {
+        const packageName = normalizePackageSpecifier(match[1]);
+        if (!packageName) {
+          continue;
+        }
+        importedPackages.add(packageName);
+      }
+    }
+  }
+
+  return Array.from(importedPackages.values()).sort();
+}
+
 function toRelativePackagePath(rootDir, packageDir) {
   const relativePath = path.relative(rootDir, packageDir);
   if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
@@ -121,8 +274,12 @@ export function collectPiRuntimePackages(options = {}) {
       packageJson,
     });
 
-    const dependencyNames = Object.keys(packageJson.dependencies || {}).sort();
-    for (const dependencyName of dependencyNames) {
+    const declaredDependencyNames = new Set(Object.keys(packageJson.dependencies || {}));
+    const importedDependencyNames = new Set(collectImportedPackageNames(normalizedDir, packageJson));
+    declaredDependencyNames.delete(packageName);
+    importedDependencyNames.delete(packageName);
+
+    for (const dependencyName of Array.from(declaredDependencyNames.values()).sort()) {
       if (shouldSkipDependency(dependencyName)) {
         continue;
       }
@@ -134,6 +291,17 @@ export function collectPiRuntimePackages(options = {}) {
         );
       }
       queue.push(dependencyDir);
+    }
+
+    for (const dependencyName of Array.from(importedDependencyNames.values()).sort()) {
+      if (shouldSkipDependency(dependencyName) || declaredDependencyNames.has(dependencyName)) {
+        continue;
+      }
+
+      const dependencyDir = resolveInstalledPackageDir(dependencyName, normalizedDir, rootDir);
+      if (dependencyDir) {
+        queue.push(dependencyDir);
+      }
     }
   }
 

@@ -136,18 +136,6 @@ export function resolvePiPackageEntryPath(): string {
     return explicitEntry;
   }
 
-  const runtimeRequire = resolveRuntimeRequire();
-  if (runtimeRequire?.resolve) {
-    try {
-      const resolved = runtimeRequire.resolve("@mariozechner/pi-coding-agent");
-      if (resolved && existsSync(resolved)) {
-        return resolved;
-      }
-    } catch {
-      // Ignore require.resolve failures and scan for the local package entry below.
-    }
-  }
-
   try {
     const pluginInstallDir = resolvePiPluginInstallDir();
     const bundledEntry = join(
@@ -162,7 +150,19 @@ export function resolvePiPackageEntryPath(): string {
       return bundledEntry;
     }
   } catch {
-    // Fall through to legacy directory scanning below.
+    // Fall through to runtimeRequire/package resolution below.
+  }
+
+  const runtimeRequire = resolveRuntimeRequire();
+  if (runtimeRequire?.resolve) {
+    try {
+      const resolved = runtimeRequire.resolve("@mariozechner/pi-coding-agent");
+      if (resolved && existsSync(resolved)) {
+        return resolved;
+      }
+    } catch {
+      // Ignore require.resolve failures and scan for the local package entry below.
+    }
   }
 
   for (const root of candidateRoots()) {

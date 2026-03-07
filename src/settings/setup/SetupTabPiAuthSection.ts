@@ -485,6 +485,7 @@ export function renderLocalPiAuthSection(root: HTMLElement, tabInstance: SystemS
         });
       }
     } catch (error: any) {
+      console.error("[SystemSculpt][Setup][PiAuth] Failed to refresh Pi provider auth records", error);
       const message = describePiAuthAvailabilityError(error);
       summarySetting.setDesc(message.summary);
       if (message.detail) {

@@ -25,7 +25,7 @@ npm run e2e:mock
 License key requirement:
 
 - `SYSTEMSCULPT_E2E_LICENSE_KEY` is still required by the plugin startup checks.
-- `testing/e2e/run.sh` auto-loads env from repo-local `.env.local` / `.env` before resolving fallback settings JSON.
+- `node testing/e2e/run.mjs ...` auto-loads env from repo-local `.env.local` / `.env` before resolving fallback settings JSON.
 - If env is missing, it falls back to vault settings JSON (for example `~/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json`).
 
 Optional:
@@ -103,10 +103,10 @@ This file contains secrets (license keys / provider keys). Do not `cat`/print it
 The live runner also seeds the temp vault’s settings from this file (sanitized to avoid vault-specific paths),
 so custom provider configs and model lists match your real environment.
 
-Standard runner (macOS/Linux):
+Standard runner (macOS/Linux/Windows):
 
 ```bash
-testing/e2e/run.sh live
+node testing/e2e/run.mjs live
 ```
 
 When neither `SYSTEMSCULPT_E2E_SETTINGS_JSON` nor `SYSTEMSCULPT_E2E_VAULT` is set,
@@ -117,19 +117,19 @@ the runner auto-falls back to:
 Disable this fallback explicitly (for CI/isolation) with:
 
 ```bash
-SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK=1 testing/e2e/run.sh live
+SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK=1 node testing/e2e/run.mjs live
 ```
 
 Set the vault path:
 
 ```bash
-SYSTEMSCULPT_E2E_VAULT="/absolute/path/to/your/vault" testing/e2e/run.sh live
+SYSTEMSCULPT_E2E_VAULT="/absolute/path/to/your/vault" node testing/e2e/run.mjs live
 ```
 
 Or point directly at the settings file:
 
 ```bash
-SYSTEMSCULPT_E2E_SETTINGS_JSON="/absolute/path/to/your/vault/.obsidian/plugins/systemsculpt-ai/data.json" testing/e2e/run.sh live
+SYSTEMSCULPT_E2E_SETTINGS_JSON="/absolute/path/to/your/vault/.obsidian/plugins/systemsculpt-ai/data.json" node testing/e2e/run.mjs live
 ```
 
 Optional repo-local env file (gitignored) for stable local runs:
@@ -142,7 +142,7 @@ SYSTEMSCULPT_E2E_LICENSE_KEY=your-license-key
 Mobile emulation runs also require live env values (same loader):
 
 ```bash
-testing/e2e/run.sh emu
+node testing/e2e/run.mjs emu
 ```
 
 ## Parallel live runs

@@ -4,11 +4,12 @@ on:
   push:
     tags:
       - "*"
+
 jobs:
-  build:
+  build-assets:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -16,14 +17,102 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
 
-      - name: Build plugin
+      - name: Build plugin and runtime assets
         run: |
-          npm install
+          npm ci --no-audit --no-fund
           npm run check:plugin:fast
-          npm run test -- src/studio/__tests__/studio-terminal-runtime-bootstrap.test.ts src/studio/__tests__/studio-terminal-sidecar-client.test.ts src/studio/__tests__/studio-terminal-sidecar-backend.test.ts src/studio/__tests__/studio-terminal-sidecar-script.integration.test.ts src/studio/__tests__/studio-terminal-session-manager.test.ts --runInBand
+          npm run check:e2e
+          npm run test -- src/services/pi/__tests__/PiRuntimeBootstrap.test.ts src/services/pi/__tests__/PiCli.test.ts src/services/pi/__tests__/PiDesktopSetupUtils.test.ts src/studio/__tests__/studio-terminal-runtime-bootstrap.test.ts src/studio/__tests__/studio-terminal-sidecar-client.test.ts src/studio/__tests__/studio-terminal-sidecar-backend.test.ts src/studio/__tests__/studio-terminal-sidecar-script.integration.test.ts src/studio/__tests__/studio-terminal-session-manager.test.ts --runInBand
           npm run build
+          npm run build:pi-runtime
+          npm run verify:pi-runtime
           npm run build:terminal-runtime
+          tar -czf release-artifacts.tgz \
+            main.js manifest.json styles.css studio-terminal-sidecar.cjs \
+            dist/pi-runtime dist/terminal-runtime
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: release-artifacts.tgz
+
+  windows-fresh-desktop:
+    name: Windows Fresh Desktop Bootstrap
+    runs-on: windows-2025
+    needs: build-assets
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    env:
+      SYSTEMSCULPT_E2E_APP_VERSION: "1.11.7"
+      SYSTEMSCULPT_E2E_FOCUS_GUARD: "0"
+      SYSTEMSCULPT_E2E_INSTANCES: "1"
+      SYSTEMSCULPT_E2E_SKIP_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Cache Obsidian Binaries
+        uses: actions/cache@v4
+        with:
+          path: testing/e2e/.obsidian-cache
+          key: ${{ runner.os }}-obsidian-${{ env.SYSTEMSCULPT_E2E_APP_VERSION }}
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: .
+
+      - name: Extract release bundle
+        run: tar -xf release-artifacts.tgz
+
+      - name: E2E (fresh desktop)
+        run: npm run e2e:mock:fresh-desktop
+
+      - name: Upload E2E artifacts (windows fresh desktop)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-fresh-desktop
+          if-no-files-found: ignore
+          path: |
+            testing/e2e/logs
+            testing/e2e/reports
+            testing/e2e/screenshots
+            testing/e2e/video
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-assets
+      - windows-fresh-desktop
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: .
+
+      - name: Extract release bundle
+        run: tar -xf release-artifacts.tgz
 
       - name: Create release
         env:
@@ -34,6 +123,10 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
+            --generate-notes \
+            --verify-tag \
             main.js manifest.json styles.css studio-terminal-sidecar.cjs \
+            dist/pi-runtime/studio-pi-runtime-manifest.json \
+            dist/pi-runtime/*.tgz \
             dist/terminal-runtime/studio-terminal-runtime-manifest.json \
             dist/terminal-runtime/*.tgz

@@ -93,8 +93,7 @@ npm run release:plugin -- --dry-run    # preview next version + notes only
 npm run release:plugin -- --bump patch # force a specific bump
 ```
 
-Requires an authenticated GitHub CLI session (`gh auth login`).
-Release automation also builds and publishes Studio terminal runtime assets from `dist/terminal-runtime`.
+Release automation now commits and pushes the release tag locally, then GitHub Actions builds the release bundle, validates fresh-desktop bootstrap on Windows, and creates the draft release with Pi and Studio terminal runtime assets from `dist/pi-runtime` and `dist/terminal-runtime`.
 
 ## Canonical source files for docs
 

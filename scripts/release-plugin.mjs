@@ -339,7 +339,6 @@ function printPlan({
   bump,
   lastTag,
   commitCount,
-  draft,
   dryRun,
 }) {
   console.log("\n[release] Plan");
@@ -347,7 +346,7 @@ function printPlan({
   console.log(`[release] - Next version: ${newVersion} (${bump})`);
   console.log(`[release] - Last tag: ${lastTag || "(none)"}`);
   console.log(`[release] - Commits included: ${commitCount}`);
-  console.log(`[release] - Draft release: ${draft ? "yes" : "no"}`);
+  console.log("[release] - GitHub Actions draft release: yes");
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
 
@@ -469,18 +468,6 @@ function ensureReleaseAssets() {
   ];
 }
 
-function ensureGitHubAuth(dryRun) {
-  if (dryRun) {
-    return;
-  }
-
-  const result = runCapture("gh", ["auth", "status"], true);
-  if (result.status !== 0) {
-    const details = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-    fail(`GitHub CLI is not authenticated.${details ? `\n${details}` : ""}`);
-  }
-}
-
 function main() {
   const options = parseArgs(args);
 
@@ -531,7 +518,6 @@ function main() {
   }
 
   ensureTagDoesNotExist(newVersion);
-  ensureGitHubAuth(options.dryRun);
 
   printPlan({
     currentVersion: manifest.version,
@@ -539,19 +525,27 @@ function main() {
     bump,
     lastTag,
     commitCount: commits.length,
-    draft: options.draft,
     dryRun: options.dryRun,
   });
 
   const notesPath = writeNotesFile(newVersion, commits, options.notesFile);
-  logStep(`Release notes file: ${notesPath}`);
+  logStep(`Release notes preview file: ${notesPath}`);
 
   if (options.dryRun) {
     logStep("Dry run complete. No files changed.");
     return;
   }
 
+  if (options.draft) {
+    logStep("Ignoring --draft: GitHub Actions now creates the draft release after validation.");
+  }
+  if (options.notesFile) {
+    logStep("Ignoring --notes-file for publication: GitHub Actions now generates the release notes.");
+  }
+
   runChecks(options.skipChecks);
+  const releaseAssetFiles = ensureReleaseAssets();
+  logStep(`Verified local release assets (${releaseAssetFiles.length} files).`);
 
   logStep(`Updating version files to ${newVersion}`);
   manifest.version = newVersion;
@@ -578,17 +572,8 @@ function main() {
   logStep(`Pushing tag ${newVersion}`);
   run("git", ["push", "origin", newVersion]);
 
-  const releaseAssetFiles = ensureReleaseAssets();
-  const releaseArgs = ["release", "create", newVersion, ...releaseAssetFiles, "--title", newVersion, "--notes-file", notesPath];
-
-  if (options.draft) {
-    releaseArgs.push("--draft");
-  }
-
-  logStep("Publishing GitHub release with assets");
-  run("gh", releaseArgs);
-
-  logStep(`Release ${newVersion} complete.`);
+  logStep("Handed off release publication to GitHub Actions.");
+  logStep(`GitHub Actions will validate Windows fresh-desktop bootstrap, then create the draft release for ${newVersion}.`);
 }
 
 main();

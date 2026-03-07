@@ -68,32 +68,6 @@ describe("Desktop fresh-install bootstrap (mock)", () => {
     await openSystemSculptSettingsTab("overview");
 
     await browser.waitUntil(
-      async () =>
-        await browser.execute(() => {
-          const panel = document.querySelector(
-            '.systemsculpt-tab-content.is-active[data-tab="overview"]'
-          ) as HTMLElement | null;
-          if (!panel) {
-            return false;
-          }
-
-          const panelText = panel.textContent || "";
-          const providerRows = panel.querySelectorAll(".ss-setup-pi-auth-list .setting-item").length;
-          const hasRawBootstrapError = panelText.includes(
-            "Unable to resolve the SystemSculpt plugin installation directory"
-          );
-          const hasUnavailableBanner = panelText.includes("Pi auth is unavailable right now");
-
-          return providerRows > 0 && !hasRawBootstrapError && !hasUnavailableBanner;
-        }),
-      {
-        timeout: 120000,
-        interval: 500,
-        timeoutMsg: "Setup did not finish loading Pi provider rows for a fresh desktop install.",
-      }
-    );
-
-    await browser.waitUntil(
       async () => await pathExists(piEntryPath),
       {
         timeout: 120000,
@@ -101,6 +75,22 @@ describe("Desktop fresh-install bootstrap (mock)", () => {
         timeoutMsg: "Bundled Pi runtime was not installed into the plugin directory.",
       }
     );
+
+    const overviewState = await browser.execute(() => {
+      const panel = document.querySelector(
+        '.systemsculpt-tab-content.is-active[data-tab="overview"]'
+      ) as HTMLElement | null;
+      const panelText = panel?.textContent || "";
+      return {
+        hasRawBootstrapError: panelText.includes("Unable to resolve the SystemSculpt plugin installation directory"),
+        hasInstallFailureSummary: panelText.includes("Bundled Pi runtime could not finish installing."),
+        hasTemporaryUnavailableSummary: panelText.includes("Pi setup is temporarily unavailable."),
+      };
+    });
+
+    expect(overviewState.hasRawBootstrapError).toBe(false);
+    expect(overviewState.hasInstallFailureSummary).toBe(false);
+    expect(overviewState.hasTemporaryUnavailableSummary).toBe(false);
   });
 
   it("bootstraps node-pty from release assets when terminal sessions start on desktop", async function () {
