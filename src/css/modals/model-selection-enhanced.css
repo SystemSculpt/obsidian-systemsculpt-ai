@@ -432,32 +432,21 @@
   border-style: dashed;
 }
 
-/* Add "SELECTED" badge to the currently active model */
-.systemsculpt-model-selection-modal .ss-modal__item.ss-active::before {
-  content: "SELECTED";
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  z-index: 2;
-  box-shadow: 0 1px 3px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+.systemsculpt-model-selection-modal .ss-modal__item {
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
 }
 
-/* Adjust existing badges when "SELECTED" badge is present */
-.systemsculpt-model-selection-modal .ss-modal__item.ss-active .provider-badge {
-  margin-right: 60px; /* Make room for the SELECTED badge */
+.systemsculpt-model-selection-modal .ss-modal__item-content {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .systemsculpt-model-selection-modal .ss-modal__item-icon {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -466,16 +455,16 @@
 }
 
 .systemsculpt-model-selection-modal .ss-modal__item-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 /* Enhanced icon styling for selected model */
 .systemsculpt-model-selection-modal .ss-modal__item.ss-active .ss-modal__item-icon {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
-  border-radius: 4px;
-  box-shadow: 0 2px 4px color-mix(in srgb, rgb(0, 0, 0) 10%, var(--ss-layer-base));
+  border-radius: 3px;
+  box-shadow: 0 1px 2px color-mix(in srgb, rgb(0, 0, 0) 8%, var(--ss-layer-base));
 }
 
 .systemsculpt-model-selection-modal .ss-modal__item.ss-active .ss-modal__item-title {
@@ -484,15 +473,14 @@
 }
 
 .systemsculpt-model-selection-modal .ss-modal__item-title {
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.1;
   font-weight: 500;
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .systemsculpt-model-selection-modal .ss-modal__item-description {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-muted);
+  display: none;
 }
 
 /* Special styling for current model when shown outside filter results */
@@ -520,40 +508,70 @@
 }
 
 /* === Provider Badges === */
-.systemsculpt-model-selection-modal .provider-badge {
-  padding: 2px 6px;
+.systemsculpt-model-selection-modal .ss-modal__item-badge {
+  padding: 1px 5px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1.2;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: var(--background-secondary);
   color: var(--text-muted);
   border: 1px solid var(--background-modifier-border);
 }
 
-.systemsculpt-model-selection-modal .provider-badge[data-badge="New"] {
-  background: var(--color-green);
-  color: white;
-  border-color: var(--color-green);
+.systemsculpt-model-selection-modal .systemsculpt-favorite-button-container {
+  width: 22px;
+  height: 22px;
 }
 
-.systemsculpt-model-selection-modal .provider-badge[data-badge="Beta"] {
-  background: var(--color-orange);
-  color: white;
-  border-color: var(--color-orange);
+.systemsculpt-model-selection-modal .systemsculpt-favorite-toggle {
+  width: 20px;
+  height: 20px;
+  background: transparent;
 }
 
-.systemsculpt-model-selection-modal .provider-badge[data-badge="Agent"] {
+.systemsculpt-model-selection-modal .systemsculpt-favorite-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-model-selection-modal .systemsculpt-favorite-toggle:hover {
+  transform: scale(1.08);
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item-badge[data-badge="Agent"] {
   background: var(--color-purple);
   color: white;
   border-color: var(--color-purple);
 }
 
-.systemsculpt-model-selection-modal .provider-badge[data-badge="Legacy"] {
-  background: var(--color-red);
-  color: white;
-  border-color: var(--color-red);
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="openai"] .ss-modal__item-badge {
+  border-color: color-mix(in srgb, #10a37f 45%, var(--background-modifier-border));
+  color: color-mix(in srgb, #10a37f 90%, var(--text-normal));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="anthropic"] .ss-modal__item-badge {
+  border-color: color-mix(in srgb, #d97706 40%, var(--background-modifier-border));
+  color: color-mix(in srgb, #d97706 90%, var(--text-normal));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="google"] .ss-modal__item-badge,
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="google-gemini-cli"] .ss-modal__item-badge,
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="google-antigravity"] .ss-modal__item-badge {
+  border-color: color-mix(in srgb, #2563eb 40%, var(--background-modifier-border));
+  color: color-mix(in srgb, #2563eb 92%, var(--text-normal));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item[data-provider="openrouter"] .ss-modal__item-badge {
+  border-color: color-mix(in srgb, #0f766e 40%, var(--background-modifier-border));
+  color: color-mix(in srgb, #0f766e 92%, var(--text-normal));
+}
+
+.systemsculpt-model-selection-modal .ss-modal__item.ss-provider-access-unavailable .ss-modal__item-badge {
   opacity: 0.8;
 }
 

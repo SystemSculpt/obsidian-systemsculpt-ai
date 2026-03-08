@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { SystemPromptPreset } from "../types";
+import type { SystemPromptPreset } from "../types";
 import { LOCAL_SYSTEM_PROMPTS, GENERAL_USE_PRESET, CONCISE_PRESET } from "../constants/prompts";
 
 export type SystemPromptSelectionType = "general-use" | "concise" | "agent" | "custom";

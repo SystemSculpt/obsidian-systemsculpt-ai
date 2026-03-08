@@ -67,7 +67,7 @@ export class StandardModelSelectionModal {
     this.selectedModelId = options.currentModelId;
     this.onSelect = options.onSelect;
     this.modalTitle = options.title || "Select AI Model";
-    this.modalDescription = options.description || "Choose a local Pi model from your connected providers.";
+    this.modalDescription = options.description || "Choose a Pi model. Each option shows the provider it will run through.";
     this.searchService = SearchService.getInstance();
     this.favoritesService = FavoritesService.getInstance(this.plugin);
 

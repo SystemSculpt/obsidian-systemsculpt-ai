@@ -10,6 +10,20 @@ export type ModelSelectionItemBuilderOptions = {
   resolveModelAccessState: (model: SystemSculptModel) => ModelSelectionProviderAccessState;
 };
 
+function getModelProviderId(model: Pick<SystemSculptModel, "provider" | "sourceProviderId">): string {
+  return String(model.sourceProviderId || model.provider || "").trim();
+}
+
+function getModelProviderLabel(
+  model: Pick<SystemSculptModel, "provider" | "sourceProviderId">,
+  resolveProviderLabel: (providerName: string) => string
+): string {
+  const providerId = getModelProviderId(model);
+  const resolvedLabel = String(resolveProviderLabel(providerId) || "").trim();
+  const compactLabel = resolvedLabel.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+  return compactLabel || resolvedLabel || providerId || "Pi";
+}
+
 function isModelSelected(modelId: string, selectedModelId: string): boolean {
   if (selectedModelId === modelId) {
     return true;
@@ -30,71 +44,6 @@ function getProviderAccessRank(state: ModelSelectionProviderAccessState): number
   return 2;
 }
 
-function getModelCapabilities(model: SystemSculptModel): string[] {
-  const capabilities: string[] = [];
-
-  if ((model as any).supports_vision) capabilities.push("Vision");
-  if ((model as any).supports_functions) capabilities.push("Functions");
-  if ((model as any).supports_streaming !== false) capabilities.push("Streaming");
-  if (model.context_length && model.context_length >= 100000) capabilities.push("Long Context");
-
-  return capabilities;
-}
-
-function formatContextLength(tokens: number): string {
-  if (tokens >= 1000000) {
-    return `${(tokens / 1000000).toFixed(1)}M tokens`;
-  }
-  if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(0)}K tokens`;
-  }
-  return `${tokens} tokens`;
-}
-
-function getProviderAccessLabel(
-  accessState: ModelSelectionProviderAccessState,
-  providerLabel: string
-): string {
-  if (accessState === "pi-auth") {
-    return `Pi connected via ${providerLabel}`;
-  }
-  if (accessState === "local") {
-    return "Local Pi runtime";
-  }
-  return "Connect in Pi";
-}
-
-function getModelDescription(
-  model: SystemSculptModel,
-  accessState: ModelSelectionProviderAccessState,
-  providerLabel: string
-): string {
-  const parts: string[] = [getProviderAccessLabel(accessState, providerLabel)];
-
-  if (model.context_length) {
-    parts.push(formatContextLength(model.context_length));
-  }
-
-  const pricing = (model as any).pricing;
-  if (pricing?.input && pricing?.output) {
-    parts.push(`$${pricing.input}/$${pricing.output} per 1K`);
-  }
-
-  const capabilityParts: string[] = [];
-  if ((model as any).supports_vision) capabilityParts.push("Vision");
-  if ((model as any).supports_functions) capabilityParts.push("Functions");
-  if ((model as any).supports_streaming) capabilityParts.push("Streaming");
-  if (capabilityParts.length > 0) {
-    parts.push(capabilityParts.join(" · "));
-  }
-
-  if (model.description && model.description.length > 0 && model.description.length < 100) {
-    parts.push(model.description);
-  }
-
-  return parts.join(" • ");
-}
-
 function getModelIcon(
   model: SystemSculptModel,
   accessState: ModelSelectionProviderAccessState
@@ -113,26 +62,10 @@ function getModelIcon(
 
 function getModelBadge(
   model: SystemSculptModel,
-  accessState: ModelSelectionProviderAccessState,
   providerLabel: string
 ): string {
   if (getCanonicalId(model) === "systemsculpt@@vault-agent") {
     return "Agent";
-  }
-  if ((model as any).is_new) {
-    return "New";
-  }
-  if ((model as any).is_beta) {
-    return "Beta";
-  }
-  if ((model as any).is_deprecated) {
-    return "Legacy";
-  }
-  if (accessState === "pi-auth") {
-    return `${providerLabel} ✓`;
-  }
-  if (accessState === "local") {
-    return "Local Pi";
   }
   return providerLabel;
 }
@@ -152,11 +85,12 @@ export function getModelSelectionSearchableFields(
   model: SystemSculptModel,
   resolveProviderLabel: (providerName: string) => string
 ): SearchableField[] {
-  const providerLabel = resolveProviderLabel(model.provider || "");
+  const providerLabel = getModelProviderLabel(model, resolveProviderLabel);
+  const providerId = getModelProviderId(model);
   return [
     { field: "name", text: model.name || "", weight: 2.0 },
     { field: "description", text: model.description || "", weight: 0.5 },
-    { field: "provider", text: model.provider || "", weight: 0.8 },
+    { field: "provider", text: providerId, weight: 0.8 },
     { field: "providerLabel", text: providerLabel || "", weight: 0.9 },
     { field: "id", text: model.id || "", weight: 0.6 },
   ];
@@ -186,40 +120,43 @@ export function buildModelSelectionListItems(
       return accessCompare;
     }
 
-    const providerCompare = options
-      .resolveProviderLabel(left.provider || "")
-      .localeCompare(options.resolveProviderLabel(right.provider || ""));
+    const providerCompare = getModelProviderLabel(left, options.resolveProviderLabel)
+      .localeCompare(getModelProviderLabel(right, options.resolveProviderLabel));
     if (providerCompare !== 0) {
       return providerCompare;
     }
 
-    return left.name.localeCompare(right.name);
+    return String(left.name || "").localeCompare(String(right.name || ""));
   });
 
   return sortedModels.map((model) => {
-    const providerLabel = options.resolveProviderLabel(model.provider || "");
+    const providerLabel = getModelProviderLabel(model, options.resolveProviderLabel);
     const accessState = options.resolveModelAccessState(model);
     const isCurrentModel = isModelSelected(model.id, options.selectedModelId);
     const providerAuthenticated = accessState === "pi-auth" || accessState === "local";
     const disabled = accessState === "unavailable";
+    const title =
+      String(model.name || "").trim() ||
+      String(model.identifier?.displayName || "").trim() ||
+      String(model.identifier?.modelId || "").trim() ||
+      model.id;
 
     const item: ListItem = {
       id: model.id,
-      title: model.name,
-      description: getModelDescription(model, accessState, providerLabel),
+      title,
       icon: getModelIcon(model, accessState),
       selected: isCurrentModel,
       disabled,
-      badge: getModelBadge(model, accessState, providerLabel),
+      badge: getModelBadge(model, providerLabel),
       metadata: {
-        provider: model.provider,
+        provider: getModelProviderId(model),
+        providerLabel,
         providerAccessState: accessState,
         contextLength: model.context_length,
         isFavorite: model.isFavorite || false,
         isNew: (model as any).is_new || false,
         isBeta: (model as any).is_beta || false,
         isDeprecated: (model as any).is_deprecated || false,
-        capabilities: getModelCapabilities(model),
         isCurrentModel,
         providerAuthenticated,
         disabled,

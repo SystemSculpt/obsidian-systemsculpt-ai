@@ -132,12 +132,13 @@ describe("StandardModelSelectionModal auth helpers", () => {
     });
   });
 
-  it("decorates model items with provider access copy and classes", () => {
+  it("builds compact provider-first model items", () => {
     const items = buildModelSelectionListItems(
       [
         {
           id: "openai@@gpt-4.1",
-          provider: "openai",
+          provider: "pi",
+          sourceProviderId: "openai",
           name: "GPT-4.1",
           description: "Fast and strong",
           context_length: 128000,
@@ -156,18 +157,24 @@ describe("StandardModelSelectionModal auth helpers", () => {
       {
         selectedModelId: "openai@@gpt-4.1",
         resolveProviderLabel: (provider) => (provider === "openai" ? "OpenAI" : "Anthropic"),
-        resolveModelAccessState: (model) => (model.provider === "openai" ? "pi-auth" : "unavailable"),
+        resolveModelAccessState: (model) =>
+          model.sourceProviderId === "openai" || model.provider === "openai"
+            ? "pi-auth"
+            : "unavailable",
       }
     );
 
     expect(items[0]).toMatchObject({
       id: "openai@@gpt-4.1",
-      badge: "OpenAI ✓",
+      badge: "OpenAI",
       selected: true,
     });
-    expect(items[0].description).toContain("Pi connected via OpenAI");
+    expect(items[0].description).toBeUndefined();
+    expect(items[0].metadata?.provider).toBe("openai");
+    expect(items[0].metadata?.providerLabel).toBe("OpenAI");
     expect((items[0] as any).additionalClasses).toContain("ss-provider-access-pi-auth");
-    expect(items[1].description).toContain("Connect in Pi");
+    expect(items[1].badge).toBe("Anthropic");
+    expect(items[1].description).toBeUndefined();
     expect(items[1].disabled).toBe(true);
   });
 

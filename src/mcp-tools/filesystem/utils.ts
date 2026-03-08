@@ -1,7 +1,7 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import path from "node:path";
 import fs from "node:fs/promises";
-import SystemSculptPlugin from "../../main";
+import type SystemSculptPlugin from "../../main";
 import { FILESYSTEM_LIMITS } from "./constants";
 
 /**

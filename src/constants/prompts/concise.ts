@@ -1,4 +1,4 @@
-import { SystemPromptPreset } from "../../types";
+import type { SystemPromptPreset } from "../../types";
 
 /**
  * Concise system prompt - focused on brevity

@@ -1,4 +1,4 @@
-import { SystemPromptPreset } from "../../types";
+import type { SystemPromptPreset } from "../../types";
 
 /**
  * Agent system prompt - vault agent protocol

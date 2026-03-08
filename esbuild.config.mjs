@@ -103,6 +103,15 @@ const watchCss = () => {
 	});
 };
 
+const clearDestinationPath = (targetPath) => {
+	fs.rmSync(targetPath, {
+		recursive: true,
+		force: true,
+		maxRetries: 8,
+		retryDelay: 150,
+	});
+};
+
 const buildOptions = {
 	banner: {
 		js: banner,
@@ -252,7 +261,7 @@ const syncArtifacts = () => {
 					throw new Error(`Runtime dependency missing: ${srcModulePath}`);
 				}
 				const destModulePath = path.join(target, relativeRuntimePath);
-				fs.rmSync(destModulePath, { recursive: true, force: true });
+				clearDestinationPath(destModulePath);
 				copyDirectoryRecursive(srcModulePath, destModulePath);
 			}
 			logger.info(`[Sync] Updated ${target}`);

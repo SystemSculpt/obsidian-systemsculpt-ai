@@ -1,4 +1,4 @@
-import { SystemPromptPreset } from "../../types";
+import type { SystemPromptPreset } from "../../types";
 
 /**
  * General use system prompt - comprehensive and balanced
