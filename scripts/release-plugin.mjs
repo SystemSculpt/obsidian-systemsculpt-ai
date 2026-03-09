@@ -255,7 +255,7 @@ function getRepoRoot() {
 }
 
 function ensureExpectedFiles() {
-  const required = ["README.md", "LICENSE", "manifest.json", "package.json", "versions.json"];
+  const required = ["README.md", "LICENSE", "manifest.json", "package.json", "package-lock.json", "versions.json"];
   for (const file of required) {
     const abs = path.join(cwd, file);
     if (!fs.existsSync(abs)) {
@@ -525,11 +525,13 @@ function main() {
 
   const manifestPath = path.join(cwd, "manifest.json");
   const packagePath = path.join(cwd, "package.json");
+  const lockfilePath = path.join(cwd, "package-lock.json");
   const versionsPath = path.join(cwd, "versions.json");
   const readmePath = path.join(cwd, "README.md");
 
   const manifest = readJson(manifestPath);
   const pkg = readJson(packagePath);
+  const lockfile = readJson(lockfilePath);
   const versions = readJson(versionsPath);
 
   if (manifest.version !== pkg.version) {
@@ -587,15 +589,20 @@ function main() {
   logStep(`Updating version files to ${newVersion}`);
   manifest.version = newVersion;
   pkg.version = newVersion;
+  lockfile.version = newVersion;
+  if (lockfile.packages && lockfile.packages[""]) {
+    lockfile.packages[""].version = newVersion;
+  }
   versions[newVersion] = manifest.minAppVersion;
 
   writeJson(manifestPath, manifest);
   writeJson(packagePath, pkg);
+  writeJson(lockfilePath, lockfile);
   writeJson(versionsPath, versions);
   updateReadmeVersion(readmePath, newVersion);
 
   logStep("Staging release metadata files");
-  run("git", ["add", "manifest.json", "package.json", "versions.json", "README.md"]);
+  run("git", ["add", "manifest.json", "package.json", "package-lock.json", "versions.json", "README.md"]);
 
   logStep(`Committing release metadata (release: ${newVersion})`);
   run("git", ["commit", "-m", `release: ${newVersion}`]);
