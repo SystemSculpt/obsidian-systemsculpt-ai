@@ -1,10 +1,32 @@
+jest.mock("../../utils/errorLogger", () => ({
+  errorLogger: {
+    debug: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  },
+}));
+
 import { EmbeddingsProcessor } from "../../services/embeddings/processing/EmbeddingsProcessor";
 import type { EmbeddingsProvider } from "../../services/embeddings/types";
 import { EmbeddingsProviderError } from "../../services/embeddings/providers/ProviderError";
 import { buildNamespace } from "../../services/embeddings/utils/namespace";
 import { buildVectorId } from "../../services/embeddings/utils/vectorId";
 
+const { errorLogger } = require("../../utils/errorLogger") as {
+  errorLogger: {
+    debug: jest.Mock;
+    warn: jest.Mock;
+    error: jest.Mock;
+  };
+};
+
 describe("EmbeddingsProcessor batching", () => {
+  beforeEach(() => {
+    errorLogger.debug.mockReset();
+    errorLogger.warn.mockReset();
+    errorLogger.error.mockReset();
+  });
+
   const createChunks = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       index,
@@ -159,6 +181,11 @@ describe("EmbeddingsProcessor batching", () => {
     expect(provider.generateEmbeddings).toHaveBeenCalledTimes(1);
     expect(result.fatalError).toBe(cooldownError);
     expect(result.failedPaths).toEqual([]);
+    expect(errorLogger.error).not.toHaveBeenCalledWith(
+      expect.stringContaining("Embeddings batch failed with fatal error; stopping."),
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it("isolates HTML 403 blocks to the offending chunk and continues embedding others", async () => {

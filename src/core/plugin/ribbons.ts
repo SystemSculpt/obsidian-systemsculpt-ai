@@ -13,8 +13,6 @@ export class RibbonManager {
   private plugin: SystemSculptPlugin;
   private app: App;
   private ribbons: RibbonHandle[] = [];
-  private videoRecorderRibbonEl: HTMLElement | null = null;
-  private videoRecorderToggleUnsubscribe: (() => void) | null = null;
   private isInitialized: boolean = false;
   private isDisposed: boolean = false;
 
@@ -43,7 +41,6 @@ export class RibbonManager {
    * 5. SystemSculpt Search
    * 6. Meeting Processor
    * 7. YouTube Canvas
-   * 8. Video Recorder Toggle
    */
   private registerRibbonIcons() {
     // 1. SystemSculpt Chat
@@ -93,18 +90,6 @@ export class RibbonManager {
       const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
       new YouTubeCanvasModal(this.app, this.plugin).open();
     });
-
-    // 8. Video Recorder Toggle
-    const videoRibbon = this.registerRibbonIcon(
-      "video",
-      "Start Obsidian Video Recording",
-      () => {
-        void this.toggleVideoRecorderFromRibbon();
-      }
-    ) as HTMLElement | null;
-    this.videoRecorderRibbonEl = videoRibbon;
-    this.bindVideoRecorderRibbonState(videoRibbon);
-
   }
 
   private registerRibbonIcon(icon: string, title: string, callback: () => void) {
@@ -136,9 +121,6 @@ export class RibbonManager {
       return;
     }
     this.isDisposed = true;
-    this.videoRecorderToggleUnsubscribe?.();
-    this.videoRecorderToggleUnsubscribe = null;
-    this.videoRecorderRibbonEl = null;
     this.ribbons.forEach((ribbon) => this.safeRemoveRibbon(ribbon));
     this.ribbons = [];
   }
@@ -193,46 +175,4 @@ export class RibbonManager {
   public async openSimilarNotesView() {
     await this.plugin.getViewManager().activateEmbeddingsView();
   }
-
-  private async toggleVideoRecorderFromRibbon(): Promise<void> {
-    try {
-      const service = this.plugin.ensureVideoRecorderService?.();
-      if (!service) {
-        new Notice("Video recorder service is unavailable.", 5000);
-        return;
-      }
-      await service.toggleRecording();
-    } catch (error) {
-      new Notice(`Unable to toggle video recorder: ${error instanceof Error ? error.message : String(error)}`, 7000);
-    }
-  }
-
-  private bindVideoRecorderRibbonState(ribbon: HTMLElement | null): void {
-    if (!ribbon || typeof this.plugin.ensureVideoRecorderService !== "function") {
-      return;
-    }
-
-    try {
-      const service = this.plugin.ensureVideoRecorderService();
-      const updateState = (recording: boolean) => {
-        ribbon.classList.toggle("ss-ribbon-video-recording", recording);
-        ribbon.setAttribute(
-          "aria-label",
-          recording ? "Stop Obsidian Video Recording" : "Start Obsidian Video Recording"
-        );
-        ribbon.setAttribute(
-          "title",
-          recording ? "Stop Obsidian Video Recording" : "Start Obsidian Video Recording"
-        );
-      };
-
-      updateState(service.isRecordingActive());
-      this.videoRecorderToggleUnsubscribe?.();
-      this.videoRecorderToggleUnsubscribe = service.onToggle(updateState);
-    } catch {
-      // Ribbon still works as a toggle even if service binding fails during init.
-    }
-  }
-
-  
 }

@@ -60,8 +60,15 @@ describe("StandardModelSelectionModal auth helpers", () => {
     ).toBe(false);
   });
 
-  it("builds a provider-first summary for local-ready, connected, and unavailable providers", () => {
+  it("builds a provider-first summary for managed, local-ready, connected, and unavailable providers", () => {
     const models = [
+      {
+        id: "systemsculpt@@systemsculpt/ai-agent",
+        provider: "systemsculpt",
+        name: "SystemSculpt",
+        piLocalAvailable: true,
+        piAuthMode: "local",
+      },
       { id: "openai@@gpt-4.1", provider: "openai", name: "GPT-4.1", piLocalAvailable: true },
       { id: "anthropic@@claude-3.7", provider: "anthropic", name: "Claude 3.7", piLocalAvailable: true },
       { id: "openrouter@@google/gemini-3-flash-preview", provider: "openrouter", name: "Gemini 3 Flash" },
@@ -88,17 +95,25 @@ describe("StandardModelSelectionModal auth helpers", () => {
       }
     );
 
-    expect(summary.totalModels).toBe(3);
-    expect(summary.totalProviders).toBe(3);
+    expect(summary.totalModels).toBe(4);
+    expect(summary.totalProviders).toBe(4);
     expect(summary.piReadyProviders).toBe(0);
     expect(summary.managedProviders).toBe(0);
-    expect(summary.localProviders).toBe(1);
+    expect(summary.localProviders).toBe(2);
     expect(summary.unavailableProviders).toBe(2);
     expect(summary.providers[0]).toMatchObject({
       providerId: "openai",
       accessState: "local",
       isCurrentProvider: true,
     });
+    expect(summary.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: "systemsculpt",
+          accessState: "local",
+        }),
+      ])
+    );
     expect(summary.providers.map((provider) => provider.accessState)).toContain("unavailable");
   });
 
@@ -136,6 +151,14 @@ describe("StandardModelSelectionModal auth helpers", () => {
     const items = buildModelSelectionListItems(
       [
         {
+          id: "systemsculpt@@systemsculpt/ai-agent",
+          provider: "systemsculpt",
+          name: "SystemSculpt",
+          description: "Managed SystemSculpt lane",
+          piLocalAvailable: true,
+          piAuthMode: "local",
+        },
+        {
           id: "openai@@gpt-4.1",
           provider: "pi",
           sourceProviderId: "openai",
@@ -156,26 +179,35 @@ describe("StandardModelSelectionModal auth helpers", () => {
       ] as any,
       {
         selectedModelId: "openai@@gpt-4.1",
-        resolveProviderLabel: (provider) => (provider === "openai" ? "OpenAI" : "Anthropic"),
+        resolveProviderLabel: (provider) =>
+          provider === "openai" ? "OpenAI" : provider === "systemsculpt" ? "SystemSculpt" : "Anthropic",
         resolveModelAccessState: (model) =>
-          model.sourceProviderId === "openai" || model.provider === "openai"
-            ? "pi-auth"
-            : "unavailable",
+          model.provider === "systemsculpt"
+            ? "local"
+            : model.sourceProviderId === "openai" || model.provider === "openai"
+              ? "pi-auth"
+              : "unavailable",
       }
     );
 
     expect(items[0]).toMatchObject({
+      id: "systemsculpt@@systemsculpt/ai-agent",
+      badge: "SystemSculpt",
+      selected: false,
+    });
+    expect((items[0] as any).additionalClasses).toContain("ss-provider-access-local");
+    expect(items[1]).toMatchObject({
       id: "openai@@gpt-4.1",
       badge: "OpenAI",
       selected: true,
     });
-    expect(items[0].description).toBeUndefined();
-    expect(items[0].metadata?.provider).toBe("openai");
-    expect(items[0].metadata?.providerLabel).toBe("OpenAI");
-    expect((items[0] as any).additionalClasses).toContain("ss-provider-access-pi-auth");
-    expect(items[1].badge).toBe("Anthropic");
     expect(items[1].description).toBeUndefined();
-    expect(items[1].disabled).toBe(true);
+    expect(items[1].metadata?.provider).toBe("openai");
+    expect(items[1].metadata?.providerLabel).toBe("OpenAI");
+    expect((items[1] as any).additionalClasses).toContain("ss-provider-access-pi-auth");
+    expect(items[2].badge).toBe("Anthropic");
+    expect(items[2].description).toBeUndefined();
+    expect(items[2].disabled).toBe(true);
   });
 
   it("treats desktop local Pi models without auth as unavailable", () => {

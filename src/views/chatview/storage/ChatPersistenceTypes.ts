@@ -30,6 +30,13 @@ export interface ChatMetadata {
   piLastSyncedAt?: string;
 }
 
+export interface PiSessionState {
+  sessionFile?: string;
+  sessionId?: string;
+  lastEntryId?: string;
+  lastSyncedAt?: string;
+}
+
 export interface ParsedChatMarkdown {
   metadata: ChatMetadata;
   messages: ChatMessage[];
@@ -43,25 +50,69 @@ export interface ChatResumeDescriptor {
   chatBackend: ChatBackend;
   lastModified: number;
   messageCount: number;
-  pi?: {
-    sessionFile?: string;
-    sessionId?: string;
-    lastEntryId?: string;
-    lastSyncedAt?: string;
+  pi?: PiSessionState;
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+export function normalizePiSessionState(options?: {
+  sessionFile?: unknown;
+  sessionId?: unknown;
+  lastEntryId?: unknown;
+  lastSyncedAt?: unknown;
+}): PiSessionState {
+  return {
+    sessionFile: normalizeOptionalString(options?.sessionFile),
+    sessionId: normalizeOptionalString(options?.sessionId),
+    lastEntryId: normalizeOptionalString(options?.lastEntryId),
+    lastSyncedAt: normalizeOptionalString(options?.lastSyncedAt),
   };
 }
 
 export function resolveChatBackend(options: {
   explicitBackend?: unknown;
   piSessionFile?: unknown;
+  piSessionId?: unknown;
 }): ChatBackend {
   if (options.explicitBackend === "pi" || options.explicitBackend === "legacy") {
     return options.explicitBackend;
   }
 
-  return typeof options.piSessionFile === "string" && options.piSessionFile.trim().length > 0
-    ? "pi"
-    : "legacy";
+  const piState = normalizePiSessionState({
+    sessionFile: options.piSessionFile,
+    sessionId: options.piSessionId,
+  });
+  return piState.sessionFile || piState.sessionId ? "pi" : "legacy";
+}
+
+export function buildChatLeafState(input: {
+  chatId: string;
+  title: string;
+  modelId: string;
+  chatPath: string;
+  chatBackend: ChatBackend;
+  pi?: PiSessionState;
+}): Record<string, unknown> {
+  const piState = normalizePiSessionState({
+    sessionFile: input.pi?.sessionFile,
+    sessionId: input.pi?.sessionId,
+    lastEntryId: input.pi?.lastEntryId,
+    lastSyncedAt: input.pi?.lastSyncedAt,
+  });
+
+  return {
+    chatId: input.chatId,
+    chatTitle: input.title,
+    selectedModelId: input.modelId,
+    chatBackend: input.chatBackend,
+    piSessionFile: piState.sessionFile,
+    piSessionId: piState.sessionId,
+    piLastEntryId: piState.lastEntryId,
+    piLastSyncedAt: piState.lastSyncedAt,
+    file: input.chatPath,
+  };
 }
 
 export function getLastMessagePiEntryId(messages: ChatMessage[]): string | undefined {

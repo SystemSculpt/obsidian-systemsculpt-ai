@@ -329,7 +329,7 @@ export const uiSetup = {
           try {
             await chatView.syncPiSessionTranscript({
               syncTitle: true,
-              render: true,
+              render: false,
               persist: true,
               force: true,
             });

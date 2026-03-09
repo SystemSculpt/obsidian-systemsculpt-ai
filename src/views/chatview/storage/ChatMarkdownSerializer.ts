@@ -4,7 +4,12 @@ import * as obsidianApi from "obsidian";
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
-import type { ChatMetadata, ParsedChatMarkdown } from "./ChatPersistenceTypes";
+import {
+  normalizePiSessionState,
+  resolveChatBackend,
+  type ChatMetadata,
+  type ParsedChatMarkdown,
+} from "./ChatPersistenceTypes";
 
 /**
  * ChatMarkdownSerializer – central place for converting between in-memory
@@ -331,6 +336,13 @@ export class ChatMarkdownSerializer {
       systemMessagePath = parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1");
     }
 
+    const piState = normalizePiSessionState({
+      sessionFile: parsed.piSessionFile,
+      sessionId: parsed.piSessionId,
+      lastEntryId: parsed.piLastEntryId,
+      lastSyncedAt: parsed.piLastSyncedAt,
+    });
+
     return {
       id,
       model,
@@ -344,11 +356,15 @@ export class ChatMarkdownSerializer {
         path: systemMessagePath,
       },
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
-      chatBackend: parsed.chatBackend === "pi" || parsed.chatBackend === "legacy" ? parsed.chatBackend : undefined,
-      piSessionFile: typeof parsed.piSessionFile === "string" ? parsed.piSessionFile : undefined,
-      piSessionId: typeof parsed.piSessionId === "string" ? parsed.piSessionId : undefined,
-      piLastEntryId: typeof parsed.piLastEntryId === "string" ? parsed.piLastEntryId : undefined,
-      piLastSyncedAt: typeof parsed.piLastSyncedAt === "string" ? parsed.piLastSyncedAt : undefined,
+      chatBackend: resolveChatBackend({
+        explicitBackend: parsed.chatBackend,
+        piSessionFile: piState.sessionFile,
+        piSessionId: piState.sessionId,
+      }),
+      piSessionFile: piState.sessionFile,
+      piSessionId: piState.sessionId,
+      piLastEntryId: piState.lastEntryId,
+      piLastSyncedAt: piState.lastSyncedAt,
     };
   }
 

@@ -1,6 +1,10 @@
 import { SystemSculptModel } from "../types/llm";
 import { FavoriteModel } from "../types/favorites";
-import { ensureCanonicalId } from "../utils/modelUtils";
+import {
+  compareSystemSculptModelPriority,
+  ensureCanonicalId,
+  isSystemSculptModel,
+} from "../utils/modelUtils";
 
 /**
  * Service for managing favorite models
@@ -204,12 +208,17 @@ export class FavoritesService {
     const favoritesFirst = this.plugin.settings.favoritesFilterSettings.favoritesFirst;
     const sortOrder = this.plugin.settings.favoritesFilterSettings.modelSortOrder;
 
-    // If neither favoritesFirst nor alphabetical sort is needed, return original order
+    // Even in default mode, keep SystemSculpt pinned to the top of the visible list.
     if (!favoritesFirst && sortOrder === 'default') {
-      return models;
+      return [...models].sort((a, b) => compareSystemSculptModelPriority(a, b));
     }
 
     return [...models].sort((a, b) => {
+      const pinnedCompare = compareSystemSculptModelPriority(a, b);
+      if (pinnedCompare !== 0) {
+        return pinnedCompare;
+      }
+
       // --- Primary Sort: Favorites First (if enabled) ---
       if (favoritesFirst) {
         const aIsFav = a.isFavorite === true;
@@ -243,7 +252,7 @@ export class FavoritesService {
       return models;
     }
 
-    return models.filter(model => model.isFavorite === true);
+    return models.filter((model) => model.isFavorite === true || isSystemSculptModel(model));
   }
 
   /**

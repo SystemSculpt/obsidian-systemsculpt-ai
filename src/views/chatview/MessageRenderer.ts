@@ -16,7 +16,7 @@ import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
 import { formatReasoningForDisplay } from "./utils/reasoningFormat";
 import { applyTreeLayout, seedTreeLine, TREE_HEADER_SYMBOL, setBulletSymbol } from "./utils/treeConnectors";
 import { MarkdownMessageRenderer } from "./renderers/MarkdownMessageRenderer";
-import { attachMessageToolbar } from "./ui/MessageToolbar";
+import { attachMessageToolbar, type MessageToolbarResendResult } from "./ui/MessageToolbar";
 import { ToolCallTreeRenderer } from "./renderers/ToolCallTreeRenderer";
 import {
   createInlineBlock,
@@ -97,12 +97,14 @@ export class MessageRenderer extends Component {
     role,
     content,
     annotations,
+    onResend,
   }: {
     app: App;
     messageId: string;
     role: ChatRole;
     content: string | MultiPartContent[] | null;
     annotations?: Annotation[];
+    onResend?: (input: { messageId: string; content: string }) => Promise<MessageToolbarResendResult>;
   }): Promise<{ messageEl: HTMLElement; contentEl: HTMLElement }> {
     const messageEl = document.createElement("div");
     messageEl.classList.add("systemsculpt-message");
@@ -163,6 +165,7 @@ export class MessageRenderer extends Component {
         messageEl,
         role,
         messageId,
+        onResend,
       });
     } catch {}
 
@@ -288,6 +291,7 @@ export class MessageRenderer extends Component {
         messageEl,
         role,
         messageId,
+        onResend: undefined,
       });
     } catch {}
   }

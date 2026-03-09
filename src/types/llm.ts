@@ -27,7 +27,6 @@ export type SystemSculptTextModelSourceMode =
   | "systemsculpt"
   | "custom_endpoint"
   | "local_pi"
-  | "pi_managed"
   | "pi_local";
 
 export type SystemSculptPiTextAuthMode =

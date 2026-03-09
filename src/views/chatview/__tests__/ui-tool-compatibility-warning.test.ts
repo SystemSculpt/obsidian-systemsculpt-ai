@@ -1,4 +1,5 @@
 jest.mock("../../../utils/modelUtils", () => ({
+  createCanonicalId: jest.fn((providerId: string, modelId: string) => `${String(providerId || "").toLowerCase()}@@${modelId}`),
   ensureCanonicalId: jest.fn((id: string) => id || ""),
   getModelLabelWithProvider: jest.fn((id: string) => id || ""),
   getDisplayName: jest.fn((id: string) => (id === "text-only-model" ? "Text Only Model" : id || "")),

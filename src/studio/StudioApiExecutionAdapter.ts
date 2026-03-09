@@ -18,8 +18,10 @@ import type {
 } from "./types";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { runStudioLocalPiTextGeneration } from "./StudioLocalTextModelCatalog";
-import { resolvePiTextExecutionPlan, shouldUseLocalPiExecution } from "../services/pi-native/PiTextRuntime";
-import { randomId } from "./utils";
+import {
+  assertPiTextExecutionReady,
+  shouldUseLocalPiExecution,
+} from "../services/pi-native/PiTextRuntime";
 
 const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
 const STUDIO_MANAGED_IMAGE_MODEL_ID = "systemsculpt/managed-image";
@@ -261,6 +263,10 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     return lines.join("\n");
   }
 
+  private modelRequiresSystemSculptCredits(model: Awaited<ReturnType<StudioApiExecutionAdapter["resolveSelectedTextModel"]>>): boolean {
+    return String(model.provider || "").trim().toLowerCase() === "systemsculpt";
+  }
+
   private buildLocalPiTokenTypeGuidanceMessage(options: {
     modelId: string;
     rawMessage: string;
@@ -472,7 +478,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     if (!model) {
       return true;
     }
-    return !shouldUseLocalPiExecution(model);
+    return this.modelRequiresSystemSculptCredits(model) || !shouldUseLocalPiExecution(model);
   }
 
   async estimateRunCredits(project: StudioProjectV1): Promise<{ ok: boolean; reason?: string }> {
@@ -504,7 +510,8 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     const reasoningEffort = this.readReasoningEffort(request);
     const systemPrompt = String(request.systemPrompt || "").trim();
     const selectedModel = await this.resolveSelectedTextModel(request);
-    const executionPlan = await resolvePiTextExecutionPlan(selectedModel);
+    const executionPlan = await assertPiTextExecutionReady(selectedModel);
+
     try {
       const result = await this.runLocalPiTextTurnExclusive(() =>
         runStudioLocalPiTextGeneration({

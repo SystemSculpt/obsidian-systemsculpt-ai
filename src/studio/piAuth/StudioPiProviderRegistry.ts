@@ -25,6 +25,7 @@ export const API_KEY_ENV_VAR_BY_PROVIDER: Record<string, string> = {
 };
 
 export const PROVIDER_LABEL_OVERRIDES: Record<string, string> = {
+  systemsculpt: "SystemSculpt",
   "openai-codex": "OpenAI Codex (ChatGPT OAuth)",
   "google-gemini-cli": "Google Gemini CLI",
   "google-antigravity": "Google Antigravity",

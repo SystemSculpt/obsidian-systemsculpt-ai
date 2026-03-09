@@ -30,22 +30,23 @@ describe("ModelManagementService", () => {
     expect(models).toEqual([{ id: "openai@@gpt-5-mini" }]);
   });
 
-  it("returns the Pi execution id for remote models", async () => {
+  it("returns the Pi execution id for SystemSculpt models through the local Pi source", async () => {
     const plugin = buildPlugin();
     (plugin.modelService.getModelById as jest.Mock).mockResolvedValue({
-      id: "openai@@gpt-5-mini",
-      provider: "openai",
-      piExecutionModelId: "openai/gpt-5-mini",
-      piRemoteAvailable: true,
+      id: "systemsculpt@@systemsculpt/ai-agent",
+      provider: "systemsculpt",
+      sourceMode: "pi_local",
+      piExecutionModelId: "systemsculpt/ai-agent",
+      piLocalAvailable: true,
     });
 
     const service = new ModelManagementService(plugin, "https://api.systemsculpt.com/api/v1");
-    const info = await service.getModelInfo("openai@@gpt-5-mini");
+    const info = await service.getModelInfo("systemsculpt@@systemsculpt/ai-agent");
 
     expect(info).toMatchObject({
       isCustom: false,
-      modelSource: "pi_managed",
-      actualModelId: "openai/gpt-5-mini",
+      modelSource: "pi_local",
+      actualModelId: "systemsculpt/ai-agent",
     });
   });
 

@@ -40,6 +40,7 @@ export async function* executeLocalPiStream(
     plugin: input.plugin,
     modelId: input.prepared.actualModelId,
     messages: input.prepared.preparedMessages,
+    systemPrompt: input.prepared.finalSystemPrompt,
     sessionFile: input.sessionFile,
     onSessionReady: input.onSessionReady,
     signal: input.signal,

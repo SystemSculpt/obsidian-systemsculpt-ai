@@ -6,6 +6,10 @@ import {
   startPiProcess,
   type PiResolvedRuntime,
 } from "./PiProcessRuntime";
+import {
+  buildSystemSculptPiProviderEnv,
+  ensureSystemSculptPiProviderExtension,
+} from "./PiSystemSculptProvider";
 
 export type PiRpcThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -47,6 +51,7 @@ export type PiRpcClientOptions = {
   plugin: SystemSculptPlugin;
   modelId?: string;
   thinkingLevel?: PiRpcThinkingLevel;
+  systemPrompt?: string;
   sessionFile?: string;
   noSession?: boolean;
   cwd?: string;
@@ -88,6 +93,7 @@ export class PiRpcProcessClient {
     }
 
     const args = ["--mode", "rpc"];
+    args.push("--extension", await ensureSystemSculptPiProviderExtension(this.options.plugin));
     if (this.options.noSession) {
       args.push("--no-session");
     } else if (this.options.sessionFile) {
@@ -99,10 +105,15 @@ export class PiRpcProcessClient {
     if (this.options.thinkingLevel) {
       args.push("--thinking", this.options.thinkingLevel);
     }
+    const systemPrompt = String(this.options.systemPrompt || "").trim();
+    if (systemPrompt) {
+      args.push("--system-prompt", systemPrompt);
+    }
 
     const launched = await startPiProcess({
       plugin: this.options.plugin,
       args,
+      env: buildSystemSculptPiProviderEnv(this.options.plugin),
       cwd: this.options.cwd || resolvePiCommandCwd(this.options.plugin),
     });
 

@@ -120,6 +120,39 @@ export function getCanonicalId(model: SystemSculptModel): string {
   return createCanonicalId("unknown", model.id || model.name || "unknown-model");
 }
 
+function resolveCanonicalProviderIdForModel(model: Pick<SystemSculptModel, "id" | "provider" | "sourceProviderId">): string {
+  const sourceProviderId = String((model as any).sourceProviderId || "").trim().toLowerCase();
+  if (sourceProviderId) {
+    return sourceProviderId;
+  }
+
+  const provider = String(model.provider || "").trim().toLowerCase();
+  if (provider) {
+    return provider;
+  }
+
+  const parsed = parseCanonicalId(String(model.id || ""));
+  return String(parsed?.providerId || "").trim().toLowerCase();
+}
+
+export function isSystemSculptModel(
+  model: Pick<SystemSculptModel, "id" | "provider" | "sourceProviderId">
+): boolean {
+  return resolveCanonicalProviderIdForModel(model) === "systemsculpt";
+}
+
+export function compareSystemSculptModelPriority(
+  left: Pick<SystemSculptModel, "id" | "provider" | "sourceProviderId">,
+  right: Pick<SystemSculptModel, "id" | "provider" | "sourceProviderId">
+): number {
+  const leftPinned = isSystemSculptModel(left);
+  const rightPinned = isSystemSculptModel(right);
+  if (leftPinned === rightPinned) {
+    return 0;
+  }
+  return leftPinned ? -1 : 1;
+}
+
 /**
  * Find a model in a list using the canonical ID or ID components
  * @param models List of models to search
@@ -200,12 +233,21 @@ export function getDisplayName(modelId: string): string {
   if (modelId?.includes(MODEL_ID_SEPARATOR)) {
     const parsed = parseCanonicalId(modelId);
     if (parsed) {
+      if (
+        parsed.providerId === "systemsculpt" &&
+        String(parsed.modelId || "").trim().toLowerCase().startsWith("systemsculpt/")
+      ) {
+        return "SystemSculpt";
+      }
       return parsed.modelId;
     }
   }
   
   // For legacy format with slash
   if (modelId?.includes('/')) {
+    if (String(modelId).trim().toLowerCase().startsWith("systemsculpt/")) {
+      return "SystemSculpt";
+    }
     const parts = modelId.split('/');
     if (parts.length >= 2) {
       return parts[parts.length - 1]; // Last part is usually the model name
@@ -219,7 +261,7 @@ export function getDisplayName(modelId: string): string {
 /**
  * Returns a standardized, bracketed provider prefix for display labels
  * Examples:
- * - systemsculpt -> "[SS AI] "
+ * - systemsculpt -> "SystemSculpt: "
  * - anthropic -> "[ANTHROPIC] "
  * - openai -> "[OPENAI] "
  */
@@ -229,7 +271,7 @@ export function getProviderDisplayPrefix(providerId: string): string {
     return '';
   }
   if (normalized === 'systemsculpt') {
-    return '[SS AI] ';
+    return 'SystemSculpt: ';
   }
   if (normalized.startsWith(LOCAL_PI_PROVIDER_PREFIX)) {
     const piProviderId = normalized.slice(LOCAL_PI_PROVIDER_PREFIX.length);
@@ -252,8 +294,12 @@ export function getModelLabelWithProvider(modelId: string): string {
   const canonical = ensureCanonicalId(modelId);
   const parsed = parseCanonicalId(canonical);
   if (parsed) {
+    const displayName = getDisplayName(canonical);
+    if (parsed.providerId === "systemsculpt") {
+      return displayName === "SystemSculpt" ? displayName : `SystemSculpt: ${displayName}`;
+    }
     const prefix = getProviderDisplayPrefix(parsed.providerId);
-    return `${prefix}${getDisplayName(canonical)}`;
+    return `${prefix}${displayName}`;
   }
   // Fallback for unexpected formats
   return getDisplayName(modelId);

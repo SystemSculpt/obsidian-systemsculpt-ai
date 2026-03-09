@@ -4,7 +4,11 @@ import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/t
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
 import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
-import { getLastMessagePiEntryId, resolveChatBackend } from "./storage/ChatPersistenceTypes";
+import {
+  getLastMessagePiEntryId,
+  normalizePiSessionState,
+  resolveChatBackend,
+} from "./storage/ChatPersistenceTypes";
 
 type LoadedChatRecord = {
   id: string;
@@ -166,16 +170,31 @@ export class ChatStorageService {
       const existingTags = existingMetadata?.tags ?? [];
       const defaultChatTag = this.resolveDefaultChatTag();
       const mergedTags = this.mergeTags(existingTags, defaultChatTag);
+      const piState = normalizePiSessionState({
+        sessionFile: piSessionFile,
+        sessionId: piSessionId,
+        lastEntryId: piLastEntryId,
+        lastSyncedAt: piLastSyncedAt,
+      });
+      const resolvedBackend = resolveChatBackend({
+        explicitBackend: chatBackend,
+        piSessionFile: piState.sessionFile,
+        piSessionId: piState.sessionId,
+      });
+      const allowsEmptyVisibleTranscript =
+        resolvedBackend === "pi" && (!!piState.sessionFile || !!piState.sessionId);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
       const currentVersion = Number(existingMetadata?.version) || 0;
       let newVersion = currentVersion + 1;
       
-      // Safety check: Don't increment version if we're about to save empty messages over existing content
+      // Safety check: Don't overwrite an existing local chat with an empty transcript.
+      // Pi first-turn forks are a legitimate exception because the new branch can be
+      // empty on-screen until the next assistant turn is written.
       if (messages.length === 0 && fileExists && existingMetadata && file instanceof TFile) {
         // Check if the existing file has messages (simple heuristic: check for message markers)
         const existingContent = await vault.read(file);
-        if (existingContent.includes('SYSTEMSCULPT-MESSAGE-START')) {
+        if (existingContent.includes('SYSTEMSCULPT-MESSAGE-START') && !allowsEmptyVisibleTranscript) {
           throw new Error('Cannot save empty messages over existing chat content');
         }
       }
@@ -192,14 +211,11 @@ export class ChatStorageService {
           path: (systemPromptType === 'custom' && systemPromptPath) ? systemPromptPath : undefined
         },
         chatFontSize: chatFontSize || "medium",
-        chatBackend: resolveChatBackend({
-          explicitBackend: chatBackend,
-          piSessionFile,
-        }),
-        piSessionFile: String(piSessionFile || "").trim() || undefined,
-        piSessionId: String(piSessionId || "").trim() || undefined,
-        piLastEntryId: String(piLastEntryId || "").trim() || getLastMessagePiEntryId(messages),
-        piLastSyncedAt: String(piLastSyncedAt || "").trim() || undefined,
+        chatBackend: resolvedBackend,
+        piSessionFile: piState.sessionFile,
+        piSessionId: piState.sessionId,
+        piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
+        piLastSyncedAt: piState.lastSyncedAt,
       };
 
       if (mergedTags.length > 0) {
@@ -393,6 +409,12 @@ export class ChatStorageService {
         systemMessagePath = parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1");
       }
 
+      const piState = normalizePiSessionState({
+        sessionFile: (parsed as any).piSessionFile,
+        sessionId: (parsed as any).piSessionId,
+        lastEntryId: (parsed as any).piLastEntryId,
+        lastSyncedAt: (parsed as any).piLastSyncedAt,
+      });
       return {
         id,
         model,
@@ -409,12 +431,13 @@ export class ChatStorageService {
         chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
         chatBackend: resolveChatBackend({
           explicitBackend: (parsed as any).chatBackend,
-          piSessionFile: (parsed as any).piSessionFile,
+          piSessionFile: piState.sessionFile,
+          piSessionId: piState.sessionId,
         }),
-        piSessionFile: typeof (parsed as any).piSessionFile === "string" ? (parsed as any).piSessionFile : undefined,
-        piSessionId: typeof (parsed as any).piSessionId === "string" ? (parsed as any).piSessionId : undefined,
-        piLastEntryId: typeof (parsed as any).piLastEntryId === "string" ? (parsed as any).piLastEntryId : undefined,
-        piLastSyncedAt: typeof (parsed as any).piLastSyncedAt === "string" ? (parsed as any).piLastSyncedAt : undefined,
+        piSessionFile: piState.sessionFile,
+        piSessionId: piState.sessionId,
+        piLastEntryId: piState.lastEntryId,
+        piLastSyncedAt: piState.lastSyncedAt,
       };
     } catch (error) {
       return null;
@@ -434,9 +457,16 @@ export class ChatStorageService {
 
   // Utility to finalize the parsed data into the expected return format
   private finalizeParsedData(metadata: ChatMetadata, messages: ChatMessage[], filePath?: string): LoadedChatRecord {
+     const piState = normalizePiSessionState({
+      sessionFile: metadata.piSessionFile,
+      sessionId: metadata.piSessionId,
+      lastEntryId: metadata.piLastEntryId,
+      lastSyncedAt: metadata.piLastSyncedAt,
+     });
      const chatBackend = resolveChatBackend({
       explicitBackend: metadata.chatBackend,
-      piSessionFile: metadata.piSessionFile,
+      piSessionFile: piState.sessionFile,
+      piSessionId: piState.sessionId,
      });
      const normalizedMessages = chatBackend === "legacy" ? this.normalizeLegacyToolMessages(messages) : messages;
      return {
@@ -452,10 +482,10 @@ export class ChatStorageService {
       chatFontSize: metadata.chatFontSize,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
-      piSessionFile: metadata.piSessionFile,
-      piSessionId: metadata.piSessionId,
-      piLastEntryId: metadata.piLastEntryId || getLastMessagePiEntryId(normalizedMessages),
-      piLastSyncedAt: metadata.piLastSyncedAt,
+      piSessionFile: piState.sessionFile,
+      piSessionId: piState.sessionId,
+      piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(normalizedMessages),
+      piLastSyncedAt: piState.lastSyncedAt,
     };
   }
 
@@ -474,12 +504,12 @@ export class ChatStorageService {
       lastModified: record.lastModified,
       messageCount: record.messages.length,
       pi: record.chatBackend === "pi"
-        ? {
+        ? normalizePiSessionState({
             sessionFile: record.piSessionFile,
             sessionId: record.piSessionId,
             lastEntryId: record.piLastEntryId,
             lastSyncedAt: record.piLastSyncedAt,
-          }
+          })
         : undefined,
     };
   }

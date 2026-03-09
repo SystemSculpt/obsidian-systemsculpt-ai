@@ -309,7 +309,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(controller.getGraphZoom()).toBeGreaterThan(1);
   });
 
-  it("still defers ctrl+wheel events inside inspector overlays", () => {
+  it("still zooms graph for ctrl+wheel events inside inspector overlays", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -333,8 +333,68 @@ describe("StudioGraphSelectionController wheel behavior", () => {
 
     controller.handleGraphViewportWheel(event);
 
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(controller.getGraphZoom()).toBe(initialZoom);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(controller.getGraphZoom()).toBeGreaterThan(initialZoom);
+  });
+
+  it("coalesces rapid ctrl+wheel zoom bursts into one settled edge render", () => {
+    const originalSetTimeout = window.setTimeout;
+    const originalClearTimeout = window.clearTimeout;
+    let nextTimerId = 1;
+    const scheduledTimers = new Map<number, () => void>();
+
+    window.setTimeout = ((callback: TimerHandler) => {
+      const timerId = nextTimerId++;
+      scheduledTimers.set(timerId, callback as () => void);
+      return timerId;
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((timerId: number) => {
+      scheduledTimers.delete(timerId);
+    }) as typeof window.clearTimeout;
+
+    try {
+      const host = createHost();
+      const renderEdgeLayer = jest.fn();
+      host.renderEdgeLayer = renderEdgeLayer;
+      const controller = new StudioGraphSelectionController(host);
+      const viewport = createViewport();
+      controller.registerViewportElement(viewport);
+      controller.registerSurfaceElement(createElementStub());
+      controller.registerCanvasElement(createElementStub());
+
+      const firstEvent = {
+        target: {
+          closest: () => null,
+        },
+        ctrlKey: true,
+        metaKey: false,
+        deltaX: 0,
+        deltaY: -64,
+        deltaMode: 0,
+        clientX: 320,
+        clientY: 220,
+        preventDefault: jest.fn(),
+      } as unknown as WheelEvent;
+      const secondEvent = {
+        ...firstEvent,
+        preventDefault: jest.fn(),
+        deltaY: -48,
+      } as unknown as WheelEvent;
+
+      controller.handleGraphViewportWheel(firstEvent);
+      controller.handleGraphViewportWheel(secondEvent);
+
+      expect(renderEdgeLayer).not.toHaveBeenCalled();
+      expect(scheduledTimers.size).toBe(1);
+
+      const settleZoom = Array.from(scheduledTimers.values())[0];
+      settleZoom?.();
+
+      expect(renderEdgeLayer).toHaveBeenCalledTimes(1);
+    } finally {
+      window.setTimeout = originalSetTimeout;
+      window.clearTimeout = originalClearTimeout;
+    }
   });
 });
 
@@ -435,6 +495,64 @@ describe("StudioGraphSelectionController fit selection", () => {
     expect(controller.getGraphZoom()).toBe(initialZoom);
     expect(viewport.scrollLeft).toBe(88);
     expect(viewport.scrollTop).toBe(132);
+  });
+
+  it("enters overview mode when fitting a large graph below the interactive zoom floor", () => {
+    const host = createHost();
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [
+            {
+              id: "node_a",
+              position: { x: 100, y: 120 },
+              kind: "studio.value",
+              config: {},
+            },
+            {
+              id: "node_b",
+              position: { x: 4800, y: 3100 },
+              kind: "studio.value",
+              config: {},
+            },
+          ],
+        },
+      } as any);
+
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = {
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 1000,
+      clientHeight: 600,
+      getBoundingClientRect: () =>
+        ({
+          left: 0,
+          top: 0,
+        }) as DOMRect,
+    } as unknown as HTMLElement;
+    controller.registerViewportElement(viewport);
+
+    const nodeAEl = createElementStub() as unknown as HTMLElement & {
+      offsetWidth: number;
+      offsetHeight: number;
+    };
+    (nodeAEl as any).offsetWidth = 240;
+    (nodeAEl as any).offsetHeight = 160;
+    const nodeBEl = createElementStub() as unknown as HTMLElement & {
+      offsetWidth: number;
+      offsetHeight: number;
+    };
+    (nodeBEl as any).offsetWidth = 320;
+    (nodeBEl as any).offsetHeight = 220;
+    controller.registerNodeElement("node_a", nodeAEl);
+    controller.registerNodeElement("node_b", nodeBEl);
+
+    const fitted = controller.fitGraphInViewport({ paddingPx: 25 });
+
+    expect(fitted).toBe(true);
+    expect(controller.getGraphZoomMode()).toBe("overview");
+    expect(controller.getGraphZoom()).toBeLessThan(0.4);
   });
 });
 

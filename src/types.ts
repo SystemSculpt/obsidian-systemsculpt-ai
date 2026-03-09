@@ -135,18 +135,6 @@ export interface SystemSculptSettings {
    */
   systemPrompt: string;
   recordingsDirectory: string;
-  /**
-   * Directory where Obsidian window video recordings are stored.
-   */
-  videoRecordingsDirectory: string;
-  /**
-   * Include system/desktop audio in video recordings when the runtime supports it.
-   */
-  videoCaptureSystemAudio: boolean;
-  /**
-   * Include microphone input audio in video recordings.
-   */
-  videoCaptureMicrophoneAudio: boolean;
   preferredMicrophoneId: string;
   /**
    * When enabled (desktop only), capture system audio alongside microphone input.
@@ -195,14 +183,6 @@ export interface SystemSculptSettings {
    * Users can hide this chooser from the modal and re-enable it in Settings.
    */
   showTranscriptionFormatChooserInModal?: boolean;
-  /**
-   * Show a video recording button in chat composer (desktop + licensed only).
-   */
-  showVideoRecordButtonInChat: boolean;
-  /**
-   * Show a pre-recording permission modal that explains screen/system-audio access requirements.
-   */
-  showVideoRecordingPermissionPopup?: boolean;
   /**
    * Transcription provider settings
    * - "systemsculpt": Use the SystemSculpt API (requires valid license)
@@ -572,9 +552,6 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   systemPrompt:
     "You are a helpful AI assistant. You help users with their questions and tasks in a clear and concise way.",
   recordingsDirectory: "SystemSculpt/Recordings",
-  videoRecordingsDirectory: "SystemSculpt/Video Recordings",
-  videoCaptureSystemAudio: false,
-  videoCaptureMicrophoneAudio: false,
   preferredMicrophoneId: "",
   autoTranscribeRecordings: true,
   autoPasteTranscription: true,
@@ -599,8 +576,6 @@ Raw transcript:`,
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
   showTranscriptionFormatChooserInModal: true,
-  showVideoRecordButtonInChat: true,
-  showVideoRecordingPermissionPopup: true,
   transcriptionProvider: "systemsculpt",
   customTranscriptionEndpoint: "",
   customTranscriptionApiKey: "",

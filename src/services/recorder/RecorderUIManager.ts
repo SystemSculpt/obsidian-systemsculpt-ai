@@ -8,18 +8,15 @@ export interface RecorderUIManagerOptions {
   app: App;
   plugin: SystemSculptPlugin;
   platform?: PlatformContext;
-  recorderType?: "audio" | "video";
 }
 
 /**
- * Handles recorder hover UI (shared shell for audio/video), timers, and optional visualization.
+ * Handles recorder hover UI, timers, and visualization for audio capture.
  */
 export class RecorderUIManager {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
   private readonly platform: PlatformContext;
-  private readonly recorderType: "audio" | "video";
-
   private hoverShell: HoverShellHandle | null = null;
   private statusTextEl: HTMLElement | null = null;
   private timerValueEl: HTMLElement | null = null;
@@ -43,7 +40,6 @@ export class RecorderUIManager {
     this.app = options.app;
     this.plugin = options.plugin;
     this.platform = options.platform ?? PlatformContext.get();
-    this.recorderType = options.recorderType ?? "audio";
   }
 
   public open(onStop: () => void): void {
@@ -145,20 +141,17 @@ export class RecorderUIManager {
   }
 
   private createHover(variant: HoverShellLayout): void {
-    const title = this.recorderType === "video" ? "Video Recorder" : "Audio Recorder";
-    const icon = this.recorderType === "video" ? "video" : "mic";
-
     this.hoverShell = createHoverShell({
-      title,
+      title: "Audio Recorder",
       subtitle: "In progress",
-      icon,
+      icon: "mic",
       statusText: "Preparing recorder...",
       className: "ss-recorder-hover",
       width: variant === "mobile" ? "min(420px, calc(100vw - 24px))" : "300px",
       layout: variant,
       draggable: variant === "desktop",
       defaultPosition: variant === "desktop" ? { top: "72px", right: "24px" } : { bottom: "18px", left: "12px" },
-      positionKey: `recorder-hover:${this.recorderType}`,
+      positionKey: "recorder-hover:audio",
       showStatusRow: true,
     });
 
@@ -181,21 +174,16 @@ export class RecorderUIManager {
     const timerValue = timer.createSpan({ cls: "ss-recorder-hover__timer-value", text: "00:00" });
     this.timerValueEl = timerValue;
 
-    if (this.recorderType === "audio") {
-      const visualizerWrap = contentEl.createDiv("ss-recorder-hover__visualizer-wrap");
-      const canvas = visualizerWrap.createEl("canvas", {
-        cls: "ss-recorder-hover__visualizer",
-        attr: { width: "260", height: "52" },
-      });
-      this.visualizerCanvas = canvas;
-      this.visualizerCtx = canvas.getContext("2d");
-      if (this.visualizerCtx) {
-        this.visualizerCtx.fillStyle = getComputedStyle(document.body).getPropertyValue("--background-secondary");
-        this.visualizerCtx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-    } else {
-      this.visualizerCanvas = null;
-      this.visualizerCtx = null;
+    const visualizerWrap = contentEl.createDiv("ss-recorder-hover__visualizer-wrap");
+    const canvas = visualizerWrap.createEl("canvas", {
+      cls: "ss-recorder-hover__visualizer",
+      attr: { width: "260", height: "52" },
+    });
+    this.visualizerCanvas = canvas;
+    this.visualizerCtx = canvas.getContext("2d");
+    if (this.visualizerCtx) {
+      this.visualizerCtx.fillStyle = getComputedStyle(document.body).getPropertyValue("--background-secondary");
+      this.visualizerCtx.fillRect(0, 0, canvas.width, canvas.height);
     }
   }
 
@@ -209,7 +197,7 @@ export class RecorderUIManager {
         label: "Advanced",
         icon: "sliders-horizontal",
         onClick: () => {
-          openRecorderAdvancedModal(this.app, this.plugin, { context: this.recorderType });
+          openRecorderAdvancedModal(this.app, this.plugin);
         },
       },
       {

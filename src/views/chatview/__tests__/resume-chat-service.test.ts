@@ -47,6 +47,14 @@ describe("ResumeChatService", () => {
   });
 
   describe("constructor", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it("creates instance and registers workspace events", () => {
       const { plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
@@ -54,6 +62,17 @@ describe("ResumeChatService", () => {
       expect(service).toBeInstanceOf(ResumeChatService);
       // Should register 3 events: active-leaf-change, layout-change, metadata-changed
       expect(plugin.registerEvent).toHaveBeenCalledTimes(3);
+    });
+
+    it("refreshes existing leaves on startup", () => {
+      const { app, plugin } = createPluginStub();
+      new ResumeChatService(plugin);
+
+      expect(app.workspace.iterateAllLeaves).not.toHaveBeenCalled();
+
+      jest.runOnlyPendingTimers();
+
+      expect(app.workspace.iterateAllLeaves).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -348,6 +367,22 @@ describe("ResumeChatService", () => {
 
       expect(() => service.cleanup()).not.toThrow();
     });
+
+    it("removes tracked resume buttons from connected leaves", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const leaf = { view: {} } as any;
+      const button = document.createElement("div");
+      document.body.appendChild(button);
+      (service as any).resumeButtonByLeaf.set(leaf, button);
+      app.workspace.iterateAllLeaves.mockImplementation((callback: (leaf: any) => void) => {
+        callback(leaf);
+      });
+
+      service.cleanup();
+
+      expect(button.isConnected).toBe(false);
+    });
   });
 
   describe("workspace event handlers", () => {
@@ -395,6 +430,8 @@ describe("ResumeChatService", () => {
     it("coalesces multiple calls", () => {
       const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
+      jest.runOnlyPendingTimers();
+      app.workspace.iterateAllLeaves.mockClear();
 
       const debounced = (service as any).debouncedRefreshAllLeaves();
 
@@ -412,6 +449,8 @@ describe("ResumeChatService", () => {
     it("allows subsequent calls after delay", () => {
       const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
+      jest.runOnlyPendingTimers();
+      app.workspace.iterateAllLeaves.mockClear();
 
       const debounced = (service as any).debouncedRefreshAllLeaves();
 

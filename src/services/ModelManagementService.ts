@@ -26,7 +26,7 @@ export class ModelManagementService {
 
   public async getModelInfo(modelId: string): Promise<{
     isCustom: boolean;
-    modelSource: "pi_managed" | "pi_local";
+    modelSource: "pi_local";
     model: SystemSculptModel;
     actualModelId: string;
   }> {
@@ -50,7 +50,7 @@ export class ModelManagementService {
 
     return {
       isCustom: false,
-      modelSource: model.piRemoteAvailable ? "pi_managed" : "pi_local",
+      modelSource: "pi_local",
       model,
       actualModelId,
     };

@@ -1,20 +1,12 @@
-import { App, DropdownComponent, Modal, Notice, Platform, Setting } from "obsidian";
+import { App, DropdownComponent, Modal, Notice, Setting } from "obsidian";
 import type SystemSculptPlugin from "../main";
-
-type RecorderAdvancedContext = "audio" | "video";
-
-interface RecorderAdvancedModalOptions {
-  context?: RecorderAdvancedContext;
-}
 
 export class RecorderAdvancedModal extends Modal {
   private readonly plugin: SystemSculptPlugin;
-  private readonly context: RecorderAdvancedContext;
 
-  constructor(app: App, plugin: SystemSculptPlugin, options: RecorderAdvancedModalOptions = {}) {
+  constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
-    this.context = options.context ?? "audio";
   }
 
   onOpen(): void {
@@ -23,16 +15,12 @@ export class RecorderAdvancedModal extends Modal {
     contentEl.addClass("ss-recorder-advanced-modal");
 
     contentEl.createEl("h2", { text: "Recorder Advanced Controls" });
-    const contextLabel = this.context === "video" ? "Video recorder active" : "Audio recorder active";
     contentEl.createEl("p", {
-      text: `${contextLabel}. Update capture behavior below without leaving your workflow.`,
+      text: "Audio recorder active. Update capture behavior below without leaving your workflow.",
       cls: "setting-item-description",
     });
 
     this.renderAudioSection(contentEl);
-    if (Platform.isDesktopApp) {
-      this.renderVideoSection(contentEl);
-    }
 
     new Setting(contentEl)
       .setName("Open full recording settings")
@@ -99,50 +87,6 @@ export class RecorderAdvancedModal extends Modal {
       this.plugin.settings.postProcessingEnabled,
       async (value) => {
         await this.plugin.getSettingsManager().updateSettings({ postProcessingEnabled: value });
-      }
-    );
-  }
-
-  private renderVideoSection(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "Video Recording" });
-
-    this.addToggleSetting(
-      containerEl,
-      "Show video button in chat",
-      "Expose the Obsidian-window video record action in chat composer.",
-      this.plugin.settings.showVideoRecordButtonInChat ?? true,
-      async (value) => {
-        await this.plugin.getSettingsManager().updateSettings({ showVideoRecordButtonInChat: value });
-      }
-    );
-
-    this.addToggleSetting(
-      containerEl,
-      "Include system audio",
-      "Capture desktop/system audio when runtime support is available.",
-      this.plugin.settings.videoCaptureSystemAudio ?? false,
-      async (value) => {
-        await this.plugin.getSettingsManager().updateSettings({ videoCaptureSystemAudio: value });
-      }
-    );
-
-    this.addToggleSetting(
-      containerEl,
-      "Include microphone audio",
-      "Capture microphone/input audio in video recordings.",
-      this.plugin.settings.videoCaptureMicrophoneAudio ?? false,
-      async (value) => {
-        await this.plugin.getSettingsManager().updateSettings({ videoCaptureMicrophoneAudio: value });
-      }
-    );
-
-    this.addToggleSetting(
-      containerEl,
-      "Show permission guidance popup",
-      "Show setup guidance before recording if permission flow help is needed.",
-      this.plugin.settings.showVideoRecordingPermissionPopup !== false,
-      async (value) => {
-        await this.plugin.getSettingsManager().updateSettings({ showVideoRecordingPermissionPopup: value });
       }
     );
   }
@@ -240,8 +184,7 @@ export class RecorderAdvancedModal extends Modal {
 
 export const openRecorderAdvancedModal = (
   app: App,
-  plugin: SystemSculptPlugin,
-  options?: RecorderAdvancedModalOptions
+  plugin: SystemSculptPlugin
 ): void => {
-  new RecorderAdvancedModal(app, plugin, options).open();
+  new RecorderAdvancedModal(app, plugin).open();
 };

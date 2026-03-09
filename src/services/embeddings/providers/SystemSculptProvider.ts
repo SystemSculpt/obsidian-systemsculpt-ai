@@ -31,6 +31,9 @@ export class SystemSculptProvider implements EmbeddingsProvider {
   private readonly embeddingsEndpoint = SYSTEMSCULPT_API_ENDPOINTS.EMBEDDINGS.GENERATE;
   private readonly pluginVersion: string;
   private static readonly FORBIDDEN_LOG_WINDOW_MS = 60 * 1000;
+  private static readonly HOST_OUTAGE_LOG_WINDOW_MS = 2 * 60 * 1000;
+  private static hostOutageLastLogAt = 0;
+  private static hostOutageSuppressedDuplicates = 0;
 
   public expectedDimension: number | undefined;
   private forbiddenHtmlLastLogAt = 0;
@@ -179,6 +182,37 @@ export class SystemSculptProvider implements EmbeddingsProvider {
     });
   }
 
+  private shouldEmitHostOutageLog(error: EmbeddingsProviderError, metadata: Record<string, unknown>): boolean {
+    if (error.code !== 'HOST_UNAVAILABLE') {
+      return true;
+    }
+
+    const now = Date.now();
+    const shouldLogFull =
+      now - SystemSculptProvider.hostOutageLastLogAt > SystemSculptProvider.HOST_OUTAGE_LOG_WINDOW_MS;
+
+    if (!shouldLogFull) {
+      SystemSculptProvider.hostOutageSuppressedDuplicates += 1;
+      return false;
+    }
+
+    if (SystemSculptProvider.hostOutageSuppressedDuplicates > 0) {
+      errorLogger.warn('SystemSculpt embeddings outage persisted; suppressed duplicate logs', {
+        source: 'SystemSculptProvider',
+        method: 'generateEmbeddings',
+        providerId: this.id,
+        metadata: {
+          ...metadata,
+          suppressedDuplicates: SystemSculptProvider.hostOutageSuppressedDuplicates,
+        }
+      });
+      SystemSculptProvider.hostOutageSuppressedDuplicates = 0;
+    }
+
+    SystemSculptProvider.hostOutageLastLogAt = now;
+    return true;
+  }
+
 
   private splitClientBatches(
     texts: string[],
@@ -278,13 +312,10 @@ export class SystemSculptProvider implements EmbeddingsProvider {
           ),
         };
         // Lightweight idempotency key: stable hash of concatenated inputs + model + inputType
-        // Server expects 'texts' for batch requests
+        // Hosted embeddings inference is server-controlled; only send supported contract fields.
         const requestBody = {
           texts: payloadTexts,
-          model: this.model || this.defaultModel,
           inputType: options?.inputType || 'document',
-          // Provide currentModel to allow server to flag migrations
-          currentModel: this.model || this.defaultModel
         };
 
         
@@ -396,14 +427,15 @@ export class SystemSculptProvider implements EmbeddingsProvider {
         }
 
         if (!handledForbiddenHtml) {
-          if (attempt < this.maxRetries && !isCircuit && !refused) {
+          const shouldLogOutage = this.shouldEmitHostOutageLog(normalized, attemptMetadata);
+          if (shouldLogOutage && attempt < this.maxRetries && !isCircuit && !refused) {
             errorLogger.warn('SystemSculpt embeddings request failed; retrying', {
               source: 'SystemSculptProvider',
               method: 'generateEmbeddings',
               providerId: this.id,
               metadata: attemptMetadata
             });
-          } else {
+          } else if (shouldLogOutage) {
             errorLogger.error('SystemSculpt embeddings request failed', normalized, {
               source: 'SystemSculptProvider',
               method: 'generateEmbeddings',
@@ -551,12 +583,30 @@ export class SystemSculptProvider implements EmbeddingsProvider {
       if (structured && typeof structured === 'object') {
         const messageField = (structured as any).message;
         const errorField = (structured as any).error;
+        const nestedErrorMessage =
+          errorField && typeof errorField === 'object'
+            ? typeof (errorField as any).message === 'string'
+              ? (errorField as any).message.trim()
+              : ''
+            : '';
+        const nestedErrorCode =
+          errorField && typeof errorField === 'object'
+            ? typeof (errorField as any).code === 'string'
+              ? (errorField as any).code.trim()
+              : ''
+            : '';
         const trimmedMessage = typeof messageField === 'string' ? messageField.trim() : '';
         const trimmedError = typeof errorField === 'string' ? errorField.trim() : '';
         if (trimmedMessage && trimmedError && trimmedMessage.toLowerCase() !== trimmedError.toLowerCase()) {
           message = `${trimmedMessage} (${trimmedError})`;
         } else if (trimmedMessage) {
           message = trimmedMessage;
+        } else if (nestedErrorMessage && nestedErrorCode && nestedErrorMessage.toLowerCase() !== nestedErrorCode.toLowerCase()) {
+          message = `${nestedErrorMessage} (${nestedErrorCode})`;
+        } else if (nestedErrorMessage) {
+          message = nestedErrorMessage;
+        } else if (nestedErrorCode) {
+          message = nestedErrorCode;
         } else if (trimmedError) {
           message = trimmedError;
         }
@@ -568,10 +618,25 @@ export class SystemSculptProvider implements EmbeddingsProvider {
           if (errorData && typeof errorData === 'object') {
             const parsedMessage = typeof (errorData as any).message === 'string' ? (errorData as any).message.trim() : '';
             const parsedError = typeof (errorData as any).error === 'string' ? (errorData as any).error.trim() : '';
+            const nestedParsedError = (errorData as any).error;
+            const nestedParsedMessage =
+              nestedParsedError && typeof nestedParsedError === 'object' && typeof nestedParsedError.message === 'string'
+                ? nestedParsedError.message.trim()
+                : '';
+            const nestedParsedCode =
+              nestedParsedError && typeof nestedParsedError === 'object' && typeof nestedParsedError.code === 'string'
+                ? nestedParsedError.code.trim()
+                : '';
             if (parsedMessage && parsedError && parsedMessage.toLowerCase() !== parsedError.toLowerCase()) {
               message = `${parsedMessage} (${parsedError})`;
             } else if (parsedMessage) {
               message = parsedMessage;
+            } else if (nestedParsedMessage && nestedParsedCode && nestedParsedMessage.toLowerCase() !== nestedParsedCode.toLowerCase()) {
+              message = `${nestedParsedMessage} (${nestedParsedCode})`;
+            } else if (nestedParsedMessage) {
+              message = nestedParsedMessage;
+            } else if (nestedParsedCode) {
+              message = nestedParsedCode;
             } else if (parsedError) {
               message = parsedError;
             } else {

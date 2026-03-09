@@ -6,6 +6,13 @@ jest.mock("../PiProcessRuntime", () => ({
   startPiProcess: jest.fn(),
 }));
 
+jest.mock("../PiSystemSculptProvider", () => ({
+  ensureSystemSculptPiProviderExtension: jest.fn(async () => "/tmp/systemsculpt-provider.mjs"),
+  buildSystemSculptPiProviderEnv: jest.fn(() => ({
+    SYSTEMSCULPT_PI_PROVIDER_LICENSE: "license_test",
+  })),
+}));
+
 import { startPiProcess } from "../PiProcessRuntime";
 import { PiRpcProcessClient } from "../PiRpcProcessClient";
 
@@ -114,6 +121,15 @@ describe("PiRpcProcessClient", () => {
 
     await client.start();
 
+    expect(startPiProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: expect.arrayContaining(["--extension", "/tmp/systemsculpt-provider.mjs"]),
+        env: expect.objectContaining({
+          SYSTEMSCULPT_PI_PROVIDER_LICENSE: "license_test",
+        }),
+      })
+    );
+
     const commands = child.stdin.write.mock.calls.map(([line]) => JSON.parse(String(line).trim()));
     expect(commands.map((entry) => entry.type)).toEqual([
       "get_state",
@@ -131,6 +147,54 @@ describe("PiRpcProcessClient", () => {
       expect.objectContaining({
         type: "set_thinking_level",
         level: "high",
+      })
+    );
+
+    await client.stop();
+  });
+
+  it("passes a configured system prompt through to Pi RPC startup", async () => {
+    const child = createFakeChild({
+      get_state: (payload, proc) => {
+        writeJsonLine(proc.stdout, {
+          id: payload.id,
+          type: "response",
+          command: "get_state",
+          success: true,
+          data: {
+            sessionId: "sess_prompt",
+            sessionFile: "/vault/.pi/sessions/session.jsonl",
+            thinkingLevel: "medium",
+            model: {
+              provider: "openai",
+              id: "gpt-5.3-codex-spark",
+            },
+          },
+        });
+      },
+    });
+
+    (startPiProcess as jest.Mock).mockResolvedValue({
+      child,
+      runtime: {
+        command: "pi",
+        argsPrefix: [],
+        source: "global-cli",
+        label: "pi",
+      },
+    });
+
+    const client = new PiRpcProcessClient({
+      plugin: {} as any,
+      systemPrompt: "You are SystemSculpt AI.",
+      modelId: "openai/gpt-5.3-codex-spark",
+    });
+
+    await client.start();
+
+    expect(startPiProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: expect.arrayContaining(["--system-prompt", "You are SystemSculpt AI."]),
       })
     );
 

@@ -8,7 +8,7 @@ import { SearchService } from "../services/SearchService";
 import type { SearchableField } from "../services/SearchService";
 import type { SystemSculptModel } from "../types/llm";
 import { resolveProviderLabel } from "../studio/piAuth/StudioPiProviderRegistry";
-import { ensureCanonicalId, filterChatModels } from "../utils/modelUtils";
+import { compareSystemSculptModelPriority, ensureCanonicalId, filterChatModels } from "../utils/modelUtils";
 import { buildModelSelectionListItems, getModelSelectionSearchableFields } from "./model-selection/ModelSelectionItems";
 import {
   buildModelSelectionProviderSummary, createEmptyModelSelectionProviderSummary, loadModelSelectorProviderAuth,
@@ -67,7 +67,7 @@ export class StandardModelSelectionModal {
     this.selectedModelId = options.currentModelId;
     this.onSelect = options.onSelect;
     this.modalTitle = options.title || "Select AI Model";
-    this.modalDescription = options.description || "Choose a Pi model. Each option shows the provider it will run through.";
+    this.modalDescription = options.description || "Choose a model. Each option shows the provider it will use.";
     this.searchService = SearchService.getInstance();
     this.favoritesService = FavoritesService.getInstance(this.plugin);
 
@@ -259,6 +259,10 @@ export class StandardModelSelectionModal {
     );
   }
 
+  private pinSystemSculptModels(models: SystemSculptModel[]): SystemSculptModel[] {
+    return [...models].sort((left, right) => compareSystemSculptModelPriority(left, right));
+  }
+
   private convertModelsToListItems(models: SystemSculptModel[]): ListItem[] {
     return buildModelSelectionListItems(models, {
       selectedModelId: this.selectedModelId,
@@ -292,7 +296,7 @@ export class StandardModelSelectionModal {
       filteredResults = [currentModel, ...filteredResults];
     }
 
-    return this.convertModelsToListItems(filteredResults);
+    return this.convertModelsToListItems(this.pinSystemSculptModels(filteredResults));
   }
 
   private async searchModelsAsync(models: SystemSculptModel[], query: string): Promise<ListItem[]> {

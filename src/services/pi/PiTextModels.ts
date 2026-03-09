@@ -9,7 +9,12 @@ import {
 import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import { createCanonicalId } from "../../utils/modelUtils";
 import { normalizeLocalPiExecutionModelId } from "./PiCli";
-import { loadPiSdkModule, type PiSdkModelRecord } from "./PiSdk";
+import { PiRpcProcessClient } from "./PiRpcProcessClient";
+import {
+  isSystemSculptPiProviderModel,
+  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
+  SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
+} from "./PiSystemSculptProvider";
 
 export type LocalPiTextModelOption = {
   value: string;
@@ -96,7 +101,15 @@ function buildLocalPiDescription(model: {
   return parts.join(" • ");
 }
 
-function toLocalPiListEntry(model: PiSdkModelRecord): LocalPiListedModel | null {
+function toLocalPiListEntry(model: {
+  provider?: unknown;
+  id?: unknown;
+  name?: unknown;
+  reasoning?: unknown;
+  input?: unknown;
+  contextWindow?: unknown;
+  maxTokens?: unknown;
+}): LocalPiListedModel | null {
   const providerId = normalizePiProviderId(model.provider);
   const modelId = String(model.id || "").trim();
   if (!providerId || !modelId) {
@@ -165,6 +178,9 @@ export function getLocalPiProviderIdFromCanonical(providerId: string): string {
 }
 
 export function buildLocalPiCanonicalModelId(providerId: string, modelId: string): string {
+  if (isSystemSculptPiProviderModel(providerId, modelId)) {
+    return SYSTEMSCULPT_PI_CANONICAL_MODEL_ID;
+  }
   const canonicalProviderId = buildLocalPiCanonicalProviderId(providerId);
   const normalizedModelId = String(modelId || "").trim();
   if (!canonicalProviderId || !normalizedModelId) {
@@ -174,6 +190,9 @@ export function buildLocalPiCanonicalModelId(providerId: string, modelId: string
 }
 
 export function buildLocalPiExecutionModelId(providerId: string, modelId: string): string {
+  if (isSystemSculptPiProviderModel(providerId, modelId)) {
+    return SYSTEMSCULPT_PI_EXECUTION_MODEL_ID;
+  }
   const normalizedProviderId = normalizePiProviderId(providerId);
   const normalizedModelId = String(modelId || "").trim();
   return normalizedProviderId && normalizedModelId ? `${normalizedProviderId}/${normalizedModelId}` : "";
@@ -183,6 +202,9 @@ export function resolveLocalPiExecutionModelIdFromCanonical(canonicalId: string)
   const normalized = String(canonicalId || "").trim();
   if (!normalized) {
     return "";
+  }
+  if (normalized === SYSTEMSCULPT_PI_CANONICAL_MODEL_ID) {
+    return SYSTEMSCULPT_PI_EXECUTION_MODEL_ID;
   }
   const parsed = normalized.includes("@@") ? normalized.split("@@") : [];
   if (parsed.length < 2) {
@@ -194,35 +216,47 @@ export function resolveLocalPiExecutionModelIdFromCanonical(canonicalId: string)
 }
 
 export function isLocalPiCanonicalModelId(canonicalId: string): boolean {
+  if (String(canonicalId || "").trim() === SYSTEMSCULPT_PI_CANONICAL_MODEL_ID) {
+    return true;
+  }
   const parsedProvider = String(canonicalId || "").trim().split("@@")[0] || "";
   return isLocalPiCanonicalProviderId(parsedProvider);
 }
 
 export function toLocalPiSystemSculptModel(model: LocalPiListedModel): SystemSculptModel {
-  const canonicalProviderId = buildLocalPiCanonicalProviderId(model.providerId);
+  const canonicalProviderId = isSystemSculptPiProviderModel(model.providerId, model.modelId)
+    ? "systemsculpt"
+    : buildLocalPiCanonicalProviderId(model.providerId);
   const canonicalId = buildLocalPiCanonicalModelId(model.providerId, model.modelId);
   const providerLabel = resolveProviderLabel(model.providerId);
   const capabilities = model.supportsReasoning ? ["chat", "reasoning"] : ["chat"];
+  const executionModelId = buildLocalPiExecutionModelId(model.providerId, model.modelId);
+  const publicModelId = isSystemSculptPiProviderModel(model.providerId, model.modelId)
+    ? SYSTEMSCULPT_PI_EXECUTION_MODEL_ID
+    : model.modelId;
+  const displayName = isSystemSculptPiProviderModel(model.providerId, model.modelId)
+    ? "SystemSculpt"
+    : model.label;
 
   return {
     id: canonicalId,
-    name: model.label,
+    name: displayName,
     description: model.description || `${providerLabel} via Pi`,
     provider: model.providerId,
     sourceMode: "pi_local",
     sourceProviderId: model.providerId,
     identifier: {
       providerId: canonicalProviderId,
-      modelId: model.modelId,
-      displayName: model.label,
+      modelId: publicModelId,
+      displayName,
     },
-    piExecutionModelId: `${model.providerId}/${model.modelId}`,
+    piExecutionModelId: executionModelId,
     piAuthMode: "local",
     piRemoteAvailable: false,
     piLocalAvailable: true,
     context_length: model.contextLength,
     capabilities,
-    supported_parameters: [],
+    supported_parameters: ["tools"],
     architecture: {
       modality: model.supportsImages ? "text+image->text" : "text->text",
       tokenizer: "pi-local",
@@ -243,19 +277,26 @@ export function toLocalPiSystemSculptModel(model: LocalPiListedModel): SystemScu
 }
 
 export async function listLocalPiTextModels(
-  _plugin: SystemSculptPlugin
+  plugin: SystemSculptPlugin
 ): Promise<LocalPiListedModel[]> {
   if (!Platform.isDesktopApp) {
     return [];
   }
 
-  const sdk = await loadPiSdkModule();
-  const authStorage = sdk.AuthStorage.create();
-  const modelRegistry = new sdk.ModelRegistry(authStorage);
-  const models = modelRegistry
-    .getAvailable()
-    .map((model) => toLocalPiListEntry(model))
-    .filter((model): model is LocalPiListedModel => !!model);
+  const client = new PiRpcProcessClient({
+    plugin,
+    noSession: true,
+  });
+
+  let models: LocalPiListedModel[] = [];
+  await client.start();
+  try {
+    models = (await client.getAvailableModels())
+      .map((model) => toLocalPiListEntry(model))
+      .filter((model): model is LocalPiListedModel => !!model);
+  } finally {
+    await client.stop();
+  }
 
   const byCanonicalId = new Map<string, LocalPiListedModel>();
   for (const model of models) {

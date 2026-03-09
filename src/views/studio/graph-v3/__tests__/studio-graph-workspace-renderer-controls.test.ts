@@ -48,6 +48,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     const zoomInSpy = jest.fn();
     const zoomOutSpy = jest.fn();
     const zoomResetSpy = jest.fn();
+    const zoomOverviewSpy = jest.fn();
     const toggleDetailSpy = jest.fn();
     const zoomLabel = { value: "" };
 
@@ -87,6 +88,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
       onZoomIn: zoomInSpy,
       onZoomOut: zoomOutSpy,
       onZoomReset: zoomResetSpy,
+      onZoomOverview: zoomOverviewSpy,
       onToggleNodeDetailMode: toggleDetailSpy,
       onOpenNodeContextMenu: jest.fn(),
       onCreateLabelAtPosition: jest.fn(),
@@ -115,6 +117,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     click('button[aria-label="Zoom out"]');
     click('button[aria-label="Zoom in"]');
     click('button[aria-label="Reset zoom"]');
+    click('button[aria-label="Overview graph"]');
     click('button[aria-label="Toggle node detail mode"]');
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -122,6 +125,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     expect(zoomOutSpy).toHaveBeenCalledTimes(1);
     expect(zoomInSpy).toHaveBeenCalledTimes(1);
     expect(zoomResetSpy).toHaveBeenCalledTimes(1);
+    expect(zoomOverviewSpy).toHaveBeenCalledTimes(1);
     expect(toggleDetailSpy).toHaveBeenCalledTimes(1);
     expect(zoomLabel.value).toBe("100%");
   });
@@ -163,6 +167,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
       onZoomIn: jest.fn(),
       onZoomOut: jest.fn(),
       onZoomReset: jest.fn(),
+      onZoomOverview: jest.fn(),
       onToggleNodeDetailMode: jest.fn(),
       onOpenNodeContextMenu: jest.fn(),
       onCreateLabelAtPosition: jest.fn(),

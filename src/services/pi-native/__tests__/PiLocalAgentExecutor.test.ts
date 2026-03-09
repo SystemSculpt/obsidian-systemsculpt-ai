@@ -181,6 +181,47 @@ describe("PiLocalAgentExecutor", () => {
     ]);
   });
 
+  it("sends only the latest user turn while keeping the Pi system prompt configured on the session", async () => {
+    configureNextClient = (client) => {
+      client.setPromptImplementation(async (message) => {
+        expect(message).toBe("Latest question");
+        client.emit({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Latest answer" }],
+            stopReason: "stop",
+          },
+        });
+        client.emit({ type: "agent_end", messages: [] });
+      });
+    };
+
+    const drain = collectEvents(
+      streamPiLocalAgentTurn({
+        plugin: createPlugin(),
+        modelId: "openai/gpt-5-mini",
+        systemPrompt: "You are SystemSculpt AI.",
+        sessionFile: "/vault/.pi/sessions/existing.jsonl",
+        messages: [
+          { role: "system", content: "You are SystemSculpt AI.", message_id: "sys_1" } as any,
+          { role: "user", content: "First question", message_id: "user_1" } as any,
+          { role: "assistant", content: "First answer", message_id: "assistant_1" } as any,
+          { role: "user", content: "Latest question", message_id: "user_2" } as any,
+        ],
+      })
+    );
+
+    const client = latestClient();
+    expect(client.options.sessionFile).toBe("/vault/.pi/sessions/existing.jsonl");
+    expect(client.options.systemPrompt).toBe("You are SystemSculpt AI.");
+
+    await expect(drain).resolves.toEqual([
+      { type: "content", text: "Latest answer" },
+      { type: "meta", key: "stop-reason", value: "stop" },
+    ]);
+  });
+
   it("aborts the underlying Pi RPC turn when the caller aborts", async () => {
     const abortController = new AbortController();
     let releasePrompt: (() => void) | null = null;
@@ -278,5 +319,6 @@ describe("PiLocalAgentExecutor", () => {
       text: "local result",
       modelId: "openai/gpt-5-mini",
     });
+    expect(latestClient().options.systemPrompt).toBe("Keep it short.");
   });
 });

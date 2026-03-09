@@ -64,6 +64,6 @@ describe("PiTextModels", () => {
       sourceProviderId: "openai",
       context_length: 1_000_000,
     });
-    expect(model.supported_parameters).toEqual([]);
+    expect(model.supported_parameters).toEqual(["tools"]);
   });
 });

@@ -16,6 +16,7 @@ type PiLocalAgentRunOptions = {
   plugin: SystemSculptPlugin;
   modelId: string;
   messages: ChatMessage[];
+  systemPrompt?: string;
   signal?: AbortSignal;
   sessionFile?: string;
   reasoningEffort?: string;
@@ -77,32 +78,29 @@ function toTextContent(value: unknown): string {
 }
 
 function buildPromptInput(messages: ChatMessage[]): { text: string; images: PiImageContent[] } {
-  const textParts: string[] = [];
-  const images: PiImageContent[] = [];
-
-  for (const message of messages) {
-    if (message.role !== "user") {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") {
       continue;
     }
 
     const content = message.content;
     if (typeof content === "string") {
-      const text = content.trim();
-      if (text) {
-        textParts.push(text);
-      }
-      continue;
+      return {
+        text: content.trim(),
+        images: [],
+      };
     }
 
     if (!Array.isArray(content)) {
-      const text = toTextContent(content).trim();
-      if (text) {
-        textParts.push(text);
-      }
-      continue;
+      return {
+        text: toTextContent(content).trim(),
+        images: [],
+      };
     }
 
     const blockTexts: string[] = [];
+    const images: PiImageContent[] = [];
     for (const block of content) {
       if (!block || typeof block !== "object") {
         continue;
@@ -126,14 +124,15 @@ function buildPromptInput(messages: ChatMessage[]): { text: string; images: PiIm
       }
     }
 
-    if (blockTexts.length > 0) {
-      textParts.push(blockTexts.join("\n\n"));
-    }
+    return {
+      text: blockTexts.join("\n\n").trim(),
+      images,
+    };
   }
 
   return {
-    text: textParts.join("\n\n").trim(),
-    images,
+    text: "",
+    images: [],
   };
 }
 
@@ -206,6 +205,7 @@ export async function* streamPiLocalAgentTurn(
     plugin: options.plugin,
     modelId: options.modelId,
     thinkingLevel: normalizePiThinkingLevel(options.reasoningEffort),
+    systemPrompt: options.systemPrompt,
     sessionFile: options.sessionFile,
   });
 
@@ -442,25 +442,18 @@ export async function runPiLocalTextGeneration(options: {
   reasoningEffort?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string; modelId: string }> {
-  const messages: ChatMessage[] = [];
-  if (options.systemPrompt?.trim()) {
-    messages.push({
-      role: "system",
-      content: options.systemPrompt.trim(),
-      message_id: "pi-local-system",
-    } as ChatMessage);
-  }
-  messages.push({
+  const messages: ChatMessage[] = [{
     role: "user",
     content: options.prompt,
     message_id: "pi-local-user",
-  } as ChatMessage);
+  } as ChatMessage];
 
   let text = "";
   for await (const event of streamPiLocalAgentTurn({
     plugin: options.plugin,
     modelId: options.modelId,
     messages,
+    systemPrompt: options.systemPrompt,
     signal: options.signal,
     reasoningEffort: options.reasoningEffort,
   })) {

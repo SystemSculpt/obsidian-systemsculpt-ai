@@ -577,7 +577,7 @@ export class EmbeddingsProcessor {
       const uniquePaths = [...new Set(batch.map(item => item.file.path))];
       const action = this.handleBatchError(providerError, uniquePaths, batchIndex, detailsMetadata);
 
-      if (action === 'stop') {
+      if (action === 'stop' && !this.shouldSuppressFatalBatchLog(providerError)) {
         const maxPaths = 40;
         const fileList = uniquePaths.length > maxPaths
           ? [...uniquePaths.slice(0, maxPaths), `(+${uniquePaths.length - maxPaths} more)`]
@@ -874,6 +874,18 @@ export class EmbeddingsProcessor {
     });
 
     return 'continue';
+  }
+
+  private shouldSuppressFatalBatchLog(error: EmbeddingsProviderError): boolean {
+    return Boolean(
+      error.transient &&
+      (
+        error.code === "HOST_UNAVAILABLE" ||
+        error.code === "RATE_LIMITED" ||
+        error.status === 429 ||
+        (typeof error.retryInMs === "number" && error.retryInMs > 0)
+      )
+    );
   }
 
   private delay(ms: number): Promise<void> {

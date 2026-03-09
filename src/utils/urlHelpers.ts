@@ -2,7 +2,7 @@
  * URL helper utilities for consistent API endpoint handling
  */
 
-import { API_BASE_URL } from "../constants/api";
+import { API_BASE_URL, WEBSITE_API_BASE_URL } from "../constants/api";
 
 /**
  * Ensures a server URL has the proper /api/v1 suffix
@@ -77,6 +77,56 @@ export function resolveSystemSculptApiBaseUrl(serverUrl?: string): string {
   } catch {
     return API_BASE_URL;
   }
+}
+
+function resolveCandidateUrl(candidate: string, fallback: string): URL {
+  try {
+    return new URL(candidate);
+  } catch {
+    return new URL(fallback);
+  }
+}
+
+function rewriteLocalWebsitePort(url: URL): void {
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+    return;
+  }
+
+  if (url.port === "3001") {
+    url.port = "3000";
+  }
+}
+
+/**
+ * Resolve the canonical SystemSculpt website plugin API base.
+ * This keeps custom/self-hosted paths aligned with the configured API host while
+ * still correcting the default production host back to the marketing domain.
+ */
+export function resolveSystemSculptWebsitePluginBaseUrl(serverUrl?: string): string {
+  const candidate = String(serverUrl || "").trim();
+  if (!candidate) {
+    return WEBSITE_API_BASE_URL;
+  }
+
+  const normalizedApiUrl = resolveSystemSculptApiBaseUrl(candidate);
+  const url = resolveCandidateUrl(normalizedApiUrl, WEBSITE_API_BASE_URL);
+
+  if (url.hostname === "api.systemsculpt.com") {
+    url.hostname = "systemsculpt.com";
+    url.port = "";
+  } else if (url.hostname === "www.api.systemsculpt.com") {
+    url.hostname = "www.systemsculpt.com";
+    url.port = "";
+  }
+
+  rewriteLocalWebsitePort(url);
+
+  const trimmedPath = url.pathname.replace(/\/+$/, "");
+  const withoutApiV1 = trimmedPath.replace(/\/api\/v1$/i, "").replace(/\/api$/i, "");
+  const basePath = withoutApiV1 === "/" ? "" : withoutApiV1;
+  url.pathname = `${basePath}/api/plugin`.replace(/\/{2,}/g, "/");
+
+  return url.toString();
 }
 
 /**

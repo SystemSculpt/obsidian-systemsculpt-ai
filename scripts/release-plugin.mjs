@@ -314,6 +314,14 @@ function ensureTagDoesNotExist(version) {
   }
 }
 
+function ensureGitHubCliReady() {
+  const auth = runCapture("gh", ["auth", "status"], true);
+  if (auth.status !== 0) {
+    const details = auth.stderr || auth.stdout || "Run `gh auth login` before releasing.";
+    fail(`GitHub CLI is not authenticated for release creation.\n${details}`);
+  }
+}
+
 function updateReadmeVersion(readmePath, newVersion) {
   const existing = fs.readFileSync(readmePath, "utf8");
   let updated = existing;
@@ -346,16 +354,18 @@ function printPlan({
   console.log(`[release] - Next version: ${newVersion} (${bump})`);
   console.log(`[release] - Last tag: ${lastTag || "(none)"}`);
   console.log(`[release] - Commits included: ${commitCount}`);
-  console.log("[release] - GitHub Actions draft release: yes");
+  console.log("[release] - Local GitHub draft release via gh: yes");
+  console.log("[release] - Windows validation: manual risk accepted");
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
 
 function writeNotesFile(version, commits, customNotesFile) {
   if (customNotesFile) {
-    if (!fs.existsSync(customNotesFile)) {
-      fail(`Notes file does not exist: ${customNotesFile}`);
+    const resolvedNotesPath = path.resolve(cwd, customNotesFile);
+    if (!fs.existsSync(resolvedNotesPath)) {
+      fail(`Notes file does not exist: ${resolvedNotesPath}`);
     }
-    return customNotesFile;
+    return resolvedNotesPath;
   }
 
   const notes = buildReleaseNotes(version, commits);
@@ -374,6 +384,9 @@ function runChecks(skipChecks) {
   logStep("Running npm run check:plugin");
   run("npm", ["run", "check:plugin"]);
 
+  logStep("Running npm run check:e2e");
+  run("npm", ["run", "check:e2e"]);
+
   logStep("Running npm test");
   run("npm", ["test"]);
 
@@ -382,6 +395,9 @@ function runChecks(skipChecks) {
 
   logStep("Running npm run build:pi-runtime");
   run("npm", ["run", "build:pi-runtime"]);
+
+  logStep("Running npm run verify:pi-runtime");
+  run("npm", ["run", "verify:pi-runtime"]);
 
   logStep("Running npm run build:terminal-runtime");
   run("npm", ["run", "build:terminal-runtime"]);
@@ -468,6 +484,33 @@ function ensureReleaseAssets() {
   ];
 }
 
+function createDraftRelease(version, notesPath, releaseAssetFiles) {
+  logStep(`Creating local draft GitHub release ${version}`);
+  run("gh", [
+    "release",
+    "create",
+    version,
+    "--draft",
+    "--verify-tag",
+    "--title",
+    version,
+    "--notes-file",
+    notesPath,
+    ...releaseAssetFiles,
+  ]);
+}
+
+function verifyDraftRelease(version) {
+  logStep(`Verifying draft release ${version}`);
+  run("gh", [
+    "release",
+    "view",
+    version,
+    "--json",
+    "isDraft,assets,tagName,targetCommitish,url",
+  ]);
+}
+
 function main() {
   const options = parseArgs(args);
 
@@ -478,6 +521,7 @@ function main() {
 
   ensureExpectedFiles();
   ensureCleanTree(options.allowDirty);
+  ensureGitHubCliReady();
 
   const manifestPath = path.join(cwd, "manifest.json");
   const packagePath = path.join(cwd, "package.json");
@@ -536,13 +580,6 @@ function main() {
     return;
   }
 
-  if (options.draft) {
-    logStep("Ignoring --draft: GitHub Actions now creates the draft release after validation.");
-  }
-  if (options.notesFile) {
-    logStep("Ignoring --notes-file for publication: GitHub Actions now generates the release notes.");
-  }
-
   runChecks(options.skipChecks);
   const releaseAssetFiles = ensureReleaseAssets();
   logStep(`Verified local release assets (${releaseAssetFiles.length} files).`);
@@ -572,8 +609,9 @@ function main() {
   logStep(`Pushing tag ${newVersion}`);
   run("git", ["push", "origin", newVersion]);
 
-  logStep("Handed off release publication to GitHub Actions.");
-  logStep(`GitHub Actions will validate Windows fresh-desktop bootstrap, then create the draft release for ${newVersion}.`);
+  createDraftRelease(newVersion, notesPath, releaseAssetFiles);
+  verifyDraftRelease(newVersion);
+  logStep(`Draft GitHub release is ready for review: ${newVersion}`);
 }
 
 main();

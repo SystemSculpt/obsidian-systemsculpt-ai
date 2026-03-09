@@ -5,6 +5,7 @@ import {
   isLocalPiCanonicalModelId,
   resolveLocalPiExecutionModelIdFromCanonical,
 } from "../pi/PiTextModels";
+import { SYSTEMSCULPT_PI_CANONICAL_MODEL_ID } from "../pi/PiSystemSculptProvider";
 
 function normalizeProviderId(value: unknown): string {
   return String(value || "")
@@ -79,6 +80,19 @@ function isLegacySystemSculptAlias(providerId: string, modelId: string): boolean
     String(modelId || "").trim().toLowerCase().startsWith("systemsculpt/");
 }
 
+export function normalizeLegacyPiTextSelectionId(savedModelId: string): string {
+  const parsed = parseCanonicalId(savedModelId);
+  if (!parsed) {
+    return savedModelId;
+  }
+
+  if (isLegacySystemSculptAlias(parsed.providerId, parsed.modelId)) {
+    return SYSTEMSCULPT_PI_CANONICAL_MODEL_ID;
+  }
+
+  return savedModelId;
+}
+
 function pickBestLocalPiFallback(models: SystemSculptModel[]): SystemSculptModel | undefined {
   return models.find((model) => model.piLocalAvailable) || models[0];
 }
@@ -88,13 +102,14 @@ export function resolveLegacyPiTextSelection(
   models: SystemSculptModel[],
   customProviders: CustomProvider[]
 ): SystemSculptModel | undefined {
-  const parsed = parseCanonicalId(savedModelId);
+  const normalizedSavedModelId = normalizeLegacyPiTextSelectionId(savedModelId);
+  const parsed = parseCanonicalId(normalizedSavedModelId);
   if (!parsed) {
     return undefined;
   }
 
-  if (isLocalPiCanonicalModelId(savedModelId)) {
-    const actualModelId = resolveLocalPiExecutionModelIdFromCanonical(savedModelId);
+  if (isLocalPiCanonicalModelId(normalizedSavedModelId)) {
+    const actualModelId = resolveLocalPiExecutionModelIdFromCanonical(normalizedSavedModelId);
     const directMatch = findModelByActualId(models, actualModelId);
     if (directMatch) {
       return directMatch;
@@ -102,10 +117,6 @@ export function resolveLegacyPiTextSelection(
 
     const [providerId, ...modelIdParts] = actualModelId.split("/");
     return findStableAliasModel(models, providerId || "", modelIdParts.join("/"));
-  }
-
-  if (isLegacySystemSculptAlias(parsed.providerId, parsed.modelId)) {
-    return pickBestLocalPiFallback(models);
   }
 
   const mappedProviderId = mapLegacyCustomProviderId(parsed.providerId, customProviders);
@@ -123,4 +134,16 @@ export function resolveLegacyPiTextSelection(
     findStableAliasModel(models, parsed.providerId, parsed.modelId) ||
     pickBestLocalPiFallback(models)
   );
+}
+
+export function resolveLegacyPiTextSelectionId(
+  savedModelId: string,
+  models: SystemSculptModel[],
+  customProviders: CustomProvider[]
+): string {
+  const migrated = resolveLegacyPiTextSelection(savedModelId, models, customProviders);
+  if (migrated?.id) {
+    return migrated.id;
+  }
+  return normalizeLegacyPiTextSelectionId(savedModelId);
 }

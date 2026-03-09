@@ -85,7 +85,7 @@ npm run e2e:live
 ```
 
 
-### Local plugin release (GitHub Actions optional)
+### Local plugin release
 
 ```bash
 npm run release:plugin                  # auto bump (major/minor/patch from commits)
@@ -93,7 +93,9 @@ npm run release:plugin -- --dry-run    # preview next version + notes only
 npm run release:plugin -- --bump patch # force a specific bump
 ```
 
-Release automation now commits and pushes the release tag locally, then GitHub Actions builds the release bundle, validates fresh-desktop bootstrap on Windows, and creates the draft release with Pi and Studio terminal runtime assets from `dist/pi-runtime` and `dist/terminal-runtime`.
+Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle plus Pi and Studio terminal runtime assets from `dist/pi-runtime` and `dist/terminal-runtime`, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
+
+Windows fresh-desktop validation is no longer an automated gate in this flow. Treat Windows compatibility as a manual release risk until we add a separate local or paid CI path for it.
 
 ## Canonical source files for docs
 

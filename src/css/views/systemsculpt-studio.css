@@ -1186,6 +1186,16 @@ select.ss-pi-wizard__select { width: 100%; }
   -webkit-font-smoothing: antialiased;
 }
 
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-frame,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-tag,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-tag-input,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-link-path,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-link-preview,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-node-card,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-port-pin {
+  pointer-events: none;
+}
+
 @keyframes ss-studio-pending-pulse {
   0%,
   100% {

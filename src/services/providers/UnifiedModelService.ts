@@ -227,8 +227,12 @@ export class UnifiedModelService {
   }> {
     const models = await this.getModels(true);
     return {
-      systemSculpt: false,
-      customProviders: false,
+      systemSculpt: models.some(
+        (model) =>
+          String(model.provider || "").trim().toLowerCase() === "systemsculpt" &&
+          !!model.piExecutionModelId
+      ),
+      customProviders: models.some((model) => model.piAuthMode === "byok"),
       localPi: models.some((model) => model.piLocalAvailable),
     };
   }

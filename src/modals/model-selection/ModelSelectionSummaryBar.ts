@@ -12,33 +12,42 @@ export type ModelSelectionSummaryBarHandle = {
 };
 
 function getAccessLabel(state: ModelSelectionProviderAccessState): string {
+  if (state === "managed") {
+    return "Managed";
+  }
   if (state === "pi-auth") {
     return "Connected";
   }
   if (state === "local") {
-    return "Local";
+    return "Ready";
   }
-  return "Needs Pi";
+  return "Setup";
 }
 
 function getTitle(summary: ModelSelectionProviderSummarySnapshot): string {
   if (summary.totalModels === 0) {
+    if (summary.managedProviders > 0) {
+      return `${summary.managedProviders} managed provider${summary.managedProviders === 1 ? "" : "s"} available`;
+    }
     if (summary.piReadyProviders > 0) {
-      return `${summary.piReadyProviders} provider${summary.piReadyProviders === 1 ? "" : "s"} authenticated`;
+      return `${summary.piReadyProviders} provider${summary.piReadyProviders === 1 ? "" : "s"} connected`;
     }
     if (summary.localProviders > 0) {
-      return `${summary.localProviders} local provider${summary.localProviders === 1 ? "" : "s"} ready`;
+      return `${summary.localProviders} provider${summary.localProviders === 1 ? "" : "s"} ready`;
     }
     return "No models available yet";
   }
+  if (summary.managedProviders > 0) {
+    return `${summary.managedProviders} managed provider${summary.managedProviders === 1 ? "" : "s"} available`;
+  }
   if (summary.localProviders > 0) {
-    return `${summary.localProviders} local provider${summary.localProviders === 1 ? "" : "s"} available`;
+    return `${summary.localProviders} provider${summary.localProviders === 1 ? "" : "s"} ready`;
   }
   if (summary.piReadyProviders > 0) {
     return `${summary.piReadyProviders} provider${summary.piReadyProviders === 1 ? "" : "s"} connected`;
   }
   if (summary.unavailableProviders > 0) {
-    return `${summary.unavailableProviders} provider${summary.unavailableProviders === 1 ? "" : "s"} need Pi auth`;
+    return `${summary.unavailableProviders} provider${summary.unavailableProviders === 1 ? "" : "s"} need setup`;
   }
   return `${summary.totalProviders} provider${summary.totalProviders === 1 ? "" : "s"} available`;
 }
@@ -46,18 +55,20 @@ function getTitle(summary: ModelSelectionProviderSummarySnapshot): string {
 function getStats(summary: ModelSelectionProviderSummarySnapshot): string {
   if (summary.totalModels === 0) {
     if (summary.totalProviders > 0) {
-      return `${summary.totalProviders} connected provider${summary.totalProviders === 1 ? "" : "s"} found. Refresh after adding or fixing local model access.`;
+      return `${summary.totalProviders} provider${summary.totalProviders === 1 ? "" : "s"} found. Finish setup or refresh available models.`;
     }
-    return "Open Setup to connect Pi providers or refresh local Pi model availability.";
+    return "Open Setup to finish provider setup or refresh available models.";
   }
 
   const parts = [`${summary.totalModels} models`, `${summary.totalProviders} providers`];
-  if (summary.localProviders > 0) {
-    parts.push(`${summary.localProviders} local`);
+  if (summary.managedProviders > 0) {
+    parts.push(`${summary.managedProviders} managed`);
+  } else if (summary.localProviders > 0) {
+    parts.push(`${summary.localProviders} ready`);
   } else if (summary.piReadyProviders > 0) {
     parts.push(`${summary.piReadyProviders} connected`);
   } else if (summary.unavailableProviders > 0) {
-    parts.push(`${summary.unavailableProviders} need auth`);
+    parts.push(`${summary.unavailableProviders} need setup`);
   }
   return parts.join(" • ");
 }
@@ -69,7 +80,7 @@ export function renderModelSelectionSummaryBar(
   const summaryEl = containerEl.createDiv("ss-model-provider-summary");
   const topEl = summaryEl.createDiv("ss-model-provider-summary__top");
   const glanceEl = topEl.createDiv("ss-model-provider-summary__glance");
-  glanceEl.createDiv({ cls: "ss-model-provider-summary__eyebrow", text: "Provider Access" });
+  glanceEl.createDiv({ cls: "ss-model-provider-summary__eyebrow", text: "Model Access" });
   const titleEl = glanceEl.createDiv("ss-model-provider-summary__title");
   const statsEl = glanceEl.createDiv("ss-model-provider-summary__stats");
   const controlsEl = topEl.createDiv("ss-model-provider-summary__controls");

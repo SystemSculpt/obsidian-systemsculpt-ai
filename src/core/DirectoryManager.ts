@@ -95,7 +95,6 @@ export class DirectoryManager {
         settings.benchmarksDirectory,
         settings.webResearchDirectory,
         settings.recordingsDirectory,
-        settings.videoRecordingsDirectory,
         settings.systemPromptsDirectory,
         settings.attachmentsDirectory,
         settings.extractionsDirectory
@@ -519,7 +518,6 @@ export class DirectoryManager {
         settings.chatsDirectory,
         settings.savedChatsDirectory,
         settings.recordingsDirectory,
-        settings.videoRecordingsDirectory,
         settings.systemPromptsDirectory,
         settings.attachmentsDirectory,
         settings.extractionsDirectory
@@ -581,7 +579,6 @@ export class DirectoryManager {
         settings.chatsDirectory,
         settings.savedChatsDirectory,
         settings.recordingsDirectory,
-        settings.videoRecordingsDirectory,
         settings.systemPromptsDirectory,
         settings.attachmentsDirectory,
         settings.extractionsDirectory

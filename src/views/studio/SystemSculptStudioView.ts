@@ -67,6 +67,8 @@ import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
   type ConnectionAutoCreateDescriptor,
   type ConnectionAutoCreateRequest,
+  type StudioGraphZoomChangeContext,
+  type StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
 import {
   type StudioNodeInspectorRuntimeDetails,
@@ -257,6 +259,8 @@ export class SystemSculptStudioView extends ItemView {
   private pendingLabelAutofocusNodeId: string | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
+  private graphZoomMode: StudioGraphZoomMode = "interactive";
+  private graphZoomGestureInFlight = false;
   private terminalMounts = new Map<string, StudioTerminalMount>();
   private terminalZoomChangeListeners = new Set<() => void>();
   private lastGraphPointerPosition: { x: number; y: number } | null = null;
@@ -284,7 +288,7 @@ export class SystemSculptStudioView extends ItemView {
       scheduleProjectSave: () => this.scheduleProjectSave(),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
-      onGraphZoomChanged: (zoom) => this.handleGraphZoomChanged(zoom),
+      onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
       describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
@@ -2458,14 +2462,14 @@ export class SystemSculptStudioView extends ItemView {
     const graphX = (viewport.scrollLeft + localX) / previousZoom;
     const graphY = (viewport.scrollTop + localY) / previousZoom;
 
-    this.graphInteraction.setGraphZoom(nextZoom);
+    this.graphInteraction.setGraphZoom(nextZoom, {
+      mode: "interactive",
+      settled: false,
+      scheduleSettle: true,
+    });
     const appliedZoom = this.graphInteraction.getGraphZoom() || 1;
     viewport.scrollLeft = graphX * appliedZoom - localX;
     viewport.scrollTop = graphY * appliedZoom - localY;
-    this.captureGraphViewportState({
-      zoomOverride: appliedZoom,
-      requestLayoutSave: true,
-    });
   }
 
   private adjustGraphZoomFromRibbon(multiplier: number): void {
@@ -2484,18 +2488,20 @@ export class SystemSculptStudioView extends ItemView {
     return this.fitSelectedGraphNodesInViewport();
   }
 
+  showGraphOverviewFromCommand(): boolean {
+    return this.fitGraphOverviewInViewport();
+  }
+
   private fitSelectedGraphNodesInViewport(): boolean {
-    const fitted = this.graphInteraction.fitSelectedNodesInViewport({
+    return this.graphInteraction.fitSelectedNodesInViewport({
       paddingPx: STUDIO_GRAPH_SELECTION_FIT_PADDING_PX,
     });
-    if (!fitted) {
-      return false;
-    }
-    this.captureGraphViewportState({
-      zoomOverride: this.graphInteraction.getGraphZoom() || 1,
-      requestLayoutSave: true,
+  }
+
+  private fitGraphOverviewInViewport(): boolean {
+    return this.graphInteraction.fitGraphInViewport({
+      paddingPx: STUDIO_GRAPH_SELECTION_FIT_PADDING_PX,
     });
-    return true;
   }
 
   private openAddNodeMenuAtViewportCenter(): void {
@@ -2638,13 +2644,18 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl.classList.toggle("is-interacting", this.nodeDragInProgress);
   }
 
-  private syncGraphZoomVisualState(zoomOverride?: number): void {
+  private syncGraphZoomVisualState(
+    zoomOverride?: number,
+    modeOverride?: StudioGraphZoomMode
+  ): void {
     if (!this.graphViewportEl) {
       return;
     }
     const zoom = normalizeGraphZoom(zoomOverride ?? this.graphInteraction.getGraphZoom());
+    const mode = modeOverride ?? this.graphZoomMode;
     this.graphViewportEl.classList.toggle("is-zoomed-far", zoom <= 0.56);
     this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.4);
+    this.graphViewportEl.classList.toggle("is-zoom-overview", mode === "overview");
   }
 
   private syncInspectorSelection(): void {
@@ -3542,8 +3553,19 @@ export class SystemSculptStudioView extends ItemView {
     this.removeNodes([nodeId]);
   }
 
-  private handleGraphZoomChanged(zoom: number): void {
-    this.syncGraphZoomVisualState(zoom);
+  private handleGraphZoomChanged(zoom: number, context: StudioGraphZoomChangeContext): void {
+    this.graphZoomMode = context.mode;
+    this.graphZoomGestureInFlight = !context.settled;
+    this.syncGraphZoomVisualState(zoom, context.mode);
+    this.nodeContextMenuOverlay?.hide();
+    this.nodeActionContextMenuOverlay?.hide();
+    if (!context.settled) {
+      return;
+    }
+    if (context.mode === "overview") {
+      this.inspectorOverlay?.hide();
+      return;
+    }
     this.inspectorOverlay?.setGraphZoom(zoom);
     this.nodeContextMenuOverlay?.setGraphZoom(zoom);
     this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
@@ -3555,6 +3577,9 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.markViewportScrolling();
+    if (this.graphZoomGestureInFlight || this.graphZoomMode === "overview") {
+      return;
+    }
     if (this.viewportScrollCaptureFrame !== null) {
       return;
     }
@@ -3923,6 +3948,9 @@ export class SystemSculptStudioView extends ItemView {
       onZoomReset: () => {
         this.resetGraphZoomFromRibbon();
       },
+      onZoomOverview: () => {
+        this.fitGraphOverviewInViewport();
+      },
       onToggleNodeDetailMode: () => {
         this.toggleCurrentNodeDetailMode();
       },
@@ -4049,11 +4077,15 @@ export class SystemSculptStudioView extends ItemView {
   private captureGraphViewportState(options?: {
     zoomOverride?: number;
     requestLayoutSave?: boolean;
+    allowOverview?: boolean;
   }): void {
     const viewport = this.graphViewportEl;
     const projectPath = this.graphViewportProjectPath;
     if (!viewport || !projectPath) {
       this.pendingViewportState = null;
+      return;
+    }
+    if (this.graphZoomMode === "overview" && options?.allowOverview !== true) {
       return;
     }
 
@@ -4092,7 +4124,9 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const nextZoom = normalizeGraphZoom(restoredState.zoom);
-    this.graphInteraction.setGraphZoom(nextZoom);
+    this.graphZoomMode = "interactive";
+    this.graphZoomGestureInFlight = false;
+    this.graphInteraction.setGraphZoom(nextZoom, { mode: "interactive" });
 
     const nextLeft = normalizeGraphCoordinate(restoredState.scrollLeft);
     const nextTop = normalizeGraphCoordinate(restoredState.scrollTop);

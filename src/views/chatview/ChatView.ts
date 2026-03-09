@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, Component, Platform } from "obsidian";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { ChatMessage, ChatRole, MultiPartContent, SystemSculptSettings } from "../../types";
@@ -13,7 +14,12 @@ import { normalizeDesktopPromptSelectionType, SystemPromptService } from "../../
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 import { StandardModelSelectionModal } from "../../modals/StandardModelSelectionModal";
 
-import { ensureCanonicalId, getDisplayName, getModelLabelWithProvider } from "../../utils/modelUtils";
+import {
+  ensureCanonicalId,
+  findModelById,
+  getDisplayName,
+  getModelLabelWithProvider,
+} from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
 import { GENERAL_USE_PRESET } from "../../constants/prompts";
 import { ChatExportService } from "./export/ChatExportService";
@@ -26,9 +32,15 @@ import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
 import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
-import { loadPiSessionMirror } from "../../services/pi/PiSessionMirror";
+import { loadPiSessionMirrorWithRecovery } from "../../services/pi/PiSessionMirror";
 import { PiRpcProcessClient } from "../../services/pi/PiRpcProcessClient";
-import { resolveChatBackend, type ChatBackend } from "./storage/ChatPersistenceTypes";
+import { resolveLegacyPiTextSelectionId } from "../../services/pi-native/PiTextMigration";
+import {
+  normalizePiSessionState,
+  resolveChatBackend,
+  type ChatBackend,
+  type PiSessionState,
+} from "./storage/ChatPersistenceTypes";
 
 import { uiSetup } from "./uiSetup";
 import { messageHandling } from "./messageHandling";
@@ -138,14 +150,8 @@ export class ChatView extends ItemView {
     this.systemPromptPath = initialState.systemPromptPath;
     // Use -1 as uninitialized state to distinguish from actual version 0
     this.chatVersion = initialState.version !== undefined ? initialState.version : -1;
-    this.chatBackend = resolveChatBackend({
-      explicitBackend: initialState.chatBackend,
-      piSessionFile: initialState.piSessionFile,
-    });
-    this.piSessionFile = typeof initialState.piSessionFile === "string" ? initialState.piSessionFile : undefined;
-    this.piSessionId = typeof initialState.piSessionId === "string" ? initialState.piSessionId : undefined;
-    this.piLastEntryId = typeof initialState.piLastEntryId === "string" ? initialState.piLastEntryId : undefined;
-    this.piLastSyncedAt = typeof initialState.piLastSyncedAt === "string" ? initialState.piLastSyncedAt : undefined;
+    this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
+    this.applyChatLeafState(initialState);
 
     this.ensureCoreServicesReady();
 
@@ -611,9 +617,47 @@ export class ChatView extends ItemView {
     this.plugin.openSettingsTab(targetTab);
   }
 
+  private async resolveLoadedSelectedModelId(savedModelId: string): Promise<string> {
+    const rawModelId = String(savedModelId || "").trim();
+    if (!rawModelId) {
+      return "";
+    }
+
+    const customProviders = this.plugin.settings.customProviders || [];
+    const tryResolve = (models: any[]): string => {
+      const directMatch = findModelById(models, rawModelId);
+      if (directMatch?.id) {
+        return directMatch.id;
+      }
+      return resolveLegacyPiTextSelectionId(rawModelId, models, customProviders);
+    };
+
+    try {
+      const cachedModels = this.plugin.modelService.getCachedModels();
+      const cachedResolved = tryResolve(cachedModels);
+      if (cachedResolved !== rawModelId || !!findModelById(cachedModels, cachedResolved)) {
+        return cachedResolved;
+      }
+    } catch {
+      // Fall back to the last persisted id if the cache is not ready yet.
+    }
+
+    try {
+      const models = await this.plugin.modelService.getModels();
+      const resolved = tryResolve(models);
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Keep the saved id when live model resolution isn't available.
+    }
+
+    return rawModelId;
+  }
+
   public async promptProviderSetup(customMessage?: string): Promise<void> {
     const message = customMessage ??
-      "Open Setup to sign in with ChatGPT, Claude, Gemini, or add an API key, then refresh your model list.";
+      "Open Setup to finish provider setup, then refresh your model list.";
     const result = await showPopup(this.app, message, {
       title: "Finish setup",
       icon: "plug-zap",
@@ -1063,10 +1107,7 @@ export class ChatView extends ItemView {
       this.initializeChatTitle();
       // Ensure the selectedModelId for a new chat defaults to the plugin's setting
       this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
-      this.piSessionFile = undefined;
-      this.piSessionId = undefined;
-      this.piLastEntryId = undefined;
-      this.piLastSyncedAt = undefined;
+      this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       // Respect policy for default system prompt when starting new chats
@@ -1126,14 +1167,7 @@ export class ChatView extends ItemView {
       this.systemPromptType = state.systemPromptType || 'general-use';
       this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
-      this.chatBackend = resolveChatBackend({
-        explicitBackend: state.chatBackend,
-        piSessionFile: state.piSessionFile,
-      });
-      this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
-      this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
-      this.piLastEntryId = typeof state.piLastEntryId === "string" ? state.piLastEntryId : undefined;
-      this.piLastSyncedAt = typeof state.piLastSyncedAt === "string" ? state.piLastSyncedAt : undefined;
+      this.applyChatLeafState(state);
 
       if (state.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
@@ -1169,14 +1203,7 @@ export class ChatView extends ItemView {
     // Only set path for custom prompts
     this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
-    this.chatBackend = resolveChatBackend({
-      explicitBackend: state.chatBackend,
-      piSessionFile: state.piSessionFile,
-    });
-    this.piSessionFile = typeof state.piSessionFile === "string" ? state.piSessionFile : undefined;
-    this.piSessionId = typeof state.piSessionId === "string" ? state.piSessionId : undefined;
-    this.piLastEntryId = typeof state.piLastEntryId === "string" ? state.piLastEntryId : undefined;
-    this.piLastSyncedAt = typeof state.piLastSyncedAt === "string" ? state.piLastSyncedAt : undefined;
+    this.applyChatLeafState(state);
     // Restore chat font size
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
@@ -1204,10 +1231,7 @@ export class ChatView extends ItemView {
       this.systemPromptType = 'general-use';
       this.systemPromptPath = undefined;
       this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
-      this.piSessionFile = undefined;
-      this.piSessionId = undefined;
-      this.piLastEntryId = undefined;
-      this.piLastSyncedAt = undefined;
+      this.applyPiSessionState({}, { reset: true, updateViewState: false });
       // Don't render here if UI not ready yet
       if (this.chatContainer) {
         this.renderMessagesInChunks();
@@ -1262,10 +1286,7 @@ export class ChatView extends ItemView {
           this.systemPromptType = 'general-use';
           this.systemPromptPath = undefined;
           this.chatBackend = Platform.isDesktopApp ? "pi" : "legacy";
-          this.piSessionFile = undefined;
-          this.piSessionId = undefined;
-          this.piLastEntryId = undefined;
-          this.piLastSyncedAt = undefined;
+          this.applyPiSessionState({}, { reset: true, updateViewState: false });
           this.contextManager?.clearContext();
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
@@ -1276,7 +1297,9 @@ export class ChatView extends ItemView {
         }
 
         // Restore all chat properties
-        this.selectedModelId = chatData.selectedModelId || this.plugin.settings.selectedModelId;
+        this.selectedModelId = await this.resolveLoadedSelectedModelId(
+          chatData.selectedModelId || this.plugin.settings.selectedModelId
+        );
         this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
         const persistedMessages = chatData.messages || [];
@@ -1286,12 +1309,15 @@ export class ChatView extends ItemView {
         this.systemPromptType = chatData.systemPromptType || 'general-use';
         this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
 
-        this.chatBackend = chatData.chatBackend;
-        this.piSessionFile = chatData.piSessionFile;
-        this.piSessionId = chatData.piSessionId;
-        this.piLastEntryId = chatData.piLastEntryId;
-        this.piLastSyncedAt = chatData.piLastSyncedAt;
-        const hasPiSession = this.isPiBackedChat() && !!this.piSessionFile;
+        this.applyChatLeafState({
+          chatBackend: chatData.chatBackend,
+          piSessionFile: chatData.piSessionFile,
+          piSessionId: chatData.piSessionId,
+          piLastEntryId: chatData.piLastEntryId,
+          piLastSyncedAt: chatData.piLastSyncedAt,
+        });
+        const hasPiSession = this.isPiBackedChat() && (!!this.getPiSessionFile() || !!this.getPiSessionId());
+        const canHydratePiTranscript = !!this.getPiSessionFile();
         this.messages = persistedMessages;
 
         // Load chat font size from chat data
@@ -1319,7 +1345,7 @@ export class ChatView extends ItemView {
           if (loadEpoch !== this.loadEpoch) return;
         }
 
-        if (hasPiSession) {
+        if (hasPiSession && canHydratePiTranscript) {
           this.showChatLoadingBanner(persistedMessages.length > 0 ? "Syncing Pi session…" : "Restoring Pi chat…");
           await yieldToPaint();
           try {
@@ -2097,6 +2123,73 @@ export class ChatView extends ItemView {
     if(this.inputHandler) this.inputHandler.focus();
   }
 
+  private readPiSessionState(): PiSessionState {
+    return normalizePiSessionState({
+      sessionFile: this.piSessionFile,
+      sessionId: this.piSessionId,
+      lastEntryId: this.piLastEntryId,
+      lastSyncedAt: this.piLastSyncedAt,
+    });
+  }
+
+  private applyPiSessionState(
+    next: Partial<PiSessionState>,
+    options?: {
+      backend?: ChatBackend;
+      reset?: boolean;
+      touchSyncedAt?: boolean;
+      updateViewState?: boolean;
+    }
+  ): void {
+    const current = options?.reset ? {} : this.readPiSessionState();
+    const merged = normalizePiSessionState({
+      sessionFile: next.sessionFile ?? current.sessionFile,
+      sessionId: next.sessionId ?? current.sessionId,
+      lastEntryId: next.lastEntryId ?? current.lastEntryId,
+      lastSyncedAt: next.lastSyncedAt ?? current.lastSyncedAt,
+    });
+
+    if (options?.backend) {
+      this.chatBackend = options.backend;
+    }
+
+    this.piSessionFile = merged.sessionFile;
+    this.piSessionId = merged.sessionId;
+    this.piLastEntryId = merged.lastEntryId;
+    this.piLastSyncedAt =
+      options?.touchSyncedAt ? new Date().toISOString() : merged.lastSyncedAt;
+
+    if (options?.updateViewState !== false) {
+      this.updateViewState();
+    }
+  }
+
+  private applyChatLeafState(state: {
+    chatBackend?: ChatBackend;
+    piSessionFile?: string;
+    piSessionId?: string;
+    piLastEntryId?: string;
+    piLastSyncedAt?: string;
+  }): void {
+    this.chatBackend = resolveChatBackend({
+      explicitBackend: state.chatBackend,
+      piSessionFile: state.piSessionFile,
+      piSessionId: state.piSessionId,
+    });
+    this.applyPiSessionState(
+      {
+        sessionFile: state.piSessionFile,
+        sessionId: state.piSessionId,
+        lastEntryId: state.piLastEntryId,
+        lastSyncedAt: state.piLastSyncedAt,
+      },
+      {
+        backend: this.chatBackend,
+        updateViewState: false,
+      }
+    );
+  }
+
   public getSelectedModelId(): string {
     return this.selectedModelId;
   }
@@ -2107,20 +2200,27 @@ export class ChatView extends ItemView {
       : undefined;
   }
 
+  public getPiSessionId(): string | undefined {
+    return typeof this.piSessionId === "string" && this.piSessionId.trim().length > 0
+      ? this.piSessionId
+      : undefined;
+  }
+
   public isPiBackedChat(): boolean {
-    return Platform.isDesktopApp && this.chatBackend === "pi";
+    return this.chatBackend === "pi";
   }
 
   public isLegacyReadOnlyChat(): boolean {
-    return Platform.isDesktopApp && this.chatBackend === "legacy" && String(this.chatId || "").trim().length > 0;
+    return this.chatBackend === "legacy" && String(this.chatId || "").trim().length > 0;
   }
 
   private resolvePiSessionRef(nextState?: {
     sessionFile?: string;
     sessionId?: string;
   }): { sessionFile?: string; sessionId?: string } {
-    const sessionFile = String(nextState?.sessionFile || this.piSessionFile || "").trim();
-    const sessionId = String(nextState?.sessionId || this.piSessionId || "").trim();
+    const current = this.readPiSessionState();
+    const sessionFile = String(nextState?.sessionFile || current.sessionFile || "").trim();
+    const sessionId = String(nextState?.sessionId || current.sessionId || "").trim();
     return {
       sessionFile: sessionFile || undefined,
       sessionId: sessionId || undefined,
@@ -2136,13 +2236,33 @@ export class ChatView extends ItemView {
     force?: boolean;
   }): Promise<boolean> {
     const sessionRef = this.resolvePiSessionRef(options);
-    if (!this.isPiBackedChat() || !sessionRef.sessionFile) {
+    if (!this.isPiBackedChat()) {
+      return false;
+    }
+    if (!sessionRef.sessionFile) {
+      this.applyPiSessionState(
+        {
+          sessionFile: sessionRef.sessionFile,
+          sessionId: sessionRef.sessionId,
+        },
+        {
+          backend: "pi",
+          touchSyncedAt: !!sessionRef.sessionId,
+        }
+      );
+      if (options?.persist && this.chatId && this.isFullyLoaded) {
+        await this.saveChat();
+      }
       return false;
     }
 
-    const snapshot = await loadPiSessionMirror({
+    const snapshot = await loadPiSessionMirrorWithRecovery({
       plugin: this.plugin,
       sessionFile: sessionRef.sessionFile,
+      lastEntryId: this.piLastEntryId,
+      messageEntryIds: this.messages
+        .map((message) => String(message.pi_entry_id || "").trim())
+        .filter(Boolean),
     });
 
     const nextLastEntryId = String(snapshot.lastEntryId || "").trim() || this.piLastEntryId;
@@ -2155,11 +2275,17 @@ export class ChatView extends ItemView {
     if (shouldReplaceTranscript && snapshot.messages.length > 0) {
       this.messages = snapshot.messages;
     }
-    this.chatBackend = "pi";
-    this.piSessionFile = snapshot.sessionFile || sessionRef.sessionFile;
-    this.piSessionId = snapshot.sessionId || sessionRef.sessionId;
-    this.piLastEntryId = nextLastEntryId;
-    this.piLastSyncedAt = new Date().toISOString();
+    this.applyPiSessionState(
+      {
+        sessionFile: snapshot.sessionFile || sessionRef.sessionFile,
+        sessionId: snapshot.sessionId || sessionRef.sessionId,
+        lastEntryId: nextLastEntryId,
+      },
+      {
+        backend: "pi",
+        touchSyncedAt: true,
+      }
+    );
 
     const sessionName = String(snapshot.sessionName || "").trim();
     if (options?.syncTitle !== false && sessionName) {
@@ -2177,6 +2303,48 @@ export class ChatView extends ItemView {
     }
 
     return shouldReplaceTranscript;
+  }
+
+  private async applyLocalPiForkState(options: {
+    forkMessageId: string;
+    sessionFile?: string;
+    sessionId?: string;
+    sessionName?: string;
+  }): Promise<void> {
+    const forkIndex = this.messages.findIndex(
+      (message) => message.message_id === options.forkMessageId && message.role === "user"
+    );
+    if (forkIndex === -1) {
+      throw new Error("Pi could not resolve the chat message selected for forking.");
+    }
+
+    // Pi restores the selected user prompt into the editor, so the visible transcript should
+    // stop immediately before that message while the new branch waits for its first assistant turn.
+    this.messages = this.messages.slice(0, forkIndex);
+    this.applyPiSessionState(
+      {
+        sessionFile: options.sessionFile,
+        sessionId: options.sessionId,
+        lastEntryId: String(this.messages[this.messages.length - 1]?.pi_entry_id || "").trim() || undefined,
+      },
+      {
+        backend: "pi",
+        reset: !options.sessionFile && !options.sessionId,
+        touchSyncedAt: true,
+      }
+    );
+
+    const sessionName = String(options.sessionName || "").trim();
+    if (sessionName) {
+      this.setTitle(sessionName, false);
+    }
+
+    this.updateViewState();
+    await this.renderMessagesInChunks();
+
+    if (this.chatId && this.isFullyLoaded) {
+      await this.saveChat();
+    }
   }
 
   public async hydrateFromPiSession(options?: {
@@ -2216,10 +2384,7 @@ export class ChatView extends ItemView {
     cancelled: boolean;
   }> {
     const sessionFile = this.getPiSessionFile();
-    if (!Platform.isDesktopApp || !sessionFile) {
-      throw new Error("This chat does not have an active Pi session to fork.");
-    }
-
+    const sessionId = this.getPiSessionId();
     const targetMessage = this.messages.find(
       (message) => message.message_id === messageId && message.role === "user"
     );
@@ -2227,9 +2392,31 @@ export class ChatView extends ItemView {
       throw new Error("Only Pi-backed user messages can be forked.");
     }
 
+    if (!sessionFile && !sessionId) {
+      throw new Error("This chat does not have an active Pi session to fork.");
+    }
+    if (sessionFile && !existsSync(sessionFile)) {
+      throw new Error(
+        "The linked Pi session file no longer exists. Reopen the chat to recover it, or start a new Pi chat."
+      );
+    }
+
+    if (!sessionFile && sessionId) {
+      await this.applyLocalPiForkState({
+        forkMessageId: messageId,
+      });
+      return {
+        text:
+          typeof targetMessage.content === "string"
+            ? targetMessage.content
+            : JSON.stringify(targetMessage.content ?? ""),
+        cancelled: false,
+      };
+    }
+
     const client = new PiRpcProcessClient({
       plugin: this.plugin,
-      sessionFile,
+      sessionFile: sessionFile!,
     });
 
     await client.start();
@@ -2247,14 +2434,27 @@ export class ChatView extends ItemView {
       }
 
       const state = await client.getState();
-      await this.syncPiSessionTranscript({
-        sessionFile: String(state.sessionFile || "").trim() || sessionFile,
-        sessionId: String(state.sessionId || "").trim() || this.piSessionId,
-        syncTitle: true,
-        render: true,
-        persist: true,
-        force: true,
-      });
+      const nextSessionFile = String(state.sessionFile || "").trim() || sessionFile;
+      const nextSessionId = String(state.sessionId || "").trim() || this.piSessionId;
+      const nextSessionName = String(state.sessionName || "").trim();
+
+      if (nextSessionFile && !existsSync(nextSessionFile)) {
+        await this.applyLocalPiForkState({
+          forkMessageId: messageId,
+          sessionFile: nextSessionFile,
+          sessionId: nextSessionId,
+          sessionName: nextSessionName,
+        });
+      } else {
+        await this.syncPiSessionTranscript({
+          sessionFile: nextSessionFile,
+          sessionId: nextSessionId,
+          syncTitle: true,
+          render: true,
+          persist: true,
+          force: true,
+        });
+      }
 
       return result;
     } finally {
@@ -2278,10 +2478,15 @@ export class ChatView extends ItemView {
     try {
       await client.setSessionName(sessionName);
       const state = await client.getState();
-      this.chatBackend = "pi";
-      this.piSessionFile = String(state.sessionFile || "").trim() || sessionFile;
-      this.piSessionId = String(state.sessionId || "").trim() || this.piSessionId;
-      this.updateViewState();
+      this.applyPiSessionState(
+        {
+          sessionFile: String(state.sessionFile || "").trim() || sessionFile,
+          sessionId: String(state.sessionId || "").trim() || this.piSessionId,
+        },
+        {
+          backend: "pi",
+        }
+      );
     } finally {
       await client.stop();
     }
@@ -2289,14 +2494,7 @@ export class ChatView extends ItemView {
 
   public clearPiSessionState(options?: { save?: boolean; updateViewState?: boolean }): void {
     const hadSession = !!this.piSessionFile || !!this.piSessionId;
-    this.piSessionFile = undefined;
-    this.piSessionId = undefined;
-    this.piLastEntryId = undefined;
-    this.piLastSyncedAt = undefined;
-
-    if (options?.updateViewState !== false) {
-      this.updateViewState();
-    }
+    this.applyPiSessionState({}, { reset: true, updateViewState: options?.updateViewState });
 
     if (hadSession && options?.save && this.chatId && this.isFullyLoaded) {
       void this.saveChat();
@@ -2304,20 +2502,16 @@ export class ChatView extends ItemView {
   }
 
   public setPiSessionState(session: { sessionFile?: string; sessionId: string }): void {
-    const nextSessionFile =
-      typeof session.sessionFile === "string" && session.sessionFile.trim().length > 0
-        ? session.sessionFile.trim()
-        : undefined;
-    const nextSessionId = String(session.sessionId || "").trim() || undefined;
+    const nextState = normalizePiSessionState({
+      sessionFile: session.sessionFile,
+      sessionId: session.sessionId,
+    });
 
-    if (this.piSessionFile === nextSessionFile && this.piSessionId === nextSessionId) {
+    if (this.piSessionFile === nextState.sessionFile && this.piSessionId === nextState.sessionId) {
       return;
     }
 
-    this.chatBackend = "pi";
-    this.piSessionFile = nextSessionFile;
-    this.piSessionId = nextSessionId;
-    this.updateViewState();
+    this.applyPiSessionState(nextState, { backend: "pi" });
 
     if (this.chatId && this.isFullyLoaded) {
       void this.saveChat();

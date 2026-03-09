@@ -9,6 +9,10 @@ import {
   isLikelyMissingStudioPiExecutableError,
   mergeStudioPiCliPath,
 } from "../../studio/piAuth/StudioPiProcessUtils";
+import {
+  buildSystemSculptPiProviderEnv,
+  ensureSystemSculptPiProviderExtension,
+} from "./PiSystemSculptProvider";
 import { buildPiNodeChildEnv, resolvePiNodeCommandCandidates } from "./PiNodeRuntime";
 import { ensureBundledPiRuntime } from "./PiRuntimeBootstrap";
 import { resolvePiPackageRoot } from "./PiSdk";
@@ -253,7 +257,11 @@ export async function runPiCommandWithResolvedRuntime(
   }
 
   const cwd = String(options.cwd || "").trim() || resolvePiCommandCwd(options.plugin);
-  const env = createPiCommandEnv(options.env);
+  const extensionPath = await ensureSystemSculptPiProviderExtension(options.plugin);
+  const env = createPiCommandEnv({
+    ...buildSystemSculptPiProviderEnv(options.plugin),
+    ...(options.env || {}),
+  });
   await ensureBundledPiRuntime({ plugin: options.plugin });
   const runtimes = resolvePiRuntimes(env);
   let lastMissingBinaryError: unknown = null;
@@ -261,7 +269,7 @@ export async function runPiCommandWithResolvedRuntime(
   for (const runtime of runtimes) {
     try {
       return await spawnProcessForRuntime(runtime, {
-        args: options.args,
+        args: ["--extension", extensionPath, ...options.args],
         cwd,
         env,
         timeoutMs: options.timeoutMs,
@@ -290,7 +298,11 @@ export async function startPiProcess(
   }
 
   const cwd = String(options.cwd || "").trim() || resolvePiCommandCwd(options.plugin);
-  const env = createPiCommandEnv(options.env);
+  const extensionPath = await ensureSystemSculptPiProviderExtension(options.plugin);
+  const env = createPiCommandEnv({
+    ...buildSystemSculptPiProviderEnv(options.plugin),
+    ...(options.env || {}),
+  });
   await ensureBundledPiRuntime({ plugin: options.plugin });
   const runtimes = resolvePiRuntimes(env);
   let lastMissingBinaryError: unknown = null;
@@ -298,7 +310,7 @@ export async function startPiProcess(
   for (const runtime of runtimes) {
     try {
       const child = await new Promise<ChildProcessWithoutNullStreams>((resolve, reject) => {
-        const spawned = spawn(runtime.command, [...runtime.argsPrefix, ...options.args], {
+        const spawned = spawn(runtime.command, [...runtime.argsPrefix, "--extension", extensionPath, ...options.args], {
           cwd,
           env: runtime.env || env,
           shell: false,

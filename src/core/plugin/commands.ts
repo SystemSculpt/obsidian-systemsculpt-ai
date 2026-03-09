@@ -29,7 +29,6 @@ export class CommandManager {
 
   registerCommands() {
     this.registerToggleAudioRecorder();
-    this.registerToggleVideoRecorder();
     this.registerOpenChat();
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
@@ -99,48 +98,6 @@ export class CommandManager {
         }
       },
       hotkeys: [{ modifiers: ["Mod"], key: "r" }],
-    });
-  }
-
-  private registerToggleVideoRecorder() {
-    this.plugin.addCommand({
-      id: "toggle-obsidian-window-video-recorder",
-      name: "Toggle Obsidian Window Video Recorder",
-      callback: async () => {
-        const alreadyInitialized = this.plugin.hasVideoRecorderService();
-        const logger = this.plugin.getLogger();
-
-        logger.debug("Toggle video recorder command received", {
-          source: "CommandManager",
-          method: "toggleVideoRecorder",
-          metadata: {
-            alreadyInitialized,
-          },
-        });
-
-        try {
-          const recorderService = this.plugin.getVideoRecorderService();
-          await recorderService.toggleRecording();
-
-          logger.info("Video recorder toggled", {
-            source: "CommandManager",
-            method: "toggleVideoRecorder",
-            metadata: {
-              alreadyInitialized,
-            },
-          });
-        } catch (error) {
-          logger.error("Failed to toggle video recorder", error, {
-            source: "CommandManager",
-            method: "toggleVideoRecorder",
-            metadata: {
-              alreadyInitialized,
-            },
-          });
-
-          new Notice("Unable to toggle the Obsidian window video recorder.", 8000);
-        }
-      },
     });
   }
 
@@ -908,6 +865,21 @@ export class CommandManager {
         return true;
       },
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
+    });
+
+    this.plugin.addCommand({
+      id: "overview-systemsculpt-studio-graph-in-viewport",
+      name: "SystemSculpt Studio: Overview Graph in Viewport",
+      checkCallback: (checking: boolean) => {
+        const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+        if (!activeStudioView) {
+          return false;
+        }
+        if (!checking) {
+          activeStudioView.showGraphOverviewFromCommand();
+        }
+        return true;
+      },
     });
 
     this.plugin.addCommand({

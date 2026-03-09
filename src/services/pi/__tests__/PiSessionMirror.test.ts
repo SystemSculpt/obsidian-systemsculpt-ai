@@ -1,4 +1,7 @@
-import { loadPiSessionMirror } from "../PiSessionMirror";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { loadPiSessionMirror, loadPiSessionMirrorWithRecovery } from "../PiSessionMirror";
 import { loadPiSdkModule } from "../PiSdk";
 
 jest.mock("../PiSdk", () => ({
@@ -8,8 +11,15 @@ jest.mock("../PiSdk", () => ({
 const loadPiSdkModuleMock = loadPiSdkModule as jest.MockedFunction<typeof loadPiSdkModule>;
 
 describe("PiSessionMirror", () => {
+  let tempDir: string;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    tempDir = mkdtempSync(join(tmpdir(), "pi-session-mirror-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("rebuilds a canonical transcript from Pi session entries", async () => {
@@ -150,5 +160,110 @@ describe("PiSessionMirror", () => {
       ],
     });
     expect(snapshot.messages.some((message) => message.role === "tool")).toBe(false);
+  });
+
+  it("recovers a stale session file by matching persisted Pi entry ids", async () => {
+    const sessionDir = join(tempDir, "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+
+    const staleSessionFile = join(sessionDir, "missing-session.jsonl");
+    const recoveredSessionFile = join(sessionDir, "recovered-session.jsonl");
+    const unrelatedSessionFile = join(sessionDir, "unrelated-session.jsonl");
+    writeFileSync(recoveredSessionFile, "");
+    writeFileSync(unrelatedSessionFile, "");
+
+    const sessionEntriesByFile = new Map<string, any[]>([
+      [
+        recoveredSessionFile,
+        [
+          {
+            type: "message",
+            id: "entry_user_match",
+            parentId: null,
+            timestamp: "100",
+            message: {
+              role: "user",
+              timestamp: 100,
+              content: "hi :)",
+            },
+          },
+          {
+            type: "message",
+            id: "entry_assistant_match",
+            parentId: "entry_user_match",
+            timestamp: "200",
+            message: {
+              role: "assistant",
+              timestamp: 200,
+              provider: "anthropic",
+              model: "claude-haiku-4-5",
+              content: [{ type: "text", text: "Hey there" }],
+            },
+          },
+        ],
+      ],
+      [
+        unrelatedSessionFile,
+        [
+          {
+            type: "message",
+            id: "entry_other",
+            parentId: null,
+            timestamp: "100",
+            message: {
+              role: "user",
+              timestamp: 100,
+              content: "other chat",
+            },
+          },
+        ],
+      ],
+    ]);
+
+    loadPiSdkModuleMock.mockResolvedValue({
+      SessionManager: {
+        open: jest.fn((sessionFile: string) => {
+          if (!sessionEntriesByFile.has(sessionFile)) {
+            throw new Error(`ENOENT: no such file or directory, open '${sessionFile}'`);
+          }
+          const entries = sessionEntriesByFile.get(sessionFile) || [];
+          return {
+            getBranch: () => entries,
+            buildSessionContext: () => ({
+              model: {
+                provider: "anthropic",
+                modelId: "claude-haiku-4-5",
+              },
+            }),
+            getSessionId: () => `sess-${sessionFile.includes("recovered") ? "recovered" : "other"}`,
+            getSessionFile: () => sessionFile,
+            getSessionName: () => undefined,
+          };
+        }),
+      },
+    } as any);
+
+    const snapshot = await loadPiSessionMirrorWithRecovery({
+      plugin: {} as any,
+      sessionFile: staleSessionFile,
+      lastEntryId: "entry_assistant_match",
+      messageEntryIds: ["entry_user_match"],
+    });
+
+    expect(snapshot.sessionFile).toBe(recoveredSessionFile);
+    expect(snapshot.sessionId).toBe("sess-recovered");
+    expect(snapshot.lastEntryId).toBe("entry_assistant_match");
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        pi_entry_id: "entry_user_match",
+        content: "hi :)",
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        pi_entry_id: "entry_assistant_match",
+        content: "Hey there",
+      }),
+    ]);
   });
 });

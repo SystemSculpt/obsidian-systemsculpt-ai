@@ -7,6 +7,8 @@ import {
   parseCanonicalId,
   migrateFromLegacyId,
   getCanonicalId,
+  isSystemSculptModel,
+  compareSystemSculptModelPriority,
   findModelById,
   getDisplayName,
   getProviderDisplayPrefix,
@@ -233,6 +235,11 @@ describe("modelUtils", () => {
       );
     });
 
+    it("renders the canonical SystemSculpt alias with a friendly label", () => {
+      expect(getDisplayName("systemsculpt@@systemsculpt/ai-agent")).toBe("SystemSculpt");
+      expect(getDisplayName("systemsculpt/ai-agent")).toBe("SystemSculpt");
+    });
+
     it("handles undefined/null gracefully", () => {
       expect(getDisplayName(undefined as any)).toBeUndefined();
       expect(getDisplayName(null as any)).toBeNull();
@@ -240,8 +247,8 @@ describe("modelUtils", () => {
   });
 
   describe("getProviderDisplayPrefix", () => {
-    it("returns [SS AI] for systemsculpt", () => {
-      expect(getProviderDisplayPrefix("systemsculpt")).toBe("[SS AI] ");
+    it("returns a friendly prefix for systemsculpt", () => {
+      expect(getProviderDisplayPrefix("systemsculpt")).toBe("SystemSculpt: ");
     });
 
     it("returns uppercase bracketed prefix for other providers", () => {
@@ -250,7 +257,7 @@ describe("modelUtils", () => {
     });
 
     it("handles case-insensitively", () => {
-      expect(getProviderDisplayPrefix("SystemSculpt")).toBe("[SS AI] ");
+      expect(getProviderDisplayPrefix("SystemSculpt")).toBe("SystemSculpt: ");
       expect(getProviderDisplayPrefix("OPENAI")).toBe("[OPENAI] ");
     });
 
@@ -260,14 +267,63 @@ describe("modelUtils", () => {
     });
   });
 
+  describe("isSystemSculptModel", () => {
+    it("detects System Sculpt models from provider fields", () => {
+      expect(
+        isSystemSculptModel(
+          createMockModel({
+            id: "systemsculpt@@systemsculpt/ai-agent",
+            provider: "systemsculpt",
+          })
+        )
+      ).toBe(true);
+    });
+
+    it("detects System Sculpt models from sourceProviderId", () => {
+      expect(
+        isSystemSculptModel(
+          createMockModel({
+            id: "openai@@gpt-5-mini",
+            provider: "openai",
+            sourceProviderId: "systemsculpt",
+          })
+        )
+      ).toBe(true);
+    });
+
+    it("returns false for non-System Sculpt models", () => {
+      expect(isSystemSculptModel(createMockModel())).toBe(false);
+    });
+  });
+
+  describe("compareSystemSculptModelPriority", () => {
+    it("pins System Sculpt models ahead of other providers", () => {
+      const systemSculpt = createMockModel({
+        id: "systemsculpt@@systemsculpt/ai-agent",
+        provider: "systemsculpt",
+      });
+      const openai = createMockModel({
+        id: "openai@@gpt-4",
+        provider: "openai",
+      });
+
+      expect(compareSystemSculptModelPriority(systemSculpt, openai)).toBeLessThan(0);
+      expect(compareSystemSculptModelPriority(openai, systemSculpt)).toBeGreaterThan(0);
+      expect(compareSystemSculptModelPriority(openai, createMockModel())).toBe(0);
+    });
+  });
+
   describe("getModelLabelWithProvider", () => {
     it("combines provider prefix with model name", () => {
       expect(getModelLabelWithProvider("openai@@gpt-4")).toBe("[OPENAI] gpt-4");
     });
 
-    it("handles systemsculpt provider specially", () => {
+    it("renders the SystemSculpt provider with friendly product copy", () => {
+      expect(getModelLabelWithProvider("systemsculpt@@systemsculpt/ai-agent")).toBe(
+        "SystemSculpt"
+      );
       expect(getModelLabelWithProvider("systemsculpt@@vault-agent")).toBe(
-        "[SS AI] vault-agent"
+        "SystemSculpt: vault-agent"
       );
     });
 

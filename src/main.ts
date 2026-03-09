@@ -25,7 +25,6 @@ import { SystemSculptModel } from "./types/llm";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import { RecorderService } from "./services/RecorderService";
-import { VideoRecorderService } from "./services/VideoRecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
 import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
@@ -84,7 +83,6 @@ export default class SystemSculptPlugin extends Plugin {
   private _aiService: SystemSculptService | undefined;
   settingsTab: SystemSculptSettingTab;
   private recorderService: RecorderService | null = null;
-  private videoRecorderService: VideoRecorderService | null = null;
   private transcriptionService: TranscriptionService;
   private settingsManager: SettingsManager;
   private licenseManager: LicenseManager;
@@ -1727,9 +1725,6 @@ export default class SystemSculptPlugin extends Plugin {
       wrap("recorder", "recorder service", () => {
         this.ensureRecorderService();
       }),
-      wrap("videoRecorder", "video recorder service", () => {
-        this.ensureVideoRecorderService();
-      }),
       wrap("readwise", "readwise service", () => {
         if (this.settings.readwiseEnabled) {
           this.getReadwiseService();
@@ -1929,7 +1924,6 @@ export default class SystemSculptPlugin extends Plugin {
       if (this.commandManager) {
         const commands = [
           "toggle-audio-recorder",
-          "toggle-obsidian-window-video-recorder",
           "open-systemsculpt-chat",
           "open-systemsculpt-history",
           "open-chat-history",
@@ -1971,10 +1965,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.recorderService = null;
       }
 
-      if (this.videoRecorderService) {
-        this.videoRecorderService.unload();
-        this.videoRecorderService = null;
-      }
       if (this.transcriptionService) {
         this.transcriptionService.unload();
       }
@@ -2205,39 +2195,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   getRecorderService(): RecorderService {
     return this.ensureRecorderService();
-  }
-
-  hasVideoRecorderService(): boolean {
-    return this.videoRecorderService !== null;
-  }
-
-  ensureVideoRecorderService(): VideoRecorderService {
-    if (!this.videoRecorderService) {
-      const logger = this.getLogger();
-      try {
-        const instance = VideoRecorderService.getInstance(this.app, this);
-        if (!instance) {
-          throw new Error("VideoRecorderService instance unavailable");
-        }
-        this.videoRecorderService = instance;
-        logger.debug("VideoRecorderService instantiated", {
-          source: "VideoRecorderService",
-          metadata: { initializedDuringEnsure: true },
-        });
-      } catch (error) {
-        logger.error("VideoRecorderService initialization failed", error, {
-          source: "VideoRecorderService",
-          method: "ensureVideoRecorderService",
-        });
-        throw error;
-      }
-    }
-
-    return this.videoRecorderService;
-  }
-
-  getVideoRecorderService(): VideoRecorderService {
-    return this.ensureVideoRecorderService();
   }
 
   private ensureWorkflowEngineService(): WorkflowEngineService {

@@ -37,6 +37,7 @@ export type StudioGraphWorkspaceRendererOptions = {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
+  onZoomOverview: () => void;
   onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateLabelAtPosition: (position: { x: number; y: number }) => void;
@@ -103,6 +104,7 @@ export function renderStudioGraphWorkspace(
     onZoomIn,
     onZoomOut,
     onZoomReset,
+    onZoomOverview,
     onToggleNodeDetailMode,
     onOpenNodeContextMenu,
     onCreateLabelAtPosition,
@@ -304,6 +306,21 @@ export function renderStudioGraphWorkspace(
     event.preventDefault();
     event.stopPropagation();
     onZoomReset();
+  });
+
+  const zoomOverviewButton = controls.createEl("button", {
+    cls: "ss-studio-graph-workspace-control-button",
+    text: "Fit",
+    attr: {
+      "aria-label": "Overview graph",
+      title: "Overview graph",
+    },
+  });
+  zoomOverviewButton.type = "button";
+  zoomOverviewButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onZoomOverview();
   });
 
   const detailButton = controls.createEl("button", {

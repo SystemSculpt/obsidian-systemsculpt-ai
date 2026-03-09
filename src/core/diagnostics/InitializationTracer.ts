@@ -13,6 +13,15 @@ export interface InitializationTracerConfig {
   defaultTimeoutMs?: number;
 }
 
+type OpenPhaseFlushLevel = "debug" | "warn" | "error";
+
+const OPEN_PHASE_FLUSH_LEVEL_BY_REASON: Partial<Record<string, OpenPhaseFlushLevel>> = {
+  "plugin-unload": "debug",
+  "plugin.onload-error": "warn",
+  "critical-initialization-error": "error",
+  "deferred-initialization-error": "error",
+};
+
 let phaseCounter = 0;
 
 const DEFAULT_SLOW_THRESHOLD_MS = 750;
@@ -83,8 +92,9 @@ export class InitializationTracer {
 
   flushOpenPhases(reason: string): void {
     const logger = this.getLogger();
+    const level = OPEN_PHASE_FLUSH_LEVEL_BY_REASON[reason] ?? "warn";
     for (const phase of this.activePhases.values()) {
-      logger.warn("init:open", {
+      const context = {
         source: "InitializationTracer",
         metadata: {
           phase: phase.name,
@@ -92,7 +102,14 @@ export class InitializationTracer {
           elapsedMs: phase.getElapsedMs(),
           reason,
         },
-      });
+      };
+      if (level === "debug") {
+        logger.debug("init:open", context);
+      } else if (level === "error") {
+        logger.error("init:open", undefined, context);
+      } else {
+        logger.warn("init:open", context);
+      }
     }
   }
 }

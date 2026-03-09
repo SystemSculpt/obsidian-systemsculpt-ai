@@ -4,7 +4,7 @@ import { App } from "obsidian";
 import { CommandManager } from "../commands";
 
 describe("CommandManager studio fit-selection command", () => {
-  function registerFitSelectionCommand(activeStudioView: unknown = null) {
+  function registerStudioViewportCommands(activeStudioView: unknown = null) {
     const app = new App();
     (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeStudioView);
 
@@ -16,15 +16,27 @@ describe("CommandManager studio fit-selection command", () => {
     const manager = new CommandManager(plugin, app);
     (manager as any).registerSystemSculptStudioCommands();
 
-    const fitCommand = addCommand.mock.calls
+    const commands = addCommand.mock.calls
       .map((entry) => entry[0])
-      .find((command) => command.id === "fit-systemsculpt-studio-selection-in-viewport");
+      .filter((command) =>
+        [
+          "fit-systemsculpt-studio-selection-in-viewport",
+          "overview-systemsculpt-studio-graph-in-viewport",
+        ].includes(command.id)
+      );
 
-    return { fitCommand };
+    const fitCommand = commands.find(
+      (command) => command.id === "fit-systemsculpt-studio-selection-in-viewport"
+    );
+    const overviewCommand = commands.find(
+      (command) => command.id === "overview-systemsculpt-studio-graph-in-viewport"
+    );
+
+    return { fitCommand, overviewCommand };
   }
 
   it("registers fit-selection with Mod+Shift+1", () => {
-    const { fitCommand } = registerFitSelectionCommand();
+    const { fitCommand } = registerStudioViewportCommands();
 
     expect(fitCommand).toEqual(
       expect.objectContaining({
@@ -38,7 +50,7 @@ describe("CommandManager studio fit-selection command", () => {
 
   it("runs fit-selection on the active studio view", () => {
     const fitSelectionInViewportFromCommand = jest.fn();
-    const { fitCommand } = registerFitSelectionCommand({
+    const { fitCommand } = registerStudioViewportCommands({
       fitSelectionInViewportFromCommand,
     });
 
@@ -50,7 +62,20 @@ describe("CommandManager studio fit-selection command", () => {
   });
 
   it("is unavailable when no studio view is active", () => {
-    const { fitCommand } = registerFitSelectionCommand(null);
+    const { fitCommand } = registerStudioViewportCommands(null);
     expect(fitCommand.checkCallback(true)).toBe(false);
+  });
+
+  it("runs overview on the active studio view", () => {
+    const showGraphOverviewFromCommand = jest.fn();
+    const { overviewCommand } = registerStudioViewportCommands({
+      showGraphOverviewFromCommand,
+    });
+
+    expect(overviewCommand.checkCallback(true)).toBe(true);
+    expect(showGraphOverviewFromCommand).not.toHaveBeenCalled();
+
+    expect(overviewCommand.checkCallback(false)).toBe(true);
+    expect(showGraphOverviewFromCommand).toHaveBeenCalledTimes(1);
   });
 });

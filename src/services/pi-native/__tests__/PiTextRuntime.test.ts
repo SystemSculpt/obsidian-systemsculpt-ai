@@ -1,19 +1,13 @@
-jest.mock("../PiTextAuth", () => ({
-  buildPiTextProviderSetupMessage: jest.fn((provider: string, actualModelId?: string) =>
-    `Connect ${provider} in Pi before running "${actualModelId || provider}".`
-  ),
-  hasPiTextProviderAuth: jest.fn().mockResolvedValue(true),
-}));
-
 import { Platform } from "obsidian";
 import {
+  assertPiTextExecutionReady,
   resolvePiTextExecutionPlan,
   shouldUseLocalPiExecution,
 } from "../PiTextRuntime";
 
 describe("PiTextRuntime", () => {
   beforeEach(() => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
     Object.defineProperty(Platform, "isDesktopApp", {
       configurable: true,
       value: true,
@@ -24,6 +18,7 @@ describe("PiTextRuntime", () => {
     it("returns true only for desktop-local Pi models", () => {
       expect(
         shouldUseLocalPiExecution({
+          sourceMode: "pi_local",
           piLocalAvailable: true,
         } as any)
       ).toBe(true);
@@ -34,11 +29,13 @@ describe("PiTextRuntime", () => {
       });
       expect(
         shouldUseLocalPiExecution({
+          sourceMode: "pi_local",
           piLocalAvailable: true,
         } as any)
       ).toBe(false);
       expect(
         shouldUseLocalPiExecution({
+          sourceMode: "pi_local",
           piLocalAvailable: false,
         } as any)
       ).toBe(false);
@@ -57,6 +54,26 @@ describe("PiTextRuntime", () => {
       expect(plan).toEqual({
         mode: "local",
         actualModelId: "openai/gpt-5-mini",
+        providerId: "openai",
+        authMode: "local",
+      });
+    });
+
+    it("keeps the SystemSculpt alias on the local Pi runtime", async () => {
+      const plan = await resolvePiTextExecutionPlan({
+        id: "systemsculpt@@systemsculpt/ai-agent",
+        provider: "systemsculpt",
+        sourceMode: "pi_local",
+        piExecutionModelId: "systemsculpt/ai-agent",
+        piLocalAvailable: true,
+        piAuthMode: "local",
+      } as any);
+
+      expect(plan).toEqual({
+        mode: "local",
+        actualModelId: "systemsculpt/ai-agent",
+        providerId: "systemsculpt",
+        authMode: "local",
       });
     });
 
@@ -98,6 +115,26 @@ describe("PiTextRuntime", () => {
           piLocalAvailable: true,
         } as any)
       ).rejects.toThrow('Model "broken-model" is missing a Pi execution model id.');
+    });
+  });
+
+  describe("assertPiTextExecutionReady", () => {
+    it("returns the local Pi execution plan when the model is available", async () => {
+      await expect(
+        assertPiTextExecutionReady({
+          id: "anthropic@@claude-3.7-sonnet",
+          provider: "anthropic",
+          sourceMode: "pi_local",
+          piExecutionModelId: "anthropic/claude-3.7-sonnet",
+          piLocalAvailable: true,
+          piAuthMode: "local",
+        } as any)
+      ).resolves.toEqual({
+        mode: "local",
+        actualModelId: "anthropic/claude-3.7-sonnet",
+        providerId: "anthropic",
+        authMode: "local",
+      });
     });
   });
 });

@@ -49,11 +49,6 @@ jest.mock("../../../types", () => ({
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
     recordingsDirectory: "SystemSculpt/Recordings",
-    videoRecordingsDirectory: "SystemSculpt/Video Recordings",
-    videoCaptureSystemAudio: false,
-    videoCaptureMicrophoneAudio: false,
-    showVideoRecordButtonInChat: true,
-    showVideoRecordingPermissionPopup: true,
     transcriptionOutputFormat: "markdown",
     showTranscriptionFormatChooserInModal: true,
     defaultAgentBudget: 10,
@@ -389,22 +384,22 @@ describe("SettingsManager", () => {
 
     });
 
-    it("defaults invalid video permission popup setting", () => {
+    it("removes deprecated screen recording settings", () => {
       const result = validateSettings({
         ...DEFAULT_SETTINGS,
-        showVideoRecordingPermissionPopup: "invalid",
+        videoRecordingsDirectory: "SystemSculpt/Video Recordings",
+        videoCaptureSystemAudio: true,
+        videoCaptureMicrophoneAudio: true,
+        showVideoRecordButtonInChat: true,
+        showVideoRecordingPermissionPopup: true,
+        recordSystemAudio: true,
       });
-      expect(result.showVideoRecordingPermissionPopup).toBe(true);
-    });
-
-    it("defaults invalid video audio source settings", () => {
-      const result = validateSettings({
-        ...DEFAULT_SETTINGS,
-        videoCaptureSystemAudio: "invalid",
-        videoCaptureMicrophoneAudio: "invalid",
-      });
-      expect(result.videoCaptureSystemAudio).toBe(false);
-      expect(result.videoCaptureMicrophoneAudio).toBe(false);
+      expect("videoRecordingsDirectory" in result).toBe(false);
+      expect("videoCaptureSystemAudio" in result).toBe(false);
+      expect("videoCaptureMicrophoneAudio" in result).toBe(false);
+      expect("showVideoRecordButtonInChat" in result).toBe(false);
+      expect("showVideoRecordingPermissionPopup" in result).toBe(false);
+      expect("recordSystemAudio" in result).toBe(false);
     });
 
     it("defaults invalid transcription output format settings", () => {

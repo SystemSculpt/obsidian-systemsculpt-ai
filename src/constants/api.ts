@@ -29,11 +29,6 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
     LIST: "/models",
     GET: (modelId: string) => `/models/${modelId}`,
   },
-  AGENT: {
-    BASE: "/api/v1/agent",
-    SESSIONS: "/api/v1/agent/sessions",
-    SESSION_TURNS: (sessionId: string) => `/api/v1/agent/sessions/${sessionId}/turns`,
-  },
   CREDITS: {
     BALANCE: "/credits/balance",
     USAGE: "/credits/usage",

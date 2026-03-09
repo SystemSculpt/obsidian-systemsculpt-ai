@@ -6,58 +6,17 @@ import {
   normalizeStudioLocalPiModelId,
   runStudioLocalPiTextGeneration,
 } from "../StudioLocalTextModelCatalog";
-import { loadPiSdkModule } from "../../services/pi/PiSdk";
+import { PiRpcProcessClient } from "../../services/pi/PiRpcProcessClient";
 
 jest.mock("../../services/pi-native/PiLocalAgentExecutor", () => ({
   runPiLocalTextGeneration: jest.fn(),
 }));
 
-jest.mock("../../services/pi/PiSdk", () => ({
-  loadPiSdkModule: jest.fn(),
+jest.mock("../../services/pi/PiRpcProcessClient", () => ({
+  PiRpcProcessClient: jest.fn(),
 }));
 
-const loadPiSdkModuleMock = loadPiSdkModule as jest.MockedFunction<typeof loadPiSdkModule>;
-
-function createSdkMock(models: Array<Record<string, unknown>>) {
-  class MockModelRegistry {
-    constructor(_authStorage: unknown) {}
-
-    getAll() {
-      return models;
-    }
-
-    getAvailable() {
-      return models;
-    }
-
-    async getApiKey() {
-      return "test-key";
-    }
-
-    async getApiKeyForProvider() {
-      return "test-key";
-    }
-
-    isUsingOAuth() {
-      return false;
-    }
-  }
-
-  return {
-    AuthStorage: {
-      create: () => ({
-        getOAuthProviders: () => [],
-        login: jest.fn(),
-        set: jest.fn(),
-        remove: jest.fn(),
-        logout: jest.fn(),
-        get: jest.fn(),
-        hasAuth: jest.fn(() => false),
-      }),
-    },
-    ModelRegistry: MockModelRegistry,
-  } as any;
-}
+const PiRpcProcessClientMock = PiRpcProcessClient as jest.MockedClass<typeof PiRpcProcessClient>;
 
 describe("StudioLocalTextModelCatalog", () => {
   const plugin = {
@@ -71,12 +30,16 @@ describe("StudioLocalTextModelCatalog", () => {
   } as any;
 
   beforeEach(() => {
-    loadPiSdkModuleMock.mockReset();
+    PiRpcProcessClientMock.mockReset();
   });
 
   it("maps Pi's available model catalog into searchable local model options", async () => {
-    loadPiSdkModuleMock.mockResolvedValue(
-      createSdkMock([
+    PiRpcProcessClientMock.mockImplementation(
+      () =>
+        ({
+          start: jest.fn().mockResolvedValue(undefined),
+          stop: jest.fn().mockResolvedValue(undefined),
+          getAvailableModels: jest.fn().mockResolvedValue([
         {
           provider: "openai",
           id: "gpt-5",
@@ -104,12 +67,13 @@ describe("StudioLocalTextModelCatalog", () => {
           reasoning: true,
           input: ["text", "image"],
         },
-      ])
+          ]),
+        }) as any
     );
 
     const options = await listStudioLocalTextModelOptions(plugin);
 
-    expect(loadPiSdkModuleMock).toHaveBeenCalledTimes(1);
+    expect(PiRpcProcessClientMock).toHaveBeenCalledTimes(1);
     expect(options).toEqual([
       {
         value: "google-antigravity/gpt-oss-120b-medium",
@@ -150,7 +114,14 @@ describe("StudioLocalTextModelCatalog", () => {
   });
 
   it("throws an actionable error when the Pi SDK catalog lookup fails", async () => {
-    loadPiSdkModuleMock.mockRejectedValue(new Error("Pi SDK unavailable"));
+    PiRpcProcessClientMock.mockImplementation(
+      () =>
+        ({
+          start: jest.fn().mockResolvedValue(undefined),
+          stop: jest.fn().mockResolvedValue(undefined),
+          getAvailableModels: jest.fn().mockRejectedValue(new Error("Pi SDK unavailable")),
+        }) as any
+    );
 
     await expect(listStudioLocalTextModelOptions(plugin)).rejects.toThrow(
       "Pi SDK unavailable"

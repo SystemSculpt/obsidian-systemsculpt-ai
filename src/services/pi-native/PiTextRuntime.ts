@@ -4,6 +4,8 @@ import type { SystemSculptModel } from "../../types/llm";
 export type PiTextExecutionPlan = {
   mode: "local";
   actualModelId: string;
+  providerId: string;
+  authMode: "local";
 };
 
 function requireActualModelId(model: SystemSculptModel): string {
@@ -14,14 +16,24 @@ function requireActualModelId(model: SystemSculptModel): string {
   return actualModelId;
 }
 
+function resolveProviderId(model: SystemSculptModel, actualModelId: string): string {
+  return (
+    String(model.sourceProviderId || "").trim() ||
+    String(model.provider || "").trim() ||
+    actualModelId.split("/")[0] ||
+    "unknown"
+  );
+}
+
 export function shouldUseLocalPiExecution(model: SystemSculptModel): boolean {
-  return Platform.isDesktopApp && !!model.piLocalAvailable;
+  return Platform.isDesktopApp && model.sourceMode === "pi_local" && !!model.piLocalAvailable;
 }
 
 export async function resolvePiTextExecutionPlan(
   model: SystemSculptModel
 ): Promise<PiTextExecutionPlan> {
   const actualModelId = requireActualModelId(model);
+  const providerId = resolveProviderId(model, actualModelId);
 
   if (!Platform.isDesktopApp) {
     throw new Error("Pi desktop text generation is only available in the desktop app.");
@@ -36,5 +48,13 @@ export async function resolvePiTextExecutionPlan(
   return {
     mode: "local",
     actualModelId,
+    providerId,
+    authMode: "local",
   };
+}
+
+export async function assertPiTextExecutionReady(
+  model: SystemSculptModel
+): Promise<PiTextExecutionPlan> {
+  return await resolvePiTextExecutionPlan(model);
 }

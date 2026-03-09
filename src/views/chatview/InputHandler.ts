@@ -12,8 +12,6 @@ import { SystemSculptError } from "../../utils/errors";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { MessageRenderer } from "../chatview/MessageRenderer";
 import { RecorderService } from "../../services/RecorderService";
-import { VideoRecorderService } from "../../services/VideoRecorderService";
-import { hasMacWindowShellRecordingSupport } from "../../services/video/MacShellVideoSupport";
 import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
 import { MessagePart } from "../../types";
@@ -37,7 +35,7 @@ import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleS
 // Turn lifecycle handling
 import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
 import { errorLogger } from "../../utils/errorLogger";
-import { resolvePiTextExecutionPlan } from "../../services/pi-native/PiTextRuntime";
+import { assertPiTextExecutionReady } from "../../services/pi-native/PiTextRuntime";
 
 export interface InputHandlerOptions {
   app: App;
@@ -103,11 +101,9 @@ export class InputHandler extends Component {
 
   // getValue/setValue are implemented later in the class near input helpers
   private recorderService: RecorderService;
-  private videoRecorderService: VideoRecorderService;
   private plugin: SystemSculptPlugin;
   private recorderVisualizer: HTMLElement | null = null;
   private isRecording = false;
-  private isVideoRecording = false;
   private updateGeneratingState: () => void;
   private stopButton: ButtonComponent | null = null;
   private getChatMarkdown: () => Promise<string>;
@@ -118,7 +114,6 @@ export class InputHandler extends Component {
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
   private micButton: ButtonComponent;
-  private videoButton: ButtonComponent | null = null;
   private sendButton: ButtonComponent;
   private chatStorage: any; // ChatStorageService
   private getChatId: () => string;
@@ -128,7 +123,6 @@ export class InputHandler extends Component {
   private agentSelectionMenu?: AgentSelectionMenu;
   private liveRegionEl: HTMLElement | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
-  private videoRecorderToggleUnsubscribe: (() => void) | null = null;
 
   /* ------------------------------------------------------------------
    * Batching of tool-call state-changed events to avoid excessive DOM
@@ -193,7 +187,6 @@ export class InputHandler extends Component {
         }
       },
     });
-    this.videoRecorderService = VideoRecorderService.getInstance(this.app, this.plugin);
 
     // Simplify message handlers
     const originalMessageSubmit = options.onMessageSubmit;
@@ -208,12 +201,26 @@ export class InputHandler extends Component {
     this.onAssistantResponse = async (message: ChatMessage) => {
       // First, save the message data
       await originalAssistantResponse(message);
+      const shouldSkipPiPostPersistRerender =
+        !!this.chatView?.isPiBackedChat?.() && !!this.chatView?.getPiSessionFile?.();
 
       // Prefer an in-place finalization to avoid DOM remove+add (which can trigger
       // extra layout work and false "new messages" increments while detached)
       const currentMessageEl = this.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement;
       if (currentMessageEl) {
         try {
+          if (shouldSkipPiPostPersistRerender) {
+            if (!currentMessageEl.querySelector('.systemsculpt-message-toolbar')) {
+              this.messageRenderer.addMessageButtonToolbar(
+                currentMessageEl,
+                typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''),
+                message.role,
+                message.message_id
+              );
+            }
+            return;
+          }
+
           // Ensure a content container exists
           let contentEl = currentMessageEl.querySelector('.systemsculpt-message-content') as HTMLElement | null;
           if (!contentEl) {
@@ -237,6 +244,10 @@ export class InputHandler extends Component {
         } catch {
           // Fall back to full re-render if anything goes wrong
         }
+      }
+
+      if (shouldSkipPiPostPersistRerender) {
+        return;
       }
 
       // Fallback: re-render using the unified pathway that matches reload behavior
@@ -296,6 +307,7 @@ export class InputHandler extends Component {
 	      systemPromptPath: sys.path,
 	      signal,
         sessionFile: this.chatView?.getPiSessionFile?.(),
+        sessionId: this.chatView?.getPiSessionId?.(),
         onPiSessionReady: (session) => {
           this.chatView?.setPiSessionState?.(session);
         },
@@ -333,9 +345,6 @@ export class InputHandler extends Component {
       onInput: () => this.handleInputChange(),
       onPaste: (e) => this.handlePaste(e),
       handleMicClick: () => this.handleMicClick(),
-      handleVideoClick: () => this.handleVideoClick(),
-      showVideoButton: () => this.shouldShowVideoButton(),
-      canUseVideoRecording: () => this.canUseVideoRecording(),
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
     });
 
@@ -343,7 +352,6 @@ export class InputHandler extends Component {
     this.inputWrapper = composer.inputWrap;
     this.attachmentsEl = composer.attachments;
     this.micButton = composer.micButton;
-    this.videoButton = composer.videoButton;
     this.sendButton = composer.sendButton;
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
@@ -382,20 +390,6 @@ export class InputHandler extends Component {
       }
     });
 
-    this.videoRecorderToggleUnsubscribe?.();
-    this.videoRecorderToggleUnsubscribe = this.videoRecorderService.onToggle((isRecording: boolean) => {
-      this.isVideoRecording = isRecording;
-      if (this.videoButton && this.videoButton.buttonEl) {
-        this.videoButton.buttonEl.classList.toggle("ss-active", isRecording);
-        this.videoButton.setTooltip(
-          isRecording
-            ? "Video recording in progress (click to stop)"
-            : "Record Obsidian window workflow"
-        );
-      }
-      this.updateGeneratingState?.();
-    });
-
     // Update UI when generating state changes
     this.updateGeneratingState = () => {
       // Keep input enabled to allow typing next message
@@ -405,10 +399,6 @@ export class InputHandler extends Component {
       this.settingsButton.setDisabled(false); // Settings changes only affect next message
       this.attachButton.setDisabled(false); // Users can add context for their next message
       this.micButton.setDisabled(!this.hasProLicense()); // Voice input just adds text to input field
-      if (this.videoButton) {
-        this.videoButton.buttonEl.style.display = this.shouldShowVideoButton() ? "flex" : "none";
-        this.videoButton.setDisabled(!this.canUseVideoRecording());
-      }
       // Note: Save As Note functionality moved to slash command menu
       
       if (this.stopButton) {
@@ -550,10 +540,6 @@ export class InputHandler extends Component {
     this.toggleRecording();
   }
 
-  private handleVideoClick(): void {
-    this.toggleVideoRecording();
-  }
-
   private async toggleRecording(): Promise<void> {
     await this.recorderService.toggleRecording();
 
@@ -561,11 +547,6 @@ export class InputHandler extends Component {
     // so we don't need to manually update the button state here
 
     // Keep focus/cursor in chat
-    this.input.focus();
-  }
-
-  private async toggleVideoRecording(): Promise<void> {
-    await this.videoRecorderService.toggleRecording();
     this.input.focus();
   }
 
@@ -644,56 +625,6 @@ export class InputHandler extends Component {
 
   private hasProLicense(): boolean {
     return !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid);
-  }
-
-  private shouldShowVideoButton(): boolean {
-    return this.plugin.settings.showVideoRecordButtonInChat !== false;
-  }
-
-  private hasVideoCaptureRuntimeSupport(): boolean {
-    if (typeof MediaRecorder === "undefined" || typeof navigator === "undefined") {
-      return false;
-    }
-
-    const hasDisplayMedia = typeof (navigator.mediaDevices as any)?.getDisplayMedia === "function";
-    if (hasDisplayMedia) {
-      return true;
-    }
-
-    const hasLegacyMediaDevices = !!navigator.mediaDevices;
-    if (!hasLegacyMediaDevices) {
-      return hasMacWindowShellRecordingSupport();
-    }
-
-    const candidates = [
-      (globalThis as any)?.require,
-      (globalThis as any)?.window?.require,
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate !== "function") continue;
-      try {
-        const electron = candidate("electron") as { desktopCapturer?: { getSources?: Function } };
-        if (electron?.desktopCapturer?.getSources) {
-          return true;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return hasMacWindowShellRecordingSupport();
-  }
-
-  private canUseVideoRecording(): boolean {
-    if (!this.shouldShowVideoButton()) {
-      return false;
-    }
-    if (this.isVideoRecording) {
-      return true;
-    }
-    return Platform.isDesktopApp
-      && this.hasProLicense()
-      && this.hasVideoCaptureRuntimeSupport()
-      && this.videoRecorderService.isRuntimeSupported();
   }
 
   private updateSendButtonState(): void {
@@ -907,13 +838,6 @@ export class InputHandler extends Component {
 	        display: string | null;
 	        classList: string[];
 	      } | null;
-	      video: {
-	        text: string;
-	        tooltip: string | null;
-	        disabled: boolean;
-	        display: string | null;
-	        classList: string[];
-	      } | null;
 	      attach: {
 	        text: string;
 	        tooltip: string | null;
@@ -936,7 +860,6 @@ export class InputHandler extends Component {
     };
 	    recorder: {
 	      isRecording: boolean;
-        isVideoRecording: boolean;
 	    };
 	  } {
     const describeButton = (button: ButtonComponent | null | undefined) => {
@@ -983,7 +906,6 @@ export class InputHandler extends Component {
 		        send: describeButton(this.sendButton),
 		        stop: describeButton(this.stopButton),
 		        mic: describeButton(this.micButton),
-		        video: describeButton(this.videoButton),
 		        attach: describeButton(this.attachButton),
 		        settings: describeButton(this.settingsButton),
 		      },
@@ -994,7 +916,6 @@ export class InputHandler extends Component {
       },
 	      recorder: {
 	        isRecording: this.isRecording,
-        isVideoRecording: this.isVideoRecording,
 	      },
 	    };
   }
@@ -1043,8 +964,6 @@ export class InputHandler extends Component {
 
     this.recorderToggleUnsubscribe?.();
     this.recorderToggleUnsubscribe = null;
-    this.videoRecorderToggleUnsubscribe?.();
-    this.videoRecorderToggleUnsubscribe = null;
 
     // Clean up slash command menu
     if (this.slashCommandMenu) {
@@ -1237,7 +1156,7 @@ export class InputHandler extends Component {
 
     if (!models || models.length === 0) {
       await this.invokeProviderSetupPrompt(
-        "No Pi models are available yet. Open Setup, finish Pi sign-in or API-key setup, then refresh your model list."
+        "No models are available yet. Open Setup, finish provider setup, then refresh your model list."
       );
       return false;
     }
@@ -1251,12 +1170,12 @@ export class InputHandler extends Component {
     try {
       const model = await this.plugin.modelService.getModelById(selectedModelId);
       if (model) {
-        await resolvePiTextExecutionPlan(model);
+        await assertPiTextExecutionReady(model);
         return true;
       }
     } catch (error: any) {
       await this.invokeProviderSetupPrompt(
-        error?.message || "The selected Pi model is not ready yet. Open Setup to finish Pi sign-in or API-key setup."
+        error?.message || "The selected model is not ready yet. Open Setup to finish provider setup."
       );
       return false;
     }

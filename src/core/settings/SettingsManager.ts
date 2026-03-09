@@ -391,10 +391,6 @@ export class SettingsManager {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
 
-    if (typeof validatedSettings.videoRecordingsDirectory !== 'string') {
-      validatedSettings.videoRecordingsDirectory = defaultSettings.videoRecordingsDirectory;
-    }
-
     if (typeof validatedSettings.attachmentsDirectory !== 'string') {
       validatedSettings.attachmentsDirectory = defaultSettings.attachmentsDirectory;
     }
@@ -454,25 +450,6 @@ export class SettingsManager {
       validatedSettings.showTranscriptionFormatChooserInModal = defaultSettings.showTranscriptionFormatChooserInModal;
     }
 
-    if (typeof validatedSettings.showVideoRecordButtonInChat !== 'boolean') {
-      validatedSettings.showVideoRecordButtonInChat = defaultSettings.showVideoRecordButtonInChat;
-    }
-
-    if (typeof validatedSettings.videoCaptureSystemAudio !== 'boolean') {
-      const legacySystemAudio = (validatedSettings as any).recordSystemAudio;
-      validatedSettings.videoCaptureSystemAudio = typeof legacySystemAudio === "boolean"
-        ? legacySystemAudio
-        : defaultSettings.videoCaptureSystemAudio;
-    }
-
-    if (typeof validatedSettings.videoCaptureMicrophoneAudio !== 'boolean') {
-      validatedSettings.videoCaptureMicrophoneAudio = defaultSettings.videoCaptureMicrophoneAudio;
-    }
-
-    if (typeof validatedSettings.showVideoRecordingPermissionPopup !== 'boolean') {
-      validatedSettings.showVideoRecordingPermissionPopup = defaultSettings.showVideoRecordingPermissionPopup ?? true;
-    }
-
     if (typeof validatedSettings.skipEmptyNoteWarning !== 'boolean') {
       validatedSettings.skipEmptyNoteWarning = defaultSettings.skipEmptyNoteWarning;
     }
@@ -494,6 +471,13 @@ export class SettingsManager {
     if ('backgroundEmbeddingUpdates' in validatedSettings) {
       delete (validatedSettings as any).backgroundEmbeddingUpdates;
     }
+
+    delete (validatedSettings as any).recordSystemAudio;
+    delete (validatedSettings as any).videoRecordingsDirectory;
+    delete (validatedSettings as any).videoCaptureSystemAudio;
+    delete (validatedSettings as any).videoCaptureMicrophoneAudio;
+    delete (validatedSettings as any).showVideoRecordButtonInChat;
+    delete (validatedSettings as any).showVideoRecordingPermissionPopup;
 
     if (typeof validatedSettings.embeddingsEnabled !== 'boolean') {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;

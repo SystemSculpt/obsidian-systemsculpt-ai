@@ -2,11 +2,19 @@ import { App, setIcon, Platform } from "obsidian";
 import type { ChatRole } from "../../../types";
 import { PlatformContext } from "../../../services/PlatformContext";
 
+export type MessageToolbarResendResult = {
+  status: "success" | "cancelled" | "error";
+};
+
 type ToolbarOptions = {
   app: App;
   messageEl: HTMLElement;
   role: ChatRole;
   messageId: string;
+  onResend?: (input: {
+    messageId: string;
+    content: string;
+  }) => Promise<MessageToolbarResendResult>;
 };
 
 function getMessageText(messageEl: HTMLElement): string {
@@ -33,7 +41,7 @@ function createIconButton(
   name: string,
   ariaLabel: string,
   onClick: (ev: MouseEvent) => void
-): HTMLElement {
+): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = "systemsculpt-toolbar-btn";
   btn.setAttribute("type", "button");
@@ -48,7 +56,7 @@ function createIconButton(
 }
 
 export function attachMessageToolbar(options: ToolbarOptions): void {
-  const { messageEl, role, messageId } = options;
+  const { messageEl, role, messageId, onResend } = options;
 
   if (messageEl.querySelector(".systemsculpt-message-toolbar")) return;
 
@@ -105,50 +113,60 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
   toolbar.appendChild(copyBtn);
 
   if (role === "user") {
-    const resendBtn = createIconButton("refresh-ccw", "Resend", () => {});
-    let isConfirmingResend = false;
-    let confirmTimer: number | null = null;
-
-    const resetConfirm = () => {
-      if (!isConfirmingResend) return;
-      isConfirmingResend = false;
-      if (confirmTimer) {
-        window.clearTimeout(confirmTimer);
-        confirmTimer = null;
-      }
-      setIcon(resendBtn, "refresh-ccw");
-      resendBtn.classList.remove("ss-confirm");
-      resendBtn.setAttribute("aria-label", "Resend");
-      resendBtn.removeAttribute("title");
-    };
-
-    resendBtn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (!isConfirmingResend) {
-        isConfirmingResend = true;
-        setIcon(resendBtn, "help-circle");
-        resendBtn.classList.add("ss-confirm");
-        resendBtn.setAttribute("aria-label", "Confirm resend");
-        resendBtn.setAttribute("title", "Are you sure?");
-        confirmTimer = window.setTimeout(() => {
-          resetConfirm();
-        }, 2500);
+    const resendBtn = createIconButton("refresh-ccw", "Resend", async () => {
+      setResendPending();
+      const content = messageEl.dataset.content || getMessageText(messageEl) || "";
+      if (!onResend) {
+        resetResendButton();
         return;
       }
-      const content = messageEl.dataset.content || getMessageText(messageEl) || "";
-      messageEl.dispatchEvent(
-        new CustomEvent("resubmit", {
-          bubbles: true,
-          detail: { messageId, content },
-        })
-      );
-      resetConfirm();
-    });
 
-    toolbar.addEventListener("mouseleave", () => {
-      resetConfirm();
+      const result = await onResend({ messageId, content });
+      if (result.status === "success") {
+        setResendSuccess();
+        return;
+      }
+      setResendError();
     });
+    let resendResetTimeout: number | null = null;
+    const clearResendResetTimeout = () => {
+      if (resendResetTimeout !== null) {
+        window.clearTimeout(resendResetTimeout);
+        resendResetTimeout = null;
+      }
+    };
+    const resetResendButton = () => {
+      clearResendResetTimeout();
+      setIcon(resendBtn, "refresh-ccw");
+      resendBtn.classList.remove("ss-confirm", "ss-success");
+      resendBtn.disabled = false;
+      resendBtn.setAttribute("aria-label", "Resend");
+    };
+    const setResendPending = () => {
+      clearResendResetTimeout();
+      setIcon(resendBtn, "loader-circle");
+      resendBtn.classList.remove("ss-success");
+      resendBtn.classList.add("ss-confirm");
+      resendBtn.disabled = true;
+      resendBtn.setAttribute("aria-label", "Resending…");
+      resendResetTimeout = window.setTimeout(() => {
+        resetResendButton();
+      }, 8000);
+    };
+    const setResendSuccess = () => {
+      clearResendResetTimeout();
+      setIcon(resendBtn, "check");
+      resendBtn.classList.remove("ss-confirm");
+      resendBtn.classList.add("ss-success");
+      resendBtn.disabled = false;
+      resendBtn.setAttribute("aria-label", "Resent");
+      resendResetTimeout = window.setTimeout(() => {
+        resetResendButton();
+      }, 1200);
+    };
+    const setResendError = () => {
+      resetResendButton();
+    };
 
     toolbar.appendChild(resendBtn);
   }

@@ -1,4 +1,8 @@
-import { resolveLegacyPiTextSelection } from "../PiTextMigration";
+import {
+  normalizeLegacyPiTextSelectionId,
+  resolveLegacyPiTextSelection,
+  resolveLegacyPiTextSelectionId,
+} from "../PiTextMigration";
 
 describe("resolveLegacyPiTextSelection", () => {
   const models = [
@@ -18,6 +22,12 @@ describe("resolveLegacyPiTextSelection", () => {
       id: "anthropic@@claude-sonnet-4-6",
       provider: "anthropic",
       piExecutionModelId: "anthropic/claude-sonnet-4-6",
+      piLocalAvailable: true,
+    },
+    {
+      id: "systemsculpt@@systemsculpt/ai-agent",
+      provider: "systemsculpt",
+      piExecutionModelId: "systemsculpt/ai-agent",
       piLocalAvailable: true,
     },
   ] as any;
@@ -45,9 +55,9 @@ describe("resolveLegacyPiTextSelection", () => {
     expect(resolved?.id).toBe("openai@@gpt-4.1");
   });
 
-  it("falls back from the legacy SystemSculpt alias to the first local Pi model", () => {
+  it("maps the legacy SystemSculpt alias back onto the canonical SystemSculpt Pi model", () => {
     const resolved = resolveLegacyPiTextSelection("systemsculpt@@systemsculpt/managed", models, []);
-    expect(resolved?.id).toBe("openai@@gpt-4.1");
+    expect(resolved?.id).toBe("systemsculpt@@systemsculpt/ai-agent");
   });
 
   it("migrates pinned legacy model ids onto stable latest aliases when available", () => {
@@ -58,5 +68,13 @@ describe("resolveLegacyPiTextSelection", () => {
     );
 
     expect(resolved?.id).toBe("anthropic@@claude-haiku-4-5");
+  });
+
+  it("normalizes legacy SystemSculpt ids even before models are loaded", () => {
+    expect(normalizeLegacyPiTextSelectionId("systemsculpt@@systemsculpt/managed"))
+      .toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(
+      resolveLegacyPiTextSelectionId("systemsculpt@@systemsculpt/managed", [], [])
+    ).toBe("systemsculpt@@systemsculpt/ai-agent");
   });
 });

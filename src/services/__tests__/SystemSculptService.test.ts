@@ -1,6 +1,9 @@
 import { App, TFile } from "obsidian";
 import { SystemSculptService } from "../SystemSculptService";
-import { resolvePiTextExecutionPlan } from "../pi-native/PiTextRuntime";
+import {
+  assertPiTextExecutionReady,
+  resolvePiTextExecutionPlan,
+} from "../pi-native/PiTextRuntime";
 import { executeLocalPiStream } from "../LocalPiStreamExecutor";
 import { SystemSculptEnvironment } from "../api/SystemSculptEnvironment";
 
@@ -39,7 +42,9 @@ const contextFileService = {
 };
 
 jest.mock("../StreamingService", () => ({
-  StreamingService: jest.fn().mockImplementation(() => ({})),
+  StreamingService: jest.fn().mockImplementation(() => ({
+    generateRequestId: jest.fn(() => "req_remote_1"),
+  })),
 }));
 
 jest.mock("../LicenseService", () => ({
@@ -73,6 +78,7 @@ jest.mock("../LocalPiStreamExecutor", () => ({
 }));
 
 jest.mock("../pi-native/PiTextRuntime", () => ({
+  assertPiTextExecutionReady: jest.fn(),
   resolvePiTextExecutionPlan: jest.fn(),
 }));
 
@@ -157,6 +163,14 @@ describe("SystemSculptService", () => {
     (resolvePiTextExecutionPlan as jest.Mock).mockResolvedValue({
       mode: "local",
       actualModelId: "openai/gpt-4o",
+      providerId: "openai",
+      authMode: "local",
+    });
+    (assertPiTextExecutionReady as jest.Mock).mockResolvedValue({
+      mode: "local",
+      actualModelId: "openai/gpt-4o",
+      providerId: "openai",
+      authMode: "local",
     });
   });
 
@@ -235,6 +249,11 @@ describe("SystemSculptService", () => {
 
     expect(events).toEqual(streamed);
     expect(executeLocalPiStream).toHaveBeenCalledTimes(1);
+    expect(assertPiTextExecutionReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "openai@@gpt-4o",
+      })
+    );
   });
 
   it("counts image context files", () => {

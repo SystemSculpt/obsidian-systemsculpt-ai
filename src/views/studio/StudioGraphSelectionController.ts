@@ -5,6 +5,9 @@ import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
+  STUDIO_GRAPH_OVERVIEW_MIN_ZOOM,
+  type StudioGraphZoomChangeContext,
+  type StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
 import {
   computeStudioGraphCanvasSize,
@@ -37,6 +40,7 @@ const WHEEL_DOM_DELTA_PAGE =
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
 const STUDIO_GRAPH_NODE_MIN_HEIGHT_PX = 80;
 const STUDIO_GRAPH_NODE_FALLBACK_HEIGHT_PX = 164;
+const STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS = 160;
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
@@ -47,7 +51,7 @@ type StudioGraphSelectionHost = {
   resolveNodeDragHoverGroup?: (draggedNodeIds: string[]) => string | null;
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;
-  onGraphZoomChanged?: (zoom: number) => void;
+  onGraphZoomChanged?: (zoom: number, context: StudioGraphZoomChangeContext) => void;
 };
 
 type NotifyNodePositionsChangedOptions = {
@@ -56,6 +60,7 @@ type NotifyNodePositionsChangedOptions = {
 
 export class StudioGraphSelectionController {
   private graphZoom = STUDIO_GRAPH_DEFAULT_ZOOM;
+  private graphZoomMode: StudioGraphZoomMode = "interactive";
   private graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
   private graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
   private graphViewportEl: HTMLElement | null = null;
@@ -68,6 +73,7 @@ export class StudioGraphSelectionController {
   private selectedNodeIds = new Set<string>();
   private suppressNextCanvasClick = false;
   private onSelectionChange: (() => void) | null = null;
+  private zoomSettleTimer: number | null = null;
 
   constructor(private readonly host: StudioGraphSelectionHost) {}
 
@@ -75,9 +81,29 @@ export class StudioGraphSelectionController {
     return this.graphZoom;
   }
 
-  setGraphZoom(nextZoom: number): void {
-    this.graphZoom = this.clampGraphZoom(nextZoom);
-    this.applyGraphZoom();
+  getGraphZoomMode(): StudioGraphZoomMode {
+    return this.graphZoomMode;
+  }
+
+  setGraphZoom(
+    nextZoom: number,
+    options?: {
+      mode?: StudioGraphZoomMode;
+      settled?: boolean;
+      scheduleSettle?: boolean;
+    }
+  ): void {
+    const mode = options?.mode ?? "interactive";
+    this.graphZoomMode = mode;
+    this.graphZoom = this.clampGraphZoom(nextZoom, mode);
+    const settled = options?.settled !== false;
+    if (settled) {
+      this.cancelScheduledGraphZoomSettle();
+    }
+    this.applyGraphZoom({ settled });
+    if (options?.scheduleSettle) {
+      this.scheduleSettledGraphZoom();
+    }
   }
 
   isNodeSelected(nodeId: string): boolean {
@@ -123,6 +149,8 @@ export class StudioGraphSelectionController {
   clearProjectState(): void {
     const hadSelection = this.selectedNodeIds.size > 0;
     this.selectedNodeIds.clear();
+    this.cancelScheduledGraphZoomSettle();
+    this.graphZoomMode = "interactive";
     if (hadSelection) {
       this.notifySelectionChanged();
     }
@@ -138,6 +166,8 @@ export class StudioGraphSelectionController {
     this.graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
     this.graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
     this.suppressNextCanvasClick = false;
+    this.cancelScheduledGraphZoomSettle();
+    this.graphZoomMode = "interactive";
     this.nodeElsById.clear();
   }
 
@@ -216,8 +246,43 @@ export class StudioGraphSelectionController {
       return false;
     }
 
-    const selectionBounds = this.computeSelectedNodeBounds(project);
+    const selectionBounds = this.computeNodeBounds(project, this.selectedNodeIds);
     if (!selectionBounds) {
+      return false;
+    }
+
+    return this.fitBoundsInViewport(selectionBounds, {
+      mode: "interactive",
+      paddingPx: options?.paddingPx,
+    });
+  }
+
+  fitGraphInViewport(options?: { paddingPx?: number }): boolean {
+    const project = this.host.getCurrentProject();
+    if (!this.graphViewportEl || !project || project.graph.nodes.length === 0) {
+      return false;
+    }
+
+    const graphBounds = this.computeNodeBounds(project);
+    if (!graphBounds) {
+      return false;
+    }
+
+    return this.fitBoundsInViewport(graphBounds, {
+      mode: "overview",
+      paddingPx: options?.paddingPx,
+    });
+  }
+
+  private fitBoundsInViewport(
+    bounds: GraphBounds,
+    options?: {
+      paddingPx?: number;
+      mode?: StudioGraphZoomMode;
+    }
+  ): boolean {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
       return false;
     }
 
@@ -229,19 +294,24 @@ export class StudioGraphSelectionController {
     const viewportHeight = Math.max(1, viewport.clientHeight || 0);
     const availableWidth = Math.max(1, viewportWidth - paddingPx * 2);
     const availableHeight = Math.max(1, viewportHeight - paddingPx * 2);
-    const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
-    const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
-    const targetZoom = this.clampGraphZoom(
-      Math.min(availableWidth / selectionWidth, availableHeight / selectionHeight)
-    );
+    const selectionWidth = Math.max(1, bounds.right - bounds.left);
+    const selectionHeight = Math.max(1, bounds.bottom - bounds.top);
+    const requestedMode = options?.mode ?? "interactive";
+    const rawTargetZoom = Math.min(availableWidth / selectionWidth, availableHeight / selectionHeight);
+    const appliedMode =
+      requestedMode === "overview" && rawTargetZoom < STUDIO_GRAPH_MIN_ZOOM ? "overview" : "interactive";
+    const targetZoom = this.clampGraphZoom(rawTargetZoom, appliedMode);
 
+    this.cancelScheduledGraphZoomSettle();
+    this.graphZoomMode = appliedMode;
     this.graphZoom = targetZoom;
-    this.applyGraphZoom();
+    this.applyGraphZoom({ settled: false, notifyHost: false });
 
-    const centerX = (selectionBounds.left + selectionBounds.right) * 0.5;
-    const centerY = (selectionBounds.top + selectionBounds.bottom) * 0.5;
+    const centerX = (bounds.left + bounds.right) * 0.5;
+    const centerY = (bounds.top + bounds.bottom) * 0.5;
     viewport.scrollLeft = centerX * targetZoom - viewportWidth * 0.5;
     viewport.scrollTop = centerY * targetZoom - viewportHeight * 0.5;
+    this.applyGraphZoom({ settled: true });
     return true;
   }
 
@@ -267,16 +337,20 @@ export class StudioGraphSelectionController {
     };
   }
 
-  private computeSelectedNodeBounds(project: StudioProjectV1): GraphBounds | null {
+  private computeNodeBounds(project: StudioProjectV1, nodeIds?: Iterable<string>): GraphBounds | null {
     const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
+    const nodes = nodeIds
+      ? Array.from(nodeIds)
+        .map((nodeId) => nodeById.get(nodeId))
+        .filter((node): node is StudioNodeInstance => Boolean(node))
+      : project.graph.nodes;
     let left = Number.POSITIVE_INFINITY;
     let top = Number.POSITIVE_INFINITY;
     let right = Number.NEGATIVE_INFINITY;
     let bottom = Number.NEGATIVE_INFINITY;
 
-    for (const nodeId of this.selectedNodeIds) {
-      const node = nodeById.get(nodeId);
-      if (!node || !node.position) {
+    for (const node of nodes) {
+      if (!node.position) {
         continue;
       }
       const nodeX = Number(node.position.x);
@@ -315,6 +389,9 @@ export class StudioGraphSelectionController {
   }
 
   startMarqueeSelection(startEvent: PointerEvent): void {
+    if (this.graphZoomMode === "overview") {
+      return;
+    }
     if (!this.host.getCurrentProject() || !this.graphViewportEl || !this.graphMarqueeEl) {
       return;
     }
@@ -467,17 +544,21 @@ export class StudioGraphSelectionController {
     window.addEventListener("pointercancel", finishSelection);
   }
 
-  private clampGraphZoom(value: number): number {
+  private clampGraphZoom(value: number, mode: StudioGraphZoomMode = this.graphZoomMode): number {
     if (!Number.isFinite(value)) {
       return this.graphZoom;
     }
-    return Math.min(STUDIO_GRAPH_MAX_ZOOM, Math.max(STUDIO_GRAPH_MIN_ZOOM, value));
+    const minZoom = mode === "overview" ? STUDIO_GRAPH_OVERVIEW_MIN_ZOOM : STUDIO_GRAPH_MIN_ZOOM;
+    return Math.min(STUDIO_GRAPH_MAX_ZOOM, Math.max(minZoom, value));
   }
 
-  applyGraphZoom(): void {
-    const zoom = this.clampGraphZoom(this.graphZoom);
+  applyGraphZoom(options?: {
+    settled?: boolean;
+    notifyHost?: boolean;
+  }): void {
+    const settled = options?.settled !== false;
+    const zoom = this.clampGraphZoom(this.graphZoom, this.graphZoomMode);
     this.graphZoom = zoom;
-    this.syncCanvasBounds();
     if (!this.graphCanvasEl || !this.graphSurfaceEl) {
       return;
     }
@@ -487,19 +568,54 @@ export class StudioGraphSelectionController {
     if (this.graphZoomLabelEl) {
       this.graphZoomLabelEl.setText(`${Math.round(zoom * 100)}%`);
     }
-    this.host.onGraphZoomChanged?.(zoom);
-    this.host.renderEdgeLayer();
+    if (options?.notifyHost !== false) {
+      this.host.onGraphZoomChanged?.(zoom, {
+        mode: this.graphZoomMode,
+        settled,
+      });
+    }
+    if (settled) {
+      this.host.renderEdgeLayer();
+    }
   }
 
-  private zoomGraphAtClientPoint(nextZoom: number, clientX: number, clientY: number): void {
+  private scheduleSettledGraphZoom(): void {
+    this.cancelScheduledGraphZoomSettle();
+    this.zoomSettleTimer = window.setTimeout(() => {
+      this.zoomSettleTimer = null;
+      this.applyGraphZoom({ settled: true });
+    }, STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS);
+  }
+
+  private cancelScheduledGraphZoomSettle(): void {
+    if (this.zoomSettleTimer !== null) {
+      window.clearTimeout(this.zoomSettleTimer);
+      this.zoomSettleTimer = null;
+    }
+  }
+
+  private zoomGraphAtClientPoint(
+    nextZoom: number,
+    clientX: number,
+    clientY: number,
+    options?: {
+      mode?: StudioGraphZoomMode;
+      settled?: boolean;
+      scheduleSettle?: boolean;
+    }
+  ): void {
     const viewport = this.graphViewportEl;
     if (!viewport) {
       return;
     }
 
+    const mode = options?.mode ?? "interactive";
     const previousZoom = this.graphZoom;
-    const clampedNextZoom = this.clampGraphZoom(nextZoom);
-    if (Math.abs(clampedNextZoom - previousZoom) < 0.0001) {
+    const clampedNextZoom = this.clampGraphZoom(nextZoom, mode);
+    if (Math.abs(clampedNextZoom - previousZoom) < 0.0001 && this.graphZoomMode === mode) {
+      if (options?.scheduleSettle) {
+        this.scheduleSettledGraphZoom();
+      }
       return;
     }
 
@@ -509,11 +625,19 @@ export class StudioGraphSelectionController {
     const graphX = (viewport.scrollLeft + localX) / previousZoom;
     const graphY = (viewport.scrollTop + localY) / previousZoom;
 
+    const settled = options?.settled !== false;
+    if (settled) {
+      this.cancelScheduledGraphZoomSettle();
+    }
+    this.graphZoomMode = mode;
     this.graphZoom = clampedNextZoom;
-    this.applyGraphZoom();
+    this.applyGraphZoom({ settled });
 
     viewport.scrollLeft = graphX * clampedNextZoom - localX;
     viewport.scrollTop = graphY * clampedNextZoom - localY;
+    if (options?.scheduleSettle) {
+      this.scheduleSettledGraphZoom();
+    }
   }
 
   private normalizeWheelDelta(delta: number, deltaMode: number, viewport: HTMLElement): number {
@@ -541,12 +665,13 @@ export class StudioGraphSelectionController {
 
     const shouldZoom = event.ctrlKey || event.metaKey;
     if (shouldZoom) {
-      if (this.shouldDeferWheelToOverlay(event)) {
-        return;
-      }
       event.preventDefault();
       const scaleFactor = Math.exp(-event.deltaY * 0.0025);
-      this.zoomGraphAtClientPoint(this.graphZoom * scaleFactor, event.clientX, event.clientY);
+      this.zoomGraphAtClientPoint(this.graphZoom * scaleFactor, event.clientX, event.clientY, {
+        mode: "interactive",
+        settled: false,
+        scheduleSettle: true,
+      });
       return;
     }
 
@@ -588,6 +713,9 @@ export class StudioGraphSelectionController {
   }
 
   startNodeDrag(nodeId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
+    if (this.graphZoomMode === "overview") {
+      return;
+    }
     const project = this.host.getCurrentProject();
     if (!project) {
       return;

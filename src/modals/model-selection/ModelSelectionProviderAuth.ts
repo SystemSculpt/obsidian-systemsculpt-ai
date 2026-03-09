@@ -17,6 +17,7 @@ export type ModelSelectorProviderAuthRecord = StudioPiProviderAuthRecordLike &
   >;
 
 export type ModelSelectionProviderAccessState =
+  | "managed"
   | "pi-auth"
   | "local"
   | "unavailable";
@@ -106,13 +107,16 @@ function resolveCurrentProviderId(models: SystemSculptModel[], selectedModelId?:
 }
 
 function getProviderAccessRank(state: ModelSelectionProviderAccessState): number {
-  if (state === "pi-auth") {
+  if (state === "managed") {
     return 0;
   }
-  if (state === "local") {
+  if (state === "pi-auth") {
     return 1;
   }
-  return 2;
+  if (state === "local") {
+    return 2;
+  }
+  return 3;
 }
 
 export function resolveModelSelectionAccessStateForModel(
@@ -121,6 +125,16 @@ export function resolveModelSelectionAccessStateForModel(
 ): ModelSelectionProviderAccessState {
   const providerId = normalizeModelSelectorProviderId(model.sourceProviderId || model.provider);
   const providerAuthenticated = hasAuthenticatedModelSelectorProvider(providerAuthById.get(providerId));
+  const remoteAuthMode = String(model.piAuthMode || "").trim().toLowerCase();
+  const remoteManaged = !!model.piRemoteAvailable && (remoteAuthMode === "hosted" || remoteAuthMode === "both");
+  if (remoteManaged) {
+    return "managed";
+  }
+
+  if (!!model.piRemoteAvailable && remoteAuthMode === "byok") {
+    return providerAuthenticated ? "pi-auth" : "unavailable";
+  }
+
   const localReady =
     !!model.piLocalAvailable &&
     (!piTextProviderRequiresAuth(providerId) || providerAuthenticated);
@@ -161,11 +175,13 @@ export function buildModelSelectionProviderSummary(
     if (existing) {
       existing.modelCount += 1;
       if (
+        accessState === "managed" ||
         accessState === "local" ||
         getProviderAccessRank(accessState) < getProviderAccessRank(existing.accessState)
       ) {
         existing.accessState = accessState;
-        existing.providerAuthenticated = accessState === "pi-auth" || accessState === "local";
+        existing.providerAuthenticated =
+          accessState === "managed" || accessState === "pi-auth" || accessState === "local";
       }
       continue;
     }
@@ -175,7 +191,8 @@ export function buildModelSelectionProviderSummary(
       providerName: resolveProviderName(model.provider || providerId) || defaultResolveProviderName(providerId),
       modelCount: 1,
       accessState,
-      providerAuthenticated: accessState === "pi-auth" || accessState === "local",
+      providerAuthenticated:
+        accessState === "managed" || accessState === "pi-auth" || accessState === "local",
       isCurrentProvider: currentProviderId.length > 0 && currentProviderId === providerId,
     });
   }
@@ -202,7 +219,7 @@ export function buildModelSelectionProviderSummary(
   return {
     totalModels: models.length,
     totalProviders: items.length,
-    managedProviders: 0,
+    managedProviders: items.filter((provider) => provider.accessState === "managed").length,
     piReadyProviders: items.filter((provider) => provider.accessState === "pi-auth").length,
     localProviders: items.filter((provider) => provider.accessState === "local").length,
     unavailableProviders: items.filter((provider) => provider.accessState === "unavailable").length,

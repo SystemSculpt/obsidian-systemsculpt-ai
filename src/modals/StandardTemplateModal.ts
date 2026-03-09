@@ -5,7 +5,7 @@ import SystemSculptPlugin from "../main";
 import { ChatMessage } from "../types";
 import { showAIResponseModal } from "../modals/StandardAIResponseModal";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
-import { ensureCanonicalId } from "../utils/modelUtils";
+import { ensureCanonicalId, getModelLabelWithProvider } from "../utils/modelUtils";
 
 export interface TemplateModalOptions {
   plugin?: SystemSculptPlugin;
@@ -160,9 +160,7 @@ export class StandardTemplateModal extends StandardModal {
         const models = await this.plugin.modelService.getModels();
         dropdown.selectEl.innerHTML = "";
         for (const model of models) {
-          const provider = model.provider || '';
-          const prefix = provider.toLowerCase() === "systemsculpt" ? "[SS AI] " : `[${provider.toUpperCase()}] `;
-          dropdown.addOption(model.id, `${prefix}${model.name}`);
+          dropdown.addOption(model.id, getModelLabelWithProvider(model.id || model.name));
         }
         dropdown.setValue(this.selectedModelId);
         dropdown.selectEl.disabled = false;

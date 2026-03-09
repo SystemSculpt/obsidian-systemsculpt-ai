@@ -32,7 +32,10 @@ import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
-import { resolvePiTextExecutionPlan } from "./pi-native/PiTextRuntime";
+import {
+  assertPiTextExecutionReady,
+  resolvePiTextExecutionPlan,
+} from "./pi-native/PiTextRuntime";
 
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
@@ -436,9 +439,9 @@ export class SystemSculptService {
           displayName: providerModelId,
         },
         piExecutionModelId: actualModelId,
-        piAuthMode: modelSource === "pi_local" ? "local" : "both",
-        piRemoteAvailable: modelSource === "pi_managed",
-        piLocalAvailable: modelSource === "pi_local",
+        piAuthMode: "local",
+        piRemoteAvailable: false,
+        piLocalAvailable: true,
         context_length: 0,
         capabilities: [],
         architecture: {
@@ -956,6 +959,7 @@ export class SystemSculptService {
     includeReasoning,
     debug,
     sessionFile,
+    sessionId,
     onPiSessionReady,
   }: {
     messages: ChatMessage[];
@@ -971,6 +975,7 @@ export class SystemSculptService {
     includeReasoning?: boolean;
     debug?: StreamDebugCallbacks;
     sessionFile?: string;
+    sessionId?: string;
     onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
   }): AsyncGenerator<StreamEvent, void, unknown> {
     this.refreshSettings();
@@ -996,11 +1001,13 @@ export class SystemSculptService {
         resolvedModel,
       } = prepared;
 
-      await resolvePiTextExecutionPlan(resolvedModel);
-
+      const executionPlan = await assertPiTextExecutionReady(resolvedModel);
       yield* executeLocalPiStream({
         plugin: this.plugin,
-        prepared,
+        prepared: {
+          ...prepared,
+          actualModelId: executionPlan.actualModelId,
+        },
         sessionFile,
         onSessionReady: onPiSessionReady,
         signal,
@@ -1068,11 +1075,11 @@ export class SystemSculptService {
     const executionPlan = await resolvePiTextExecutionPlan(prepared.resolvedModel);
 
     const requestBody: Record<string, any> = {
-      modelId: executionPlan.actualModelId,
       context: {
         messages: prepared.preparedMessages,
       },
       transport: "pi-rpc",
+      modelId: executionPlan.actualModelId,
     };
 
     return {

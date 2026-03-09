@@ -5,9 +5,15 @@ import { FavoritesService } from "../FavoritesService";
 import { SystemSculptModel } from "../../types/llm";
 
 // Mock modelUtils
-jest.mock("../../utils/modelUtils", () => ({
-  ensureCanonicalId: jest.fn((id: string, _provider?: string) => id),
-}));
+jest.mock("../../utils/modelUtils", () => {
+  const actual = jest.requireActual("../../utils/modelUtils");
+  return {
+    ...actual,
+    ensureCanonicalId: jest.fn((id: string, _provider?: string) => id),
+    isSystemSculptModel: actual.isSystemSculptModel,
+    compareSystemSculptModelPriority: actual.compareSystemSculptModelPriority,
+  };
+});
 
 describe("FavoritesService", () => {
   let service: FavoritesService;
@@ -286,6 +292,7 @@ describe("FavoritesService", () => {
 
   describe("sortModelsByFavorites", () => {
     const models: SystemSculptModel[] = [
+      { id: "systemsculpt@@systemsculpt/ai-agent", name: "System Sculpt", provider: "systemsculpt", isFavorite: false } as SystemSculptModel,
       { id: "gpt-3.5", name: "GPT-3.5", provider: "openai", isFavorite: false } as SystemSculptModel,
       { id: "gpt-4", name: "GPT-4", provider: "openai", isFavorite: true } as SystemSculptModel,
       { id: "claude-3", name: "Claude 3", provider: "anthropic", isFavorite: false } as SystemSculptModel,
@@ -297,7 +304,7 @@ describe("FavoritesService", () => {
 
       const sorted = service.sortModelsByFavorites(models);
 
-      expect(sorted[0].id).toBe("gpt-3.5");
+      expect(sorted[0].id).toBe("systemsculpt@@systemsculpt/ai-agent");
     });
 
     it("sorts favorites first when enabled", () => {
@@ -306,8 +313,9 @@ describe("FavoritesService", () => {
 
       const sorted = service.sortModelsByFavorites(models);
 
-      expect(sorted[0].id).toBe("gpt-4");
-      expect(sorted[0].isFavorite).toBe(true);
+      expect(sorted[0].id).toBe("systemsculpt@@systemsculpt/ai-agent");
+      expect(sorted[1].id).toBe("gpt-4");
+      expect(sorted[1].isFavorite).toBe(true);
     });
 
     it("sorts alphabetically when enabled", () => {
@@ -316,8 +324,8 @@ describe("FavoritesService", () => {
 
       const sorted = service.sortModelsByFavorites(models);
 
-      // Sorted by provider first (anthropic < openai), then by name
-      expect(sorted[0].provider).toBe("anthropic");
+      expect(sorted[0].id).toBe("systemsculpt@@systemsculpt/ai-agent");
+      expect(sorted[1].provider).toBe("anthropic");
     });
 
     it("sorts favorites first then alphabetically", () => {
@@ -326,9 +334,9 @@ describe("FavoritesService", () => {
 
       const sorted = service.sortModelsByFavorites(models);
 
-      // Favorite first, then alphabetical for non-favorites
-      expect(sorted[0].id).toBe("gpt-4");
-      expect(sorted[1].provider).toBe("anthropic");
+      expect(sorted[0].id).toBe("systemsculpt@@systemsculpt/ai-agent");
+      expect(sorted[1].id).toBe("gpt-4");
+      expect(sorted[2].provider).toBe("anthropic");
     });
   });
 
@@ -353,6 +361,21 @@ describe("FavoritesService", () => {
 
       expect(filtered.length).toBe(1);
       expect(filtered[0].id).toBe("gpt-4");
+    });
+
+    it("keeps System Sculpt visible when favorites-only mode is enabled", () => {
+      mockPlugin.settings.favoritesFilterSettings.showFavoritesOnly = true;
+
+      const filtered = service.filterModelsByFavorites([
+        { id: "systemsculpt@@systemsculpt/ai-agent", name: "System Sculpt", provider: "systemsculpt", isFavorite: false } as SystemSculptModel,
+        { id: "gpt-4", name: "GPT-4", provider: "openai", isFavorite: true } as SystemSculptModel,
+        { id: "claude-3", name: "Claude 3", provider: "anthropic", isFavorite: false } as SystemSculptModel,
+      ]);
+
+      expect(filtered.map((model) => model.id)).toEqual([
+        "systemsculpt@@systemsculpt/ai-agent",
+        "gpt-4",
+      ]);
     });
   });
 

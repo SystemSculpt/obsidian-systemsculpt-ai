@@ -23,6 +23,7 @@ export class ResumeChatService {
 
     // Register workspace events for handling markdown views
     this.registerWorkspaceEvents();
+    this.scheduleInitialRefresh();
   }
 
   private registerWorkspaceEvents() {
@@ -52,6 +53,14 @@ export class ResumeChatService {
         }
       })
     );
+  }
+
+  private scheduleInitialRefresh() {
+    setTimeout(() => {
+      this.app.workspace.iterateAllLeaves((leaf) => {
+        void this.handleLeafChange(leaf);
+      });
+    }, 0);
   }
 
   private debouncedRefreshAllLeaves() {
@@ -197,5 +206,13 @@ export class ResumeChatService {
       element.removeEventListener(type, listener);
     });
     this.listeners = [];
+
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const button = this.resumeButtonByLeaf.get(leaf);
+      if (button?.isConnected) {
+        button.remove();
+      }
+      this.resumeButtonByLeaf.delete(leaf);
+    });
   }
 }

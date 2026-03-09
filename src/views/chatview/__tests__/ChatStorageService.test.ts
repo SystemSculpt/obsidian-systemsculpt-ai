@@ -519,6 +519,47 @@ Hello
       ).rejects.toThrow();
     });
 
+    it("allows Pi-backed chats to save an empty visible transcript after a fork", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/pi-fork.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: pi-fork
+model: anthropic@@claude-haiku-4-5
+title: Pi Fork
+created: 2024-01-01T00:00:00.000Z
+lastModified: 2024-01-01T00:00:00.000Z
+version: 1
+chatBackend: pi
+piSessionFile: /tmp/old.jsonl
+piSessionId: old-session
+---
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="1" -->
+Hello
+<!-- SYSTEMSCULPT-MESSAGE-END -->`);
+
+      await expect(
+        service.saveChat(
+          "pi-fork",
+          [],
+          "anthropic@@claude-haiku-4-5",
+          undefined,
+          undefined,
+          "general-use",
+          undefined,
+          "Pi Fork",
+          "medium",
+          "/tmp/new.jsonl",
+          "new-session",
+          undefined,
+          "2026-03-09T02:32:48.935Z",
+          "pi"
+        )
+      ).resolves.toEqual({ version: 2 });
+
+      expect(mockVault.modify).toHaveBeenCalled();
+    });
+
     it("includes title in save", async () => {
       await service.saveChat(
         "titled-chat",

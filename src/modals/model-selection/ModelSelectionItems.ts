@@ -1,7 +1,7 @@
 import type { ListItem } from "../../core/ui/modals/standard";
 import type { SearchableField } from "../../services/SearchService";
 import type { SystemSculptModel } from "../../types/llm";
-import { ensureCanonicalId, getCanonicalId } from "../../utils/modelUtils";
+import { compareSystemSculptModelPriority, ensureCanonicalId, getCanonicalId } from "../../utils/modelUtils";
 import type { ModelSelectionProviderAccessState } from "./ModelSelectionProviderAuth";
 
 export type ModelSelectionItemBuilderOptions = {
@@ -35,13 +35,16 @@ function isModelSelected(modelId: string, selectedModelId: string): boolean {
 }
 
 function getProviderAccessRank(state: ModelSelectionProviderAccessState): number {
-  if (state === "pi-auth") {
+  if (state === "managed") {
     return 0;
   }
-  if (state === "local") {
+  if (state === "pi-auth") {
     return 1;
   }
-  return 2;
+  if (state === "local") {
+    return 2;
+  }
+  return 3;
 }
 
 function getModelIcon(
@@ -50,6 +53,9 @@ function getModelIcon(
 ): string {
   if (getCanonicalId(model) === "systemsculpt@@vault-agent") {
     return "folder-open";
+  }
+  if (accessState === "managed") {
+    return "sparkles";
   }
   if (accessState === "pi-auth") {
     return "shield-check";
@@ -101,6 +107,11 @@ export function buildModelSelectionListItems(
   options: ModelSelectionItemBuilderOptions
 ): ListItem[] {
   const sortedModels = [...models].sort((left, right) => {
+    const pinnedCompare = compareSystemSculptModelPriority(left, right);
+    if (pinnedCompare !== 0) {
+      return pinnedCompare;
+    }
+
     const leftSelected = isModelSelected(left.id, options.selectedModelId) ? 1 : 0;
     const rightSelected = isModelSelected(right.id, options.selectedModelId) ? 1 : 0;
     if (leftSelected !== rightSelected) {
@@ -133,7 +144,8 @@ export function buildModelSelectionListItems(
     const providerLabel = getModelProviderLabel(model, options.resolveProviderLabel);
     const accessState = options.resolveModelAccessState(model);
     const isCurrentModel = isModelSelected(model.id, options.selectedModelId);
-    const providerAuthenticated = accessState === "pi-auth" || accessState === "local";
+    const providerAuthenticated =
+      accessState === "managed" || accessState === "pi-auth" || accessState === "local";
     const disabled = accessState === "unavailable";
     const title =
       String(model.name || "").trim() ||
@@ -164,7 +176,12 @@ export function buildModelSelectionListItems(
     };
 
     (item as any)._ssModel = model;
-    (item as any).providerClass = accessState === "local" ? "provider-local" : "provider-pi";
+    (item as any).providerClass =
+      accessState === "local"
+        ? "provider-local"
+        : accessState === "managed"
+          ? "provider-managed"
+          : "provider-pi";
     (item as any).additionalClasses = buildAdditionalClasses(accessState, isCurrentModel);
 
     if (providerAuthenticated) {

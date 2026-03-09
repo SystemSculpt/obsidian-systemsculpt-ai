@@ -1,7 +1,11 @@
 import { StudioGraphConnectionEngineV2 } from "./connections-v2/StudioGraphConnectionEngineV2";
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
-import type { PendingConnection, StudioGraphInteractionHost } from "./StudioGraphInteractionTypes";
+import type {
+  PendingConnection,
+  StudioGraphInteractionHost,
+  StudioGraphZoomMode,
+} from "./StudioGraphInteractionTypes";
 import {
   STUDIO_GRAPH_CANVAS_HEIGHT,
   STUDIO_GRAPH_CANVAS_WIDTH,
@@ -36,7 +40,7 @@ export class StudioGraphInteractionEngine {
         this.groupController.handleNodeDropToGroup(groupId, draggedNodeIds);
         this.host.onNodeDropToGroup?.(groupId, draggedNodeIds);
       },
-      onGraphZoomChanged: (zoom) => this.host.onGraphZoomChanged?.(zoom),
+      onGraphZoomChanged: (zoom, context) => this.host.onGraphZoomChanged?.(zoom, context),
     });
 
     this.groupController = new StudioGraphGroupController({
@@ -60,8 +64,19 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getGraphZoom();
   }
 
-  setGraphZoom(nextZoom: number): void {
-    this.selectionController.setGraphZoom(nextZoom);
+  getGraphZoomMode(): StudioGraphZoomMode {
+    return this.selectionController.getGraphZoomMode();
+  }
+
+  setGraphZoom(
+    nextZoom: number,
+    options?: {
+      mode?: StudioGraphZoomMode;
+      settled?: boolean;
+      scheduleSettle?: boolean;
+    }
+  ): void {
+    this.selectionController.setGraphZoom(nextZoom, options);
   }
 
   getPendingConnection(): PendingConnection | null {
@@ -186,6 +201,10 @@ export class StudioGraphInteractionEngine {
 
   fitSelectedNodesInViewport(options?: { paddingPx?: number }): boolean {
     return this.selectionController.fitSelectionInViewport(options);
+  }
+
+  fitGraphInViewport(options?: { paddingPx?: number }): boolean {
+    return this.selectionController.fitGraphInViewport(options);
   }
 
   handleGraphViewportWheel(event: WheelEvent): void {

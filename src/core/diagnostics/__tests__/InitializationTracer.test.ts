@@ -151,6 +151,32 @@ describe("InitializationTracer", () => {
       expect(warnings).toHaveLength(2);
     });
 
+    it("uses debug level for expected plugin unload cleanup", () => {
+      tracer.startPhase("phase1");
+
+      tracer.flushOpenPhases("plugin-unload");
+
+      const debugEntries = logger.entries.filter(
+        (e) => e.level === "debug" && e.message === "init:open"
+      );
+      const warningEntries = logger.entries.filter(
+        (e) => e.level === "warn" && e.message === "init:open"
+      );
+      expect(debugEntries).toHaveLength(1);
+      expect(warningEntries).toHaveLength(0);
+    });
+
+    it("uses error level for critical initialization failures", () => {
+      tracer.startPhase("phase1");
+
+      tracer.flushOpenPhases("critical-initialization-error");
+
+      const errorEntries = logger.entries.filter(
+        (e) => e.level === "error" && e.message === "init:open"
+      );
+      expect(errorEntries).toHaveLength(1);
+    });
+
     it("includes reason in warning metadata", () => {
       tracer.startPhase("test-phase");
       tracer.flushOpenPhases("shutdown");

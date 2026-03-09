@@ -8,7 +8,16 @@ export const messageHandling = {
   addMessage: async function(chatView: ChatView, role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage, targetContainer?: HTMLElement | DocumentFragment): Promise<void> {
     const messageId = existingMessageId || chatView.generateMessageId();
     
-    const { messageEl, contentEl } = await chatView.messageRenderer.renderMessage({ app: chatView.app, messageId, role, content: content || "" });
+    const { messageEl, contentEl } = await chatView.messageRenderer.renderMessage({
+      app: chatView.app,
+      messageId,
+      role,
+      content: content || "",
+      onResend:
+        role === "user"
+          ? async (input) => this.runResendAction(chatView, input)
+          : undefined,
+    });
 
     // Track role on element for grouping metadata and debugging
     messageEl.dataset.role = role;
@@ -47,6 +56,70 @@ export const messageHandling = {
     }
 
     // Token counter has been removed
+  },
+
+  runResendAction: async function(
+    chatView: ChatView,
+    input: { messageId: string; content: string }
+  ): Promise<{ status: "success" | "cancelled" | "error" }> {
+    const { messageId, content } = input;
+    const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
+    if (index === -1) {
+      return { status: "error" };
+    }
+
+    if (chatView.isLegacyReadOnlyChat()) {
+      new Notice("This legacy chat is read-only. Start a new Pi chat to continue from here.");
+      return { status: "error" };
+    }
+
+    if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
+      try {
+        const forkResult = await chatView.forkPiSessionFromMessage(messageId);
+        if (forkResult.cancelled) {
+          new Notice("Pi cancelled the fork request for that message.");
+          return { status: "cancelled" };
+        }
+        if (chatView.inputHandler) {
+          const piResendText = String(forkResult.text || "").trim();
+          chatView.inputHandler.setValue(piResendText || String(content || "").trim());
+          chatView.inputHandler.focus();
+        }
+        new Notice("Forked chat to that message and restored it to the composer.");
+        return { status: "success" };
+      } catch (error) {
+        new Notice(
+          `Unable to fork Pi session from this message: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return { status: "error" };
+      }
+    }
+
+    chatView.messages.splice(index);
+    chatView.clearPiSessionState({ save: false });
+
+    if (chatView.messages.length === 0) {
+      chatView.chatId = "";
+      chatView.chatVersion = 0;
+      chatView.isFullyLoaded = false;
+    } else {
+      await chatView.saveChat();
+    }
+
+    await this.reloadAllMessages(chatView);
+
+    if (chatView.inputHandler) {
+      try {
+        const { trimOuterBlankLines } = await import('../../utils/textUtils');
+        const asString = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+        chatView.inputHandler.setValue(trimOuterBlankLines(asString));
+      } catch {
+        chatView.inputHandler.setValue(typeof content === 'string' ? content : JSON.stringify(content ?? ''));
+      }
+      chatView.inputHandler.focus();
+    }
+
+    return { status: "success" };
   },
 
   // Group-related helpers removed; flat list insertion only
@@ -91,60 +164,6 @@ export const messageHandling = {
       chatView.register(() => element.removeEventListener(eventName, handler));
     };
     
-    const resubmitHandler = async (e: CustomEvent) => {
-      const { messageId, content } = e.detail;
-      const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
-      if (index === -1) return;
-
-      if (chatView.isLegacyReadOnlyChat()) {
-        new Notice("This legacy chat is read-only. Start a new Pi chat to continue from here.");
-        return;
-      }
-
-      if (chatView.getPiSessionFile()) {
-        try {
-          const forkResult = await chatView.forkPiSessionFromMessage(messageId);
-          if (forkResult.cancelled) {
-            new Notice("Pi cancelled the fork request for that message.");
-            return;
-          }
-        } catch (error) {
-          new Notice(
-            `Unable to fork Pi session from this message: ${error instanceof Error ? error.message : String(error)}`
-          );
-          return;
-        }
-      } else {
-        // Legacy local-only chats still fall back to truncating local history.
-        chatView.messages.splice(index);
-        chatView.clearPiSessionState({ save: false });
-
-        if (chatView.messages.length === 0) {
-          chatView.chatId = "";
-          chatView.chatVersion = 0;
-          chatView.isFullyLoaded = false;
-        } else {
-          await chatView.saveChat();
-        }
-
-        await this.reloadAllMessages(chatView);
-      }
-
-      // Put the text back in the input box for editing, trimming outer blank lines
-      if (chatView.inputHandler) {
-        try {
-          const { trimOuterBlankLines } = await import('../../utils/textUtils');
-          const asString = typeof content === 'string' ? content : JSON.stringify(content ?? '');
-          const normalized = trimOuterBlankLines(asString);
-          chatView.inputHandler.setValue(normalized);
-        } catch {
-          // Fallback without normalization if dynamic import fails
-          chatView.inputHandler.setValue(typeof content === 'string' ? content : JSON.stringify(content ?? ''));
-        }
-        chatView.inputHandler.focus();
-      }
-    };
-    
     const replyHandler = async (e: CustomEvent) => {
       const { content } = e.detail || {};
       const text = typeof content === 'string' ? content : (messageEl.querySelector('.systemsculpt-message-content, .systemsculpt-content-part')?.textContent || '').trim();
@@ -165,7 +184,7 @@ export const messageHandling = {
         return;
       }
 
-      if (chatView.getPiSessionFile()) {
+      if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
         new Notice("Editing previous Pi-backed messages isn't supported yet. Fork from that user message instead.");
         return;
       }
@@ -190,6 +209,10 @@ export const messageHandling = {
           messageId,
           role: updatedMessage.role,
           content: updatedMessage.content,
+          onResend:
+            updatedMessage.role === "user"
+              ? async (input) => this.runResendAction(chatView, input)
+              : undefined,
         });
         
         // Re-apply assistant message rendering if needed
@@ -213,7 +236,7 @@ export const messageHandling = {
         return;
       }
 
-      if (chatView.getPiSessionFile()) {
+      if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
         new Notice("Deleting individual messages is disabled for Pi-backed chats. Fork from a user message instead.");
         return;
       }
@@ -233,7 +256,6 @@ export const messageHandling = {
       }
     };
     
-    registerHandler(messageEl, "resubmit", resubmitHandler as EventListener);
     registerHandler(messageEl, "reply", replyHandler as EventListener);
     registerHandler(messageEl, "edit", editHandler as EventListener);
     registerHandler(messageEl, "delete", deleteHandler as EventListener);

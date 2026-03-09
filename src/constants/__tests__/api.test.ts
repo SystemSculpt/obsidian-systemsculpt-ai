@@ -63,23 +63,6 @@ describe("SYSTEMSCULPT_API_ENDPOINTS", () => {
     });
   });
 
-  describe("AGENT", () => {
-    it("has BASE endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.BASE).toBe("/api/v1/agent");
-    });
-
-    it("has SESSIONS endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSIONS).toBe("/api/v1/agent/sessions");
-    });
-
-    it("builds SESSION_TURNS endpoint", () => {
-      expect(SYSTEMSCULPT_API_ENDPOINTS.AGENT.SESSION_TURNS("sess_1")).toBe(
-        "/api/v1/agent/sessions/sess_1/turns"
-      );
-    });
-
-  });
-
   describe("EMBEDDINGS", () => {
     it("has GENERATE endpoint", () => {
       expect(SYSTEMSCULPT_API_ENDPOINTS.EMBEDDINGS.GENERATE).toBe("/embeddings");
