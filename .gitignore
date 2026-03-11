@@ -24,6 +24,7 @@ build/
 config.json
 systemsculpt-sync.config.json
 systemsculpt-sync.ios.json
+systemsculpt-sync.android.json
 run.sh
 !testing/e2e/run.sh
 

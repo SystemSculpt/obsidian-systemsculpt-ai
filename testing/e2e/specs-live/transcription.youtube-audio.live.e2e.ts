@@ -1,6 +1,6 @@
 import { expect } from "@wdio/globals";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,9 +17,92 @@ import {
 } from "../utils/systemsculptChat";
 
 const execFileAsync = promisify(execFile);
+const STATIC_TOKEN_WORDS = ["crimson", "harbor", "silver", "cactus", "golden", "lantern"] as const;
+const SHORT_TTS_SENTENCE =
+  "System Sculpt audio transcription test. This is an automated integration check. Token phrase: crimson harbor silver cactus golden lantern.";
 
 async function execFileWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<void> {
   await execFileAsync(cmd, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
+}
+
+function commandExists(command: string): boolean {
+  const probe = spawnSync(process.platform === "win32" ? "where" : "which", [command], {
+    encoding: "utf8",
+  });
+  return probe.status === 0;
+}
+
+async function resolveAvailableCommand(
+  candidates: Array<string | null | undefined>
+): Promise<string | null> {
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (!value) continue;
+
+    if (value.includes("/") || value.includes("\\") || /^[a-zA-Z]:[\\/]/.test(value)) {
+      try {
+        await fs.access(value);
+        return value;
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (commandExists(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+async function buildShortSpeechFixture(tmpDir: string, nonce: string): Promise<string> {
+  const fixtureOverride = String(process.env.SYSTEMSCULPT_E2E_SHORT_AUDIO_FIXTURE || "").trim();
+  if (fixtureOverride) {
+    const sourcePath = path.resolve(fixtureOverride);
+    await fs.access(sourcePath);
+    return sourcePath;
+  }
+
+  const explicitTts = String(process.env.SYSTEMSCULPT_E2E_TTS_BIN || "").trim();
+  const ttsCommand = await resolveAvailableCommand([
+    explicitTts,
+    process.platform === "darwin" ? "/usr/bin/say" : "",
+    process.platform === "win32" ? "espeak-ng.exe" : "espeak-ng",
+    process.platform === "win32" ? "espeak.exe" : "espeak",
+  ]);
+
+  if (!ttsCommand) {
+    throw new Error(
+      [
+        "Unable to generate the short speech fixture.",
+        "Provide SYSTEMSCULPT_E2E_SHORT_AUDIO_FIXTURE or install a supported TTS command",
+        "(macOS: /usr/bin/say, Windows/Linux: espeak-ng or espeak).",
+      ].join(" ")
+    );
+  }
+
+  const lower = ttsCommand.toLowerCase();
+  if (lower.endsWith("say") || lower.endsWith("/say") || lower.endsWith("\\say")) {
+    const outputPath = path.join(tmpDir, `tts-short-${nonce}.aiff`);
+    await execFileWithTimeout(
+      ttsCommand,
+      ["-o", outputPath, "-r", "160", SHORT_TTS_SENTENCE],
+      30_000
+    );
+    return outputPath;
+  }
+
+  const outputPath = path.join(tmpDir, `tts-short-${nonce}.wav`);
+  await execFileWithTimeout(
+    ttsCommand,
+    ["-s", "170", "-w", outputPath, SHORT_TTS_SENTENCE],
+    30_000
+  );
+  return outputPath;
+}
+
+function toFfmpegConcatPath(value: string): string {
+  return path.resolve(value).replace(/\\/g, "/").replace(/'/g, "'\\''");
 }
 
 async function waitForTFile(pathInVault: string, timeoutMs: number, minSizeBytes?: number): Promise<void> {
@@ -54,48 +137,7 @@ describe("Transcription + YouTube transcript (live)", function () {
 
   let vaultPath: string;
   const nonce = crypto.randomUUID().slice(0, 8);
-  const TOKEN_PHRASE_WORDS = [
-    "alpha",
-    "bravo",
-    "charlie",
-    "delta",
-    "echo",
-    "foxtrot",
-    "golf",
-    "hotel",
-    "india",
-    "juliet",
-    "kilo",
-    "lima",
-    "mike",
-    "november",
-    "oscar",
-    "papa",
-    "quebec",
-    "romeo",
-    "sierra",
-    "tango",
-    "uniform",
-    "victor",
-    "whiskey",
-    "yankee",
-    "zulu",
-  ] as const;
-
-  const tokenWords = (() => {
-    const cleaned = nonce.toLowerCase().replace(/[^a-f0-9]/g, "");
-    const words: string[] = [];
-    for (let i = 0; i < cleaned.length && words.length < 5; i += 1) {
-      const n = Number.parseInt(cleaned[i], 16);
-      if (Number.isNaN(n)) continue;
-      const idx = (n + i * 7) % TOKEN_PHRASE_WORDS.length;
-      words.push(TOKEN_PHRASE_WORDS[idx]);
-    }
-    while (words.length < 5) {
-      words.push(TOKEN_PHRASE_WORDS[words.length % TOKEN_PHRASE_WORDS.length]);
-    }
-    return words;
-  })();
+  const tokenWords = [...STATIC_TOKEN_WORDS];
   const audioFolder = "E2E/audio";
   const shortAiffPath = path.join(audioFolder, `tts-short-${nonce}.aiff`);
   const mp3Path = path.join(audioFolder, `tts-long-${nonce}.mp3`);
@@ -122,45 +164,19 @@ describe("Transcription + YouTube transcript (live)", function () {
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), `systemsculpt-e2e-audio-${nonce}-`));
     try {
-      const shortAbs = path.join(tmpDir, `tts-short-${nonce}.aiff`);
+      const shortAbs = await buildShortSpeechFixture(tmpDir, nonce);
       const mp3Abs = path.join(tmpDir, `tts-long-${nonce}.mp3`);
       const oggAbs = path.join(tmpDir, `tts-long-${nonce}.ogg`);
       const meetingWavAbs = path.join(tmpDir, `meeting-chunked-${nonce}.wav`);
 
-      await execFileWithTimeout(
-        "/usr/bin/say",
-        [
-          "-o",
-          shortAbs,
-          "-r",
-          "160",
-          `System Sculpt audio transcription test. This is an automated integration check. Token phrase: ${tokenWords.join(
-            " "
-          )}.`,
-        ],
-        30_000
-      );
-
-      const ffmpegBinCandidates = [
+      const ffmpegBin = await resolveAvailableCommand([
         process.env.SYSTEMSCULPT_E2E_FFMPEG_BIN,
         "/opt/homebrew/bin/ffmpeg",
         "/usr/local/bin/ffmpeg",
         "/usr/bin/ffmpeg",
+        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
         "ffmpeg",
-      ].filter(Boolean) as string[];
-
-      let ffmpegBin: string | null = null;
-      for (const candidate of ffmpegBinCandidates) {
-        if (candidate === "ffmpeg") {
-          ffmpegBin = candidate;
-          break;
-        }
-        try {
-          await fs.access(candidate);
-          ffmpegBin = candidate;
-          break;
-        } catch (_) {}
-      }
+      ]);
       if (!ffmpegBin) throw new Error("ffmpeg not available (set SYSTEMSCULPT_E2E_FFMPEG_BIN).");
 
       await execFileWithTimeout(
@@ -274,7 +290,11 @@ describe("Transcription + YouTube transcript (live)", function () {
         300_000
       );
 
-      await fs.writeFile(concatListAbs, `file '${introWavAbs}'\nfile '${mainWavAbs}'\n`, "utf8");
+      await fs.writeFile(
+        concatListAbs,
+        `file '${toFfmpegConcatPath(introWavAbs)}'\nfile '${toFfmpegConcatPath(mainWavAbs)}'\n`,
+        "utf8"
+      );
 
       await execFileWithTimeout(
         ffmpegBin,

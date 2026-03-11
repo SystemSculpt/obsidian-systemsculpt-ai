@@ -71,6 +71,10 @@ Optional:
  - `SYSTEMSCULPT_E2E_WINDOW_AUTO_REPOSITION` (optional bool override for capture modes).
  - `SYSTEMSCULPT_E2E_APP_VERSION` (default: `1.11.7`)
  - `SYSTEMSCULPT_E2E_SKIP_BUILD` (`1` skips `npm run build` inside the runner)
+ - `SYSTEMSCULPT_E2E_FFMPEG_BIN` (override the `ffmpeg` binary for audio specs)
+ - `SYSTEMSCULPT_E2E_TTS_BIN` (override the speech synthesizer used by the live transcription spec)
+ - `SYSTEMSCULPT_E2E_SHORT_AUDIO_FIXTURE` (path to a prerecorded short speech file, useful when no TTS command is installed)
+ - `SYSTEMSCULPT_E2E_SOURCE_AUDIO_PATH` (path to the larger meeting-style source audio fixture)
 
 ### Mobile emulation specs
 
@@ -94,6 +98,10 @@ Standard runner (macOS/Linux/Windows):
 ```bash
 node testing/e2e/run.mjs live
 ```
+
+For the live transcription spec on Windows/Linux, either install `espeak-ng` or
+set `SYSTEMSCULPT_E2E_SHORT_AUDIO_FIXTURE`. The spec no longer assumes macOS
+`/usr/bin/say`, but it still needs a real short speech source plus `ffmpeg`.
 
 When neither `SYSTEMSCULPT_E2E_SETTINGS_JSON` nor `SYSTEMSCULPT_E2E_VAULT` is set,
 the runner auto-falls back to:

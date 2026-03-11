@@ -92,7 +92,7 @@ npm run release:plugin -- --bump patch # force a specific bump
 
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 
-Windows fresh-desktop validation is no longer an automated gate in this flow. Treat Windows compatibility as a manual release risk until we add a separate CI lane for it.
+Windows still needs a human-run host pass, but the shared runtime smoke runner and live E2E lane are now documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
 
 ## Canonical source files for docs
 

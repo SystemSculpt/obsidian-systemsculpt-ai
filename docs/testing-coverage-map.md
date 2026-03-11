@@ -1,6 +1,6 @@
 # Testing coverage map
 
-Last verified against code, tests, and device workflow docs: **2026-03-10**.
+Last verified against code, tests, and device workflow docs: **2026-03-11**.
 
 ## Canonical contract
 
@@ -85,9 +85,15 @@ These are blocking tests for every simplification step:
   - chat sends and receives one SystemSculpt reply
   - embeddings generation works through `SystemSculpt`
   - Similar Notes renders at least one result from indexed content
+- shared runtime smoke runner
+  - `npm run runtime:smoke:desktop`
+  - `npm run runtime:smoke:desktop:extended`
+  - `npm run runtime:smoke:desktop:stress`
+  - these now cover chat, approval-gated filesystem tools, embeddings, transcription, hosted web fetch, and YouTube transcript through the real Obsidian runtime
 - desktop E2E specs
   - `testing/e2e/specs-live/chat.core.live.e2e.ts`
   - `testing/e2e/specs-live/embeddings.systemsculpt.core.live.e2e.ts`
+  - `testing/e2e/specs-live/transcription.youtube-audio.live.e2e.ts`
   - these should become the canonical live specs, not legacy variant specs
 
 ### 3. Mobile emulation tests
@@ -113,7 +119,10 @@ The iOS toggle truth remains the rendered `.checkbox-container.is-enabled` state
 - one real Android device before release confidence
 - `adb` relaunch / log checks
 - Chrome DevTools WebView inspection
-- same SystemSculpt chat + embeddings smoke cases as iPad
+- `npm run android:smoke:runtime`
+- `npm run android:smoke:runtime:extended`
+- `npm run android:smoke:runtime:stress`
+- same SystemSculpt chat + embeddings smoke cases as iPad, plus hosted web fetch and YouTube transcript
 
 ## Release verification gates
 
@@ -130,6 +139,6 @@ These are the release-specific tests the simplification must satisfy:
 
 - real iPad SystemSculpt chat is now the highest-priority device proof after the service cut
 - direct iPad sync remains reliable from this Mac, but live relaunch/inspection still depends on the iPad staying awake and Obsidian exposing an inspectable target
-- Android real-device automation is still a setup gap in this Mac environment until `adb` / Android Studio are installed
+- one human-run Windows desktop pass is still needed on an actual Windows host even though the runtime smoke and live E2E lanes are now documented cross-platform
 - the repo still contains Pi runtime, model-selection, custom-provider, and Studio terminal code that the new tests should eventually drive out of the shipped path
 - the current E2E harness still assumes old release assets such as `studio-terminal-sidecar.cjs`

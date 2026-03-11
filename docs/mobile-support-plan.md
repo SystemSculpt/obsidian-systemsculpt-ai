@@ -1,6 +1,6 @@
 # Mobile Support Plan
 
-Last verified against code and local dev environment: **2026-03-10**.
+Last verified against code and local dev environment: **2026-03-11**.
 
 ## Goal
 
@@ -20,14 +20,22 @@ The repo already contains real mobile-aware infrastructure:
 - Mobile detection is centralized in `src/utils/MobileDetection.ts`.
 - There is existing mobile emulation and WDIO coverage in `testing/e2e/wdio.emu.conf.mjs` and `testing/e2e/specs/recorder.mobile.e2e.ts`.
 - Several user flows already degrade intentionally on mobile instead of crashing.
+- Chat now defaults to the hosted `systemsculpt` backend on both desktop and mobile in `src/views/chatview/ChatView.ts`.
+- The repo now has a native runtime smoke runner for live desktop and Android verification:
+  - `scripts/run-runtime-smoke.mjs`
+  - `npm run runtime:smoke:desktop`
+  - `npm run android:smoke:runtime`
 
-The main risk is architectural drift:
+The main risk is no longer a desktop/mobile backend split. The current risk is
+cross-device QA drift:
 
-- Desktop chat is now Pi-first: `src/views/chatview/ChatView.ts`.
-- Mobile still falls onto the old `"legacy"` backend path: `src/views/chatview/ChatView.ts`.
+- Desktop and mobile now share the hosted SystemSculpt chat path: `src/views/chatview/ChatView.ts`.
+- Android has a proven emulator + WebView smoke lane.
+- iPad still depends on the physical device being foregrounded and inspectable from the Mac.
 - A large amount of desktop-only Node/Electron code is still imported from mobile-shipped source files.
 
-If we keep extending mobile on the current `"legacy"` lane, we will harden two different products. The right move is to turn mobile into a first-class, explicitly scoped runtime with shared UI/storage and a separate execution backend, not a compatibility leftover.
+The right move is to keep mobile on the same hosted contract while continuing to
+trim desktop-only runtime surfaces out of the mobile-shipped path.
 
 ## Current Codebase Facts
 
@@ -68,10 +76,12 @@ If we keep extending mobile on the current `"legacy"` lane, we will harden two d
 
 ### Structural problems blocking clean mobile support
 
-- Chat backend selection is split at the root:
-  - desktop => `"pi"`
-  - non-desktop => `"legacy"`
+- Chat backend selection is unified at the root:
+  - desktop => `"systemsculpt"`
+  - non-desktop => `"systemsculpt"`
   - file: `src/views/chatview/ChatView.ts`
+- The remaining problem is stale assumptions in docs/tests that still talk about a
+  mobile `"legacy"` lane.
 - Many mobile-shipped source files still import Node builtins or desktop runtime modules at top level, including:
   - `src/views/chatview/ChatView.ts`
   - `src/services/pi/PiRuntimeBootstrap.ts`
@@ -171,24 +181,22 @@ Do not market mobile as “full parity.” Market it as:
 
 ## Recommended Architecture
 
-### 1. Replace `"legacy"` with a first-class mobile/backend concept
+### 1. Keep hosted chat as the single cross-device contract
 
 Current state:
 
-- `ChatView` still treats mobile as `"legacy"`.
+- `ChatView` now defaults to `"systemsculpt"` across platforms.
 
 Recommended change:
 
-- Introduce a real execution abstraction such as `ChatExecutionBackend` with explicit implementations:
-  - `pi`
-  - `remote`
 - Keep chat storage, message rendering, approvals, and UI shared.
-- Make mobile use `remote`, not a legacy compatibility branch.
+- Keep mobile on the hosted SystemSculpt path instead of introducing a second execution lane.
+- Remove or rewrite stale docs/tests that still refer to a mobile legacy backend.
 
 Why:
 
-- This preserves the desktop hard cut while giving mobile a supported architecture.
-- It avoids normalizing “legacy” as the permanent mobile product.
+- This preserves the thin-client contract we just proved live on desktop and Android.
+- It avoids reintroducing compatibility drift through outdated copy or old test assumptions.
 
 ### 2. Add a single `PlatformCapabilities` contract
 
@@ -292,8 +300,10 @@ Recommended local setup:
 Recommended repo additions:
 
 - `scripts/sync-android-plugin.mjs`
-- `scripts/mobile-logcat.sh` or equivalent
-- `systemsculpt-sync.android.json`
+- `scripts/android-logcat.mjs`
+- `scripts/open-android-debug-tools.mjs`
+- `systemsculpt-sync.android.example.json`
+- `docs/android-device-testing.md`
 
 Suggested command shape:
 
@@ -343,8 +353,21 @@ Verified on this Mac:
 - `Obsidian.app` is installed.
 - `Xcode 26.2` is installed.
 - iOS simulators are available through `xcrun simctl`.
-- `adb` is not currently installed.
-- Android Studio is not currently installed.
+- Android Studio is installed in `~/Applications/Android Studio.app`.
+- Android SDK tooling is installed and available through:
+  - `adb`
+  - `sdkmanager`
+  - `avdmanager`
+  - `emulator`
+- The canonical Android SDK root is `~/Library/Android/sdk`.
+- A proven Android emulator now exists on this Mac:
+  - `SystemSculpt_Pixel_9_API_36_1`
+- The Android repo helper lane now exists:
+  - `npm run android:sync`
+  - `npm run android:debug:open`
+  - `npm run android:logcat`
+- The dedicated Android QA vault path proved in the emulator is:
+  - `/sdcard/Documents/SystemSculpt Android QA`
 - Obsidian remote debugging on `127.0.0.1:9222` was not active during this audit.
 
 Practical conclusion:
@@ -353,7 +376,7 @@ Practical conclusion:
 - We can stand up a true iOS device loop now if we use a real device plus shared vault sync.
 - We can automate build, sync, relaunch, running-process verification, and crash harvesting on iOS today.
 - We still need Safari Develop for the highest-quality live JS inspection on iOS.
-- We need to install Android tooling before we can have a first-class Android loop from this machine.
+- We now have a first-class Android emulator loop from this machine, including plugin sync, app relaunch, log capture, and WebView inspection.
 
 ## Proposed Delivery Phases
 

@@ -204,6 +204,12 @@ npm run ios:inspect:plugin -- --strict
 npm run ios:inspect:toggle
 ```
 
+- Run the same live hosted runtime smoke matrix we use on desktop and Android once the Obsidian target is inspectable:
+
+```bash
+npm run ios:smoke:runtime
+```
+
 Important iPad nuance:
 
 - on some iPad/Obsidian mobile lanes, the raw checkbox input stays `false` even for enabled rows
@@ -254,6 +260,15 @@ npm run ios:debug:open -- --sync --open-xcode
    - start it with `npm run ios:appium -- --port 4723`
    - use it for taps, swipes, navigation, and repeatable UI assertions
    - do not treat it as a replacement for Web Inspector, because webview / DOM access still depends on inspectable web content on iOS 16.4+
+6. Once Obsidian is visible in the adapter, run the shared runtime smoke matrix:
+
+```bash
+npm run ios:smoke:runtime
+```
+
+Important device-state note:
+
+- if `devicectl` relaunch fails because Guided Access is active, disable Guided Access on the device and bring Obsidian to the foreground manually before running the adapter-backed smoke pass
 
 ## Current Appium Status On This Mac
 

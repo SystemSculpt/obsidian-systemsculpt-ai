@@ -26,6 +26,7 @@ import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/Sys
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import type { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
+import { YouTubeTranscriptService } from "./services/YouTubeTranscriptService";
 import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
@@ -57,6 +58,8 @@ import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifec
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
 import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { ReadwiseService } from "./services/readwise";
+import { WebResearchApiService } from "./services/web/WebResearchApiService";
+import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
@@ -104,6 +107,7 @@ export default class SystemSculptPlugin extends Plugin {
   settingsTab: SystemSculptSettingTab;
   private recorderService: RecorderService | null = null;
   private transcriptionService: TranscriptionService;
+  private youtubeTranscriptService: YouTubeTranscriptService | null = null;
   private settingsManager: SettingsManager;
   private licenseManager: LicenseManager;
   private viewManager: ViewManager;
@@ -138,6 +142,8 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
+  private webResearchApiService: WebResearchApiService | null = null;
+  private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
@@ -2132,6 +2138,27 @@ export default class SystemSculptPlugin extends Plugin {
 
   getTranscriptionService(): TranscriptionService {
     return this.transcriptionService;
+  }
+
+  getYouTubeTranscriptService(): YouTubeTranscriptService {
+    if (!this.youtubeTranscriptService) {
+      this.youtubeTranscriptService = YouTubeTranscriptService.getInstance(this);
+    }
+    return this.youtubeTranscriptService;
+  }
+
+  getWebResearchApiService(): WebResearchApiService {
+    if (!this.webResearchApiService) {
+      this.webResearchApiService = new WebResearchApiService(this);
+    }
+    return this.webResearchApiService;
+  }
+
+  getWebResearchCorpusService(): WebResearchCorpusService {
+    if (!this.webResearchCorpusService) {
+      this.webResearchCorpusService = new WebResearchCorpusService(this);
+    }
+    return this.webResearchCorpusService;
   }
 
   public async runAutomationOnFile(
