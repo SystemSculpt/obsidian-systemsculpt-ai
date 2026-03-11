@@ -70,6 +70,9 @@ import path from "node:path";
 import { PlatformContext } from "../PlatformContext";
 import { TranscriptionService } from "../TranscriptionService";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../../constants/uploadLimits";
+
+const CUSTOM_PROVIDER_DIRECT_LIMIT_BYTES = 25 * 1024 * 1024;
+
 describe("TranscriptionService", () => {
   let service: TranscriptionService;
   let mockPlugin: any;
@@ -585,17 +588,7 @@ Hello`;
   });
 
   describe("unload", () => {
-    it("disposes audio resampler", () => {
-      const disposeSpy = jest.fn();
-      (service as any).audioResampler = { dispose: disposeSpy };
-
-      service.unload();
-
-      expect(disposeSpy).toHaveBeenCalled();
-    });
-
-    it("handles missing audio resampler", () => {
-      (service as any).audioResampler = null;
+    it("is a safe no-op", () => {
       expect(() => service.unload()).not.toThrow();
     });
   });
@@ -986,6 +979,39 @@ First`;
       expect(text).toContain('filename="audio.ogg"');
       expect(text).toContain("Content-Type: audio/ogg");
     });
+
+    it("surfaces plain-text 413 errors without a JSON parse wrapper", async () => {
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn(() => true),
+        preferredTransport: jest.fn(() => "requestUrl"),
+        supportsStreaming: jest.fn(() => false),
+      });
+
+      mockPlugin.settings.transcriptionProvider = "custom";
+      mockPlugin.settings.customTranscriptionEndpoint =
+        "https://api.openai.com/v1/audio/transcriptions";
+      mockPlugin.settings.customTranscriptionApiKey = "test";
+      (TranscriptionService as any).instance = undefined;
+      service = TranscriptionService.getInstance(mockPlugin);
+
+      (requestUrl as jest.Mock).mockResolvedValue({
+        status: 413,
+        headers: { "content-type": "text/plain" },
+        text: "Request Entity Too Large",
+      });
+
+      const file = new TFile();
+      (file as any).path = "audio.m4a";
+      (file as any).name = "audio.m4a";
+      (file as any).basename = "audio";
+      (file as any).extension = "m4a";
+
+      await expect(
+        (service as any).transcribeAudio(file, new Blob(["audio"], { type: "audio/mp4" }), {
+          onProgress: jest.fn(),
+        })
+      ).rejects.toThrow("HTTP 413: Request Entity Too Large");
+    });
   });
 
   describe("transcribeFile chunking", () => {
@@ -1039,6 +1065,49 @@ First`;
       expect(text).toContain('filename="big.ogg"');
       expect(text).toContain("Content-Type: audio/ogg");
     });
+
+    it("chunks custom uploads when multipart overhead would push them past 25MB", async () => {
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn(() => true),
+        preferredTransport: jest.fn(() => "requestUrl"),
+        supportsStreaming: jest.fn(() => false),
+      });
+
+      mockPlugin.settings.transcriptionProvider = "custom";
+      mockPlugin.settings.customTranscriptionEndpoint =
+        "https://api.openai.com/v1/audio/transcriptions";
+      mockPlugin.settings.customTranscriptionApiKey = "test";
+      (TranscriptionService as any).instance = undefined;
+      service = TranscriptionService.getInstance(mockPlugin);
+
+      const queueSpy = jest.spyOn(service as any, "queueTranscription");
+      const chunkSpy = jest
+        .spyOn(service as any, "transcribeChunkedAudio")
+        .mockResolvedValue("chunked via client");
+
+      const nearLimitBytes = CUSTOM_PROVIDER_DIRECT_LIMIT_BYTES - 200;
+      const file = new TFile();
+      (file as any).path = "nearly-too-large.m4a";
+      (file as any).name = "nearly-too-large.m4a";
+      (file as any).basename = "nearly-too-large";
+      (file as any).extension = "m4a";
+      (file as any).stat = { size: nearLimitBytes };
+
+      mockPlugin.app.vault.readBinary = jest
+        .fn()
+        .mockResolvedValue(new ArrayBuffer(nearLimitBytes));
+
+      const result = await service.transcribeFile(file, {
+        type: "note",
+        timestamped: false,
+        onProgress: jest.fn(),
+        suppressNotices: true,
+      });
+
+      expect(result).toBe("chunked via client");
+      expect(chunkSpy).toHaveBeenCalledTimes(1);
+      expect(queueSpy).not.toHaveBeenCalled();
+    }, 30000);
 
     it("uses SystemSculpt jobs on desktop (no client-side chunking)", async () => {
       (PlatformContext.get as jest.Mock).mockReturnValue({
@@ -1174,6 +1243,126 @@ First`;
         { url: "https://r2.example.test/part-1", bytes: 6 },
         { url: "https://r2.example.test/part-2", bytes: payload.byteLength - 6 },
       ]);
+    });
+
+    it("uses SystemSculpt jobs on mobile by reading from the vault when no desktop path exists", async () => {
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn(() => true),
+        preferredTransport: jest.fn(() => "requestUrl"),
+        supportsStreaming: jest.fn(() => false),
+      });
+      (TranscriptionService as any).instance = undefined;
+      service = TranscriptionService.getInstance(mockPlugin);
+
+      mockPlugin.app.vault.adapter.basePath = "";
+
+      const file = new TFile();
+      (file as any).path = "mobile.ogg";
+      (file as any).name = "mobile.ogg";
+      (file as any).basename = "mobile";
+      (file as any).extension = "ogg";
+
+      const payload = Uint8Array.from(Buffer.from("hello world"));
+      (file as any).stat = { size: payload.byteLength };
+      mockPlugin.app.vault.readBinary = jest.fn().mockResolvedValue(payload.buffer.slice(0));
+
+      const partsReceived: Array<{ url: string; bytes: number }> = [];
+
+      (requestUrl as jest.Mock).mockImplementation(async (options: any) => {
+        const url = String(options?.url || "");
+        const method = String(options?.method || "GET").toUpperCase();
+
+        if (url.endsWith("/audio/transcriptions/jobs") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              job: {
+                id: "job-mobile",
+                status: "uploading",
+                filename: "mobile.ogg",
+                contentType: "audio/ogg",
+                contentLengthBytes: payload.byteLength,
+                timestamped: false,
+                language: null,
+                model: "whisper-large-v3",
+                processingStrategy: "direct",
+                processingStage: null,
+                audioExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+              },
+              upload: {
+                key: "uploads/audio-transcriptions/job-mobile/mobile.ogg",
+                uploadId: "upload-mobile",
+                partSizeBytes: 5,
+                totalParts: 3,
+                partUrlExpiresInSeconds: 900,
+              },
+            },
+          };
+        }
+
+        if (url.includes("/audio/transcriptions/jobs/job-mobile/upload/part-url") && method === "GET") {
+          const parsed = new URL(url);
+          const partNumber = parsed.searchParams.get("partNumber");
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              part: {
+                partNumber: Number(partNumber),
+                method: "PUT",
+                url: `https://r2.example.test/mobile-part-${partNumber}`,
+                urlExpiresInSeconds: 900,
+              },
+            },
+          };
+        }
+
+        if (url.startsWith("https://r2.example.test/mobile-part-") && method === "PUT") {
+          partsReceived.push({ url, bytes: options.body?.byteLength ?? 0 });
+          return { status: 200, headers: { etag: `"etag-${partsReceived.length}"` }, text: "" };
+        }
+
+        if (url.endsWith("/audio/transcriptions/jobs/job-mobile/upload/complete") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: { success: true, job: { id: "job-mobile", status: "queued" } },
+          };
+        }
+
+        if (url.endsWith("/audio/transcriptions/jobs/job-mobile/start") && method === "POST") {
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            json: {
+              success: true,
+              job: { id: "job-mobile", status: "succeeded" },
+              text: "mobile transcript",
+              transcript_urls: {
+                text: "https://r2.example.test/mobile-transcript.txt",
+                json: "https://r2.example.test/mobile-transcript.json",
+                expiresInSeconds: 1800,
+              },
+            },
+          };
+        }
+
+        throw new Error(`Unexpected requestUrl call: ${method} ${url}`);
+      });
+
+      const result = await service.transcribeFile(file, {
+        type: "note",
+        timestamped: false,
+        onProgress: jest.fn(),
+        suppressNotices: true,
+      });
+
+      expect(result).toBe("mobile transcript");
+      expect(mockPlugin.app.vault.readBinary).toHaveBeenCalledWith(file);
+      expect(partsReceived.map((entry) => entry.bytes)).toEqual([5, 5, payload.byteLength - 10]);
     });
 
     it("reports transcribing chunk progress while polling SystemSculpt jobs", async () => {
@@ -1367,6 +1556,6 @@ First`;
           await fs.rm(tmpDir, { recursive: true, force: true });
         }
       }
-    }, 15000);
+    }, 30000);
   });
 });

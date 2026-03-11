@@ -37,11 +37,12 @@ Transcription controls include:
 
 ## Pipeline behavior notes
 
-- Desktop uses the SystemSculpt jobs pipeline for larger files.
-- Mobile/direct upload paths have stricter request-size constraints.
+- SystemSculpt transcription now uses the hosted jobs pipeline on every platform.
+- Large recordings upload through the multipart jobs path instead of the older direct-upload path.
+- Custom provider uploads still follow the provider's direct-upload limit, so near-limit files may chunk client-side first.
 
 ## If transcription fails
 
 1. Re-run license validation and retry the request.
 2. Confirm credits or quota are still available for your SystemSculpt account.
-3. If you are on desktop, retry once with automatic audio conversion enabled for incompatible source files.
+3. If you are using a custom provider, retry with a smaller file or let the plugin chunk the upload automatically.

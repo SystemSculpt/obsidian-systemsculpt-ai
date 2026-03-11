@@ -1,12 +1,9 @@
-import { Plugin, Notice, Menu, TFile, MarkdownView, requestUrl, App, normalizePath } from "obsidian";
+import { Notice, TFile, requestUrl, normalizePath } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptService } from "./SystemSculptService";
-import type { SystemSculptSettings } from "../types";
-import { SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 import type SystemSculptPlugin from "../main";
 import { logDebug, logInfo, logWarning, logError, logMobileError } from "../utils/errorHandling";
-import { AudioResampler } from "./AudioResampler";
 import { SerialTaskQueue } from "../utils/SerialTaskQueue";
 
 // Match server-side configuration
@@ -30,15 +27,6 @@ const SYSTEMSCULPT_JOB_POLL_INTERVAL_MS = 2000;
 const SYSTEMSCULPT_JOB_KICK_INTERVAL_MS = 60_000;
 const SYSTEMSCULPT_JOB_TIMEOUT_MS = 30 * 60_000;
 
-// Expected sample rates for different formats
-const EXPECTED_SAMPLE_RATES: Record<string, number> = {
-  wav: 16000,
-  m4a: 16000,
-  mp3: 16000,
-  webm: 48000,
-  ogg: 16000
-};
-
 export interface TranscriptionContext {
   type: "note" | "chat";
   timestamped?: boolean;
@@ -47,28 +35,48 @@ export interface TranscriptionContext {
   suppressNotices?: boolean;
 }
 
+interface MultipartFormField {
+  name: string;
+  value: string | Blob;
+  filename?: string;
+}
+
+interface TranscriptionRequestSpec {
+  endpoint: string;
+  headers: Record<string, string>;
+  formFields: MultipartFormField[];
+}
+
+interface AudioUploadSource {
+  readChunk(offset: number, bytesToRead: number): Promise<Uint8Array>;
+  close(): Promise<void>;
+}
+
+function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer;
+  }
+  return bytes.slice().buffer as ArrayBuffer;
+}
+
 export class TranscriptionService {
   private static instance: TranscriptionService;
   private plugin: SystemSculptPlugin;
-  private app: App;
   private sculptService: SystemSculptService;
   private platform: PlatformContext;
   private transcriptionQueue = new SerialTaskQueue();
   private retryCount: number = 0;
   private maxRetries: number = 2; // Maximum of 2 retries (3 attempts total)
   private retryDelay: number = 5000; // 5 seconds between retries
-  private audioResampler: AudioResampler;
   private uploadQueue: Promise<string>[] = [];
   private activeUploads = 0;
   private maxConcurrentUploads = 1; // Process uploads one at a time to avoid rate limiting
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
-    this.app = plugin.app;
     // Use singleton instance instead of creating new one
     this.sculptService = SystemSculptService.getInstance(plugin);
     this.platform = PlatformContext.get();
-    this.audioResampler = new AudioResampler();
   }
 
   /**
@@ -76,7 +84,7 @@ export class TranscriptionService {
    * Returns a Uint8Array suitable as a Request body along with the boundary string.
    */
   private async buildMultipartBody(
-    formFields: Array<{ name: string; value: string | Blob; filename?: string }>,
+    formFields: MultipartFormField[],
     boundary: string
   ): Promise<Uint8Array> {
     const encoder = new TextEncoder();
@@ -119,6 +127,38 @@ export class TranscriptionService {
       offset += p.length;
     }
     return body;
+  }
+
+  private estimateMultipartBodySize(formFields: MultipartFormField[], boundary: string): number {
+    const encoder = new TextEncoder();
+    let totalSize = 0;
+
+    for (const field of formFields) {
+      totalSize += encoder.encode(`--${boundary}\r\n`).length;
+
+      if (field.value instanceof Blob) {
+        const rawContentType = field.value.type || "application/octet-stream";
+        const contentType = rawContentType.split(";")[0] || rawContentType;
+        const filename = field.filename || "file";
+        totalSize += encoder.encode(
+          `Content-Disposition: form-data; name="${field.name}"; filename="${filename}"\r\n`
+        ).length;
+        totalSize += encoder.encode(`Content-Type: ${contentType}\r\n`).length;
+        totalSize += encoder.encode("\r\n").length;
+        totalSize += field.value.size;
+        totalSize += encoder.encode("\r\n").length;
+      } else {
+        totalSize += encoder.encode(
+          `Content-Disposition: form-data; name="${field.name}"\r\n`
+        ).length;
+        totalSize += encoder.encode("\r\n").length;
+        totalSize += encoder.encode(String(field.value)).length;
+        totalSize += encoder.encode("\r\n").length;
+      }
+    }
+
+    totalSize += encoder.encode(`--${boundary}--\r\n`).length;
+    return totalSize;
   }
 
   /**
@@ -319,7 +359,15 @@ export class TranscriptionService {
     };
   }
 
-  private resolveAbsolutePath(file: TFile): string {
+  private tryResolveAbsolutePath(file: TFile): string | null {
+    const isDesktopRuntime =
+      typeof (this.platform as any)?.isDesktopRuntime === "function"
+        ? !!(this.platform as any).isDesktopRuntime()
+        : !this.platform.isMobile();
+    if (!isDesktopRuntime || typeof require !== "function") {
+      return null;
+    }
+
     const path = require("path");
     const adapter: any = this.plugin.app?.vault?.adapter;
     const normalized = normalizePath(file.path);
@@ -332,9 +380,45 @@ export class TranscriptionService {
       return path.join(adapter.basePath, normalized);
     }
 
-    throw new Error(
-      "Unable to resolve an absolute file path for transcription. This transcription mode requires desktop Obsidian."
-    );
+    return null;
+  }
+
+  private async createAudioUploadSource(file: TFile): Promise<AudioUploadSource> {
+    const absolutePath = this.tryResolveAbsolutePath(file);
+    if (absolutePath) {
+      const fs = require("fs");
+      const fileHandle = await fs.promises.open(absolutePath, "r");
+      return {
+        readChunk: async (offset: number, bytesToRead: number) => {
+          const chunk = new Uint8Array(bytesToRead);
+          const { bytesRead } = await fileHandle.read(chunk, 0, bytesToRead, offset);
+          if (bytesRead !== bytesToRead) {
+            throw new Error(
+              `Short read while uploading audio (expected ${bytesToRead} bytes, got ${bytesRead}).`
+            );
+          }
+          return chunk;
+        },
+        close: async () => {
+          await fileHandle.close().catch(() => {});
+        },
+      };
+    }
+
+    const bytes = new Uint8Array(await this.plugin.app.vault.readBinary(file));
+    return {
+      readChunk: async (offset: number, bytesToRead: number) => {
+        const end = Math.min(bytes.length, offset + bytesToRead);
+        const slice = bytes.slice(offset, end);
+        if (slice.byteLength !== bytesToRead) {
+          throw new Error(
+            `Short read while uploading audio (expected ${bytesToRead} bytes, got ${slice.byteLength}).`
+          );
+        }
+        return slice;
+      },
+      close: async () => {},
+    };
   }
 
   private segmentsToSrt(segments: any[]): string {
@@ -376,7 +460,6 @@ export class TranscriptionService {
       (MIME_TYPE_MAP as Record<string, string>)[extension] || "application/octet-stream";
     const createIdempotencyKey = `audio-jobs-create:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-    const absolutePath = this.resolveAbsolutePath(file);
     context?.onProgress?.(2, "Preparing upload...");
 
     const create = await this.requestSystemSculptJson({
@@ -416,8 +499,7 @@ export class TranscriptionService {
       throw new Error("Server returned an invalid multipart totalParts.");
     }
 
-    const fs = require("fs");
-    const fileHandle = await fs.promises.open(absolutePath, "r");
+    const source = await this.createAudioUploadSource(file);
     const parts: Array<{ partNumber: number; etag: string }> = [];
 
     try {
@@ -439,13 +521,7 @@ export class TranscriptionService {
           throw new Error(this.extractRequestUrlErrorMessage(sign));
         }
 
-        const chunk = new Uint8Array(bytesToRead);
-        const { bytesRead } = await fileHandle.read(chunk, 0, bytesToRead, offset);
-        if (bytesRead !== bytesToRead) {
-          throw new Error(
-            `Short read while uploading part ${partNumber}/${totalParts} (expected ${bytesToRead}, got ${bytesRead}).`
-          );
-        }
+        const chunk = await source.readChunk(offset, bytesToRead);
 
         context?.onProgress?.(
           5 + Math.floor((partNumber / totalParts) * 60),
@@ -455,7 +531,7 @@ export class TranscriptionService {
         const put = await requestUrl({
           url: signedUrl,
           method: "PUT",
-          body: chunk.buffer,
+          body: toExactArrayBuffer(chunk),
           throw: false,
         });
 
@@ -478,7 +554,7 @@ export class TranscriptionService {
       }).catch(() => {});
       throw error;
     } finally {
-      await fileHandle.close().catch(() => {});
+      await source.close();
     }
 
     context?.onProgress?.(70, "Finalizing upload...");
@@ -854,63 +930,10 @@ export class TranscriptionService {
   ): Promise<string> {
     // Add a unique request ID to prevent duplicate processing
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-    // Determine endpoint and compose fields based on provider
-    const isCustom = this.plugin.settings.transcriptionProvider === "custom";
-    const endpoint = isCustom
-      ? this.plugin.settings.customTranscriptionEndpoint
-      : `${this.sculptService.baseUrl}/audio/transcriptions`;
-    const isGroqCustom = isCustom && (endpoint || "").toLowerCase().includes("groq.com");
-    const uploadDescriptor = this.resolveAudioUploadDescriptor(file, blob);
-
-    let headers: Record<string, string> = {};
-    const formFields: Array<{ name: string; value: string | Blob; filename?: string }> = [];
-
-    if (!isCustom) {
-      // Use SystemSculpt server proxy
-      headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
-      if (this.plugin.settings.licenseKey) headers['x-license-key'] = this.plugin.settings.licenseKey;
-      if (this.plugin.manifest?.version) headers['x-plugin-version'] = this.plugin.manifest.version;
-      headers['Idempotency-Key'] = `audio-direct:${requestId}`;
-
-      // Server expects file + optional requestId and timestamped flag
-      formFields.push({ name: 'file', value: blob, filename: uploadDescriptor.filename });
-      formFields.push({ name: 'requestId', value: requestId });
-      if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
-    } else {
-      // Custom endpoint
-      // Authorization header if provided
-      if (this.plugin.settings.customTranscriptionApiKey) {
-        headers['Authorization'] = `Bearer ${this.plugin.settings.customTranscriptionApiKey}`;
-        if ((endpoint || "").toLowerCase().includes('groq.com')) {
-          headers['X-Request-ID'] = `obsidian-client-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-          headers['Accept'] = 'application/json';
-        }
-      }
-      headers['Content-Type'] = `multipart/form-data; boundary=`; // placeholder, boundary appended below
-
-      if (isGroqCustom) {
-        const fileBlob =
-          blob.type && blob.type.toLowerCase() === uploadDescriptor.mimeType.toLowerCase()
-            ? blob
-            : new Blob([await blob.arrayBuffer()], { type: uploadDescriptor.mimeType });
-        formFields.push({ name: 'file', value: fileBlob, filename: uploadDescriptor.filename });
-        formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-large-v3' });
-        if (context?.timestamped) {
-          formFields.push({ name: 'response_format', value: 'verbose_json' });
-          formFields.push({ name: 'timestamp_granularities[]', value: 'segment' });
-        } else {
-          formFields.push({ name: 'response_format', value: 'text' });
-        }
-        formFields.push({ name: 'language', value: 'en' });
-      } else {
-        // OpenAI or other compatible custom endpoints
-        formFields.push({ name: 'file', value: blob, filename: uploadDescriptor.filename });
-        formFields.push({ name: 'model', value: this.plugin.settings.customTranscriptionModel || 'whisper-1' });
-        formFields.push({ name: 'requestId', value: requestId });
-        if (context?.timestamped) formFields.push({ name: 'timestamped', value: 'true' });
-      }
-    }
+    const spec = await this.buildTranscriptionRequestSpec(file, blob, context, requestId);
+    const endpoint = spec.endpoint;
+    const headers = { ...spec.headers };
+    const formFields = spec.formFields;
 
     // Build multipart body
     const boundary = 'WebKitFormBoundary' + Math.random().toString(36).substring(2, 15);
@@ -1036,24 +1059,18 @@ export class TranscriptionService {
             rawResponseText: rawResponseText ? rawResponseText.substring(0, 1000) + (rawResponseText.length > 1000 ? '...' : '') : "N/A",
           };
 
-          try {
-            const errorData = JSON.parse(rawResponseText || "{}");
-            
-            if (errorData?.error?.message) {
-              errorMessage = errorData.error.message;
-            } else if (errorData?.error) {
-              errorMessage = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error);
-            } else if (errorData?.message) {
-              errorMessage = errorData.message;
-            }
-            errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
-            additionalLogInfo.parsedErrorData = errorData;
-
-          } catch (jsonParseError) {
-            const e = jsonParseError instanceof Error ? jsonParseError : new Error(String(jsonParseError));
-            errorMessage = `Failed to parse server error response as JSON (HTTP ${response.status}). Parser error: ${e.message}`;
-            errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
-            additionalLogInfo.jsonParsingError = e.message;
+          const extracted = this.extractHttpErrorMessage(
+            response.status,
+            response.statusText,
+            rawResponseText
+          );
+          errorMessage = extracted.message;
+          errorToLog = new Error(errorMessage) as Error & { additionalInfo?: any };
+          if (typeof extracted.parsedErrorData !== "undefined") {
+            additionalLogInfo.parsedErrorData = extracted.parsedErrorData;
+          }
+          if (extracted.jsonParsingError) {
+            additionalLogInfo.jsonParsingError = extracted.jsonParsingError;
           }
         
           errorToLog.additionalInfo = additionalLogInfo;
@@ -1840,9 +1857,8 @@ export class TranscriptionService {
     }
 
     const provider = this.plugin.settings.transcriptionProvider;
-    const isMobile = this.platform.isMobile();
 
-    if (provider === "systemsculpt" && !isMobile && file.stat.size > SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES) {
+    if (provider === "systemsculpt" && file.stat.size > SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES) {
       throw new Error(
         `File too large for SystemSculpt transcription jobs. Maximum supported size is ${Math.floor(
           SYSTEMSCULPT_JOB_MAX_AUDIO_BYTES / (1024 * 1024)
@@ -1870,8 +1886,7 @@ export class TranscriptionService {
         );
       }
 
-      // Desktop: use the server-side jobs pipeline so we can handle large files reliably.
-      if (provider === "systemsculpt" && !isMobile) {
+      if (provider === "systemsculpt") {
         const transcriptionText = await this.transcribeViaSystemSculptJobs(file, context);
         context?.onProgress?.(100, "Transcription complete!");
         this.info("Transcription pipeline finished (server-side jobs)", {
@@ -1936,7 +1951,7 @@ export class TranscriptionService {
 
       let processedArrayBuffer = arrayBuffer;
       let mimeType = MIME_TYPE_MAP[extension as keyof typeof MIME_TYPE_MAP];
-      let wasResampled = false;
+      const wasResampled = false;
 
       if (provider === "custom" && !this.plugin.settings.customTranscriptionEndpoint?.trim()) {
         throw new Error(
@@ -1944,81 +1959,16 @@ export class TranscriptionService {
         );
       }
 
-      const directUploadLimitBytes =
-        provider === "custom" ? CUSTOM_AUDIO_UPLOAD_MAX_BYTES : AUDIO_UPLOAD_MAX_BYTES;
-      const chunkTargetSampleRate =
-        provider === "custom" ? 16000 : EXPECTED_SAMPLE_RATES[extension] || 16000;
-
-      const resamplingEnabled = this.plugin.settings.enableAutoAudioResampling ?? true;
-
-      if (provider === "systemsculpt" && !isMobile && resamplingEnabled && file.stat.size <= AUDIO_UPLOAD_MAX_BYTES) {
-        const targetSampleRate = EXPECTED_SAMPLE_RATES[extension] || 16000;
-
-        try {
-          context?.onProgress?.(10, "Checking audio compatibility...");
-          this.debug("Checking audio compatibility", { targetSampleRate });
-
-          const { needsResampling, currentSampleRate } = await this.audioResampler.checkNeedsResampling(
-            arrayBuffer,
-            mimeType,
-            targetSampleRate
-          );
-
-          if (needsResampling) {
-            context?.onProgress?.(15, "Converting audio format for optimal processing...");
-            if (!context?.suppressNotices) {
-              new Notice(
-                `Audio needs conversion from ${currentSampleRate}Hz to ${targetSampleRate}Hz. This may take a moment...`,
-                5000
-              );
-            }
-
-            const startTime = Date.now();
-            const resampleResult = await this.audioResampler.resampleAudio(arrayBuffer, targetSampleRate, mimeType);
-            const resampleTime = Date.now() - startTime;
-
-            processedArrayBuffer = resampleResult.buffer;
-            mimeType = "audio/wav";
-            wasResampled = true;
-
-            if (resampleTime > 2000) {
-              context?.onProgress?.(18, "Audio conversion complete!");
-            }
-            this.debug("Audio resampled", {
-              targetSampleRate,
-              durationMs: resampleTime
-            });
-          }
-        } catch (resampleError) {
-          if (!context?.suppressNotices) {
-            new Notice("Audio format conversion failed. Attempting with original file...", 3000);
-          }
-            this.warn("Audio resampling failed", {
-              error: resampleError instanceof Error ? resampleError.message : String(resampleError)
-            });
-          }
-      } else if (provider === "systemsculpt" && isMobile) {
-        try {
-          const { needsResampling, currentSampleRate } = await this.audioResampler.checkNeedsResampling(
-            arrayBuffer,
-            mimeType,
-            EXPECTED_SAMPLE_RATES[extension] || 16000
-          );
-
-          if (needsResampling) {
-            if (!context?.suppressNotices) {
-              new Notice(
-                `⚠️ Audio format (${currentSampleRate}Hz) may not be compatible. Consider converting on desktop for best results.`,
-                7000
-              );
-            }
-          }
-        } catch (e) {
-          // Ignore check errors on mobile
-        }
-      }
-
-      const shouldChunk = processedArrayBuffer.byteLength > directUploadLimitBytes;
+      const directUploadLimitBytes = CUSTOM_AUDIO_UPLOAD_MAX_BYTES;
+      const chunkTargetSampleRate = 16000;
+      const uploadBlob = new Blob([processedArrayBuffer], { type: mimeType });
+      const directRequestSpec = await this.buildTranscriptionRequestSpec(file, uploadBlob, context);
+      const uploadBoundary = "WebKitFormBoundary" + "x".repeat(13);
+      const estimatedUploadBytes = this.estimateMultipartBodySize(
+        directRequestSpec.formFields,
+        uploadBoundary
+      );
+      const shouldChunk = estimatedUploadBytes > directUploadLimitBytes;
       const transcriptionText = shouldChunk
         ? await this.transcribeChunkedAudio(
             file,
@@ -2031,7 +1981,7 @@ export class TranscriptionService {
           )
         : await this.queueTranscription(
             file,
-            new Blob([processedArrayBuffer], { type: mimeType }),
+            uploadBlob,
             context,
             wasResampled
           );
@@ -2078,6 +2028,123 @@ export class TranscriptionService {
       this.error("Transcription pipeline failed", catchedError, { filePath: file.path });
       throw catchedError;
     }
+  }
+
+  private extractHttpErrorMessage(
+    status: number,
+    statusText: string,
+    rawResponseText: string
+  ): { message: string; parsedErrorData?: any; jsonParsingError?: string } {
+    const trimmed = String(rawResponseText || "").trim();
+    if (trimmed) {
+      try {
+        const parsedErrorData = JSON.parse(trimmed || "{}");
+        if (parsedErrorData?.error?.message) {
+          return { message: parsedErrorData.error.message, parsedErrorData };
+        }
+        if (parsedErrorData?.error) {
+          return {
+            message:
+              typeof parsedErrorData.error === "string"
+                ? parsedErrorData.error
+                : JSON.stringify(parsedErrorData.error),
+            parsedErrorData,
+          };
+        }
+        if (parsedErrorData?.message) {
+          return { message: parsedErrorData.message, parsedErrorData };
+        }
+        return {
+          message: `${statusText || `HTTP ${status}`}`.trim(),
+          parsedErrorData,
+        };
+      } catch (jsonParseError) {
+        const parserError =
+          jsonParseError instanceof Error ? jsonParseError.message : String(jsonParseError);
+        const normalizedText = trimmed.replace(/\s+/g, " ").trim();
+        if (status === 413) {
+          return {
+            message: `HTTP 413: ${normalizedText || "Upload exceeded the server or provider size limit."}`,
+            jsonParsingError: parserError,
+          };
+        }
+        return {
+          message: normalizedText || `${statusText || `HTTP ${status}`}`.trim(),
+          jsonParsingError: parserError,
+        };
+      }
+    }
+
+    return {
+      message: statusText ? `${statusText}`.trim() : `HTTP ${status}`,
+    };
+  }
+
+  private async buildTranscriptionRequestSpec(
+    file: TFile,
+    blob: Blob,
+    context?: TranscriptionContext,
+    requestId: string = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+  ): Promise<TranscriptionRequestSpec> {
+    const isCustom = this.plugin.settings.transcriptionProvider === "custom";
+    const endpoint = isCustom
+      ? this.plugin.settings.customTranscriptionEndpoint
+      : `${this.sculptService.baseUrl}/audio/transcriptions`;
+    const isGroqCustom = isCustom && (endpoint || "").toLowerCase().includes("groq.com");
+    const uploadDescriptor = this.resolveAudioUploadDescriptor(file, blob);
+
+    const headers: Record<string, string> = {
+      "Content-Type": "multipart/form-data; boundary=",
+    };
+    const formFields: MultipartFormField[] = [];
+
+    if (!isCustom) {
+      if (this.plugin.settings.licenseKey) headers["x-license-key"] = this.plugin.settings.licenseKey;
+      if (this.plugin.manifest?.version) headers["x-plugin-version"] = this.plugin.manifest.version;
+      headers["Idempotency-Key"] = `audio-direct:${requestId}`;
+
+      formFields.push({ name: "file", value: blob, filename: uploadDescriptor.filename });
+      formFields.push({ name: "requestId", value: requestId });
+      if (context?.timestamped) formFields.push({ name: "timestamped", value: "true" });
+      return { endpoint, headers, formFields };
+    }
+
+    if (this.plugin.settings.customTranscriptionApiKey) {
+      headers["Authorization"] = `Bearer ${this.plugin.settings.customTranscriptionApiKey}`;
+      if ((endpoint || "").toLowerCase().includes("groq.com")) {
+        headers["X-Request-ID"] = `obsidian-client-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        headers["Accept"] = "application/json";
+      }
+    }
+
+    if (isGroqCustom) {
+      const fileBlob =
+        blob.type && blob.type.toLowerCase() === uploadDescriptor.mimeType.toLowerCase()
+          ? blob
+          : new Blob([await blob.arrayBuffer()], { type: uploadDescriptor.mimeType });
+      formFields.push({ name: "file", value: fileBlob, filename: uploadDescriptor.filename });
+      formFields.push({
+        name: "model",
+        value: this.plugin.settings.customTranscriptionModel || "whisper-large-v3",
+      });
+      if (context?.timestamped) {
+        formFields.push({ name: "response_format", value: "verbose_json" });
+        formFields.push({ name: "timestamp_granularities[]", value: "segment" });
+      } else {
+        formFields.push({ name: "response_format", value: "text" });
+      }
+      formFields.push({ name: "language", value: "en" });
+      return { endpoint, headers, formFields };
+    }
+
+    formFields.push({ name: "file", value: blob, filename: uploadDescriptor.filename });
+    formFields.push({
+      name: "model",
+      value: this.plugin.settings.customTranscriptionModel || "whisper-1",
+    });
+    formFields.push({ name: "requestId", value: requestId });
+    if (context?.timestamped) formFields.push({ name: "timestamped", value: "true" });
+    return { endpoint, headers, formFields };
   }
 
   /**
@@ -2179,9 +2246,6 @@ export class TranscriptionService {
   }
 
   unload() {
-    // Clean up resources
-    if (this.audioResampler) {
-      this.audioResampler.dispose();
-    }
+    // Reserved for future teardown work.
   }
 }

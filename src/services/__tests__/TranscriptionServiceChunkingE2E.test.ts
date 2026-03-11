@@ -10,7 +10,7 @@ jest.mock("../../constants/uploadLimits", () => ({
 jest.mock("../PlatformContext", () => ({
   PlatformContext: {
     get: jest.fn(() => ({
-      // Mobile path should continue using client-side chunking (legacy endpoint per chunk).
+      // Client-side chunk uploads should remain requestUrl-friendly on mobile runtimes.
       isMobile: jest.fn(() => true),
       preferredTransport: jest.fn(() => "requestUrl"),
       supportsStreaming: jest.fn(() => true),
@@ -141,7 +141,10 @@ describe("TranscriptionService chunking end-to-end", () => {
       settings: {
         licenseKey: "test-license-key",
         licenseValid: true,
-        transcriptionProvider: "systemsculpt",
+        transcriptionProvider: "custom",
+        customTranscriptionEndpoint: "https://api.openai.com/v1/audio/transcriptions",
+        customTranscriptionApiKey: "test-api-key",
+        customTranscriptionModel: "whisper-1",
         enableAutoAudioResampling: true,
       },
       directoryManager: null,
@@ -179,12 +182,20 @@ describe("TranscriptionService chunking end-to-end", () => {
     (file as any).extension = extension;
     (file as any).stat = { size: AUDIO_UPLOAD_MAX_BYTES + 1 };
 
-    const result = await service.transcribeFile(file, {
-      type: "note",
-      timestamped: false,
-      onProgress: jest.fn(),
-      suppressNotices: true,
-    });
+    const result = await (service as any).transcribeChunkedAudio(
+      file,
+      new ArrayBuffer(AUDIO_UPLOAD_MAX_BYTES + 1),
+      {
+        maxChunkBytes: AUDIO_UPLOAD_MAX_BYTES,
+        targetSampleRate: 16000,
+      },
+      {
+        type: "note",
+        timestamped: false,
+        onProgress: jest.fn(),
+        suppressNotices: true,
+      }
+    );
 
     expect(result).toBe("Hello world this is an overlap phrase with continuation");
     expect(requestUrl).toHaveBeenCalledTimes(2);
