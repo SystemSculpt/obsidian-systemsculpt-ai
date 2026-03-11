@@ -315,7 +315,7 @@ Recommended canonical path:
 
 Validated local additions from this repo's current iPad lane:
 
-- direct sync into `iPad Vault/.obsidian/plugins/systemsculpt-ai` is working
+- direct sync into `<your-ios-test-vault>/.obsidian/plugins/systemsculpt-ai` is working
 - `xcrun devicectl` can launch Obsidian on the device and confirm process state
 - `idevicecrashreport` can pull real Obsidian crash logs after launch failures
 - `remotedebug_ios_webkit_adapter` can now bridge the live Obsidian webview well enough for `Runtime.evaluate` plugin-state proof from the Mac

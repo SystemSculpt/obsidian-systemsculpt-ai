@@ -26,7 +26,7 @@ License key requirement:
 
 - `SYSTEMSCULPT_E2E_LICENSE_KEY` is still required by the plugin startup checks.
 - `node testing/e2e/run.mjs ...` auto-loads env from repo-local `.env.local` / `.env` before resolving fallback settings JSON.
-- If env is missing, it falls back to vault settings JSON (for example `~/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json`).
+- If env is missing, it falls back to vault settings JSON (for example `~/path/to/your-vault/.obsidian/plugins/systemsculpt-ai/data.json`).
 
 Optional:
 - `SYSTEMSCULPT_E2E_MOCK_PORT` (default: `43111`)
@@ -98,12 +98,12 @@ node testing/e2e/run.mjs live
 When neither `SYSTEMSCULPT_E2E_SETTINGS_JSON` nor `SYSTEMSCULPT_E2E_VAULT` is set,
 the runner auto-falls back to:
 
-`~/gits/private-vault/.obsidian/plugins/systemsculpt-ai/data.json`
+`~/path/to/your-vault/.obsidian/plugins/systemsculpt-ai/data.json`
 
 Disable this fallback explicitly (for CI/isolation) with:
 
 ```bash
-SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK=1 node testing/e2e/run.mjs live
+SYSTEMSCULPT_E2E_DISABLE_DEFAULT_VAULT_FALLBACK=1 node testing/e2e/run.mjs live
 ```
 
 Set the vault path:

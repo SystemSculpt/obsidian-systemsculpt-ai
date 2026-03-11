@@ -217,12 +217,12 @@ describe("Transcription + YouTube transcript (live)", function () {
 
       const meetingMp3Abs = path.resolve(
         sourceAudioPath ??
-          path.join(os.homedir(), "gits/private-vault/90 - system/systemsculpt/Recordings/test_meeting.mp3")
+          path.join(os.homedir(), "SystemSculpt", "fixtures", "test_meeting.mp3")
       );
       try {
         await fs.access(meetingMp3Abs);
       } catch (error) {
-        throw new Error(`Missing private-vault audio fixture: ${meetingMp3Abs}`);
+        throw new Error(`Missing local audio fixture: ${meetingMp3Abs}`);
       }
 
       // Exercise the server-side chunking path by transcoding 10 minutes of a real recording

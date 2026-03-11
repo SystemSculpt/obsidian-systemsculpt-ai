@@ -66,14 +66,19 @@ function resolveSettingsJsonPath() {
     return path.join(vaultPath, ".obsidian", "plugins", "systemsculpt-ai", "data.json");
   }
 
-  const fallbackDisabled = String(process.env.SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK || "0").trim() === "1";
+  const fallbackDisabled = String(
+    process.env.SYSTEMSCULPT_E2E_DISABLE_DEFAULT_VAULT_FALLBACK
+      || process.env.SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK
+      || "0"
+  ).trim() === "1";
   if (fallbackDisabled) {
     return "";
   }
 
   const fallbackPath = expandHome(
-    process.env.SYSTEMSCULPT_E2E_PRIVATE_VAULT_FALLBACK
-      || path.join(os.homedir(), "gits", "private-vault", ".obsidian", "plugins", "systemsculpt-ai", "data.json")
+    process.env.SYSTEMSCULPT_E2E_DEFAULT_VAULT_FALLBACK
+      || process.env.SYSTEMSCULPT_E2E_PRIVATE_VAULT_FALLBACK
+      || path.join(os.homedir(), "SystemSculpt", "vault", ".obsidian", "plugins", "systemsculpt-ai", "data.json")
   );
   return fallbackPath;
 }
@@ -426,7 +431,7 @@ async function runWdio(mode) {
 }
 
 function applyFreshDesktopDefaults() {
-  process.env.SYSTEMSCULPT_E2E_DISABLE_PRIVATE_VAULT_FALLBACK = "1";
+  process.env.SYSTEMSCULPT_E2E_DISABLE_DEFAULT_VAULT_FALLBACK = "1";
   process.env.SYSTEMSCULPT_E2E_PLUGIN_INSTALL_MODE = "release-assets";
   process.env.SYSTEMSCULPT_E2E_LICENSE_KEY = String(process.env.SYSTEMSCULPT_E2E_LICENSE_KEY || "").trim() || "fake-license";
   process.env.SYSTEMSCULPT_E2E_INSTANCES = String(process.env.SYSTEMSCULPT_E2E_INSTANCES || "").trim() || "1";

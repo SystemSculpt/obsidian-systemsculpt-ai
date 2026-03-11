@@ -1,7 +1,7 @@
 {
   "pluginTargets": [
     {
-      "path": "/Users/systemsculpt/Library/Mobile Documents/iCloud~md~obsidian/Documents/REPLACE_WITH_VAULT_NAME/.obsidian/plugins/systemsculpt-ai",
+      "path": "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/REPLACE_WITH_VAULT_NAME/.obsidian/plugins/systemsculpt-ai",
       "includeRuntimePaths": false
     }
   ],

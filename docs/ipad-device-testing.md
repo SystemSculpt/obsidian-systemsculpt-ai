@@ -1,23 +1,23 @@
 # iPad Device Testing
 
-Last verified against local dev environment: **2026-03-10**.
+Last verified against a local iOS device-testing environment: **2026-03-10**.
 
 ## Current Status
 
-This Mac can see the plugged-in device through Xcode tooling:
+The host Mac can see the plugged-in device through Xcode tooling:
 
-- device name: `Michael's iPad`
+- device name: `<paired iPad name>`
 - state: `available (paired)`
 - lock state: unlocked since boot
 - Developer Mode: enabled
 - Obsidian app: installed as `md.obsidian` (`1.12.4`)
 
-That means the physical-device lane is viable from this machine.
+That means the physical-device lane is viable from the current machine.
 
-The local iCloud-backed test vault is now created at:
+The local iCloud-backed test vault can live at:
 
 ```text
-~/Library/Mobile Documents/iCloud~md~obsidian/Documents/iPad Vault
+~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<your-ios-test-vault>
 ```
 
 The repo-side sync config is now:
@@ -26,9 +26,9 @@ The repo-side sync config is now:
 ./systemsculpt-sync.ios.json
 ```
 
-The direct-vault dev loop is active:
+The direct-vault dev loop looks like this:
 
-- repo build output syncs into `iPad Vault/.obsidian/plugins/systemsculpt-ai`
+- repo build output syncs into `<your-ios-test-vault>/.obsidian/plugins/systemsculpt-ai`
 - the synced `main.js` can be verified byte-for-byte against the repo build
 - the mobile target stays trimmed to about `5.6M` because desktop runtime payloads are excluded
 - the adapter-backed WebKit lane can now prove live plugin state from the Mac with `npm run ios:inspect:plugin -- --strict`
@@ -48,13 +48,13 @@ Why:
 
 ### Different Apple account
 
-Using your wife's Apple account is still possible, but it is more complicated.
+Using a different Apple account is still possible, but it is more complicated.
 
 It does **not** block:
 
-- plugging the iPad into this Mac
+- plugging the iPad into the host Mac
 - Safari Web Inspector
-- trusting the device on this Mac
+- trusting the device on the host Mac
 
 It **does** complicate the easiest sync path:
 
@@ -70,7 +70,7 @@ It **does** complicate the easiest sync path:
 
 This is the recommended first setup.
 
-1. Open the dedicated iCloud-backed vault `iPad Vault` on the iPad.
+1. Open the dedicated iCloud-backed vault `<your-ios-test-vault>` on the iPad.
 2. Use the live repo sync config:
 
 ```text
@@ -109,7 +109,7 @@ On the iPad:
 2. Trust the Mac if prompted.
 3. Keep Obsidian open on the test vault while connected.
 
-Developer Mode is now enabled on the current device and should stay on for deeper device tooling.
+Developer Mode should stay enabled on the paired device for deeper device tooling.
 
 On the Mac:
 
@@ -134,13 +134,13 @@ npm run sync:local -- --strict --config ./systemsculpt-sync.ios.json
 
 ### Notes
 
-- `systemsculpt-sync.ios.json` now points at the live iCloud test vault `iPad Vault`.
+- `systemsculpt-sync.ios.json` should point at the live iCloud test vault `<your-ios-test-vault>`.
 - `systemsculpt-sync.ios.example.json` remains the template if we want to spin up another iOS vault later.
 - The current default sync config in the repo does **not** point at any iCloud Obsidian vault yet.
 
 ## Verified Automation Lanes
 
-### Works well from this Mac
+### Works well from the host Mac
 
 - Build and sync latest plugin files directly into the live iCloud vault:
 
@@ -153,9 +153,9 @@ npm run sync:local -- --strict --config ./systemsculpt-sync.ios.json
 
 ```bash
 xcrun devicectl device process launch \
-  --device 7435752B-143A-5FBB-A36D-F6F496FEB3C8 \
+  --device <device-udid> \
   --terminate-existing \
-  --payload-url 'obsidian://open?vault=iPad%20Vault' \
+  --payload-url 'obsidian://open?vault=<your-ios-test-vault>' \
   md.obsidian
 ```
 
@@ -163,21 +163,21 @@ xcrun devicectl device process launch \
 
 ```bash
 xcrun devicectl list devices
-xcrun devicectl device info lockState --device 7435752B-143A-5FBB-A36D-F6F496FEB3C8
+xcrun devicectl device info lockState --device <device-udid>
 ```
 
 - Verify Obsidian is installed and running:
 
 ```bash
-xcrun devicectl device info apps --device 7435752B-143A-5FBB-A36D-F6F496FEB3C8 --bundle-id md.obsidian --include-all-apps --json-output /tmp/obsidian-apps.json --quiet
-xcrun devicectl device info processes --device 7435752B-143A-5FBB-A36D-F6F496FEB3C8 --json-output /tmp/obsidian-processes.json --quiet
+xcrun devicectl device info apps --device <device-udid> --bundle-id md.obsidian --include-all-apps --json-output /tmp/obsidian-apps.json --quiet
+xcrun devicectl device info processes --device <device-udid> --json-output /tmp/obsidian-processes.json --quiet
 ```
 
 - Pull crash reports from the device after a failed launch:
 
 ```bash
 mkdir -p /tmp/idevice-crashreports
-idevicecrashreport -u 00008120-001E51020C900032 -k -e -f App /tmp/idevice-crashreports
+idevicecrashreport -u <device-udid> -k -e -f App /tmp/idevice-crashreports
 ```
 
 - Open the reliable Mac-side tools and relaunch Obsidian in one step:
@@ -206,7 +206,7 @@ npm run ios:inspect:toggle
 
 Important iPad nuance:
 
-- on this iPad/Obsidian mobile lane, the raw checkbox input stays `false` even for enabled rows
+- on some iPad/Obsidian mobile lanes, the raw checkbox input stays `false` even for enabled rows
 - the reliable UI signal is the row's `.checkbox-container.is-enabled` state, which `npm run ios:inspect:toggle` now checks automatically
 
 ### Weak or currently unreliable
@@ -229,7 +229,7 @@ Important iPad nuance:
 
 ## Best-In-Class Mac-to-iPad Debug Loop
 
-This is the strongest setup I found after checking Apple, WebKit, Appium, and Obsidian guidance against the real device here.
+This is the strongest setup I found after checking Apple, WebKit, Appium, and Obsidian guidance against a real device.
 
 1. Keep the direct-vault loop as the source of truth for latest code:
    - `bash run.sh` for build/watch/sync
@@ -244,7 +244,7 @@ npm run ios:debug:open -- --sync --open-xcode
    - `npm run ios:inspect:plugin -- --strict`
    - this now verifies the live Obsidian webview on the connected iPad and confirms whether `systemsculpt-ai` is enabled, instantiated, and failure-free
    - `npm run ios:inspect:toggle`
-   - this opens `Settings > Community plugins` in the live iPad session and verifies the rendered `SystemSculpt AI` toggle via the mobile UI's `checkbox-container is-enabled` class, which is more reliable here than the raw checkbox input value
+   - this opens `Settings > Community plugins` in the live iPad session and verifies the rendered `SystemSculpt AI` toggle via the mobile UI's `checkbox-container is-enabled` class, which is more reliable in this environment than the raw checkbox input value
 4. Use the tools by role:
    - `QuickTime Player`: live mirror and record the iPad screen over USB
    - `Console`: live device logs from the connected iPad
@@ -301,7 +301,7 @@ That means true end-to-end Appium control will work only after we set a Developm
 ### Current best-practice iPad QA loop
 
 1. Build locally.
-2. Sync into `iPad Vault`.
+2. Sync into `<your-ios-test-vault>`.
 3. Relaunch Obsidian with `devicectl`.
 4. Confirm the Obsidian process is alive.
 5. If something goes wrong, pull crash reports immediately.
@@ -311,4 +311,4 @@ That means true end-to-end Appium control will work only after we set a Developm
 
 If the goal is to get a high-quality iPad lane running quickly, use the **same Apple account** on the iPad for the first pass.
 
-If you want to keep the iPad on your wife's Apple account, it is still workable, but I would switch the sync method to **Obsidian Sync**, not iCloud Drive.
+If you want to keep the iPad on a different Apple account, it is still workable, but I would switch the sync method to **Obsidian Sync**, not iCloud Drive.

@@ -506,7 +506,7 @@ export const datasetNode: StudioNodeDefinition = {
         type: "directory_path",
         required: true,
         allowOutsideVault: true,
-        placeholder: "/Users/systemsculpt/gits/systemsculpt-website",
+        placeholder: "/path/to/adapter-project",
       },
       {
         key: "customQuery",

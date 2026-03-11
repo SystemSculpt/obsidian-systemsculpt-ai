@@ -163,7 +163,7 @@ describe("StudioNodeResultCacheStore", () => {
     });
 
     const inputs = {
-      path: "/Users/systemsculpt/Downloads/audio.wav",
+      path: "/mock/downloads/audio.wav",
     };
     const fingerprintA = await buildNodeInputFingerprint(
       transcriptionNode({

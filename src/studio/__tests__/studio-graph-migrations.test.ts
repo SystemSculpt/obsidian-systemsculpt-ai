@@ -48,7 +48,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         title: "Media",
         position: { x: 0, y: 0 },
         config: {
-          sourcePath: "/Users/systemsculpt/Movies/input.mp4",
+          sourcePath: "/media/input.mp4",
           sourceMode: "local",
           assetMode: "auto",
           mediaKind: "video",
@@ -108,7 +108,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
 
     const mediaNode = migrated.project.graph.nodes.find((node) => node.id === "media");
     expect(mediaNode?.config).toEqual({
-      sourcePath: "/Users/systemsculpt/Movies/input.mp4",
+      sourcePath: "/media/input.mp4",
     });
 
     const signature = migrated.project.graph.edges
@@ -133,7 +133,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         version: "1.0.0",
         title: "Media",
         position: { x: 0, y: 0 },
-        config: { sourcePath: "/Users/systemsculpt/Movies/input.mp4" },
+        config: { sourcePath: "/media/input.mp4" },
       },
       {
         id: "audio",
@@ -354,7 +354,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         title: "Dataset",
         position: { x: 0, y: 0 },
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "select 1",
         },
       },

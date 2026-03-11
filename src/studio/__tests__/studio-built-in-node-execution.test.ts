@@ -728,7 +728,7 @@ describe("Studio built-in text/image node execution", () => {
       inputs: {
         prompt: "Generate image prompt",
         images: [
-          "/Users/systemsculpt/Downloads/reference.png",
+          "/mock/downloads/reference.png",
           "SystemSculpt/Assets/reference.webp",
         ],
       },
@@ -754,7 +754,7 @@ describe("Studio built-in text/image node execution", () => {
     await definition!.execute(context);
 
     expect(context.services.readLocalFileBinary).toHaveBeenCalledWith(
-      "/Users/systemsculpt/Downloads/reference.png"
+      "/mock/downloads/reference.png"
     );
     expect(context.services.readVaultBinary).toHaveBeenCalledWith("SystemSculpt/Assets/reference.webp");
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
@@ -854,7 +854,7 @@ describe("Studio built-in text/image node execution", () => {
       nodeId: "media-node",
       kind: "studio.media_ingest",
       config: {
-        sourcePath: "/Users/systemsculpt/Downloads/demo.mp4",
+        sourcePath: "/mock/downloads/demo.mp4",
       },
     });
     context.services.readLocalFileBinary = jest.fn(async () => new ArrayBuffer(8));
@@ -868,10 +868,10 @@ describe("Studio built-in text/image node execution", () => {
     const result = await definition!.execute(context);
 
     expect(context.services.readLocalFileBinary).toHaveBeenCalledWith(
-      "/Users/systemsculpt/Downloads/demo.mp4"
+      "/mock/downloads/demo.mp4"
     );
     expect(context.services.storeAsset).toHaveBeenCalledWith(expect.any(ArrayBuffer), "video/mp4");
-    expect(result.outputs.path).toBe("/Users/systemsculpt/Downloads/demo.mp4");
+    expect(result.outputs.path).toBe("/mock/downloads/demo.mp4");
     expect(result.outputs.preview_path).toBe(
       "SystemSculpt/Studio/Test.systemsculpt-assets/assets/sha256/aa/demo.mp4"
     );
@@ -885,7 +885,7 @@ describe("Studio built-in text/image node execution", () => {
       nodeId: "media-node",
       kind: "studio.media_ingest",
       config: {
-        sourcePath: "/Users/systemsculpt/Downloads/huge.mp4",
+        sourcePath: "/mock/downloads/huge.mp4",
       },
     });
     context.services.readLocalFileBinary = jest.fn(async () => {
@@ -900,7 +900,7 @@ describe("Studio built-in text/image node execution", () => {
 
     const result = await definition!.execute(context);
 
-    expect(result.outputs.path).toBe("/Users/systemsculpt/Downloads/huge.mp4");
+    expect(result.outputs.path).toBe("/mock/downloads/huge.mp4");
     expect(result.outputs.preview_path).toBe("");
     expect(String(result.outputs.preview_error || "")).toContain("greater than 2 GiB");
     expect(context.services.storeAsset).not.toHaveBeenCalled();
@@ -919,7 +919,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "dataset-node",
         kind: "studio.dataset",
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "SELECT 1;",
           refreshHours: 6,
           timeoutMs: 60_000,
@@ -945,7 +945,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "dataset-node",
         kind: "studio.dataset",
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "SELECT 1;",
           refreshHours: 6,
           timeoutMs: 60_000,
@@ -978,7 +978,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "dataset-node",
         kind: "studio.dataset",
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "SELECT email FROM users LIMIT 5;",
           adapterCommand: "node",
           adapterArgs: ["scripts/custom-adapter.js", "--query", "{{query}}"],
@@ -1030,7 +1030,7 @@ describe("Studio built-in text/image node execution", () => {
         nodeId: "dataset-node",
         kind: "studio.dataset",
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "SELECT email, revenue FROM users LIMIT 2;",
           refreshHours: 6,
           timeoutMs: 60_000,

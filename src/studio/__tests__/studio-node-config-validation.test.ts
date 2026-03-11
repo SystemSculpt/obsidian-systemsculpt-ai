@@ -130,7 +130,7 @@ describe("Studio node config validation", () => {
     expect(invalid.errors.some((error) => error.fieldKey === "sourcePath")).toBe(true);
 
     const valid = validateNodeConfig(definition!, {
-      sourcePath: "/Users/systemsculpt/Desktop/video.mp4",
+      sourcePath: "/media/video.mp4",
     });
     expect(valid.isValid).toBe(true);
   });
@@ -151,7 +151,7 @@ describe("Studio node config validation", () => {
     const withCustomPath = validateNodeConfig(definition!, {
       ffmpegCommand: "ffmpeg",
       outputFormat: "mp3",
-      outputPath: "/Users/systemsculpt/Desktop/audio/output-name.mp3",
+      outputPath: "/outputs/audio/output-name.mp3",
       timeoutMs: 120_000,
       maxOutputBytes: 512 * 1024,
     });
@@ -182,7 +182,7 @@ describe("Studio node config validation", () => {
     expect(definition).not.toBeNull();
 
     const result = validateNodeConfig(definition!, {
-      workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+      workingDirectory: "/workspace/adapter-project",
       customQuery: "SELECT 1;",
       adapterCommand: "node",
       adapterArgs: ["scripts/db-query.js", "{{query}}"],
@@ -201,7 +201,7 @@ describe("Studio node config validation", () => {
     expect(definition).not.toBeNull();
 
     const result = validateNodeConfig(definition!, {
-      workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+      workingDirectory: "/workspace/adapter-project",
       customQuery: "SELECT 1;",
       adapterCommand: "",
       refreshHours: 6,

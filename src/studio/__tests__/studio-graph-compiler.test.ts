@@ -332,7 +332,7 @@ describe("StudioGraphCompiler", () => {
         title: "Dataset",
         position: { x: 0, y: 0 },
         config: {
-          workingDirectory: "/Users/systemsculpt/gits/systemsculpt-website",
+          workingDirectory: "/workspace/adapter-project",
           customQuery: "SELECT email FROM users LIMIT 5;",
           outputFields: ["email"],
         },

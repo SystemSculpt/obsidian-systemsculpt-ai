@@ -60,7 +60,7 @@ describe("PiDesktopSetupUtils", () => {
   it("builds desktop login launchers for macOS Terminal and Windows PowerShell", () => {
     const macLaunch = buildStudioPiDesktopLoginWindowLaunch({
       platform: "darwin",
-      cwd: "/Users/systemsculpt/Test Vault",
+      cwd: "/Users/example/Test Vault",
       shellCommand: "ELECTRON_RUN_AS_NODE='1' '/opt/homebrew/bin/node' '/tmp/pi cli.js' '/login' 'anthropic'",
     });
     expect(macLaunch).toEqual({
@@ -70,14 +70,14 @@ describe("PiDesktopSetupUtils", () => {
         "-e",
         'tell application "Terminal" to activate',
         "-e",
-        'tell application "Terminal" to do script "cd \'/Users/systemsculpt/Test Vault\'; ELECTRON_RUN_AS_NODE=\'1\' \'/opt/homebrew/bin/node\' \'/tmp/pi cli.js\' \'/login\' \'anthropic\'"',
+        'tell application "Terminal" to do script "cd \'/Users/example/Test Vault\'; ELECTRON_RUN_AS_NODE=\'1\' \'/opt/homebrew/bin/node\' \'/tmp/pi cli.js\' \'/login\' \'anthropic\'"',
       ],
     });
 
     const windowsLaunch = buildStudioPiDesktopLoginWindowLaunch({
       platform: "win32",
-      cwd: "C:\\Users\\mike\\Vault",
-      shellCommand: "$env:ELECTRON_RUN_AS_NODE='1'; & 'C:\\Users\\mike\\node.exe' 'C:\\Users\\mike\\cli.js' '/login' 'anthropic'",
+      cwd: "C:\\Users\\example\\Vault",
+      shellCommand: "$env:ELECTRON_RUN_AS_NODE='1'; & 'C:\\Users\\example\\node.exe' 'C:\\Users\\example\\cli.js' '/login' 'anthropic'",
     });
     expect(windowsLaunch).toEqual({
       appLabel: "PowerShell",
@@ -86,7 +86,7 @@ describe("PiDesktopSetupUtils", () => {
         "-NoLogo",
         "-NoProfile",
         "-Command",
-        "Start-Process -FilePath 'powershell.exe' -WorkingDirectory 'C:\\Users\\mike\\Vault' -ArgumentList @('-NoExit', '-Command', '$env:ELECTRON_RUN_AS_NODE=''1''; & ''C:\\Users\\mike\\node.exe'' ''C:\\Users\\mike\\cli.js'' ''/login'' ''anthropic''')",
+        "Start-Process -FilePath 'powershell.exe' -WorkingDirectory 'C:\\Users\\example\\Vault' -ArgumentList @('-NoExit', '-Command', '$env:ELECTRON_RUN_AS_NODE=''1''; & ''C:\\Users\\example\\node.exe'' ''C:\\Users\\example\\cli.js'' ''/login'' ''anthropic''')",
       ],
     });
   });
