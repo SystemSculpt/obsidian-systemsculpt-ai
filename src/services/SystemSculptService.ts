@@ -11,15 +11,15 @@ import {
 } from "../utils/errors";
 import SystemSculptPlugin from "../main";
 import { getImageCompatibilityInfo } from "../utils/modelUtils";
-import { mapAssistantToolCallsForApi } from "../utils/tooling";
+import { mapAssistantToolCallsForApi, normalizeOpenAITools, type OpenAITool } from "../utils/tooling";
 import { deterministicId } from "../utils/id";
 import { Notice } from "obsidian";
-import { executeLocalPiStream } from "./LocalPiStreamExecutor";
 import { PlatformContext } from "./PlatformContext";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
+import { AGENT_PRESET } from "../constants/prompts";
 
 // Import the new service classes
 import { StreamingService } from "./StreamingService";
@@ -32,10 +32,8 @@ import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
-import {
-  assertPiTextExecutionReady,
-  resolvePiTextExecutionPlan,
-} from "./pi-native/PiTextRuntime";
+import { MCPService } from "../mcp/MCPService";
+import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
@@ -120,6 +118,7 @@ export class SystemSculptService {
   private documentUploadService: DocumentUploadService;
   private audioUploadService: AudioUploadService;
   private platformRequestClient: PlatformRequestClient;
+  private mcpService: MCPService;
 
   public get extractionsDirectory(): string {
     return this.settings.extractionsDirectory ?? "";
@@ -402,10 +401,9 @@ export class SystemSculptService {
     messages: ChatMessage[];
     model: string;
     contextFiles?: Set<string>;
-    systemPromptType?: string;
-    systemPromptPath?: string;
     systemPromptOverride?: string;
     emitNotices?: boolean;
+    allowTools?: boolean;
   }): Promise<PreparedChatRequest> {
     this.refreshSettings();
 
@@ -413,8 +411,6 @@ export class SystemSculptService {
 	      messages,
 	      model,
 	      contextFiles,
-	      systemPromptType,
-	      systemPromptPath,
 	      systemPromptOverride,
 	      emitNotices = false,
 	    } = options;
@@ -480,34 +476,94 @@ export class SystemSculptService {
         }
     }
 
-    // Compose final system prompt including agent prefix and tooling hint when applicable.
-    let finalSystemPrompt = systemPromptOverride;
-    if (!finalSystemPrompt) {
-      const { PromptBuilder } = await import("./PromptBuilder");
-      finalSystemPrompt = await PromptBuilder.buildSystemPrompt(
-        this.plugin.app,
-        () => this.plugin.settings,
-        { type: (systemPromptType as any) || "general-use", path: systemPromptPath }
-      );
+    const finalSystemPrompt =
+      typeof systemPromptOverride === "string" && systemPromptOverride.trim().length > 0
+        ? systemPromptOverride.trim()
+        : modelSource === "systemsculpt"
+          ? AGENT_PRESET.systemPrompt
+        : undefined;
+
+    let tools: OpenAITool[] = [];
+    if (
+      options.allowTools !== false &&
+      modelSource === "systemsculpt"
+      && Array.isArray(resolvedModel.supported_parameters)
+      && resolvedModel.supported_parameters.includes("tools")
+    ) {
+      try {
+        tools = normalizeOpenAITools(await this.mcpService.getAvailableTools());
+      } catch (error) {
+        errorLogger.warn("Failed to resolve available MCP tools for hosted SystemSculpt chat", {
+          source: "SystemSculptService",
+          method: "prepareChatRequest",
+          metadata: {
+            model,
+            actualModelId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+        tools = [];
+      }
     }
 
-	    const preparedMessages = await this.contextFileService.prepareMessagesWithContext(
-	      messages,
-	      contextFileSet,
-	      systemPromptType,
-	      systemPromptPath,
-	      imagesEnabledForRequest,
-	      finalSystemPrompt
-	    );
+    const preparedMessages = await this.contextFileService.prepareMessagesWithContext(
+      messages,
+      contextFileSet,
+      imagesEnabledForRequest,
+      finalSystemPrompt
+    );
 
-	    return {
-	      modelSource,
-	      resolvedModel,
-	      actualModelId,
-	      preparedMessages,
-	      finalSystemPrompt,
-	    };
-	  }
+    return {
+      modelSource,
+      resolvedModel,
+      actualModelId,
+      preparedMessages,
+      finalSystemPrompt: finalSystemPrompt || "",
+      tools,
+    };
+  }
+
+  private buildHostedChatRequestBody(options: {
+    prepared: PreparedChatRequest;
+    forcedToolName?: string;
+    maxTokens?: number;
+    reasoningEffort?: string;
+  }): Record<string, any> {
+    const body: Record<string, any> = {
+      model: options.prepared.actualModelId,
+      messages: this.toSystemSculptApiMessages(options.prepared.preparedMessages),
+      stream: true,
+    };
+
+    if (
+      typeof options.maxTokens === "number"
+      && Number.isFinite(options.maxTokens)
+      && options.maxTokens > 0
+    ) {
+      body.max_completion_tokens = Math.max(1, Math.floor(options.maxTokens));
+    }
+
+    const forcedToolName = String(options.forcedToolName || "").trim();
+    if (forcedToolName) {
+      body.tool_choice = {
+        type: "function",
+        function: {
+          name: forcedToolName,
+        },
+      };
+    }
+
+    const normalizedReasoningEffort = this.normalizeReasoningEffort(options.reasoningEffort);
+    if (normalizedReasoningEffort) {
+      body.reasoning_effort = normalizedReasoningEffort;
+    }
+
+    if (Array.isArray(options.prepared.tools) && options.prepared.tools.length > 0) {
+      body.tools = options.prepared.tools;
+    }
+
+    return body;
+  }
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -529,6 +585,7 @@ export class SystemSculptService {
     );
     this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
     this.platformRequestClient = new PlatformRequestClient();
+    this.mcpService = new MCPService(plugin, plugin.app);
   }
 
   /**
@@ -600,6 +657,21 @@ export class SystemSculptService {
     }
 
     return count;
+  }
+
+  private normalizeReasoningEffort(value: unknown): string | undefined {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (
+      normalized === "off" ||
+      normalized === "minimal" ||
+      normalized === "low" ||
+      normalized === "medium" ||
+      normalized === "high" ||
+      normalized === "xhigh"
+    ) {
+      return normalized;
+    }
+    return undefined;
   }
 
   private refreshSettings(): void {
@@ -950,12 +1022,12 @@ export class SystemSculptService {
     model,
     onError,
     contextFiles,
-    systemPromptType,
-    systemPromptPath,
     systemPromptOverride,
     signal,
     forcedToolName,
     maxTokens,
+    reasoningEffort,
+    allowTools,
     includeReasoning,
     debug,
     sessionFile,
@@ -966,12 +1038,12 @@ export class SystemSculptService {
     model: string;
     onError?: (error: string) => void;
     contextFiles?: Set<string>;
-    systemPromptType?: string;
-    systemPromptPath?: string;
     systemPromptOverride?: string;
     signal?: AbortSignal;
     forcedToolName?: string;
     maxTokens?: number;
+    reasoningEffort?: string;
+    allowTools?: boolean;
     includeReasoning?: boolean;
     debug?: StreamDebugCallbacks;
     sessionFile?: string;
@@ -991,28 +1063,83 @@ export class SystemSculptService {
         messages,
         model,
         contextFiles,
-        systemPromptType,
-        systemPromptPath,
         systemPromptOverride,
         emitNotices: true,
+        allowTools,
       });
 
       const {
         resolvedModel,
       } = prepared;
-
-      const executionPlan = await assertPiTextExecutionReady(resolvedModel);
-      yield* executeLocalPiStream({
-        plugin: this.plugin,
-        prepared: {
-          ...prepared,
-          actualModelId: executionPlan.actualModelId,
-        },
-        sessionFile,
-        onSessionReady: onPiSessionReady,
-        signal,
-        debug,
+      const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
+      const requestBody = this.buildHostedChatRequestBody({
+        prepared,
+        forcedToolName,
+        maxTokens,
+        reasoningEffort,
       });
+      const transport = PlatformContext.get().preferredTransport({ endpoint });
+
+      debug?.onRequest?.({
+        provider: String(resolvedModel.provider || "systemsculpt"),
+        endpoint,
+        headers: SystemSculptEnvironment.buildHeaders((this.settings.licenseKey || "").trim()),
+        body: requestBody,
+        transport,
+        canStream: true,
+        isCustomProvider: false,
+      });
+
+      const response = await this.platformRequestClient.request({
+        url: endpoint,
+        method: "POST",
+        body: requestBody,
+        stream: true,
+        signal,
+        licenseKey: (this.settings.licenseKey || "").trim(),
+      });
+
+      debug?.onResponse?.({
+        provider: String(resolvedModel.provider || "systemsculpt"),
+        endpoint,
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        isCustomProvider: false,
+      });
+
+      if (!response.ok) {
+        await StreamingErrorHandler.handleStreamError(response, false, {
+          provider: String(resolvedModel.provider || "systemsculpt"),
+          endpoint,
+          model: prepared.actualModelId,
+        });
+      }
+
+      let diagnostics: any;
+      for await (
+        const event of this.streamingService.streamResponse(response, {
+          model: prepared.actualModelId,
+          isCustomProvider: false,
+          signal,
+          onRawEvent: debug?.onRawEvent,
+          onDiagnostics: (value) => {
+            diagnostics = value;
+          },
+        })
+      ) {
+        try {
+          debug?.onStreamEvent?.({ event });
+        } catch {}
+        yield event;
+      }
+
+      try {
+        debug?.onStreamEnd?.({
+          completed: !signal?.aborted,
+          aborted: !!signal?.aborted,
+          diagnostics,
+        });
+      } catch {}
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -1054,39 +1181,78 @@ export class SystemSculptService {
     messages,
     model,
     contextFiles,
-    systemPromptType,
-    systemPromptPath,
   }: {
     messages: ChatMessage[];
     model: string;
     contextFiles?: Set<string>;
-    systemPromptType?: string;
-    systemPromptPath?: string;
   }): Promise<{ requestBody: Record<string, any>; preparedMessages: ChatMessage[]; actualModelId: string }> {
     const prepared = await this.prepareChatRequest({
       messages,
       model,
       contextFiles,
-      systemPromptType,
-      systemPromptPath,
       emitNotices: false,
     });
-
-    const executionPlan = await resolvePiTextExecutionPlan(prepared.resolvedModel);
-
-    const requestBody: Record<string, any> = {
-      context: {
-        messages: prepared.preparedMessages,
-      },
-      transport: "pi-rpc",
-      modelId: executionPlan.actualModelId,
-    };
+    const requestBody = this.buildHostedChatRequestBody({ prepared });
 
     return {
       requestBody,
       preparedMessages: prepared.preparedMessages,
-      actualModelId: executionPlan.actualModelId,
+      actualModelId: prepared.actualModelId,
     };
+  }
+
+  public async executeHostedToolCall(options: {
+    toolCall: ToolCall | ToolCallRequest;
+    chatView?: any;
+    timeoutMs?: number;
+  }): Promise<ToolCallResult> {
+    const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {}) as ToolCallRequest;
+    const functionName = String(request?.function?.name || "").trim();
+    if (!functionName) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_TOOL_CALL",
+          message: "Tool call is missing a function name.",
+        },
+      };
+    }
+
+    const rawArguments = request?.function?.arguments;
+    let parsedArgs: any = {};
+    if (typeof rawArguments === "string" && rawArguments.trim().length > 0) {
+      try {
+        parsedArgs = JSON.parse(rawArguments);
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: "INVALID_TOOL_ARGUMENTS",
+            message: `Tool call arguments for ${functionName} were not valid JSON.`,
+            details: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    }
+
+    try {
+      const data = await this.mcpService.executeTool(functionName, parsedArgs, options.chatView, {
+        timeoutMs: options.timeoutMs,
+      });
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: "TOOL_EXECUTION_FAILED",
+          message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
+          details: error,
+        },
+      };
+    }
   }
 
   public async getApiStatus(): Promise<ApiStatusResponse | null> {

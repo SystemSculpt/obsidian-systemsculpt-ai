@@ -1,11 +1,7 @@
 import { App, TFile } from "obsidian";
 import { SystemSculptService } from "../SystemSculptService";
-import {
-  assertPiTextExecutionReady,
-  resolvePiTextExecutionPlan,
-} from "../pi-native/PiTextRuntime";
-import { executeLocalPiStream } from "../LocalPiStreamExecutor";
 import { SystemSculptEnvironment } from "../api/SystemSculptEnvironment";
+import { AGENT_PRESET } from "../../constants/prompts";
 
 const licenseService = {
   validateLicense: jest.fn().mockResolvedValue(true),
@@ -15,15 +11,18 @@ const modelManagementService = {
   getModels: jest.fn().mockResolvedValue([]),
   getModelInfo: jest.fn(async (modelId: string) => ({
     isCustom: false,
-    actualModelId: modelId.includes("@@") ? modelId.replace("@@", "/") : modelId,
-    modelSource: "pi_local",
+    actualModelId: "systemsculpt/ai-agent",
+    modelSource: "systemsculpt",
     model: {
-      id: modelId,
-      provider: modelId.split("@@")[0] || modelId.split("/")[0] || "openai",
-      piExecutionModelId: modelId.includes("@@") ? modelId.replace("@@", "/") : modelId,
-      piRemoteAvailable: false,
-      piLocalAvailable: true,
-      piAuthMode: "local",
+      id: "systemsculpt@@systemsculpt/ai-agent",
+      provider: "systemsculpt",
+      sourceMode: "systemsculpt",
+      sourceProviderId: "systemsculpt",
+      piExecutionModelId: "systemsculpt/ai-agent",
+      piRemoteAvailable: true,
+      piLocalAvailable: false,
+      piAuthMode: "hosted",
+      supported_parameters: ["tools"],
     },
   })),
   preloadModels: jest.fn().mockResolvedValue(undefined),
@@ -40,11 +39,16 @@ const audioUploadService = {
 const contextFileService = {
   prepareMessagesWithContext: jest.fn(async (messages: any[]) => messages),
 };
+const mcpService = {
+  getAvailableTools: jest.fn(),
+  executeTool: jest.fn(),
+};
 
 jest.mock("../StreamingService", () => ({
-  StreamingService: jest.fn().mockImplementation(() => ({
-    generateRequestId: jest.fn(() => "req_remote_1"),
-  })),
+  StreamingService: jest.fn().mockImplementation(() => {
+    const actual = jest.requireActual("../StreamingService");
+    return new actual.StreamingService();
+  }),
 }));
 
 jest.mock("../LicenseService", () => ({
@@ -67,19 +71,8 @@ jest.mock("../AudioUploadService", () => ({
   AudioUploadService: jest.fn().mockImplementation(() => audioUploadService),
 }));
 
-jest.mock("../PromptBuilder", () => ({
-  PromptBuilder: {
-    buildSystemPrompt: jest.fn().mockResolvedValue("System prompt"),
-  },
-}));
-
-jest.mock("../LocalPiStreamExecutor", () => ({
-  executeLocalPiStream: jest.fn(),
-}));
-
-jest.mock("../pi-native/PiTextRuntime", () => ({
-  assertPiTextExecutionReady: jest.fn(),
-  resolvePiTextExecutionPlan: jest.fn(),
+jest.mock("../../mcp/MCPService", () => ({
+  MCPService: jest.fn().mockImplementation(() => mcpService),
 }));
 
 jest.mock("../../utils/debugLogger", () => ({
@@ -140,7 +133,7 @@ const createPlugin = () => {
       licenseKey: "license",
       selectedModelId: "",
       embeddingsEnabled: false,
-      workflowEngine: { templates: {} },
+      workflowEngine: { automations: {} },
     },
     modelService: {
       getModels: jest.fn().mockResolvedValue([]),
@@ -160,18 +153,24 @@ describe("SystemSculptService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     SystemSculptService.clearInstance();
-    (resolvePiTextExecutionPlan as jest.Mock).mockResolvedValue({
-      mode: "local",
-      actualModelId: "openai/gpt-4o",
-      providerId: "openai",
-      authMode: "local",
-    });
-    (assertPiTextExecutionReady as jest.Mock).mockResolvedValue({
-      mode: "local",
-      actualModelId: "openai/gpt-4o",
-      providerId: "openai",
-      authMode: "local",
-    });
+    mcpService.getAvailableTools.mockResolvedValue([
+      {
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          description: "Read a file from the vault",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+            },
+            required: ["path"],
+          },
+        },
+      },
+    ]);
+    mcpService.executeTool.mockResolvedValue({ content: "hello" });
+    delete (global as any).fetch;
   });
 
   it("initializes with the resolved base url and updates dependent services", () => {
@@ -196,64 +195,195 @@ describe("SystemSculptService", () => {
     );
   });
 
-  it("builds local Pi request previews from the prepared chat payload", async () => {
+  it("builds hosted SystemSculpt request previews from the prepared chat payload", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
 
     const { requestBody, preparedMessages, actualModelId } = await service.buildRequestPreview({
       messages: [{ role: "user", content: "Hello", message_id: "msg_1" } as any],
-      model: "openai@@gpt-4o",
+      model: "systemsculpt@@systemsculpt/ai-agent",
     });
 
-    expect(resolvePiTextExecutionPlan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "openai@@gpt-4o",
-        piExecutionModelId: "openai/gpt-4o",
-      })
-    );
     expect(requestBody).toEqual({
-      modelId: "openai/gpt-4o",
-      context: {
-        messages: preparedMessages,
-      },
-      transport: "pi-rpc",
+      model: "systemsculpt/ai-agent",
+      messages: preparedMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "mcp-filesystem_read",
+            description: "Read a file from the vault",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        },
+      ],
     });
-    expect(actualModelId).toBe("openai/gpt-4o");
+    expect(actualModelId).toBe("systemsculpt/ai-agent");
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [{ role: "user", content: "Hello", message_id: "msg_1" }],
+      new Set(),
+      true,
+      AGENT_PRESET.systemPrompt
+    );
+    expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
   });
 
-  it("delegates streaming to the local Pi executor with session metadata", async () => {
+  it("executes hosted tool calls through the local MCP service", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
-    const onPiSessionReady = jest.fn();
-    const streamed = [
-      { type: "content", text: "hello" },
-    ];
 
-    (executeLocalPiStream as jest.Mock).mockImplementation(async function* (input: any) {
-      expect(input.sessionFile).toBe("/tmp/pi-session.jsonl");
-      expect(input.onSessionReady).toBe(onPiSessionReady);
-      expect(input.prepared.actualModelId).toBe("openai/gpt-4o");
-      for (const event of streamed) {
-        yield event;
-      }
+    const result = await service.executeHostedToolCall({
+      toolCall: {
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          arguments: "{\"paths\":[\"foo.md\"]}",
+        },
+      } as any,
+      chatView: { id: "chat-view" },
+      timeoutMs: 1200,
     });
+
+    expect(result).toEqual({
+      success: true,
+      data: { content: "hello" },
+    });
+    expect(mcpService.executeTool).toHaveBeenCalledWith(
+      "mcp-filesystem_read",
+      { paths: ["foo.md"] },
+      { id: "chat-view" },
+      { timeoutMs: 1200 }
+    );
+  });
+
+  it("returns a structured failure for invalid hosted tool call arguments", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const result = await service.executeHostedToolCall({
+      toolCall: {
+        id: "call_bad_args",
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          arguments: "{not json",
+        },
+      } as any,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe("INVALID_TOOL_ARGUMENTS");
+    expect(mcpService.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("streams hosted SystemSculpt chat completions through the API endpoint", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    ) as any;
 
     const events = await collectEvents(
       service.streamMessage({
         messages: [{ role: "user", content: "Hello", message_id: "msg_1" } as any],
-        model: "openai@@gpt-4o",
-        sessionFile: "/tmp/pi-session.jsonl",
-        onPiSessionReady,
+        model: "systemsculpt@@systemsculpt/ai-agent",
       })
     );
 
-    expect(events).toEqual(streamed);
-    expect(executeLocalPiStream).toHaveBeenCalledTimes(1);
-    expect(assertPiTextExecutionReady).toHaveBeenCalledWith(
+    expect(events).toEqual([{ type: "content", text: "Hello" }]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.systemsculpt.test/api/v1/chat/completions",
       expect.objectContaining({
-        id: "openai@@gpt-4o",
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-license-key": "license",
+          Accept: "text/event-stream",
+        }),
+        body: JSON.stringify({
+          model: "systemsculpt/ai-agent",
+          messages: [{ role: "user", content: "Hello" }],
+          stream: true,
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "mcp-filesystem_read",
+                description: "Read a file from the vault",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                  },
+                  required: ["path"],
+                },
+              },
+            },
+          ],
+        }),
       })
     );
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [{ role: "user", content: "Hello", message_id: "msg_1" }],
+      new Set(),
+      true,
+      AGENT_PRESET.systemPrompt
+    );
+    expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports hosted text-only requests without tools and forwards reasoning effort", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"Studio"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    ) as any;
+
+    const events = await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Draft this workflow.", message_id: "msg_studio_1" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+        systemPromptOverride: "Studio system prompt",
+        allowTools: false,
+        reasoningEffort: "high",
+      })
+    );
+
+    expect(events).toEqual([{ type: "content", text: "Studio" }]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.systemsculpt.test/api/v1/chat/completions",
+      expect.objectContaining({
+        body: JSON.stringify({
+          model: "systemsculpt/ai-agent",
+          messages: [{ role: "user", content: "Draft this workflow." }],
+          stream: true,
+          reasoning_effort: "high",
+        }),
+      })
+    );
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [{ role: "user", content: "Draft this workflow.", message_id: "msg_studio_1" }],
+      new Set(),
+      true,
+      "Studio system prompt"
+    );
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
   });
 
   it("counts image context files", () => {

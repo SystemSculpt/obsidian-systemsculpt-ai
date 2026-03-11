@@ -138,7 +138,7 @@ describe("StreamingController stream behavior", () => {
 
     expect(result.completed).toBe(true);
     expect(result.message.tool_calls?.[0]?.id).toBe(toolCallId);
-    expect(result.message.tool_calls?.[0]?.state).toBe("completed");
+    expect(result.message.tool_calls?.[0]?.state).toBe("executing");
     expect(Array.isArray((result.message as any).reasoning_details)).toBe(true);
     expect((result.message as any).reasoning_details[0].id).toBe(toolCallId);
   });

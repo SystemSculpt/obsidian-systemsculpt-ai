@@ -1,7 +1,6 @@
 import { App, TFile, Component, Notice, Modal, Setting, ButtonComponent, Platform } from "obsidian";
 import {
   ChatMessage,
-  SystemPromptInfo,
   ChatRole,
   Annotation,
   UrlCitation,
@@ -19,7 +18,6 @@ import { SlashCommandMenu, SlashCommand } from "./SlashCommandMenu";
 import { StreamingController } from "./controllers/StreamingController";
 import { messageHandling } from "./messageHandling";
 import { AtMentionMenu } from "../../components/AtMentionMenu";
-import { AgentSelectionMenu } from "./AgentSelectionMenu";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../constants/largeText";
 import { ERROR_CODES } from "../../utils/errors";
 import { showPopup } from "../../core/ui/";
@@ -35,16 +33,20 @@ import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleS
 // Turn lifecycle handling
 import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
 import { errorLogger } from "../../utils/errorLogger";
-import { assertPiTextExecutionReady } from "../../services/pi-native/PiTextRuntime";
+import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
+import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
+import {
+  getManagedSystemSculptModelId,
+  hasManagedSystemSculptAccess,
+  isManagedSystemSculptModelId,
+} from "../../services/systemsculpt/ManagedSystemSculptModel";
 
 export interface InputHandlerOptions {
   app: App;
   container: HTMLElement;
   aiService: SystemSculptService;
   getMessages: () => ChatMessage[];
-  getSelectedModelId: () => string;
   getContextFiles: () => Set<string>;
-  getSystemPrompt: () => SystemPromptInfo;
   isChatReady: () => boolean;
   chatContainer: HTMLElement;
   scrollManager: ScrollManagerService;
@@ -54,7 +56,7 @@ export interface InputHandlerOptions {
   onContextFileAdd: (wikilink: string) => Promise<void>;
   onError: (error: string | SystemSculptError) => void;
   onAddContextFile: () => void;
-  onEditSystemPrompt: () => void;
+  onOpenChatSettings: () => void;
   plugin: SystemSculptPlugin;
   getChatMarkdown: () => Promise<string>;
   getChatTitle: () => string;
@@ -70,9 +72,7 @@ export class InputHandler extends Component {
   private container: HTMLElement;
   private aiService: SystemSculptService;
   private getMessages: () => ChatMessage[];
-  private getSelectedModelId: () => string;
   private getContextFiles: () => Set<string>;
-  private getSystemPrompt: () => SystemPromptInfo;
   private isChatReady: () => boolean;
   private chatContainer: HTMLElement;
   private scrollManager: ScrollManagerService;
@@ -82,7 +82,7 @@ export class InputHandler extends Component {
   private onContextFileAdd: (wikilink: string) => Promise<void>;
   private onError: (error: string | SystemSculptError) => void;
   private onAddContextFile: () => void;
-  private onEditSystemPrompt: () => void;
+  private onOpenChatSettings: () => void;
   private input: HTMLTextAreaElement;
   private inputWrapper: HTMLDivElement | null = null;
   private attachmentsEl: HTMLDivElement | null = null;
@@ -120,7 +120,7 @@ export class InputHandler extends Component {
   private chatView: any;
   private slashCommandMenu?: SlashCommandMenu;
   private atMentionMenu?: AtMentionMenu;
-  private agentSelectionMenu?: AgentSelectionMenu;
+  private agentSelectionMenu?: { isOpen?: () => boolean };
   private liveRegionEl: HTMLElement | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
 
@@ -148,9 +148,7 @@ export class InputHandler extends Component {
     this.container = options.container;
     this.aiService = options.aiService;
     this.getMessages = options.getMessages;
-    this.getSelectedModelId = options.getSelectedModelId;
     this.getContextFiles = options.getContextFiles;
-    this.getSystemPrompt = options.getSystemPrompt;
     this.isChatReady = options.isChatReady;
     this.chatContainer = options.chatContainer;
     this.scrollManager = options.scrollManager;
@@ -161,7 +159,7 @@ export class InputHandler extends Component {
     this.addMessageToHistory = options.addMessageToHistory;
     this.onError = options.onError;
     this.onAddContextFile = options.onAddContextFile;
-    this.onEditSystemPrompt = options.onEditSystemPrompt;
+    this.onOpenChatSettings = options.onOpenChatSettings;
     this.plugin = options.plugin;
     // Provide light wrappers for external callers to read/write input
     this.getValue = () => this.input?.value ?? "";
@@ -199,65 +197,13 @@ export class InputHandler extends Component {
 
     const originalAssistantResponse = options.onAssistantResponse;
     this.onAssistantResponse = async (message: ChatMessage) => {
-      // First, save the message data
       await originalAssistantResponse(message);
-      const shouldSkipPiPostPersistRerender =
-        !!this.chatView?.isPiBackedChat?.() && !!this.chatView?.getPiSessionFile?.();
-
-      // Prefer an in-place finalization to avoid DOM remove+add (which can trigger
-      // extra layout work and false "new messages" increments while detached)
-      const currentMessageEl = this.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement;
-      if (currentMessageEl) {
-        try {
-          if (shouldSkipPiPostPersistRerender) {
-            if (!currentMessageEl.querySelector('.systemsculpt-message-toolbar')) {
-              this.messageRenderer.addMessageButtonToolbar(
-                currentMessageEl,
-                typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''),
-                message.role,
-                message.message_id
-              );
-            }
-            return;
-          }
-
-          // Ensure a content container exists
-          let contentEl = currentMessageEl.querySelector('.systemsculpt-message-content') as HTMLElement | null;
-          if (!contentEl) {
-            contentEl = currentMessageEl.createDiv({ cls: 'systemsculpt-message-content' });
-          }
-
-          // Render unified parts in-place (non-streaming)
-          const partList = this.messageRenderer.normalizeMessageToParts(message);
-          this.messageRenderer.renderUnifiedMessageParts(currentMessageEl, partList.parts, false);
-
-          // Attach the toolbar if not already present
-          if (!currentMessageEl.querySelector('.systemsculpt-message-toolbar')) {
-            this.messageRenderer.addMessageButtonToolbar(
-              currentMessageEl,
-              typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''),
-              message.role,
-              message.message_id
-            );
-          }
-          return; // Done via in-place update
-        } catch {
-          // Fall back to full re-render if anything goes wrong
-        }
-      }
-
-      if (shouldSkipPiPostPersistRerender) {
-        return;
-      }
-
-      // Fallback: re-render using the unified pathway that matches reload behavior
-      await messageHandling.addMessage(this.chatView, message.role, message.content, message.message_id, message);
+      await this.renderPersistedAssistantMessage(message);
     };
 
     this.setupInput();
     this.initializeSlashCommands();
     this.initializeAtMentionMenu();
-    this.initializeAgentSelectionMenu();
 
     // ----------------------------------------------------------------------
     // Extracted streaming logic controller
@@ -297,14 +243,12 @@ export class InputHandler extends Component {
       messageEl.dataset.messageId = messageId;
     }
 
-    const sys = this.getSystemPrompt();
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
+    const managedModelId = getManagedSystemSculptModelId();
 	    const stream = this.aiService.streamMessage({
 	      messages: this.getMessages(),
-	      model: this.getSelectedModelId(),
+	      model: managedModelId,
 	      contextFiles,
-	      systemPromptType: sys.type,
-	      systemPromptPath: sys.path,
 	      signal,
         sessionFile: this.chatView?.getPiSessionFile?.(),
         sessionId: this.chatView?.getPiSessionId?.(),
@@ -314,7 +258,7 @@ export class InputHandler extends Component {
 	      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
 	        chatId: this.getChatId(),
 	        assistantMessageId: messageId,
-        modelId: this.getSelectedModelId(),
+        modelId: managedModelId,
       }) || undefined,
     });
 
@@ -326,6 +270,223 @@ export class InputHandler extends Component {
 	    );
 	  }
 
+  private shouldContinueHostedToolLoop(message: ChatMessage, stopReason?: string): boolean {
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (toolCalls.length === 0) {
+      return false;
+    }
+
+    if (String(stopReason || "").trim() === "toolUse") {
+      return true;
+    }
+
+    return toolCalls.some((toolCall) => toolCall.state === "executing" || !toolCall.result);
+  }
+
+  private mergeToolCalls(existingToolCalls: ToolCall[] = [], nextToolCalls: ToolCall[] = []): ToolCall[] | undefined {
+    if (existingToolCalls.length === 0 && nextToolCalls.length === 0) {
+      return undefined;
+    }
+
+    const existingMap = new Map(existingToolCalls.map((toolCall) => [toolCall.id, toolCall]));
+    const mergedMap = new Map(existingMap);
+    for (const toolCall of nextToolCalls) {
+      mergedMap.set(toolCall.id, toolCall);
+    }
+
+    for (const [toolCallId, existingToolCall] of existingMap) {
+      if (!existingToolCall.result || !mergedMap.has(toolCallId)) {
+        continue;
+      }
+      const mergedToolCall = mergedMap.get(toolCallId)!;
+      if (!mergedToolCall.result) {
+        mergedToolCall.result = existingToolCall.result;
+      }
+    }
+
+    return Array.from(mergedMap.values());
+  }
+
+  private mergeAssistantMessageIntoHistory(message: ChatMessage): ChatMessage {
+    const messages = this.getMessages();
+    const existingMessageIndex = messages.findIndex((entry) => entry.message_id === message.message_id);
+    if (existingMessageIndex === -1) {
+      messages.push(message);
+      return message;
+    }
+
+    const existingMessage = messages[existingMessageIndex];
+    const mergedMessage: ChatMessage = {
+      ...existingMessage,
+      ...message,
+      content: message.content !== undefined ? message.content : existingMessage.content,
+      reasoning: message.reasoning || existingMessage.reasoning,
+      annotations: message.annotations || existingMessage.annotations,
+      tool_calls: this.mergeToolCalls(existingMessage.tool_calls || [], message.tool_calls || []),
+      messageParts: message.messageParts || existingMessage.messageParts,
+      reasoning_details: (message as any).reasoning_details || (existingMessage as any).reasoning_details,
+    };
+
+    messages[existingMessageIndex] = mergedMessage;
+    return mergedMessage;
+  }
+
+  private async renderPersistedAssistantMessage(
+    message: ChatMessage,
+    options?: { forceRerender?: boolean }
+  ): Promise<void> {
+    const shouldSkipPiPostPersistRerender =
+      !options?.forceRerender &&
+      !!this.chatView?.isPiBackedChat?.() &&
+      !!this.chatView?.getPiSessionFile?.();
+
+    const currentMessageEl = this.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement | null;
+    if (currentMessageEl) {
+      try {
+        if (shouldSkipPiPostPersistRerender) {
+          if (!currentMessageEl.querySelector(".systemsculpt-message-toolbar")) {
+            this.messageRenderer.addMessageButtonToolbar(
+              currentMessageEl,
+              typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? ""),
+              message.role,
+              message.message_id
+            );
+          }
+          return;
+        }
+
+        this.messageRenderer.renderUnifiedMessageParts(
+          currentMessageEl,
+          this.messageRenderer.normalizeMessageToParts(message).parts,
+          false
+        );
+
+        if (!currentMessageEl.querySelector(".systemsculpt-message-toolbar")) {
+          this.messageRenderer.addMessageButtonToolbar(
+            currentMessageEl,
+            typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? ""),
+            message.role,
+            message.message_id
+          );
+        }
+        return;
+      } catch {
+        // Fall back to the full message reload path below if an in-place update fails.
+      }
+    }
+
+    if (shouldSkipPiPostPersistRerender) {
+      return;
+    }
+
+    await messageHandling.addMessage(this.chatView, message.role, message.content, message.message_id, message);
+  }
+
+  private async persistAssistantToolLoopUpdate(message: ChatMessage): Promise<ChatMessage> {
+    const mergedMessage = this.mergeAssistantMessageIntoHistory(message);
+    await this.saveChatImmediate();
+    await this.renderPersistedAssistantMessage(mergedMessage, { forceRerender: true });
+    return mergedMessage;
+  }
+
+  private async confirmHostedToolExecution(toolCall: ToolCall): Promise<boolean> {
+    const functionName = String(toolCall.request?.function?.name || "").trim();
+    if (!requiresUserApproval(functionName, { trustedToolNames: new Set() })) {
+      return true;
+    }
+
+    let parsedArgs: Record<string, unknown> = {};
+    const rawArguments = toolCall.request?.function?.arguments;
+    if (typeof rawArguments === "string" && rawArguments.trim().length > 0) {
+      try {
+        parsedArgs = JSON.parse(rawArguments);
+      } catch {
+        parsedArgs = {};
+      }
+    }
+
+    const primaryPath = extractPrimaryPathArg(functionName, parsedArgs);
+    const popup = await showPopup(
+      this.app,
+      primaryPath
+        ? `${functionName} wants to modify ${primaryPath}.`
+        : `${functionName} wants to modify your vault.`,
+      {
+        title: "Approve Tool Action",
+        description: "Allow this hosted SystemSculpt tool call to continue in your local vault.",
+        primaryButton: "Approve",
+        secondaryButton: "Deny",
+      }
+    );
+
+    return popup?.confirmed === true && popup.action === "primary";
+  }
+
+  private async executeHostedToolCalls(message: ChatMessage, signal: AbortSignal): Promise<ChatMessage> {
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (toolCalls.length === 0) {
+      return message;
+    }
+
+    for (const toolCall of toolCalls) {
+      if (signal.aborted) {
+        break;
+      }
+      if (toolCall.state === "completed" || toolCall.state === "failed") {
+        continue;
+      }
+
+      toolCall.state = "executing";
+      toolCall.executionStartedAt = toolCall.executionStartedAt || Date.now();
+
+      const approved = await this.confirmHostedToolExecution(toolCall);
+      if (!approved) {
+        toolCall.state = "failed";
+        toolCall.executionCompletedAt = Date.now();
+        toolCall.result = {
+          success: false,
+          error: {
+            code: "USER_DENIED",
+            message: "The user denied this tool execution.",
+          },
+        };
+        continue;
+      }
+
+      const result = await this.aiService.executeHostedToolCall({
+        toolCall,
+        chatView: this.chatView,
+      });
+
+      toolCall.result = result;
+      toolCall.executionCompletedAt = Date.now();
+      toolCall.state = result.success ? "completed" : "failed";
+    }
+
+    return message;
+  }
+
+  private async runHostedAgentTurnLoop(signal: AbortSignal, includeContextFiles: boolean): Promise<void> {
+    const maxToolContinuationRounds = 8;
+
+    for (let round = 0; round < maxToolContinuationRounds; round += 1) {
+      const streamedTurn = await this.streamAssistantTurn(signal, includeContextFiles);
+      if (!this.shouldContinueHostedToolLoop(streamedTurn.message, streamedTurn.stopReason)) {
+        return;
+      }
+
+      const executedMessage = await this.executeHostedToolCalls(streamedTurn.message, signal);
+      await this.persistAssistantToolLoopUpdate(executedMessage);
+    }
+
+    throw new SystemSculptError(
+      "The hosted agent exceeded the maximum tool continuation depth.",
+      ERROR_CODES.STREAM_ERROR,
+      500,
+      { errorCode: TOOL_LOOP_ERROR_CODE }
+    );
+  }
+
   private setupInput(): void {
     // Create an aria-live region for streaming status updates (a11y)
     if (!this.liveRegionEl) {
@@ -336,7 +497,7 @@ export class InputHandler extends Component {
     }
 
     const composer = createChatComposer(this.container, {
-      onEditSystemPrompt: this.onEditSystemPrompt,
+      onOpenChatSettings: this.onOpenChatSettings,
       onAddContextFile: this.onAddContextFile,
       onSend: () => this.handleSendMessage(),
       onStop: () => this.handleStopGeneration(),
@@ -457,11 +618,6 @@ export class InputHandler extends Component {
     this.addChild(this.atMentionMenu);
   }
 
-  private initializeAgentSelectionMenu(): void {
-    this.agentSelectionMenu = new AgentSelectionMenu(this.plugin, this.chatView, this.input);
-    this.addChild(this.agentSelectionMenu);
-  }
-
   private handleStopGeneration(): void {
     this.turnLifecycle.stop();
 
@@ -486,7 +642,7 @@ export class InputHandler extends Component {
     }
 
     if (this.chatView?.isLegacyReadOnlyChat?.()) {
-      new Notice("This legacy chat is read-only. Open a new Pi chat to continue the conversation.", 6000);
+      new Notice("This archived chat is read-only. Open a new chat to continue the conversation.", 6000);
       return;
     }
 
@@ -508,7 +664,7 @@ export class InputHandler extends Component {
         } as any;
         await this.onMessageSubmit(userMessage);
 
-        await this.streamAssistantTurn(signal, includeContextFiles);
+        await this.runHostedAgentTurnLoop(signal, includeContextFiles);
         void this.chatView.refreshCreditsBalance();
       });
     } catch (err) {
@@ -523,7 +679,7 @@ export class InputHandler extends Component {
         errorLogger.debug("Chat turn failed", {
           source: "InputHandler",
           method: "handleSendMessage",
-          metadata: { modelId: this.getSelectedModelId?.() },
+          metadata: { modelId: getManagedSystemSculptModelId() },
         });
       } catch {}
     } finally {
@@ -598,7 +754,6 @@ export class InputHandler extends Component {
       input: this.input,
       slashCommandMenu: this.slashCommandMenu,
       atMentionMenu: this.atMentionMenu,
-      agentSelectionMenu: this.agentSelectionMenu,
     }, event);
   }
 
@@ -608,7 +763,6 @@ export class InputHandler extends Component {
       adjustInputHeight: () => this.adjustInputHeight(),
       slashCommandMenu: this.slashCommandMenu,
       atMentionMenu: this.atMentionMenu,
-      agentSelectionMenu: this.agentSelectionMenu,
       setPendingLargeTextContent: (t: string | null) => { this.pendingLargeTextContent = t; },
     });
     this.updateSendButtonState();
@@ -1149,39 +1303,35 @@ export class InputHandler extends Component {
   }
 
   private async ensureProviderReadyForChat(): Promise<boolean> {
-    let models: any[] = [];
-    try {
-      models = await this.plugin.modelService.getModels();
-    } catch {}
-
-    if (!models || models.length === 0) {
+    if (!hasManagedSystemSculptAccess(this.plugin)) {
       await this.invokeProviderSetupPrompt(
-        "No models are available yet. Open Setup, finish provider setup, then refresh your model list."
+        "Activate your SystemSculpt license in Account before starting a chat."
       );
       return false;
     }
 
-    const selectedModelId = this.getSelectedModelId();
-    if (!selectedModelId) {
-      await this.showModelSelectionModal("Choose a model before starting a chat.");
-      return false;
-    }
-
-    try {
-      const model = await this.plugin.modelService.getModelById(selectedModelId);
-      if (model) {
-        await assertPiTextExecutionReady(model);
-        return true;
+    const selectedModelId =
+      typeof this.chatView?.getSelectedModelId === "function"
+        ? String(this.chatView.getSelectedModelId() || "").trim()
+        : String(this.chatView?.selectedModelId || this.plugin.settings.selectedModelId || "").trim();
+    if (!isManagedSystemSculptModelId(selectedModelId)) {
+      try {
+        if (typeof this.chatView?.setSelectedModelId === "function") {
+          await this.chatView.setSelectedModelId(getManagedSystemSculptModelId());
+        } else {
+          await this.plugin.getSettingsManager().updateSettings({
+            selectedModelId: getManagedSystemSculptModelId(),
+          });
+        }
+      } catch (error: any) {
+        await this.invokeProviderSetupPrompt(
+          error?.message || "SystemSculpt is not ready yet. Open Account to confirm your license."
+        );
+        return false;
       }
-    } catch (error: any) {
-      await this.invokeProviderSetupPrompt(
-        error?.message || "The selected model is not ready yet. Open Setup to finish provider setup."
-      );
-      return false;
     }
 
-    await this.showModelSelectionModal("The selected model is unavailable. Pick another model to continue.");
-    return false;
+    return true;
   }
 
   private async invokeProviderSetupPrompt(message?: string): Promise<void> {
@@ -1195,11 +1345,11 @@ export class InputHandler extends Component {
   private async promptProviderSetupFallback(message?: string): Promise<void> {
     const result = await showPopup(
       this.app,
-      message ?? "Open Settings → Overview & Setup to finish Pi sign-in or API-key setup, then refresh your model list.",
+      message ?? "Open Settings -> Account to activate your SystemSculpt license.",
       {
-        title: "Set Up Pi",
+        title: "Finish SystemSculpt setup",
         icon: "plug-zap",
-        primaryButton: "Open Setup",
+        primaryButton: "Open Account",
         secondaryButton: "Not Now",
       }
     );
@@ -1208,30 +1358,11 @@ export class InputHandler extends Component {
     }
   }
 
-  private openSetupTabFallback(tabId: string = "overview"): void {
+  private openSetupTabFallback(tabId: string = "account"): void {
     try {
       this.plugin.openSettingsTab(tabId);
     } catch (error) {
-      new Notice("Open Settings → SystemSculpt AI → Overview & Setup to finish Pi setup.", 6000);
+      new Notice("Open Settings -> SystemSculpt AI -> Account to finish SystemSculpt setup.", 6000);
     }
   }
-
-  private async showModelSelectionModal(description?: string): Promise<void> {
-    const { StandardModelSelectionModal } = await import("../../modals/StandardModelSelectionModal");
-    const modal = new StandardModelSelectionModal({
-      app: this.app,
-      plugin: this.plugin,
-      currentModelId: this.getSelectedModelId() || '',
-      title: "Select an AI Model",
-      description: description || "Choose a model to continue.",
-      onSelect: async (result) => {
-        if (typeof this.chatView?.setSelectedModelId === 'function') {
-          await this.chatView.setSelectedModelId(result.modelId);
-        }
-        new Notice('Model updated. Send your message again.', 3000);
-      }
-    });
-    modal.open();
-  }
-
 }

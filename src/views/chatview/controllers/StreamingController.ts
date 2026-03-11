@@ -433,10 +433,9 @@ export class StreamingController extends Component {
       id: sanitizedId,
       messageId,
       request,
-      state: "completed",
+      state: "executing",
       timestamp: Date.now(),
       executionStartedAt: Date.now(),
-      executionCompletedAt: Date.now(),
     };
 
     emittedToolCalls.add(sanitizedId);
