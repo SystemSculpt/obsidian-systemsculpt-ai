@@ -1,9 +1,11 @@
 import { SystemSculptService } from "./SystemSculptService";
+import {
+  getManagedSystemSculptModelId,
+  hasManagedSystemSculptAccess,
+} from "./systemsculpt/ManagedSystemSculptModel";
 import type SystemSculptPlugin from "../main";
 
 import { ChatMessage } from "../types";
-import { SystemSculptModel } from "../types/llm";
-import { ensureCanonicalId, parseCanonicalId, createCanonicalId } from "../utils/modelUtils";
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
 
 import { PostProcessingModelPromptModal } from "../modals/PostProcessingModelPromptModal";
@@ -29,44 +31,7 @@ export class PostProcessingService {
    * @returns The canonical model ID
    */
   private getPostProcessingModelId(): string {
-    const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
-    const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
-    let modelId = (useLatestEverywhere || isStandardMode) ? '' : this.plugin.settings.postProcessingModelId;
-    let providerId = (useLatestEverywhere || isStandardMode) ? '' : this.plugin.settings.postProcessingProviderId;
-
-    if (!modelId || !providerId) {
-      // Fallback logic: Use global selected model
-      const globalDefault = this.plugin.settings.selectedModelId;
-      if (globalDefault) {
-        const parsedGlobal = parseCanonicalId(globalDefault);
-        if (parsedGlobal) {
-          modelId = parsedGlobal.modelId;
-          providerId = parsedGlobal.providerId;
-        } else {
-          modelId = globalDefault;
-        }
-      }
-    }
-
-    let canonicalId = (modelId || '').trim();
-
-    if (!canonicalId) {
-      throw new Error("Failed to determine a valid model for post-processing.");
-    }
-
-    if (!canonicalId.includes('@@')) {
-      canonicalId = providerId
-        ? createCanonicalId(providerId, canonicalId)
-        : ensureCanonicalId(canonicalId);
-    }
-
-    canonicalId = ensureCanonicalId(canonicalId);
-
-    if (!canonicalId) {
-      throw new Error("Failed to determine a valid model for post-processing.");
-    }
-
-    return canonicalId;
+    return getManagedSystemSculptModelId();
   }
 
   async processTranscription(text: string): Promise<string> {
@@ -76,6 +41,10 @@ export class PostProcessingService {
 
     try {
       const modelId = this.getPostProcessingModelId();
+      if (!hasManagedSystemSculptAccess(this.plugin)) {
+        await this.promptPostProcessingModelFix(modelId);
+        return text;
+      }
       await this.ensurePostProcessingModelAvailability(modelId);
       const messages: ChatMessage[] = [
         {
@@ -116,7 +85,7 @@ export class PostProcessingService {
     try {
       const validation = await this.plugin.modelService.validateSpecificModel(modelId);
       if (!validation.isAvailable) {
-        await this.promptPostProcessingModelFix(modelId, validation.alternativeModel);
+        await this.promptPostProcessingModelFix(modelId);
         throw new SystemSculptError(
           `Post-processing model ${modelId} is unavailable`,
           ERROR_CODES.MODEL_UNAVAILABLE,
@@ -138,20 +107,17 @@ export class PostProcessingService {
     }
   }
 
-  private async promptPostProcessingModelFix(modelId: string, alternativeModel?: SystemSculptModel): Promise<void> {
+  private async promptPostProcessingModelFix(modelId: string): Promise<void> {
     if (PostProcessingService.promptVisible) {
       return;
     }
 
     PostProcessingService.promptVisible = true;
     const reason = this.buildModelUnavailableReason(modelId);
-    const scope = this.usesLockedPostProcessingModel() ? 'global' : 'post-processing';
 
     const modal = new PostProcessingModelPromptModal(this.plugin, {
       missingModelId: modelId,
       reason,
-      alternativeModel,
-      scope,
       onClose: () => {
         PostProcessingService.promptVisible = false;
       },
@@ -161,27 +127,14 @@ export class PostProcessingService {
   }
 
   private buildModelUnavailableReason(modelId: string): string {
-    const parsed = parseCanonicalId(modelId);
-    if (parsed?.providerId === 'systemsculpt') {
-      if (!this.plugin.settings.licenseKey?.trim()) {
-        return 'Post-processing is linked to the SystemSculpt AI Agent, but no license key is configured. Add a license or pick a different provider.';
-      }
-
-      if (this.plugin.settings.licenseValid !== true) {
-        return 'Post-processing is using the SystemSculpt AI Agent, but the license has not been validated yet. Validate your license or choose another model.';
-      }
-
-      if (!this.plugin.settings.enableSystemSculptProvider) {
-        return 'The SystemSculpt provider is turned off, so the configured post-processing model is unavailable.';
-      }
+    if (!this.plugin.settings.licenseKey?.trim()) {
+      return "Post-processing now runs only through SystemSculpt, but no license key is configured. Add your license in Setup to continue.";
     }
 
-    return 'The selected post-processing model is no longer available. Please choose another model or disable post-processing.';
-  }
+    if (this.plugin.settings.licenseValid !== true) {
+      return "Post-processing now runs only through SystemSculpt, but the current license has not been validated yet. Validate it in Setup to continue.";
+    }
 
-  private usesLockedPostProcessingModel(): boolean {
-    const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
-    const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
-    return useLatestEverywhere || isStandardMode;
+    return `The managed SystemSculpt post-processing model (${modelId}) is unavailable right now. Check Setup and your connection, or disable post-processing for now.`;
   }
 }

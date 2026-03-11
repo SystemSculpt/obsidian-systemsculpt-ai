@@ -3,11 +3,24 @@ import { join } from "node:path";
 import type SystemSculptPlugin from "../../main";
 import { resolveSystemSculptApiBaseUrl } from "../../utils/urlHelpers";
 import { resolvePiPluginInstallDir } from "./PiRuntimeBootstrap";
+import {
+  isSystemSculptPiExecutionModel,
+  isSystemSculptPiProviderModel,
+  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
+  SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
+  SYSTEMSCULPT_PI_PROVIDER_ID,
+  SYSTEMSCULPT_PI_PROVIDER_MODEL_ID,
+} from "./PiCanonicalIds";
 
-export const SYSTEMSCULPT_PI_PROVIDER_ID = "systemsculpt";
-export const SYSTEMSCULPT_PI_PROVIDER_MODEL_ID = "ai-agent";
-export const SYSTEMSCULPT_PI_EXECUTION_MODEL_ID = "systemsculpt/ai-agent";
-export const SYSTEMSCULPT_PI_CANONICAL_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
+export {
+  isSystemSculptPiExecutionModel,
+  isSystemSculptPiProviderModel,
+  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
+  SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
+  SYSTEMSCULPT_PI_PROVIDER_ID,
+  SYSTEMSCULPT_PI_PROVIDER_MODEL_ID,
+} from "./PiCanonicalIds";
+
 export const SYSTEMSCULPT_PI_LICENSE_ENV = "SYSTEMSCULPT_PI_PROVIDER_LICENSE";
 
 const SYSTEMSCULPT_PI_EXTENSION_FILE = "systemsculpt-pi-provider-extension.mjs";
@@ -50,17 +63,6 @@ function buildExtensionSource(baseUrl: string): string {
 function buildExtensionPath(plugin: SystemSculptPlugin): string {
   const pluginInstallDir = resolvePiPluginInstallDir({ plugin });
   return join(pluginInstallDir, SYSTEMSCULPT_PI_EXTENSION_FILE);
-}
-
-export function isSystemSculptPiExecutionModel(modelId: string): boolean {
-  return String(modelId || "").trim().toLowerCase() === SYSTEMSCULPT_PI_EXECUTION_MODEL_ID;
-}
-
-export function isSystemSculptPiProviderModel(providerId: string, modelId: string): boolean {
-  return (
-    String(providerId || "").trim().toLowerCase() === SYSTEMSCULPT_PI_PROVIDER_ID &&
-    String(modelId || "").trim().toLowerCase() === SYSTEMSCULPT_PI_PROVIDER_MODEL_ID
-  );
 }
 
 export async function ensureSystemSculptPiProviderExtension(

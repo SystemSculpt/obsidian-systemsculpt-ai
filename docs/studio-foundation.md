@@ -5,7 +5,7 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 ## Scope
 - Studio is desktop-only.
 - Studio projects are machine-managed `.systemsculpt` files.
-- `studio.text_generation` supports two text sources: `SystemSculpt` (default) and `Local (Pi)`.
+- `studio.text_generation` runs through `SystemSculpt`.
 - `studio.image_generation` and `studio.transcription` remain SystemSculpt-backed.
 - Native Canvas internals are not used for Studio runtime behavior.
 
@@ -22,8 +22,8 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/studio/StudioNodeConfigValidation.ts`: schema-driven node config validation.
 - `src/studio/StudioNodeResultCacheStore.ts`: persistent per-node output cache + input fingerprinting.
 - `src/studio/StudioRunScope.ts`: reusable run-scope projection for graph/node runs.
-- `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter (SystemSculpt + Local Pi text routing).
-- `src/studio/StudioLocalTextModelCatalog.ts`: dynamic local model catalog resolver for node config UIs.
+- `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter for the SystemSculpt path.
+- `src/studio/StudioLocalTextModelCatalog.ts`: legacy local-model helper retained only while older migration paths are still being removed.
 - `src/studio/StudioRuntime.ts`: run queue, immutable snapshots, events, retention.
 - `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
 - `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
@@ -69,7 +69,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - Nodes should expose only immediately reusable output ports to keep graph wiring unambiguous.
 - Metadata/debug details belong in runtime logs or snapshots, not as default output ports.
 - `studio.text_generation` exposes only `text` as its output.
-- `studio.text_generation` defaults to `SystemSculpt`; switching to `Local (Pi)` reveals a searchable model picker backed by dynamic provider models.
+- `studio.text_generation` runs through `SystemSculpt`; the plugin should not expose alternate text runtimes as part of the shipped UX.
 - `studio.json` is a structured-data node that can pass through upstream `json` input or parse/validate upstream `text` into `json` for typed downstream bindings.
 - `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), always exposes raw `text`, and auto-exposes reusable field outputs from structured adapter results (cached internally with TTL).
 - `studio.dataset` resolves data through a user-configurable adapter command + argument list.

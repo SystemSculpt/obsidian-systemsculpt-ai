@@ -110,7 +110,7 @@ export class CreditsBalanceModal extends StandardModal {
     );
 
     this.addActionButton(
-      "Open Setup",
+      "Open Account",
       () => this.options.onOpenSetup(),
       false,
       "settings"
@@ -356,7 +356,7 @@ export class CreditsBalanceModal extends StandardModal {
       text: "Refresh to try again",
     });
 
-    this.hintEl.setText("We could not load your latest credits. You can refresh or open Setup to verify your license.");
+    this.hintEl.setText("We could not load your latest credits. You can refresh or open Account to verify your license.");
     this.hintEl.removeClass("is-warning");
   }
 

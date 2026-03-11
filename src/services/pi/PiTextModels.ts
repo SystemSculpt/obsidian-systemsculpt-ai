@@ -1,20 +1,42 @@
-import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { CustomProvider, SystemSculptModel } from "../../types/llm";
+import { PlatformContext } from "../PlatformContext";
 import {
   getDefaultStudioPiProviderHints,
   resolvePiProviderFromEndpoint,
   resolveProviderLabel,
 } from "../../studio/piAuth/StudioPiProviderRegistry";
 import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
-import { createCanonicalId } from "../../utils/modelUtils";
-import { normalizeLocalPiExecutionModelId } from "./PiCli";
-import { PiRpcProcessClient } from "./PiRpcProcessClient";
 import {
+  buildLocalPiCanonicalModelId,
+  buildLocalPiCanonicalProviderId,
+  buildLocalPiExecutionModelId,
+  getLocalPiProviderIdFromCanonical,
+  isLocalPiCanonicalModelId,
+  isLocalPiCanonicalProviderId,
   isSystemSculptPiProviderModel,
+  normalizeLocalPiExecutionModelId,
+  resolveLocalPiExecutionModelIdFromCanonical,
   SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
   SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
-} from "./PiSystemSculptProvider";
+} from "./PiCanonicalIds";
+
+export {
+  buildLocalPiCanonicalModelId,
+  buildLocalPiCanonicalProviderId,
+  buildLocalPiExecutionModelId,
+  getLocalPiProviderIdFromCanonical,
+  isLocalPiCanonicalModelId,
+  isLocalPiCanonicalProviderId,
+  isSystemSculptPiExecutionModel,
+  isSystemSculptPiProviderModel,
+  normalizeLocalPiExecutionModelId,
+  resolveLocalPiExecutionModelIdFromCanonical,
+  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
+  SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
+  SYSTEMSCULPT_PI_PROVIDER_ID,
+  SYSTEMSCULPT_PI_PROVIDER_MODEL_ID,
+} from "./PiCanonicalIds";
 
 export type LocalPiTextModelOption = {
   value: string;
@@ -35,8 +57,6 @@ export type LocalPiListedModel = {
   supportsImages: boolean;
   keywords: string[];
 };
-
-const LOCAL_PI_PROVIDER_PREFIX = "local-pi-";
 
 function stripPinnedDateSuffix(modelId: string): string {
   const normalized = String(modelId || "").trim();
@@ -157,72 +177,6 @@ function toLocalPiListEntry(model: {
   };
 }
 
-export function buildLocalPiCanonicalProviderId(providerId: string): string {
-  const normalized = normalizePiProviderId(providerId);
-  if (!normalized) {
-    return "";
-  }
-  return `${LOCAL_PI_PROVIDER_PREFIX}${normalized}`;
-}
-
-export function isLocalPiCanonicalProviderId(providerId: string): boolean {
-  return String(providerId || "").trim().toLowerCase().startsWith(LOCAL_PI_PROVIDER_PREFIX);
-}
-
-export function getLocalPiProviderIdFromCanonical(providerId: string): string {
-  const normalized = String(providerId || "").trim().toLowerCase();
-  if (!isLocalPiCanonicalProviderId(normalized)) {
-    return "";
-  }
-  return normalizePiProviderId(normalized.slice(LOCAL_PI_PROVIDER_PREFIX.length));
-}
-
-export function buildLocalPiCanonicalModelId(providerId: string, modelId: string): string {
-  if (isSystemSculptPiProviderModel(providerId, modelId)) {
-    return SYSTEMSCULPT_PI_CANONICAL_MODEL_ID;
-  }
-  const canonicalProviderId = buildLocalPiCanonicalProviderId(providerId);
-  const normalizedModelId = String(modelId || "").trim();
-  if (!canonicalProviderId || !normalizedModelId) {
-    return "";
-  }
-  return createCanonicalId(canonicalProviderId, normalizedModelId);
-}
-
-export function buildLocalPiExecutionModelId(providerId: string, modelId: string): string {
-  if (isSystemSculptPiProviderModel(providerId, modelId)) {
-    return SYSTEMSCULPT_PI_EXECUTION_MODEL_ID;
-  }
-  const normalizedProviderId = normalizePiProviderId(providerId);
-  const normalizedModelId = String(modelId || "").trim();
-  return normalizedProviderId && normalizedModelId ? `${normalizedProviderId}/${normalizedModelId}` : "";
-}
-
-export function resolveLocalPiExecutionModelIdFromCanonical(canonicalId: string): string {
-  const normalized = String(canonicalId || "").trim();
-  if (!normalized) {
-    return "";
-  }
-  if (normalized === SYSTEMSCULPT_PI_CANONICAL_MODEL_ID) {
-    return SYSTEMSCULPT_PI_EXECUTION_MODEL_ID;
-  }
-  const parsed = normalized.includes("@@") ? normalized.split("@@") : [];
-  if (parsed.length < 2) {
-    return normalizeLocalPiExecutionModelId(normalized);
-  }
-  const providerId = getLocalPiProviderIdFromCanonical(parsed[0]);
-  const modelId = parsed.slice(1).join("@@");
-  return buildLocalPiExecutionModelId(providerId, modelId);
-}
-
-export function isLocalPiCanonicalModelId(canonicalId: string): boolean {
-  if (String(canonicalId || "").trim() === SYSTEMSCULPT_PI_CANONICAL_MODEL_ID) {
-    return true;
-  }
-  const parsedProvider = String(canonicalId || "").trim().split("@@")[0] || "";
-  return isLocalPiCanonicalProviderId(parsedProvider);
-}
-
 export function toLocalPiSystemSculptModel(model: LocalPiListedModel): SystemSculptModel {
   const canonicalProviderId = isSystemSculptPiProviderModel(model.providerId, model.modelId)
     ? "systemsculpt"
@@ -279,10 +233,11 @@ export function toLocalPiSystemSculptModel(model: LocalPiListedModel): SystemScu
 export async function listLocalPiTextModels(
   plugin: SystemSculptPlugin
 ): Promise<LocalPiListedModel[]> {
-  if (!Platform.isDesktopApp) {
+  if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
     return [];
   }
 
+  const { PiRpcProcessClient } = await import("./PiRpcProcessClient");
   const client = new PiRpcProcessClient({
     plugin,
     noSession: true,

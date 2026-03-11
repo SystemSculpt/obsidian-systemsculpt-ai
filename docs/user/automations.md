@@ -1,12 +1,14 @@
 # Automations
 
-Automations process notes from capture folders into destination folders using workflow templates.
+Automations process notes from capture folders into destination folders using SystemSculpt workflow rules.
 
 ## Configure
 
-Open `Settings -> SystemSculpt AI -> Automations`.
+Open `Settings -> SystemSculpt AI -> Workflow`.
 
-Current built-in automation templates (`src/constants/workflowTemplates.ts`):
+Automation settings now live inside the `Workflow` tab.
+
+Current built-in workflow automations (`src/constants/workflowAutomations.ts`):
 
 - Meeting Transcript -> Summary + Tasks
 - Web Clipping -> Summary + Insights
@@ -26,4 +28,4 @@ Each card lets you configure:
 ## Notes
 
 - Automations run against markdown notes.
-- `Skipped workflow items` can be cleared from the Automations tab.
+- `Skipped workflow items` can be cleared from the `Workflow` tab.

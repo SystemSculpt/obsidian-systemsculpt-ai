@@ -18,23 +18,22 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  * Version: 1.5.3
  */
-import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter } from "obsidian";
+import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath } from "obsidian";
 import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptModel } from "./types/llm";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
-import { RecorderService } from "./services/RecorderService";
+import type { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
-import { FileContextMenuService } from "./context-menu/FileContextMenuService";
+import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
-import { ViewManager } from "./core/plugin/views";
-import { CommandManager } from "./core/plugin/commands";
+import type { ViewManager } from "./core/plugin/views";
+import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { UnifiedModelService } from "./services/providers/UnifiedModelService";
-import { TemplateManager } from "./templates/TemplateManager";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { VersionCheckerService } from "./services/VersionCheckerService";
 import { FavoritesService } from "./services/FavoritesService";
@@ -51,26 +50,47 @@ import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { PlatformContext } from "./services/PlatformContext";
+import { detectPlatformEnvironment } from "./utils/PlatformEnvironment";
 import { tryCopyToClipboard } from "./utils/clipboard";
-import { DailySettingsService, DailySettings } from "./services/daily/DailySettingsService";
-import { DailyNoteService } from "./services/daily/DailyNoteService";
-import { DailyWorkflowService } from "./services/daily/DailyWorkflowService";
-import { DailyAnalyticsService } from "./services/daily/DailyAnalyticsService";
-import { DailyReviewService } from "./services/daily/DailyReviewService";
-import { DailyStatusBar } from "./components/daily/DailyStatusBar";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
-import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
+import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { ReadwiseService } from "./services/readwise";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
-import { StudioService } from "./studio/StudioService";
-import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./views/studio/SystemSculptStudioView";
-import {
-  clearPiRuntimeBootstrapContext,
-  ensureBundledPiRuntime,
-  registerPiRuntimeBootstrapContext,
-} from "./services/pi/PiRuntimeBootstrap";
+import type { StudioService } from "./studio/StudioService";
+import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
+
+type ViewManagerModule = typeof import("./core/plugin/views");
+type CommandManagerModule = typeof import("./core/plugin/commands");
+type StudioServiceModule = typeof import("./studio/StudioService");
+type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
+type RecorderServiceModule = typeof import("./services/RecorderService");
+type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
+
+function loadViewManagerModule(): ViewManagerModule {
+  return require("./core/plugin/views");
+}
+
+function loadCommandManagerModule(): CommandManagerModule {
+  return require("./core/plugin/commands");
+}
+
+function loadStudioServiceModule(): StudioServiceModule {
+  return require("./studio/StudioService");
+}
+
+function loadSystemSculptSearchEngineModule(): SystemSculptSearchEngineModule {
+  return require("./services/search/SystemSculptSearchEngine");
+}
+
+function loadRecorderServiceModule(): RecorderServiceModule {
+  return require("./services/RecorderService");
+}
+
+function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
+  return require("./context-menu/FileContextMenuService");
+}
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
@@ -90,7 +110,6 @@ export default class SystemSculptPlugin extends Plugin {
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private _modelService: UnifiedModelService | undefined;
-  private templateManager: TemplateManager;
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
@@ -120,16 +139,8 @@ export default class SystemSculptPlugin extends Plugin {
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
+  private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
-
-  // Daily vault system services
-  private dailySettingsService: DailySettingsService | null = null;
-  private dailyNoteService: DailyNoteService | null = null;
-  private dailyWorkflowService: DailyWorkflowService | null = null;
-  private dailyAnalyticsService: DailyAnalyticsService | null = null;
-  private dailyStatusBar: DailyStatusBar | null = null;
-  private dailyStatusBarItem: HTMLElement | null = null;
-  private dailyReviewService: DailyReviewService | null = null;
 
   // Readwise integration
   private readwiseService: ReadwiseService | null = null;
@@ -208,82 +219,52 @@ export default class SystemSculptPlugin extends Plugin {
 
   public getSearchEngine(): SystemSculptSearchEngine {
     if (!this.searchEngine) {
+      const { SystemSculptSearchEngine } = loadSystemSculptSearchEngineModule();
       this.searchEngine = new SystemSculptSearchEngine(this.app, this);
     }
     return this.searchEngine;
   }
 
+  private async writeMobileStartupProbe(
+    stage: string,
+    extra: Record<string, unknown> = {}
+  ): Promise<void> {
+    const environment = detectPlatformEnvironment();
+    if (environment.runtime !== "mobile" && environment.surface !== "mobile") {
+      return;
+    }
+
+    try {
+      await this.app.vault.adapter.mkdir("SystemSculpt");
+    } catch {}
+
+    try {
+      await this.app.vault.adapter.mkdir(normalizePath("SystemSculpt/Diagnostics"));
+    } catch {}
+
+    try {
+      await this.app.vault.adapter.write(
+        this.mobileStartupProbePath,
+        JSON.stringify(
+          {
+            stage,
+            pluginVersion: this.manifest.version,
+            runtime: environment.runtime,
+            surface: environment.surface,
+            isMobileEmulation: environment.isMobileEmulation,
+            timestamp: new Date().toISOString(),
+            ...extra,
+          },
+          null,
+          2
+        )
+      );
+    } catch {}
+  }
+
 
   public getPluginLogger(): PluginLogger | null {
     return this.pluginLogger;
-  }
-
-  public getDailySettingsService(): DailySettingsService {
-    if (!this.dailySettingsService) {
-      this.dailySettingsService = new DailySettingsService(this.app);
-      this.dailySettingsService.initialize().then(async () => {
-        const settings = await this.dailySettingsService!.getSettings();
-        await this.onDailySettingsUpdated(settings);
-      }).catch((error) => {
-        const logger = this.getLogger();
-        logger.error("Daily settings service initialization failed", error, {
-          source: "SystemSculptPlugin",
-        });
-      });
-      this.dailySettingsService.onSettingsChange((settings) => {
-        void this.onDailySettingsUpdated(settings);
-      });
-    }
-    return this.dailySettingsService;
-  }
-
-  public getDailyNoteService(): DailyNoteService {
-    if (!this.dailyNoteService) {
-      const eventBus = new EventEmitter();
-      this.dailyNoteService = new DailyNoteService(
-        this.app,
-        this.getDailySettingsService(),
-        eventBus
-      );
-    }
-    return this.dailyNoteService;
-  }
-
-  public getDailyWorkflowService(): DailyWorkflowService {
-    if (!this.dailyWorkflowService) {
-      const logger = this.getLogger();
-      this.dailyWorkflowService = new DailyWorkflowService(
-        this.getDailyNoteService(),
-        this.getDailySettingsService()
-      );
-      this.dailyWorkflowService.initialize().catch((error) => {
-        logger.warn("Daily workflow service failed to initialize", {
-          source: "SystemSculptPlugin",
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-      });
-    }
-    return this.dailyWorkflowService;
-  }
-
-  public getDailyAnalyticsService(): DailyAnalyticsService {
-    if (!this.dailyAnalyticsService) {
-      this.dailyAnalyticsService = new DailyAnalyticsService(this.getDailyNoteService());
-    }
-    return this.dailyAnalyticsService;
-  }
-
-  public getDailyReviewService(): DailyReviewService {
-    if (!this.dailyReviewService) {
-      this.dailyReviewService = new DailyReviewService(
-        this.app,
-        this.getDailyNoteService(),
-        this.getDailySettingsService()
-      );
-    }
-    return this.dailyReviewService;
   }
 
   /**
@@ -333,54 +314,6 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  private async onDailySettingsUpdated(settings: DailySettings): Promise<void> {
-    if (settings.showDailyStatusBar) {
-      await this.ensureDailyStatusBar(settings);
-    } else {
-      this.disposeDailyStatusBar();
-    }
-
-    // Ensure workflow service is running to respond to new settings
-    this.getDailyWorkflowService();
-  }
-
-  private async ensureDailyStatusBar(settingsOverride?: DailySettings): Promise<void> {
-    const settings = settingsOverride || await this.getDailySettingsService().getSettings();
-    if (!settings.showDailyStatusBar) {
-      return;
-    }
-
-    if (!this.dailyStatusBarItem) {
-      this.dailyStatusBarItem = this.addStatusBarItem();
-    }
-
-		if (!this.dailyStatusBar) {
-			this.dailyStatusBar = new DailyStatusBar(
-				this.app,
-				this.getDailyNoteService(),
-				this.getDailySettingsService()
-			);
-      await this.dailyStatusBar.initialize(this.dailyStatusBarItem);
-    } else {
-      this.dailyStatusBar.requestRefresh(true);
-    }
-
-    this.dailyStatusBar?.requestRefresh();
-  }
-
-  private disposeDailyStatusBar(): void {
-    if (this.dailyStatusBar) {
-      this.dailyStatusBar.cleanup();
-      this.dailyStatusBar = null;
-    }
-
-    if (this.dailyStatusBarItem) {
-      this.dailyStatusBarItem.remove();
-      this.dailyStatusBarItem = null;
-    }
-  }
-
-
   private getInitializationTracer(): InitializationTracer {
     if (!this.initializationTracer) {
       this.initializationTracer = new InitializationTracer(() => this.getLogger());
@@ -425,6 +358,10 @@ export default class SystemSculptPlugin extends Plugin {
   
   private async prepareDiagnosticsSession(): Promise<void> {
     if (this.diagnosticsSessionId) {
+      return;
+    }
+
+    if (!PlatformContext.get().supportsEagerVaultWrites()) {
       return;
     }
 
@@ -542,8 +479,9 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
+    void this.writeMobileStartupProbe("onload-entered");
+
     try {
-      registerPiRuntimeBootstrapContext({ plugin: this });
       this.configureLifecycle(loadStart);
       if (!this.lifecycleCoordinator) {
         throw new Error("Lifecycle coordinator failed to initialize");
@@ -559,10 +497,23 @@ export default class SystemSculptPlugin extends Plugin {
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
         failureCount: this.failures.length,
       });
+      void this.writeMobileStartupProbe("onload-complete", {
+        failureCount: this.failures.length,
+      });
     } catch (error) {
       this.failures.push("core initialization");
       onloadPhase.fail(error, {
         failureCount: this.failures.length,
+      });
+      void this.writeMobileStartupProbe("onload-catch", {
+        failureCount: this.failures.length,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+              }
+            : String(error),
       });
 
       tracer.flushOpenPhases("plugin.onload-error");
@@ -617,7 +568,9 @@ export default class SystemSculptPlugin extends Plugin {
         if (!this.storage) {
           this.storage = new StorageManager(this.app, this);
         }
-        await this.prepareDiagnosticsSession();
+        if (PlatformContext.get().supportsEagerVaultWrites()) {
+          await this.prepareDiagnosticsSession();
+        }
       },
     });
 
@@ -751,6 +704,9 @@ export default class SystemSculptPlugin extends Plugin {
       label: "resource monitor",
       optional: true,
       run: () => {
+        if (!PlatformContext.get().supportsEagerVaultWrites()) {
+          return;
+        }
         this.resourceMonitor = new ResourceMonitorService(this, {
           metricsFileName: this.diagnosticsMetricsFileName,
           sessionId: this.diagnosticsSessionId ?? undefined,
@@ -764,6 +720,9 @@ export default class SystemSculptPlugin extends Plugin {
       label: "storage",
       optional: true,
       run: () => {
+        if (!PlatformContext.get().supportsEagerVaultWrites()) {
+          return;
+        }
         this.scheduleStorageInitialization(tracer);
       },
     });
@@ -811,46 +770,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
-    coordinator.registerTask("layout", {
-      id: "pi.runtime.prewarm",
-      label: "Pi runtime bootstrap",
-      optional: true,
-      diagnostics: {
-        slowThresholdMs: 30_000,
-        timeoutMs: 120_000,
-      },
-      run: async () => {
-        if (!Platform.isDesktopApp) {
-          return;
-        }
-
-        const tracer = this.getInitializationTracer();
-        await new Promise<void>((resolve) => {
-          const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
-          timer(() => {
-            const piRuntimePhase = tracer.startPhase("pi.runtime.prewarm", {
-              slowThresholdMs: 6000,
-              timeoutMs: 90000,
-              successLevel: "debug",
-            });
-
-            this.runAfterIdleAsync(() => ensureBundledPiRuntime({ plugin: this }), 1500)
-              .then(({ result }) => {
-                piRuntimePhase.complete({
-                  installedRuntime: result.installedRuntime,
-                  packageCount: result.packageCount,
-                });
-                resolve();
-              })
-              .catch((error) => {
-                piRuntimePhase.fail(error);
-                resolve();
-              });
-          }, 5000);
-        });
-      },
-    });
-
     coordinator.registerTask("layout", {
       id: "updates.schedule",
       label: "version check",
@@ -978,7 +897,6 @@ export default class SystemSculptPlugin extends Plugin {
           source: "SystemSculptPlugin",
           method: "runCriticalInitialization",
         });
-        throw failureError;
       });
 
     this.deferredInitializationPromise = this.criticalInitializationPromise.then(async () => {
@@ -995,7 +913,6 @@ export default class SystemSculptPlugin extends Plugin {
         source: "SystemSculptPlugin",
         method: "runDeferredInitialization",
       });
-      throw failureError;
     });
   }
 
@@ -1113,7 +1030,6 @@ export default class SystemSculptPlugin extends Plugin {
     details.push(`\nInitialization State:`);
     details.push(`- Directory Manager Initialized: ${this.directoryManager?.isInitialized() || false}`);
     details.push(`- Settings Loaded: ${!!this.settings}`);
-    details.push(`- Template Manager: ${!!this.templateManager}`);
 
     // Add directory verification info if available
     if (this.directoryManager) {
@@ -1278,6 +1194,13 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.directoryManager = new DirectoryManager(this.app, this);
+      if (!PlatformContext.get().supportsEagerVaultWrites()) {
+        phase.complete({
+          deferred: true,
+        });
+        return;
+      }
+
       await this.directoryManager.initialize();
 
       logger.info("Directory manager initialized", {
@@ -1441,8 +1364,7 @@ export default class SystemSculptPlugin extends Plugin {
       this._internal_settings_systemsculpt_plugin = settingsManager.getSettings();
 
       try {
-        const { StandardModelSelectionModal } = await import("./modals/StandardModelSelectionModal");
-        StandardModelSelectionModal.cleanupProviderPreferences(this);
+        this.cleanupLegacySelectedModelProvidersPreference();
       } catch (cleanupError) {
         logger.debug("No standard model preference cleanup needed", {
           source: "SystemSculptPlugin",
@@ -1494,6 +1416,15 @@ export default class SystemSculptPlugin extends Plugin {
         },
       });
     }
+  }
+
+  private cleanupLegacySelectedModelProvidersPreference(): void {
+    if (!this.settings.selectedModelProviders?.length) {
+      return;
+    }
+
+    this.settings.selectedModelProviders = [];
+    void this.saveSettings();
   }
 
   private async initializeBasicServices() {
@@ -1554,23 +1485,20 @@ export default class SystemSculptPlugin extends Plugin {
       this.ensureSettingsTab();
 
       if (!this.directoryManager) {
-        await this.initializeDirectories();
+        this.directoryManager = new DirectoryManager(this.app, this);
       } else if (!this.directoryManager.isInitialized()) {
-        await this.directoryManager.initialize();
+        if (PlatformContext.get().supportsEagerVaultWrites()) {
+          await this.directoryManager.initialize();
+        }
       }
 
-      this.templateManager = new TemplateManager(this, this.app);
-
-      if (!this.embeddingsStatusBar) {
+      if (PlatformContext.get().supportsStatusBar() && !this.embeddingsStatusBar) {
         this.embeddingsStatusBar = new EmbeddingsStatusBar(this);
         this.register(() => {
           this.embeddingsStatusBar?.unload();
           this.embeddingsStatusBar = null;
         });
       }
-
-      this.getDailyWorkflowService();
-      await this.ensureDailyStatusBar();
 
       logger.info("Primary UI components ready", {
         source: "SystemSculptPlugin",
@@ -1723,7 +1651,9 @@ export default class SystemSculptPlugin extends Plugin {
         this.transcriptionService = TranscriptionService.getInstance(this);
       }),
       wrap("recorder", "recorder service", () => {
-        this.ensureRecorderService();
+        if (!PlatformContext.get().isMobileRuntime()) {
+          this.ensureRecorderService();
+        }
       }),
       wrap("readwise", "readwise service", () => {
         if (this.settings.readwiseEnabled) {
@@ -1731,7 +1661,9 @@ export default class SystemSculptPlugin extends Plugin {
         }
       }),
       wrap("fileContextMenu", "file context menu service", () => {
-        this.setupFileContextMenuService();
+        if (!PlatformContext.get().isMobileRuntime()) {
+          this.setupFileContextMenuService();
+        }
       }),
       wrap("workflowEngine", "workflow engine service", () => {
         this.ensureWorkflowEngineService();
@@ -1753,6 +1685,7 @@ export default class SystemSculptPlugin extends Plugin {
       return;
     }
 
+    const { FileContextMenuService } = loadFileContextMenuServiceModule();
     this.fileContextMenuService = new FileContextMenuService({
       app: this.app,
       plugin: this,
@@ -1775,9 +1708,13 @@ export default class SystemSculptPlugin extends Plugin {
     try {
       this.licenseManager = new LicenseManager(this, this.app);
       this.resumeChatService = new ResumeChatService(this);
+      const { ViewManager } = loadViewManagerModule();
       this.viewManager = new ViewManager(this, this.app);
       this.viewManager.initialize();
-      this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+      if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
+        this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+      }
+      const { CommandManager } = loadCommandManagerModule();
       this.commandManager = new CommandManager(this, this.app);
       this.commandManager.registerCommands();
 
@@ -1852,8 +1789,6 @@ export default class SystemSculptPlugin extends Plugin {
     // Plugin unloading silently
 
     try {
-      clearPiRuntimeBootstrapContext();
-
       // Embeddings cleanup
       // Clean up version checker service
       if (this.versionCheckerService) {
@@ -1886,13 +1821,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.embeddingsStatusBar.unload();
         this.embeddingsStatusBar = null;
       }
-
-      if (this.dailyWorkflowService) {
-        this.dailyWorkflowService.cleanup();
-        this.dailyWorkflowService = null;
-      }
-
-      this.disposeDailyStatusBar();
 
       if (this.workflowEngineService) {
         this.workflowEngineService.destroy();
@@ -1944,11 +1872,6 @@ export default class SystemSculptPlugin extends Plugin {
       // Cleanup views
       if (this.viewManager) {
         this.viewManager.unloadViews();
-      }
-
-      // Cleanup template manager
-      if (this.templateManager) {
-        this.templateManager.unload();
       }
 
       if (this.fileContextMenuService) {
@@ -2099,7 +2022,7 @@ export default class SystemSculptPlugin extends Plugin {
     return false;
   }
 
-  public openSettingsTab(targetTab: string = "overview"): void {
+  public openSettingsTab(targetTab: string = "account"): void {
     try {
       // @ts-ignore – Obsidian typings omit the settings API
       const settingsApi: any = this.app.setting;
@@ -2118,7 +2041,7 @@ export default class SystemSculptPlugin extends Plugin {
         this.app.workspace.trigger("systemsculpt:settings-focus-tab", targetTab);
       }, focusDelay);
     } catch {
-      new Notice("Open Settings → SystemSculpt AI to configure providers.", 6000);
+      new Notice("Open Settings → SystemSculpt AI to manage your account and plugin preferences.", 6000);
     }
   }
 
@@ -2129,7 +2052,7 @@ export default class SystemSculptPlugin extends Plugin {
   }): Promise<void> {
     const initialBalance = options?.initialBalance ?? null;
     let lastKnownBalance = initialBalance;
-    const settingsTab = options?.settingsTab ?? "overview";
+    const settingsTab = options?.settingsTab ?? "account";
 
     try {
       const { CreditsBalanceModal } = await import("./modals/CreditsBalanceModal");
@@ -2172,6 +2095,7 @@ export default class SystemSculptPlugin extends Plugin {
     if (!this.recorderService) {
       const logger = this.getLogger();
       try {
+        const { RecorderService } = loadRecorderServiceModule();
         const instance = RecorderService.getInstance(this.app, this);
         if (!instance) {
           throw new Error('RecorderService instance unavailable');
@@ -2292,7 +2216,12 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getStudioService(): StudioService {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+      throw new Error("SystemSculpt Studio is desktop-only.");
+    }
+
     if (!this.studioService) {
+      const { StudioService } = loadStudioServiceModule();
       this.studioService = new StudioService(this);
     }
     return this.studioService;
@@ -2428,7 +2357,7 @@ export default class SystemSculptPlugin extends Plugin {
         const nextState = !appAny.isMobile;
         try {
           appAny.emulateMobile(nextState);
-          PlatformContext.get().getDetection().resetCache();
+          PlatformContext.get().resetDetectionCache();
           const status = nextState ? 'enabled' : 'disabled';
           new Notice(`Mobile emulation ${status}.`, 2500);
         } catch (error) {

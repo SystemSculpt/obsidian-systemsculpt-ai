@@ -108,8 +108,7 @@ export class ChatExportModal extends Modal {
       {
         label: 'Overview',
         keys: [
-          { key: 'includeMetadata', label: 'Metadata', description: 'Chat title, timestamps, model, and tool statistics.' },
-          { key: 'includeSystemPrompt', label: 'System prompt', description: 'Export the active system prompt content.' },
+          { key: 'includeMetadata', label: 'Metadata', description: 'Chat title, timestamps, and tool statistics.' },
           { key: 'includeContextFiles', label: 'Context files', description: 'Reference linked files and attachments.' },
         ],
       },

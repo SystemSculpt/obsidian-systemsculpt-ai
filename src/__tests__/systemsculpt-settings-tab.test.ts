@@ -7,8 +7,8 @@ import { buildSettingsTabConfigs } from "../settings/SettingsTabRegistry";
 jest.mock("../settings/SettingsTabRegistry", () => ({
   buildSettingsTabConfigs: jest.fn(() => [
     {
-      id: "overview",
-      label: "Overview",
+      id: "account",
+      label: "Account",
       sections: [
         (parent: HTMLElement) => {
           parent.createDiv({ cls: "setting-item" });
@@ -93,8 +93,8 @@ describe("SystemSculptSettingTab native layout", () => {
     document.body.innerHTML = "";
     (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
       {
-        id: "overview",
-        label: "Overview",
+        id: "account",
+        label: "Account",
         sections: [
           (parent: HTMLElement) => {
             parent.createDiv({ cls: "setting-item" });
@@ -137,23 +137,61 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(tab.containerEl.querySelector(".ss-settings-tab-bar")).not.toBeNull();
   });
 
+  it("describes the plugin as a SystemSculpt client instead of a provider shell", async () => {
+    const tab = await renderTab();
+    const text = tab.containerEl.textContent || "";
+    expect(text).toContain("Manage your SystemSculpt account");
+    expect(text).not.toContain("Configure AI models");
+  });
+
+  it("does not render the legacy settings mode control", async () => {
+    const tab = await renderTab();
+    const text = tab.containerEl.textContent || "";
+
+    expect(text).not.toContain("Settings mode");
+    expect(Array.from(tab.containerEl.querySelectorAll(".setting-item-name")).some((el) => el.textContent?.trim() === "Settings mode")).toBe(false);
+  });
+
+  it("keeps quick actions out of the top-level settings shell", async () => {
+    const tab = await renderTab();
+    expect(Array.from(tab.containerEl.querySelectorAll(".setting-item-name")).some((el) => el.textContent?.trim() === "Quick actions")).toBe(false);
+  });
+
+  it("builds feedback payloads around SystemSculpt access instead of provider choices", () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "license_test";
+    plugin.settings.selectedProvider = "custom-provider";
+    plugin.settings.selectedModelId = "openai@@gpt-4.1";
+    plugin.settings.customProviders = [{ name: "Legacy Provider", isEnabled: true }];
+
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const url = (tab as any).generateFeedbackUrl();
+    const body = decodeURIComponent(url.split("&body=")[1] || "");
+
+    expect(body).toContain("SystemSculpt access: Active");
+    expect(body).not.toContain("AI Provider:");
+    expect(body).not.toContain("AI Model:");
+    expect(body).not.toContain("Custom providers enabled:");
+  });
+
   it("preserves active tab across settings rerenders", async () => {
     (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
       {
-        id: "overview",
-        label: "Overview",
+        id: "account",
+        label: "Account",
         sections: [
           (parent: HTMLElement) => {
-            parent.createDiv({ cls: "setting-item", text: "Overview item" });
+            parent.createDiv({ cls: "setting-item", text: "Account item" });
           },
         ],
       },
       {
-        id: "embeddings",
-        label: "Embeddings",
+        id: "knowledge",
+        label: "Knowledge",
         sections: [
           (parent: HTMLElement) => {
-            parent.createDiv({ cls: "setting-item", text: "Embeddings item" });
+            parent.createDiv({ cls: "setting-item", text: "Knowledge item" });
           },
         ],
       },
@@ -163,18 +201,18 @@ describe("SystemSculptSettingTab native layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     await tab.display();
 
-    const embeddingsButton = tab.containerEl.querySelector('button[data-tab="embeddings"]') as HTMLElement | null;
-    expect(embeddingsButton).not.toBeNull();
-    embeddingsButton?.click();
+    const knowledgeButton = tab.containerEl.querySelector('button[data-tab="knowledge"]') as HTMLElement | null;
+    expect(knowledgeButton).not.toBeNull();
+    knowledgeButton?.click();
 
     await tab.display();
 
-    const embeddingsButtonAfter = tab.containerEl.querySelector('button[data-tab="embeddings"]') as HTMLElement | null;
-    const embeddingsPanelAfter = tab.containerEl.querySelector(
-      '.systemsculpt-tab-content[data-tab="embeddings"]'
+    const knowledgeButtonAfter = tab.containerEl.querySelector('button[data-tab="knowledge"]') as HTMLElement | null;
+    const knowledgePanelAfter = tab.containerEl.querySelector(
+      '.systemsculpt-tab-content[data-tab="knowledge"]'
     ) as HTMLElement | null;
 
-    expect(embeddingsButtonAfter?.classList.contains("mod-active")).toBe(true);
-    expect(embeddingsPanelAfter?.classList.contains("is-active")).toBe(true);
+    expect(knowledgeButtonAfter?.classList.contains("mod-active")).toBe(true);
+    expect(knowledgePanelAfter?.classList.contains("is-active")).toBe(true);
   });
 });

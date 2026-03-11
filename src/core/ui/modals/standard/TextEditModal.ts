@@ -20,7 +20,7 @@ export interface TextEditOptions {
 
 /**
  * TextEditModal is a standardized modal for editing text,
- * such as system prompts, templates, etc.
+ * such as system prompts, saved snippets, etc.
  */
 export class TextEditModal extends StandardModal {
   private options: TextEditOptions;
@@ -252,4 +252,4 @@ export class TextEditModal extends StandardModal {
     // Clean up
     super.onClose();
   }
-} 
+}

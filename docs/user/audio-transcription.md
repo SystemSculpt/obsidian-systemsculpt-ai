@@ -1,10 +1,12 @@
 # Audio and transcription
 
-SystemSculpt supports in-app recording plus transcription workflows.
+SystemSculpt handles in-app recording and transcription workflows inside Obsidian.
 
 ## Configure
 
-Open `Settings -> SystemSculpt AI -> Audio & Transcription`.
+Open `Settings -> SystemSculpt AI -> Workflow`.
+
+Audio and transcription settings now live inside the `Workflow` tab.
 
 Recording controls include:
 
@@ -18,10 +20,10 @@ Recording controls include:
 
 Transcription controls include:
 
-- Provider selection (`SystemSculpt API` or `Custom`)
+- SystemSculpt transcription
 - Optional auto audio format conversion (advanced/desktop path)
-- Custom endpoint/API key/model fields (advanced mode)
-- Provider presets for custom mode (`Groq`, `OpenAI`, `Local`)
+- Default output format (`Markdown` or `SRT`)
+- Output format chooser toggle
 
 ## Commands and ribbon
 
@@ -35,12 +37,11 @@ Transcription controls include:
 
 ## Pipeline behavior notes
 
-- Desktop + SystemSculpt API uses a server-side jobs pipeline (large-file capable).
+- Desktop uses the SystemSculpt jobs pipeline for larger files.
 - Mobile/direct upload paths have stricter request-size constraints.
-- Custom-provider path uses direct upload and chunks audio when required.
 
 ## If transcription fails
 
-1. If you use SystemSculpt API, re-run license validation and retry the request.
-2. If you use a custom provider, verify credentials and endpoint configuration.
-3. For custom local servers, verify local reachability from Obsidian.
+1. Re-run license validation and retry the request.
+2. Confirm credits or quota are still available for your SystemSculpt account.
+3. If you are on desktop, retry once with automatic audio conversion enabled for incompatible source files.

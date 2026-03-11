@@ -98,10 +98,6 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
 import {
-  openStudioPiSetupWizard,
-  type StudioPiSetupWizardIssue,
-} from "./StudioPiSetupWizardModal";
-import {
   deriveStudioNoteTitleFromPath,
   ensureStudioNoteConfigItems,
   parseStudioNoteItems,
@@ -171,8 +167,9 @@ import {
   remapPathScopedRecord,
   resolveProjectPathAfterFolderRename,
 } from "./systemsculpt-studio-view/StudioProjectPathState";
+import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 
-export const SYSTEMSCULPT_STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
+export { SYSTEMSCULPT_STUDIO_VIEW_TYPE };
 
 const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
   x: 36,
@@ -193,14 +190,6 @@ type SystemSculptStudioViewState = {
 
 type StudioRunGraphOptions = {
   fromNodeId?: string;
-  skipPiSetupWizard?: boolean;
-};
-
-type StudioPiSetupErrorContext = {
-  issue: StudioPiSetupWizardIssue;
-  message: string;
-  modelId: string;
-  provider: string;
 };
 
 type StudioTerminalRenderCandidate = {
@@ -1441,106 +1430,6 @@ export class SystemSculptStudioView extends ItemView {
       return firstLine;
     }
     return `${firstLine.slice(0, 217)}...`;
-  }
-
-  private extractProviderFromModelId(modelId: string): string {
-    const trimmed = String(modelId || "").trim();
-    if (!trimmed) {
-      return "";
-    }
-    const slash = trimmed.indexOf("/");
-    if (slash <= 0) {
-      return "";
-    }
-    return trimmed.slice(0, slash).trim().toLowerCase();
-  }
-
-  private extractPiSetupErrorContext(error: unknown): StudioPiSetupErrorContext | null {
-    const rawMessage = error instanceof Error ? error.message : String(error || "");
-    const message = this.normalizeEscapedNewlines(rawMessage);
-    const normalized = message.trim().toLowerCase();
-    if (!normalized) {
-      return null;
-    }
-    const piSignals = [
-      "local (pi)",
-      "spawn pi enoent",
-      "pi cli not found",
-      "agent-session.js:556",
-      "no api key found for",
-      "pi /login",
-    ];
-    if (!piSignals.some((signal) => normalized.includes(signal))) {
-      return null;
-    }
-
-    let issue: StudioPiSetupWizardIssue = "runtime_error";
-    if (
-      normalized.includes("pi cli not found") ||
-      normalized.includes("spawn pi enoent") ||
-      normalized.includes("pi: command not found") ||
-      normalized.includes("command not found: pi")
-    ) {
-      issue = "missing_cli";
-    } else if (normalized.includes("personal access tokens are not supported for this endpoint")) {
-      issue = "token_type";
-    } else if (
-      normalized.includes("provider authentication is missing or invalid") ||
-      normalized.includes("no api key found for") ||
-      normalized.includes("authentication failed") ||
-      normalized.includes("use /login")
-    ) {
-      issue = "provider_auth";
-    }
-
-    const modelIdMatch = /model\s+"([^"]+)"/i.exec(message);
-    const modelId = modelIdMatch ? String(modelIdMatch[1] || "").trim() : "";
-    const providerFromError =
-      /no api key found for\s+([a-z0-9._-]+)/i.exec(message)?.[1]?.trim().toLowerCase() ||
-      /pi\s+\/login\s+([a-z0-9._-]+)/i.exec(message)?.[1]?.trim().toLowerCase() ||
-      "";
-    const provider = providerFromError || this.extractProviderFromModelId(modelId);
-
-    return {
-      issue,
-      message,
-      modelId,
-      provider,
-    };
-  }
-
-  private async tryOpenPiSetupWizardAndRetry(
-    options: StudioRunGraphOptions | undefined,
-    error: unknown
-  ): Promise<"retry" | "dismiss" | null> {
-    if (options?.skipPiSetupWizard) {
-      return null;
-    }
-
-    const context = this.extractPiSetupErrorContext(error);
-    if (!context) {
-      return null;
-    }
-
-    const outcome = await openStudioPiSetupWizard({
-      app: this.app,
-      plugin: this.plugin,
-      issue: context.issue,
-      modelId: context.modelId,
-      provider: context.provider,
-      errorMessage: context.message,
-      projectPath: this.currentProjectPath,
-      onLog: (label, details) => {
-        this.logStudioConsoleError(label, details);
-      },
-    });
-    if (outcome.action !== "retry") {
-      return "dismiss";
-    }
-    await this.runGraph({
-      fromNodeId: options?.fromNodeId,
-    });
-    return "retry";
   }
 
   private handleRunEvent(event: StudioRunEvent): void {
@@ -2790,15 +2679,7 @@ export class SystemSculptStudioView extends ItemView {
         );
       }
     } catch (error) {
-      const wizardAction = await this.tryOpenPiSetupWizardAndRetry(options, error);
-      if (wizardAction === "retry") {
-        return;
-      }
       const errorMessage = error instanceof Error ? error.message : String(error);
-      if (wizardAction === "dismiss") {
-        this.runPresentation.failBeforeRun(errorMessage);
-        return;
-      }
       this.runPresentation.failBeforeRun(errorMessage);
       this.setError(error);
     } finally {

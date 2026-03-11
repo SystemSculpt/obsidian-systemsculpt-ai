@@ -8,7 +8,7 @@ import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
 export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
   if (containerEl.classList.contains('systemsculpt-tab-content')) {
-    containerEl.dataset.tab = "backup";
+    containerEl.dataset.tab = "workspace";
   }
   const { app, plugin } = tabInstance;
 
@@ -16,7 +16,7 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
   new Setting(containerEl)
     .setName('Automatic backups')
-    .setDesc('Create a backup every 24 hours. Backups include providers, favorites, and preferences, but exclude secret keys and tokens.')
+    .setDesc('Create a backup every 24 hours. Backups include SystemSculpt preferences and feature settings, but exclude secret keys and tokens.')
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.automaticBackupsEnabled)
@@ -72,13 +72,9 @@ Continue?`
           try {
             const backupData = await plugin.app.vault.adapter.read(selectedBackupPath);
             const backupSettings = JSON.parse(backupData);
-            const customProviders = Array.isArray(backupSettings.customProviders) ? backupSettings.customProviders.length : 0;
-            const favoriteModels = Array.isArray(backupSettings.favoriteModels) ? backupSettings.favoriteModels.length : 0;
-            const selectedModel = backupSettings.selectedModelId ? String(backupSettings.selectedModelId).split(':').pop() : 'Default';
             const details = `This backup contains:
-• ${customProviders} custom provider${customProviders === 1 ? '' : 's'}
-• ${favoriteModels} favorite model${favoriteModels === 1 ? '' : 's'}
-• Selected model: ${selectedModel}
+• Chat display defaults and client-side workspace preferences
+• Embeddings, audio, and automation settings
 • License status: ${backupSettings.licenseValid ? 'Active' : 'Inactive'}`;
             await confirmRestore(details);
           } catch (error) {
@@ -114,5 +110,5 @@ Continue?`
 
   new Setting(containerEl)
     .setName('Tips')
-    .setDesc('Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share configurations.');
+    .setDesc('Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share your SystemSculpt configuration.');
 }

@@ -390,7 +390,7 @@ export class MeetingProcessorModal extends StandardModal {
     });
 
     const nameRow = destCol.createDiv({ cls: "ss-meeting-processor__field" });
-    nameRow.createDiv({ cls: "ss-meeting-processor__field-label", text: "Filename template" });
+    nameRow.createDiv({ cls: "ss-meeting-processor__field-label", text: "Filename pattern" });
     const nameInput = nameRow.createEl("input", {
       type: "text",
       value: this.plugin.settings.meetingProcessorOutputNameTemplate || "{{basename}}-processed.md",

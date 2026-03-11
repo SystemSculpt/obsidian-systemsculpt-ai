@@ -59,9 +59,8 @@ describe("StudioPermissionManager", () => {
     });
 
     const manager = new StudioPermissionManager(policy);
-    expect(() => manager.assertNetworkUrl("https://api.systemsculpt.com/api/v1/agent/sessions")).not.toThrow();
+    expect(() => manager.assertNetworkUrl("https://api.systemsculpt.com/api/v1/chat/completions")).not.toThrow();
     expect(() => manager.assertNetworkUrl("http://api.systemsculpt.com")).toThrow("HTTPS");
     expect(() => manager.assertNetworkUrl("https://example.com")).toThrow("Network permission denied");
   });
 });
-

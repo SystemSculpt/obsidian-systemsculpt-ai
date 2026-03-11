@@ -310,9 +310,28 @@ class Plugin extends Component {
     this._commands = [];
     this._views = new Map();
     this._settingTabs = [];
-    this._ribbons = [];
     this._editorExtensions = [];
     this._extensions = [];
+    this._ribbonEl = document.createElement("div");
+    this._ribbonEl.className = "workspace-ribbon side-dock-ribbon mod-left";
+    this._ribbonActionsEl = document.createElement("div");
+    this._ribbonActionsEl.className = "side-dock-actions";
+    this._ribbonSettingsEl = document.createElement("div");
+    this._ribbonSettingsEl.className = "side-dock-settings";
+    this._ribbonEl.append(this._ribbonActionsEl, this._ribbonSettingsEl);
+    document.body.appendChild(this._ribbonEl);
+    Object.defineProperty(this, "_ribbons", {
+      configurable: true,
+      enumerable: true,
+      get: () => Array.from(this._ribbonActionsEl.querySelectorAll(".side-dock-ribbon-action")),
+    });
+    this.register(() => {
+      try {
+        this._ribbonEl.remove();
+      } catch (_) {
+        // ignore cleanup failures
+      }
+    });
   }
 
   addCommand(command) {
@@ -326,20 +345,15 @@ class Plugin extends Component {
   }
 
   addRibbonIcon(icon, title, callback) {
-    const ribbon = {
-      icon,
-      title,
-      callback,
-      removed: false,
-      remove: () => {
-        if (ribbon.removed) {
-          return;
-        }
-        ribbon.removed = true;
-        this._ribbons = this._ribbons.filter((item) => item !== ribbon);
-      },
-    };
-    this._ribbons.push(ribbon);
+    const ribbon = document.createElement("div");
+    ribbon.className = "clickable-icon side-dock-ribbon-action";
+    ribbon.setAttribute("aria-label", title);
+    ribbon.title = title;
+    ribbon.dataset.tooltipPosition = "right";
+    ribbon.dataset.tooltipDelay = "300";
+    ribbon.icon = icon;
+    ribbon.callback = callback;
+    this._ribbonActionsEl.prepend(ribbon);
     return ribbon;
   }
 

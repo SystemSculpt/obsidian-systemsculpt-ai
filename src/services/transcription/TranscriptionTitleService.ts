@@ -1,6 +1,9 @@
 import { App, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { ensureCanonicalId } from "../../utils/modelUtils";
+import {
+  getManagedSystemSculptModelId,
+  hasManagedSystemSculptAccess,
+} from "../systemsculpt/ManagedSystemSculptModel";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 
 const TITLE_PROMPT = [
@@ -72,12 +75,11 @@ export class TranscriptionTitleService {
 
   public async tryGenerateTitle(transcriptText: string): Promise<string | null> {
     try {
-      const rawModelId = this.plugin.settings.selectedModelId?.trim() || "";
-      if (!rawModelId) {
+      if (!hasManagedSystemSculptAccess(this.plugin)) {
         return null;
       }
 
-      const model = ensureCanonicalId(rawModelId);
+      const model = getManagedSystemSculptModelId();
       const excerpt = this.buildTitleContext(transcriptText);
       if (!excerpt.trim()) {
         return null;

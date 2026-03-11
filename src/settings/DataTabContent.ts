@@ -16,22 +16,15 @@ export function displayDataTabContent(
 ) {
   containerEl.empty();
   if (containerEl.classList.contains("systemsculpt-tab-content")) {
-    containerEl.dataset.tab = "data";
+    containerEl.dataset.tab = "readwise";
   }
   const { plugin } = tabInstance;
 
-  // Header
-  containerEl.createEl("h3", { text: "Data Imports" });
+  containerEl.createEl("h3", { text: "Readwise" });
   containerEl.createEl("p", {
-    text: "Import and sync data from external services into your vault.",
+    text: "Import and sync highlights, books, articles, and annotations from Readwise into your vault.",
     cls: "setting-item-description",
   });
-
-  // ============================================================================
-  // Readwise Section
-  // ============================================================================
-
-  containerEl.createEl("h4", { text: "Readwise" });
   renderReadwiseAffiliateNote(containerEl);
 
   // Enable toggle

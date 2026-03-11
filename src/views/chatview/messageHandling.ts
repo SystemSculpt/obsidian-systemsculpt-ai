@@ -69,7 +69,7 @@ export const messageHandling = {
     }
 
     if (chatView.isLegacyReadOnlyChat()) {
-      new Notice("This legacy chat is read-only. Start a new Pi chat to continue from here.");
+      new Notice("This archived chat is read-only. Start a new chat to continue from here.");
       return { status: "error" };
     }
 
@@ -77,7 +77,7 @@ export const messageHandling = {
       try {
         const forkResult = await chatView.forkPiSessionFromMessage(messageId);
         if (forkResult.cancelled) {
-          new Notice("Pi cancelled the fork request for that message.");
+          new Notice("The SystemSculpt session cancelled the branch request for that message.");
           return { status: "cancelled" };
         }
         if (chatView.inputHandler) {
@@ -85,11 +85,11 @@ export const messageHandling = {
           chatView.inputHandler.setValue(piResendText || String(content || "").trim());
           chatView.inputHandler.focus();
         }
-        new Notice("Forked chat to that message and restored it to the composer.");
+        new Notice("Branched chat to that message and restored it to the composer.");
         return { status: "success" };
       } catch (error) {
         new Notice(
-          `Unable to fork Pi session from this message: ${error instanceof Error ? error.message : String(error)}`
+          `Unable to branch this chat from that message: ${error instanceof Error ? error.message : String(error)}`
         );
         return { status: "error" };
       }
@@ -180,12 +180,12 @@ export const messageHandling = {
     
     const editHandler = async (e: CustomEvent) => {
       if (chatView.isLegacyReadOnlyChat()) {
-        new Notice("Editing old legacy chats is disabled. Start a new Pi chat instead.");
+        new Notice("Editing archived chats is disabled. Start a new chat instead.");
         return;
       }
 
       if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
-        new Notice("Editing previous Pi-backed messages isn't supported yet. Fork from that user message instead.");
+        new Notice("Editing earlier SystemSculpt-session messages is not supported yet. Branch from that user message instead.");
         return;
       }
 
@@ -232,12 +232,12 @@ export const messageHandling = {
     
     const deleteHandler = async (e: CustomEvent) => {
       if (chatView.isLegacyReadOnlyChat()) {
-        new Notice("Deleting turns from old legacy chats is disabled. Start a new Pi chat instead.");
+        new Notice("Deleting turns from archived chats is disabled. Start a new chat instead.");
         return;
       }
 
       if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
-        new Notice("Deleting individual messages is disabled for Pi-backed chats. Fork from a user message instead.");
+        new Notice("Deleting individual messages is disabled for SystemSculpt-session chats. Branch from a user message instead.");
         return;
       }
 

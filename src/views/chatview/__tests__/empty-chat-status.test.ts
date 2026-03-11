@@ -23,6 +23,8 @@ describe("ChatView empty chat status", () => {
   const createChatView = (options?: {
     selectedModelId?: string;
     cachedModels?: Array<{ id: string }>;
+    licenseKey?: string;
+    licenseValid?: boolean;
   }) => {
     const app = new App();
     const leaf = new WorkspaceLeaf(app);
@@ -38,6 +40,8 @@ describe("ChatView empty chat status", () => {
       settings: {
         chatsDirectory: "SystemSculpt/Chats",
         selectedModelId: options?.selectedModelId ?? "",
+        licenseKey: options?.licenseKey ?? "license_test",
+        licenseValid: options?.licenseValid ?? true,
         chatFontSize: "medium",
         systemPromptType: "general-use",
         systemPromptPath: "",
@@ -61,10 +65,10 @@ describe("ChatView empty chat status", () => {
     return chatView;
   };
 
-  it("shows a neutral new-chat state when a model is already selected", () => {
+  it("shows a neutral new-chat state with SystemSculpt", () => {
     const chatView = createChatView({
-      selectedModelId: "openai-codex@@gpt-5.3-codex-spark",
-      cachedModels: [{ id: "openai-codex@@gpt-5.3-codex-spark" }],
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      cachedModels: [{ id: "systemsculpt@@systemsculpt/ai-agent" }],
     });
 
     chatView.displayChatStatus();
@@ -79,16 +83,19 @@ describe("ChatView empty chat status", () => {
 
     expect(statusText).toContain("New chat");
     expect(statusText).toContain("Ready");
+    expect(statusText).toContain("SystemSculpt");
+    expect(statusText).not.toContain("Model");
     expectNoStandalonePiCopy(statusText);
-    expect(actionLabels).toContain("Switch Model");
+    expect(actionLabels).not.toContain("Switch Model");
+    expect(actionLabels).not.toContain("Switch Prompt");
     expect(actionLabels).not.toContain("Choose Model");
     expect(actionLabels).not.toContain("Copy Log Paths");
     expect(primaryAction).toBe("Add Context");
   });
 
-  it("treats a saved model selection as configured even when the model cache is still cold", () => {
+  it("keeps the managed model state even when the model cache is still cold", () => {
     const chatView = createChatView({
-      selectedModelId: "openai-codex@@gpt-5.3-codex-spark",
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
       cachedModels: [],
     });
 
@@ -96,14 +103,16 @@ describe("ChatView empty chat status", () => {
 
     const statusText = chatView.chatContainer.textContent || "";
     expect(statusText).toContain("New chat");
-    expect(statusText).toContain("Switch Model");
+    expect(statusText).toContain("SystemSculpt");
+    expect(statusText).not.toContain("Model");
     expect(statusText).not.toContain("Finish setup");
+    expect(statusText).not.toContain("Prompt");
   });
 
-  it("keeps model selection guidance when providers are ready but no model is selected", () => {
+  it("does not ask the user to choose a model when setup is complete", () => {
     const chatView = createChatView({
       selectedModelId: "",
-      cachedModels: [{ id: "openai-codex@@gpt-5.3-codex-spark" }],
+      cachedModels: [{ id: "systemsculpt@@systemsculpt/ai-agent" }],
     });
 
     chatView.displayChatStatus();
@@ -113,17 +122,22 @@ describe("ChatView empty chat status", () => {
       chatView.chatContainer.querySelectorAll(".systemsculpt-chat-status-action-label")
     ).map((el) => el.textContent?.trim());
 
-    expect(statusText).toContain("Choose a model");
-    expect(statusText).toContain("Almost ready");
+    expect(statusText).toContain("New chat");
+    expect(statusText).toContain("Ready");
+    expect(statusText).toContain("SystemSculpt");
+    expect(statusText).not.toContain("Model");
     expectNoStandalonePiCopy(statusText);
-    expect(actionLabels).toContain("Choose Model");
-    expect(actionLabels).not.toContain("Add Context");
+    expect(actionLabels).not.toContain("Choose Model");
+    expect(actionLabels).not.toContain("Switch Prompt");
+    expect(actionLabels).toContain("Add Context");
   });
 
-  it("uses generic setup wording when providers are not configured", () => {
+  it("uses SystemSculpt license setup wording when access is not configured", () => {
     const chatView = createChatView({
       selectedModelId: "",
       cachedModels: [],
+      licenseKey: "",
+      licenseValid: false,
     });
 
     chatView.displayChatStatus();
@@ -135,9 +149,30 @@ describe("ChatView empty chat status", () => {
 
     expect(statusText).toContain("Finish setup");
     expect(statusText).toContain("Setup required");
-    expect(statusText).toContain("Connect a provider, then choose a model.");
+    expect(statusText).toContain("Add and validate your SystemSculpt license to start chatting.");
     expectNoStandalonePiCopy(statusText);
-    expect(actionLabels).toContain("Open Setup");
+    expect(actionLabels).toContain("Open Account");
     expect(actionLabels).toHaveLength(1);
+  });
+
+  it("does not persist model or prompt selection into new leaf state", () => {
+    const chatView = createChatView({
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      cachedModels: [{ id: "systemsculpt@@systemsculpt/ai-agent" }],
+    });
+    chatView.chatId = "chat-123";
+    chatView.chatTitle = "Test Chat";
+
+    const state = chatView.getState();
+
+    expect(state).toEqual(
+      expect.objectContaining({
+        chatId: "chat-123",
+        chatTitle: "Test Chat",
+      })
+    );
+    expect(state).not.toHaveProperty("selectedModelId");
+    expect(state).not.toHaveProperty("systemPromptType");
+    expect(state).not.toHaveProperty("systemPromptPath");
   });
 });

@@ -3,10 +3,14 @@
  * Provides detailed information about mobile devices, their capabilities, and limitations
  */
 
-import { Platform } from 'obsidian';
+import {
+  detectPlatformEnvironment,
+  type PlatformEnvironment,
+} from "./PlatformEnvironment";
 
 export interface MobileDeviceInfo {
   isMobile: boolean;
+  environment: PlatformEnvironment;
   platform: {
     name: string;
     version: string;
@@ -93,6 +97,18 @@ export class MobileDetection {
     return this.getDeviceInfo().isMobile;
   }
 
+  public isDesktopRuntime(): boolean {
+    return this.getEnvironment().runtime === "desktop";
+  }
+
+  public isNativeMobileRuntime(): boolean {
+    return this.getEnvironment().runtime === "mobile";
+  }
+
+  public getEnvironment(): PlatformEnvironment {
+    return detectPlatformEnvironment();
+  }
+
   /**
    * Check if device has resource constraints
    */
@@ -109,35 +125,19 @@ export class MobileDetection {
 
   private detectDeviceInfo(): MobileDeviceInfo {
     const userAgent = navigator.userAgent;
+    const environment = this.getEnvironment();
     const platform = this.detectPlatform(userAgent);
     const device = this.detectDevice(userAgent);
-    const mobileUserAgent = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-    const appAny = (typeof window !== 'undefined' ? (window as any)?.app : undefined);
-    const isMobileEmulation = Boolean(appAny?.isMobile && typeof appAny?.emulateMobile === 'function');
     const capabilities = this.detectCapabilities();
     const network = this.detectNetwork();
     const performance = this.detectPerformance();
     const limitations = this.detectLimitations(device, capabilities, network, performance);
     const npm = this.detectNpmIssues(platform.os, device.type, limitations);
-
-    const platformSignals = Boolean(
-      Platform?.isMobileApp ||
-      Platform?.isAndroidApp ||
-      Platform?.isIosApp ||
-      Platform?.isMobile === true ||
-      (Platform?.isMobile && (Platform?.isDesktopApp !== true || isMobileEmulation || mobileUserAgent)) ||
-      isMobileEmulation
-    );
-
-    const isMobile = platformSignals ||
-                    device.type === 'smartphone' ||
-                    device.type === 'tablet' ||
-                    platform.os === 'iOS' ||
-                    platform.os === 'Android' ||
-                    mobileUserAgent;
+    const isMobile = environment.surface === "mobile";
 
     return {
       isMobile,
+      environment,
       platform,
       device,
       capabilities,

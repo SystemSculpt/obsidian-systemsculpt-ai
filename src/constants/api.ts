@@ -29,6 +29,9 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
     LIST: "/models",
     GET: (modelId: string) => `/models/${modelId}`,
   },
+  CHAT: {
+    COMPLETIONS: "/chat/completions",
+  },
   CREDITS: {
     BALANCE: "/credits/balance",
     USAGE: "/credits/usage",

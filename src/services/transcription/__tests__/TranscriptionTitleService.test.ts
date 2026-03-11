@@ -4,6 +4,16 @@
 
 import { buildPercentileExcerpt, TranscriptionTitleService } from "../TranscriptionTitleService";
 
+const mockStreamMessage = jest.fn();
+
+jest.mock("../../SystemSculptService", () => ({
+  SystemSculptService: {
+    getInstance: jest.fn(() => ({
+      streamMessage: mockStreamMessage,
+    })),
+  },
+}));
+
 describe("buildPercentileExcerpt", () => {
   it("returns the full text when under the limit", () => {
     expect(buildPercentileExcerpt("hello world", 500)).toBe("hello world");
@@ -22,6 +32,7 @@ describe("buildPercentileExcerpt", () => {
 describe("TranscriptionTitleService", () => {
   beforeEach(() => {
     (TranscriptionTitleService as any).instance = null;
+    mockStreamMessage.mockReset();
   });
 
   describe("getInstance", () => {
@@ -123,22 +134,43 @@ describe("TranscriptionTitleService", () => {
   });
 
   describe("tryGenerateTitle", () => {
-    it("returns null when no model is configured", async () => {
-      const plugin: any = { settings: { selectedModelId: "" } };
+    it("returns null when no active SystemSculpt license is configured", async () => {
+      const plugin: any = { settings: { licenseKey: "", licenseValid: false } };
       (TranscriptionTitleService as any).instance = null;
       const service = TranscriptionTitleService.getInstance(plugin);
 
       const result = await service.tryGenerateTitle("some transcript");
       expect(result).toBeNull();
+      expect(mockStreamMessage).not.toHaveBeenCalled();
     });
 
     it("returns null for empty transcript", async () => {
-      const plugin: any = { settings: { selectedModelId: "gpt-4" } };
+      const plugin: any = { settings: { licenseKey: "valid-license", licenseValid: true } };
       (TranscriptionTitleService as any).instance = null;
       const service = TranscriptionTitleService.getInstance(plugin);
 
       const result = await service.tryGenerateTitle("");
       expect(result).toBeNull();
+    });
+
+    it("uses the managed SystemSculpt model when access is available", async () => {
+      const plugin: any = { settings: { licenseKey: "valid-license", licenseValid: true } };
+      mockStreamMessage.mockReturnValue(
+        (async function* () {
+          yield { type: "content", text: "Useful Transcript Title" };
+        })()
+      );
+
+      const service = TranscriptionTitleService.getInstance(plugin);
+      const result = await service.tryGenerateTitle("Transcript body");
+
+      expect(result).toBe("Useful Transcript Title");
+      expect(mockStreamMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "systemsculpt@@systemsculpt/ai-agent",
+          systemPromptOverride: expect.stringContaining("audio transcripts"),
+        })
+      );
     });
   });
 
@@ -329,4 +361,3 @@ describe("buildPercentileExcerpt edge cases", () => {
     expect(result).not.toContain("\r");
   });
 });
-

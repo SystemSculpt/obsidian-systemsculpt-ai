@@ -1,6 +1,5 @@
 import { JSDOM } from "jsdom";
 import {
-  handleAgentSelectionDetection,
   handleAtMentionDetection,
   handleInputChange,
   handleKeyDown,
@@ -175,29 +174,27 @@ describe("UIKeyHandlers", () => {
     expect(setPendingLargeTextContent).toHaveBeenCalledWith(null);
   });
 
-  it("shows agent menu and hides slash menu for /agent prefix", () => {
+  it("treats /agent like a normal slash query now that prompt switching is removed", () => {
     const input = createInput();
     input.value = "/agent ";
     input.selectionStart = input.value.length;
 
-    const agentSelectionMenu = {
+    const slashCommandMenu = {
       isOpen: jest.fn(() => false),
       show: jest.fn(),
-      hide: jest.fn(),
-    };
-    const slashCommandMenu = {
-      isOpen: jest.fn(() => true),
+      updateQuery: jest.fn(),
       hide: jest.fn(),
     };
 
-    handleAgentSelectionDetection({
+    handleInputChange({
       input,
-      agentSelectionMenu,
+      adjustInputHeight: jest.fn(),
       slashCommandMenu,
-    });
+      setPendingLargeTextContent: jest.fn(),
+    } as any);
 
-    expect(agentSelectionMenu.show).toHaveBeenCalledWith(input.selectionStart);
-    expect(slashCommandMenu.hide).toHaveBeenCalled();
+    expect(slashCommandMenu.show).toHaveBeenCalledWith("agent ");
+    expect(slashCommandMenu.hide).not.toHaveBeenCalled();
   });
 
   it("shows slash command menu when leading slash typed", () => {

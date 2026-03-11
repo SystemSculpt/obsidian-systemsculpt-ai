@@ -1,18 +1,16 @@
 import { Notice, TFile, setIcon } from "obsidian";
 import { ChatView } from "./ChatView";
 import { ChatMessage, ToolCall, type SystemSculptSettings } from "../../types";
-import { StandardModelSelectionModal, ModelSelectionResult } from "../../modals/StandardModelSelectionModal";
-import { showPopup } from "../../core/ui/";
 import { FileContextManager } from "./FileContextManager";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { InputHandler } from "./InputHandler";
 import { ensureCanonicalId, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
 import { attachOverlapInsetManager } from "../../core/ui/services/OverlapInsetService";
 import {
-  renderChatCreditsIndicator,
-  renderChatModelIndicator,
-  renderChatPromptIndicator,
-} from "./ui/ChatComposerIndicators";
+  getManagedSystemSculptModelId,
+  isManagedSystemSculptModelId,
+} from "../../services/systemsculpt/ManagedSystemSculptModel";
+import { renderChatCreditsIndicator } from "./ui/ChatComposerIndicators";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Utility helpers for desktop Pi chat UI
@@ -274,9 +272,7 @@ export const uiSetup = {
       container,
       aiService: chatView.aiService,
       getMessages: () => chatView.getMessages(),
-      getSelectedModelId: () => chatView.selectedModelId,
       getContextFiles: () => chatView.contextManager.getContextFiles(),
-      getSystemPrompt: () => ({ type: chatView.systemPromptType, path: chatView.systemPromptPath }),
       isChatReady: () => !chatView.chatId || chatView.isFullyLoaded,
       chatContainer: chatView.chatContainer,
       scrollManager: chatView.scrollManager,
@@ -356,7 +352,7 @@ export const uiSetup = {
       onAddContextFile: () => {
         chatView.contextManager.addContextFile();
       },
-      onEditSystemPrompt: () => chatView.handleSystemPromptEdit(),
+      onOpenChatSettings: () => chatView.handleOpenChatSettings(),
       plugin: chatView.plugin,
       getChatMarkdown: () => chatView.exportChatAsMarkdown(),
       getChatTitle: () => chatView.getChatTitle(),
@@ -390,58 +386,17 @@ export const uiSetup = {
 
     chatView.inputHandler.focus();
 
-    // Initialize model indicator without forcing model fetch. The indicator
-    // will render a lightweight state and fetch only when user opens modal
-    // or when generation begins.
-    void chatView.updateModelIndicator();
-    
-    // Initialize system prompt indicator
-    void chatView.updateSystemPromptIndicator();
     void chatView.updateCreditsIndicator();
 
-    // Check if we need to prompt for initial model selection
-    if (!chatView.plugin.settings.selectedModelId && !chatView.plugin.hasPromptedForDefaultModel) {
-      // Mark that we've prompted to prevent duplicates
-      chatView.plugin.hasPromptedForDefaultModel = true;
-      
-      // Use setTimeout to allow the view to fully render first
-      setTimeout(async () => {
-        const result = await showPopup(
-          chatView.app,
-          "Welcome to SystemSculpt! To get started, please select a default AI model for your chats.",
-          { title: "Select Default Model", icon: "bot", primaryButton: "Choose Model", secondaryButton: "Skip for Now" }
-        );
+    if (!isManagedSystemSculptModelId(chatView.plugin.settings.selectedModelId)) {
+      await chatView.plugin.getSettingsManager().updateSettings({
+        selectedModelId: getManagedSystemSculptModelId(),
+      });
+    }
 
-        if (result?.confirmed) {
-          try {
-            // Open the modal immediately; it will lazy-load models and update progressively
-            const modal = new StandardModelSelectionModal({
-              app: chatView.app,
-              plugin: chatView.plugin,
-              currentModelId: "",
-              onSelect: async (result: ModelSelectionResult) => {
-                // Since this is the initial selection, always set as default
-                await chatView.plugin.getSettingsManager().updateSettings({ selectedModelId: result.modelId });
-                chatView.selectedModelId = result.modelId;
-                await chatView.updateModelIndicator();
-                new Notice("Default model set! You can change this anytime in settings.", 3000);
-              }
-            });
-            modal.open();
-          } catch (error) {
-            new Notice("Failed to open model selector. Please try again from settings.", 5000);
-          }
-        }
-      }, 500); // Small delay to ensure view is ready
-    } else if (chatView.plugin.settings.selectedModelId) {
-      // If we have a default model and this chat doesn't have one set, use the default
-      if (!chatView.selectedModelId) {
-        const useLatestEverywhere = chatView.plugin.settings.useLatestModelEverywhere ?? true;
-        const isStandardMode = chatView.plugin.settings.settingsMode !== 'advanced';
-        if (useLatestEverywhere || isStandardMode) {
-          chatView.selectedModelId = chatView.plugin.settings.selectedModelId;
-        }
-      }
+    if (!isManagedSystemSculptModelId(chatView.selectedModelId)) {
+      chatView.selectedModelId = getManagedSystemSculptModelId();
+      chatView.currentModelName = getDisplayName(chatView.selectedModelId);
     }
 
     // After ensuring Mermaid is enabled, configure theme variables once
@@ -482,229 +437,25 @@ export const uiSetup = {
     }
   },
 
-  /**
-   * Ensures buttons are always in the correct order:
-   * 1. Model button
-   * 2. System Prompt button
-   */
-  ensureButtonOrder: function(chatView: ChatView): void {
-    const container = chatView.containerEl.children[1] as HTMLElement;
-    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    if (!modelSection) return;
-
-    // Clear the section and re-add buttons in correct order
-    const buttons: HTMLElement[] = [];
-    
-    // 1. Model button (always first)
-    if (chatView.modelIndicator) {
-      buttons.push(chatView.modelIndicator);
-    }
-    
-    // 2. System Prompt button (always second)
-    if (chatView.systemPromptIndicator) {
-      buttons.push(chatView.systemPromptIndicator);
-    }
-
-    // Remove all buttons from the section
-    modelSection.empty();
-    
-    // Add them back in the correct order
-    buttons.forEach(button => {
-      modelSection.appendChild(button);
-    });
-  },
-
   updateModelIndicator: async function(chatView: ChatView): Promise<void> {
-    // The actual container is containerEl.children[1], not containerEl itself
-    const container = chatView.containerEl.children[1] as HTMLElement;
-    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    if (!modelSection) return;
-
-    if (!chatView.modelIndicator) {
-      // (modelSection already acquired above)
-      
-      chatView.modelIndicator = modelSection.createEl("div", {
-        cls: "systemsculpt-model-indicator systemsculpt-chip",
-      }) as HTMLElement;
-
-      // Register event handlers only once when creating the indicator
-      chatView.registerDomEvent(chatView.modelIndicator, "click", async () => {
-        const modal = new StandardModelSelectionModal({
-            app: chatView.app,
-            plugin: chatView.plugin,
-            currentModelId: chatView.selectedModelId || "",
-            onSelect: async (result: ModelSelectionResult) => {
-              await chatView.setSelectedModelId(result.modelId);
-              new Notice("Model updated for this chat.", 3000);
-          }
-        });
-        modal.open();
-      });
-
-      chatView.registerDomEvent(chatView.modelIndicator, 'keydown', (event: KeyboardEvent) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          (event.target as HTMLElement)?.click();
-        }
-      });
-    } else {
-      chatView.modelIndicator.empty();
-    }
-
-    // Always allow model changes
-    chatView.modelIndicator.setAttrs({
-      role: "button",
-      tabindex: 0,
-      'aria-label': 'Change chat model'
-    });
-
-    try {
-      const rendered = renderChatModelIndicator(chatView.modelIndicator, {
-        selectedModelId: chatView.selectedModelId,
-      });
-      chatView.currentModelName = rendered.currentModelName;
-      chatView.modelIndicator.setAttr("aria-label", rendered.ariaLabel);
-      chatView.modelIndicator.setAttr("title", rendered.title);
-      chatView.modelIndicator.removeClass("systemsculpt-model-locked");
-
-      if (rendered.isEmpty) {
-        return;
-      }
-    } catch (error) {
-      chatView.currentModelName = chatView.selectedModelId || 'Error';
-      if (chatView.modelIndicator) {
-        chatView.modelIndicator.removeClass("systemsculpt-no-model");
-        const errorText = `Error loading model (${chatView.currentModelName})`;
-        chatView.modelIndicator.createSpan({ text: errorText });
-        chatView.modelIndicator.setAttr('aria-label', `${errorText}. Click to try changing.`);
-        chatView.modelIndicator.setAttr('title', `${errorText}`);
-      }
-    }
-
-    // Ensure the model indicator is visible
     if (chatView.modelIndicator) {
-      chatView.modelIndicator.style.display = "";
+      chatView.modelIndicator.remove();
+      chatView.modelIndicator = null as any;
     }
-
-    // Ensure correct button order
-    this.ensureButtonOrder(chatView);
-
-    // Update tool compatibility warning after model change
     await this.updateToolCompatibilityWarning(chatView);
-
-    // Token counter update removed
   },
 
   updateSystemPromptIndicator: async function(chatView: ChatView): Promise<void> {
-    // The actual container is containerEl.children[1], not containerEl itself
-    const container = chatView.containerEl.children[1] as HTMLElement;
-    const modelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    if (!modelSection) {
-      return;
-    }
-
-    // Ensure the system prompt indicator exists and is visible
     if (chatView.systemPromptIndicator) {
-      chatView.systemPromptIndicator.style.display = "";
+      chatView.systemPromptIndicator.remove();
+      chatView.systemPromptIndicator = null as any;
     }
-
-    if (!chatView.systemPromptIndicator) {
-      // modelSection already acquired
-      
-      chatView.systemPromptIndicator = modelSection.createEl("div", {
-        cls: "systemsculpt-model-indicator systemsculpt-chip",
-      }) as HTMLElement;
-
-      // Register event handlers only once when creating the indicator
-      chatView.registerDomEvent(chatView.systemPromptIndicator, "click", async () => {
-        const { StandardSystemPromptSelectionModal } = await import("../../modals/StandardSystemPromptSelectionModal");
-        const modal = new StandardSystemPromptSelectionModal({
-          app: chatView.app,
-          plugin: chatView.plugin,
-          currentType: chatView.systemPromptType || "general-use",
-          currentPath: chatView.systemPromptPath,
-          onSelect: async (result) => {
-            // Update the chat view's system prompt
-            chatView.systemPromptType = result.type;
-            if (result.type === "custom") {
-              chatView.systemPromptPath = result.path;
-            } else {
-              chatView.systemPromptPath = undefined;
-            }
-            chatView.clearPiSessionState({ save: false });
-            
-            // Update current prompt
-            chatView.currentPrompt = result.prompt;
-            
-            // If policy is enabled or in Standard mode, promote this selection as the default for new chats
-            try {
-              const useLatestPrompt = chatView.plugin.settings.useLatestSystemPromptForNewChats ?? true;
-              const isStandardMode = chatView.plugin.settings.settingsMode !== 'advanced';
-              if (useLatestPrompt || isStandardMode) {
-                await chatView.plugin.getSettingsManager().updateSettings({
-                  systemPromptType: result.type,
-                  systemPromptPath: result.type === 'custom' ? (result.path || "") : ""
-                });
-                chatView.plugin.emitter?.emit?.('systemPromptSettingsChanged');
-              }
-            } catch {}
-
-            // Save chat with new system prompt
-            await chatView.saveChat();
-            
-            // Update the indicator
-            await chatView.updateSystemPromptIndicator();
-            
-            new Notice("System prompt updated for this chat.", 3000);
-            // Keep the empty-chat status panel in sync
-            if (chatView.messages.length === 0) {
-              chatView.displayChatStatus();
-            }
-          }
-        });
-        modal.open();
-      });
-
-      // Add keyboard support
-      chatView.registerDomEvent(chatView.systemPromptIndicator, 'keydown', (event: KeyboardEvent) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          (event.target as HTMLElement)?.click();
-        }
-      });
-    } else {
-      chatView.systemPromptIndicator.empty();
-    }
-
-    // Set interactive attributes
-    chatView.systemPromptIndicator.setAttrs({
-      role: "button",
-      tabindex: 0,
-      'aria-label': 'Change system prompt'
-    });
-
-    // Show the actual prompt type and allow changes
-    const rendered = renderChatPromptIndicator(chatView.systemPromptIndicator, {
-      promptType: chatView.systemPromptType,
-      promptPath: chatView.systemPromptPath,
-    });
-    chatView.systemPromptIndicator.setAttr('aria-label', rendered.ariaLabel);
-    chatView.systemPromptIndicator.setAttr('title', rendered.title);
-    if (chatView.systemPromptIndicator) {
-      chatView.systemPromptIndicator.removeClass('systemsculpt-system-prompt-locked');
-    }
-
-    // Ensure correct button order
-    this.ensureButtonOrder(chatView);
-
-    // Token counter update removed
   },
 
   updateCreditsIndicator: async function(chatView: ChatView): Promise<void> {
     const container = chatView.containerEl.children[1] as HTMLElement;
     const toolbarRightGroup = container?.querySelector(".systemsculpt-chat-composer-toolbar-group.mod-right") as HTMLElement | null;
-    const fallbackModelSection = container?.querySelector(".systemsculpt-model-indicator-section") as HTMLElement | null;
-    const targetSection = toolbarRightGroup ?? fallbackModelSection;
+    const targetSection = toolbarRightGroup;
     if (!targetSection) return;
 
     const isProActive =

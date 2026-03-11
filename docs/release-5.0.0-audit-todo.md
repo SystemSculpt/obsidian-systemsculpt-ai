@@ -34,7 +34,7 @@ Priority: `P0`
 Why this matters:
 
 - This is the only clearly broken production lane left in the broad live matrix.
-- It affects paid functionality and makes the combined plugin + API surface not fully healthy.
+- It affects licensed functionality and makes the combined plugin + API surface not fully healthy.
 
 Evidence:
 
@@ -144,7 +144,7 @@ Priority: `P2`
 
 Why this matters:
 
-- Credit exhaustion is one of the highest-risk user journeys for paid features.
+- Credit exhaustion is one of the highest-risk user journeys for account-backed features.
 - Right now we are assuming those paths are fine because the matrix skips them.
 
 Evidence:

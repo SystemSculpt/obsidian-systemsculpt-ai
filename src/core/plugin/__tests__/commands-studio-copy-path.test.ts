@@ -39,7 +39,7 @@ describe("CommandManager copy-current-file-path command", () => {
       return null;
     });
 
-    if (options?.activeLeafViewFile || options?.activeLeafStateFile) {
+    if (options?.activeLeafViewFile || options?.activeLeafStateFile || options?.activeChatViewFile) {
       const activeLeaf = new WorkspaceLeaf(app);
       if (options.activeLeafViewFile) {
         (activeLeaf as any).view = {
@@ -47,6 +47,12 @@ describe("CommandManager copy-current-file-path command", () => {
             path: options.activeLeafViewFile,
             extension: options.activeLeafViewFile.split(".").pop() || "",
           }),
+        };
+      }
+      if (options.activeChatViewFile) {
+        (activeLeaf as any).view = {
+          getViewType: () => "systemsculpt-chat-view",
+          getChatHistoryFilePath: jest.fn(() => options.activeChatViewFile),
         };
       }
       if (options.activeLeafStateFile) {

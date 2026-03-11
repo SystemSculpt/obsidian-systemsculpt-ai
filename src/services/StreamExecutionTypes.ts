@@ -1,6 +1,7 @@
 import type { StreamEvent, StreamPipelineDiagnostics } from "../streaming/types";
 import type { ChatMessage } from "../types";
 import type { SystemSculptModel, SystemSculptTextModelSourceMode } from "../types/llm";
+import type { OpenAITool } from "../utils/tooling";
 
 export interface StreamDebugCallbacks {
   onRequest?: (data: {
@@ -35,4 +36,5 @@ export interface PreparedChatRequest {
   actualModelId: string;
   preparedMessages: ChatMessage[];
   finalSystemPrompt: string;
+  tools: OpenAITool[];
 }

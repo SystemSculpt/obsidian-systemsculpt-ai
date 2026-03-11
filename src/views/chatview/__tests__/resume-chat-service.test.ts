@@ -118,7 +118,7 @@ describe("ResumeChatService", () => {
       expect(service.isChatHistoryFile(file)).toBe(false);
     });
 
-    it("returns false when required metadata fields are missing", () => {
+    it("returns false when the chat id is missing", () => {
       const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
 
@@ -132,15 +132,20 @@ describe("ResumeChatService", () => {
         },
       });
       expect(service.isChatHistoryFile(file)).toBe(false);
+    });
 
-      // Missing model
+    it("accepts managed chat history files even if old model metadata is absent", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
       app.metadataCache.getCache.mockReturnValue({
         frontmatter: {
           id: "chat-1",
           created: "2025-01-01",
         },
       });
-      expect(service.isChatHistoryFile(file)).toBe(false);
+      expect(service.isChatHistoryFile(file)).toBe(true);
     });
 
     it("accepts lastModified instead of created", () => {
@@ -224,39 +229,6 @@ describe("ResumeChatService", () => {
     });
   });
 
-  describe("getModelFromFile", () => {
-    it("returns model from frontmatter", () => {
-      const { app, plugin } = createPluginStub();
-      const service = new ResumeChatService(plugin);
-
-      const file = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
-      app.metadataCache.getCache.mockReturnValue({
-        frontmatter: { model: "openai@@gpt-4" },
-      });
-      expect(service.getModelFromFile(file)).toBe("openai@@gpt-4");
-    });
-
-    it("falls back to plugin selected model when frontmatter model is missing", () => {
-      const { app, plugin } = createPluginStub();
-      const service = new ResumeChatService(plugin);
-
-      const file = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
-      app.metadataCache.getCache.mockReturnValue({
-        frontmatter: {},
-      });
-      expect(service.getModelFromFile(file)).toBe("systemsculpt@@systemsculpt/ai-agent");
-    });
-
-    it("falls back to plugin selected model when cache is null", () => {
-      const { app, plugin } = createPluginStub();
-      const service = new ResumeChatService(plugin);
-
-      const file = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
-      app.metadataCache.getCache.mockReturnValue(null);
-      expect(service.getModelFromFile(file)).toBe("systemsculpt@@systemsculpt/ai-agent");
-    });
-  });
-
   describe("openChat", () => {
     it("opens chat through the shared resume descriptor when chat metadata exists", async () => {
       const { plugin } = createPluginStub();
@@ -264,15 +236,9 @@ describe("ResumeChatService", () => {
       const descriptor = {
         chatId: "chat-3",
         title: "Chat 3",
-        modelId: "systemsculpt@@systemsculpt/ai-agent",
         chatPath: "SystemSculpt/Chats/chat-3.md",
-        chatBackend: "pi",
-        pi: {
-          sessionFile: "/tmp/chat-3.jsonl",
-          sessionId: "session-3",
-          lastEntryId: "entry-3",
-          lastSyncedAt: "2026-03-06T10:00:00.000Z",
-        },
+        lastModified: Date.now(),
+        messageCount: 3,
       };
       (service as any).chatStorage = {
         getChatResumeDescriptor: jest.fn().mockResolvedValue(descriptor),
@@ -295,14 +261,13 @@ describe("ResumeChatService", () => {
         getChatResumeDescriptor: jest.fn().mockResolvedValue(null),
       };
 
-      await service.openChat("chat-4", "openai@@gpt-4");
+      await service.openChat("chat-4", "SystemSculpt/Chats/chat-4.md");
 
       expect(app.workspace.getLeaf).toHaveBeenCalledWith("tab");
       expect(leaf.setViewState).toHaveBeenCalledWith({
         type: "systemsculpt-chat-view",
         state: {
           chatId: "chat-4",
-          selectedModelId: "openai@@gpt-4",
         },
       });
     });
@@ -316,7 +281,7 @@ describe("ResumeChatService", () => {
         }),
       };
 
-      await service.openChat("chat-5", "openai@@gpt-4");
+      await service.openChat("chat-5", "SystemSculpt/Chats/chat-5.md");
 
       expect(Notice).toHaveBeenCalledWith("Error opening chat. Please try again.");
     });

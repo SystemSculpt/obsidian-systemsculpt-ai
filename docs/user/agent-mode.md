@@ -1,6 +1,6 @@
-# Agent Mode (tools)
+# Tool Use In Chat
 
-Agent Mode allows the model to call structured tools during chat.
+SystemSculpt can use built-in tools during chat when the current flow needs them. There is no separate Agent Mode toggle in the plugin.
 
 ## Where tools come from
 

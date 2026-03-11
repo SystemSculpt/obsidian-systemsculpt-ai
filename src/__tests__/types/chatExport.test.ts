@@ -21,7 +21,6 @@ describe("chatExport", () => {
       const options = createDefaultChatExportOptions();
 
       expect(options.includeMetadata).toBe(true);
-      expect(options.includeSystemPrompt).toBe(true);
       expect(options.includeContextFiles).toBe(true);
       expect(options.includeContextFileContents).toBe(true);
       expect(options.includeConversation).toBe(true);
@@ -83,7 +82,7 @@ describe("chatExport", () => {
       expect(result.includeMetadata).toBe(false);
       expect(result.includeImages).toBe(false);
       // Other values should remain from base
-      expect(result.includeSystemPrompt).toBe(true);
+      expect(result.includeContextFiles).toBe(true);
     });
 
     it("does not modify base object", () => {
@@ -99,7 +98,6 @@ describe("chatExport", () => {
       const base = createDefaultChatExportOptions();
       const overrides: ChatExportOptions = {
         includeMetadata: false,
-        includeSystemPrompt: false,
         includeContextFiles: false,
         includeContextFileContents: false,
         includeConversation: false,
@@ -146,7 +144,7 @@ describe("chatExport", () => {
       });
 
       expect(result.includeMetadata).toBe(false);
-      expect(result.includeSystemPrompt).toBe(true);
+      expect(result.includeContextFiles).toBe(true);
       expect(result.includeConversation).toBe(true);
     });
 
@@ -169,7 +167,7 @@ describe("chatExport", () => {
       expect(result.includeReasoning).toBe(false);
       // Remaining defaults
       expect(result.includeMetadata).toBe(true);
-      expect(result.includeSystemPrompt).toBe(true);
+      expect(result.includeContextFiles).toBe(true);
     });
   });
 });

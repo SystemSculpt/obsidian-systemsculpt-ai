@@ -13,7 +13,7 @@ export type ModelSelectionSummaryBarHandle = {
 
 function getAccessLabel(state: ModelSelectionProviderAccessState): string {
   if (state === "managed") {
-    return "Managed";
+    return "SystemSculpt";
   }
   if (state === "pi-auth") {
     return "Connected";
@@ -27,48 +27,26 @@ function getAccessLabel(state: ModelSelectionProviderAccessState): string {
 function getTitle(summary: ModelSelectionProviderSummarySnapshot): string {
   if (summary.totalModels === 0) {
     if (summary.managedProviders > 0) {
-      return `${summary.managedProviders} managed provider${summary.managedProviders === 1 ? "" : "s"} available`;
+      return "SystemSculpt is available";
     }
-    if (summary.piReadyProviders > 0) {
-      return `${summary.piReadyProviders} provider${summary.piReadyProviders === 1 ? "" : "s"} connected`;
+    if (summary.totalProviders > 0) {
+      return "Finish account setup to load chat models";
     }
-    if (summary.localProviders > 0) {
-      return `${summary.localProviders} provider${summary.localProviders === 1 ? "" : "s"} ready`;
-    }
-    return "No models available yet";
+    return "No chat models available yet";
   }
-  if (summary.managedProviders > 0) {
-    return `${summary.managedProviders} managed provider${summary.managedProviders === 1 ? "" : "s"} available`;
-  }
-  if (summary.localProviders > 0) {
-    return `${summary.localProviders} provider${summary.localProviders === 1 ? "" : "s"} ready`;
-  }
-  if (summary.piReadyProviders > 0) {
-    return `${summary.piReadyProviders} provider${summary.piReadyProviders === 1 ? "" : "s"} connected`;
-  }
-  if (summary.unavailableProviders > 0) {
-    return `${summary.unavailableProviders} provider${summary.unavailableProviders === 1 ? "" : "s"} need setup`;
-  }
-  return `${summary.totalProviders} provider${summary.totalProviders === 1 ? "" : "s"} available`;
+  return `${summary.totalModels} chat model${summary.totalModels === 1 ? "" : "s"} available`;
 }
 
 function getStats(summary: ModelSelectionProviderSummarySnapshot): string {
   if (summary.totalModels === 0) {
-    if (summary.totalProviders > 0) {
-      return `${summary.totalProviders} provider${summary.totalProviders === 1 ? "" : "s"} found. Finish setup or refresh available models.`;
-    }
-    return "Open Setup to finish provider setup or refresh available models.";
+    return "Open Account to finish setup or refresh available chat models.";
   }
 
-  const parts = [`${summary.totalModels} models`, `${summary.totalProviders} providers`];
+  const parts = [`${summary.totalModels} chat model${summary.totalModels === 1 ? "" : "s"}`];
   if (summary.managedProviders > 0) {
-    parts.push(`${summary.managedProviders} managed`);
-  } else if (summary.localProviders > 0) {
-    parts.push(`${summary.localProviders} ready`);
-  } else if (summary.piReadyProviders > 0) {
-    parts.push(`${summary.piReadyProviders} connected`);
+    parts.push("SystemSculpt ready");
   } else if (summary.unavailableProviders > 0) {
-    parts.push(`${summary.unavailableProviders} need setup`);
+    parts.push("account attention needed");
   }
   return parts.join(" • ");
 }
@@ -80,14 +58,14 @@ export function renderModelSelectionSummaryBar(
   const summaryEl = containerEl.createDiv("ss-model-provider-summary");
   const topEl = summaryEl.createDiv("ss-model-provider-summary__top");
   const glanceEl = topEl.createDiv("ss-model-provider-summary__glance");
-  glanceEl.createDiv({ cls: "ss-model-provider-summary__eyebrow", text: "Model Access" });
+  glanceEl.createDiv({ cls: "ss-model-provider-summary__eyebrow", text: "Chat Models" });
   const titleEl = glanceEl.createDiv("ss-model-provider-summary__title");
   const statsEl = glanceEl.createDiv("ss-model-provider-summary__stats");
   const controlsEl = topEl.createDiv("ss-model-provider-summary__controls");
   const favoritesContainerEl = controlsEl.createDiv("ss-favorites-button");
   const setupButton = controlsEl.createEl("button", {
     cls: "ss-model-setup-button",
-    text: "Open Setup",
+    text: "Open Account",
   });
   const refreshButton = controlsEl.createEl("button", {
     cls: "ss-model-refresh-button",
@@ -125,8 +103,8 @@ export function renderModelSelectionSummaryBar(
     chipsEl.empty();
 
     if (state?.loading) {
-      titleEl.textContent = "Loading providers and models…";
-      statsEl.textContent = "Checking connected providers and refreshing model availability.";
+      titleEl.textContent = "Loading chat models…";
+      statsEl.textContent = "Refreshing chat availability.";
       return;
     }
 

@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../../../types";
 
-export type ChatBackend = "pi" | "legacy";
+export type ChatBackend = "systemsculpt" | "legacy";
 
 export interface ChatContextFileMetadata {
   path: string;
@@ -14,13 +14,14 @@ export interface ChatSystemMessageMetadata {
 
 export interface ChatMetadata {
   id: string;
-  model: string;
+  model?: string;
   created: string;
   lastModified: string;
   title: string;
   version?: number;
   tags?: string[];
   context_files?: ChatContextFileMetadata[];
+  // Legacy only. New chat saves do not persist client-side prompt selection metadata.
   systemMessage?: ChatSystemMessageMetadata;
   chatFontSize?: "small" | "medium" | "large";
   chatBackend?: ChatBackend;
@@ -45,12 +46,9 @@ export interface ParsedChatMarkdown {
 export interface ChatResumeDescriptor {
   chatId: string;
   title: string;
-  modelId: string;
   chatPath: string;
-  chatBackend: ChatBackend;
   lastModified: number;
   messageCount: number;
-  pi?: PiSessionState;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -75,42 +73,41 @@ export function resolveChatBackend(options: {
   explicitBackend?: unknown;
   piSessionFile?: unknown;
   piSessionId?: unknown;
+  defaultBackend?: ChatBackend;
+  allowPiBackend?: boolean;
 }): ChatBackend {
-  if (options.explicitBackend === "pi" || options.explicitBackend === "legacy") {
-    return options.explicitBackend;
+  const fallbackBackend = options.defaultBackend ?? "legacy";
+  const explicitBackend = typeof options.explicitBackend === "string"
+    ? options.explicitBackend.trim().toLowerCase()
+    : "";
+
+  if (explicitBackend === "legacy") {
+    return "legacy";
+  }
+
+  if (explicitBackend === "pi" || explicitBackend === "systemsculpt") {
+    return "systemsculpt";
   }
 
   const piState = normalizePiSessionState({
     sessionFile: options.piSessionFile,
     sessionId: options.piSessionId,
   });
-  return piState.sessionFile || piState.sessionId ? "pi" : "legacy";
+  if (piState.sessionFile || piState.sessionId) {
+    return "systemsculpt";
+  }
+
+  return fallbackBackend;
 }
 
 export function buildChatLeafState(input: {
   chatId: string;
   title: string;
-  modelId: string;
   chatPath: string;
-  chatBackend: ChatBackend;
-  pi?: PiSessionState;
 }): Record<string, unknown> {
-  const piState = normalizePiSessionState({
-    sessionFile: input.pi?.sessionFile,
-    sessionId: input.pi?.sessionId,
-    lastEntryId: input.pi?.lastEntryId,
-    lastSyncedAt: input.pi?.lastSyncedAt,
-  });
-
   return {
     chatId: input.chatId,
     chatTitle: input.title,
-    selectedModelId: input.modelId,
-    chatBackend: input.chatBackend,
-    piSessionFile: piState.sessionFile,
-    piSessionId: piState.sessionId,
-    piLastEntryId: piState.lastEntryId,
-    piLastSyncedAt: piState.lastSyncedAt,
     file: input.chatPath,
   };
 }

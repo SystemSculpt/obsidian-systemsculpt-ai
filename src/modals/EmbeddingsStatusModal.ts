@@ -261,7 +261,7 @@ export class EmbeddingsStatusModal extends StandardModal {
 
     const detailsGrid = this.providerInfoEl.createDiv({ cls: "ss-embeddings-provider-details" });
 
-    this.createDetailItem(detailsGrid, "cpu", "Provider", this.formatProviderName(descriptor.provider));
+    this.createDetailItem(detailsGrid, "cpu", "Service", this.formatProviderName(descriptor.provider));
     if (descriptor.provider !== "systemsculpt") {
       this.createDetailItem(detailsGrid, "box", "Model", this.formatModelName(descriptor.model));
     }
@@ -407,7 +407,7 @@ export class EmbeddingsStatusModal extends StandardModal {
 
   private openSettings(): void {
     try {
-      this.plugin.openSettingsTab("embeddings");
+      this.plugin.openSettingsTab("knowledge");
       this.close();
     } catch {
     }

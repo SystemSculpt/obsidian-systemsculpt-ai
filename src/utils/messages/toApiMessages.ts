@@ -17,8 +17,6 @@ export function toApiBaseMessages(messages: ChatMessage[]): ChatMessage[] {
     if (m.tool_calls) cleaned.tool_calls = m.tool_calls as any;
     if ((m as any).reasoning_details) cleaned.reasoning_details = (m as any).reasoning_details as any;
     if (m.documentContext) cleaned.documentContext = m.documentContext;
-    if (m.systemPromptType) cleaned.systemPromptType = m.systemPromptType;
-    if (m.systemPromptPath) cleaned.systemPromptPath = m.systemPromptPath;
 
     // Exclude: messageParts, streaming, annotations (UI/auxiliary)
     return cleaned;

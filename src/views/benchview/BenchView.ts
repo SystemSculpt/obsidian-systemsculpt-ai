@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { BENCH_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { StandardModelSelectionModal } from "../../modals/StandardModelSelectionModal";
 import { ensureCanonicalId } from "../../utils/modelUtils";
 import { MessageRenderer } from "../chatview/MessageRenderer";
@@ -12,7 +13,7 @@ import { DEFAULT_SETTINGS } from "../../types";
 import { attachFolderSuggester } from "../../components/FolderSuggester";
 import { errorLogger } from "../../utils/errorLogger";
 
-export const BENCH_VIEW_TYPE = "systemsculpt-bench-view";
+export { BENCH_VIEW_TYPE };
 
 type CaseState = {
   caseDef: BenchmarkCase;

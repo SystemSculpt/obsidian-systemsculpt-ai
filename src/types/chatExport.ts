@@ -1,6 +1,5 @@
 export interface ChatExportOptions {
   includeMetadata: boolean;
-  includeSystemPrompt: boolean;
   includeContextFiles: boolean;
   includeContextFileContents: boolean;
   includeConversation: boolean;
@@ -16,7 +15,6 @@ export interface ChatExportOptions {
 
 const DEFAULT_CHAT_EXPORT_OPTIONS: ChatExportOptions = {
   includeMetadata: true,
-  includeSystemPrompt: true,
   includeContextFiles: true,
   includeContextFileContents: true,
   includeConversation: true,

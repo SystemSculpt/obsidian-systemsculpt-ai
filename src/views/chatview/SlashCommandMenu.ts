@@ -68,7 +68,6 @@ export class SlashCommandMenu extends Component {
             type: CHAT_VIEW_TYPE,
             state: {
               chatId: "", // Empty ID for new chat
-              selectedModelId: this.plugin.settings.selectedModelId // Default model
             }
           });
 
@@ -145,20 +144,6 @@ export class SlashCommandMenu extends Component {
           };
           
           confirmModal.open();
-        }
-      },
-      {
-        id: 'agent',
-        name: 'Switch Prompt',
-        description: 'Change the system prompt for this chat',
-        icon: 'user-check',
-        execute: async (chatView: ChatView) => {
-          this.hide();
-          const currentValue = this.inputElement.value;
-          if (!currentValue.startsWith('/agent')) {
-            this.inputElement.value = '/agent ';
-            this.inputElement.dispatchEvent(new Event('input'));
-          }
         }
       },
       {

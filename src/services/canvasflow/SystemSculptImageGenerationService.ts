@@ -1,4 +1,4 @@
-import { Platform, requestUrl } from "obsidian";
+import { requestUrl } from "obsidian";
 import { API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS, SYSTEMSCULPT_API_HEADERS } from "../../constants/api";
 import { resolveSystemSculptApiBaseUrl } from "../../utils/urlHelpers";
 import { PlatformContext } from "../PlatformContext";
@@ -488,7 +488,7 @@ export class SystemSculptImageGenerationService {
   }
 
   private shouldPreferRequestUrlForBinaryDownload(targetUrl: string): boolean {
-    if (Platform.isMobileApp) {
+    if (PlatformContext.get().isMobile()) {
       return true;
     }
 
@@ -584,7 +584,7 @@ export class SystemSculptImageGenerationService {
       return { status, json: body, headers: headersOut };
     };
 
-    const preferred = Platform.isMobileApp ? "requestUrl" : preferredTransport(url);
+    const preferred = PlatformContext.get().isMobile() ? "requestUrl" : preferredTransport(url);
     if (preferred === "fetch") {
       try {
         return await viaFetch();

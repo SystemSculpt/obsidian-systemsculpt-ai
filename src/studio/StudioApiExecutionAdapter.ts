@@ -1,5 +1,6 @@
 import { normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import type { ChatMessage } from "../types";
 import { resolveSystemSculptApiBaseUrl } from "../utils/urlHelpers";
 import {
   SystemSculptImageGenerationService,
@@ -17,11 +18,6 @@ import type {
   StudioTranscriptionResult,
 } from "./types";
 import { StudioAssetStore } from "./StudioAssetStore";
-import { runStudioLocalPiTextGeneration } from "./StudioLocalTextModelCatalog";
-import {
-  assertPiTextExecutionReady,
-  shouldUseLocalPiExecution,
-} from "../services/pi-native/PiTextRuntime";
 
 const API_NODE_KINDS = new Set(["studio.image_generation", "studio.transcription"]);
 const STUDIO_MANAGED_IMAGE_MODEL_ID = "systemsculpt/managed-image";
@@ -151,7 +147,6 @@ type VaultBinaryAdapter = {
 
 export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private imageClient: SystemSculptImageGenerationService | null = null;
-  private localPiTextTurnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -180,129 +175,16 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private async resolveSelectedTextModel(request: StudioTextGenerationRequest) {
     const requestedModelId = String(request.modelId || "").trim();
     if (!requestedModelId) {
-      throw new Error("Text generation node requires a Pi model selection before it can run.");
+      throw new Error("Text generation node requires a SystemSculpt model selection before it can run.");
     }
 
     const model = await this.plugin.modelService.getModelById(requestedModelId);
     if (!model) {
-      throw new Error(`Selected Pi model "${requestedModelId}" is unavailable. Refresh models and choose another.`);
+      throw new Error(
+        `Selected SystemSculpt model "${requestedModelId}" is unavailable. Refresh models and choose another.`
+      );
     }
     return model;
-  }
-
-  private isLikelyMissingPiCli(message: string): boolean {
-    const normalized = String(message || "").trim().toLowerCase();
-    if (!normalized) {
-      return false;
-    }
-    return (
-      normalized.includes("spawn pi enoent") ||
-      normalized.includes("pi: command not found") ||
-      normalized.includes("command not found: pi") ||
-      normalized.includes("pi sdk package is unavailable") ||
-      normalized.includes("pi runtime bootstrap") ||
-      normalized.includes("bundled pi runtime") ||
-      normalized.includes("unable to resolve a pi runtime") ||
-      normalized.includes("no such file or directory") && normalized.includes("pi")
-    );
-  }
-
-  private buildLocalPiInstallGuidanceMessage(options: {
-    modelId: string;
-    rawMessage: string;
-  }): string {
-    return [
-      `Local (Pi) text generation failed for model "${options.modelId}": the bundled Pi runtime is unavailable.`,
-      `Original error: ${options.rawMessage}`,
-      "",
-      "Recovery checklist:",
-      "1) Keep Obsidian open for a few seconds, then retry so SystemSculpt can finish downloading the bundled Pi runtime.",
-      "2) If this was a fresh install or update, reopen Obsidian and retry the Studio run.",
-      "3) Open Setup -> Local Pi and rerun Verify Models to force a runtime check.",
-      "4) If your network blocks GitHub release downloads, allow them and retry the bootstrap.",
-    ].join("\n");
-  }
-
-  private extractProviderFromLocalPiModelId(modelId: string): string {
-    const trimmed = String(modelId || "").trim();
-    if (!trimmed) {
-      return "";
-    }
-    const slash = trimmed.indexOf("/");
-    if (slash <= 0) {
-      return "";
-    }
-    return trimmed.slice(0, slash).trim().toLowerCase();
-  }
-
-  private buildLocalPiAuthGuidanceMessage(options: {
-    modelId: string;
-    rawMessage: string;
-  }): string {
-    const providerFromMessage =
-      /no api key found for\s+([a-z0-9._-]+)/i.exec(options.rawMessage)?.[1]?.trim().toLowerCase() ||
-      /authentication failed for\s+\"([a-z0-9._-]+)\"/i.exec(options.rawMessage)?.[1]?.trim().toLowerCase() ||
-      "";
-    const provider = providerFromMessage || this.extractProviderFromLocalPiModelId(options.modelId);
-    const loginCommand = provider ? `pi /login ${provider}` : "pi /login <provider>";
-
-    const lines = [
-      `Local (Pi) text generation failed for model "${options.modelId}": provider authentication is missing or invalid.`,
-      `Original error: ${options.rawMessage}`,
-      "",
-      "Fix checklist:",
-      "1) Open SystemSculpt Setup and complete the provider login again.",
-      "2) If you need the terminal fallback, launch it from the setup wizard so it uses the bundled Pi runtime.",
-      `   Manual command: ${loginCommand}`,
-      "3) Refresh the local Pi model catalog in Studio or retry the setup wizard's Verify Models step.",
-      "4) Retry the Studio run.",
-      "",
-      "If you use API-key providers, you can also export the required provider API key env vars before launching Obsidian.",
-    ];
-
-    return lines.join("\n");
-  }
-
-  private modelRequiresSystemSculptCredits(model: Awaited<ReturnType<StudioApiExecutionAdapter["resolveSelectedTextModel"]>>): boolean {
-    return String(model.provider || "").trim().toLowerCase() === "systemsculpt";
-  }
-
-  private buildLocalPiTokenTypeGuidanceMessage(options: {
-    modelId: string;
-    rawMessage: string;
-  }): string {
-    const provider = this.extractProviderFromLocalPiModelId(options.modelId) || "provider";
-    return [
-      `Local (Pi) text generation failed for model "${options.modelId}": the current ${provider} credentials are not accepted for this endpoint.`,
-      `Original error: ${options.rawMessage}`,
-      "",
-      "Fix checklist:",
-      "1) Re-authenticate from SystemSculpt Setup so the bundled Pi runtime is used.",
-      `   Manual command: pi /login ${provider}`,
-      "2) Refresh the local Pi model catalog in Studio or rerun the setup wizard verification step.",
-      "3) Retry the Studio run.",
-    ].join("\n");
-  }
-
-  private enrichLocalPiRuntimeErrorMessage(options: {
-    modelId: string;
-    rawMessage: string;
-  }): string {
-    const normalized = String(options.rawMessage || "").trim().toLowerCase();
-    if (!normalized) {
-      return options.rawMessage;
-    }
-    if (
-      normalized.includes("no api key found for") ||
-      normalized.includes("agent-session.js:556") ||
-      normalized.includes("authentication failed for")
-    ) {
-      return this.buildLocalPiAuthGuidanceMessage(options);
-    }
-    if (normalized.includes("personal access tokens are not supported for this endpoint")) {
-      return this.buildLocalPiTokenTypeGuidanceMessage(options);
-    }
-    return options.rawMessage;
   }
 
   private licenseKey(): string {
@@ -331,15 +213,6 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       pluginVersion: this.plugin.manifest.version,
     });
     return this.imageClient;
-  }
-
-  private async runLocalPiTextTurnExclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.localPiTextTurnQueue.then(operation, operation);
-    this.localPiTextTurnQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
   }
 
   private get vaultAdapter(): VaultBinaryAdapter {
@@ -463,22 +336,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   private nodeRequiresSystemSculptCredits(node: StudioProjectV1["graph"]["nodes"][number]): boolean {
-    if (API_NODE_KINDS.has(node.kind)) {
-      return true;
-    }
-    if (node.kind !== "studio.text_generation") {
-      return false;
-    }
-    const requestedModelId = String((node.config as Record<string, unknown>)?.modelId || "").trim();
-    if (!requestedModelId) {
-      return true;
-    }
-    const models = this.plugin.modelService.getCachedModels();
-    const model = models.find((candidate) => candidate.id === requestedModelId);
-    if (!model) {
-      return true;
-    }
-    return this.modelRequiresSystemSculptCredits(model) || !shouldUseLocalPiExecution(model);
+    return API_NODE_KINDS.has(node.kind) || node.kind === "studio.text_generation";
   }
 
   async estimateRunCredits(project: StudioProjectV1): Promise<{ ok: boolean; reason?: string }> {
@@ -510,38 +368,34 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     const reasoningEffort = this.readReasoningEffort(request);
     const systemPrompt = String(request.systemPrompt || "").trim();
     const selectedModel = await this.resolveSelectedTextModel(request);
-    const executionPlan = await assertPiTextExecutionReady(selectedModel);
+    const requestMessage: ChatMessage = {
+      role: "user",
+      content: request.prompt,
+      message_id: `studio_${request.runId}_${request.nodeId}_user`,
+    };
+    let text = "";
 
     try {
-      const result = await this.runLocalPiTextTurnExclusive(() =>
-        runStudioLocalPiTextGeneration({
-          plugin: this.plugin,
-          modelId: executionPlan.actualModelId,
-          prompt: request.prompt,
-          systemPrompt,
-          reasoningEffort,
-        })
-      );
-      return {
-        text: result.text,
-        modelId: selectedModel.id,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (this.isLikelyMissingPiCli(message)) {
-        throw new Error(
-          this.buildLocalPiInstallGuidanceMessage({
-            modelId: executionPlan.actualModelId,
-            rawMessage: message,
-          })
-        );
+      for await (const event of this.plugin.aiService.streamMessage({
+        messages: [requestMessage],
+        model: selectedModel.id,
+        systemPromptOverride: systemPrompt || undefined,
+        reasoningEffort,
+        allowTools: false,
+      })) {
+        if (event.type === "content") {
+          text += event.text;
+        }
       }
-      const enrichedMessage = this.enrichLocalPiRuntimeErrorMessage({
-        modelId: executionPlan.actualModelId,
-        rawMessage: message,
-      });
-      throw new Error(`Local (Pi) text generation failed: ${enrichedMessage}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      throw new Error(`SystemSculpt text generation failed: ${message}`);
     }
+
+    return {
+      text,
+      modelId: selectedModel.id,
+    };
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {

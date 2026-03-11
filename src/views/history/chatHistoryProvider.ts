@@ -37,17 +37,14 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
 
       const summaries = await chatStorage.loadChats();
       const entries: SystemSculptHistoryEntry[] = summaries.map((summary) => {
-        const selectedModelId = summary.selectedModelId || plugin.settings.selectedModelId;
         const timestampMs = asTimestamp(summary.lastModified);
         const title = String(summary.title || "Untitled Chat").trim() || "Untitled Chat";
         const isFavorite = chatFavorites.isFavorite(summary.id);
         const messageCount = Array.isArray(summary.messages) ? summary.messages.length : 0;
-        const subtitle = `${messageCount} messages${selectedModelId ? ` · ${selectedModelId}` : ""}`;
+        const subtitle = `${messageCount} messages`;
         const searchText = [
           title,
           summary.id,
-          selectedModelId,
-          summary.chatBackend,
           joinMessageContent(summary.messages || []),
         ]
           .filter((segment) => segment.length > 0)
@@ -61,7 +58,7 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
           subtitle,
           timestampMs,
           searchText,
-          badge: summary.chatBackend === "pi" ? "Pi" : "Legacy",
+          badge: "Managed",
           metadataPath: summary.chatPath,
           isFavorite,
           toggleFavorite: async () => {
@@ -72,19 +69,9 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
             await openChatResumeDescriptor(plugin, {
               chatId: summary.id,
               title,
-              modelId: selectedModelId,
               chatPath: summary.chatPath,
-              chatBackend: summary.chatBackend,
               lastModified: timestampMs,
               messageCount,
-              pi: summary.chatBackend === "pi"
-                ? {
-                    sessionFile: summary.piSessionFile,
-                    sessionId: summary.piSessionId,
-                    lastEntryId: summary.piLastEntryId,
-                    lastSyncedAt: summary.piLastSyncedAt,
-                  }
-                : undefined,
             });
           },
         };

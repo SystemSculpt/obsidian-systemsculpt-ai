@@ -1,0 +1,10 @@
+.side-dock-actions > .ss-systemsculpt-ribbon-divider {
+  width: 24px;
+  height: 1px;
+  margin: 10px auto 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 42%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--background-primary) 70%, transparent);
+  opacity: 0.9;
+  pointer-events: none;
+}

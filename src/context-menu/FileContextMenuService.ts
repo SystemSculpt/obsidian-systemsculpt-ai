@@ -19,7 +19,6 @@ import {
   DocumentProcessingProgressEvent,
 } from "../types/documentProcessing";
 import { showAudioTranscriptionModal } from "../modals/AudioTranscriptionModal";
-import { ChatView } from "../views/chatview/ChatView";
 import { errorLogger } from "../utils/errorLogger";
 import type { PluginLogger } from "../utils/PluginLogger";
 import {
@@ -48,6 +47,12 @@ const COPYABLE_IMAGE_EXTENSIONS = new Set([
 const CONVERT_MENU_TITLE = "Convert to Markdown";
 
 type ProcessingFlow = "document" | "audio";
+
+type ChatViewModule = typeof import("../views/chatview/ChatView");
+
+function loadChatViewModule(): ChatViewModule {
+  return require("../views/chatview/ChatView");
+}
 
 export interface DocumentProcessor {
   processDocument(
@@ -85,6 +90,7 @@ class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
 
   async open(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf("tab");
+    const { ChatView } = loadChatViewModule();
     const view = new ChatView(leaf, this.plugin);
     await leaf.open(view);
     await this.focusLeaf(leaf);

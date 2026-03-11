@@ -4,13 +4,14 @@ Similar Notes is semantic search for your vault.
 
 ## Configure
 
-Open `Settings -> SystemSculpt AI -> Embeddings & Search`.
+Open `Settings -> SystemSculpt AI -> Knowledge`.
+
+Similar Notes settings now live inside the `Knowledge` tab.
 
 Core controls:
 
 - `Enable embeddings`
-- `Embeddings provider` (`SystemSculpt` or `Custom provider`)
-- Custom provider fields (endpoint, API key, model)
+- `Embeddings execution` (`SystemSculpt`)
 - `Processing status` (refresh + remaining-files modal)
 - `Clear embeddings data`
 - Exclusions: chat history, Obsidian exclusions, excluded folders, excluded patterns
@@ -31,4 +32,4 @@ Core controls:
 
 - Processing is background/on-demand, not a single one-shot job.
 - Exclusions can dramatically reduce indexed content.
-- If provider/model changes, embeddings namespaces may need rebuilding.
+- If SystemSculpt updates the embeddings setup, a rebuild may be required.

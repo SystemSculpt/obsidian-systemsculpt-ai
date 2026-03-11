@@ -1,7 +1,7 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
-import { MobileDetection } from "../utils/MobileDetection";
 import { createHoverShell, type HoverShellHandle } from "./HoverShell";
+import { PlatformContext } from "../services/PlatformContext";
 
 export interface FloatingWidgetOptions {
   title: string;
@@ -25,7 +25,6 @@ export interface FloatingWidgetOptions {
 export abstract class FloatingWidget {
   protected app: App;
   protected plugin: SystemSculptPlugin;
-  protected mobileDetection: MobileDetection;
   
   // UI elements
   protected widgetEl: HTMLElement | null = null;
@@ -39,7 +38,6 @@ export abstract class FloatingWidget {
   constructor(app: App, plugin: SystemSculptPlugin, options: FloatingWidgetOptions) {
     this.app = app;
     this.plugin = plugin;
-    this.mobileDetection = new MobileDetection();
     this.options = {
       draggable: true,
       position: { top: "50px", right: "20px" },
@@ -55,7 +53,7 @@ export abstract class FloatingWidget {
     // Remove any existing widget
     this.hide();
 
-    const isMobile = this.mobileDetection.isMobileDevice();
+    const isMobile = PlatformContext.get().isMobile();
     
     if (isMobile) {
       // On mobile, use a different approach or fall back to modal

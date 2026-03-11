@@ -1,6 +1,6 @@
 import { App, Notice, Setting, setIcon } from "obsidian";
 import { attachFolderSuggester } from "../components/FolderSuggester";
-import { WORKFLOW_AUTOMATIONS, WorkflowAutomationDefinition } from "../constants/workflowTemplates";
+import { WORKFLOW_AUTOMATIONS, WorkflowAutomationDefinition } from "../constants/workflowAutomations";
 import type { WorkflowEngineSettings, WorkflowAutomationState } from "../types";
 import { createDefaultWorkflowEngineSettings } from "../types";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
@@ -13,8 +13,6 @@ interface AutomationCardContext {
 
 export function displayAutomationsTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab): void {
   containerEl.empty();
-  containerEl.addClass("systemsculpt-tab-content");
-  containerEl.dataset.tab = "automations";
 
   const { plugin } = tabInstance;
   const settingsManager = plugin.getSettingsManager();
@@ -35,11 +33,11 @@ export function displayAutomationsTabContent(containerEl: HTMLElement, tabInstan
     updates: Partial<WorkflowAutomationState>
   ): Promise<void> => {
     await updateWorkflowEngine((current) => {
-      const existing = current.templates?.[automationId] || { id: automationId, enabled: false };
+      const existing = current.automations?.[automationId] || { id: automationId, enabled: false };
       return {
         ...current,
-        templates: {
-          ...current.templates,
+        automations: {
+          ...current.automations,
           [automationId]: {
             ...existing,
             ...updates,
@@ -52,7 +50,7 @@ export function displayAutomationsTabContent(containerEl: HTMLElement, tabInstan
 
   containerEl.createEl("h3", { text: "Automations" });
   containerEl.createEl("p", {
-    text: "Toggle the workflows you want. Adjust capture/destination folders if your Daily Vault layout differs.",
+    text: "Toggle the workflows you want. Adjust capture and destination folders to fit your vault structure.",
     cls: "setting-item-description",
   });
 
@@ -114,7 +112,7 @@ function renderAutomationCard(
   card.createEl("p", { text: automation.subtitle, cls: "ss-automation-card__subtitle" });
   card.createEl("p", { text: automation.description, cls: "ss-automation-card__description" });
 
-  const state = getWorkflowSettings().templates?.[automation.id];
+  const state = getWorkflowSettings().automations?.[automation.id];
 
   renderFolderSetting(
     card,

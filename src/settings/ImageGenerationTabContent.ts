@@ -1,4 +1,4 @@
-import { Notice, Platform, Setting } from "obsidian";
+import { Notice, Setting } from "obsidian";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import {
@@ -6,18 +6,21 @@ import {
 } from "../services/canvasflow/ImageGenerationModelCatalog";
 import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
 import { queueCanvasFlowLastUsedPatch } from "../services/canvasflow/CanvasFlowPromptDefaults";
+import { PlatformContext } from "../services/PlatformContext";
 
 export async function displayImageGenerationTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
   if (containerEl.classList.contains("systemsculpt-tab-content")) {
-    containerEl.dataset.tab = "image-generation";
+    containerEl.dataset.tab = "studio";
   }
 
   const { plugin } = tabInstance;
+  const platform = PlatformContext.get();
+  const supportsStudio = platform.supportsDesktopOnlyFeatures();
 
   containerEl.createEl("h3", { text: "Image Generation" });
   containerEl.createEl("p", {
-    text: "Configure SystemSculpt Studio (desktop-only) and run image generation through the SystemSculpt API managed backend.",
+    text: "Configure SystemSculpt Studio (desktop-only) and run image generation through SystemSculpt.",
     cls: "setting-item-description",
   });
 
@@ -29,9 +32,9 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
     .addButton((button) => {
       button
         .setButtonText("Open Studio")
-        .setDisabled(!Platform.isDesktopApp)
+        .setDisabled(!supportsStudio)
         .onClick(async () => {
-          if (!Platform.isDesktopApp) {
+          if (!supportsStudio) {
             new Notice("SystemSculpt Studio is desktop-only.");
             return;
           }
@@ -112,23 +115,12 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
       text.inputEl.inputMode = "numeric";
     });
 
-  new Setting(containerEl)
-    .setName("Studio telemetry (remote)")
-    .setDesc("Keep full diagnostics local; enable this only if you want redacted Studio run telemetry sent to SystemSculpt.")
-    .addToggle((toggle) => {
-      toggle
-        .setValue(plugin.settings.studioTelemetryOptIn === true)
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ studioTelemetryOptIn: value });
-        });
-    });
-
-  containerEl.createEl("h3", { text: "SystemSculpt Image API (Managed)" });
+  containerEl.createEl("h3", { text: "SystemSculpt Image Generation" });
 
   new Setting(containerEl)
-    .setName("Managed image engine")
+    .setName("Image engine")
     .setDesc(
-      "SystemSculpt controls the image provider and model server-side. No client-side model selection is exposed."
+      "SystemSculpt chooses the image engine for you. There is nothing to pick here in the plugin."
     );
 
   new Setting(containerEl)
@@ -285,7 +277,7 @@ async function syncImageGenerationModelCatalog(
     const response = await service.listModels();
     const supportedModels = Array.isArray(response.models) ? response.models : [];
     if (supportedModels.length === 0) {
-      throw new Error("No managed image generation capabilities were returned by the server.");
+      throw new Error("No image generation capabilities were returned by SystemSculpt.");
     }
     const models = supportedModels;
     await plugin.getSettingsManager().updateSettings({
@@ -300,7 +292,7 @@ async function syncImageGenerationModelCatalog(
       throw error;
     }
     if (!options?.silent) {
-      new Notice("Could not refresh managed image generation capabilities; using cached metadata.");
+      new Notice("Could not refresh image generation capabilities; using cached metadata.");
     }
     return cached;
   }

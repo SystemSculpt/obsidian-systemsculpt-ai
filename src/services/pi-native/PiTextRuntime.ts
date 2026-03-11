@@ -1,5 +1,5 @@
-import { Platform } from "obsidian";
 import type { SystemSculptModel } from "../../types/llm";
+import { PlatformContext } from "../PlatformContext";
 
 export type PiTextExecutionPlan = {
   mode: "local";
@@ -7,6 +7,10 @@ export type PiTextExecutionPlan = {
   providerId: string;
   authMode: "local";
 };
+
+function supportsDesktopPiFeatures(): boolean {
+  return PlatformContext.get().supportsDesktopOnlyFeatures();
+}
 
 function requireActualModelId(model: SystemSculptModel): string {
   const actualModelId = String(model.piExecutionModelId || "").trim();
@@ -26,7 +30,7 @@ function resolveProviderId(model: SystemSculptModel, actualModelId: string): str
 }
 
 export function shouldUseLocalPiExecution(model: SystemSculptModel): boolean {
-  return Platform.isDesktopApp && model.sourceMode === "pi_local" && !!model.piLocalAvailable;
+  return supportsDesktopPiFeatures() && model.sourceMode === "pi_local" && !!model.piLocalAvailable;
 }
 
 export async function resolvePiTextExecutionPlan(
@@ -35,7 +39,7 @@ export async function resolvePiTextExecutionPlan(
   const actualModelId = requireActualModelId(model);
   const providerId = resolveProviderId(model, actualModelId);
 
-  if (!Platform.isDesktopApp) {
+  if (!supportsDesktopPiFeatures()) {
     throw new Error("Pi desktop text generation is only available in the desktop app.");
   }
 

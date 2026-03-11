@@ -14,6 +14,8 @@ const createPlugin = () => {
     app,
     settings: {
       selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      licenseKey: "valid-license",
+      licenseValid: true,
       settingsMode: "advanced",
       useLatestModelEverywhere: true,
       titleGenerationPromptType: "precise",
@@ -176,31 +178,14 @@ describe("TitleGenerationService", () => {
   });
 
   describe("model selection", () => {
-    it("uses titleGenerationModelId when already canonical", async () => {
+    it("always uses the managed SystemSculpt model", async () => {
       const { plugin } = createPlugin();
-      plugin.settings.useLatestModelEverywhere = false;
       plugin.settings.titleGenerationModelId = "openai@@gpt-4";
-      plugin.settings.titleGenerationProviderId = "";
-
-      streamMessage.mockImplementation((params: any) => {
-        expect(params.model).toBe("openai@@gpt-4");
-        return (async function* () {
-          yield { type: "content", text: "Title" };
-        })();
-      });
-
-      const service = TitleGenerationService.getInstance(plugin);
-      await service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }]);
-    });
-
-    it("constructs canonical ID from provider and model", async () => {
-      const { plugin } = createPlugin();
-      plugin.settings.useLatestModelEverywhere = false;
-      plugin.settings.titleGenerationModelId = "gpt-4";
       plugin.settings.titleGenerationProviderId = "openai";
+      plugin.settings.selectedModelId = "anthropic@@claude-sonnet-4";
 
       streamMessage.mockImplementation((params: any) => {
-        expect(params.model).toBe("openai@@gpt-4");
+        expect(params.model).toBe("systemsculpt@@systemsculpt/ai-agent");
         return (async function* () {
           yield { type: "content", text: "Title" };
         })();
@@ -210,34 +195,29 @@ describe("TitleGenerationService", () => {
       await service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }]);
     });
 
-    it("uses fallback model when validation fails", async () => {
+    it("returns a default title when managed access is missing", async () => {
       const { plugin } = createPlugin();
-      plugin.modelService.validateSpecificModel = jest.fn(async () => ({
-        isAvailable: false,
-        alternativeModel: { id: "openai@@gpt-3.5-turbo" },
-      }));
-
-      streamMessage.mockImplementation((params: any) => {
-        expect(params.model).toBe("openai@@gpt-3.5-turbo");
-        return (async function* () {
-          yield { type: "content", text: "Title" };
-        })();
-      });
-
-      const service = TitleGenerationService.getInstance(plugin);
-      await service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }]);
-    });
-
-    it("throws when no model is determined", async () => {
-      const { plugin } = createPlugin();
-      plugin.settings.selectedModelId = "";
-      plugin.settings.titleGenerationModelId = "";
-      plugin.settings.useLatestModelEverywhere = true;
+      plugin.settings.licenseKey = "";
+      plugin.settings.licenseValid = false;
 
       const service = TitleGenerationService.getInstance(plugin);
       await expect(
         service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }])
-      ).rejects.toThrow("Failed to determine a valid model");
+      ).resolves.toBe("Untitled Chat");
+      expect(streamMessage).not.toHaveBeenCalled();
+    });
+
+    it("returns a default title when managed model validation fails", async () => {
+      const { plugin } = createPlugin();
+      plugin.modelService.validateSpecificModel = jest.fn(async () => ({
+        isAvailable: false,
+      }));
+
+      const service = TitleGenerationService.getInstance(plugin);
+      await expect(
+        service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }])
+      ).resolves.toBe("Untitled Chat");
+      expect(streamMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -410,14 +390,13 @@ describe("TitleGenerationService", () => {
   });
 
   describe("standard mode", () => {
-    it("uses global model in standard mode", async () => {
+    it("still uses the managed model in standard mode", async () => {
       const { plugin } = createPlugin();
       plugin.settings.settingsMode = "standard";
       plugin.settings.titleGenerationModelId = "custom-model";
 
       streamMessage.mockImplementation((params: any) => {
-        // Should use global model, not the custom one
-        expect(params.model).not.toBe("custom-model");
+        expect(params.model).toBe("systemsculpt@@systemsculpt/ai-agent");
         return (async function* () {
           yield { type: "content", text: "Title" };
         })();

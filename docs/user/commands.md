@@ -22,12 +22,11 @@ Source of truth:
 
 ## Chat and writing
 
+Chat always runs through SystemSculpt. There are no separate chat-model commands in the plugin.
+
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Change Chat Model (Current Chat) |  | `change-chat-model` | Requires active SystemSculpt chat view |
-| Set Default Chat Model |  | `set-default-chat-model` | Sets default model for new chats |
 | Change/Generate Title | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
-| Open Template Selection |  | `open-template-modal` | Inserts a template into active editor |
 | Quick Edit (Active File) |  | `quick-file-edit` | Opens Quick Edit widget |
 | Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
 
@@ -38,22 +37,10 @@ Source of truth:
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Opens search modal |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
-| Process Embeddings |  | `process-embeddings` | Informational; processing is automatic |
+| Process Embeddings |  | `process-embeddings` | Starts embeddings processing |
 | Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
-| Rebuild Embeddings (Current Model) |  | `rebuild-embeddings-current-model` | Rebuilds only current provider/model namespace |
+| Rebuild Embeddings (Current Model) |  | `rebuild-embeddings-current-model` | Rebuilds only the current SystemSculpt embeddings namespace |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
-
-## Daily Vault
-
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Open Today's Daily Note |  | `daily-vault-open-today` | Opens/creates today's note per settings |
-| Create Daily Note |  | `daily-vault-create-note` | Forces creation flow |
-| Open Yesterday's Daily Note |  | `daily-vault-open-yesterday` | Opens yesterday when available |
-| Start Daily Review |  | `daily-vault-start-daily-review` | Starts daily review flow |
-| Start Weekly Review |  | `daily-vault-start-weekly-review` | Starts weekly review flow |
-| View Daily Streak |  | `daily-vault-view-streak` | Shows streak summary |
-| Open Daily Vault Settings |  | `daily-vault-open-settings` | Focuses Daily Vault tab |
 
 ## Audio and media
 

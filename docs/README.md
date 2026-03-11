@@ -1,6 +1,6 @@
 # SystemSculpt AI docs
 
-Last verified against code: **2026-02-11**.
+Last verified against code: **2026-03-10**.
 
 This folder includes both user docs and engineering docs for the Obsidian plugin.
 
@@ -10,15 +10,16 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 - [Settings](user/settings.md)
 - [Commands](user/commands.md)
 - [Ribbon icons](user/ribbon-icons.md)
-- [Agent Mode tools](user/agent-mode.md)
 - [Similar Notes (embeddings)](user/similar-notes.md)
-- [Daily Vault](user/daily-vault.md)
 - [Audio & transcription](user/audio-transcription.md)
 - [Automations](user/automations.md)
 - [Troubleshooting](user/troubleshooting.md)
 
 ## Engineering docs (repo root `docs/`)
 
+- [SystemSculpt-only simplification plan](systemsculpt-only-simplification-plan.md)
+- [Mobile support plan](mobile-support-plan.md)
+- [iPad device testing](ipad-device-testing.md)
 - [Chat request flow](chat-request-flow.md)
 - [Benchmark](benchmark.md)
 - [Testing coverage map](testing-coverage-map.md)

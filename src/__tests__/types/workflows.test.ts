@@ -14,7 +14,6 @@ import {
   type WorkflowTriggerType,
   type WorkflowConditionType,
   type WorkflowStepType,
-  type WorkflowTaskDestination,
 } from "../../types/workflows";
 
 describe("WORKFLOW_AUTOMATION_IDS", () => {
@@ -47,8 +46,6 @@ describe("createDefaultWorkflowAutomationsState", () => {
     expect(transcript.enabled).toBe(false);
     expect(transcript.sourceFolder).toContain("Transcripts");
     expect(transcript.destinationFolder).toContain("Meetings");
-    expect(transcript.tasksDestination).toBe("central-note");
-    expect(transcript.tasksNotePath).toContain("Central Tasks");
     expect(transcript.systemPrompt).toContain("meeting");
   });
 
@@ -103,26 +100,16 @@ describe("createDefaultWorkflowEngineSettings", () => {
     expect(settings.processedNotesFolder).toBe("");
   });
 
-  it("has central-note as task destination", () => {
-    const settings = createDefaultWorkflowEngineSettings();
-    expect(settings.taskDestination).toBe("central-note");
-  });
-
-  it("has default task note path", () => {
-    const settings = createDefaultWorkflowEngineSettings();
-    expect(settings.taskNotePath).toContain("Central Tasks");
-  });
-
   it("has autoTranscribeInboxNotes enabled", () => {
     const settings = createDefaultWorkflowEngineSettings();
     expect(settings.autoTranscribeInboxNotes).toBe(true);
   });
 
-  it("includes all default templates", () => {
+  it("includes all default automations", () => {
     const settings = createDefaultWorkflowEngineSettings();
-    expect(settings.templates[WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT]).toBeDefined();
-    expect(settings.templates[WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING]).toBeDefined();
-    expect(settings.templates[WORKFLOW_AUTOMATION_IDS.IDEA_DUMP]).toBeDefined();
+    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT]).toBeDefined();
+    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING]).toBeDefined();
+    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.IDEA_DUMP]).toBeDefined();
   });
 
   it("returns a new object each time", () => {
@@ -200,17 +187,17 @@ describe("WorkflowStep type", () => {
     expect(step.config).toBeUndefined();
   });
 
-  it("can create apply-template step with config", () => {
+  it("can create write-note step with config", () => {
     const step: WorkflowStep = {
       id: "step-2",
-      type: "apply-template",
-      label: "Apply meeting template",
+      type: "write-note",
+      label: "Write meeting note",
       config: {
-        templatePath: "/templates/meeting.md",
+        targetPath: "/processed/meeting.md",
       },
     };
-    expect(step.type).toBe("apply-template");
-    expect(step.config?.templatePath).toBe("/templates/meeting.md");
+    expect(step.type).toBe("write-note");
+    expect(step.config?.targetPath).toBe("/processed/meeting.md");
   });
 
   it("can create ai-preset step", () => {
@@ -296,14 +283,11 @@ describe("WorkflowAutomationState type", () => {
       enabled: false,
       sourceFolder: "/source",
       destinationFolder: "/dest",
-      tasksDestination: "daily-note",
-      tasksNotePath: "/daily.md",
       metadata: { key: "value" },
       systemPrompt: "Process this note",
     };
 
     expect(state.sourceFolder).toBe("/source");
-    expect(state.tasksDestination).toBe("daily-note");
     expect(state.metadata?.key).toBe("value");
     expect(state.systemPrompt).toBe("Process this note");
   });
@@ -316,14 +300,11 @@ describe("WorkflowEngineSettings type", () => {
       inboxRoutingEnabled: false,
       inboxFolder: "/custom/inbox",
       processedNotesFolder: "/processed",
-      taskDestination: "daily-note",
-      taskNotePath: "/daily/tasks.md",
       autoTranscribeInboxNotes: false,
-      templates: {},
+      automations: {},
     };
 
     expect(settings.enabled).toBe(false);
-    expect(settings.taskDestination).toBe("daily-note");
-    expect(settings.templates).toEqual({});
+    expect(settings.automations).toEqual({});
   });
 });

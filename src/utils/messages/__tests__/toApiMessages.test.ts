@@ -84,7 +84,7 @@ describe("toApiBaseMessages", () => {
     expect(result[0].documentContext).toBe("# Document Content");
   });
 
-  it("preserves systemPromptType when present", () => {
+  it("strips legacy systemPromptType when present", () => {
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -95,10 +95,10 @@ describe("toApiBaseMessages", () => {
     ];
 
     const result = toApiBaseMessages(messages);
-    expect(result[0].systemPromptType).toBe("custom");
+    expect(result[0]).not.toHaveProperty("systemPromptType");
   });
 
-  it("preserves systemPromptPath when present", () => {
+  it("strips legacy systemPromptPath when present", () => {
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -109,7 +109,7 @@ describe("toApiBaseMessages", () => {
     ];
 
     const result = toApiBaseMessages(messages);
-    expect(result[0].systemPromptPath).toBe("/prompts/helper.md");
+    expect(result[0]).not.toHaveProperty("systemPromptPath");
   });
 
   it("excludes messageParts", () => {
@@ -189,8 +189,8 @@ describe("toApiBaseMessages", () => {
     expect(result[0].tool_call_id).toBe("call_xyz");
     expect(result[0].name).toBe("web_search");
     expect(result[0].documentContext).toBe("Context here");
-    expect(result[0].systemPromptType).toBe("agent");
-    expect(result[0].systemPromptPath).toBe("/agent/search.md");
+    expect(result[0]).not.toHaveProperty("systemPromptType");
+    expect(result[0]).not.toHaveProperty("systemPromptPath");
   });
 
   it("does not mutate original messages", () => {

@@ -1,9 +1,10 @@
 import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { BENCH_RESULTS_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { BenchResultsDataLoader } from "./BenchResultsDataLoader";
 import { LeaderboardRenderer } from "./LeaderboardRenderer";
 
-export const BENCH_RESULTS_VIEW_TYPE = "systemsculpt-bench-results-view";
+export { BENCH_RESULTS_VIEW_TYPE };
 
 /**
  * View displaying a leaderboard of benchmark results.

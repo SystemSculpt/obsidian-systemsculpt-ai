@@ -26,7 +26,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private tabsDef: { id: string; label: string }[] = [];
   private contentMutationObserver: MutationObserver | null = null;
   private indexRebuildTimer: number | null = null;
-  private activeTabId: string = "overview";
+  private activeTabId: string = "account";
   private focusTabEventRef: EventRef | null = null;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
@@ -92,22 +92,10 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       environmentInfo.push(`- Language: ${navigator.language}`);
     }
     
-    // Current AI Provider (prefer active provider name if available)
-    const activeProvider = this.plugin.settings.activeProvider;
-    const currentProvider = activeProvider?.name || this.plugin.settings.selectedProvider;
-    if (currentProvider) {
-      environmentInfo.push(`- AI Provider: ${currentProvider}`);
-    }
-    
-    // Current Model
-    const currentModel = this.plugin.settings.selectedModelId;
-    if (currentModel) {
-      environmentInfo.push(`- AI Model: ${currentModel}`);
-    }
-    
-    // Plugin Mode (Standard or Advanced)
-    const pluginMode = this.plugin.settings.settingsMode === 'advanced' ? 'Advanced' : 'Standard';
-    environmentInfo.push(`- Plugin mode: ${pluginMode}`);
+    const hasSystemSculptAccess =
+      !!(this.plugin.settings.licenseValid === true && this.plugin.settings.licenseKey?.trim());
+    environmentInfo.push(`- SystemSculpt access: ${hasSystemSculptAccess ? "Active" : "Needs setup"}`);
+    environmentInfo.push("- Execution path: SystemSculpt");
     
     // Vault Statistics (privacy-conscious)
     const files = this.app.vault.getFiles();
@@ -122,16 +110,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     // Enabled Features
     const enabledFeatures: string[] = ['MCP']; // MCP is always enabled (internal servers)
     if (this.plugin.settings.embeddingsEnabled) enabledFeatures.push('Embeddings');
-    if (this.plugin.settings.enableSystemSculptProvider) enabledFeatures.push('SystemSculpt Provider');
 
     if (enabledFeatures.length > 0) {
       environmentInfo.push(`- Enabled features: ${enabledFeatures.join(', ')}`);
-    }
-
-    // Enabled custom providers (if any)
-    const enabledCustomProviders = (this.plugin.settings.customProviders || []).filter(p => p.isEnabled).map(p => p.name).filter(Boolean);
-    if (enabledCustomProviders.length > 0) {
-      environmentInfo.push(`- Custom providers enabled: ${enabledCustomProviders.join(', ')}`);
     }
     
     const title = encodeURIComponent('SystemSculpt Feedback: ');
@@ -147,6 +128,64 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     );
 
     return `https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=${title}&body=${body}`;
+  }
+
+  public renderQuickActionsSection(containerEl: HTMLElement): void {
+    const actionsSetting = new Setting(containerEl)
+      .setName("Quick actions")
+      .setDesc("");
+
+    actionsSetting.addButton((button) => {
+      decorateRestoreDefaultsButton(button.buttonEl);
+      button.onClick(async () => {
+        const confirm = await showPopup(
+          this.app,
+          RESTORE_DEFAULTS_COPY.label,
+          {
+            description:
+              "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
+            primaryButton: "Restore Defaults",
+            secondaryButton: "Cancel",
+          }
+        );
+        if (!confirm?.confirmed) {
+          return;
+        }
+
+        try {
+          button.setDisabled(true);
+          await this.plugin.getSettingsManager().updateSettings({
+            chatFontSize: "medium",
+            embeddingsEnabled: false,
+            chatsDirectory: "SystemSculpt/Chats",
+            savedChatsDirectory: "SystemSculpt/Saved Chats",
+            benchmarksDirectory: "SystemSculpt/Benchmarks",
+            attachmentsDirectory: "SystemSculpt/Attachments",
+            extractionsDirectory: "SystemSculpt/Extractions",
+            showUpdateNotifications: true,
+            debugMode: false,
+          });
+          new Notice("Recommended defaults restored.", 2500);
+          await this.display();
+        } catch (_) {
+          new Notice("Failed to restore recommended defaults.", 4000);
+        } finally {
+          button.setDisabled(false);
+        }
+      });
+    });
+
+    const feedbackLink = actionsSetting.controlEl.createEl("a", {
+      cls: "ss-settings-link",
+      text: "Send feedback",
+      attr: {
+        href: this.generateFeedbackUrl(),
+        target: "_blank",
+        rel: "noopener",
+        "aria-label": "Share feedback, report bugs, or suggest improvements",
+      },
+    });
+    setIcon(feedbackLink.createSpan({ cls: "ss-settings-link-icon" }), "external-link");
   }
 
   private removeAllListeners() {
@@ -168,7 +207,7 @@ async display(): Promise<void> {
 
   containerEl.createEl("h2", { text: "SystemSculpt AI" });
   containerEl.createEl("p", {
-    text: "Configure AI models, prompts, embeddings, audio, and more.",
+    text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
     cls: "setting-item-description",
   });
 
@@ -189,24 +228,6 @@ async display(): Promise<void> {
         } finally {
           button.setDisabled(false);
         }
-      });
-  });
-
-  const modeSetting = new Setting(containerEl)
-    .setName("Settings mode")
-    .setDesc("Standard hides advanced options. Advanced unlocks everything.");
-  modeSetting.addDropdown((dropdown) => {
-    dropdown
-      .addOption("standard", "Standard")
-      .addOption("advanced", "Advanced")
-      .setValue((this.plugin.settings.settingsMode ?? "standard") as string)
-      .onChange(async (value) => {
-        const nextMode = value === "advanced" ? "advanced" : "standard";
-        if (nextMode === this.plugin.settings.settingsMode) {
-          return;
-        }
-        await this.plugin.getSettingsManager().updateSettings({ settingsMode: nextMode as any });
-        this.display();
       });
   });
 
@@ -240,70 +261,6 @@ async display(): Promise<void> {
       });
   });
 
-  const actionsSetting = new Setting(containerEl)
-    .setName("Quick actions")
-    .setDesc("");
-  actionsSetting.addButton((button) => {
-    decorateRestoreDefaultsButton(button.buttonEl);
-    button.onClick(async () => {
-      const confirm = await showPopup(
-        this.app,
-        RESTORE_DEFAULTS_COPY.label,
-        {
-          description:
-            "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
-          primaryButton: "Restore Defaults",
-          secondaryButton: "Cancel",
-        }
-      );
-      if (!confirm?.confirmed) {
-        return;
-      }
-
-      try {
-        button.setDisabled(true);
-        await this.plugin.getSettingsManager().updateSettings({
-          settingsMode: "standard",
-          selectedModelId: this.plugin.settings.selectedModelId || "",
-          systemPromptType: "general-use",
-          systemPromptPath: "",
-          chatFontSize: "medium",
-          selectedModelProviders: [],
-          embeddingsEnabled: false,
-          showModelTooltips: false,
-          showVisionModelsOnly: false,
-          showTopPicksOnly: false,
-          chatsDirectory: "SystemSculpt/Chats",
-          savedChatsDirectory: "SystemSculpt/Saved Chats",
-          benchmarksDirectory: "SystemSculpt/Benchmarks",
-          attachmentsDirectory: "SystemSculpt/Attachments",
-          extractionsDirectory: "SystemSculpt/Extractions",
-          systemPromptsDirectory: "SystemSculpt/System Prompts",
-          showUpdateNotifications: true,
-          debugMode: false,
-        });
-        new Notice("Recommended defaults restored.", 2500);
-        this.display();
-      } catch (_) {
-        new Notice("Failed to restore recommended defaults.", 4000);
-      } finally {
-        button.setDisabled(false);
-      }
-    });
-  });
-
-  const feedbackLink = actionsSetting.controlEl.createEl("a", {
-    cls: "ss-settings-link",
-    text: "Send feedback",
-    attr: {
-      href: this.generateFeedbackUrl(),
-      target: "_blank",
-      rel: "noopener",
-      "aria-label": "Share feedback, report bugs, or suggest improvements",
-    },
-  });
-  setIcon(feedbackLink.createSpan({ cls: "ss-settings-link-icon" }), "external-link");
-
   const layout = containerEl.createDiv({ cls: "ss-settings-layout" });
   const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
   const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
@@ -312,12 +269,7 @@ async display(): Promise<void> {
   this.contentContainerEl = contentContainer;
 
   const tabConfigsAll = buildSettingsTabConfigs(this);
-  const isAdvancedMode = this.plugin.settings.settingsMode === "advanced";
-  const visibleTabs = isAdvancedMode
-    ? tabConfigsAll
-    : tabConfigsAll.filter((cfg) =>
-        ["overview", "models-prompts", "chat-templates", "daily-vault", "embeddings", "audio-transcription"].includes(cfg.id)
-      );
+  const visibleTabs = tabConfigsAll;
 
   if (this.focusTabEventRef) {
     this.app.workspace.offref(this.focusTabEventRef);
@@ -335,7 +287,7 @@ async display(): Promise<void> {
   this.tabsDef = visibleTabs.map(({ id, label }) => ({ id, label }));
   const previousActiveTabId = this.activeTabId;
   const hasPreviousActiveTab = this.tabsDef.some((tab) => tab.id === previousActiveTabId);
-  this.activeTabId = hasPreviousActiveTab ? previousActiveTabId : (this.tabsDef[0]?.id ?? "overview");
+  this.activeTabId = hasPreviousActiveTab ? previousActiveTabId : (this.tabsDef[0]?.id ?? "account");
 
   for (const [index, cfg] of visibleTabs.entries()) {
     const button = tabBar.createEl("button", {
@@ -377,28 +329,6 @@ async display(): Promise<void> {
         },
       });
       anchor.toggle(false);
-    }
-  }
-
-  if (!isAdvancedMode) {
-    const hiddenConfigs = tabConfigsAll.filter((cfg) => !visibleTabs.find((c) => c.id === cfg.id));
-    for (const cfg of hiddenConfigs) {
-      const hiddenPanel = contentContainer.createDiv({
-        cls: ["ss-tab-panel", "systemsculpt-tab-content"],
-      });
-      hiddenPanel.dataset.tab = cfg.id;
-      hiddenPanel.toggle(false);
-      if (cfg.anchor) {
-        const anchor = hiddenPanel.createDiv({
-          attr: {
-            "data-ss-search": "true",
-            "data-ss-title": cfg.anchor.title,
-            "data-ss-desc": cfg.anchor.desc,
-            "data-ss-advanced": "true",
-          },
-        });
-        anchor.toggle(false);
-      }
     }
   }
 
@@ -652,11 +582,7 @@ async display(): Promise<void> {
       if (match.description) {
         row.createDiv({ cls: "ss-search-desc", text: match.description });
       }
-      const isAdvancedOnly = !this.tabsDef.find((tab) => tab.id === match.tabId);
-      row.createDiv({
-        cls: "ss-search-tab",
-        text: isAdvancedOnly ? `${match.tabLabel} • Requires Advanced` : match.tabLabel,
-      });
+      row.createDiv({ cls: "ss-search-tab", text: match.tabLabel });
       row.addEventListener("click", () => this.navigateToSetting(match.tabId, match.element));
     }
   }
@@ -673,18 +599,6 @@ async display(): Promise<void> {
 
     const targetButton = this.tabContainerEl.querySelector(`button[data-tab="${tabId}"]`) as HTMLElement | null;
     if (!targetButton) {
-      if (this.plugin.settings.settingsMode !== "advanced") {
-        this.plugin
-          .getSettingsManager()
-          .updateSettings({ settingsMode: "advanced" as any })
-          .then(() => {
-            this.display();
-            setTimeout(() => {
-              const newBtn = this.tabContainerEl?.querySelector(`button[data-tab="${tabId}"]`) as HTMLElement | null;
-              newBtn?.click();
-            }, 120);
-          });
-      }
       return;
     }
 

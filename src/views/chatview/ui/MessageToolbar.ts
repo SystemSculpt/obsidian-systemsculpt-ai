@@ -1,4 +1,4 @@
-import { App, setIcon, Platform } from "obsidian";
+import { App, setIcon } from "obsidian";
 import type { ChatRole } from "../../../types";
 import { PlatformContext } from "../../../services/PlatformContext";
 
@@ -74,8 +74,7 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
   const toolbar = document.createElement("div");
   toolbar.className = "systemsculpt-message-toolbar";
   const platform = PlatformContext.get();
-  const uiVariant = platform.uiVariant();
-  const isMobile = Platform.isMobile || uiVariant === "mobile";
+  const isMobile = platform.uiVariant() === "mobile";
   toolbar.classList.add(`platform-ui-${isMobile ? "mobile" : "desktop"}`);
 
   if (messageEl.classList.contains("systemsculpt-user-message")) {

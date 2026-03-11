@@ -1,7 +1,5 @@
 import type SystemSculptPlugin from "../main";
 import { resolveProviderLabel } from "./piAuth/StudioPiProviderRegistry";
-import { hasAuthenticatedStudioPiProvider } from "./piAuth/StudioPiProviderAuthUtils";
-import { loadPiTextProviderAuth, piTextProviderRequiresAuth } from "../services/pi-native/PiTextAuth";
 import type {
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
@@ -26,7 +24,7 @@ function formatContextLength(tokens: number): string {
 }
 
 function describeModel(model: SystemSculptModel): string {
-  const parts: string[] = ["Local Pi runtime"];
+  const parts: string[] = ["SystemSculpt managed"];
   const context = formatContextLength(model.context_length);
   if (context) {
     parts.push(context);
@@ -72,25 +70,10 @@ export async function resolveStudioDynamicSelectOptions(options: {
   }
 
   const models = await plugin.modelService.getModels().catch(() => [] as SystemSculptModel[]);
-  const providerHints = Array.from(
-    new Set(
-      models
-        .map((model) => normalizeText(model.sourceProviderId || model.provider).toLowerCase())
-        .filter((providerId) => providerId.length > 0)
-    )
-  );
-  const providerAuthById = await loadPiTextProviderAuth(providerHints);
+  const hostedAccessConfigured = normalizeText(plugin.settings.licenseKey).length > 0;
 
   return models
-    .map((model) => {
-      const providerId = normalizeText(model.sourceProviderId || model.provider).toLowerCase();
-      const authRecord = providerAuthById.get(providerId);
-      const localReady =
-        !!model.piLocalAvailable &&
-        (!piTextProviderRequiresAuth(providerId) || hasAuthenticatedStudioPiProvider(authRecord));
-      const providerAuthenticated = localReady;
-      return toPiTextOption(model, providerAuthenticated);
-    })
+    .map((model) => toPiTextOption(model, hostedAccessConfigured))
     .sort((left, right) => {
       const authCompare = Number(Boolean(right.providerAuthenticated)) - Number(Boolean(left.providerAuthenticated));
       if (authCompare !== 0) {

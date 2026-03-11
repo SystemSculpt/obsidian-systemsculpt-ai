@@ -13,7 +13,7 @@ export interface AIResponseModalOptions {
   messages: ChatMessage[];
   onInsert?: (response: string) => void;
   commandText?: string; // The command text to filter out from the note content
-  parentModal?: StandardModal; // Reference to the parent modal (StandardTemplateModal) to close it
+  parentModal?: StandardModal; // Reference to the parent modal to close it
 }
 
 /**

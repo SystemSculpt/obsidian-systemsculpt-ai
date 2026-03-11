@@ -18,6 +18,7 @@ import {
   discardAllQuickEditDiffInEditors,
   QUICK_EDIT_REVIEW_COMPLETE_EVENT,
 } from "../quick-edit/editor-diff";
+import { PlatformContext } from "../services/PlatformContext";
 import { errorLogger } from "../utils/errorLogger";
 
 type StatusTone = "info" | "success" | "error";
@@ -134,7 +135,7 @@ export class QuickFileEditModal extends StandardModal {
     this.previewButton = this.addActionButton("Preview changes", () => void this.submit(), true, "settings");
     this.stopButton = this.addActionButton("Stop", () => this.cancelRun(), false, "x-circle");
     this.applyButton = this.addActionButton("Apply all", () => void this.applyAllPendingEdits(), true, "check");
-    if (this.applyButton && !Platform.isMobile) {
+    if (this.applyButton && !PlatformContext.get().isMobile()) {
       this.applyButton.createSpan({
         cls: "systemsculpt-shortcut-hint",
         text: Platform.isMacOS ? " (⌘+Enter)" : " (Ctrl+Enter)",

@@ -8,8 +8,11 @@ import {
   getToolCompatibilityInfo,
   supportsTools,
 } from "../../utils/modelUtils";
-import { listPiTextCatalogModels } from "../pi-native/PiTextCatalog";
-import { resolveLegacyPiTextSelection } from "../pi-native/PiTextMigration";
+import { getManagedSystemSculptModelId } from "../systemsculpt/ManagedSystemSculptModel";
+
+async function loadPiTextCatalogModule(): Promise<typeof import("../pi-native/PiTextCatalog")> {
+  return await import("../pi-native/PiTextCatalog");
+}
 
 export class UnifiedModelService {
   private static instance: UnifiedModelService | null = null;
@@ -42,6 +45,7 @@ export class UnifiedModelService {
     }
 
     this.loadingPromise = (async () => {
+      const { listPiTextCatalogModels } = await loadPiTextCatalogModule();
       const models = await listPiTextCatalogModels(this.plugin);
       this.favoritesService.processFavorites(models);
 
@@ -102,16 +106,10 @@ export class UnifiedModelService {
       return chatModels[0];
     }
 
-    const sameProvider = chatModels.filter(
+    const sameProvider = chatModels.find(
       (model) => (model.provider || "").toLowerCase() === (unavailable.provider || "").toLowerCase()
     );
-    if (sameProvider.length > 0) {
-      const localPreferred = sameProvider.find((model) => model.piLocalAvailable);
-      return localPreferred || sameProvider[0];
-    }
-
-    const localPreferred = chatModels.find((model) => model.piLocalAvailable);
-    return localPreferred || chatModels[0];
+    return sameProvider || chatModels[0];
   }
 
   public async validateSelectedModel(
@@ -137,19 +135,6 @@ export class UnifiedModelService {
 
     const directMatch = findModelById(modelList, savedId);
     if (directMatch) {
-      return result;
-    }
-
-    const migrated = resolveLegacyPiTextSelection(
-      savedId,
-      modelList,
-      this.plugin.settings.customProviders || []
-    );
-    if (migrated) {
-      result.wasReplaced = true;
-      result.oldModelId = savedId;
-      result.newModel = migrated;
-      await this.plugin.getSettingsManager().updateSettings({ selectedModelId: migrated.id });
       return result;
     }
 
@@ -226,14 +211,11 @@ export class UnifiedModelService {
     localPi: boolean;
   }> {
     const models = await this.getModels(true);
+    const managedModelId = getManagedSystemSculptModelId();
     return {
-      systemSculpt: models.some(
-        (model) =>
-          String(model.provider || "").trim().toLowerCase() === "systemsculpt" &&
-          !!model.piExecutionModelId
-      ),
-      customProviders: models.some((model) => model.piAuthMode === "byok"),
-      localPi: models.some((model) => model.piLocalAvailable),
+      systemSculpt: models.some((model) => model.id === managedModelId),
+      customProviders: false,
+      localPi: false,
     };
   }
 

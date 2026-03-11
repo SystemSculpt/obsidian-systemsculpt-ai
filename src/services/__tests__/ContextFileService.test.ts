@@ -12,14 +12,6 @@ jest.mock("../../utils/ImageProcessor", () => ({
   },
 }));
 
-jest.mock("../SystemPromptService", () => ({
-  SystemPromptService: {
-    getInstance: jest.fn(() => ({
-      getSystemPromptContent: jest.fn().mockResolvedValue("System prompt content"),
-    })),
-  },
-}));
-
 jest.mock("../../utils/errorLogger", () => ({
   errorLogger: {
     debug: jest.fn(),
@@ -32,25 +24,14 @@ jest.mock("../../utils/cryptoUtils", () => ({
   simpleHash: jest.fn((input) => `hash_${input.slice(0, 10)}`),
 }));
 
-jest.mock("../../utils/tooling", () => ({
-  mapAssistantToolCallsForApi: jest.fn((toolCalls) =>
-    toolCalls.map((tc: any) => ({
-      id: tc.id,
-      type: "function",
-      function: { name: tc.request?.name, arguments: JSON.stringify(tc.request?.arguments || {}) },
-    }))
-  ),
-  buildToolResultMessagesFromToolCalls: jest.fn((toolCalls) =>
-    toolCalls
-      .filter((tc: any) => tc.result)
-      .map((tc: any) => ({
-        role: "tool",
-        tool_call_id: tc.id,
-        content: JSON.stringify(tc.result),
-      }))
-  ),
-  pruneToolMessagesNotFollowingToolCalls: jest.fn((messages) => ({ messages, dropped: 0 })),
-}));
+jest.mock("../../utils/tooling", () => {
+  const actual = jest.requireActual("../../utils/tooling");
+  return {
+    ...actual,
+    buildToolResultMessagesFromToolCalls: jest.fn(actual.buildToolResultMessagesFromToolCalls),
+    pruneToolMessagesNotFollowingToolCalls: jest.fn(actual.pruneToolMessagesNotFollowingToolCalls),
+  };
+});
 
 describe("ContextFileService", () => {
   let service: ContextFileService;
@@ -205,7 +186,7 @@ describe("ContextFileService", () => {
   });
 
   describe("prepareMessagesWithContext", () => {
-    it("adds system message at the beginning", async () => {
+    it("keeps the transcript user-first when no server prompt is supplied", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Hello" },
       ];
@@ -213,12 +194,10 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true
       );
 
-      expect(result[0].role).toBe("system");
+      expect(result[0].role).toBe("user");
     });
 
     it("uses provided finalSystemPrompt", async () => {
@@ -229,8 +208,6 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true,
         "Custom system prompt"
       );
@@ -252,8 +229,6 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(["[[notes/context.md]]"]),
-        undefined,
-        undefined,
         true
       );
 
@@ -271,8 +246,6 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(["doc:12345"]),
-        undefined,
-        undefined,
         true
       );
 
@@ -280,60 +253,16 @@ describe("ContextFileService", () => {
       expect(userMessage?.documentContext?.documentIds).toContain("12345");
     });
 
-    it("strips tool calls from assistant history before sending to Pi", async () => {
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Use a tool" },
-        {
-          role: "assistant",
-          content: "Using tool",
-          tool_calls: [{ id: "call-1", request: { name: "test", arguments: {} } }] as any,
-        },
-      ];
-
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        undefined,
-        undefined,
-        true
-      );
-
-      const assistantMessage = result.find((m) => m.role === "assistant");
-      expect(assistantMessage?.tool_calls).toBeUndefined();
-    });
-
-    it("drops tool calls even if legacy history still contains them", async () => {
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Use a tool" },
-        {
-          role: "assistant",
-          content: "",
-          tool_calls: [
-            { id: "call-1", request: { name: "test", arguments: {} }, result: { success: true } },
-          ] as any,
-        },
-      ];
-
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        undefined,
-        undefined,
-        true
-      );
-
-      const assistantMessage = result.find((m) => m.role === "assistant");
-      expect(assistantMessage?.tool_calls).toBeUndefined();
-    });
-
-    it("drops tool role messages that follow stripped tool calls", async () => {
+    it("preserves assistant tool calls when matching explicit tool results exist", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool", message_id: "u1" },
         {
           role: "assistant",
-          content: "",
+          content: "Using tool",
           message_id: "a1",
-          tool_calls: [{ id: "call-1", request: { name: "test", arguments: {} } }] as any,
+          tool_calls: [
+            { id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } },
+          ] as any,
         } as any,
         {
           role: "tool",
@@ -341,31 +270,72 @@ describe("ContextFileService", () => {
           tool_call_id: "call-1",
           content: "{\"ok\":true}",
         } as any,
-        { role: "user", content: "Continue", message_id: "u2" },
       ];
 
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true
       );
 
-      const assistantIndex = result.findIndex((m) => m.role === "assistant");
-      expect(assistantIndex).toBeGreaterThan(-1);
-      expect(result[assistantIndex + 1]?.role).toBe("user");
-      expect(result.filter((m) => m.role === "tool")).toHaveLength(0);
+      const assistantMessage = result.find((m) => m.role === "assistant");
+      expect((assistantMessage as any)?.tool_calls).toEqual([
+        { id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } },
+      ]);
+      expect(result.find((m) => m.role === "tool")).toEqual(
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: "call-1",
+          content: "{\"ok\":true}",
+        })
+      );
     });
 
-    it("drops tool_calls when no matching tool results exist", async () => {
+    it("synthesizes tool role messages from completed tool calls when explicit results are absent", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool", message_id: "u1" },
         {
           role: "assistant",
           content: "",
           message_id: "a1",
-          tool_calls: [{ id: "call-1", request: { name: "test", arguments: {} } }] as any,
+          tool_calls: [
+            {
+              id: "call-1",
+              function: { name: "mcp-filesystem_read", arguments: "{}" },
+              state: "completed",
+              result: { success: true, data: { ok: true } },
+            },
+          ] as any,
+        } as any,
+      ];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(),
+        true
+      );
+
+      const assistantMessage = result.find((m) => m.role === "assistant");
+      expect((assistantMessage as any)?.tool_calls).toEqual([
+        expect.objectContaining({ id: "call-1" }),
+      ]);
+      expect(result).toContainEqual(
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: "call-1",
+          content: JSON.stringify({ ok: true }),
+        })
+      );
+    });
+
+    it("drops unresolved tool_calls when no matching tool results exist", async () => {
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Use a tool", message_id: "u1" },
+        {
+          role: "assistant",
+          content: "",
+          message_id: "a1",
+          tool_calls: [{ id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } }] as any,
         } as any,
         { role: "user", content: "Continue", message_id: "u2" },
       ];
@@ -373,40 +343,61 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true
       );
 
       const assistantMessage = result.find((m) => m.role === "assistant");
       expect((assistantMessage as any)?.tool_calls).toBeUndefined();
+      expect(result.filter((m) => m.role === "tool")).toHaveLength(0);
     });
 
-    it("filters out tool role messages", async () => {
+    it("prunes orphan tool role messages that do not follow assistant tool calls", async () => {
       const messages: ChatMessage[] = [
-        { role: "user", content: "Hello" },
-        { role: "tool", content: "Tool result" } as any,
-        { role: "assistant", content: "Response" },
+        { role: "user", content: "Use a tool", message_id: "u1" },
+        { role: "tool", content: "orphan tool result", tool_call_id: "orphan-call", message_id: "t0" } as any,
+        {
+          role: "assistant",
+          content: "No tool",
+          message_id: "a1",
+        },
+        { role: "user", content: "Continue", message_id: "u2" },
       ];
 
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true
       );
 
-      const toolMessages = result.filter((m) => m.role === "tool");
-      expect(toolMessages).toHaveLength(0);
+      expect(result.filter((m) => m.role === "tool")).toHaveLength(0);
     });
 
-    it("uses fallback system prompt when none configured", async () => {
-      const { SystemPromptService } = require("../SystemPromptService");
-      SystemPromptService.getInstance.mockReturnValue({
-        getSystemPromptContent: jest.fn().mockRejectedValue(new Error("Not found")),
-      });
+    it("keeps context insertion and document refs aligned after orphan tool pruning", async () => {
+      const mockFile = new TFile({ path: "notes/context.md", extension: "md" });
+      (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Context content");
 
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Earlier", message_id: "u1" },
+        { role: "tool", content: "orphan tool result", tool_call_id: "orphan-call", message_id: "t0" } as any,
+        { role: "assistant", content: "Intermediate", message_id: "a1" },
+        { role: "user", content: "Latest", message_id: "u2" },
+      ];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(["[[notes/context.md]]", "doc:12345"]),
+        true
+      );
+
+      const latestUserIndex = result.findIndex((m) => m.message_id === "u2");
+      const contextIndex = result.findIndex((m) => String(m.content || "").includes("Context from [[notes/context.md]]"));
+      expect(contextIndex).toBeGreaterThan(-1);
+      expect(contextIndex).toBeLessThan(latestUserIndex);
+      expect(result[latestUserIndex]?.documentContext?.documentIds).toEqual(["12345"]);
+    });
+
+    it("omits a system message when none is provided", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Hello" },
       ];
@@ -414,13 +405,11 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true
       );
 
-      expect(result[0].role).toBe("system");
-      expect(result[0].content).toContain("helpful AI assistant");
+      expect(result[0].role).toBe("user");
+      expect(result.find((message) => message.role === "system")).toBeUndefined();
     });
 
     it("injects Bases syntax guide when the latest user message references a .base file", async () => {
@@ -429,14 +418,25 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true,
         "Custom system prompt"
       );
 
       expect(result[0].role).toBe("system");
       expect(String(result[0].content)).toContain("<obsidian_bases_syntax_guide>");
+    });
+
+    it("does not inject a Bases guide on its own when no server prompt override is provided", async () => {
+      const messages: ChatMessage[] = [{ role: "user", content: "Open Projects.base and update filters" }];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(),
+        true
+      );
+
+      expect(result).toEqual(messages);
+      expect(result.find((message) => message.role === "system")).toBeUndefined();
     });
 
     it("injects Bases syntax guide when a tool call targets a .base path", async () => {
@@ -460,8 +460,6 @@ describe("ContextFileService", () => {
       const result = await service.prepareMessagesWithContext(
         messages,
         new Set(),
-        undefined,
-        undefined,
         true,
         "Custom system prompt"
       );

@@ -1,4 +1,4 @@
-import { Platform } from "obsidian";
+import { PlatformContext } from "../../PlatformContext";
 import {
   assertPiTextExecutionReady,
   resolvePiTextExecutionPlan,
@@ -6,12 +6,14 @@ import {
 } from "../PiTextRuntime";
 
 describe("PiTextRuntime", () => {
+  let supportsDesktopOnlyFeatures: jest.Mock<boolean, []>;
+
   beforeEach(() => {
     jest.clearAllMocks();
-    Object.defineProperty(Platform, "isDesktopApp", {
-      configurable: true,
-      value: true,
-    });
+    supportsDesktopOnlyFeatures = jest.fn(() => true);
+    jest.spyOn(PlatformContext, "get").mockReturnValue({
+      supportsDesktopOnlyFeatures,
+    } as any);
   });
 
   describe("shouldUseLocalPiExecution", () => {
@@ -23,10 +25,7 @@ describe("PiTextRuntime", () => {
         } as any)
       ).toBe(true);
 
-      Object.defineProperty(Platform, "isDesktopApp", {
-        configurable: true,
-        value: false,
-      });
+      supportsDesktopOnlyFeatures.mockReturnValue(false);
       expect(
         shouldUseLocalPiExecution({
           sourceMode: "pi_local",
@@ -78,10 +77,7 @@ describe("PiTextRuntime", () => {
     });
 
     it("fails outside the desktop app", async () => {
-      Object.defineProperty(Platform, "isDesktopApp", {
-        configurable: true,
-        value: false,
-      });
+      supportsDesktopOnlyFeatures.mockReturnValue(false);
 
       await expect(
         resolvePiTextExecutionPlan({

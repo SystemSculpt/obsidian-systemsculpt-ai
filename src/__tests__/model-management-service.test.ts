@@ -19,18 +19,18 @@ describe("ModelManagementService", () => {
     jest.resetAllMocks();
   });
 
-  it("delegates model listing to the Pi-native text catalog", async () => {
+  it("delegates model listing to the managed SystemSculpt catalog", async () => {
     const plugin = buildPlugin();
-    listPiTextCatalogModels.mockResolvedValue([{ id: "openai@@gpt-5-mini" }]);
+    listPiTextCatalogModels.mockResolvedValue([{ id: "systemsculpt@@systemsculpt/ai-agent" }]);
 
     const service = new ModelManagementService(plugin, "https://api.systemsculpt.com/api/v1");
     const models = await service.getModels();
 
     expect(listPiTextCatalogModels).toHaveBeenCalledWith(plugin);
-    expect(models).toEqual([{ id: "openai@@gpt-5-mini" }]);
+    expect(models).toEqual([{ id: "systemsculpt@@systemsculpt/ai-agent" }]);
   });
 
-  it("returns the Pi execution id for SystemSculpt models through the local Pi source", async () => {
+  it("normalizes the SystemSculpt model to the hosted managed source", async () => {
     const plugin = buildPlugin();
     (plugin.modelService.getModelById as jest.Mock).mockResolvedValue({
       id: "systemsculpt@@systemsculpt/ai-agent",
@@ -45,27 +45,32 @@ describe("ModelManagementService", () => {
 
     expect(info).toMatchObject({
       isCustom: false,
-      modelSource: "pi_local",
+      modelSource: "systemsculpt",
       actualModelId: "systemsculpt/ai-agent",
+      model: expect.objectContaining({
+        sourceMode: "systemsculpt",
+        piAuthMode: "hosted",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+      }),
     });
   });
 
-  it("returns the Pi execution id for local models", async () => {
+  it("falls back to the managed SystemSculpt model when a legacy model id is requested", async () => {
     const plugin = buildPlugin();
-    (plugin.modelService.getModelById as jest.Mock).mockResolvedValue({
-      id: "ollama@@llama3.1:8b",
-      provider: "ollama",
-      piExecutionModelId: "ollama/llama3.1:8b",
-      piRemoteAvailable: false,
-    });
+    (plugin.modelService.getModelById as jest.Mock).mockResolvedValue(undefined);
 
     const service = new ModelManagementService(plugin, "https://api.systemsculpt.com/api/v1");
-    const info = await service.getModelInfo("ollama@@llama3.1:8b");
+    const info = await service.getModelInfo("local-pi-openai@@gpt-4.1");
 
     expect(info).toMatchObject({
       isCustom: false,
-      modelSource: "pi_local",
-      actualModelId: "ollama/llama3.1:8b",
+      modelSource: "systemsculpt",
+      actualModelId: "systemsculpt/ai-agent",
+      model: expect.objectContaining({
+        id: "systemsculpt@@systemsculpt/ai-agent",
+        provider: "systemsculpt",
+      }),
     });
   });
 });

@@ -1,4 +1,8 @@
 import { MobileDetection } from "../utils/MobileDetection";
+import {
+  detectPlatformEnvironment,
+  type PlatformRuntime,
+} from "../utils/PlatformEnvironment";
 
 export type PlatformTransport = "fetch" | "requestUrl";
 export type PlatformUIVariant = "mobile" | "desktop";
@@ -45,7 +49,31 @@ export class PlatformContext {
   }
 
   public isMobile(): boolean {
-    return this.mobileDetection.isMobileDevice();
+    return detectPlatformEnvironment().surface === "mobile";
+  }
+
+  public runtime(): PlatformRuntime {
+    return detectPlatformEnvironment().runtime;
+  }
+
+  public isDesktopRuntime(): boolean {
+    return this.runtime() === "desktop";
+  }
+
+  public isMobileRuntime(): boolean {
+    return this.runtime() === "mobile";
+  }
+
+  public supportsDesktopOnlyFeatures(): boolean {
+    return this.isDesktopRuntime();
+  }
+
+  public supportsStatusBar(): boolean {
+    return this.isDesktopRuntime();
+  }
+
+  public supportsEagerVaultWrites(): boolean {
+    return this.isDesktopRuntime();
   }
 
   public uiVariant(): PlatformUIVariant {
@@ -77,6 +105,10 @@ export class PlatformContext {
 
   public getDeviceInfo() {
     return this.mobileDetection.getDeviceInfo();
+  }
+
+  public resetDetectionCache(): void {
+    this.mobileDetection.resetCache();
   }
 
   public getDetection(): MobileDetection {

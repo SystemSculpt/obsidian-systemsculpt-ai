@@ -1,6 +1,7 @@
 import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
 import { ChatMessage, MessagePart } from "../../types";
 import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
+import { getManagedSystemSculptModelId } from "../../services/systemsculpt/ManagedSystemSculptModel";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
 import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
@@ -27,6 +28,17 @@ type LoadedChatRecord = {
   piSessionId?: string;
   piLastEntryId?: string;
   piLastSyncedAt?: string;
+};
+
+type SaveChatOptions = {
+  contextFiles?: Set<string>;
+  title?: string;
+  chatFontSize?: "small" | "medium" | "large";
+  piSessionFile?: string;
+  piSessionId?: string;
+  piLastEntryId?: string;
+  piLastSyncedAt?: string;
+  chatBackend?: ChatBackend;
 };
 
 export class ChatStorageService {
@@ -99,35 +111,13 @@ export class ChatStorageService {
   async saveChat(
     chatId: string,
     messages: ChatMessage[],
-    selectedModelId: string,
-    contextFiles?: Set<string>,
-    customPromptFilePath?: string,
-    systemPromptType?: "general-use" | "concise" | "agent" | "custom",
-    systemPromptPath?: string,
-    title?: string,
-    chatFontSize?: "small" | "medium" | "large",
-    piSessionFile?: string,
-    piSessionId?: string,
-    piLastEntryId?: string,
-    piLastSyncedAt?: string,
-    chatBackend?: ChatBackend,
+    options: SaveChatOptions = {},
   ): Promise<{ version: number }> {
     try {
       const { version } = await this.saveChatSimple(
         chatId,
         messages,
-        selectedModelId,
-        contextFiles,
-        customPromptFilePath,
-        systemPromptType,
-        systemPromptPath,
-        title,
-        chatFontSize,
-        piSessionFile,
-        piSessionId,
-        piLastEntryId,
-        piLastSyncedAt,
-        chatBackend,
+        options,
       );
       return { version };
     } catch (error) {
@@ -138,18 +128,7 @@ export class ChatStorageService {
   private async saveChatSimple(
     chatId: string,
     messages: ChatMessage[],
-    selectedModelId: string,
-    contextFiles?: Set<string>,
-    customPromptFilePath?: string,
-    systemPromptType?: "general-use" | "concise" | "agent" | "custom",
-    systemPromptPath?: string,
-    title?: string,
-    chatFontSize?: "small" | "medium" | "large",
-    piSessionFile?: string,
-    piSessionId?: string,
-    piLastEntryId?: string,
-    piLastSyncedAt?: string,
-    chatBackend?: ChatBackend,
+    options: SaveChatOptions = {},
   ): Promise<{ filePath: string; version: number }> {
     let filePath = `[unknown-path]/${chatId}.md`;
     try {
@@ -171,18 +150,18 @@ export class ChatStorageService {
       const defaultChatTag = this.resolveDefaultChatTag();
       const mergedTags = this.mergeTags(existingTags, defaultChatTag);
       const piState = normalizePiSessionState({
-        sessionFile: piSessionFile,
-        sessionId: piSessionId,
-        lastEntryId: piLastEntryId,
-        lastSyncedAt: piLastSyncedAt,
+        sessionFile: options.piSessionFile,
+        sessionId: options.piSessionId,
+        lastEntryId: options.piLastEntryId,
+        lastSyncedAt: options.piLastSyncedAt,
       });
       const resolvedBackend = resolveChatBackend({
-        explicitBackend: chatBackend,
+        explicitBackend: options.chatBackend,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
       });
       const allowsEmptyVisibleTranscript =
-        resolvedBackend === "pi" && (!!piState.sessionFile || !!piState.sessionId);
+        resolvedBackend === "systemsculpt" && (!!piState.sessionFile || !!piState.sessionId);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
       const currentVersion = Number(existingMetadata?.version) || 0;
@@ -201,16 +180,11 @@ export class ChatStorageService {
 
       const metadata: ChatMetadata = {
         id: chatId,
-        model: selectedModelId,
         created: creationDate,
         lastModified: now,
-        title: title || existingMetadata?.title || "Untitled Chat",
+        title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
-        systemMessage: {
-          type: systemPromptType || 'general-use',
-          path: (systemPromptType === 'custom' && systemPromptPath) ? systemPromptPath : undefined
-        },
-        chatFontSize: chatFontSize || "medium",
+        chatFontSize: options.chatFontSize || "medium",
         chatBackend: resolvedBackend,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
@@ -222,8 +196,8 @@ export class ChatStorageService {
         metadata.tags = mergedTags;
       }
 
-      if (contextFiles && contextFiles.size > 0) {
-        metadata.context_files = Array.from(contextFiles).map((path) => ({
+      if (options.contextFiles && options.contextFiles.size > 0) {
+        metadata.context_files = Array.from(options.contextFiles).map((path) => ({
           path,
           type: path.includes("/Extractions/") ? "extraction" : "source",
         }));
@@ -472,7 +446,7 @@ export class ChatStorageService {
      return {
       id: metadata.id,
       messages: normalizedMessages,
-      selectedModelId: metadata.model,
+      selectedModelId: metadata.model || getManagedSystemSculptModelId(),
       lastModified: new Date(metadata.lastModified).getTime(),
       title: metadata.title,
       version: metadata.version || 0,
@@ -498,19 +472,9 @@ export class ChatStorageService {
     return {
       chatId: record.id,
       title: record.title,
-      modelId: record.selectedModelId,
       chatPath: record.chatPath,
-      chatBackend: record.chatBackend,
       lastModified: record.lastModified,
       messageCount: record.messages.length,
-      pi: record.chatBackend === "pi"
-        ? normalizePiSessionState({
-            sessionFile: record.piSessionFile,
-            sessionId: record.piSessionId,
-            lastEntryId: record.piLastEntryId,
-            lastSyncedAt: record.piLastSyncedAt,
-          })
-        : undefined,
     };
   }
 

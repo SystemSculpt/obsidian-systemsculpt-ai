@@ -127,9 +127,10 @@ export class ResumeChatService {
     const cache = this.app.metadataCache.getCache(file.path);
     if (!cache?.frontmatter) return false;
 
-    // Check for expected chat metadata fields
+    // Check for expected chat metadata fields. Old chat files may not carry a
+    // persisted model anymore, so identity + timestamps are the stable contract.
     const metadata = cache.frontmatter;
-    return !!(metadata.id && metadata.model && (metadata.created || metadata.lastModified));
+    return !!(metadata.id && (metadata.created || metadata.lastModified));
   }
 
   public extractChatId(file: TFile): string | null {
@@ -142,11 +143,6 @@ export class ResumeChatService {
     // Fallback: extract from filename (remove .md extension)
     const filename = file.basename;
     return filename || null;
-  }
-
-  public getModelFromFile(file: TFile): string {
-    const cache = this.app.metadataCache.getCache(file.path);
-    return cache?.frontmatter?.model || this.plugin.settings.selectedModelId;
   }
 
   private createResumeChatButton(chatId: string, file: TFile): HTMLElement {
@@ -168,10 +164,8 @@ export class ResumeChatService {
     return buttonContainer;
   }
 
-  public async openChat(chatId: string, chatPathOrModelId?: string, modelId?: string): Promise<void> {
+  public async openChat(chatId: string, chatPath?: string): Promise<void> {
     try {
-      const chatPath = chatPathOrModelId?.endsWith(".md") ? chatPathOrModelId : undefined;
-      const selectedModelId = chatPath ? modelId : (modelId || chatPathOrModelId || this.settings.selectedModelId);
       const descriptor = await this.chatStorage.getChatResumeDescriptor(chatId);
       if (descriptor) {
         await openChatResumeDescriptor(this.plugin, {
@@ -186,7 +180,6 @@ export class ResumeChatService {
         type: "systemsculpt-chat-view",
         state: {
           chatId,
-          selectedModelId,
         },
       });
       this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });

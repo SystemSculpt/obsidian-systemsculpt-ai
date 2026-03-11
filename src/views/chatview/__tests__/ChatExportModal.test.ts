@@ -90,7 +90,6 @@ jest.mock("../../../utils/titleUtils", () => ({
 jest.mock("../../../types/chatExport", () => ({
   createDefaultChatExportOptions: jest.fn().mockReturnValue({
     includeMetadata: true,
-    includeSystemPrompt: true,
     includeContextFiles: true,
     includeConversation: true,
     includeUserMessages: true,
@@ -340,9 +339,8 @@ describe("ChatExportModal option groups", () => {
   it("includes Overview group options", async () => {
     await modal.onOpen();
 
-    // Overview group should include metadata, system prompt, context files
+    // Overview group should include metadata and context files
     expect((modal as any).state.options.includeMetadata).toBeDefined();
-    expect((modal as any).state.options.includeSystemPrompt).toBeDefined();
     expect((modal as any).state.options.includeContextFiles).toBeDefined();
   });
 

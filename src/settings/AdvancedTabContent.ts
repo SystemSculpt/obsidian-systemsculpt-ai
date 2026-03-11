@@ -1,15 +1,8 @@
-import { App, Setting, Notice, ButtonComponent, setIcon } from "obsidian";
-import SystemSculptPlugin from "../main";
+import { Setting, Notice, ButtonComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPopup } from "../core/ui";
-import { DEFAULT_SETTINGS, LogLevel } from "../types";
-import { TextEditModal } from "../core/ui/modals/standard/TextEditModal";
-// Import necessary components
-import { StandardModelSelectionModal, ModelSelectionResult } from "../modals/StandardModelSelectionModal";
-import { parseCanonicalId } from "../utils/modelUtils";
-import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
+import { DEFAULT_SETTINGS } from "../types";
 import { UpdateNotificationWarningModal } from "../modals/UpdateNotificationWarningModal";
-import { setLogLevel } from "../utils/errorHandling";
 import { tryCopyToClipboard } from "../utils/clipboard";
 
 export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -20,27 +13,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     const { app, plugin } = tabInstance;
 
     containerEl.createEl("h3", { text: "Advanced Settings" }); // Added header for clarity
-
-    // Development Mode setting
-    const developmentModeSetting = new Setting(containerEl)
-        .setName("Development mode")
-        .setDesc("Enable additional logging and debugging features for troubleshooting")
-        .addToggle((toggle) => {
-            toggle
-                .setValue(plugin.settings.debugMode)
-                .onChange(async (value) => {
-                    await plugin.getSettingsManager().updateSettings({
-                        debugMode: value,
-                        logLevel: value ? LogLevel.DEBUG : LogLevel.WARNING
-                    });
-                    
-                    // Apply the log level change immediately
-                    setLogLevel(value ? LogLevel.DEBUG : LogLevel.WARNING);
-                    
-                    new Notice(`Development mode ${value ? 'enabled' : 'disabled'}.`);
-                });
-        });
-
+    tabInstance.renderQuickActionsSection(containerEl);
 
     // Update Notifications setting
     const updateNotificationsSetting = new Setting(containerEl)

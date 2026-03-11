@@ -1,10 +1,13 @@
 import { App, TFile } from "obsidian";
 import { ChatMessage } from "../types";
 import { ImageProcessor } from "../utils/ImageProcessor";
-import { SystemPromptService } from "./SystemPromptService";
 import { simpleHash } from "../utils/cryptoUtils";
 import { mentionsObsidianBases } from "../utils/obsidianBases";
 import { OBSIDIAN_BASES_SYNTAX_GUIDE } from "../constants/prompts/obsidianBasesSyntaxGuide";
+import {
+  buildToolResultMessagesFromToolCalls,
+  pruneToolMessagesNotFollowingToolCalls,
+} from "../utils/tooling";
 
 /**
  * Service responsible for handling context files and message preparation
@@ -195,42 +198,27 @@ export class ContextFileService {
   }
 
   /**
-   * Prepare messages with context files and system prompt
+   * Prepare messages with context files and an optional server-managed
+   * instruction override.
    */
   public async prepareMessagesWithContext(
     messages: ChatMessage[],
     contextFiles: Set<string>,
-    systemPromptType?: string,
-    systemPromptPath?: string,
     includeImages?: boolean,
     finalSystemPrompt?: string
   ): Promise<ChatMessage[]> {
+    const { messages: sanitizedMessages } = pruneToolMessagesNotFollowingToolCalls(messages || []);
     const shouldIncludeImages = includeImages !== false;
     const preparedMessages: ChatMessage[] = [];
 
-    // Add system message first
-    let systemPromptContent: string | undefined = finalSystemPrompt;
+    let systemPromptContent =
+      typeof finalSystemPrompt === "string" && finalSystemPrompt.trim().length > 0
+        ? finalSystemPrompt.trim()
+        : undefined;
 
-    // If not provided, resolve based on configured type
-    const normalizedType = systemPromptType?.toLowerCase();
-    if (!systemPromptContent) {
-      try {
-        if (normalizedType === "custom" && systemPromptPath) {
-          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent("custom", systemPromptPath);
-        } else if (normalizedType === "general-use" || normalizedType === "concise" || normalizedType === "agent") {
-          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent(normalizedType as any, undefined);
-        } else {
-          systemPromptContent = await SystemPromptService.getInstance(this.app, () => ({})).getSystemPromptContent("general-use", undefined);
-        }
-      } catch (_) {}
-      // As a final fallback
-      if (!systemPromptContent) {
-        systemPromptContent = "You are a helpful AI assistant. Provide clear, accurate, and relevant information.";
-      }
-    }
-
-    // Conditionally augment the system prompt with Bases syntax help when relevant.
-    if (systemPromptContent && this.shouldInjectObsidianBasesGuide(messages, contextFiles)) {
+    // Only augment explicit server-supplied prompt content; the thin client
+    // no longer invents its own prompt when none is provided.
+    if (systemPromptContent && this.shouldInjectObsidianBasesGuide(sanitizedMessages, contextFiles)) {
       systemPromptContent = `${systemPromptContent}\n\n${OBSIDIAN_BASES_SYNTAX_GUIDE}`;
     }
 
@@ -240,14 +228,6 @@ export class ContextFileService {
         role: "system",
         content: systemPromptContent,
         message_id: this.deterministicId(systemPromptContent, "sys")
-      });
-    } else {
-      // Add a minimal default system prompt if all else fails
-      const fallbackPrompt = "You are a helpful AI assistant. Provide clear, accurate, and relevant information.";
-      preparedMessages.push({
-        role: "system",
-        content: fallbackPrompt,
-        message_id: this.deterministicId(fallbackPrompt, "sys")
       });
     }
     
@@ -271,47 +251,26 @@ export class ContextFileService {
 
     // Identify the latest user message index
     let lastUserIndex = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === "user") {
+    for (let i = sanitizedMessages.length - 1; i >= 0; i--) {
+      if (sanitizedMessages[i]?.role === "user") {
         lastUserIndex = i;
         break;
       }
     }
 
-    // If we have document IDs, attach them to the latest user message (not the first)
-    if (documentIds.length > 0 && lastUserIndex !== -1) {
-      const targetUserMessage = messages[lastUserIndex];
-      if (targetUserMessage) {
-        targetUserMessage.documentContext = { documentIds };
-      }
-    }
+    const latestUserDocumentContext =
+      documentIds.length > 0 && lastUserIndex !== -1 ? { documentIds } : undefined;
 
     // Add the actual chat messages, injecting context right before the latest user message.
+    const explicitToolResultIds = new Set(
+      sanitizedMessages
+        .filter((msg) => msg?.role === "tool" && typeof msg.tool_call_id === "string" && msg.tool_call_id.length > 0)
+        .map((msg) => String(msg.tool_call_id))
+    );
+
     let idx = 0;
-    while (idx < messages.length) {
-      const msg = messages[idx];
-
-      if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        const assistantMessageWithoutTools: Partial<ChatMessage> = {
-          role: "assistant",
-          message_id: msg.message_id,
-          content: msg.content || "",
-        };
-        preparedMessages.push(assistantMessageWithoutTools as ChatMessage);
-
-        let lookahead = idx + 1;
-        while (lookahead < messages.length && messages[lookahead]?.role === "tool") {
-          lookahead += 1;
-        }
-        idx = lookahead;
-        continue;
-      }
-
-      if (msg.role === "tool") {
-        // Tool messages are handled as part of the assistant tool_calls branch above.
-        idx += 1;
-        continue;
-      }
+    while (idx < sanitizedMessages.length) {
+      const msg = sanitizedMessages[idx];
 
       // Insert deferred context messages immediately before the latest user message
       if (idx === lastUserIndex && contextMessages.length > 0) {
@@ -324,21 +283,59 @@ export class ContextFileService {
       const messageToPush: Partial<ChatMessage> = {
         role: msg.role,
         message_id: msg.message_id,
-        documentContext: msg.documentContext,
-        systemPromptType: msg.systemPromptType,
-        systemPromptPath: msg.systemPromptPath,
+        documentContext:
+          idx === lastUserIndex && latestUserDocumentContext
+            ? latestUserDocumentContext
+            : msg.documentContext,
+        ...(typeof msg.tool_call_id === "string" && { tool_call_id: msg.tool_call_id }),
+        ...(typeof msg.name === "string" && msg.name.length > 0 && { name: msg.name }),
         ...((msg as any).reasoning_details && { reasoning_details: (msg as any).reasoning_details }),
-        ...(msg.tool_calls && msg.tool_calls.length > 0 && { tool_calls: msg.tool_calls }),
       };
-      if (msg.content) {
+
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(msg.tool_calls);
+        const satisfiedToolCallIds = new Set<string>();
+        for (const toolCall of msg.tool_calls) {
+          const toolCallId = typeof toolCall?.id === "string" ? toolCall.id : "";
+          if (!toolCallId) continue;
+          if (explicitToolResultIds.has(toolCallId)) {
+            satisfiedToolCallIds.add(toolCallId);
+            continue;
+          }
+          if (synthesizedToolMessages.some((toolMessage) => toolMessage.tool_call_id === toolCallId)) {
+            satisfiedToolCallIds.add(toolCallId);
+          }
+        }
+
+        const preservedToolCalls = msg.tool_calls.filter(
+          (toolCall) => typeof toolCall?.id === "string" && satisfiedToolCallIds.has(toolCall.id)
+        );
+        if (preservedToolCalls.length > 0) {
+          (messageToPush as any).tool_calls = preservedToolCalls;
+        }
+      } else if (msg.tool_calls && msg.tool_calls.length > 0) {
+        (messageToPush as any).tool_calls = msg.tool_calls;
+      }
+
+      if (msg.content !== undefined) {
         messageToPush.content = msg.content;
       }
       preparedMessages.push(messageToPush as ChatMessage);
 
-        idx += 1;
+      if (msg.role === "assistant" && Array.isArray((messageToPush as any).tool_calls)) {
+        const syntheticToolMessages = buildToolResultMessagesFromToolCalls((messageToPush as any).tool_calls).filter(
+          (toolMessage) =>
+            typeof toolMessage.tool_call_id === "string"
+            && !explicitToolResultIds.has(toolMessage.tool_call_id)
+        );
+        for (const toolMessage of syntheticToolMessages) {
+          preparedMessages.push(toolMessage);
+        }
       }
+
+      idx += 1;
+    }
 
     return preparedMessages;
   }
-
 }

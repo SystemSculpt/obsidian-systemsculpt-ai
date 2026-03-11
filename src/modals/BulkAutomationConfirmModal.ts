@@ -85,7 +85,7 @@ export class BulkAutomationConfirmModal {
 
     body.createDiv({
       cls: "systemsculpt-bulk-widget-info",
-      text: "Skip All will mark these files as skipped so they do not auto-process. Clear skips in Settings -> Automations."
+      text: "Skip All will mark these files as skipped so they do not auto-process. Clear skips in Settings -> Workflow."
     });
 
     const buttons = this.container.createDiv({ cls: "systemsculpt-bulk-widget-buttons" });

@@ -32,7 +32,7 @@ export class VersionCheckerService {
   private periodicCheckTimeout: NodeJS.Timeout | null = null;
   private startupCheckAbortController: AbortController | null = null;
   
-  // Development mode state to track update flow
+  // Internal update-flow state used by local release testing
   private devModeUpdateState: "show-update" | "show-post-update" = "show-update";
 
   private constructor(currentVersion: string, app: App, plugin: SystemSculptPlugin) {

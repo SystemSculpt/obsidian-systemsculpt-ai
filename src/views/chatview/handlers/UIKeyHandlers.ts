@@ -57,7 +57,6 @@ export async function handleKeyDown(ctx: KeyHandlersContext, event: KeyboardEven
 
 export function handleInputChange(ctx: { input: HTMLTextAreaElement; adjustInputHeight: () => void; slashCommandMenu?: any; atMentionMenu?: any; agentSelectionMenu?: any; setPendingLargeTextContent: (text: string | null) => void; }): void {
   ctx.adjustInputHeight();
-  handleAgentSelectionDetection(ctx);
   handleSlashCommandDetection(ctx);
   handleAtMentionDetection(ctx);
 
@@ -65,31 +64,6 @@ export function handleInputChange(ctx: { input: HTMLTextAreaElement; adjustInput
     if (!LargeTextHelpers.containsPlaceholder(ctx.input.value)) {
       ctx.setPendingLargeTextContent(null);
     }
-  }
-}
-
-export function handleAgentSelectionDetection(ctx: { input: HTMLTextAreaElement; agentSelectionMenu?: any; slashCommandMenu?: any }): void {
-  if (!ctx.agentSelectionMenu) return;
-  
-  const value = ctx.input.value;
-  const cursorPos = ctx.input.selectionStart || 0;
-  
-  // Check if input starts with /agent followed by space or just /agent
-  const agentCommandPattern = /^\/agent(\s|$)/;
-  const match = value.match(agentCommandPattern);
-  
-  if (match && cursorPos >= match[0].length) {
-    // User has typed /agent (with optional space) - show agent menu
-    if (!ctx.agentSelectionMenu.isOpen()) {
-      ctx.agentSelectionMenu.show(cursorPos);
-    }
-    // Hide slash command menu if it's open
-    if (ctx.slashCommandMenu?.isOpen()) {
-      ctx.slashCommandMenu.hide();
-    }
-  } else if (ctx.agentSelectionMenu.isOpen()) {
-    // Input no longer matches /agent pattern - hide agent menu
-    ctx.agentSelectionMenu.hide();
   }
 }
 

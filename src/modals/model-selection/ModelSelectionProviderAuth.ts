@@ -1,4 +1,3 @@
-import { Platform } from "obsidian";
 import type { SystemSculptModel } from "../../types/llm";
 import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
 import type { StudioPiProviderAuthRecord } from "../../studio/piAuth/StudioPiAuthStorage";
@@ -9,6 +8,7 @@ import {
 } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import { ensureCanonicalId } from "../../utils/modelUtils";
 import { loadPiTextProviderAuth, piTextProviderRequiresAuth } from "../../services/pi-native/PiTextAuth";
+import { PlatformContext } from "../../services/PlatformContext";
 
 export type ModelSelectorProviderAuthRecord = StudioPiProviderAuthRecordLike &
   Pick<
@@ -81,7 +81,7 @@ export async function loadModelSelectorProviderAuth(
     )
   );
 
-  if (!providerHints.length || !Platform.isDesktopApp) {
+  if (!providerHints.length || !PlatformContext.get().supportsDesktopOnlyFeatures()) {
     return new Map<string, ModelSelectorProviderAuthRecord>();
   }
 

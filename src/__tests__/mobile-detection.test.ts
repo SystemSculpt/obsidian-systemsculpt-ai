@@ -77,6 +77,9 @@ describe('MobileDetection heuristics', () => {
       const detection = MobileDetection.getInstance();
 
       expect(detection.getDeviceInfo().isMobile).toBe(false);
+      expect(detection.getEnvironment()).toEqual(
+        expect.objectContaining({ runtime: 'desktop', surface: 'desktop' })
+      );
     } finally {
       Object.assign(Platform, originalPlatform);
     }
@@ -102,6 +105,9 @@ describe('MobileDetection heuristics', () => {
       const detection = MobileDetection.getInstance();
 
       expect(detection.getDeviceInfo().isMobile).toBe(true);
+      expect(detection.getEnvironment()).toEqual(
+        expect.objectContaining({ runtime: 'mobile', surface: 'mobile' })
+      );
     } finally {
       Object.assign(Platform, originalPlatform);
     }
@@ -127,6 +133,9 @@ describe('MobileDetection heuristics', () => {
       const detection = MobileDetection.getInstance();
 
       expect(detection.getDeviceInfo().isMobile).toBe(true);
+      expect(detection.getEnvironment()).toEqual(
+        expect.objectContaining({ runtime: 'desktop', surface: 'mobile', isMobileEmulation: true })
+      );
     } finally {
       Object.assign(Platform, originalPlatform);
     }

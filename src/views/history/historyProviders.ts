@@ -1,12 +1,12 @@
-import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { PlatformContext } from "../../services/PlatformContext";
 import { createChatHistoryProvider } from "./chatHistoryProvider";
 import { createStudioSessionHistoryProvider } from "./studioSessionHistoryProvider";
 import type { SystemSculptHistoryEntry, SystemSculptHistoryProvider } from "./types";
 
 export function createSystemSculptHistoryProviders(
   plugin: SystemSculptPlugin,
-  includeStudioSessions: boolean = Platform.isDesktopApp
+  includeStudioSessions: boolean = PlatformContext.get().supportsDesktopOnlyFeatures()
 ): SystemSculptHistoryProvider[] {
   const providers: SystemSculptHistoryProvider[] = [createChatHistoryProvider(plugin)];
   if (includeStudioSessions) {

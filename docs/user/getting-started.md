@@ -1,6 +1,6 @@
 # Getting started
 
-SystemSculpt AI runs inside Obsidian and uses the model providers you configure.
+SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Chat works through your SystemSculpt account automatically, with nothing extra to pick inside the plugin.
 
 ## Install
 
@@ -22,10 +22,10 @@ npm run build
 
 ## First-run setup
 
-1. Open `Settings -> SystemSculpt AI -> Overview & Setup`.
-2. Add a provider (OpenAI, Anthropic, OpenRouter, MiniMax, Moonshot/Kimi, Groq, Ollama, LM Studio, or custom OpenAI-compatible).
-3. Add API credentials for that provider.
-4. Optional: enter and activate a SystemSculpt license key.
+1. Open `Settings -> SystemSculpt AI -> Account`.
+2. Enter and activate your SystemSculpt license key.
+3. Review credits and account status.
+4. Open docs or support links if you need help.
 
 ## Start chatting
 
@@ -39,22 +39,20 @@ npm run build
 - Type `@` to mention files.
 - Use `Chat with File` from the command palette.
 
-## Turn on Agent Mode (optional)
+## Tool use
 
-- Agent Mode is per chat.
-- Toggle it from the chat toolbar.
-- When enabled, the model can request tool calls (filesystem, web research, YouTube transcript).
+- SystemSculpt can use built-in tools automatically when the current flow needs them.
+- You only need to set up your SystemSculpt account in the plugin.
 
 ## Enable Similar Notes (optional)
 
-1. Open `Settings -> SystemSculpt AI -> Embeddings & Search`.
+1. Open `Settings -> SystemSculpt AI -> Knowledge`.
 2. Enable embeddings.
-3. Choose `SystemSculpt` or `Custom provider`.
+3. Review indexing scope and exclusions for your vault.
 4. Open `Open Similar Notes Panel`.
 
 ## Next docs
 
 - [Settings](settings.md)
 - [Commands](commands.md)
-- [Agent Mode](agent-mode.md)
 - [Troubleshooting](troubleshooting.md)

@@ -19,7 +19,7 @@ export function renderAccountSection(
     .setDesc(
       isProActive
         ? userStatus.greeting || "Pro features enabled."
-        : "Activate a license to unlock SystemSculpt credits-backed features and account services."
+        : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services."
     );
 
   if (!isProActive) {
@@ -33,14 +33,14 @@ export function renderAccountSection(
     statusSetting.addExtraButton((button) => {
       button
         .setIcon("external-link")
-        .setTooltip("Manage subscription")
+        .setTooltip("Manage account")
         .onClick(() => window.open(SYSTEMSCULPT_WEBSITE.LICENSE, "_blank"));
     });
   }
 
   const licenseSetting = new Setting(root)
     .setName("License key")
-    .setDesc(isProActive ? "License validated." : "Paste your license key to enable SystemSculpt Pro.");
+    .setDesc(isProActive ? "License validated." : "Paste your license key to activate SystemSculpt.");
 
   let licenseInput: TextComponent | null = null;
   licenseSetting.addText((text) => {
@@ -216,7 +216,7 @@ export function renderAccountSection(
     creditsSetting.addButton((button) => {
       button.setButtonText("Details").onClick(async () => {
         await plugin.openCreditsBalanceModal({
-          settingsTab: "overview",
+          settingsTab: "account",
         });
       });
     });

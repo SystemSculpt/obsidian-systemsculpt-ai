@@ -73,7 +73,7 @@ describe("createChatComposer", () => {
     const root = document.createElement("div");
     const onSend = jest.fn();
     const composer = createChatComposer(root, {
-      onEditSystemPrompt: jest.fn(),
+      onOpenChatSettings: jest.fn(),
       onAddContextFile: jest.fn(),
       onSend,
       onStop: jest.fn(),
@@ -91,6 +91,7 @@ describe("createChatComposer", () => {
     expect(composer.attachButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.settingsButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.micButton.buttonEl.tagName).toBe("BUTTON");
+    expect(root.querySelector(".systemsculpt-chat-composer-chips")).toBeNull();
 
     // Send button starts disabled until the host enables it.
     expect(composer.sendButton.buttonEl.disabled).toBe(true);
@@ -101,7 +102,7 @@ describe("createChatComposer", () => {
     const onInput = jest.fn();
 
     const composer = createChatComposer(root, {
-      onEditSystemPrompt: jest.fn(),
+      onOpenChatSettings: jest.fn(),
       onAddContextFile: jest.fn(),
       onSend: jest.fn(),
       onStop: jest.fn(),
@@ -128,13 +129,13 @@ describe("createChatComposer", () => {
   it("invokes button callbacks", () => {
     const root = document.createElement("div");
     const onAddContextFile = jest.fn();
-    const onEditSystemPrompt = jest.fn();
+    const onOpenChatSettings = jest.fn();
     const onSend = jest.fn();
     const onStop = jest.fn();
     const handleMicClick = jest.fn();
 
     const composer = createChatComposer(root, {
-      onEditSystemPrompt,
+      onOpenChatSettings,
       onAddContextFile,
       onSend,
       onStop,
@@ -150,7 +151,7 @@ describe("createChatComposer", () => {
     expect(onAddContextFile).toHaveBeenCalled();
 
     composer.settingsButton.buttonEl.click();
-    expect(onEditSystemPrompt).toHaveBeenCalled();
+    expect(onOpenChatSettings).toHaveBeenCalled();
 
     composer.sendButton.setDisabled(false);
     composer.sendButton.buttonEl.click();

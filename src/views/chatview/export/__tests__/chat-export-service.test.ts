@@ -1,18 +1,5 @@
 import { TFile } from "obsidian";
 import { ChatExportService } from "../ChatExportService";
-import { SystemPromptService } from "../../../../services/SystemPromptService";
-
-jest.mock("../../../../services/SystemPromptService", () => ({
-  normalizeDesktopPromptSelectionType: jest.fn((type?: string) => {
-    if (type === "concise" || type === "custom") {
-      return type;
-    }
-    return "general-use";
-  }),
-  SystemPromptService: {
-    getInstance: jest.fn(),
-  },
-}));
 
 const createChatView = () => {
   const app: any = {
@@ -33,8 +20,6 @@ const createChatView = () => {
     selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
     currentModelName: "SystemSculpt Agent",
     webSearchEnabled: true,
-    systemPromptType: "general-use",
-    systemPromptPath: "",
     contextManager: {
       getContextFiles: jest.fn(() => new Set(["[[Note]]", "[[Image.png]]", "doc:extract.md"])),
     },
@@ -74,11 +59,6 @@ describe("ChatExportService", () => {
       },
     ];
 
-    const promptService = {
-      getSystemPromptContent: jest.fn(async () => "PROMPT"),
-    };
-    (SystemPromptService.getInstance as jest.Mock).mockReturnValue(promptService);
-
     app.metadataCache.getFirstLinkpathDest.mockImplementation((path: string) => {
       if (path === "Note") return new TFile({ path: "Note.md" });
       if (path === "Image.png") return new TFile({ path: "Image.png" });
@@ -92,7 +72,8 @@ describe("ChatExportService", () => {
       includeSystemPrompt: true,
     });
 
-    expect(result.context.systemPrompt?.content).toBe("PROMPT");
+    expect(result.context.model).toBeUndefined();
+    expect(result.context.systemPrompt).toBeUndefined();
     expect(result.context.summary.totalMessages).toBe(3);
     expect(result.context.summary.userMessages).toBe(1);
     expect(result.context.summary.assistantMessages).toBe(2);

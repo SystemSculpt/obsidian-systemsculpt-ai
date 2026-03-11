@@ -158,7 +158,7 @@ describe("CreditsBalanceModal", () => {
     findButtonByText(modal.modalEl, "Buy Credits").click();
     expect((window as any).open).toHaveBeenCalledWith("https://systemsculpt.com/buy-credits", "_blank");
 
-    findButtonByText(modal.modalEl, "Open Setup").click();
+    findButtonByText(modal.modalEl, "Open Account").click();
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
   });
 

@@ -31,7 +31,7 @@ export class RecorderAdvancedModal extends Modal {
           .setCta()
           .onClick(() => {
             this.close();
-            this.plugin.openSettingsTab("recorder");
+            this.plugin.openSettingsTab("workflow");
           });
       });
   }
@@ -83,7 +83,7 @@ export class RecorderAdvancedModal extends Modal {
     this.addToggleSetting(
       containerEl,
       "Enable post-processing",
-      "Apply your post-processing prompt after transcription.",
+      "Apply SystemSculpt clean-up after transcription.",
       this.plugin.settings.postProcessingEnabled,
       async (value) => {
         await this.plugin.getSettingsManager().updateSettings({ postProcessingEnabled: value });

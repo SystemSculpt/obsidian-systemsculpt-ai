@@ -34,7 +34,7 @@ jest.mock("../../../types", () => ({
       enabled: false,
       autoTranscribeInboxNotes: false,
       inboxFolder: "Inbox",
-      templates: {},
+      automations: {},
     },
     mcpServers: [],
     debugMode: false,
@@ -62,7 +62,7 @@ jest.mock("../../../types", () => ({
     enabled: false,
     autoTranscribeInboxNotes: false,
     inboxFolder: "Inbox",
-    templates: {},
+    automations: {},
   }),
   LogLevel: {
     DEBUG: 0,
@@ -323,19 +323,42 @@ describe("SettingsManager", () => {
         expect(result.workflowEngine.autoTranscribeInboxNotes).toBe(true);
       });
 
-      it("merges templates with defaults", () => {
+      it("migrates legacy templates into automations", () => {
         const result = migrateSettings({
           workflowEngine: {
             templates: {
-              "custom-template": {
+              "custom-automation": {
                 enabled: true,
                 sourceFolder: "Source",
               },
             },
           },
         });
-        expect(result.workflowEngine.templates["custom-template"]).toBeDefined();
-        expect(result.workflowEngine.templates["custom-template"].enabled).toBe(true);
+        expect(result.workflowEngine.automations["custom-automation"]).toBeDefined();
+        expect(result.workflowEngine.automations["custom-automation"].enabled).toBe(true);
+        expect((result.workflowEngine as any).templates).toBeUndefined();
+      });
+
+      it("keeps explicit automations when both automations and templates are present", () => {
+        const result = migrateSettings({
+          workflowEngine: {
+            automations: {
+              "custom-automation": {
+                enabled: false,
+                sourceFolder: "Automations",
+              },
+            },
+            templates: {
+              "custom-automation": {
+                enabled: true,
+                sourceFolder: "Templates",
+              },
+            },
+          },
+        });
+        expect(result.workflowEngine.automations["custom-automation"]).toBeDefined();
+        expect(result.workflowEngine.automations["custom-automation"].enabled).toBe(false);
+        expect(result.workflowEngine.automations["custom-automation"].sourceFolder).toBe("Automations");
       });
     });
   });
@@ -400,6 +423,15 @@ describe("SettingsManager", () => {
       expect("showVideoRecordButtonInChat" in result).toBe(false);
       expect("showVideoRecordingPermissionPopup" in result).toBe(false);
       expect("recordSystemAudio" in result).toBe(false);
+    });
+
+    it("removes deprecated studio telemetry settings", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        studioTelemetryOptIn: true,
+      } as any);
+
+      expect("studioTelemetryOptIn" in result).toBe(false);
     });
 
     it("defaults invalid transcription output format settings", () => {

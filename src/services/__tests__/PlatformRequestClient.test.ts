@@ -35,7 +35,7 @@ describe("PlatformRequestClient", () => {
     ) as any;
 
     const response = await client.request({
-      url: "https://api.systemsculpt.com/api/v1/agent/sessions",
+      url: "https://api.systemsculpt.com/api/v1/chat/completions",
       method: "POST",
       body: { ok: true },
       stream: false,
@@ -47,7 +47,7 @@ describe("PlatformRequestClient", () => {
 
     expect(response.ok).toBe(true);
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://api.systemsculpt.com/api/v1/agent/sessions",
+      "https://api.systemsculpt.com/api/v1/chat/completions",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -71,7 +71,7 @@ describe("PlatformRequestClient", () => {
     });
 
     const response = await client.request({
-      url: "https://api.systemsculpt.com/api/v1/agent/sessions",
+      url: "https://api.systemsculpt.com/api/v1/chat/completions",
       method: "POST",
       body: { ok: true },
       stream: true,
@@ -80,7 +80,7 @@ describe("PlatformRequestClient", () => {
 
     expect(requestUrl).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://api.systemsculpt.com/api/v1/agent/sessions",
+        url: "https://api.systemsculpt.com/api/v1/chat/completions",
         method: "POST",
         body: JSON.stringify({ ok: true }),
         headers: expect.objectContaining({

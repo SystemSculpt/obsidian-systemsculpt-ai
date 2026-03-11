@@ -27,7 +27,7 @@ export const textGenerationNode: StudioNodeDefinition = {
         type: "select",
         required: true,
         selectPresentation: "searchable_dropdown",
-        optionsSource: "studio.pi_text_models",
+        optionsSource: "studio.systemsculpt_text_models",
       },
       {
         key: "reasoningEffort",

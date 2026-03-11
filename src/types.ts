@@ -1,8 +1,3 @@
-import { App, TFile } from "obsidian";
-import { SystemSculptService } from "./services/SystemSculptService";
-import { ScrollManagerService } from "./views/chatview/ScrollManagerService";
-import { MessageRenderer } from "./views/chatview/MessageRenderer";
-import SystemSculptPlugin from "./main";
 import type {
   SystemSculptModel,
   CustomProvider,
@@ -51,7 +46,6 @@ export type {
   WorkflowTrigger,
   WorkflowCondition,
   WorkflowStep,
-  WorkflowTaskDestination,
 } from "./types/workflows";
 
 export { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
@@ -108,11 +102,6 @@ export interface SystemSculptSettings {
    */
   // defaultModelId?: string; // DEPRECATED: Use selectedModelId
 
-  /**
-   * The default model ID used when creating new templates.
-   * This allows the template system to persist the user's preferred model independently of chat defaults.
-   */
-  defaultTemplateModelId?: string;
   chatsDirectory: string;
   /**
    * Directory where notes created via the "Save chat as note" feature are stored
@@ -275,12 +264,6 @@ export interface SystemSculptSettings {
   activeProvider: ActiveProvider;
 
   /**
-   * Template settings
-   */
-  templateHotkey: string;
-  enableTemplateHotkey: boolean;
-
-  /**
    * Last used folder for Save As Note modal
    */
   lastSaveAsNoteFolder: string;
@@ -402,7 +385,6 @@ export interface SystemSculptSettings {
   studioRunRetentionMaxArtifactsMb: number;
   /** Minutes the Studio terminal sidecar can stay alive without active Obsidian clients. */
   studioTerminalSidecarTimeoutMinutes: number;
-  studioTelemetryOptIn: boolean;
   studioJsonEditorDefaultMode?: "composer" | "raw";
 
   /**
@@ -539,10 +521,9 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   licenseKey: "",
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
-  selectedModelId: "",
+  selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
   useLatestModelEverywhere: true,
   // defaultModelId: "", // DEPRECATED
-  defaultTemplateModelId: "",
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
   benchmarksDirectory: "SystemSculpt/Benchmarks",
@@ -631,11 +612,6 @@ Raw transcript:`,
     type: "native",
   },
 
-  /**
-   * Template settings defaults
-   */
-  templateHotkey: "/",
-  enableTemplateHotkey: true,
   lastSaveAsNoteFolder: "SystemSculpt/AI Responses",
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),
@@ -686,7 +662,6 @@ Raw transcript:`,
   studioRunRetentionMaxRuns: 100,
   studioRunRetentionMaxArtifactsMb: 1024,
   studioTerminalSidecarTimeoutMinutes: 15,
-  studioTelemetryOptIn: false,
   studioJsonEditorDefaultMode: "composer",
 
   /**
@@ -792,31 +767,6 @@ export interface TextContent {
 }
 
 export type MultiPartContent = TextContent | ImageContent;
-
-export interface SystemPromptInfo {
-  type: string;
-  path?: string;
-}
-
-export interface InputHandlerOptions {
-  app: App;
-  container: HTMLElement;
-  aiService: SystemSculptService;
-  getMessages: () => ChatMessage[];
-  getSelectedModelId: () => string;
-  getContextFiles: () => Set<string>;
-  getSystemPrompt: () => SystemPromptInfo;
-  chatContainer: HTMLElement;
-  scrollManager: ScrollManagerService;
-  messageRenderer: MessageRenderer;
-  onMessageSubmit: (message: ChatMessage) => Promise<void>;
-  onAssistantResponse: (message: ChatMessage) => Promise<void>;
-  onContextFileAdd: (wikilink: string) => Promise<void>;
-  onError: (error: string) => void;
-  onAddContextFile: () => void;
-  onEditSystemPrompt: () => void;
-  plugin: SystemSculptPlugin;
-}
 
 export interface UrlCitation {
   url: string;

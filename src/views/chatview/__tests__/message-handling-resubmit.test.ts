@@ -16,7 +16,7 @@ describe("messageHandling resubmit behavior", () => {
     jest.clearAllMocks();
   });
 
-  it("forks Pi-backed chats and restores the resent prompt into the composer", async () => {
+  it("branches managed-session chats and restores the resent prompt into the composer", async () => {
     const chatView: any = {
       messages: [{ message_id: "user_pi_1", role: "user", content: "Hello Pi" }],
       isLegacyReadOnlyChat: jest.fn(() => false),
@@ -38,7 +38,7 @@ describe("messageHandling resubmit behavior", () => {
     expect(chatView.inputHandler.setValue).toHaveBeenCalledWith("Hello Pi");
     expect(chatView.inputHandler.focus).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ status: "success" });
-    expect(Notice).toHaveBeenCalledWith("Forked chat to that message and restored it to the composer.");
+    expect(Notice).toHaveBeenCalledWith("Branched chat to that message and restored it to the composer.");
   });
 
   it("keeps legacy resubmit behavior by truncating later messages and restoring editable text", async () => {

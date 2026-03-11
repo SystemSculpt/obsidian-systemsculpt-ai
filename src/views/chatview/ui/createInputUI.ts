@@ -1,7 +1,7 @@
 import { ButtonComponent } from "obsidian";
 
 export interface ChatComposerDeps {
-  onEditSystemPrompt: () => void;
+  onOpenChatSettings: () => void;
   onAddContextFile: () => void;
   onSend: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
@@ -21,7 +21,6 @@ export interface ChatComposerElements {
   root: HTMLDivElement;
   toolbar: HTMLDivElement;
   attachments: HTMLDivElement;
-  chips: HTMLDivElement;
   inputWrap: HTMLDivElement;
   input: HTMLTextAreaElement;
   settingsButton: ButtonComponent;
@@ -36,11 +35,6 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
 
   const toolbar = root.createDiv({ cls: "systemsculpt-chat-composer-toolbar" });
   const leftGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-left" });
-
-  // Chips container (model + system prompt). uiSetup will populate these.
-  const chips = toolbar.createDiv({
-    cls: "systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips",
-  });
 
   const rightGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-right" });
 
@@ -58,9 +52,9 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
 
   const settingsButton = new ButtonComponent(rightGroup)
     .setIcon("settings")
-    .setTooltip("Chat settings")
+    .setTooltip("Chat display settings")
     .setClass("clickable-icon")
-    .onClick(() => deps.onEditSystemPrompt());
+    .onClick(() => deps.onOpenChatSettings());
   settingsButton.buttonEl.setAttribute("aria-label", "Chat settings");
   settingsButton.buttonEl.classList.add("systemsculpt-chat-composer-button", "systemsculpt-chat-settings-button");
 
@@ -135,7 +129,6 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     root,
     toolbar,
     attachments,
-    chips,
     inputWrap,
     input: input as HTMLTextAreaElement,
     settingsButton,

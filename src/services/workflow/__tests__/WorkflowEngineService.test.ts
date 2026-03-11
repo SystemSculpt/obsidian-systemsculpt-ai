@@ -50,7 +50,7 @@ describe("WorkflowEngineService", () => {
           enabled: false,
           autoTranscribeInboxNotes: false,
           inboxFolder: "Inbox",
-          templates: {},
+          automations: {},
         },
       },
       getLogger: jest.fn().mockReturnValue({
@@ -121,14 +121,14 @@ describe("WorkflowEngineService", () => {
   });
 
   describe("getAutomationBacklog", () => {
-    it("returns empty array when no templates configured", async () => {
+    it("returns empty array when no automations are configured", async () => {
       const backlog = await service.getAutomationBacklog();
 
       expect(backlog).toEqual([]);
     });
 
-    it("returns empty array when templates is undefined", async () => {
-      mockPlugin.settings.workflowEngine.templates = undefined;
+    it("returns empty array when automations are undefined", async () => {
+      mockPlugin.settings.workflowEngine.automations = undefined;
 
       const backlog = await service.getAutomationBacklog();
 
@@ -142,7 +142,7 @@ describe("WorkflowEngineService", () => {
         frontmatter: { workflow_status: "processed" },
       });
 
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: true,
           sourceFolder: "Transcripts",
@@ -160,7 +160,7 @@ describe("WorkflowEngineService", () => {
       (mockApp.vault.getMarkdownFiles as jest.Mock).mockReturnValue([mockFile]);
       (mockApp.metadataCache.getFileCache as jest.Mock).mockReturnValue({});
 
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: true,
           sourceFolder: "Transcripts",
@@ -179,7 +179,7 @@ describe("WorkflowEngineService", () => {
       const mockFile = new TFile({ path: "OtherFolder/file.md" });
       (mockApp.vault.getMarkdownFiles as jest.Mock).mockReturnValue([mockFile]);
 
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: true,
           sourceFolder: "Transcripts",
@@ -203,7 +203,7 @@ describe("WorkflowEngineService", () => {
     });
 
     it("throws for non-markdown files", async () => {
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "test-automation": {
           enabled: true,
           sourceFolder: "Source",
@@ -386,8 +386,8 @@ describe("WorkflowEngineService", () => {
       expect(result).toBe(true);
     });
 
-    it("returns true when any template is enabled", () => {
-      mockPlugin.settings.workflowEngine.templates = {
+    it("returns true when any automation is enabled", () => {
+      mockPlugin.settings.workflowEngine.automations = {
         "test-automation": { enabled: true },
       };
       const result = (service as any).isEngineActive(mockPlugin.settings.workflowEngine);
@@ -398,17 +398,17 @@ describe("WorkflowEngineService", () => {
       mockPlugin.settings.workflowEngine = {
         enabled: false,
         autoTranscribeInboxNotes: false,
-        templates: {},
+        automations: {},
       };
       const result = (service as any).isEngineActive(mockPlugin.settings.workflowEngine);
       expect(result).toBe(false);
     });
 
-    it("returns false when templates are undefined", () => {
+    it("returns false when automations are undefined", () => {
       mockPlugin.settings.workflowEngine = {
         enabled: false,
         autoTranscribeInboxNotes: false,
-        templates: undefined,
+        automations: undefined,
       };
       const result = (service as any).isEngineActive(mockPlugin.settings.workflowEngine);
       expect(result).toBe(false);
@@ -449,7 +449,7 @@ describe("WorkflowEngineService", () => {
 
     it("returns automation for md file in source folder", () => {
       const mockFile = new TFile({ path: "Transcripts/note.md" });
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: true,
           sourceFolder: "Transcripts",
@@ -467,7 +467,7 @@ describe("WorkflowEngineService", () => {
 
     it("returns null for processed md file", () => {
       const mockFile = new TFile({ path: "Transcripts/note.md" });
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: true,
           sourceFolder: "Transcripts",
@@ -485,7 +485,7 @@ describe("WorkflowEngineService", () => {
 
     it("returns null for disabled automation", () => {
       const mockFile = new TFile({ path: "Transcripts/note.md" });
-      mockPlugin.settings.workflowEngine.templates = {
+      mockPlugin.settings.workflowEngine.automations = {
         "meeting-transcript": {
           enabled: false,
           sourceFolder: "Transcripts",
@@ -654,7 +654,7 @@ describe("WorkflowEngineService", () => {
       mockPlugin.settings.workflowEngine = {
         enabled: false,
         autoTranscribeInboxNotes: false,
-        templates: {},
+        automations: {},
       };
       const mockFile = new TFile({ path: "Inbox/audio.mp3" });
 

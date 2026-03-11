@@ -1,10 +1,8 @@
 import { App, Modal, Notice, Setting, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { AutomationRunnerModal } from "./AutomationRunnerModal";
-import { StandardModelSelectionModal, ModelSelectionResult } from "./StandardModelSelectionModal";
-import { ensureCanonicalId } from "../utils/modelUtils";
 import type { AutomationBacklogEntry } from "../services/workflow/WorkflowEngineService";
-import { WORKFLOW_AUTOMATIONS } from "../constants/workflowTemplates";
+import { WORKFLOW_AUTOMATIONS } from "../constants/workflowAutomations";
 
 export class AutomationBacklogModal extends Modal {
   private plugin: SystemSculptPlugin;
@@ -31,31 +29,12 @@ export class AutomationBacklogModal extends Modal {
     contentEl.empty();
     this.contentWrapper = contentEl.createDiv({ cls: "ss-automation-backlog" });
 
-    this.renderModelSetting();
+    contentEl.createEl("p", {
+      text: "Backlog items run through SystemSculpt automatically. Instructions and execution are handled for you.",
+      cls: "setting-item-description",
+    });
     this.renderControls();
     this.renderBacklogList();
-  }
-
-  private renderModelSetting(): void {
-    new Setting(this.contentEl)
-      .setName("Model")
-      .setDesc(this.plugin.settings.selectedModelId || "Select a model")
-      .addButton((button) => {
-        button.setButtonText("Change model");
-        button.onClick(() => {
-          const modal = new StandardModelSelectionModal({
-            app: this.app,
-            plugin: this.plugin,
-            currentModelId: this.plugin.settings.selectedModelId,
-            onSelect: async (result: ModelSelectionResult) => {
-              const canonicalId = ensureCanonicalId(result.modelId);
-              await this.plugin.getSettingsManager().updateSettings({ selectedModelId: canonicalId });
-              this.render();
-            },
-          });
-          modal.open();
-        });
-      });
   }
 
   private renderControls(): void {

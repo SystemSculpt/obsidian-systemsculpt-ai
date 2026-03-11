@@ -34,14 +34,4 @@ export function renderSupportSection(
     href: SYSTEMSCULPT_WEBSITE.FEEDBACK,
     ariaLabel: "Open the feedback form on GitHub (opens in new tab)",
   });
-
-  const releaseSetting = new Setting(root)
-    .setName("Release notes")
-    .setDesc("See what changed in the latest release and the roadmap.");
-
-  releaseSetting.addButton((button) => {
-    button
-      .setButtonText("View changelog")
-      .onClick(() => window.open(`${SYSTEMSCULPT_WEBSITE.BASE_URL}/changelog`, "_blank"));
-  });
 }

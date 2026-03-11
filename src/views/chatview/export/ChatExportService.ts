@@ -1,7 +1,5 @@
 import { TFile } from 'obsidian';
 import type { ChatMessage, MultiPartContent, MessagePart } from '../../../types';
-import { SystemPromptService, normalizeDesktopPromptSelectionType } from '../../../services/SystemPromptService';
-import { getModelLabelWithProvider } from '../../../utils/modelUtils';
 import { errorLogger } from '../../../utils/errorLogger';
 import type { ChatView } from '../ChatView';
 import { MessagePartNormalizer } from '../utils/MessagePartNormalizer';
@@ -52,14 +50,6 @@ export class ChatExportService {
   private async buildContext(options: ChatExportOptions): Promise<ChatExportContext> {
     const exportedAt = new Date();
 
-    const modelLabel = this.chatView.selectedModelId
-      ? getModelLabelWithProvider(this.chatView.selectedModelId)
-      : (this.chatView.currentModelName || '');
-
-    const systemPrompt = options.includeSystemPrompt
-      ? await this.resolveSystemPrompt()
-      : undefined;
-
     const contextFiles = options.includeContextFiles
       ? await this.collectContextFiles(options)
       : [];
@@ -71,8 +61,6 @@ export class ChatExportService {
       chatId: this.chatView.chatId,
       chatVersion: this.chatView.chatVersion,
       exportedAt,
-      model: modelLabel ? { id: this.chatView.selectedModelId, label: modelLabel } : undefined,
-      systemPrompt,
       contextFiles,
       messages: [...this.chatView.messages],
       summary,
@@ -137,46 +125,6 @@ export class ChatExportService {
       }
     });
     return count;
-  }
-
-  private async resolveSystemPrompt() {
-    try {
-      const type = normalizeDesktopPromptSelectionType(this.chatView.systemPromptType || 'general-use');
-      const path = this.chatView.systemPromptPath;
-      const service = SystemPromptService.getInstance(this.chatView.app, () => this.chatView.plugin.settings);
-      const content = await service.getSystemPromptContent(type as any, path);
-
-      return {
-        type,
-        label: this.deriveSystemPromptLabel(type, path),
-        content,
-      };
-    } catch (error) {
-      errorLogger.warn('Failed to resolve system prompt for export', {
-        source: 'ChatExportService',
-        method: 'resolveSystemPrompt',
-        metadata: {
-          chatId: this.chatView.chatId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-      return undefined;
-    }
-  }
-
-  private deriveSystemPromptLabel(type: string, path?: string): string {
-    const normalized = normalizeDesktopPromptSelectionType(type || 'general-use');
-    if (normalized === 'custom' && path) {
-      const segments = path.split('/');
-      return segments[segments.length - 1] || 'Custom';
-    }
-    if (normalized === 'general-use') {
-      return 'General Use';
-    }
-    if (normalized === 'concise') {
-      return 'Concise';
-    }
-    return this.capitalize(type || 'System Prompt');
   }
 
   private async collectContextFiles(options: ChatExportOptions) {

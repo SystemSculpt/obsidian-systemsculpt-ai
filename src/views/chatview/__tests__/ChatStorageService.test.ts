@@ -97,21 +97,20 @@ describe("ChatStorageService", () => {
     it("saves chat and returns version", async () => {
       const result = await service.saveChat(
         "test-chat-123",
-        testMessages,
-        "gpt-4"
+        testMessages
       );
 
       expect(result.version).toBe(1);
     });
 
     it("creates file when it does not exist", async () => {
-      await service.saveChat("new-chat", testMessages, "gpt-4");
+      await service.saveChat("new-chat", testMessages);
 
       expect(mockVault.create).toHaveBeenCalled();
     });
 
     it("checks if file exists before saving", async () => {
-      await service.saveChat("new-chat-2", testMessages, "gpt-4");
+      await service.saveChat("new-chat-2", testMessages);
 
       // getAbstractFileByPath should be called to check if file exists
       expect(mockVault.getAbstractFileByPath).toHaveBeenCalled();
@@ -123,24 +122,22 @@ describe("ChatStorageService", () => {
       await service.saveChat(
         "test-chat",
         testMessages,
-        "gpt-4",
-        contextFiles
+        { contextFiles }
       );
 
       expect(mockVault.create).toHaveBeenCalled();
     });
 
-    it("includes system prompt type", async () => {
+    it("does not persist client-side model or system prompt metadata", async () => {
       await service.saveChat(
         "test-chat",
-        testMessages,
-        "gpt-4",
-        undefined,
-        undefined,
-        "concise"
+        testMessages
       );
 
-      expect(mockVault.create).toHaveBeenCalled();
+      const createdContent = mockVault.create.mock.calls[0][1] as string;
+      expect(createdContent).not.toContain("model:");
+      expect(createdContent).not.toContain("systemMessage");
+      expect(createdContent).not.toContain("prompts/custom.md");
     });
 
     it("adds default chat tag to new history files", async () => {
@@ -148,7 +145,7 @@ describe("ChatStorageService", () => {
         settings: { defaultChatTag: "#project" },
       };
 
-      await service.saveChat("tagged-chat", testMessages, "gpt-4");
+      await service.saveChat("tagged-chat", testMessages);
 
       const createdContent = mockVault.create.mock.calls[0][1] as string;
       expect(createdContent).toContain('tags: ["project"]');
@@ -173,7 +170,7 @@ Content here`);
         settings: { defaultChatTag: "new" },
       };
 
-      await service.saveChat("test-chat", testMessages, "gpt-4");
+      await service.saveChat("test-chat", testMessages);
 
       const modifiedContent = mockVault.modify.mock.calls[0][1] as string;
       expect(modifiedContent).toContain('tags: ["existing","keep","new"]');
@@ -183,14 +180,14 @@ Content here`);
       mockVault.create.mockRejectedValue(new Error("Write failed"));
 
       await expect(
-        service.saveChat("test-chat", testMessages, "gpt-4")
+        service.saveChat("test-chat", testMessages)
       ).rejects.toThrow("Failed to save chat");
     });
 
     it("creates directory when it does not exist", async () => {
       mockVault.adapter.exists.mockResolvedValue(false);
 
-      await service.saveChat("test-chat", testMessages, "gpt-4");
+      await service.saveChat("test-chat", testMessages);
 
       expect(mockVault.createFolder).toHaveBeenCalledWith("SystemSculpt/Chats");
     });
@@ -203,7 +200,7 @@ Content here`);
         directoryManager: mockDirManager,
       };
 
-      await service.saveChat("test-chat", testMessages, "gpt-4");
+      await service.saveChat("test-chat", testMessages);
 
       expect(mockDirManager.ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Chats");
     });
@@ -282,7 +279,7 @@ describe("ChatStorageService tool message persistence", () => {
       tool_call_id: "tool-1",
     };
 
-    await service.saveChat("test", [toolMessage], "gpt-4");
+    await service.saveChat("test", [toolMessage]);
 
     const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
       ChatMarkdownSerializer: { serializeMessages: jest.Mock };
@@ -296,12 +293,44 @@ describe("ChatStorageService tool message persistence", () => {
       content: "Hello",
     };
 
-    await service.saveChat("test", [userMessage], "gpt-4");
+    await service.saveChat("test", [userMessage]);
 
     const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
       ChatMarkdownSerializer: { serializeMessages: jest.Mock };
     };
     expect(ChatMarkdownSerializer.serializeMessages).toHaveBeenCalledWith([userMessage]);
+  });
+});
+
+describe("ChatStorageService resume descriptor contract", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("returns a minimal managed resume descriptor without backend session internals", async () => {
+    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    jest.spyOn(service, "loadChat").mockResolvedValue({
+      id: "chat-9",
+      messages: [{ role: "user" as ChatRole, content: "Hello" }],
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      lastModified: 1741600800000,
+      title: "Chat 9",
+      chatPath: "SystemSculpt/Chats/chat-9.md",
+      systemPromptType: "general-use",
+      chatBackend: "systemsculpt",
+      piSessionFile: "/tmp/chat-9.jsonl",
+      piSessionId: "session-9",
+      piLastEntryId: "entry-9",
+      piLastSyncedAt: "2026-03-10T10:00:00.000Z",
+    });
+
+    await expect(service.getChatResumeDescriptor("chat-9")).resolves.toEqual({
+      chatId: "chat-9",
+      title: "Chat 9",
+      chatPath: "SystemSculpt/Chats/chat-9.md",
+      lastModified: 1741600800000,
+      messageCount: 1,
+    });
   });
 });
 
@@ -490,8 +519,7 @@ version: 1
 
       await service.saveChat(
         "existing",
-        [{ role: "user" as ChatRole, content: "Hello" }],
-        "gpt-4"
+        [{ role: "user" as ChatRole, content: "Hello" }]
       );
 
       expect(mockVault.modify).toHaveBeenCalled();
@@ -515,11 +543,11 @@ Hello
 <!-- SYSTEMSCULPT-MESSAGE-END -->`);
 
       await expect(
-        service.saveChat("nonempty", [], "gpt-4")
+        service.saveChat("nonempty", [])
       ).rejects.toThrow();
     });
 
-    it("allows Pi-backed chats to save an empty visible transcript after a fork", async () => {
+    it("allows managed-session chats to save an empty visible transcript after a branch", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/pi-fork.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
@@ -542,18 +570,14 @@ Hello
         service.saveChat(
           "pi-fork",
           [],
-          "anthropic@@claude-haiku-4-5",
-          undefined,
-          undefined,
-          "general-use",
-          undefined,
-          "Pi Fork",
-          "medium",
-          "/tmp/new.jsonl",
-          "new-session",
-          undefined,
-          "2026-03-09T02:32:48.935Z",
-          "pi"
+          {
+            title: "Pi Fork",
+            chatFontSize: "medium",
+            piSessionFile: "/tmp/new.jsonl",
+            piSessionId: "new-session",
+            piLastSyncedAt: "2026-03-09T02:32:48.935Z",
+            chatBackend: "pi",
+          }
         )
       ).resolves.toEqual({ version: 2 });
 
@@ -564,12 +588,7 @@ Hello
       await service.saveChat(
         "titled-chat",
         [{ role: "user" as ChatRole, content: "Hello" }],
-        "gpt-4",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        "My Custom Title"
+        { title: "My Custom Title" }
       );
 
       expect(mockVault.create).toHaveBeenCalled();
@@ -581,13 +600,7 @@ Hello
       await service.saveChat(
         "font-size-chat",
         [{ role: "user" as ChatRole, content: "Hello" }],
-        "gpt-4",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        "large"
+        { chatFontSize: "large" }
       );
 
       expect(mockVault.create).toHaveBeenCalled();
@@ -595,35 +608,17 @@ Hello
       expect(createCall[1]).toContain("large");
     });
 
-    it("includes systemPromptType in save", async () => {
+    it("omits legacy client-side model and system prompt fields from saved frontmatter", async () => {
       await service.saveChat(
         "prompt-type-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }],
-        "gpt-4",
-        undefined,
-        undefined,
-        "agent"
+        [{ role: "user" as ChatRole, content: "Hello" }]
       );
 
       expect(mockVault.create).toHaveBeenCalled();
       const createCall = mockVault.create.mock.calls[0];
-      expect(createCall[1]).toContain("agent");
-    });
-
-    it("includes systemPromptPath for custom prompts", async () => {
-      await service.saveChat(
-        "custom-prompt-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }],
-        "gpt-4",
-        undefined,
-        undefined,
-        "custom",
-        "prompts/my-prompt.md"
-      );
-
-      expect(mockVault.create).toHaveBeenCalled();
-      const createCall = mockVault.create.mock.calls[0];
-      expect(createCall[1]).toContain("prompts/my-prompt.md");
+      expect(createCall[1]).not.toContain("model:");
+      expect(createCall[1]).not.toContain("systemMessage");
+      expect(createCall[1]).not.toContain("prompts/my-prompt.md");
     });
   });
 

@@ -1,17 +1,6 @@
 import { ChatMessage } from '../../../types';
 import type { ChatExportOptions } from '../../../types/chatExport';
 
-export interface ChatExportModelInfo {
-  id?: string;
-  label?: string;
-}
-
-export interface ChatExportSystemPromptInfo {
-  type: string;
-  label?: string;
-  content: string;
-}
-
 export interface ChatExportContextFile {
   path: string;
   content?: string;
@@ -32,8 +21,6 @@ export interface ChatExportContext {
   chatId?: string;
   chatVersion?: number;
   exportedAt: Date;
-  model?: ChatExportModelInfo;
-  systemPrompt?: ChatExportSystemPromptInfo;
   contextFiles: ChatExportContextFile[];
   messages: ChatMessage[];
   summary: ChatExportSummary;

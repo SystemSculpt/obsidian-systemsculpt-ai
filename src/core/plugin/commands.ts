@@ -1,20 +1,63 @@
 import { App, MarkdownView, Notice, Platform, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
-import { StandardModelSelectionModal, ModelSelectionResult, ModelSelectionOptions } from "../../modals/StandardModelSelectionModal";
-import { ChatView } from "../../views/chatview/ChatView";
-import { TitleGenerationService } from "../../services/TitleGenerationService";
-import { TemplateSelectionModal } from "../../modals/TemplateSelectionModal";
-import { ensureCanonicalId } from "../../utils/modelUtils";
 import { DebugLogger } from "../../utils/debugLogger";
 import { errorLogger } from "../../utils/errorLogger";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
-import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowTemplates";
-import { AutomationRunnerModal, AutomationOption } from "../../modals/AutomationRunnerModal";
-import { AutomationBacklogModal } from "../../modals/AutomationBacklogModal";
+import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowAutomations";
 import { showConfirm } from "../ui/notifications";
-import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
+import { PlatformContext } from "../../services/PlatformContext";
+import type { ChatMessage } from "../../types";
+import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
+
+type StudioCommandViewLike = {
+  getViewType(): string;
+  getState(): unknown;
+  fitSelectionInViewportFromCommand(): void;
+  showGraphOverviewFromCommand(): void;
+};
+
+type ChatCommandViewLike = {
+  messages: ChatMessage[];
+  addFileToContext(file: TFile): Promise<void>;
+  focusInput(): void;
+  getChatHistoryFilePath?(): string | null;
+  getChatTitle(): string;
+  getMessages(): ChatMessage[];
+  getViewType(): string;
+  setTitle(title: string): Promise<void>;
+};
+
+type AutomationOption = {
+  id: string;
+  title: string;
+  subtitle?: string;
+};
+
+type ChatViewModule = typeof import("../../views/chatview/ChatView");
+
+async function loadTitleGenerationServiceModule(): Promise<
+  typeof import("../../services/TitleGenerationService")
+> {
+  return await import("../../services/TitleGenerationService");
+}
+
+async function loadAutomationRunnerModalModule(): Promise<
+  typeof import("../../modals/AutomationRunnerModal")
+> {
+  return await import("../../modals/AutomationRunnerModal");
+}
+
+async function loadAutomationBacklogModalModule(): Promise<
+  typeof import("../../modals/AutomationBacklogModal")
+> {
+  return await import("../../modals/AutomationBacklogModal");
+}
+
+function loadChatViewModule(): ChatViewModule {
+  return require("../../views/chatview/ChatView");
+}
 
 export class CommandManager {
   private plugin: SystemSculptPlugin;
@@ -25,6 +68,16 @@ export class CommandManager {
     this.plugin = plugin;
     this.app = app;
     this.ribbonManager = new RibbonManager(plugin, app);
+  }
+
+  private getActiveChatView(): ChatCommandViewLike | null {
+    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
+    const activeView = activeLeaf?.view as ChatCommandViewLike | undefined;
+    if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
+      return null;
+    }
+
+    return activeView;
   }
 
   registerCommands() {
@@ -38,19 +91,15 @@ export class CommandManager {
     this.registerReloadObsidian();
     this.registerOpenSettings();
     this.registerOpenCreditsBalance();
-    this.registerChangeChatModel();
-    this.registerSetDefaultChatModel();
     this.registerChatWithFile();
     this.registerResumeChat();
     this.registerChangeChatTitle();
-    this.registerOpenTemplateModal();
     this.registerOpenEmbeddingsView();
     this.registerOpenBenchView();
     this.registerOpenBenchResultsView();
     this.registerQuickFileEdit();
     this.registerDebugCommands();
     this.registerEmbeddingsDatabaseCommands();
-    this.registerDailyVaultCommands();
     this.registerRunAutomationCommand();
     this.registerAutomationBacklogCommand();
     this.registerYouTubeCanvas();
@@ -191,7 +240,7 @@ export class CommandManager {
       id: "open-systemsculpt-settings",
       name: "Open SystemSculpt AI Settings",
       callback: () => {
-        this.plugin.openSettingsTab("overview");
+        this.plugin.openSettingsTab("account");
       },
     });
   }
@@ -202,83 +251,8 @@ export class CommandManager {
       name: "Open Credits & Usage",
       callback: async () => {
         await this.plugin.openCreditsBalanceModal({
-          settingsTab: "overview",
+          settingsTab: "account",
         });
-      },
-    });
-  }
-
-
-  private registerChangeChatModel() {
-    this.plugin.addCommand({
-      id: "change-chat-model",
-      name: "Change Chat Model (Current Chat)",
-      checkCallback: (checking: boolean) => {
-        const chatView = this.app.workspace.getActiveViewOfType(ChatView);
-        if (!chatView) {
-          if (!checking) {
-            new Notice("You need to be in an active SystemSculpt chat view to use this command.", 5000);
-          }
-          return false;
-        }
-        if (!checking) {
-          (async () => {
-            try {
-              await this.plugin.modelService.getModels();
-
-              const modal = new StandardModelSelectionModal({
-                  app: this.app,
-                  plugin: this.plugin,
-                  currentModelId: chatView.getSelectedModelId() || "",
-                  onSelect: async (result: ModelSelectionResult) => {
-                    const canonicalId = ensureCanonicalId(result.modelId);
-                    await chatView.setSelectedModelId(canonicalId);
-                    new Notice("Model updated for this chat.", 2000);
-                }
-              });
-              modal.open();
-            } catch (err) {
-              new Notice("Failed to fetch available models", 10000);
-            }
-          })();
-        }
-        return true;
-      },
-    });
-  }
-
-  private registerSetDefaultChatModel() {
-    this.plugin.addCommand({
-      id: "set-default-chat-model",
-      name: "Set Default Chat Model",
-      callback: async () => {
-        if (!this.plugin) {
-          new Notice("SystemSculpt plugin not available.", 10000);
-          return;
-        }
-
-        try {
-          await this.plugin.modelService.getModels();
-
-          const modal = new StandardModelSelectionModal({
-              app: this.app,
-              plugin: this.plugin,
-              currentModelId: this.plugin.settings.selectedModelId || "",
-              onSelect: async (result: ModelSelectionResult) => {
-                // Always set as default since this is the "select default model" command
-                try {
-                    const canonicalId = ensureCanonicalId(result.modelId);
-                    await this.plugin.getSettingsManager().updateSettings({ selectedModelId: canonicalId });
-                    new Notice("Default model for new chats updated.", 3000);
-                } catch (saveError) {
-                    new Notice("Failed to save default model setting.", 10000);
-                }
-              }
-          });
-          modal.open();
-        } catch (err) {
-          new Notice("Failed to fetch available models", 10000);
-        }
       },
     });
   }
@@ -316,6 +290,7 @@ export class CommandManager {
         if (!supportedExtensions.includes(extension)) return false;
         if (!checking) {
           const leaf = this.app.workspace.getLeaf("tab");
+          const { ChatView } = loadChatViewModule();
           const view = new ChatView(leaf, this.plugin);
           leaf.open(view).then(async () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
@@ -342,13 +317,12 @@ export class CommandManager {
         const isChatHistory = this.plugin.resumeChatService.isChatHistoryFile(activeFile);
         
         if (!checking && isChatHistory) {
-          // Extract chat ID and model from the file
+          // Extract chat ID from the file
           const chatId = this.plugin.resumeChatService.extractChatId(activeFile);
-          const modelId = this.plugin.resumeChatService.getModelFromFile(activeFile);
           
           if (chatId) {
             // Resume the chat
-            this.plugin.resumeChatService.openChat(chatId, activeFile.path, modelId);
+            this.plugin.resumeChatService.openChat(chatId, activeFile.path);
           } else {
             new Notice("Could not extract chat ID from this file.", 5000);
           }
@@ -369,7 +343,7 @@ export class CommandManager {
       name: "Change/Generate Title",
       checkCallback: (checking: boolean) => {
         // First check if we're in a chat view
-        const chatView = this.app.workspace.getActiveViewOfType(ChatView);
+        const chatView = this.getActiveChatView();
         if (chatView) {
           if (chatView.messages.length === 0) return false;
           if (!checking) {
@@ -378,6 +352,7 @@ export class CommandManager {
               const notice = new Notice("Generating title...", 0);
 
               try {
+                const { TitleGenerationService } = await loadTitleGenerationServiceModule();
                 const titleService = TitleGenerationService.getInstance(this.plugin);
                 const title = await titleService.generateTitle(
                   chatView.getMessages(),
@@ -430,6 +405,7 @@ export class CommandManager {
             const notice = new Notice("Generating title...", 0);
 
             try {
+              const { TitleGenerationService } = await loadTitleGenerationServiceModule();
               const titleService = TitleGenerationService.getInstance(this.plugin);
               const title = await titleService.generateTitle(
                 activeFile,
@@ -467,63 +443,6 @@ export class CommandManager {
         return true;
       },
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "t" }],
-    });
-  }
-
-  private registerOpenTemplateModal() {
-    this.plugin.addCommand({
-      id: "open-template-modal",
-      name: "Open Template Selection",
-      checkCallback: (checking: boolean) => {
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-
-        // Only enable in a markdown view
-        if (!activeView) return false;
-
-        if (!checking) {
-          const editor = activeView.editor;
-
-          // Create and open the template selection modal
-          const modal = new TemplateSelectionModal(
-            this.app,
-            this.plugin,
-            async (file) => {
-              try {
-                // Get the template content
-                const templateContent = await this.app.vault.read(file);
-
-                // Get cursor position
-                const cursor = editor.getCursor();
-
-                // Insert the template content at cursor position
-                editor.replaceRange(templateContent, cursor);
-
-                // Move cursor to end of inserted text
-                const lines = templateContent.split("\n");
-                const endPosition = {
-                  line: cursor.line + lines.length - 1,
-                  ch: lines[lines.length - 1]?.length || 0
-                };
-
-                // Set cursor position after the inserted template
-                editor.setCursor(endPosition);
-
-                // Set focus back to editor
-                activeView.editor.focus();
-
-                // Show success message
-                new Notice(`Template "${file.basename}" inserted`, 3000);
-              } catch (error) {
-                new Notice("Error inserting template", 10000);
-              }
-            }
-          );
-
-          modal.open();
-        }
-
-        return true;
-      }
     });
   }
 
@@ -579,131 +498,11 @@ export class CommandManager {
     });
   }
 
-  private registerDailyVaultCommands() {
-    const logger = this.plugin.getLogger();
-
-    this.plugin.addCommand({
-      id: "daily-vault-open-today",
-      name: "Open Today's Daily Note",
-      callback: async () => {
-        try {
-          await this.plugin.getDailyNoteService().openDailyNote();
-        } catch (error) {
-          logger?.error("Failed to open today's daily note", error, {
-            source: "CommandManager",
-            command: "daily-vault-open-today",
-          });
-          new Notice("Unable to open today's daily note. Check your Daily Vault settings.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-create-note",
-      name: "Create Daily Note",
-      callback: async () => {
-        try {
-          const note = await this.plugin.getDailyNoteService().createDailyNote();
-          new Notice(`Daily note ready: ${note.basename}`, 4000);
-        } catch (error) {
-          logger?.error("Failed to create daily note", error, {
-            source: "CommandManager",
-            command: "daily-vault-create-note",
-          });
-          new Notice("Unable to create daily note. Verify your Daily Vault configuration.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-open-yesterday",
-      name: "Open Yesterday's Daily Note",
-      callback: async () => {
-        try {
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
-          await this.plugin.getDailyNoteService().openDailyNote(yesterday, false);
-        } catch (error) {
-          logger?.warn("Yesterday's daily note not found", {
-            source: "CommandManager",
-            command: "daily-vault-open-yesterday",
-          });
-          new Notice("Couldn't find yesterday's daily note. Create it manually if needed.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-start-daily-review",
-      name: "Start Daily Review",
-      callback: async () => {
-        try {
-          await this.plugin.getDailyReviewService().startDailyReview();
-        } catch (error) {
-          logger?.error("Failed to start daily review", error, {
-            source: "CommandManager",
-            command: "daily-vault-start-daily-review",
-          });
-          new Notice("Daily review unavailable. Confirm your Daily Vault setup.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-start-weekly-review",
-      name: "Start Weekly Review",
-      callback: async () => {
-        try {
-          await this.plugin.getDailyReviewService().startWeeklyReview();
-        } catch (error) {
-          logger?.error("Failed to start weekly review", error, {
-            source: "CommandManager",
-            command: "daily-vault-start-weekly-review",
-          });
-          new Notice("Weekly review couldn't be prepared. Check your template path in Daily Vault settings.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-view-streak",
-      name: "View Daily Streak",
-      callback: async () => {
-        try {
-          await this.plugin.getDailyReviewService().showDailyStreakSummary();
-        } catch (error) {
-          logger?.error("Failed to display daily streak", error, {
-            source: "CommandManager",
-            command: "daily-vault-view-streak",
-          });
-          new Notice("Unable to load streak data. Ensure daily notes live in the configured directory.", 6000);
-        }
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "daily-vault-open-settings",
-      name: "Open Daily Vault Settings",
-      callback: async () => {
-        try {
-          this.plugin.getDailySettingsService();
-          this.plugin.openSettingsTab("daily-vault");
-        } catch (error) {
-          logger?.error("Failed to open Daily Vault settings", error, {
-            source: "CommandManager",
-            command: "daily-vault-open-settings",
-          });
-          new Notice("Unable to open Daily Vault settings. Open SystemSculpt settings manually.", 6000);
-        }
-      },
-    });
-  }
-
   private registerRunAutomationCommand() {
     this.plugin.addCommand({
       id: "run-workflow-automation",
       name: "Run Workflow Automation",
-      callback: () => {
+      callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
           new Notice("Open a note before running an automation.", 4000);
@@ -717,10 +516,11 @@ export class CommandManager {
 
         const options = this.buildAutomationOptions();
         if (options.length === 0) {
-          new Notice("No automations available. Enable one under Settings → Automations.", 5000);
+          new Notice("No automations available. Enable one under Settings → Workflow.", 5000);
           return;
         }
 
+        const { AutomationRunnerModal } = await loadAutomationRunnerModalModule();
         const modal = new AutomationRunnerModal(this.app, this.plugin, file, options);
         modal.open();
       },
@@ -732,6 +532,7 @@ export class CommandManager {
       id: "open-automation-backlog",
       name: "Show Automation Backlog",
       callback: async () => {
+        const { AutomationBacklogModal } = await loadAutomationBacklogModalModule();
         const modal = new AutomationBacklogModal(this.app, this.plugin);
         modal.open();
       },
@@ -739,7 +540,7 @@ export class CommandManager {
   }
 
   private buildAutomationOptions(): AutomationOption[] {
-    const automationSettings = this.plugin.settings.workflowEngine?.templates || {};
+    const automationSettings = this.plugin.settings.workflowEngine?.automations || {};
 
     return WORKFLOW_AUTOMATIONS.map((definition) => {
       const state = automationSettings[definition.id];
@@ -767,7 +568,7 @@ export class CommandManager {
       id: "new-systemsculpt-studio-project",
       name: "New SystemSculpt Studio Project",
       callback: async () => {
-        if (!Platform.isDesktopApp) {
+        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
           new Notice("SystemSculpt Studio is desktop-only.");
           return;
         }
@@ -791,7 +592,7 @@ export class CommandManager {
       id: "open-systemsculpt-studio",
       name: "Open SystemSculpt Studio",
       callback: async () => {
-        if (!Platform.isDesktopApp) {
+        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
           new Notice("SystemSculpt Studio is desktop-only.");
           return;
         }
@@ -823,7 +624,7 @@ export class CommandManager {
       id: "run-systemsculpt-studio-project",
       name: "Run Current SystemSculpt Studio Project",
       callback: async () => {
-        if (!Platform.isDesktopApp) {
+        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
           new Notice("SystemSculpt Studio is desktop-only.");
           return;
         }
@@ -855,7 +656,7 @@ export class CommandManager {
       id: "fit-systemsculpt-studio-selection-in-viewport",
       name: "SystemSculpt Studio: Fit Selection in Viewport",
       checkCallback: (checking: boolean) => {
-        const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+        const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
           return false;
         }
@@ -871,7 +672,7 @@ export class CommandManager {
       id: "overview-systemsculpt-studio-graph-in-viewport",
       name: "SystemSculpt Studio: Overview Graph in Viewport",
       checkCallback: (checking: boolean) => {
-        const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+        const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
           return false;
         }
@@ -900,8 +701,18 @@ export class CommandManager {
     });
   }
 
+  private getActiveStudioView(): StudioCommandViewLike | null {
+    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
+    const activeView = activeLeaf?.view as StudioCommandViewLike | undefined;
+    if (activeView?.getViewType?.() !== SYSTEMSCULPT_STUDIO_VIEW_TYPE) {
+      return null;
+    }
+
+    return activeView;
+  }
+
   private getCurrentActiveFilePath(): string | null {
-    if (!Platform.isDesktopApp) {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
       return null;
     }
 
@@ -916,7 +727,7 @@ export class CommandManager {
       return activeLeafPath;
     }
 
-    const activeChatView = this.app.workspace.getActiveViewOfType(ChatView);
+    const activeChatView = this.getActiveChatView();
     if (activeChatView) {
       const chatFilePath = this.resolveVaultFilePath(activeChatView.getChatHistoryFilePath?.());
       if (chatFilePath) {
@@ -924,7 +735,7 @@ export class CommandManager {
       }
     }
 
-    const activeStudioView = this.app.workspace.getActiveViewOfType(SystemSculptStudioView);
+    const activeStudioView = this.getActiveStudioView();
     if (activeStudioView) {
       const viewState = activeStudioView.getState();
       const stateFilePath = this.resolveVaultFilePath((viewState as { file?: unknown }).file);

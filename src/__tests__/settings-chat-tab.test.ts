@@ -2,7 +2,6 @@
 
 import { App } from "obsidian";
 import { displayChatTabContent } from "../settings/ChatTabContent";
-import { FavoritesService } from "../services/FavoritesService";
 
 jest.mock("../views/chatview/MCPService", () => ({
   MCPService: jest.fn().mockImplementation(() => ({
@@ -56,12 +55,11 @@ describe("Chat tab native layout", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
-    FavoritesService.clearInstance();
     app = new App();
     (globalThis as any).confirm = jest.fn(() => true);
   });
 
-  it("uses native Setting rows for favorites management", async () => {
+  it("uses native Setting rows for client-owned chat preferences only", async () => {
     const plugin = createPluginStub(app);
     const tab: any = {
       app,
@@ -73,11 +71,13 @@ describe("Chat tab native layout", () => {
     await displayChatTabContent(container, tab);
 
     const names = Array.from(container.querySelectorAll('.setting-item .setting-item-name')).map((el) => el.textContent?.trim());
-    expect(names).toContain("Default system prompt");
     expect(names).toContain("Default chat tag");
     expect(names).toContain("Default Chat Font Size");
     expect(names).toContain("Honor OS Reduced Motion");
-    expect(names).toContain("Favorite models");
+    expect(names).not.toContain("Default system prompt");
+    expect(names).not.toContain("Favorite models");
+    expect(container.textContent).toContain("SystemSculpt chat works the same way across desktop and mobile");
+    expect(container.textContent).toContain("chat preferences and display choices");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });
 });

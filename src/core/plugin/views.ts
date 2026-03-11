@@ -1,17 +1,87 @@
-import { App, WorkspaceLeaf, Notice, TFile, Platform } from "obsidian";
+import { App, WorkspaceLeaf, Notice, TFile, ItemView } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { SystemPromptService } from "../../services/SystemPromptService";
-import { CHAT_VIEW_TYPE, ChatView } from "../../views/chatview/ChatView";
 import { ChatState } from "../../types/index";
-import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../../views/EmbeddingsView";
-import { BenchView, BENCH_VIEW_TYPE } from "../../views/benchview/BenchView";
-import { BenchResultsView, BENCH_RESULTS_VIEW_TYPE } from "../../views/benchresults/BenchResultsView";
-import { SystemSculptStudioView, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../views/studio/SystemSculptStudioView";
+import type { EmbeddingsView } from "../../views/EmbeddingsView";
+import type { BenchView } from "../../views/benchview/BenchView";
+import type { BenchResultsView } from "../../views/benchresults/BenchResultsView";
+import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
+import { PlatformContext } from "../../services/PlatformContext";
+import {
+  CHAT_VIEW_TYPE,
+  EMBEDDINGS_VIEW_TYPE,
+  BENCH_RESULTS_VIEW_TYPE,
+  BENCH_VIEW_TYPE,
+  SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+} from "./viewTypes";
+
+type ChatViewModule = typeof import("../../views/chatview/ChatView");
+type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
+type BenchViewModule = typeof import("../../views/benchview/BenchView");
+type BenchResultsViewModule = typeof import("../../views/benchresults/BenchResultsView");
+type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
+
+type ChatViewLike = ItemView & {
+  isFullyLoaded: boolean;
+  setState(state: ChatState): Promise<void>;
+  leaf?: WorkspaceLeaf;
+};
+
+function loadChatViewModule(): ChatViewModule {
+  return require("../../views/chatview/ChatView");
+}
+
+function loadEmbeddingsViewModule(): EmbeddingsViewModule {
+  return require("../../views/EmbeddingsView");
+}
+
+function loadBenchViewModule(): BenchViewModule {
+  return require("../../views/benchview/BenchView");
+}
+
+function loadBenchResultsViewModule(): BenchResultsViewModule {
+  return require("../../views/benchresults/BenchResultsView");
+}
+
+function loadStudioViewModule(): StudioViewModule {
+  return require("../../views/studio/SystemSculptStudioView");
+}
 
 interface ChatViewState {
   state: ChatState;
+}
+
+class DesktopOnlyPlaceholderView extends ItemView {
+  private readonly viewType: string;
+  private readonly displayText: string;
+  private readonly description: string;
+
+  constructor(
+    leaf: WorkspaceLeaf,
+    options: { viewType: string; displayText: string; description: string }
+  ) {
+    super(leaf);
+    this.viewType = options.viewType;
+    this.displayText = options.displayText;
+    this.description = options.description;
+  }
+
+  getViewType(): string {
+    return this.viewType;
+  }
+
+  getDisplayText(): string {
+    return this.displayText;
+  }
+
+  async onOpen(): Promise<void> {
+    this.containerEl.empty();
+    const container = this.containerEl.createDiv({ cls: "systemsculpt-desktop-only-placeholder" });
+    container.createEl("h3", { text: this.displayText });
+    container.createEl("p", { text: this.description });
+  }
 }
 
 export class ViewManager {
@@ -79,7 +149,7 @@ export class ViewManager {
           continue;
         }
 
-        const view = leaf.view as ChatView;
+        const view = leaf.view as ChatViewLike;
         if (view.isFullyLoaded) {
           continue;
         }
@@ -148,7 +218,7 @@ export class ViewManager {
         this.app.workspace.on("active-leaf-change", (leaf) => {
           if (!leaf) return;
           if ((leaf.view as any)?.getViewType?.() !== CHAT_VIEW_TYPE) return;
-          const view = leaf.view as ChatView;
+          const view = leaf.view as ChatViewLike;
           if (view.isFullyLoaded) return;
           this.scheduleChatRestore(leaf, "high");
         })
@@ -159,7 +229,7 @@ export class ViewManager {
     }
   }
 
-  private async restoreView(view: ChatView, state: ChatState) {
+  private async restoreView(view: ChatViewLike, state: ChatState) {
     try {
       await view.setState(state);
     } catch (error) {
@@ -210,7 +280,7 @@ export class ViewManager {
     }
 
     for (const leaf of leaves) {
-      const view = leaf.view as ChatView;
+      const view = leaf.view as ChatViewLike;
       const state = leaf.getViewState();
 
       if (!this.isValidChatState(state)) {
@@ -266,7 +336,7 @@ export class ViewManager {
     return true;
   }
 
-  private async retrySetState(view: ChatView, state: any, maxRetries: number = 3): Promise<void> {
+  private async retrySetState(view: ChatViewLike, state: any, maxRetries: number = 3): Promise<void> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -288,30 +358,67 @@ export class ViewManager {
   }
 
   registerView() {
+    const platform = PlatformContext.get();
     this.plugin.registerView(
       CHAT_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new ChatView(leaf, this.plugin)
+      (leaf: WorkspaceLeaf) => {
+        const { ChatView } = loadChatViewModule();
+        return new ChatView(leaf, this.plugin);
+      }
     );
     
     
     this.plugin.registerView(
       EMBEDDINGS_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new EmbeddingsView(leaf, this.plugin)
+      (leaf: WorkspaceLeaf) => {
+        const { EmbeddingsView } = loadEmbeddingsViewModule();
+        return new EmbeddingsView(leaf, this.plugin);
+      }
     );
 
     this.plugin.registerView(
       BENCH_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new BenchView(leaf, this.plugin)
+      (leaf: WorkspaceLeaf) => {
+        if (!platform.supportsDesktopOnlyFeatures()) {
+          return new DesktopOnlyPlaceholderView(leaf, {
+            viewType: BENCH_VIEW_TYPE,
+            displayText: "Bench",
+            description: "Bench is desktop-only right now.",
+          });
+        }
+        const { BenchView } = loadBenchViewModule();
+        return new BenchView(leaf, this.plugin);
+      }
     );
 
     this.plugin.registerView(
       BENCH_RESULTS_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new BenchResultsView(leaf, this.plugin)
+      (leaf: WorkspaceLeaf) => {
+        if (!platform.supportsDesktopOnlyFeatures()) {
+          return new DesktopOnlyPlaceholderView(leaf, {
+            viewType: BENCH_RESULTS_VIEW_TYPE,
+            displayText: "Bench Results",
+            description: "Bench results are desktop-only right now.",
+          });
+        }
+        const { BenchResultsView } = loadBenchResultsViewModule();
+        return new BenchResultsView(leaf, this.plugin);
+      }
     );
 
     this.plugin.registerView(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new SystemSculptStudioView(leaf, this.plugin)
+      (leaf: WorkspaceLeaf) => {
+        if (!platform.supportsDesktopOnlyFeatures()) {
+          return new DesktopOnlyPlaceholderView(leaf, {
+            viewType: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+            displayText: "SystemSculpt Studio",
+            description: "SystemSculpt Studio is desktop-only right now.",
+          });
+        }
+        const { SystemSculptStudioView } = loadStudioViewModule();
+        return new SystemSculptStudioView(leaf, this.plugin);
+      }
     );
   }
 
@@ -343,6 +450,10 @@ export class ViewManager {
   }
 
   async activateBenchView(): Promise<BenchView> {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+      throw new Error("Bench is desktop-only.");
+    }
+
     const existingLeaves = this.app.workspace.getLeavesOfType(BENCH_VIEW_TYPE);
     if (existingLeaves.length > 0) {
       this.app.workspace.revealLeaf(existingLeaves[0]);
@@ -360,6 +471,10 @@ export class ViewManager {
   }
 
   async activateBenchResultsView(): Promise<BenchResultsView> {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+      throw new Error("Bench results are desktop-only.");
+    }
+
     const existingLeaves = this.app.workspace.getLeavesOfType(BENCH_RESULTS_VIEW_TYPE);
     if (existingLeaves.length > 0) {
       this.app.workspace.revealLeaf(existingLeaves[0]);
@@ -382,7 +497,7 @@ export class ViewManager {
   }
 
   async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
-    if (!Platform.isDesktopApp) {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
       throw new Error("SystemSculpt Studio is desktop-only.");
     }
 

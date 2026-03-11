@@ -1,8 +1,8 @@
 import { App, Notice, TFile, MarkdownView } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { AudioTranscriptionModal } from "../../modals/AudioTranscriptionModal";
+import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { PlatformContext } from "../PlatformContext";
-import { CHAT_VIEW_TYPE } from "../../views/chatview/ChatView";
 import { TranscriptionService, TranscriptionContext } from "../TranscriptionService";
 import { PostProcessingService } from "../PostProcessingService";
 import { TranscriptionProgressManager } from "../TranscriptionProgressManager";

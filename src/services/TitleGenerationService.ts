@@ -1,14 +1,14 @@
 import { SystemSculptService } from "./SystemSculptService";
+import {
+  getManagedSystemSculptModelId,
+  hasManagedSystemSculptAccess,
+} from "./systemsculpt/ManagedSystemSculptModel";
 
 import type SystemSculptPlugin from "../main";
 import { ChatMessage, DEFAULT_TITLE_GENERATION_PROMPT } from "../types";
 import { TFile, Notice } from "obsidian";
 import { sanitizeChatTitle } from "../utils/titleUtils";
-import { ensureCanonicalId, parseCanonicalId, createCanonicalId } from "../utils/modelUtils";
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
-import { showAlert } from "../core/ui/notifications";
-import { showPopup } from "../core/ui/modals/PopupModal";
-import { StandardModelSelectionModal, ModelSelectionResult } from "../modals/StandardModelSelectionModal";
 
 /**
  * Service for generating titles for chats and notes
@@ -17,7 +17,6 @@ import { StandardModelSelectionModal, ModelSelectionResult } from "../modals/Sta
 export class TitleGenerationService {
   private static instance: TitleGenerationService;
   private sculptService: SystemSculptService;
-  private defaultModelId: string | null = null;
 
   private constructor(private plugin: SystemSculptPlugin) {
     // Use singleton instance instead of creating new one
@@ -50,6 +49,10 @@ export class TitleGenerationService {
    */
   private isNoteContext(messages: ChatMessage[] | TFile): boolean {
     return messages instanceof TFile;
+  }
+
+  private getDefaultTitle(messages: ChatMessage[] | TFile): string {
+    return this.isNoteContext(messages) ? "Untitled Note" : "Untitled Chat";
   }
 
   /**
@@ -135,56 +138,35 @@ Respond with ONLY the title, nothing else.`;
     messages: ChatMessage[] | TFile,
     onProgress?: (title: string) => void,
     onStatusUpdate?: (progress: number, status: string) => void,
-    additionalContext?: string,
-    retryCount: number = 0
+    additionalContext?: string
   ): Promise<string> {
-    // Declare variables outside try block so they're available in catch
-    let canonicalModelId: string = "";
-    let usedFallback = false;
-    
     try {
-      // Determine the canonical model ID to use for title generation
-      const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
-      const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
-      const tgId = (useLatestEverywhere || isStandardMode)
-        ? "" // force fallback to global selected model below
-        : this.plugin.settings.titleGenerationModelId;
-      const tgProvider = (useLatestEverywhere || isStandardMode)
-        ? ""
-        : this.plugin.settings.titleGenerationProviderId;
-
-      if (tgId) {
-        if (tgId.includes('@@')) {
-          // Already canonical
-          canonicalModelId = tgId;
-        } else if (tgProvider) {
-          // Construct canonical ID from separate provider + model
-          canonicalModelId = createCanonicalId(tgProvider, tgId);
-        } else {
-          // Best-effort canonicalization with default provider
-          canonicalModelId = ensureCanonicalId(tgId);
-        }
-      } else {
-        // Fallback to globally selected chat model
-        const globalDefault = this.plugin.settings.selectedModelId;
-        if (globalDefault) {
-          canonicalModelId = ensureCanonicalId(globalDefault);
-        }
+      if (!hasManagedSystemSculptAccess(this.plugin)) {
+        return this.getDefaultTitle(messages);
       }
 
-      if (!canonicalModelId) {
-        throw new Error("Failed to determine a valid model for title generation.");
-      }
+      const canonicalModelId = getManagedSystemSculptModelId();
 
-      // Validate chosen model and find an alternative if unavailable
       try {
-        const { isAvailable, alternativeModel } = await this.plugin.modelService.validateSpecificModel(canonicalModelId);
-        if (!isAvailable && alternativeModel) {
-          canonicalModelId = alternativeModel.id;
-          usedFallback = true;
+        const { isAvailable } = await this.plugin.modelService.validateSpecificModel(canonicalModelId);
+        if (!isAvailable) {
+          throw new SystemSculptError(
+            `Managed title model ${canonicalModelId} is unavailable.`,
+            ERROR_CODES.MODEL_UNAVAILABLE,
+            404,
+            { model: canonicalModelId }
+          );
         }
-      } catch (_) {
-        // If validation fails unexpectedly, proceed; server-side will handle errors and we have retry flow
+      } catch (error) {
+        if (error instanceof SystemSculptError) {
+          throw error;
+        }
+        throw new SystemSculptError(
+          `Failed to validate managed title model ${canonicalModelId}.`,
+          ERROR_CODES.MODEL_UNAVAILABLE,
+          500,
+          { model: canonicalModelId }
+        );
       }
 
       // Prepare content for title generation
@@ -258,9 +240,7 @@ ${additionalContext}
 
       // Stream the title generation
       let generatedTitle = "";
-      const parsedForStatus = parseCanonicalId(canonicalModelId);
-      const statusModelId = parsedForStatus?.modelId || canonicalModelId; // Cleaner model name for status
-      onStatusUpdate?.(60, `Generating title using ${statusModelId}${usedFallback ? ' (fallback)' : ''}...`);
+      onStatusUpdate?.(60, "Generating title using SystemSculpt...");
 
       // Set a timeout to prevent hanging
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -292,98 +272,25 @@ ${additionalContext}
       // Sanitize and validate the title
       const finalTitle = this.sanitizeTitle(generatedTitle.trim());
       if (!finalTitle) {
-        return "Untitled Chat"; // Return a default if generation fails or results in empty string
+        return this.getDefaultTitle(messages);
       }
 
       return finalTitle;
     } catch (error) {
-
-      // Check if this is a model-related error that we can help the user resolve
-      if (error instanceof SystemSculptError && 
-          (error.code === ERROR_CODES.MODEL_UNAVAILABLE || error.code === ERROR_CODES.MODEL_REQUEST_ERROR)) {
-        
-        // Prevent infinite retry loops - max 2 retries
-        if (retryCount >= 2) {
-          new Notice("Unable to generate title after multiple attempts. Using default title.", 5000);
-          return this.isNoteContext(messages) ? "Untitled Note" : "Untitled Chat";
-        }
-
-        // Show a generic error and offer model selection
-        try {
-          const parsedModel = parseCanonicalId(canonicalModelId);
-          const modelDisplayName = parsedModel?.modelId || canonicalModelId;
-          
-          const errorMessage = `The model "${modelDisplayName}" is not available for title generation. This could be because the model is not found, the provider is unavailable, or the model requires different configuration.`;
-          
-          // Show error and ask if user wants to select a different model
-          const wantToSelectModel = await showPopup(
-            this.plugin.app,
-            errorMessage + "\n\nWould you like to select a different model for title generation?",
-            {
-              title: "Title Generation Failed",
-              primaryButton: "Select Model", 
-              secondaryButton: "Cancel",
-              icon: "alert-circle"
-            }
-          );
-
-          if (wantToSelectModel?.confirmed) {
-            // Use a Promise to handle the async model selection
-            const modelSelectionResult = await new Promise<ModelSelectionResult | null>((resolve) => {
-              const modelSelectionModal = new StandardModelSelectionModal({
-                app: this.plugin.app,
-                plugin: this.plugin,
-                currentModelId: this.plugin.settings.titleGenerationModelId || this.plugin.settings.selectedModelId || "",
-                onSelect: async (result: ModelSelectionResult) => {
-                  if (result && result.modelId) {
-                    // Save the new model selection
-                    const parsed = parseCanonicalId(result.modelId);
-                    if (parsed) {
-                      await this.plugin.getSettingsManager().updateSettings({
-                        titleGenerationProviderId: parsed.providerId,
-                        titleGenerationModelId: result.modelId
-                      });
-                      const { getModelLabelWithProvider } = await import("../utils/modelUtils");
-                      new Notice(`Title generation model set to: ${getModelLabelWithProvider(result.modelId)}`);
-                    }
-                    resolve(result);
-                  } else {
-                    resolve(null);
-                  }
-                }
-              });
-
-              // Open the modal
-              modelSelectionModal.open();
-            });
-            
-            if (modelSelectionResult && modelSelectionResult.modelId) {
-              // User selected a new model, retry generation
-              return await this.generateTitle(messages, onProgress, onStatusUpdate, additionalContext, retryCount + 1);
-            } else {
-              // User cancelled model selection
-              new Notice("Title generation cancelled. Using default title.", 3000);
-              return this.isNoteContext(messages) ? "Untitled Note" : "Untitled Chat";
-            }
-          } else {
-            // User chose not to select a model
-            new Notice("Title generation cancelled. Using default title.", 3000);
-            return this.isNoteContext(messages) ? "Untitled Note" : "Untitled Chat";
-          }
-        } catch (modalError) {
-          // Fall back to the original error handling
-          new Notice(`Title generation failed: ${error.message}`, 5000);
-          throw error;
-        }
-      } else {
-        // For non-model errors, use the original error handling
-        const errorMessage = error instanceof Error
-          ? error.message
-          : "Unknown error occurred";
-
-        new Notice(`Title generation failed: ${errorMessage}`, 5000);
-        throw error;
+      if (
+        error instanceof SystemSculptError &&
+        (error.code === ERROR_CODES.MODEL_UNAVAILABLE || error.code === ERROR_CODES.MODEL_REQUEST_ERROR)
+      ) {
+        new Notice("SystemSculpt title generation is unavailable right now. Using a default title.", 5000);
+        return this.getDefaultTitle(messages);
       }
+
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "Unknown error occurred";
+
+      new Notice(`Title generation failed: ${errorMessage}`, 5000);
+      throw error;
     }
   }
 }

@@ -52,16 +52,6 @@ describe('ChatExportBuilder', () => {
     chatId: 'chat-123',
     chatVersion: 4,
     exportedAt: new Date('2025-09-17T10:15:00Z'),
-    model: {
-      id: 'systemsculpt@@gpt-4o',
-      label: 'SystemSculpt Pro (gpt-4o)'
-    },
-    webSearchEnabled: true,
-    systemPrompt: {
-      type: 'general-use',
-      label: 'General Use',
-      content: 'You are a helpful assistant.'
-    },
     contextFiles: [
       {
         path: 'Docs/guide.md',
@@ -86,8 +76,8 @@ describe('ChatExportBuilder', () => {
 
     expect(markdown.startsWith('---\n')).toBe(true);
     expect(markdown).toContain('title: "Exported Chat"');
-    expect(markdown).toContain('model:');
-    expect(markdown).toContain('label: "SystemSculpt Pro (gpt-4o)"');
+    expect(markdown).not.toContain('model:');
+    expect(markdown).not.toContain('## System Prompt');
 
     expect(markdown).toContain('## Summary');
     expect(markdown).toContain('## Context Files');
@@ -117,6 +107,7 @@ describe('ChatExportBuilder', () => {
 
     expect(markdown).not.toContain('```reasoning');
     expect(markdown).not.toContain('Assess user question and gather context.');
+    expect(markdown).not.toContain('## System Prompt');
   });
 
   test('omits tool call details when includeToolCalls is false', () => {

@@ -8,7 +8,7 @@ import {
   ChatMessage,
 } from "../../types";
 import { TranscriptionService } from "../TranscriptionService";
-import { WORKFLOW_AUTOMATIONS, type WorkflowAutomationDefinition } from "../../constants/workflowTemplates";
+import { WORKFLOW_AUTOMATIONS, type WorkflowAutomationDefinition } from "../../constants/workflowAutomations";
 import { ensureCanonicalId } from "../../utils/modelUtils";
 import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
 import {
@@ -261,7 +261,7 @@ export class WorkflowEngineService {
       }
 
       if (error.metadata?.statusCode === 400 && error.metadata?.provider) {
-        detailLines.push("Tip: Review your provider settings in Settings → Overview & Setup.");
+        detailLines.push("Tip: Review your SystemSculpt license and credits in Settings → Overview & Setup.");
       }
     } else if (error instanceof Error) {
       message = error.message || message;
@@ -358,7 +358,7 @@ export class WorkflowEngineService {
       return null;
     }
 
-    const automations = settings.templates || {};
+    const automations = settings.automations || {};
     for (const [automationId, automation] of Object.entries(automations)) {
       if (!automation?.enabled || !automation.sourceFolder) {
         continue;
@@ -434,7 +434,7 @@ export class WorkflowEngineService {
           void (async () => {
             const skippedCount = await this.persistSkippedFiles(files, "user_skip");
             if (skippedCount > 0) {
-              new Notice(`Skipped ${skippedCount} file${skippedCount > 1 ? "s" : ""}. You can clear skips in Settings -> Automations.`, 7000);
+              new Notice(`Skipped ${skippedCount} file${skippedCount > 1 ? "s" : ""}. You can clear skips in Settings -> Workflow.`, 7000);
             }
             this.plugin.getLogger().info("Bulk workflow processing cancelled by user", {
               source: "WorkflowEngineService",
@@ -579,7 +579,7 @@ export class WorkflowEngineService {
     if (pending.type === "transcription") {
       await this.processTranscription(pending.file, settings, options?.signal, options?.showNotices);
     } else if (pending.automationId) {
-      const automation = settings.templates?.[pending.automationId];
+      const automation = settings.automations?.[pending.automationId];
       if (automation) {
         await this.processAutomation(pending.file, { ...automation, id: pending.automationId }, {
           signal: options?.signal,
@@ -639,8 +639,8 @@ export class WorkflowEngineService {
     if (settings.autoTranscribeInboxNotes) {
       return true;
     }
-    const templates = settings.templates || {};
-    return Object.values(templates).some((automation) => automation?.enabled);
+    const automations = settings.automations || {};
+    return Object.values(automations).some((automation) => automation?.enabled);
   }
 
   public async runAutomationOnFile(
@@ -649,7 +649,7 @@ export class WorkflowEngineService {
     options?: { onStatus?: (status: string, progress?: number) => void }
   ): Promise<TFile | null> {
     const settings = this.getWorkflowSettings();
-    const automation = settings.templates?.[automationId];
+    const automation = settings.automations?.[automationId];
     if (!automation) {
       throw new Error("Automation is missing.");
     }
@@ -665,10 +665,10 @@ export class WorkflowEngineService {
       WORKFLOW_AUTOMATIONS.map((definition) => [definition.id, definition])
     );
     const backlog: AutomationBacklogEntry[] = [];
-    const templates = settings.templates || {};
+    const automations = settings.automations || {};
     const markdownFiles = this.app.vault.getMarkdownFiles();
 
-    for (const [automationId, automationState] of Object.entries(templates)) {
+    for (const [automationId, automationState] of Object.entries(automations)) {
       const definition = definitions.get(automationId);
       if (!definition) {
         continue;

@@ -42,15 +42,6 @@ jest.mock("obsidian", () => {
   };
 });
 
-// Mock StandardModelSelectionModal
-jest.mock("../StandardModelSelectionModal", () => ({
-  StandardModelSelectionModal: jest.fn().mockImplementation(() => ({
-    open: jest.fn(),
-    close: jest.fn(),
-  })),
-  ModelSelectionResult: {},
-}));
-
 // Mock AutomationRunnerModal
 jest.mock("../AutomationRunnerModal", () => ({
   AutomationRunnerModal: jest.fn().mockImplementation(() => ({
@@ -59,13 +50,8 @@ jest.mock("../AutomationRunnerModal", () => ({
   })),
 }));
 
-// Mock modelUtils
-jest.mock("../../utils/modelUtils", () => ({
-  ensureCanonicalId: jest.fn((id) => id),
-}));
-
-// Mock workflowTemplates
-jest.mock("../../constants/workflowTemplates", () => ({
+// Mock workflowAutomations
+jest.mock("../../constants/workflowAutomations", () => ({
   WORKFLOW_AUTOMATIONS: [
     { id: "auto1", title: "Automation 1", destinationPlaceholder: "Dest 1" },
     { id: "auto2", title: "Automation 2", destinationPlaceholder: "Dest 2" },
@@ -239,11 +225,15 @@ describe("AutomationBacklogModal", () => {
     });
   });
 
-  describe("model selection", () => {
-    it("renders model setting with current model", async () => {
+  describe("managed execution copy", () => {
+    it("describes backlog processing as managed by SystemSculpt without a model chooser", async () => {
       await modal.onOpen();
 
-      expect(Setting).toHaveBeenCalled();
+      const text = modal.contentEl.textContent || "";
+      expect(text).toContain("SystemSculpt");
+      expect(text).not.toContain("Change model");
+      expect(text).not.toContain("Select a model");
+      expect(text).toContain("run through SystemSculpt automatically");
     });
   });
 });

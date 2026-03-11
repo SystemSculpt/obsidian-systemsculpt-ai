@@ -1,9 +1,5 @@
-import { Platform } from "obsidian";
-import {
-  listStudioPiProviderAuthRecords,
-  resolveStudioPiProviderApiKey,
-  type StudioPiProviderAuthRecord,
-} from "../../studio/piAuth/StudioPiAuthStorage";
+import type { StudioPiProviderAuthRecord } from "../../studio/piAuth/StudioPiAuthStorage";
+import { PlatformContext } from "../PlatformContext";
 import {
   normalizeStudioPiProviderId,
 } from "../../studio/piAuth/StudioPiProviderAuthUtils";
@@ -17,14 +13,23 @@ export type PiTextProviderCredentialInput = {
   apiKey: string;
 };
 
+async function loadStudioPiAuthStorageModule(): Promise<typeof import("../../studio/piAuth/StudioPiAuthStorage")> {
+  return await import("../../studio/piAuth/StudioPiAuthStorage");
+}
+
+function supportsDesktopPiFeatures(): boolean {
+  return PlatformContext.get().supportsDesktopOnlyFeatures();
+}
+
 export async function loadPiTextProviderAuth(
   providerHints: string[]
 ): Promise<Map<string, StudioPiProviderAuthRecord>> {
-  if (!Platform.isDesktopApp || providerHints.length === 0) {
+  if (!supportsDesktopPiFeatures() || providerHints.length === 0) {
     return new Map<string, StudioPiProviderAuthRecord>();
   }
 
   try {
+    const { listStudioPiProviderAuthRecords } = await loadStudioPiAuthStorageModule();
     const records = await listStudioPiProviderAuthRecords({ providerHints });
     return new Map(
       records
@@ -39,10 +44,11 @@ export async function loadPiTextProviderAuth(
 export async function resolvePiTextProviderCredential(
   providerHint: string
 ): Promise<PiTextProviderCredentialInput | null> {
-  if (!Platform.isDesktopApp) {
+  if (!supportsDesktopPiFeatures()) {
     return null;
   }
 
+  const { resolveStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
   const apiKey = await resolveStudioPiProviderApiKey(providerHint);
   if (!apiKey) {
     return null;
@@ -67,7 +73,7 @@ export async function hasPiTextProviderAuth(providerHint: string): Promise<boole
     return true;
   }
 
-  if (!Platform.isDesktopApp) {
+  if (!supportsDesktopPiFeatures()) {
     return false;
   }
 
@@ -76,6 +82,7 @@ export async function hasPiTextProviderAuth(providerHint: string): Promise<boole
     return false;
   }
 
+  const { resolveStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
   const apiKey = await resolveStudioPiProviderApiKey(providerId);
   return !!apiKey;
 }

@@ -4,7 +4,7 @@ import { KeyboardNavigationService } from "../../services/KeyboardNavigationServ
 import { SystemSculptModel } from "../../../../types/llm";
 import { FavoritesService } from "../../../../services/FavoritesService";
 import { FavoriteToggle } from "../../../../components/FavoriteToggle";
-import { MobileDetection } from "../../../../utils/MobileDetection";
+import { PlatformContext } from "../../../../services/PlatformContext";
 
 export interface ListItem {
   id: string;
@@ -52,7 +52,7 @@ export interface ListSelectionOptions {
 
 /**
  * ListSelectionModal is a standardized modal for selecting items from a list,
- * such as models, contexts, templates, etc.
+ * such as models, contexts, saved items, etc.
  */
 export class ListSelectionModal extends StandardModal {
   private items: ListItem[] = [];
@@ -529,8 +529,7 @@ export class ListSelectionModal extends StandardModal {
    * Detect if the device is mobile
    */
   private isMobileDevice(): boolean {
-    // Use the comprehensive mobile detection utility
-    return MobileDetection.getInstance().isMobileDevice();
+    return PlatformContext.get().isMobile();
   }
 
   /**

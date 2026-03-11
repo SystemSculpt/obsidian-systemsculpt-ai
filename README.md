@@ -1,6 +1,6 @@
 # SystemSculpt AI (Obsidian Plugin)
 
-SystemSculpt AI adds AI chat, vault-aware agent tools, semantic note search, transcription, and workflow automations to Obsidian.
+SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcription, and workflow automations to Obsidian.
 
 ## Current release facts
 
@@ -11,22 +11,21 @@ SystemSculpt AI adds AI chat, vault-aware agent tools, semantic note search, tra
 
 ## What you can do
 
-- Chat with your notes using SystemSculpt-hosted models or custom providers.
-- Use Agent Mode tools to read, search, edit, move, and organize vault files.
+- Chat with your notes through SystemSculpt.
+- Use built-in vault tools to read, search, edit, move, and organize notes.
 - Find semantically similar notes with embeddings.
-- Record audio and transcribe with SystemSculpt or custom transcription endpoints.
-- Run Daily Vault routines and note automations.
+- Record audio and transcribe notes.
+- Run capture-folder workflow automations.
 - Use CanvasFlow image generation in Obsidian Canvas (experimental).
 - Run deterministic benchmark suites and save benchmark reports.
 
 ## Quick start
 
 1. Install **SystemSculpt AI** from Obsidian Community Plugins (or use manual install below).
-2. Open `Settings -> SystemSculpt AI -> Overview & Setup`.
-3. Add a provider and API key (or activate a SystemSculpt license key).
+2. Open `Settings -> SystemSculpt AI -> Account`.
+3. Activate your SystemSculpt license key.
 4. Run the command `Open SystemSculpt Chat`.
-5. Optional: enable embeddings in `Embeddings & Search` for Similar Notes.
-6. Optional: enable Agent Mode in chat for tool calling.
+5. Optional: enable embeddings in `Knowledge` for Similar Notes.
 
 ## Installation
 
@@ -53,9 +52,7 @@ npm run build
 - Settings reference: `docs/user/settings.md`
 - Commands: `docs/user/commands.md`
 - Ribbon icons: `docs/user/ribbon-icons.md`
-- Agent Mode tools: `docs/user/agent-mode.md`
 - Similar Notes: `docs/user/similar-notes.md`
-- Daily Vault: `docs/user/daily-vault.md`
 - Audio & transcription: `docs/user/audio-transcription.md`
 - Automations: `docs/user/automations.md`
 - Troubleshooting: `docs/user/troubleshooting.md`
@@ -93,9 +90,9 @@ npm run release:plugin -- --dry-run    # preview next version + notes only
 npm run release:plugin -- --bump patch # force a specific bump
 ```
 
-Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle plus Pi and Studio terminal runtime assets from `dist/pi-runtime` and `dist/terminal-runtime`, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
+Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 
-Windows fresh-desktop validation is no longer an automated gate in this flow. Treat Windows compatibility as a manual release risk until we add a separate local or paid CI path for it.
+Windows fresh-desktop validation is no longer an automated gate in this flow. Treat Windows compatibility as a manual release risk until we add a separate CI lane for it.
 
 ## Canonical source files for docs
 

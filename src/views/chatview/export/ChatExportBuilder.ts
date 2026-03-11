@@ -6,7 +6,6 @@ import type { ToolCall } from '../../../types/toolCalls';
 
 const OPTION_KEYS: Array<keyof ChatExportOptions> = [
   'includeMetadata',
-  'includeSystemPrompt',
   'includeContextFiles',
   'includeContextFileContents',
   'includeConversation',
@@ -31,11 +30,6 @@ export class ChatExportBuilder {
     if (options.includeMetadata) {
       const summary = this.renderSummary();
       if (summary) sections.push(summary);
-    }
-
-    if (options.includeSystemPrompt) {
-      const prompt = this.renderSystemPrompt();
-      if (prompt) sections.push(prompt);
     }
 
     if (options.includeContextFiles) {
@@ -71,16 +65,6 @@ export class ChatExportBuilder {
       ? this.context.exportedAt.toISOString()
       : String(this.context.exportedAt || new Date().toISOString());
     lines.push(`exportedAt: "${this.escapeYaml(exportedAt)}"`);
-
-    if (this.context.model?.id || this.context.model?.label) {
-      lines.push('model:');
-      if (this.context.model.id) {
-        lines.push(`  id: "${this.escapeYaml(this.context.model.id)}"`);
-      }
-      if (this.context.model.label) {
-        lines.push(`  label: "${this.escapeYaml(this.context.model.label)}"`);
-      }
-    }
 
     lines.push('options:');
     OPTION_KEYS.forEach((key) => {
@@ -138,33 +122,6 @@ export class ChatExportBuilder {
       lines.push(...bulletLines);
     }
     return lines.join('\n');
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // System prompt
-  // ────────────────────────────────────────────────────────────────────────────
-
-  private renderSystemPrompt(): string | null {
-    const systemPrompt = this.context.systemPrompt;
-    if (!systemPrompt?.content?.trim()) {
-      return null;
-    }
-
-    const headingLabel = systemPrompt.label || this.formatSystemPromptLabel(systemPrompt.type);
-    const lines: string[] = ['## System Prompt', '', `### ${headingLabel}`, '', '```text'];
-    systemPrompt.content.split(/\r?\n/).forEach((line) => {
-      lines.push(line);
-    });
-    lines.push('```');
-
-    return lines.join('\n');
-  }
-
-  private formatSystemPromptLabel(type: string): string {
-    if (!type) {
-      return 'System Prompt';
-    }
-    return this.capitalize(type.replace(/[-_]/g, ' '));
   }
 
   private capitalize(value: string): string {

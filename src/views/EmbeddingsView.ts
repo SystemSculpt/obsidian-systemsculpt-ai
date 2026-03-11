@@ -1,11 +1,13 @@
 import { ItemView, WorkspaceLeaf, TFile, setIcon, Notice, Component } from 'obsidian';
 import SystemSculptPlugin from '../main';
+import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
+import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
-import { ChatView, CHAT_VIEW_TYPE } from './chatview/ChatView';
+import type { ChatView } from './chatview/ChatView';
 import { ChatMessage } from '../types';
 import { EmbeddingsPendingFilesModal } from '../modals/EmbeddingsPendingFilesModal';
 
-export const EMBEDDINGS_VIEW_TYPE = 'systemsculpt-embeddings-view';
+export { EMBEDDINGS_VIEW_TYPE };
 
 export class EmbeddingsView extends ItemView {
   private plugin: SystemSculptPlugin;
@@ -35,6 +37,15 @@ export class EmbeddingsView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
     this.plugin = plugin;
+  }
+
+  private getActiveChatView(): ChatView | null {
+    const activeLeaf = this.app.workspace.activeLeaf;
+    const activeView = activeLeaf?.view as ChatView | undefined;
+    if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
+      return null;
+    }
+    return activeView;
   }
   
   getViewType(): string {
@@ -280,7 +291,7 @@ export class EmbeddingsView extends ItemView {
       return;
     }
     
-    let activeChatView = this.app.workspace.getActiveViewOfType(ChatView);
+    let activeChatView = this.getActiveChatView();
     // `workspace.getActiveFile()` can be null while focus is on non-file views (including this Similar Notes view).
     // Prefer the actual active ChatView when present; otherwise fall back to the workspace active file.
     let activeFile = activeChatView ? null : this.app.workspace.getActiveFile();
@@ -1155,7 +1166,7 @@ export class EmbeddingsView extends ItemView {
         cls: 'mod-muted'
       });
       settingsBtn.addEventListener('click', () => {
-        this.plugin.openSettingsTab("embeddings");
+        this.plugin.openSettingsTab("knowledge");
       });
     }
   }

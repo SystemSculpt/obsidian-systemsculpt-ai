@@ -2,11 +2,19 @@
 
 import { App } from "obsidian";
 import { CommandManager } from "../commands";
+import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../viewTypes";
 
 describe("CommandManager studio fit-selection command", () => {
   function registerStudioViewportCommands(activeStudioView: unknown = null) {
     const app = new App();
-    (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeStudioView);
+    (app.workspace as any).activeLeaf = activeStudioView
+      ? {
+          view: {
+            getViewType: () => SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+            ...activeStudioView,
+          },
+        }
+      : null;
 
     const addCommand = jest.fn();
     const plugin = {

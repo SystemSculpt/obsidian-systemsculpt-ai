@@ -66,8 +66,9 @@ export class StandardModelSelectionModal {
     this.plugin = options.plugin;
     this.selectedModelId = options.currentModelId;
     this.onSelect = options.onSelect;
-    this.modalTitle = options.title || "Select AI Model";
-    this.modalDescription = options.description || "Choose a model. Each option shows the provider it will use.";
+    this.modalTitle = options.title || "Chat Models";
+    this.modalDescription =
+      options.description || "SystemSculpt handles the chat path automatically. Choose the model for this conversation.";
     this.searchService = SearchService.getInstance();
     this.favoritesService = FavoritesService.getInstance(this.plugin);
 
@@ -239,7 +240,7 @@ export class StandardModelSelectionModal {
   private openProviderSetup(): void {
     this.modalInstance?.close();
     this.removeAllListeners();
-    window.setTimeout(() => this.plugin.openSettingsTab("overview"), 0);
+    window.setTimeout(() => this.plugin.openSettingsTab("account"), 0);
   }
 
   private updateFavoritesButtonCount(): void {
@@ -375,7 +376,7 @@ export class StandardModelSelectionModal {
         title: this.modalTitle,
         description: this.modalDescription,
         emptyText: "Loading models…",
-        placeholder: "Search by name, provider, or capabilities...",
+        placeholder: "Search by name or capabilities...",
         withSearch: true,
         size: "large",
         closeOnSelect: true,

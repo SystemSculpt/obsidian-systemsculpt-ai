@@ -60,6 +60,9 @@ export class SettingsManager {
     if ('cachedEmbeddingStats' in migratedSettings) {
       delete (migratedSettings as any).cachedEmbeddingStats;
     }
+
+    delete (migratedSettings as any).defaultTemplateModelId;
+    delete (migratedSettings as any).studioTelemetryOptIn;
     
     // Ensure other nested objects are properly initialized
     if (!migratedSettings.favoritesFilterSettings) {
@@ -96,24 +99,31 @@ export class SettingsManager {
       migratedSettings.workflowEngine = defaultWorkflowEngine;
     } else {
       const providedEngine = migratedSettings.workflowEngine;
-      const providedTemplates = providedEngine.templates || {};
-      const mergedTemplates: Record<string, any> = {};
-      const templateKeys = new Set([
-        ...Object.keys(defaultWorkflowEngine.templates || {}),
-        ...Object.keys(providedTemplates),
+      const providedAutomations =
+        (providedEngine.automations && typeof providedEngine.automations === "object" && !Array.isArray(providedEngine.automations)
+          ? providedEngine.automations
+          : null) ||
+        (providedEngine.templates && typeof providedEngine.templates === "object" && !Array.isArray(providedEngine.templates)
+          ? providedEngine.templates
+          : {}) ||
+        {};
+      const mergedAutomations: Record<string, any> = {};
+      const automationKeys = new Set([
+        ...Object.keys(defaultWorkflowEngine.automations || {}),
+        ...Object.keys(providedAutomations),
       ]);
 
-      templateKeys.forEach((templateId) => {
-        const baseTemplate = defaultWorkflowEngine.templates?.[templateId] || {
-          id: templateId,
+      automationKeys.forEach((automationId) => {
+        const baseAutomation = defaultWorkflowEngine.automations?.[automationId] || {
+          id: automationId,
           enabled: false,
         };
-        const overrideTemplate = providedTemplates[templateId] || {};
-        mergedTemplates[templateId] = {
-          ...baseTemplate,
-          ...overrideTemplate,
-          id: templateId,
-          enabled: !!overrideTemplate.enabled,
+        const overrideAutomation = providedAutomations[automationId] || {};
+        mergedAutomations[automationId] = {
+          ...baseAutomation,
+          ...overrideAutomation,
+          id: automationId,
+          enabled: !!overrideAutomation.enabled,
         };
       });
 
@@ -126,8 +136,9 @@ export class SettingsManager {
           !Array.isArray(providedEngine.skippedFiles)
             ? providedEngine.skippedFiles
             : defaultWorkflowEngine.skippedFiles,
-        templates: mergedTemplates,
+        automations: mergedAutomations,
       };
+      delete (migratedSettings.workflowEngine as any).templates;
     }
     
     if ("toolingAutoApproveReadOnly" in migratedSettings) {
@@ -208,10 +219,6 @@ export class SettingsManager {
 
     if (typeof migratedSettings.studioRunRetentionMaxArtifactsMb !== "number" || !Number.isFinite(migratedSettings.studioRunRetentionMaxArtifactsMb)) {
       migratedSettings.studioRunRetentionMaxArtifactsMb = DEFAULT_SETTINGS.studioRunRetentionMaxArtifactsMb;
-    }
-
-    if (typeof migratedSettings.studioTelemetryOptIn !== "boolean") {
-      migratedSettings.studioTelemetryOptIn = DEFAULT_SETTINGS.studioTelemetryOptIn;
     }
 
     if (
@@ -455,10 +462,6 @@ export class SettingsManager {
     }
 
 
-    if (typeof validatedSettings.enableTemplateHotkey !== 'boolean') {
-      validatedSettings.enableTemplateHotkey = defaultSettings.enableTemplateHotkey;
-    }
-
     // Remove old embeddings properties if they exist
     if ('autoUpdateSimilarNotes' in validatedSettings) {
       delete (validatedSettings as any).autoUpdateSimilarNotes;
@@ -473,11 +476,15 @@ export class SettingsManager {
     }
 
     delete (validatedSettings as any).recordSystemAudio;
+    delete (validatedSettings as any).defaultTemplateModelId;
+    delete (validatedSettings as any).templateHotkey;
+    delete (validatedSettings as any).enableTemplateHotkey;
     delete (validatedSettings as any).videoRecordingsDirectory;
     delete (validatedSettings as any).videoCaptureSystemAudio;
     delete (validatedSettings as any).videoCaptureMicrophoneAudio;
     delete (validatedSettings as any).showVideoRecordButtonInChat;
     delete (validatedSettings as any).showVideoRecordingPermissionPopup;
+    delete (validatedSettings as any).studioTelemetryOptIn;
 
     if (typeof validatedSettings.embeddingsEnabled !== 'boolean') {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;
@@ -635,30 +642,38 @@ export class SettingsManager {
     if (!providedWorkflowEngine) {
       validatedSettings.workflowEngine = defaultWorkflowEngine;
     } else {
-      const sanitizedTaskDestination =
-        providedWorkflowEngine.taskDestination === "daily-note" ? "daily-note" : "central-note";
-      const mergedTemplates: Record<string, any> = {};
-      const providedTemplates = providedWorkflowEngine.templates || {};
-      const templateIds = new Set([
-        ...Object.keys(defaultWorkflowEngine.templates || {}),
-        ...Object.keys(providedTemplates),
+      const legacyWorkflowEngine = providedWorkflowEngine as typeof providedWorkflowEngine & {
+        templates?: Record<string, unknown>;
+      };
+      const mergedAutomations: Record<string, any> = {};
+      const providedAutomations: Record<string, any> =
+        (providedWorkflowEngine.automations &&
+          typeof providedWorkflowEngine.automations === "object" &&
+          !Array.isArray(providedWorkflowEngine.automations)
+          ? providedWorkflowEngine.automations
+          : null) ||
+        (legacyWorkflowEngine.templates &&
+          typeof legacyWorkflowEngine.templates === "object" &&
+          !Array.isArray(legacyWorkflowEngine.templates)
+          ? legacyWorkflowEngine.templates
+          : {}) ||
+        {};
+      const automationIds = new Set([
+        ...Object.keys(defaultWorkflowEngine.automations || {}),
+        ...Object.keys(providedAutomations),
       ]);
 
-      templateIds.forEach((templateId) => {
-        const baseTemplate = defaultWorkflowEngine.templates?.[templateId] || {
-          id: templateId,
+      automationIds.forEach((automationId) => {
+        const baseAutomation = defaultWorkflowEngine.automations?.[automationId] || {
+          id: automationId,
           enabled: false,
-          tasksDestination: "central-note",
         };
-        const overrideTemplate = providedTemplates[templateId] || {};
-        const tasksDestination =
-          overrideTemplate.tasksDestination === "daily-note" ? "daily-note" : "central-note";
-        mergedTemplates[templateId] = {
-          ...baseTemplate,
-          ...overrideTemplate,
-          id: templateId,
-          enabled: !!overrideTemplate.enabled,
-          tasksDestination,
+        const overrideAutomation = providedAutomations[automationId] || {};
+        mergedAutomations[automationId] = {
+          ...baseAutomation,
+          ...overrideAutomation,
+          id: automationId,
+          enabled: !!overrideAutomation.enabled,
         };
       });
 
@@ -679,11 +694,6 @@ export class SettingsManager {
           typeof providedWorkflowEngine.processedNotesFolder === "string"
             ? providedWorkflowEngine.processedNotesFolder
             : "",
-        taskDestination: sanitizedTaskDestination,
-        taskNotePath:
-          typeof providedWorkflowEngine.taskNotePath === "string"
-            ? providedWorkflowEngine.taskNotePath
-            : defaultWorkflowEngine.taskNotePath,
         autoTranscribeInboxNotes:
           typeof providedWorkflowEngine.autoTranscribeInboxNotes === "boolean"
             ? providedWorkflowEngine.autoTranscribeInboxNotes
@@ -692,8 +702,9 @@ export class SettingsManager {
           typeof providedWorkflowEngine.inboxRoutingEnabled === "boolean"
             ? providedWorkflowEngine.inboxRoutingEnabled
             : defaultWorkflowEngine.inboxRoutingEnabled,
-        templates: mergedTemplates,
+        automations: mergedAutomations,
       };
+      delete (validatedSettings.workflowEngine as any).templates;
     }
 
     return validatedSettings;

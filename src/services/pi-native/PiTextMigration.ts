@@ -4,8 +4,8 @@ import { createCanonicalId, parseCanonicalId } from "../../utils/modelUtils";
 import {
   isLocalPiCanonicalModelId,
   resolveLocalPiExecutionModelIdFromCanonical,
-} from "../pi/PiTextModels";
-import { SYSTEMSCULPT_PI_CANONICAL_MODEL_ID } from "../pi/PiSystemSculptProvider";
+  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
+} from "../pi/PiCanonicalIds";
 
 function normalizeProviderId(value: unknown): string {
   return String(value || "")

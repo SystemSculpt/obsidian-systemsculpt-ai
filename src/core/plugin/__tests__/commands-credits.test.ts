@@ -26,5 +26,6 @@ describe("CommandManager credits command", () => {
     await registered.callback();
 
     expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
+    expect(openCreditsBalanceModal).toHaveBeenCalledWith({ settingsTab: "account" });
   });
 });

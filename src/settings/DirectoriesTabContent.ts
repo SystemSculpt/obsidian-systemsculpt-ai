@@ -21,7 +21,6 @@ async function handleDirectoryChange(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "systemPromptsDirectory"
         | "savedChatsDirectory"
         | "benchmarksDirectory"
         | "webResearchDirectory",
@@ -59,7 +58,6 @@ function createDirectorySetting(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "systemPromptsDirectory"
         | "savedChatsDirectory"
         | "benchmarksDirectory"
         | "webResearchDirectory",
@@ -103,7 +101,7 @@ function createDirectorySetting(
 export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
     containerEl.empty(); // Ensure clean slate
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
-        containerEl.dataset.tab = "directories";
+        containerEl.dataset.tab = "workspace";
     }
     const { plugin } = tabInstance;
 
@@ -154,15 +152,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         "Select the directory for your recordings",
         "recordingsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Recordings)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        "System Prompts Directory",
-        "Select the directory for your custom system prompts",
-        "systemPromptsDirectory",
-        "Path relative to vault root (empty = SystemSculpt/System Prompts)"
     );
 
     createDirectorySetting(

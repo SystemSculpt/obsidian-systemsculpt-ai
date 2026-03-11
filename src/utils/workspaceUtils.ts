@@ -1,5 +1,6 @@
-import { App, normalizePath, WorkspaceLeaf, TFile, Platform, Notice } from 'obsidian';
+import { App, normalizePath, WorkspaceLeaf, TFile, Notice } from 'obsidian';
 import { displayNotice } from '../core/ui/notifications';
+import { PlatformContext } from '../services/PlatformContext';
 
 /**
  * Find an existing leaf for a file path across all windows and tabs.
@@ -101,7 +102,7 @@ export async function openFileInMainWorkspace(
     let noticeTitle = '';
     let noticeMessage = '';
 
-    if (Platform.isMobile) {
+    if (PlatformContext.get().isMobile()) {
       targetLeaf = app.workspace.getLeaf('tab');
       noticeTitle = 'Opened in new tab';
     } else {
@@ -142,4 +143,4 @@ export async function openFileInMainWorkspace(
   }
 
   return { leaf: null, action: 'error' };
-} 
+}

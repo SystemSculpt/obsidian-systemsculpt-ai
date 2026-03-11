@@ -1,6 +1,6 @@
 import { App, EventRef, TFile } from "obsidian";
 import SystemSculptPlugin from "../../main";
-import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../mcp-tools/filesystem/utils";
+import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../mcp-tools/filesystem/searchUtils";
 import { extractCanvasText } from "./canvasTextExtractor";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
