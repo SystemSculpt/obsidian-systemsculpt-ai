@@ -26,7 +26,6 @@ systemsculpt-sync.config.json
 systemsculpt-sync.ios.json
 systemsculpt-sync.android.json
 run.sh
-!testing/e2e/run.sh
 
 # OS / editors
 .DS_Store
@@ -52,17 +51,6 @@ run.sh
 .obsidian-cache/
 .obsidian-cache.broken*/
 vault/
-
-# E2E artifacts (generated)
-testing/e2e/.wdio/
-testing/e2e/logs/
-testing/e2e/reports/
-testing/e2e/screenshots/
-testing/e2e/video/
-testing/e2e/.obsidian-cache/
-testing/e2e/.obsidian-cache.broken*/
-testing/e2e/fixtures/.tmp-vaults/
-testing/e2e/fixtures/vault/.obsidian/
 
 # Misc local dirs
 logs/

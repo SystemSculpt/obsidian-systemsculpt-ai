@@ -77,6 +77,12 @@ These are blocking tests for every simplification step:
 - release simplification
   - release verification fails if Pi runtime assets or terminal sidecar assets are still required
 
+## Current architecture summary
+
+- native integration testing is now organized under `testing/native/`
+- the legacy separate-instance WDIO harness has been removed
+- canonical integration commands now use `test:native:*`
+
 ### 2. Desktop integration and live app tests
 
 - native Obsidian desktop smoke
@@ -86,21 +92,18 @@ These are blocking tests for every simplification step:
   - embeddings generation works through `SystemSculpt`
   - Similar Notes renders at least one result from indexed content
 - shared runtime smoke runner
-  - `npm run runtime:smoke:desktop`
-  - `npm run runtime:smoke:desktop:extended`
-  - `npm run runtime:smoke:desktop:stress`
+  - `npm run test:native:desktop`
+  - `npm run test:native:desktop:extended`
+  - `npm run test:native:desktop:stress`
   - these now cover chat, approval-gated filesystem tools, embeddings, transcription, hosted web fetch, and YouTube transcript through the real Obsidian runtime
-- desktop E2E specs
-  - `testing/e2e/specs-live/chat.core.live.e2e.ts`
-  - `testing/e2e/specs-live/embeddings.systemsculpt.core.live.e2e.ts`
-  - `testing/e2e/specs-live/transcription.youtube-audio.live.e2e.ts`
-  - these should become the canonical live specs, not legacy variant specs
 
 ### 3. Mobile emulation tests
 
-- `npm run e2e:emu`
-  - keep as the fast regression lane
-  - expand beyond recorder coverage to SystemSculpt chat and embeddings smoke cases
+- Android Studio emulator + native smoke
+  - `npm run test:native:android`
+  - `npm run test:native:android:extended`
+  - `npm run test:native:android:stress`
+  - expand the same real-runtime SystemSculpt smoke cases instead of maintaining a second fake-client lane
 
 ### 4. Real iPad tests
 
@@ -119,9 +122,9 @@ The iOS toggle truth remains the rendered `.checkbox-container.is-enabled` state
 - one real Android device before release confidence
 - `adb` relaunch / log checks
 - Chrome DevTools WebView inspection
-- `npm run android:smoke:runtime`
-- `npm run android:smoke:runtime:extended`
-- `npm run android:smoke:runtime:stress`
+- `npm run test:native:android`
+- `npm run test:native:android:extended`
+- `npm run test:native:android:stress`
 - same SystemSculpt chat + embeddings smoke cases as iPad, plus hosted web fetch and YouTube transcript
 
 ## Release verification gates

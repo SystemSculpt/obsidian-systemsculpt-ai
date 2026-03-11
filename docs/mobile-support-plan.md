@@ -18,13 +18,13 @@ The repo already contains real mobile-aware infrastructure:
 
 - `PlatformContext` forces `requestUrl` and disables streaming on mobile in `src/services/PlatformContext.ts`.
 - Mobile detection is centralized in `src/utils/MobileDetection.ts`.
-- There is existing mobile emulation and WDIO coverage in `testing/e2e/wdio.emu.conf.mjs` and `testing/e2e/specs/recorder.mobile.e2e.ts`.
+- There is existing native mobile verification through the Android emulator and the shared runtime smoke harness.
 - Several user flows already degrade intentionally on mobile instead of crashing.
 - Chat now defaults to the hosted `systemsculpt` backend on both desktop and mobile in `src/views/chatview/ChatView.ts`.
 - The repo now has a native runtime smoke runner for live desktop and Android verification:
-  - `scripts/run-runtime-smoke.mjs`
-  - `npm run runtime:smoke:desktop`
-  - `npm run android:smoke:runtime`
+  - `testing/native/runtime-smoke/run.mjs`
+  - `npm run test:native:desktop`
+  - `npm run test:native:android`
 
 The main risk is no longer a desktop/mobile backend split. The current risk is
 cross-device QA drift:
@@ -52,10 +52,10 @@ trim desktop-only runtime surfaces out of the mobile-shipped path.
 - Some heavy workflows already branch on mobile:
   - `src/services/DocumentProcessingService.ts`
   - `src/services/TranscriptionService.ts`
-- Mobile emulation already exists in the app and tests:
+- Mobile verification already exists in the app and tests:
   - `src/main.ts`
-  - `testing/e2e/wdio.emu.conf.mjs`
-  - `testing/e2e/specs/recorder.mobile.e2e.ts`
+  - `testing/native/runtime-smoke/run.mjs`
+  - `testing/native/device/android/README.md`
 
 ### Explicitly desktop-only today
 
@@ -262,14 +262,14 @@ Why:
 
 ## Testing Strategy
 
-Use a three-lane stack.
+Use a native three-lane stack.
 
 ### Lane A: fast local emulation on desktop
 
 Use this for every PR:
 
-- `npm run check:e2e`
-- `npm run e2e:emu`
+- `npm run check:plugin:fast`
+- `npm run test:native:android:extended`
 - targeted unit tests around:
   - `PlatformContext`
   - `MobileDetection`
@@ -299,17 +299,17 @@ Recommended local setup:
 
 Recommended repo additions:
 
-- `scripts/sync-android-plugin.mjs`
-- `scripts/android-logcat.mjs`
-- `scripts/open-android-debug-tools.mjs`
+- `testing/native/device/android/sync-plugin.mjs`
+- `testing/native/device/android/logcat.mjs`
+- `testing/native/device/android/open-debug-tools.mjs`
 - `systemsculpt-sync.android.example.json`
-- `docs/android-device-testing.md`
+- `testing/native/device/android/README.md`
 
 Suggested command shape:
 
 ```bash
 npm run build
-node scripts/sync-android-plugin.mjs --serial <device> --vault-path <shared-vault-path>
+npm run test:native:android:sync -- --serial <device> --vault-path <shared-vault-path>
 ```
 
 This should be deterministic and fast enough for repeated QA.

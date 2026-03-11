@@ -182,10 +182,10 @@ This is the highest-value cut because chat is the main mobile blocker.
 - `scripts/sync-local-vaults.mjs`
   - stop copying `studio-terminal-sidecar.cjs`
   - stop syncing Pi runtime payloads into vault plugin folders
-- `testing/e2e/run.mjs`
-  - stop building Pi runtime and terminal runtime assets for release-asset mode
-- `testing/e2e/utils/obsidian.ts`
-  - stop requiring `studio-terminal-sidecar.cjs` as a base plugin file
+- `testing/native/runtime-smoke/run.mjs`
+  - keep native smoke focused on real-vault verification rather than release-asset packaging
+- `testing/native/runtime-smoke/runtime.mjs`
+  - keep native runtime boot requirements limited to the real plugin bundle
 
 ### Runtime and services
 

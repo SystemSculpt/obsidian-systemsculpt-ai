@@ -66,7 +66,7 @@ npm run dev               # watch build
 npm run build             # production build
 npm run check:plugin      # typecheck + bundle resolution
 npm run check:plugin:fast # faster local check
-npm run check:e2e         # e2e harness typecheck
+npm run check:all         # plugin check + Jest suite
 ```
 
 ### Tests
@@ -77,9 +77,14 @@ npm run test:debug
 npm run test:strict
 npm run test:embeddings
 npm run test:leaks
-npm run e2e:mock
-npm run e2e:live
+npm run test:native:desktop:extended
+npm run test:native:android:extended
 ```
+
+Testing architecture docs:
+
+- `testing/README.md`
+- `testing/native/README.md`
 
 
 ### Local plugin release
@@ -92,7 +97,9 @@ npm run release:plugin -- --bump patch # force a specific bump
 
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 
-Windows still needs a human-run host pass, but the shared runtime smoke runner and live E2E lane are now documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
+The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
+
+Windows still needs a human-run host pass, but the shared native runtime smoke runner is documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
 
 ## Canonical source files for docs
 

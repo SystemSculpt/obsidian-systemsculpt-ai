@@ -384,9 +384,6 @@ function runChecks(skipChecks) {
   logStep("Running npm run check:plugin");
   run("npm", ["run", "check:plugin"]);
 
-  logStep("Running npm run check:e2e");
-  run("npm", ["run", "check:e2e"]);
-
   logStep("Running npm test");
   run("npm", ["test"]);
 
