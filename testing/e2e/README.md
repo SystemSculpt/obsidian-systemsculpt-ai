@@ -41,20 +41,6 @@ Example (single spec):
 SYSTEMSCULPT_E2E_SPEC="testing/e2e/specs-mock/chat.core.mock.e2e.ts" npm run e2e:mock
 ```
 
-### Fresh desktop install smoke (release-asset bootstrap)
-
-Runs the plugin like a brand-new desktop install: only the shipped plugin assets are copied into the temp vault, then Pi and node-pty must bootstrap themselves from release-style runtime assets.
-
-```bash
-npm run e2e:mock:fresh-desktop
-```
-
-This smoke intentionally:
-- disables private-vault settings fallback
-- uses a fake license key against the mock server
-- serves `dist/pi-runtime` and `dist/terminal-runtime` through the local mock server
-- verifies desktop setup/runtime bootstrap without dev-only copied modules
-
 ### Live chat specs (real endpoint + real license key)
 
 Set the required env vars and run:

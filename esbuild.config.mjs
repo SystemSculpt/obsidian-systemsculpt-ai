@@ -5,6 +5,11 @@ import fs from "fs";
 import path from "path";
 import { BuildLogger, formatBytes, formatDuration } from "./build-logger.mjs";
 import { collectPiRuntimePackageRoots } from "./scripts/pi-runtime-package-set.mjs";
+import {
+	computeRuntimeSyncSignature,
+	runtimePathsNeedSync,
+	writeRuntimeSyncState,
+} from "./scripts/runtime-sync.mjs";
 
 const banner =
 `/*
@@ -22,6 +27,19 @@ const indexCssPath = path.join(cssDir, "index.css");
 const piRuntimePackageRoots = collectPiRuntimePackageRoots({
 	rootDir: process.cwd(),
 }).map((entry) => entry.relativePath);
+const runtimePaths = [
+	"node_modules/node-pty",
+	...piRuntimePackageRoots,
+];
+const runtimeSyncSignature = computeRuntimeSyncSignature({
+	rootDir: process.cwd(),
+	runtimePaths,
+	signatureFiles: [
+		"package-lock.json",
+		"node_modules/.package-lock.json",
+		"scripts/pi-runtime-package-set.mjs",
+	],
+});
 
 // Auto-sync built artifacts after each build/rebuild.
 // - Set `SYSTEMSCULPT_AUTO_SYNC_PATH` to a plugin directory to sync into a real vault.
@@ -214,10 +232,6 @@ const syncArtifacts = () => {
 	if (!autoSyncTargets || autoSyncTargets.length === 0) return;
 	const requiredFiles = ["manifest.json", "main.js", "styles.css", "studio-terminal-sidecar.cjs"];
 	const optionalFiles = ["README.md", "LICENSE", "versions.json"];
-	const runtimePaths = [
-		"node_modules/node-pty",
-		...piRuntimePackageRoots,
-	];
 
 	const copyDirectoryRecursive = (src, dest) => {
 		const stats = fs.statSync(src);
@@ -255,14 +269,25 @@ const syncArtifacts = () => {
 				const dest = path.join(target, path.basename(file));
 				fs.copyFileSync(src, dest);
 			}
-			for (const relativeRuntimePath of runtimePaths) {
-				const srcModulePath = path.join(process.cwd(), relativeRuntimePath);
-				if (!fs.existsSync(srcModulePath)) {
-					throw new Error(`Runtime dependency missing: ${srcModulePath}`);
+			if (runtimePathsNeedSync({
+				targetPath: target,
+				runtimePaths,
+				sourceSignature: runtimeSyncSignature,
+			})) {
+				for (const relativeRuntimePath of runtimePaths) {
+					const srcModulePath = path.join(process.cwd(), relativeRuntimePath);
+					if (!fs.existsSync(srcModulePath)) {
+						throw new Error(`Runtime dependency missing: ${srcModulePath}`);
+					}
+					const destModulePath = path.join(target, relativeRuntimePath);
+					clearDestinationPath(destModulePath);
+					copyDirectoryRecursive(srcModulePath, destModulePath);
 				}
-				const destModulePath = path.join(target, relativeRuntimePath);
-				clearDestinationPath(destModulePath);
-				copyDirectoryRecursive(srcModulePath, destModulePath);
+				writeRuntimeSyncState({
+					targetPath: target,
+					sourceSignature: runtimeSyncSignature,
+					runtimePaths,
+				});
 			}
 			logger.info(`[Sync] Updated ${target}`);
 		} catch (error) {

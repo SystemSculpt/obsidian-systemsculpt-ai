@@ -21,7 +21,6 @@ import {
 import {
   closeSystemSculptSettingsIfOpen,
   openSystemSculptSettingsTab,
-  setSystemSculptDropdownSetting,
   setSystemSculptToggleSetting,
   waitForSystemSculptSetting,
 } from "../utils/systemsculptSettings";
@@ -79,24 +78,21 @@ describe("Embeddings showcase (live) settings + processing modal", () => {
   it("shows where embeddings live in settings and records processing in the modal", async function () {
     this.timeout(300000);
 
-    await openSystemSculptSettingsTab("embeddings");
-    await waitForSystemSculptSetting("Enable embeddings", { tabId: "embeddings" });
+    await openSystemSculptSettingsTab("knowledge");
+    await waitForSystemSculptSetting("Enable embeddings", { tabId: "knowledge" });
     await beat(1200);
 
-    await setSystemSculptToggleSetting("Enable embeddings", true, { tabId: "embeddings" });
-    await beat(1100);
-
-    await setSystemSculptDropdownSetting("Embeddings provider", "SystemSculpt (Default)", { tabId: "embeddings" });
+    await setSystemSculptToggleSetting("Enable embeddings", true, { tabId: "knowledge" });
     await beat(1100);
 
     await browser.execute(() => {
-      const panel = document.querySelector('.systemsculpt-tab-content[data-tab="embeddings"]') as HTMLElement | null;
+      const panel = document.querySelector('.systemsculpt-tab-content[data-tab="knowledge"]') as HTMLElement | null;
       if (!panel) return;
       panel.scrollTo({ top: panel.scrollHeight, behavior: "smooth" });
     });
     await beat(900);
     await browser.execute(() => {
-      const panel = document.querySelector('.systemsculpt-tab-content[data-tab="embeddings"]') as HTMLElement | null;
+      const panel = document.querySelector('.systemsculpt-tab-content[data-tab="knowledge"]') as HTMLElement | null;
       if (!panel) return;
       panel.scrollTo({ top: 0, behavior: "smooth" });
     });

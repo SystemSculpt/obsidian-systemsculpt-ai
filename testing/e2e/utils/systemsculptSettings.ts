@@ -1,12 +1,13 @@
 import { PLUGIN_ID } from "./systemsculptChat";
 
 type SettingsTabId =
-  | "overview"
-  | "models-prompts"
-  | "chat-templates"
-  | "daily-vault"
-  | "embeddings"
-  | "audio-transcription"
+  | "account"
+  | "chat"
+  | "workflow"
+  | "knowledge"
+  | "workspace"
+  | "studio"
+  | "advanced"
   | string;
 
 type SettingsQueryParams = {
@@ -29,7 +30,7 @@ function inferSettingsKeyFromLabel(settingLabel: string): string | null {
   return null;
 }
 
-export async function openSystemSculptSettingsTab(tabId: SettingsTabId = "overview"): Promise<void> {
+export async function openSystemSculptSettingsTab(tabId: SettingsTabId = "account"): Promise<void> {
   await browser.executeObsidian(async ({ app }, { pluginId, tabId }) => {
     const pluginsApi: any = (app as any).plugins;
     const plugin = pluginsApi?.getPlugin?.(pluginId);
@@ -60,7 +61,7 @@ export async function waitForSystemSculptSetting(
   settingLabel: string,
   params?: SettingsQueryParams
 ): Promise<void> {
-  const tabId = params?.tabId ?? "overview";
+  const tabId = params?.tabId ?? "account";
   await openSystemSculptSettingsTab(tabId);
 
   await browser.waitUntil(
@@ -95,7 +96,7 @@ export async function setSystemSculptToggleSetting(
   enabled: boolean,
   params?: SettingsQueryParams
 ): Promise<void> {
-  const tabId = params?.tabId ?? "overview";
+  const tabId = params?.tabId ?? "account";
   const settingsKey = params?.settingsKey ?? inferSettingsKeyFromLabel(settingLabel);
   await waitForSystemSculptSetting(settingLabel, { tabId, timeoutMs: params?.timeoutMs });
 
@@ -235,7 +236,7 @@ export async function setSystemSculptDropdownSetting(
   optionValueOrLabel: string,
   params?: SettingsQueryParams
 ): Promise<void> {
-  const tabId = params?.tabId ?? "overview";
+  const tabId = params?.tabId ?? "account";
   const settingsKey = params?.settingsKey ?? inferSettingsKeyFromLabel(settingLabel);
   await waitForSystemSculptSetting(settingLabel, { tabId, timeoutMs: params?.timeoutMs });
 

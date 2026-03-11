@@ -23,6 +23,7 @@ build/
 !.env.local.example
 config.json
 systemsculpt-sync.config.json
+systemsculpt-sync.ios.json
 run.sh
 !testing/e2e/run.sh
 
