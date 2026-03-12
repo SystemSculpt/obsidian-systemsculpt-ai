@@ -1,147 +1,89 @@
 # Testing coverage map
 
-Last verified against code, tests, and device workflow docs: **2026-03-11**.
+Last verified against code, tests, and device workflow docs: **2026-03-12**.
 
 ## Canonical contract
 
-The migration target is now explicit:
-
-- `SystemSculpt` is the only chat path.
-- desktop, iPad, and Android use the same SystemSculpt path.
-- chat choice UI should disappear because there is nothing to choose.
-- agent-mode on/off should disappear because there is no parallel execution path to toggle.
-- Pi runtime and Studio terminal assets should stop being release requirements.
-
-The test plan must protect that simplification, not preserve the old multi-path architecture.
+- `SystemSculpt` is the only shipped chat path.
+- Desktop, Android, and iPad validation all ride the same hosted chat contract.
+- `testing/native/` is the only integration-testing architecture in this repo.
+- Desktop Studio remains part of the shipped plugin contract, so release verification still includes Pi runtime assets and `studio-terminal-sidecar.cjs`.
+- Benchmark surfaces are removed; there is no benchmark runner or benchmark-results release/test lane anymore.
 
 ## Current verified unit and service coverage
 
-- Single SystemSculpt chat catalog: `covered`
-  - `src/__tests__/model-management-service.test.ts`
-  - `src/services/pi-native/__tests__/PiTextCatalog.test.ts`
-  - These now verify that the plugin resolves to one canonical `SystemSculpt` chat identity and that legacy model ids collapse back onto it.
-- SystemSculpt chat request and streaming facade: `covered`
+- Chat request and streaming contract: `covered`
   - `src/services/__tests__/SystemSculptService.test.ts`
-  - These now verify `/chat/completions` request previews and SystemSculpt streaming instead of local Pi execution.
-- Stream parsing and rendering pipeline: `covered`
   - `src/streaming/__tests__/stream-pipeline.test.ts`
   - `src/views/chatview/__tests__/streaming-controller.test.ts`
-  - `src/views/chatview/__tests__/message-renderer-*.test.ts`
-  - `src/views/chatview/__tests__/message-grouping.test.ts`
-  - `src/views/chatview/__tests__/scroll-manager-behavior.test.ts`
-- Chat persistence and export: `covered`
+- Chat persistence, export, and resume: `covered`
   - `src/views/chatview/__tests__/ChatPersistenceManager.test.ts`
-  - `src/views/chatview/__tests__/chat-storage-normalization.test.ts`
-  - `src/views/chatview/export/__tests__/chat-export-*.test.ts`
-- Settings and resume-contract cleanup: `covered`
-  - `src/__tests__/settings-chat-tab.test.ts`
-  - `src/__tests__/settings-backup-tab.test.ts`
-  - `src/__tests__/settings-embeddings-tab.test.ts`
-  - `src/__tests__/settings-recorder-tab.test.ts`
-  - `src/__tests__/settings-tab-registry.test.ts`
-  - `src/__tests__/systemsculpt-settings-tab.test.ts`
-  - `src/modals/__tests__/AutomationBacklogModal.test.ts`
-  - `src/modals/__tests__/PostProcessingModelPromptModal.test.ts`
-  - `src/views/chatview/storage/__tests__/ChatPersistenceTypes.test.ts`
-  - `src/views/chatview/__tests__/ChatResumeUtils.test.ts`
   - `src/views/chatview/__tests__/ChatStorageService.test.ts`
   - `src/views/chatview/__tests__/resume-chat-service.test.ts`
-  - `src/views/history/__tests__/chatHistoryProvider.test.ts`
-  - These now verify that the public settings and modal surface stays on one SystemSculpt path, that stale model/prompt chooser UI plus Daily/Template settings are gone, and that resume/open/history flows no longer depend on per-file model overrides, backend labels, or Pi session payloads.
-- Embeddings core pipeline: `covered`
+  - `src/views/chatview/export/__tests__/chat-export-*.test.ts`
+- Settings-shell cleanup and client-owned preferences: `covered`
+  - `src/__tests__/settings-chat-tab.test.ts`
+  - `src/__tests__/settings-tab-registry.test.ts`
+  - `src/__tests__/systemsculpt-settings-tab.test.ts`
+  - `src/core/settings/__tests__/SettingsManager.test.ts`
+- Embeddings and Similar Notes foundations: `covered`
   - `src/services/__tests__/Embeddings*.test.ts`
   - `src/__tests__/embeddings/EmbeddingsProcessor.batch.test.ts`
-- Similar Notes UX: `partial`
-  - core indexing and search behavior is covered
-  - dedicated user-facing Similar Notes assertions are still thinner than the chat path
 - Platform transport behavior: `covered`
   - `src/services/__tests__/PlatformContext.test.ts`
-  - this remains important because mobile still depends on the right `fetch` vs `requestUrl` choice
 
-## Canonical TDD lanes for the simplification
+## Canonical integration lanes
 
-### 1. Unit and service tests
+### Native runtime smoke
 
-These are blocking tests for every simplification step:
-
-- one chat identity only
-  - `getModels()` returns a single canonical `SystemSculpt` chat identity
-  - stale saved model ids normalize back to that identity
-- one SystemSculpt chat path only
-  - request preview builds `/chat/completions` payloads
-  - streaming uses SystemSculpt API responses, not local Pi execution
-- settings simplification
-  - no public provider selection state remains
-  - no public model selection state remains beyond the canonical SystemSculpt chat id
-  - no agent-mode toggle remains
-- release simplification
-  - release verification fails if Pi runtime assets or terminal sidecar assets are still required
-
-## Current architecture summary
-
-- native integration testing is now organized under `testing/native/`
-- the legacy separate-instance WDIO harness has been removed
-- canonical integration commands now use `test:native:*`
-
-### 2. Desktop integration and live app tests
-
-- native Obsidian desktop smoke
-  - plugin loads
-  - license validates
-  - chat sends and receives one SystemSculpt reply
-  - embeddings generation works through `SystemSculpt`
-  - Similar Notes renders at least one result from indexed content
-- shared runtime smoke runner
-  - `npm run test:native:desktop`
-  - `npm run test:native:desktop:extended`
-  - `npm run test:native:desktop:stress`
-  - these now cover chat, approval-gated filesystem tools, embeddings, transcription, hosted web fetch, and YouTube transcript through the real Obsidian runtime
-
-### 3. Mobile emulation tests
-
-- Android Studio emulator + native smoke
-  - `npm run test:native:android`
-  - `npm run test:native:android:extended`
-  - `npm run test:native:android:stress`
-  - expand the same real-runtime SystemSculpt smoke cases instead of maintaining a second fake-client lane
-
-### 4. Real iPad tests
-
-- direct vault sync into the real iPad vault
-- `devicectl` relaunch
-- plugin enabled and loaded
-- SystemSculpt chat request succeeds
-- embeddings generation succeeds
-- Similar Notes shows indexed results
-
-The iOS toggle truth remains the rendered `.checkbox-container.is-enabled` state, not the raw checkbox input.
-
-### 5. Real Android tests
-
-- Android Studio emulator for fast iteration
-- one real Android device before release confidence
-- `adb` relaunch / log checks
-- Chrome DevTools WebView inspection
+- `npm run test:native:desktop`
+- `npm run test:native:desktop:extended`
+- `npm run test:native:desktop:stress`
 - `npm run test:native:android`
 - `npm run test:native:android:extended`
 - `npm run test:native:android:stress`
-- same SystemSculpt chat + embeddings smoke cases as iPad, plus hosted web fetch and YouTube transcript
+- `npm run test:native:ios`
+
+These are the authoritative live-runtime checks for:
+
+- hosted chat
+- approval-gated filesystem tools
+- vault reads and writes
+- embeddings / Similar Notes primitives
+- transcription and recorder flows
+- hosted web fetch
+- YouTube transcript retrieval in the extended profile
+
+### Device workflow docs
+
+- Android: `testing/native/device/android/README.md`
+- iOS/iPad: `testing/native/device/ios/README.md`
+- Windows desktop: `testing/native/device/windows/README.md`
 
 ## Release verification gates
 
-These are the release-specific tests the simplification must satisfy:
+The current release contract is:
 
-- plugin build succeeds without Pi runtime packaging
-- plugin build succeeds without terminal sidecar packaging
-- `check:plugin:fast` passes
-- sync and E2E helpers do not require `studio-terminal-sidecar.cjs`
-- sync and E2E helpers do not require Pi runtime `node_modules` payloads
-- release script does not run `build:pi-runtime`, `verify:pi-runtime`, or `build:terminal-runtime`
+- `npm run check:plugin`
+- `npm test`
+- `npm run build`
+- `npm run build:pi-runtime`
+- `npm run verify:pi-runtime`
+- `npm run build:terminal-runtime`
+- `npm run release:plugin -- --dry-run` when validating the full publish path
+
+Those runtime asset builds are intentional because the shipped desktop Studio surface still depends on them.
+
+## Current cleanup status
+
+- Retired benchmark commands, views, docs, and storage paths are removed.
+- Dev builds no longer auto-sync into `testing/e2e/fixtures`.
+- New chat state and saves no longer emit legacy prompt-selection metadata; older chat files remain backward-readable on load.
+- CanvasFlow no longer renders a dead-end "Saved Model (Unsupported)" chip; unsupported note-level image models fall back to actionable choices.
+- `test:native:*` remains the canonical integration command surface.
+- `runtime:smoke:*`, `android:*`, and `ios:*` remain compatibility aliases around the same native harness.
 
 ## Current gaps to close next
 
-- real iPad SystemSculpt chat is now the highest-priority device proof after the service cut
-- direct iPad sync remains reliable from this Mac, but live relaunch/inspection still depends on the iPad staying awake and Obsidian exposing an inspectable target
-- one human-run Windows desktop pass is still needed on an actual Windows host even though the runtime smoke and live E2E lanes are now documented cross-platform
-- the repo still contains Pi runtime, model-selection, custom-provider, and Studio terminal code that the new tests should eventually drive out of the shipped path
-- the current E2E harness still assumes old release assets such as `studio-terminal-sidecar.cjs`
+- One real Windows desktop host pass is still needed for full release confidence.
+- `npm run release:plugin -- --dry-run` still requires at least one commit after the current release tag before it can progress past the script's commit-range gate.

@@ -17,7 +17,6 @@ SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcrip
 - Record audio and transcribe notes.
 - Run capture-folder workflow automations.
 - Use CanvasFlow image generation in Obsidian Canvas (experimental).
-- Run deterministic benchmark suites and save benchmark reports.
 
 ## Quick start
 
@@ -98,6 +97,7 @@ npm run release:plugin -- --bump patch # force a specific bump
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
+That release path still builds the desktop Studio support assets the shipped plugin depends on: Pi runtime bundles plus `studio-terminal-sidecar.cjs`.
 
 Windows still needs a human-run host pass, but the shared native runtime smoke runner is documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
 

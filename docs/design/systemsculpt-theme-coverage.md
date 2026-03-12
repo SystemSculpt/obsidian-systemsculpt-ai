@@ -20,7 +20,6 @@ This repo does **not** ship a standalone Obsidian theme package. It ships plugin
 - Settings UI
 - Embeddings/Similar Notes surfaces
 - Recorder and transcription widgets
-- Benchmark and results views
 - CanvasFlow and YouTube modal-related surfaces
 
 ## Known constraints

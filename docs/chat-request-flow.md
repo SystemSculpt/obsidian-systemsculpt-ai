@@ -18,7 +18,7 @@ This doc describes the current send/stream pipeline for ChatView.
 - Entry UI: `src/views/chatview/ChatView.ts`
 - Send orchestration: `src/views/chatview/InputHandler.ts`
 - Request assembly + provider routing: `src/services/SystemSculptService.ts`
-- Prompt composition: `src/services/PromptBuilder.ts`, `src/services/SystemPromptService.ts`
+- Prompt composition: `src/services/SystemSculptService.ts`, `src/views/chatview/ChatView.ts`
 - Context + tool-message shaping: `src/services/ContextFileService.ts`
 - Streaming/render/persist: `src/views/chatview/controllers/StreamingController.ts`
 - Tool execution + policy: `src/views/chatview/ToolCallManager.ts`, `src/utils/toolPolicy.ts`

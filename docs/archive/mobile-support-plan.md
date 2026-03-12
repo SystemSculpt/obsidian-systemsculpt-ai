@@ -1,4 +1,7 @@
-# Mobile Support Plan
+# Mobile Support Plan (Archived)
+
+Archived snapshot kept for historical context.
+Use `docs/testing-coverage-map.md` and the device workflow docs for the current mobile-support contract.
 
 Last verified against code and local dev environment: **2026-03-11**.
 

@@ -68,12 +68,10 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio |
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
 
-## Benchmark and diagnostics
+## Diagnostics
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Open SystemSculpt Benchmark |  | `open-systemsculpt-benchmark` | Opens benchmark runner view |
-| Open SystemSculpt Benchmark Results |  | `open-systemsculpt-benchmark-results` | Opens leaderboard/results view |
 | Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Opens janitor modal |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
 | Toggle Mobile Emulation Mode |  | `toggle-mobile-emulation` | Developer tool for supported builds |

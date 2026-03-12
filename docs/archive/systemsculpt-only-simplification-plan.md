@@ -1,4 +1,7 @@
-# SystemSculpt-Only Simplification Plan
+# SystemSculpt-Only Simplification Plan (Archived)
+
+Archived snapshot kept for historical context.
+This document predates the current contract that preserves desktop Studio plus its runtime assets.
 
 Last verified against code, tests, and local device workflow: **2026-03-10**.
 

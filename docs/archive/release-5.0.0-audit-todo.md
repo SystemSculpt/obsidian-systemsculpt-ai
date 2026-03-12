@@ -1,4 +1,7 @@
-# 5.0.0 Release Audit TODO
+# 5.0.0 Release Audit TODO (Archived)
+
+Archived release-audit snapshot for historical reference.
+The active release contract is documented in `README.md`, `docs/testing-coverage-map.md`, and `scripts/release-plugin.mjs`.
 
 Last updated: 2026-03-10
 

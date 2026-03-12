@@ -1,6 +1,6 @@
 # SystemSculpt AI docs
 
-Last verified against code: **2026-03-10**.
+Last verified against code: **2026-03-12**.
 
 This folder includes both user docs and engineering docs for the Obsidian plugin.
 
@@ -17,17 +17,21 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 
 ## Engineering docs (repo root `docs/`)
 
-- [SystemSculpt-only simplification plan](systemsculpt-only-simplification-plan.md)
-- [Mobile support plan](mobile-support-plan.md)
 - [Android device testing](android-device-testing.md)
 - [iPad device testing](ipad-device-testing.md)
 - [Windows desktop testing](windows-desktop-testing.md)
 - [Chat request flow](chat-request-flow.md)
-- [Benchmark](benchmark.md)
+- [Studio foundation](studio-foundation.md)
 - [Testing coverage map](testing-coverage-map.md)
+
+## Archive docs
+
+- [Archive index](archive/README.md)
 - [On-device embeddings PRD (archival draft)](prd-on-device-embeddings.md)
 - [Design notes (snapshot docs)](design/)
 - [Research notes (time-bound snapshots)](research/)
+
+Operational guidance should come from the root engineering docs above. Historical plans and audits live under `docs/archive/`.
 
 ## Canonical code references
 
