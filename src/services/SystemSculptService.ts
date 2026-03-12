@@ -617,12 +617,6 @@ export class SystemSculptService {
   }
 
   private getValidServerUrl(): string {
-    // Import development mode constants and helpers
-    const { DEVELOPMENT_MODE } = require('../constants/api');
-    if (DEVELOPMENT_MODE === 'DEVELOPMENT' && (!this.settings.serverUrl || this.settings.serverUrl.trim() === '')) {
-      return 'http://localhost:3001/api/v1';
-    }
-
     return SystemSculptEnvironment.resolveBaseUrl(this.settings);
   }
 
@@ -1274,7 +1268,7 @@ export class SystemSculptService {
       const data = response.json || (response.text ? JSON.parse(response.text) : {});
       return data as ApiStatusResponse;
     } catch (error) {
-      return { status: "error", message: "Failed to connect to SystemSculpt API. Please check your network connection and server URL."};
+      return { status: "error", message: "Failed to connect to SystemSculpt API. Please check your network connection."};
     }
   }
 }

@@ -1,4 +1,4 @@
-import { API_BASE_URL, DEVELOPMENT_MODE, SYSTEMSCULPT_API_HEADERS } from '../../constants/api';
+import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from '../../constants/api';
 import { SystemSculptSettings } from '../../types';
 import { resolveSystemSculptApiBaseUrl } from '../../utils/urlHelpers';
 
@@ -14,8 +14,8 @@ export interface ApiEnvironmentConfig {
 export class SystemSculptEnvironment {
   /**
    * Resolve the canonical base URL for the SystemSculpt API.
-   * Applies marketing-domain correction, /api/v1 normalization, and
-   * falls back to the compiled API_BASE_URL when the input is blank.
+   * Development builds may normalize configured overrides, but production
+   * builds always pin hosted traffic to the compiled production API.
    */
   static resolveBaseUrl(
     settings: Pick<SystemSculptSettings, 'serverUrl'>,
@@ -24,14 +24,6 @@ export class SystemSculptEnvironment {
     const candidate = typeof override === 'string' && override.trim().length > 0
       ? override.trim()
       : (settings.serverUrl?.trim() || '');
-
-    // In production builds, never honor localhost/loopback server settings.
-    if (candidate && DEVELOPMENT_MODE === 'PRODUCTION') {
-      const lower = candidate.toLowerCase();
-      if (lower.includes('localhost') || lower.includes('127.0.0.1')) {
-        return API_BASE_URL;
-      }
-    }
 
     return resolveSystemSculptApiBaseUrl(candidate || API_BASE_URL);
   }

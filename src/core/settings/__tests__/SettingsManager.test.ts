@@ -472,6 +472,24 @@ describe("SettingsManager", () => {
       expect(settingsManager.settings.settingsMode).toBe("advanced");
     });
 
+
+    it("pins blank serverUrl values to the canonical production host", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        serverUrl: "",
+      });
+
+      expect(result.serverUrl).toBe("https://api.systemsculpt.com");
+    });
+
+    it("scrubs lvh.me serverUrl overrides back to production", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        serverUrl: "http://lvh.me:3002",
+      });
+
+      expect(result.serverUrl).toBe("https://api.systemsculpt.com");
+    });
     it("triggers settings-loaded event", async () => {
       await settingsManager.loadSettings();
 

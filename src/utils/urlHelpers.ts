@@ -2,7 +2,7 @@
  * URL helper utilities for consistent API endpoint handling
  */
 
-import { API_BASE_URL, WEBSITE_API_BASE_URL } from "../constants/api";
+import { API_BASE_URL, DEVELOPMENT_MODE, WEBSITE_API_BASE_URL } from "../constants/api";
 
 /**
  * Ensures a server URL has the proper /api/v1 suffix
@@ -56,9 +56,14 @@ const SYSTEMSCULPT_MARKETING_HOSTS = new Set([
  * Resolve the canonical SystemSculpt API base URL, correcting common misconfigurations.
  * - Blank / undefined -> production API base
  * - Marketing domains -> api subdomain
- * - Custom hosts -> normalized with /api/v1 suffix preserved
+ * - Development builds may use custom hosts normalized with /api/v1
+ * - Production builds always pin hosted traffic to the canonical production API
  */
 export function resolveSystemSculptApiBaseUrl(serverUrl?: string): string {
+  if (DEVELOPMENT_MODE === "PRODUCTION") {
+    return API_BASE_URL;
+  }
+
   const candidate = (serverUrl || '').trim();
   if (!candidate) {
     return API_BASE_URL;
@@ -77,6 +82,10 @@ export function resolveSystemSculptApiBaseUrl(serverUrl?: string): string {
   } catch {
     return API_BASE_URL;
   }
+}
+
+export function canonicalizeSystemSculptServerUrlSetting(serverUrl?: string): string {
+  return resolveSystemSculptApiBaseUrl(serverUrl).replace(/\/api\/v1\/?$/i, "");
 }
 
 function resolveCandidateUrl(candidate: string, fallback: string): URL {

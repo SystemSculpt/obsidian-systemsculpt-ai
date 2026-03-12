@@ -185,11 +185,8 @@ export default class SystemSculptPlugin extends Plugin {
         if (!hasLicenseKey || !hasValidLicense) {
           throw new Error('Embeddings require an active SystemSculpt license. Validate your license in settings.');
         }
-        if (!this.settings.serverUrl) {
-          throw new Error('Embeddings not available. Please verify your SystemSculpt server URL in settings.');
-        }
       } else if (provider === 'custom') {
-        // For custom provider, do not require SystemSculpt license or server URL here
+        // Custom embeddings do not depend on the hosted SystemSculpt API base URL.
         const endpoint = (this.settings.embeddingsCustomEndpoint || '').trim();
         const model = (this.settings.embeddingsCustomModel || this.settings.embeddingsModel || '').trim();
         if (!endpoint || !model) {

@@ -2,6 +2,7 @@ import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflow
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
+import { canonicalizeSystemSculptServerUrlSetting } from "../../utils/urlHelpers";
 
 // Current settings version - increment when making breaking changes to settings structure
 const CURRENT_SETTINGS_VERSION = "1.0";
@@ -616,26 +617,11 @@ export class SettingsManager {
       delete (validatedSettings as any).cachedEmbeddingStats;
     }
 
-    // Ensure server URL is a string and properly matches development mode
-    const currentServerUrl = validatedSettings.serverUrl;
-    
-    // Import development mode constants
-    const { API_BASE_URL } = require('../../constants/api');
-    const correctUrl = API_BASE_URL.replace('/api/v1', ''); // Remove the API path suffix
-    
-    if (typeof currentServerUrl !== 'string' || currentServerUrl.trim() === '') {
-      validatedSettings.serverUrl = correctUrl;
-    } 
-    // Check for mode mismatches and auto-correct them
-    else if (currentServerUrl.includes('localhost') && correctUrl.includes('api.systemsculpt.com')) {
-      validatedSettings.serverUrl = correctUrl;
-    }
-    else if (currentServerUrl.includes('api.systemsculpt.com') && correctUrl.includes('localhost')) {
-      validatedSettings.serverUrl = correctUrl;
-    }
-    else {
-      // Server URL validation passed - silent success
-    }
+    // Persist the canonical hosted API origin. Production builds always pin this to the
+    // real SystemSculpt API, while development builds still normalize local overrides.
+    validatedSettings.serverUrl = canonicalizeSystemSculptServerUrlSetting(
+      typeof validatedSettings.serverUrl === "string" ? validatedSettings.serverUrl : ""
+    );
 
     const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
     const providedWorkflowEngine = validatedSettings.workflowEngine;
@@ -822,7 +808,7 @@ export class SettingsManager {
   }
   
   public async setServerUrl(url: string): Promise<void> {
-    await this.updateSettings({ serverUrl: url });
+    await this.updateSettings({ serverUrl: canonicalizeSystemSculptServerUrlSetting(url) });
   }
 
   /**

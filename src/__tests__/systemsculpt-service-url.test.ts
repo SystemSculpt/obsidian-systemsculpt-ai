@@ -104,4 +104,10 @@ describe('SystemSculptService base URL resolution', () => {
     const service = SystemSculptService.getInstance(plugin as any);
     expect(service.baseUrl).toBe('https://api.systemsculpt.com/api/v1');
   });
+
+  it('ignores custom hosted overrides in production builds', () => {
+    const plugin = createPlugin({ serverUrl: 'http://lvh.me:3002' });
+    const service = SystemSculptService.getInstance(plugin as any);
+    expect(service.baseUrl).toBe(API_BASE_URL);
+  });
 });

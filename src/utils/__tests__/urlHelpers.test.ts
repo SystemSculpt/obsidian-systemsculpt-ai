@@ -1,5 +1,10 @@
 import { API_BASE_URL } from "../../constants/api";
-import { normalizeApiUrl, resolveSystemSculptApiBaseUrl, CACHE_BUSTER } from "../urlHelpers";
+import {
+  normalizeApiUrl,
+  resolveSystemSculptApiBaseUrl,
+  canonicalizeSystemSculptServerUrlSetting,
+  CACHE_BUSTER,
+} from "../urlHelpers";
 
 describe("normalizeApiUrl", () => {
   it("returns empty string for empty input", () => {
@@ -82,20 +87,33 @@ describe("resolveSystemSculptApiBaseUrl", () => {
       .toBe("https://api.systemsculpt.com/api/v1");
   });
 
-  it("preserves custom hosts", () => {
+  it("ignores localhost-style overrides in production builds", () => {
     expect(resolveSystemSculptApiBaseUrl("http://localhost:3001"))
-      .toBe("http://localhost:3001/api/v1");
+      .toBe(API_BASE_URL);
+    expect(resolveSystemSculptApiBaseUrl("http://lvh.me:3002"))
+      .toBe(API_BASE_URL);
+  });
+
+  it("ignores custom non-production hosts in production builds", () => {
     expect(resolveSystemSculptApiBaseUrl("https://self-hosted.example.com/service"))
-      .toBe(normalizeApiUrl("https://self-hosted.example.com/service"));
+      .toBe(API_BASE_URL);
   });
 
   it("returns default for invalid URL", () => {
     expect(resolveSystemSculptApiBaseUrl("not-a-url")).toBe(API_BASE_URL);
   });
 
-  it("trims whitespace from input", () => {
+  it("pins whitespace-trimmed custom inputs to production in release builds", () => {
     expect(resolveSystemSculptApiBaseUrl("  https://custom.example.com  "))
-      .toBe("https://custom.example.com/api/v1");
+      .toBe(API_BASE_URL);
+  });
+});
+
+describe("canonicalizeSystemSculptServerUrlSetting", () => {
+  it("stores the canonical production API origin", () => {
+    expect(canonicalizeSystemSculptServerUrlSetting("")).toBe("https://api.systemsculpt.com");
+    expect(canonicalizeSystemSculptServerUrlSetting("http://lvh.me:3002")).toBe("https://api.systemsculpt.com");
+    expect(canonicalizeSystemSculptServerUrlSetting("https://self-hosted.example.com/service")).toBe("https://api.systemsculpt.com");
   });
 });
 

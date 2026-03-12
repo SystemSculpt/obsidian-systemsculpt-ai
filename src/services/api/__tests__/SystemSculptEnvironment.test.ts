@@ -1,24 +1,11 @@
 /**
  * @jest-environment node
  */
-import { SystemSculptEnvironment, ApiEnvironmentConfig } from "../SystemSculptEnvironment";
-import { SystemSculptSettings } from "../../../types";
+import { SystemSculptEnvironment } from "../SystemSculptEnvironment";
 
 // Mock the url helpers
 jest.mock("../../../utils/urlHelpers", () => ({
-  resolveSystemSculptApiBaseUrl: jest.fn((url: string) => {
-    // Simulate URL normalization
-    if (!url) return "https://api.systemsculpt.com/api/v1";
-    // Handle marketing domain
-    if (url.includes("systemsculpt.com") && !url.includes("api.")) {
-      return url.replace("systemsculpt.com", "api.systemsculpt.com");
-    }
-    // Add /api/v1 if missing
-    if (!url.endsWith("/api/v1")) {
-      return url.replace(/\/?$/, "/api/v1");
-    }
-    return url;
-  }),
+  resolveSystemSculptApiBaseUrl: jest.fn(() => "https://api.systemsculpt.com/api/v1"),
 }));
 
 // Mock the API constants
@@ -47,40 +34,40 @@ describe("SystemSculptEnvironment", () => {
       expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
-    it("uses serverUrl from settings when provided", () => {
+    it("ignores configured serverUrl in production builds", () => {
       const settings = { serverUrl: "https://custom.example.com/api/v1" };
       const url = SystemSculptEnvironment.resolveBaseUrl(settings);
 
-      expect(url).toBe("https://custom.example.com/api/v1");
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
-    it("uses override when provided", () => {
+    it("ignores override values in production builds", () => {
       const settings = { serverUrl: "https://settings.example.com" };
       const url = SystemSculptEnvironment.resolveBaseUrl(settings, "https://override.example.com");
 
-      expect(url).toBe("https://override.example.com/api/v1");
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
-    it("prefers override over settings", () => {
+    it("still resolves to production when both settings and override are provided", () => {
       const settings = { serverUrl: "https://settings.example.com" };
       const override = "https://override.example.com/api/v1";
       const url = SystemSculptEnvironment.resolveBaseUrl(settings, override);
 
-      expect(url).toBe("https://override.example.com/api/v1");
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
-    it("handles whitespace in serverUrl", () => {
+    it("ignores whitespace-padded serverUrl in production builds", () => {
       const settings = { serverUrl: "  https://custom.example.com  " };
       const url = SystemSculptEnvironment.resolveBaseUrl(settings);
 
-      expect(url).toBe("https://custom.example.com/api/v1");
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
     it("handles empty override", () => {
       const settings = { serverUrl: "https://custom.example.com" };
       const url = SystemSculptEnvironment.resolveBaseUrl(settings, "  ");
 
-      expect(url).toBe("https://custom.example.com/api/v1");
+      expect(url).toBe("https://api.systemsculpt.com/api/v1");
     });
 
     it("handles undefined serverUrl", () => {
@@ -131,14 +118,14 @@ describe("SystemSculptEnvironment", () => {
       expect(config.licenseKey).toBe("license-123");
     });
 
-    it("uses override for baseUrl", () => {
+    it("keeps production baseUrl even when an override is supplied", () => {
       const settings = { serverUrl: "", licenseKey: "key" };
       const config = SystemSculptEnvironment.createConfig(
         settings,
         "https://custom.example.com/api/v1"
       );
 
-      expect(config.baseUrl).toBe("https://custom.example.com/api/v1");
+      expect(config.baseUrl).toBe("https://api.systemsculpt.com/api/v1");
     });
 
     it("returns undefined licenseKey for whitespace-only key", () => {
