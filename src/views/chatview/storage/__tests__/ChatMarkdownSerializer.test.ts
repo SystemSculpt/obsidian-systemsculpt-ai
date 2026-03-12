@@ -14,7 +14,7 @@ jest.mock("obsidian", () => ({
       const match = line.match(/^(\w+):\s*(.*)$/);
       if (match) {
         const [, key, value] = match;
-        if (value.startsWith("[")) {
+        if (value.startsWith("[") && !value.startsWith("[[")) {
           // Array
           result[key] = JSON.parse(value.replace(/'/g, '"'));
         } else if (value === "null" || value === "") {
@@ -271,6 +271,26 @@ Hello!
       expect(result?.metadata.id).toBe("chat-123");
       expect(result?.metadata.model).toBe("gpt-4");
       expect(result?.metadata.title).toBe("Test Chat");
+      expect(result?.metadata.chatBackend).toBe("systemsculpt");
+      expect(result?.metadata.systemMessage).toBeUndefined();
+    });
+
+    it("marks legacy prompt metadata as legacy-only compatibility state", () => {
+      const content = createMarkdown(
+        {
+          id: "chat-legacy",
+          customPromptFilePath: "[[prompts/old-format.md]]",
+        },
+        ""
+      );
+
+      const result = ChatMarkdownSerializer.parseMarkdown(content);
+
+      expect(result?.metadata.chatBackend).toBe("legacy");
+      expect(result?.metadata.systemMessage).toEqual({
+        type: "custom",
+        path: "prompts/old-format.md",
+      });
     });
 
     it("parses sequential format messages", () => {

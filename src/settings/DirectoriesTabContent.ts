@@ -22,7 +22,6 @@ async function handleDirectoryChange(
         | "chatsDirectory"
         | "extractionsDirectory"
         | "savedChatsDirectory"
-        | "benchmarksDirectory"
         | "webResearchDirectory",
     createFolder: boolean = false
 ) {
@@ -59,7 +58,6 @@ function createDirectorySetting(
         | "chatsDirectory"
         | "extractionsDirectory"
         | "savedChatsDirectory"
-        | "benchmarksDirectory"
         | "webResearchDirectory",
     placeholder: string
 ) {
@@ -125,15 +123,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         "Select the directory where notes created via \"Save chat as note\" are stored",
         "savedChatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Saved Chats)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        "Benchmarks Directory",
-        "Select the directory where benchmark reports are exported",
-        "benchmarksDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Benchmarks)"
     );
 
     createDirectorySetting(

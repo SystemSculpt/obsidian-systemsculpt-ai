@@ -1,26 +1,19 @@
 import { App, WorkspaceLeaf, Notice, TFile, ItemView } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
-import { SystemPromptService } from "../../services/SystemPromptService";
 import { ChatState } from "../../types/index";
 import type { EmbeddingsView } from "../../views/EmbeddingsView";
-import type { BenchView } from "../../views/benchview/BenchView";
-import type { BenchResultsView } from "../../views/benchresults/BenchResultsView";
 import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { PlatformContext } from "../../services/PlatformContext";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
-  BENCH_RESULTS_VIEW_TYPE,
-  BENCH_VIEW_TYPE,
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "./viewTypes";
 
 type ChatViewModule = typeof import("../../views/chatview/ChatView");
 type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
-type BenchViewModule = typeof import("../../views/benchview/BenchView");
-type BenchResultsViewModule = typeof import("../../views/benchresults/BenchResultsView");
 type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
 
 type ChatViewLike = ItemView & {
@@ -35,14 +28,6 @@ function loadChatViewModule(): ChatViewModule {
 
 function loadEmbeddingsViewModule(): EmbeddingsViewModule {
   return require("../../views/EmbeddingsView");
-}
-
-function loadBenchViewModule(): BenchViewModule {
-  return require("../../views/benchview/BenchView");
-}
-
-function loadBenchResultsViewModule(): BenchResultsViewModule {
-  return require("../../views/benchresults/BenchResultsView");
 }
 
 function loadStudioViewModule(): StudioViewModule {
@@ -313,21 +298,6 @@ export class ViewManager {
       }
     }
 
-    // Validate system prompt type if present
-    if ("systemPromptType" in state.state) {
-      const validTypes = ["general-use", "concise", "agent", "custom"]; // Keep "agent" only so older chat states migrate cleanly.
-      // Make case-insensitive comparison
-      if (!validTypes.includes(state.state.systemPromptType?.toLowerCase())) {
-        state.state.systemPromptType = "general-use";
-      } else {
-        // Normalize case to ensure consistency
-        const normalizedType = state.state.systemPromptType.toLowerCase();
-        if (normalizedType !== state.state.systemPromptType) {
-          state.state.systemPromptType = normalizedType;
-        }
-      }
-    }
-
     // Only initialize empty arrays if they don't exist at all
     if (!("messages" in state.state)) {
       state.state.messages = [];
@@ -377,36 +347,6 @@ export class ViewManager {
     );
 
     this.plugin.registerView(
-      BENCH_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => {
-        if (!platform.supportsDesktopOnlyFeatures()) {
-          return new DesktopOnlyPlaceholderView(leaf, {
-            viewType: BENCH_VIEW_TYPE,
-            displayText: "Bench",
-            description: "Bench is desktop-only right now.",
-          });
-        }
-        const { BenchView } = loadBenchViewModule();
-        return new BenchView(leaf, this.plugin);
-      }
-    );
-
-    this.plugin.registerView(
-      BENCH_RESULTS_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => {
-        if (!platform.supportsDesktopOnlyFeatures()) {
-          return new DesktopOnlyPlaceholderView(leaf, {
-            viewType: BENCH_RESULTS_VIEW_TYPE,
-            displayText: "Bench Results",
-            description: "Bench results are desktop-only right now.",
-          });
-        }
-        const { BenchResultsView } = loadBenchResultsViewModule();
-        return new BenchResultsView(leaf, this.plugin);
-      }
-    );
-
-    this.plugin.registerView(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
         if (!platform.supportsDesktopOnlyFeatures()) {
@@ -449,53 +389,6 @@ export class ViewManager {
     return rightLeaf.view as EmbeddingsView;
   }
 
-  async activateBenchView(): Promise<BenchView> {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("Bench is desktop-only.");
-    }
-
-    const existingLeaves = this.app.workspace.getLeavesOfType(BENCH_VIEW_TYPE);
-    if (existingLeaves.length > 0) {
-      this.app.workspace.revealLeaf(existingLeaves[0]);
-      return existingLeaves[0].view as BenchView;
-    }
-
-    const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.setViewState({
-      type: BENCH_VIEW_TYPE,
-      active: true
-    });
-
-    this.app.workspace.revealLeaf(leaf);
-    return leaf.view as BenchView;
-  }
-
-  async activateBenchResultsView(): Promise<BenchResultsView> {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("Bench results are desktop-only.");
-    }
-
-    const existingLeaves = this.app.workspace.getLeavesOfType(BENCH_RESULTS_VIEW_TYPE);
-    if (existingLeaves.length > 0) {
-      this.app.workspace.revealLeaf(existingLeaves[0]);
-      return existingLeaves[0].view as BenchResultsView;
-    }
-
-    // Open in right sidebar for quick reference
-    const rightLeaf = this.app.workspace.getRightLeaf(false);
-    if (!rightLeaf) {
-      throw new Error("Failed to create right sidebar leaf");
-    }
-
-    await rightLeaf.setViewState({
-      type: BENCH_RESULTS_VIEW_TYPE,
-      active: true,
-    });
-
-    this.app.workspace.revealLeaf(rightLeaf);
-    return rightLeaf.view as BenchResultsView;
-  }
-
   async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
     if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
       throw new Error("SystemSculpt Studio is desktop-only.");
@@ -534,8 +427,6 @@ export class ViewManager {
   unloadViews() {
     this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EMBEDDINGS_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(BENCH_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(BENCH_RESULTS_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
     this.ribbonManager.cleanup();
   }

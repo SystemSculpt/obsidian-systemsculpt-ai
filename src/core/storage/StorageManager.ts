@@ -8,8 +8,7 @@ export type StorageLocationType =
   | 'settings'    // Settings backups
   | 'cache'       // Various cache data
   | 'temp'        // Temporary processing files
-  | 'diagnostics' // Logs, metrics, and other diagnostics artifacts
-  | 'benchmarks'; // Benchmark fixtures, runs, and logs
+  | 'diagnostics'; // Logs, metrics, and other diagnostics artifacts
 
 /**
  * Storage operation result
@@ -98,8 +97,7 @@ export class StorageManager {
         this.ensureDirectory(this.getPath('settings', 'emergency')),
         this.ensureDirectory(this.getPath('cache')),
         this.ensureDirectory(this.getPath('temp')),
-        this.ensureDirectory(this.getPath('diagnostics'), true),
-        this.ensureDirectory(this.getPath('benchmarks'))
+        this.ensureDirectory(this.getPath('diagnostics'), true)
       ]);
       
       // Storage system initialized - silent success

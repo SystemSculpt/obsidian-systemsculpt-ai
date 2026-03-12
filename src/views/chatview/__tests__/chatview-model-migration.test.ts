@@ -38,8 +38,6 @@ describe("ChatView loaded model migration", () => {
         chatsDirectory: "SystemSculpt/Chats",
         selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
         chatFontSize: "medium",
-        systemPromptType: "general-use",
-        systemPromptPath: "",
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
         customProviders: [],

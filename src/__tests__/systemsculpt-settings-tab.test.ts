@@ -38,12 +38,7 @@ const createPluginStub = () => {
       licenseValid: false,
       customProviders: [],
       activeProvider: null,
-      selectedProvider: "",
       selectedModelId: "",
-      selectedModelProviders: [],
-      systemPromptType: "general-use",
-      systemPromptPath: "",
-      systemPrompt: "",
       titleGenerationPromptType: "precise",
       titleGenerationPromptPath: "",
       postProcessingPromptType: "summary",
@@ -59,7 +54,6 @@ const createPluginStub = () => {
       showUpdateNotifications: true,
       debugMode: false,
       useLatestModelEverywhere: true,
-      useLatestSystemPromptForNewChats: true,
       licenseKey: "",
       subscriptionStatus: "",
     },
@@ -161,7 +155,6 @@ describe("SystemSculptSettingTab native layout", () => {
     const plugin = createPluginStub();
     plugin.settings.licenseValid = true;
     plugin.settings.licenseKey = "license_test";
-    plugin.settings.selectedProvider = "custom-provider";
     plugin.settings.selectedModelId = "openai@@gpt-4.1";
     plugin.settings.customProviders = [{ name: "Legacy Provider", isEnabled: true }];
 

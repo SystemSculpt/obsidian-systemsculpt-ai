@@ -41,7 +41,7 @@ describe("SystemSculptProvider", () => {
     errorLogger.error.mockReset();
   });
 
-  it("treats forbidden HTML responses as HOST_UNAVAILABLE (no fallback retries)", async () => {
+  it("pins custom hosted base URLs back to production before treating forbidden HTML as HOST_UNAVAILABLE", async () => {
     httpRequest
       .mockRejectedValueOnce({
         status: 403,
@@ -55,7 +55,7 @@ describe("SystemSculptProvider", () => {
       code: "HOST_UNAVAILABLE",
     });
     expect(httpRequest).toHaveBeenCalledTimes(1);
-    expect(httpRequest.mock.calls[0][0].url).toBe("https://notes.systemsculpt.com/api/v1/embeddings");
+    expect(httpRequest.mock.calls[0][0].url).toBe("https://api.systemsculpt.com/api/v1/embeddings");
   });
 
   it("propagates structured BAD_REQUEST messages from the API", async () => {

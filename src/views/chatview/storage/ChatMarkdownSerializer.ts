@@ -320,20 +320,21 @@ export class ChatMarkdownSerializer {
         })
       : [];
 
-    let systemMessageType: "general-use" | "concise" | "agent" | "custom" = "general-use";
-    let systemMessagePath: string | undefined = undefined;
+    let legacySystemMessage: ChatMetadata["systemMessage"] | undefined;
 
     if (parsed.systemMessage && typeof parsed.systemMessage === "object") {
       const type = parsed.systemMessage.type?.toLowerCase();
       if (type === "general-use" || type === "concise" || type === "agent" || type === "custom") {
-        systemMessageType = type;
+        legacySystemMessage = { type };
         if (type === "custom" && parsed.systemMessage.path) {
-          systemMessagePath = parsed.systemMessage.path.replace(/^\[\[(.*?)\]\]$/, "$1");
+          legacySystemMessage.path = parsed.systemMessage.path.replace(/^\[\[(.*?)\]\]$/, "$1");
         }
       }
     } else if (parsed.customPromptFilePath) {
-      systemMessageType = "custom";
-      systemMessagePath = parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1");
+      legacySystemMessage = {
+        type: "custom",
+        path: parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1"),
+      };
     }
 
     const piState = normalizePiSessionState({
@@ -351,15 +352,13 @@ export class ChatMarkdownSerializer {
       title,
       version: Number(versionRaw) || 0,
       context_files: processedContextFiles,
-      systemMessage: {
-        type: systemMessageType,
-        path: systemMessagePath,
-      },
+      systemMessage: legacySystemMessage,
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
       chatBackend: resolveChatBackend({
         explicitBackend: parsed.chatBackend,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
+        defaultBackend: legacySystemMessage ? "legacy" : "systemsculpt",
       }),
       piSessionFile: piState.sessionFile,
       piSessionId: piState.sessionId,

@@ -166,7 +166,7 @@ describe("SearchOperations", () => {
     });
 
     it("searches hidden adapter paths when allowed", async () => {
-      const hiddenRoot = ".systemsculpt/benchmarks/v2/active";
+      const hiddenRoot = ".systemsculpt/temp/runtime-smoke";
       const hiddenPath = `${hiddenRoot}/Inbox/Note.md`;
       const hiddenSearch = new SearchOperations(app, [hiddenRoot], plugin);
 
@@ -262,7 +262,7 @@ describe("SearchOperations", () => {
     });
 
     it("searches hidden adapter file contents when allowed", async () => {
-      const hiddenRoot = ".systemsculpt/benchmarks/v2/active";
+      const hiddenRoot = ".systemsculpt/temp/runtime-smoke";
       const hiddenPath = `${hiddenRoot}/Inbox/Note.md`;
       const hiddenSearch = new SearchOperations(app, [hiddenRoot], plugin);
 

@@ -20,9 +20,12 @@ describe("ChatPersistenceTypes SystemSculpt runtime contract", () => {
         explicitBackend: "pi",
         piSessionFile: "/tmp/session.jsonl",
         defaultBackend: "legacy",
-        allowPiBackend: false,
       })
     ).toBe("systemsculpt");
+  });
+
+  it("defaults clean chats onto the managed backend when no legacy marker is present", () => {
+    expect(resolveChatBackend({})).toBe("systemsculpt");
   });
 
   it("builds minimal resume state without backend or session internals", () => {

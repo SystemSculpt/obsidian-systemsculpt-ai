@@ -19,8 +19,6 @@ type LoadedChatRecord = {
   title: string;
   version?: number;
   context_files?: string[];
-  systemPromptType: "general-use" | "concise" | "agent" | "custom";
-  systemPromptPath?: string;
   chatFontSize?: "small" | "medium" | "large";
   chatPath: string;
   chatBackend: ChatBackend;
@@ -156,7 +154,7 @@ export class ChatStorageService {
         lastSyncedAt: options.piLastSyncedAt,
       });
       const resolvedBackend = resolveChatBackend({
-        explicitBackend: options.chatBackend,
+        explicitBackend: options.chatBackend ?? existingMetadata?.chatBackend,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
       });
@@ -185,12 +183,15 @@ export class ChatStorageService {
         title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
         chatFontSize: options.chatFontSize || "medium",
-        chatBackend: resolvedBackend,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
         piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
         piLastSyncedAt: piState.lastSyncedAt,
       };
+
+      if (resolvedBackend === "legacy") {
+        metadata.chatBackend = "legacy";
+      }
 
       if (mergedTags.length > 0) {
         metadata.tags = mergedTags;
@@ -209,13 +210,13 @@ export class ChatStorageService {
 
       const SystemSculptPlugin = (this.app as any).plugins.plugins["systemsculpt-ai"];
 
-        if (SystemSculptPlugin && SystemSculptPlugin.directoryManager) {
-          await SystemSculptPlugin.directoryManager.ensureDirectoryByPath(this.chatDirectory);
-        } else {
-            const exists = await this.app.vault.adapter.exists(this.chatDirectory);
-            if (!exists) {
-              await this.app.vault.createFolder(this.chatDirectory);
-            }
+      if (SystemSculptPlugin && SystemSculptPlugin.directoryManager) {
+        await SystemSculptPlugin.directoryManager.ensureDirectoryByPath(this.chatDirectory);
+      } else {
+        const exists = await this.app.vault.adapter.exists(this.chatDirectory);
+        if (!exists) {
+          await this.app.vault.createFolder(this.chatDirectory);
+        }
       }
 
       if (fileExists && file instanceof TFile) {
@@ -360,8 +361,7 @@ export class ChatStorageService {
       ).filter((file) => file.path !== '') : [];
 
       // Process system message (simplified approach)
-      let systemMessageType: "general-use" | "concise" | "agent" | "custom" = "general-use";
-      let systemMessagePath: string | undefined = undefined;
+      let legacySystemMessage: ChatMetadata["systemMessage"] | undefined;
 
       // First try to use the systemMessage object if it exists
       if (parsed.systemMessage && typeof parsed.systemMessage === 'object') {
@@ -369,18 +369,20 @@ export class ChatStorageService {
 
         // Only accept valid types
         if (type === "general-use" || type === "concise" || type === "agent" || type === "custom") {
-          systemMessageType = type;
+          legacySystemMessage = { type };
 
           // Only set path for custom type
           if (type === "custom" && parsed.systemMessage.path) {
-            systemMessagePath = parsed.systemMessage.path.replace(/^\[\[(.*?)\]\]$/, "$1");
+            legacySystemMessage.path = parsed.systemMessage.path.replace(/^\[\[(.*?)\]\]$/, "$1");
           }
         }
       }
       // Fallback for old customPromptFilePath format
       else if (parsed.customPromptFilePath) {
-        systemMessageType = "custom";
-        systemMessagePath = parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1");
+        legacySystemMessage = {
+          type: "custom",
+          path: parsed.customPromptFilePath.replace(/^\[\[(.*?)\]\]$/, "$1"),
+        };
       }
 
       const piState = normalizePiSessionState({
@@ -398,15 +400,13 @@ export class ChatStorageService {
         version: Number(versionRaw) || 0,
         tags: tags.length > 0 ? tags : undefined,
         context_files: processedContextFiles,
-        systemMessage: {
-          type: systemMessageType,
-          path: systemMessagePath
-        },
+        systemMessage: legacySystemMessage,
         chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
         chatBackend: resolveChatBackend({
           explicitBackend: (parsed as any).chatBackend,
           piSessionFile: piState.sessionFile,
           piSessionId: piState.sessionId,
+          defaultBackend: legacySystemMessage ? "legacy" : "systemsculpt",
         }),
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
@@ -431,19 +431,24 @@ export class ChatStorageService {
 
   // Utility to finalize the parsed data into the expected return format
   private finalizeParsedData(metadata: ChatMetadata, messages: ChatMessage[], filePath?: string): LoadedChatRecord {
-     const piState = normalizePiSessionState({
+    const hasStandaloneLegacyToolMessages = messages.some((message) => message.role === "tool");
+    const piState = normalizePiSessionState({
       sessionFile: metadata.piSessionFile,
       sessionId: metadata.piSessionId,
       lastEntryId: metadata.piLastEntryId,
       lastSyncedAt: metadata.piLastSyncedAt,
-     });
-     const chatBackend = resolveChatBackend({
+    });
+    const chatBackend = resolveChatBackend({
       explicitBackend: metadata.chatBackend,
       piSessionFile: piState.sessionFile,
       piSessionId: piState.sessionId,
-     });
-     const normalizedMessages = chatBackend === "legacy" ? this.normalizeLegacyToolMessages(messages) : messages;
-     return {
+      defaultBackend: metadata.systemMessage || hasStandaloneLegacyToolMessages ? "legacy" : "systemsculpt",
+    });
+    const normalizedMessages =
+      chatBackend === "legacy" || hasStandaloneLegacyToolMessages
+        ? this.normalizeLegacyToolMessages(messages)
+        : messages;
+    return {
       id: metadata.id,
       messages: normalizedMessages,
       selectedModelId: metadata.model || getManagedSystemSculptModelId(),
@@ -451,8 +456,6 @@ export class ChatStorageService {
       title: metadata.title,
       version: metadata.version || 0,
       context_files: metadata.context_files?.map((f) => f.path) || [],
-      systemPromptType: metadata.systemMessage?.type || 'general-use',
-      systemPromptPath: metadata.systemMessage?.path,
       chatFontSize: metadata.chatFontSize,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,

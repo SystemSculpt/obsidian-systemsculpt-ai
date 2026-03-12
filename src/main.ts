@@ -1366,17 +1366,6 @@ export default class SystemSculptPlugin extends Plugin {
       await settingsManager.loadSettings();
       this._internal_settings_systemsculpt_plugin = settingsManager.getSettings();
 
-      try {
-        this.cleanupLegacySelectedModelProvidersPreference();
-      } catch (cleanupError) {
-        logger.debug("No standard model preference cleanup needed", {
-          source: "SystemSculptPlugin",
-          metadata: {
-            message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-          },
-        });
-      }
-
       const debugMode = this.settings.debugMode ?? false;
       const logLevel = debugMode ? LogLevel.DEBUG : this.settings.logLevel ?? LogLevel.WARNING;
       setLogLevel(logLevel);
@@ -1419,15 +1408,6 @@ export default class SystemSculptPlugin extends Plugin {
         },
       });
     }
-  }
-
-  private cleanupLegacySelectedModelProvidersPreference(): void {
-    if (!this.settings.selectedModelProviders?.length) {
-      return;
-    }
-
-    this.settings.selectedModelProviders = [];
-    void this.saveSettings();
   }
 
   private async initializeBasicServices() {

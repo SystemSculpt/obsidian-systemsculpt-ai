@@ -45,7 +45,6 @@ jest.mock("../../../types", () => ({
     automaticBackupInterval: 24,
     automaticBackupRetentionDays: 7,
     lastAutomaticBackup: 0,
-    selectedModelProviders: [],
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
     recordingsDirectory: "SystemSculpt/Recordings",
@@ -226,10 +225,6 @@ describe("SettingsManager", () => {
         expect(result.favoriteStudioSessions).toEqual([]);
       });
 
-      it("initializes missing selectedModelProviders", () => {
-        const result = migrateSettings({});
-        expect(result.selectedModelProviders).toEqual([]);
-      });
     });
 
     describe("boolean migrations", () => {
@@ -292,6 +287,15 @@ describe("SettingsManager", () => {
       it("removes cachedEmbeddingStats", () => {
         const result = migrateSettings({ cachedEmbeddingStats: { some: "data" } });
         expect(result.cachedEmbeddingStats).toBeUndefined();
+      });
+
+      it("removes legacy provider selection fields", () => {
+        const result = migrateSettings({
+          selectedProvider: "custom-provider",
+          selectedModelProviders: ["openai", "anthropic"],
+        });
+        expect(result.selectedProvider).toBeUndefined();
+        expect(result.selectedModelProviders).toBeUndefined();
       });
 
       it("removes excludedFolders", () => {
@@ -434,6 +438,17 @@ describe("SettingsManager", () => {
       expect("studioTelemetryOptIn" in result).toBe(false);
     });
 
+    it("removes legacy provider selection fields during validation", () => {
+      const result = validateSettings({
+        ...DEFAULT_SETTINGS,
+        selectedProvider: "custom-provider",
+        selectedModelProviders: ["openai", "anthropic"],
+      } as any);
+
+      expect("selectedProvider" in result).toBe(false);
+      expect("selectedModelProviders" in result).toBe(false);
+    });
+
     it("defaults invalid transcription output format settings", () => {
       const result = validateSettings({
         ...DEFAULT_SETTINGS,
@@ -457,21 +472,6 @@ describe("SettingsManager", () => {
       });
       expect(result.showTranscriptionFormatChooserInModal).toBe(true);
     });
-  });
-
-  describe("loadSettings", () => {
-    it("loads settings from plugin data", async () => {
-      mockPlugin.loadData.mockResolvedValue({
-        settingsMode: "advanced",
-        customProviders: [{ id: "test" }],
-      });
-
-      await settingsManager.loadSettings();
-
-      expect(mockPlugin.loadData).toHaveBeenCalled();
-      expect(settingsManager.settings.settingsMode).toBe("advanced");
-    });
-
 
     it("pins blank serverUrl values to the canonical production host", () => {
       const result = validateSettings({
@@ -490,6 +490,21 @@ describe("SettingsManager", () => {
 
       expect(result.serverUrl).toBe("https://api.systemsculpt.com");
     });
+  });
+
+  describe("loadSettings", () => {
+    it("loads settings from plugin data", async () => {
+      mockPlugin.loadData.mockResolvedValue({
+        settingsMode: "advanced",
+        customProviders: [{ id: "test" }],
+      });
+
+      await settingsManager.loadSettings();
+
+      expect(mockPlugin.loadData).toHaveBeenCalled();
+      expect(settingsManager.settings.settingsMode).toBe("advanced");
+    });
+
     it("triggers settings-loaded event", async () => {
       await settingsManager.loadSettings();
 
@@ -549,6 +564,24 @@ describe("SettingsManager", () => {
       await settingsManager.saveSettings();
 
       expect(mockPlugin.saveData).toHaveBeenCalled();
+    });
+
+    it("scrubs legacy provider selection keys before persisting", async () => {
+      await (settingsManager as any).loadSettings();
+      mockPlugin._internal_settings_systemsculpt_plugin = {
+        ...settingsManager.settings,
+        selectedProvider: "custom-provider",
+        selectedModelProviders: ["openai"],
+      };
+
+      await settingsManager.saveSettings();
+
+      expect(mockPlugin.saveData).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          selectedProvider: expect.anything(),
+          selectedModelProviders: expect.anything(),
+        })
+      );
     });
   });
 

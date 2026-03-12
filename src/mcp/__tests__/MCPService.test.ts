@@ -374,11 +374,11 @@ describe("MCPService", () => {
         transport: "internal" as any,
       });
       mockPlugin.settings.mcpServers = [fsServer];
-      const root = ".systemsculpt/benchmarks/v2/active";
+      const root = ".systemsculpt/temp/runtime-smoke";
       service.setFilesystemRoot(root);
 
       await service.executeTool("mcp-filesystem_read", {
-        paths: ["Inbox/Meeting.md", "/.systemsculpt/benchmarks/v2/active/Inbox/Notes.md"],
+        paths: ["Inbox/Meeting.md", "/.systemsculpt/temp/runtime-smoke/Inbox/Notes.md"],
       });
 
       expect(mockFilesystemAdapter.executeTool).toHaveBeenCalledWith(
@@ -398,7 +398,7 @@ describe("MCPService", () => {
         transport: "internal" as any,
       });
       mockPlugin.settings.mcpServers = [fsServer];
-      const root = ".systemsculpt/benchmarks/v2/active";
+      const root = ".systemsculpt/temp/runtime-smoke";
       service.setFilesystemRoot(root);
 
       await service.executeTool("read", {
@@ -423,11 +423,11 @@ describe("MCPService", () => {
         transport: "internal" as any,
       });
       mockPlugin.settings.mcpServers = [fsServer];
-      const root = ".systemsculpt/benchmarks/v2/active";
-      service.setFilesystemRoot(root, ["BenchmarkVault"]);
+      const root = ".systemsculpt/temp/runtime-smoke";
+      service.setFilesystemRoot(root, ["SandboxRoot"]);
 
       await service.executeTool("mcp-filesystem_read", {
-        paths: ["BenchmarkVault/Inbox/Meeting.md", "/BenchmarkVault/Inbox/Notes.md"],
+        paths: ["SandboxRoot/Inbox/Meeting.md", "/SandboxRoot/Inbox/Notes.md"],
       });
 
       expect(mockFilesystemAdapter.executeTool).toHaveBeenCalledWith(
@@ -447,7 +447,7 @@ describe("MCPService", () => {
         transport: "internal" as any,
       });
       mockPlugin.settings.mcpServers = [fsServer];
-      const root = ".systemsculpt/benchmarks/v2/active";
+      const root = ".systemsculpt/temp/runtime-smoke";
       service.setFilesystemRoot(root);
 
       await service.executeTool("mcp-filesystem_read", {

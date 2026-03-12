@@ -64,6 +64,12 @@ export class SettingsManager {
 
     delete (migratedSettings as any).defaultTemplateModelId;
     delete (migratedSettings as any).studioTelemetryOptIn;
+    delete (migratedSettings as any).selectedProvider;
+    delete (migratedSettings as any).selectedModelProviders;
+    delete (migratedSettings as any).systemPrompt;
+    delete (migratedSettings as any).systemPromptType;
+    delete (migratedSettings as any).systemPromptPath;
+    delete (migratedSettings as any).useLatestSystemPromptForNewChats;
     
     // Ensure other nested objects are properly initialized
     if (!migratedSettings.favoritesFilterSettings) {
@@ -189,11 +195,6 @@ export class SettingsManager {
     }
     if (typeof migratedSettings.lastAutomaticBackup !== 'number') {
       migratedSettings.lastAutomaticBackup = DEFAULT_SETTINGS.lastAutomaticBackup;
-    }
-    
-    // Ensure selectedModelProviders is properly initialized (migration for existing users)
-    if (!Array.isArray(migratedSettings.selectedModelProviders)) {
-      migratedSettings.selectedModelProviders = DEFAULT_SETTINGS.selectedModelProviders;
     }
     
     // Ensure preserveReasoningVerbatim is properly initialized (migration for existing users)
@@ -416,11 +417,6 @@ export class SettingsManager {
     if (typeof validatedSettings.savedChatsDirectory !== 'string') {
       validatedSettings.savedChatsDirectory = defaultSettings.savedChatsDirectory;
     }
-
-    if (typeof validatedSettings.benchmarksDirectory !== 'string') {
-      validatedSettings.benchmarksDirectory = defaultSettings.benchmarksDirectory;
-    }
-
     // Validate boolean settings - using a simpler approach to avoid TypeScript errors
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
@@ -565,17 +561,6 @@ export class SettingsManager {
       validatedSettings.studioJsonEditorDefaultMode = defaultSettings.studioJsonEditorDefaultMode;
     }
 
-    if (typeof validatedSettings.systemPromptType !== 'string') {
-      validatedSettings.systemPromptType = defaultSettings.systemPromptType;
-    }
-
-    // CRITICAL: Check if systemPromptType is "agent" - this legacy preset is no longer valid as a default.
-    // Desktop Pi chat always uses General Use unless the user explicitly selects another supported preset.
-    if (validatedSettings.systemPromptType === 'agent') {
-      validatedSettings.systemPromptType = 'general-use';
-      validatedSettings.systemPromptPath = ''; // Clear any associated path
-    }
-
     // Validate activeProvider
     if (!validatedSettings.activeProvider ||
         typeof validatedSettings.activeProvider !== 'object' ||
@@ -616,6 +601,12 @@ export class SettingsManager {
     if ('cachedEmbeddingStats' in validatedSettings) {
       delete (validatedSettings as any).cachedEmbeddingStats;
     }
+    delete (validatedSettings as any).selectedProvider;
+    delete (validatedSettings as any).selectedModelProviders;
+    delete (validatedSettings as any).systemPrompt;
+    delete (validatedSettings as any).systemPromptType;
+    delete (validatedSettings as any).systemPromptPath;
+    delete (validatedSettings as any).useLatestSystemPromptForNewChats;
 
     // Persist the canonical hosted API origin. Production builds always pin this to the
     // real SystemSculpt API, while development builds still normalize local overrides.
@@ -733,8 +724,12 @@ export class SettingsManager {
 
     try {
       const oldSettings = { ...(this.plugin._internal_settings_systemsculpt_plugin || DEFAULT_SETTINGS) }; 
-      // Use the plugin's internal settings (which is what gets updated by the UI) instead of this.settings
-      this.settings = { ...this.plugin._internal_settings_systemsculpt_plugin };
+      // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
+      const persistedSettings = await this.validateSettingsAsync({
+        ...this.plugin._internal_settings_systemsculpt_plugin,
+      } as SystemSculptSettings);
+      this.settings = persistedSettings;
+      this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
       await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);
       this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, this.plugin._internal_settings_systemsculpt_plugin);
       await this.backupSettings();

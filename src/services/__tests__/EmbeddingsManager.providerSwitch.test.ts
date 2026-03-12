@@ -419,7 +419,7 @@ describe("EmbeddingsManager provider switching", () => {
   });
 
   describe("SystemSculpt provider refresh", () => {
-    it("recreates the provider when license key or base URL changes", () => {
+    it("recreates the provider when the license key changes but ignores hosted URL overrides in production", () => {
       const pluginStub = createPluginStub({
         licenseKey: "old-license",
         serverUrl: "https://api.systemsculpt.com/api/v1",
@@ -441,7 +441,7 @@ describe("EmbeddingsManager provider switching", () => {
       manager.syncFromSettings();
 
       const updatedProviderAfterUrl = (manager as any).provider;
-      expect(updatedProviderAfterUrl).not.toBe(providerAfterLicense);
+      expect(updatedProviderAfterUrl).toBe(providerAfterLicense);
     });
   });
 

@@ -92,7 +92,6 @@ export class DirectoryManager {
       const directories = [
         settings.chatsDirectory,
         settings.savedChatsDirectory,
-        settings.benchmarksDirectory,
         settings.webResearchDirectory,
         settings.recordingsDirectory,
         settings.systemPromptsDirectory,

@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, Component } from "obsidian";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import { ChatMessage, ChatRole, MultiPartContent, SystemSculptSettings } from "../../types";
+import { ChatMessage, ChatRole, MultiPartContent } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
@@ -10,7 +10,6 @@ import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from ".
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
-import { SystemPromptService } from "../../services/SystemPromptService";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 
 import {
@@ -20,7 +19,7 @@ import {
   getModelLabelWithProvider,
 } from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
-import { GENERAL_USE_PRESET } from "../../constants/prompts";
+import { AGENT_PRESET, GENERAL_USE_PRESET } from "../../constants/prompts";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
@@ -74,8 +73,6 @@ export class ChatView extends ItemView {
   public layoutChangeHandler: () => void;
   public isFullyLoaded = false; // Track when chat is fully loaded
   public messageRenderer: MessageRenderer;
-  public systemPromptType: "general-use" | "concise" | "agent" | "custom";
-  public systemPromptPath?: string;
   public chatTitle: string;
   public chatVersion: number = 0;
   public currentPrompt?: string;
@@ -87,8 +84,6 @@ export class ChatView extends ItemView {
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
-  private systemPromptService: SystemPromptService;
-  private settings: SystemSculptSettings;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
   private warnedImageIncompatModels: Set<string> = new Set();
@@ -116,7 +111,6 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.settings = plugin.settings;
     this.app = plugin.app;
     
     // Use singleton instance instead of creating new one
@@ -128,8 +122,6 @@ export class ChatView extends ItemView {
         chatId?: string;
         chatTitle?: string;
         selectedModelId?: string;
-        systemPromptType?: "general-use" | "concise" | "agent" | "custom";
-        systemPromptPath?: string;
         version?: number;
         chatFontSize?: "small" | "medium" | "large";
         chatBackend?: ChatBackend;
@@ -150,7 +142,6 @@ export class ChatView extends ItemView {
     this.isGenerating = false;
     this.isFullyLoaded = false; // Start as not loaded
 
-    this.systemPromptPath = initialState.systemPromptPath;
     // Use -1 as uninitialized state to distinguish from actual version 0
     this.chatVersion = initialState.version !== undefined ? initialState.version : -1;
     this.chatBackend = this.defaultChatBackend();
@@ -160,14 +151,6 @@ export class ChatView extends ItemView {
 
     // Initialize chat font size from saved state or plugin settings
     this.chatFontSize = initialState.chatFontSize || (plugin.settings as any).chatFontSize || "medium";
-
-    this.systemPromptType = initialState.systemPromptType
-        || plugin.settings.systemPromptType
-        || "general-use";
-
-    if (this.systemPromptType === "custom" && !this.systemPromptPath) {
-      this.systemPromptPath = plugin.settings.systemPromptPath;
-    }
     this.layoutChangeHandler = this.onLayoutChange.bind(this);
   }
 
@@ -184,10 +167,6 @@ export class ChatView extends ItemView {
       this.messageRenderer = new MessageRenderer(this.app);
     }
 
-    if (!this.systemPromptService) {
-      this.systemPromptService = SystemPromptService.getInstance(this.app, () => this.plugin.settings);
-    }
-
     if (!this.debugLogService) {
       this.debugLogService = new ChatDebugLogService(this.plugin, this);
     }
@@ -195,6 +174,10 @@ export class ChatView extends ItemView {
 
   private defaultChatBackend(): ChatBackend {
     return "systemsculpt";
+  }
+
+  private getActiveSystemPromptType(): "general-use" | "agent" {
+    return isManagedSystemSculptModelId(this.selectedModelId) ? "agent" : "general-use";
   }
 
   getViewType(): string {
@@ -666,10 +649,9 @@ export class ChatView extends ItemView {
   public async getCurrentSystemPrompt(): Promise<string> {
     this.ensureCoreServicesReady();
     try {
-      return await this.systemPromptService.getSystemPromptContent(
-        this.systemPromptType,
-        this.systemPromptPath
-      );
+      return this.getActiveSystemPromptType() === "agent"
+        ? AGENT_PRESET.systemPrompt
+        : GENERAL_USE_PRESET.systemPrompt;
     } catch (error) {
       // Fall back to the general-use preset
       return GENERAL_USE_PRESET.systemPrompt;
@@ -924,7 +906,6 @@ export class ChatView extends ItemView {
       chatTitle: this.chatTitle,
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
-      chatBackend: this.chatBackend,
       piSessionFile: this.piSessionFile,
       piSessionId: this.piSessionId,
       piLastEntryId: this.piLastEntryId,
@@ -953,17 +934,6 @@ export class ChatView extends ItemView {
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
-      // Respect policy for default system prompt when starting new chats
-      const useLatestPrompt = this.plugin.settings.useLatestSystemPromptForNewChats ?? true;
-      const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
-      if (useLatestPrompt || isStandardMode) {
-        this.systemPromptType = this.plugin.settings.systemPromptType || 'general-use';
-        this.systemPromptPath = this.systemPromptType === 'custom' ? this.plugin.settings.systemPromptPath : undefined;
-      } else {
-        // fall back to general-use if policy disabled and nothing passed in
-        this.systemPromptType = 'general-use';
-        this.systemPromptPath = undefined;
-      }
  
       // Restore chat font size for new chats if provided in state
       if (state?.chatFontSize) {
@@ -1007,8 +977,6 @@ export class ChatView extends ItemView {
       this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       this.initializeChatTitle(state.chatTitle);
       this.chatVersion = state.version !== undefined ? state.version : -1;
-      this.systemPromptType = state.systemPromptType || 'general-use';
-      this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
 
       this.applyChatLeafState(state);
 
@@ -1041,11 +1009,6 @@ export class ChatView extends ItemView {
     this.initializeChatTitle(state.chatTitle);
     this.chatVersion = state.version !== undefined ? state.version : -1;
 
-    // Simplified system prompt handling - use 'general-use' as default
-    this.systemPromptType = state.systemPromptType || 'general-use';
-    // Only set path for custom prompts
-    this.systemPromptPath = this.systemPromptType === 'custom' ? state.systemPromptPath : undefined;
-
     this.applyChatLeafState(state);
     // Restore chat font size
     if (state.chatFontSize) {
@@ -1071,8 +1034,6 @@ export class ChatView extends ItemView {
       this.hasAdjustedInitialWindow = false;
       this.messages = [];
       this.contextManager?.clearContext();
-      this.systemPromptType = 'general-use';
-      this.systemPromptPath = undefined;
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
       // Don't render here if UI not ready yet
@@ -1126,8 +1087,6 @@ export class ChatView extends ItemView {
           this.messages = [];
           this.chatContainer?.empty();
           this.setTitle("Chat not found");
-          this.systemPromptType = 'general-use';
-          this.systemPromptPath = undefined;
           this.chatBackend = this.defaultChatBackend();
           this.applyPiSessionState({}, { reset: true, updateViewState: false });
           this.contextManager?.clearContext();
@@ -1147,10 +1106,6 @@ export class ChatView extends ItemView {
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
         const persistedMessages = chatData.messages || [];
         this.chatVersion = chatData.version || 0;
-
-        // Simplified system prompt handling
-        this.systemPromptType = chatData.systemPromptType || 'general-use';
-        this.systemPromptPath = this.systemPromptType === 'custom' ? chatData.systemPromptPath : undefined;
 
         this.applyChatLeafState({
           chatBackend: chatData.chatBackend,
@@ -1648,13 +1603,11 @@ export class ChatView extends ItemView {
       }
     };
 
+    const promptProfile = this.getActiveSystemPromptType();
     const systemPromptDetails = await safeAsync<{ basePrompt: string; combinedPrompt: string } | null>(
       "system-prompt",
       async () => {
-        const basePrompt = await this.systemPromptService.getSystemPromptContent(
-          this.systemPromptType || "general-use",
-          this.systemPromptPath
-        );
+        const basePrompt = await this.getCurrentSystemPrompt();
         return {
           basePrompt,
           combinedPrompt: basePrompt,
@@ -1899,8 +1852,7 @@ export class ChatView extends ItemView {
         isGenerating: this.isGenerating,
         selectedModelId: this.selectedModelId,
         currentModelName: this.currentModelName,
-        systemPromptType: this.systemPromptType,
-        systemPromptPath: this.systemPromptPath,
+        promptProfile,
         systemPrompt: systemPromptDetails,
         currentPrompt: this.currentPrompt,
         chatFontSize: this.chatFontSize,
@@ -2573,7 +2525,6 @@ export class ChatView extends ItemView {
     // Clear other references
     this.aiService = null as any;
     this.chatStorage = null as any;
-    this.systemPromptService = null as any;
     
     // Call parent cleanup
     await super.onClose?.();

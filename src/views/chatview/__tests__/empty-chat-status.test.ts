@@ -43,8 +43,6 @@ describe("ChatView empty chat status", () => {
         licenseKey: options?.licenseKey ?? "license_test",
         licenseValid: options?.licenseValid ?? true,
         chatFontSize: "medium",
-        systemPromptType: "general-use",
-        systemPromptPath: "",
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
         customProviders: [],
@@ -171,6 +169,7 @@ describe("ChatView empty chat status", () => {
         chatTitle: "Test Chat",
       })
     );
+    expect(state).not.toHaveProperty("chatBackend");
     expect(state).not.toHaveProperty("selectedModelId");
     expect(state).not.toHaveProperty("systemPromptType");
     expect(state).not.toHaveProperty("systemPromptPath");

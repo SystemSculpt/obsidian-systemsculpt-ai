@@ -108,21 +108,10 @@ export interface SystemSculptSettings {
    */
   savedChatsDirectory: string;
   /**
-   * Directory where benchmark reports are exported
-   */
-  benchmarksDirectory: string;
-  /**
    * Directory where web research corpus artifacts are stored.
    */
   webResearchDirectory: string;
   lastValidated: number;
-  /**
-   * For backward compatibility, we'll keep systemPrompt as the last-saved
-   * user-chosen text. This is only used for direct storage if the user
-   * picks a preset or typed content. But if systemPromptType is "custom",
-   * we'll read from systemPromptPath.
-   */
-  systemPrompt: string;
   recordingsDirectory: string;
   preferredMicrophoneId: string;
   /**
@@ -207,7 +196,6 @@ export interface SystemSculptSettings {
   showModelTooltips: boolean;
   showVisionModelsOnly: boolean;
   showTopPicksOnly: boolean;
-  selectedProvider: string;
   serverUrl: string;
   attachmentsDirectory: string;
   extractionsDirectory: string;
@@ -221,17 +209,6 @@ export interface SystemSculptSettings {
    * Skip empty note warning confirmation modal
    */
   skipEmptyNoteWarning: boolean;
-
-  /**
-   * NEW FIELDS:
-   * systemPromptType: "general-use" | "concise" | "agent" | "custom"
-   * systemPromptPath: path to the file that holds the custom system prompt (if any).
-   */
-  systemPromptType: "general-use" | "concise" | "agent" | "custom";
-  systemPromptPath: string;
-  /** When enabled, new chats start with whichever system prompt you last selected */
-  useLatestSystemPromptForNewChats?: boolean;
-
 
   /**
    * Title generation prompt settings
@@ -426,12 +403,6 @@ export interface SystemSculptSettings {
   lastAutomaticBackup: number; // Timestamp of last automatic backup
 
   /**
-   * Model selection modal provider preferences
-   * Stores the user's selected providers for the model selection modal
-   */
-  selectedModelProviders: string[]; // Array of provider IDs that are selected by default in the model selection modal
-
-  /**
    * Preserve reasoning content verbatim without any markdown processing
    * When enabled, reasoning blocks are rendered exactly as authored without
    * transformation, preserving bold markers, paragraph spacing, etc.
@@ -526,12 +497,8 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   // defaultModelId: "", // DEPRECATED
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
-  benchmarksDirectory: "SystemSculpt/Benchmarks",
   webResearchDirectory: "SystemSculpt/Web Research",
   lastValidated: 0,
-  // This is the fallback system prompt if the user hasn't chosen a custom or preset
-  systemPrompt:
-    "You are a helpful AI assistant. You help users with their questions and tasks in a clear and concise way.",
   recordingsDirectory: "SystemSculpt/Recordings",
   preferredMicrophoneId: "",
   autoTranscribeRecordings: true,
@@ -565,8 +532,7 @@ Raw transcript:`,
   showModelTooltips: false,
   showVisionModelsOnly: false,
   showTopPicksOnly: false,
-  selectedProvider: "all",
-  serverUrl: "", // Will be set from API_BASE_URL on first load
+  serverUrl: "", // Persisted canonical hosted API origin; sanitized on load
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   systemPromptsDirectory: "SystemSculpt/System Prompts",
@@ -574,14 +540,6 @@ Raw transcript:`,
   workflowEngine: createDefaultWorkflowEngineSettings(),
 
   skipEmptyNoteWarning: false,
-
-  /**
-   * NEW FIELDS DEFAULTS:
-   */
-  systemPromptType: "general-use",
-  systemPromptPath: "",
-  useLatestSystemPromptForNewChats: true,
-
 
   /**
    * Title generation prompt defaults
@@ -693,11 +651,6 @@ Raw transcript:`,
   automaticBackupRetentionDays: 30, // Keep backups for 30 days
   lastAutomaticBackup: 0, // No automatic backup yet
   
-  /**
-   * Model selection modal provider preferences defaults
-   */
-  selectedModelProviders: [], // Empty array means use default initialization logic
-
   // preserveReasoningVerbatim default already defined above
 
   /**

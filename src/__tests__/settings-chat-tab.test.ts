@@ -26,9 +26,6 @@ const createPluginStub = (app: App) => {
     app,
     emitter: { emit: jest.fn() },
     settings: {
-      systemPromptType: "general-use",
-      systemPromptPath: "",
-      systemPrompt: "",
       chatFontSize: "medium",
       settingsMode: "standard",
       customProviders: [],

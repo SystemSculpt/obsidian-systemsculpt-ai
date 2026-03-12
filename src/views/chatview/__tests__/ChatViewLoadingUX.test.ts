@@ -20,8 +20,6 @@ describe("ChatView loading UX", () => {
         chatsDirectory: "SystemSculpt/Chats",
         selectedModelId: "",
         chatFontSize: "medium",
-        systemPromptType: "general-use",
-        systemPromptPath: "",
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
         customProviders: [],

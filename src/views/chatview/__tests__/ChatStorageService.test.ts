@@ -316,7 +316,6 @@ describe("ChatStorageService resume descriptor contract", () => {
       lastModified: 1741600800000,
       title: "Chat 9",
       chatPath: "SystemSculpt/Chats/chat-9.md",
-      systemPromptType: "general-use",
       chatBackend: "systemsculpt",
       piSessionFile: "/tmp/chat-9.jsonl",
       piSessionId: "session-9",
@@ -576,7 +575,7 @@ Hello
             piSessionFile: "/tmp/new.jsonl",
             piSessionId: "new-session",
             piLastSyncedAt: "2026-03-09T02:32:48.935Z",
-            chatBackend: "pi",
+            chatBackend: "systemsculpt",
           }
         )
       ).resolves.toEqual({ version: 2 });
@@ -619,6 +618,17 @@ Hello
       expect(createCall[1]).not.toContain("model:");
       expect(createCall[1]).not.toContain("systemMessage");
       expect(createCall[1]).not.toContain("prompts/my-prompt.md");
+    });
+
+    it("omits the managed backend marker from new frontmatter", async () => {
+      await service.saveChat(
+        "managed-chat",
+        [{ role: "user" as ChatRole, content: "Hello" }]
+      );
+
+      expect(mockVault.create).toHaveBeenCalled();
+      const createCall = mockVault.create.mock.calls[0];
+      expect(createCall[1]).not.toContain("chatBackend:");
     });
   });
 
@@ -705,6 +715,18 @@ context_files:
     });
 
     it("handles systemMessage object", () => {
+      (parseYaml as jest.Mock).mockReturnValueOnce({
+        id: "test",
+        model: "gpt-4",
+        created: "2024-01-01T00:00:00.000Z",
+        lastModified: "2024-01-01T00:00:00.000Z",
+        title: "Test",
+        systemMessage: {
+          type: "custom",
+          path: "prompts/custom.md",
+        },
+      });
+
       const content = `---
 id: test
 model: gpt-4
@@ -719,8 +741,10 @@ systemMessage:
       const result = (service as any).parseMetadata(content);
 
       expect(result).not.toBeNull();
-      // The mock parseYaml doesn't fully parse nested objects, just check we got result
-      expect(result.systemMessage).toBeDefined();
+      expect(result.systemMessage).toEqual({
+        type: "custom",
+        path: "prompts/custom.md",
+      });
     });
 
     it("handles legacy customPromptFilePath", () => {

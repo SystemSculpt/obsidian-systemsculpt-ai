@@ -155,10 +155,10 @@ describe("CanvasFlowEnhancer mutation filtering", () => {
 
     expect(renderedIds).toContain("openai/gpt-5-image-mini");
     expect(renderedIds).not.toContain("openrouter/legacy-image-model");
-    expect(layout.legacyUnsupported?.id).toBe("openrouter/legacy-image-model");
+    expect(layout.selectedValue).toBe("");
   });
 
-  it("does not expose a legacy chip when selected model is runnable", () => {
+  it("keeps the selected model when it is still runnable", () => {
     enhancer.plugin.settings.imageGenerationModelCatalogCache = {
       models: [
         {
@@ -177,7 +177,7 @@ describe("CanvasFlowEnhancer mutation filtering", () => {
       selectedValue: "openai/gpt-5-image-mini",
     });
 
-    expect(layout.legacyUnsupported).toBeNull();
+    expect(layout.selectedValue).toBe("openai/gpt-5-image-mini");
   });
 
   it("suppresses inspector rebind when unchanged or while interaction lock is active", () => {

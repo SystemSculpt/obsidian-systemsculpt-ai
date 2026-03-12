@@ -98,7 +98,7 @@ describe("ChatView Pi fork state", () => {
   it("truncates the visible transcript locally when only a session id is present", async () => {
     const chatView = Object.create(ChatView.prototype) as ChatView & Record<string, any>;
     chatView.plugin = {};
-    chatView.chatBackend = "pi";
+    chatView.chatBackend = "systemsculpt";
     chatView.messages = [
       { role: "user", content: "First", message_id: "user_1", pi_entry_id: "entry_user_1" },
       { role: "assistant", content: "Reply", message_id: "assistant_1", pi_entry_id: "entry_assistant_1" },

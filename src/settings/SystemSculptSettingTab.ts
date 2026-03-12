@@ -159,7 +159,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             embeddingsEnabled: false,
             chatsDirectory: "SystemSculpt/Chats",
             savedChatsDirectory: "SystemSculpt/Saved Chats",
-            benchmarksDirectory: "SystemSculpt/Benchmarks",
             attachmentsDirectory: "SystemSculpt/Attachments",
             extractionsDirectory: "SystemSculpt/Extractions",
             showUpdateNotifications: true,

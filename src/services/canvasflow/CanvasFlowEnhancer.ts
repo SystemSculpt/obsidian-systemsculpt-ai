@@ -121,7 +121,6 @@ type InspectorModelButtonSpec = {
   label: string;
   title: string;
   provider: string;
-  legacyUnsupported: boolean;
 };
 
 type InspectorModelButtonGroup = {
@@ -133,7 +132,6 @@ type InspectorModelButtonLayout = {
   selectedValue: string;
   defaultTitle: string;
   groups: InspectorModelButtonGroup[];
-  legacyUnsupported: InspectorModelButtonSpec | null;
 };
 
 const SIMPLE_ASPECT_RATIO_OPTIONS = ["16:9", "1:1", "9:16"] as const;
@@ -824,7 +822,6 @@ export class CanvasFlowEnhancer {
           label: model.label,
           title: formatCuratedImageModelOptionText(model),
           provider: group.provider,
-          legacyUnsupported: false,
         });
       }
       if (supportedModels.length > 0) {
@@ -836,16 +833,10 @@ export class CanvasFlowEnhancer {
     }
 
     const selectedKnown = keepSelected ? knownById.get(keepSelected) || null : null;
-    const legacyUnsupported =
-      keepSelected && (!selectedKnown || selectedKnown.supported !== true)
-        ? {
-            id: keepSelected,
-            label: selectedKnown?.label || keepSelected,
-            title: selectedKnown?.title || keepSelected,
-            provider: selectedKnown?.provider || "Saved",
-            legacyUnsupported: true,
-          }
-        : null;
+    const resolvedSelection =
+      keepSelected && selectedKnown?.supported === true
+        ? keepSelected
+        : "";
 
     const defaultEntry = settingsModelSlug ? getCuratedImageGenerationModel(settingsModelSlug, serverModels) : null;
     const fallbackDefault = settingsModelSlug || DEFAULT_IMAGE_GENERATION_MODEL_ID;
@@ -854,10 +845,9 @@ export class CanvasFlowEnhancer {
       : `Use global default model (${fallbackDefault}).`;
 
     return {
-      selectedValue: keepSelected,
+      selectedValue: resolvedSelection,
       defaultTitle,
       groups,
-      legacyUnsupported,
     };
   }
 
@@ -939,24 +929,6 @@ export class CanvasFlowEnhancer {
       for (const spec of group.models) {
         createModelButton(row, spec);
       }
-    }
-
-    if (layout.legacyUnsupported) {
-      const legacyGroup = inspector.modelPickerEl.createDiv({
-        cls: "ss-canvasflow-model-group ss-canvasflow-model-group-legacy",
-      });
-      legacyGroup.createDiv({
-        text: "Saved Model (Unsupported)",
-        cls: "ss-canvasflow-model-provider ss-canvasflow-model-provider-legacy",
-      });
-      const row = legacyGroup.createDiv({ cls: "ss-canvasflow-choice-row ss-canvasflow-model-row" });
-      createModelButton(row, {
-        id: layout.legacyUnsupported.id,
-        label: layout.legacyUnsupported.label,
-        title: `${layout.legacyUnsupported.title} (not runnable right now)`,
-        disabled: true,
-        classes: "is-legacy-unsupported",
-      });
     }
 
     this.setInspectorSelectedModel(inspector, layout.selectedValue);

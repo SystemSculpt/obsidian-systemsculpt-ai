@@ -95,8 +95,6 @@ export class CommandManager {
     this.registerResumeChat();
     this.registerChangeChatTitle();
     this.registerOpenEmbeddingsView();
-    this.registerOpenBenchView();
-    this.registerOpenBenchResultsView();
     this.registerQuickFileEdit();
     this.registerDebugCommands();
     this.registerEmbeddingsDatabaseCommands();
@@ -456,26 +454,6 @@ export class CommandManager {
         } catch (error) {
           new Notice(`Error opening similar notes panel: ${error.message}`);
         }
-      },
-    });
-  }
-
-  private registerOpenBenchView() {
-    this.plugin.addCommand({
-      id: "open-systemsculpt-benchmark",
-      name: "Open SystemSculpt Benchmark",
-      callback: async () => {
-        await this.plugin.getViewManager().activateBenchView();
-      },
-    });
-  }
-
-  private registerOpenBenchResultsView() {
-    this.plugin.addCommand({
-      id: "open-systemsculpt-benchmark-results",
-      name: "Open SystemSculpt Benchmark Results",
-      callback: async () => {
-        await this.plugin.getViewManager().activateBenchResultsView();
       },
     });
   }

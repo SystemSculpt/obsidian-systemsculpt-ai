@@ -74,9 +74,8 @@ export function resolveChatBackend(options: {
   piSessionFile?: unknown;
   piSessionId?: unknown;
   defaultBackend?: ChatBackend;
-  allowPiBackend?: boolean;
 }): ChatBackend {
-  const fallbackBackend = options.defaultBackend ?? "legacy";
+  const fallbackBackend = options.defaultBackend ?? "systemsculpt";
   const explicitBackend = typeof options.explicitBackend === "string"
     ? options.explicitBackend.trim().toLowerCase()
     : "";
