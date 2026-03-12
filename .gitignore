@@ -53,6 +53,7 @@ run.sh
 vault/
 
 # Misc local dirs
+log/
 logs/
 devlogs/
 backups/
