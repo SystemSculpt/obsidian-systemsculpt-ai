@@ -42,16 +42,10 @@ const runtimeSyncSignature = computeRuntimeSyncSignature({
 });
 
 // Auto-sync built artifacts after each build/rebuild.
-// - Set `SYSTEMSCULPT_AUTO_SYNC_PATH` to a plugin directory to sync into a real vault.
-// - Dev builds also sync into the e2e fixture vault so WDIO can pick up the plugin instantly.
+// Set `SYSTEMSCULPT_AUTO_SYNC_PATH` to a plugin directory to sync into a real vault.
 const autoSyncTargets = (() => {
-	const targets = [];
 	const explicitTarget = String(process.env.SYSTEMSCULPT_AUTO_SYNC_PATH || "").trim();
-	if (explicitTarget) targets.push(explicitTarget);
-	if (!prod) {
-		targets.push(path.join(process.cwd(), "testing", "e2e", "fixtures", "vault", ".obsidian", "plugins", "systemsculpt-ai"));
-	}
-	return targets;
+	return explicitTarget ? [explicitTarget] : [];
 })();
 
 const ensureCssSourcesExist = () => {

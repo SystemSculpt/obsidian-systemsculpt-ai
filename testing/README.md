@@ -12,6 +12,7 @@ The canonical test story is:
 4. Shared smoke cases across desktop and mobile
 
 The old separate-instance WDIO harness has been removed.
+Dev builds no longer auto-sync into any retired fixture vault path; use `SYSTEMSCULPT_AUTO_SYNC_PATH` or the native sync scripts when you want a live vault copy.
 
 ## Layers
 
