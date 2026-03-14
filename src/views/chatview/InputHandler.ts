@@ -88,6 +88,7 @@ export class InputHandler extends Component {
   private attachmentsEl: HTMLDivElement | null = null;
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
+  private webSearchEnabled = false;
   private renderTimeout: NodeJS.Timeout | null = null;
 
   /**
@@ -255,6 +256,7 @@ export class InputHandler extends Component {
         onPiSessionReady: (session) => {
           this.chatView?.setPiSessionState?.(session);
         },
+        webSearchEnabled: this.webSearchEnabled,
 	      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
 	        chatId: this.getChatId(),
 	        assistantMessageId: messageId,
@@ -507,6 +509,8 @@ export class InputHandler extends Component {
       onPaste: (e) => this.handlePaste(e),
       handleMicClick: () => this.handleMicClick(),
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
+      onToggleWebSearch: () => { this.webSearchEnabled = !this.webSearchEnabled; },
+      isWebSearchEnabled: () => this.webSearchEnabled,
     });
 
     this.input = composer.input;

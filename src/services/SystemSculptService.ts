@@ -528,6 +528,7 @@ export class SystemSculptService {
     forcedToolName?: string;
     maxTokens?: number;
     reasoningEffort?: string;
+    webSearchEnabled?: boolean;
   }): Record<string, any> {
     const body: Record<string, any> = {
       model: options.prepared.actualModelId,
@@ -560,6 +561,10 @@ export class SystemSculptService {
 
     if (Array.isArray(options.prepared.tools) && options.prepared.tools.length > 0) {
       body.tools = options.prepared.tools;
+    }
+
+    if (options.webSearchEnabled) {
+      body.plugins = [{ id: "web" }];
     }
 
     return body;
@@ -1027,6 +1032,7 @@ export class SystemSculptService {
     sessionFile,
     sessionId,
     onPiSessionReady,
+    webSearchEnabled,
   }: {
     messages: ChatMessage[];
     model: string;
@@ -1043,6 +1049,7 @@ export class SystemSculptService {
     sessionFile?: string;
     sessionId?: string;
     onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
+    webSearchEnabled?: boolean;
   }): AsyncGenerator<StreamEvent, void, unknown> {
     this.refreshSettings();
 
@@ -1071,6 +1078,7 @@ export class SystemSculptService {
         forcedToolName,
         maxTokens,
         reasoningEffort,
+        webSearchEnabled,
       });
       const transport = PlatformContext.get().preferredTransport({ endpoint });
 

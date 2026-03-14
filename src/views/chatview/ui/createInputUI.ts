@@ -15,6 +15,8 @@ export interface ChatComposerDeps {
   onPaste: (e: ClipboardEvent) => void | Promise<void>;
   handleMicClick: () => void;
   hasProLicense: () => boolean;
+  onToggleWebSearch?: () => void;
+  isWebSearchEnabled?: () => boolean;
 }
 
 export interface ChatComposerElements {
@@ -25,6 +27,7 @@ export interface ChatComposerElements {
   input: HTMLTextAreaElement;
   settingsButton: ButtonComponent;
   attachButton: ButtonComponent;
+  webSearchButton: ButtonComponent;
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
   micButton: ButtonComponent;
@@ -49,6 +52,24 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .onClick(() => deps.onAddContextFile());
   attachButton.buttonEl.setAttribute("aria-label", "Add context file");
   attachButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
+
+  const webSearchButton = new ButtonComponent(leftGroup)
+    .setIcon("globe")
+    .setTooltip("Toggle web search")
+    .setClass("clickable-icon")
+    .onClick(() => {
+      deps.onToggleWebSearch?.();
+      if (deps.isWebSearchEnabled?.()) {
+        webSearchButton.buttonEl.classList.add("ss-active");
+      } else {
+        webSearchButton.buttonEl.classList.remove("ss-active");
+      }
+    });
+  webSearchButton.buttonEl.setAttribute("aria-label", "Toggle web search");
+  webSearchButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
+  if (deps.isWebSearchEnabled?.()) {
+    webSearchButton.buttonEl.classList.add("ss-active");
+  }
 
   const settingsButton = new ButtonComponent(rightGroup)
     .setIcon("settings")
@@ -133,6 +154,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     input: input as HTMLTextAreaElement,
     settingsButton,
     attachButton,
+    webSearchButton,
     sendButton,
     stopButton,
     micButton,

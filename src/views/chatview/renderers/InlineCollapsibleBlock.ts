@@ -7,7 +7,7 @@
 
 import { setIcon } from "obsidian";
 
-export type InlineBlockType = "reasoning" | "tool_call";
+export type InlineBlockType = "reasoning" | "tool_call" | "sources";
 
 export interface InlineBlockOptions {
   type: InlineBlockType;
@@ -22,6 +22,7 @@ export interface InlineBlockOptions {
 const DEFAULT_ICONS: Record<InlineBlockType, string> = {
   reasoning: "brain",
   tool_call: "wrench",
+  sources: "globe",
 };
 
 /**

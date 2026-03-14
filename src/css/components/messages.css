@@ -373,6 +373,22 @@
   text-decoration: underline;
 }
 
+/* External / citation links in assistant messages */
+.systemsculpt-message-content a.external-link,
+.systemsculpt-message-content a[href^="http://"],
+.systemsculpt-message-content a[href^="https://"] {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.systemsculpt-message-content a.external-link:hover,
+.systemsculpt-message-content a[href^="http://"]:hover,
+.systemsculpt-message-content a[href^="https://"]:hover {
+  text-decoration-style: solid;
+}
+
 /* ────────────────────────────────────────────────────────────
    Floating message toolbar (overlay on hover)
    Appears below the message without shifting layout
@@ -687,6 +703,21 @@
 
 .systemsculpt-message-content a:hover {
   text-decoration: underline;
+}
+
+.systemsculpt-message-content a.external-link,
+.systemsculpt-message-content a[href^="http://"],
+.systemsculpt-message-content a[href^="https://"] {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.systemsculpt-message-content a.external-link:hover,
+.systemsculpt-message-content a[href^="http://"]:hover,
+.systemsculpt-message-content a[href^="https://"]:hover {
+  text-decoration-style: solid;
 }
 
 .systemsculpt-message-content blockquote {

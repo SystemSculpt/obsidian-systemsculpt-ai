@@ -3,6 +3,11 @@ import type { UrlCitation } from "../../../types";
 import { setIcon } from "obsidian";
 import { MermaidPreviewModal } from "../../../modals/MermaidPreviewModal";
 import { renderCitationFooter } from "./CitationFooter";
+import {
+  createInlineBlock,
+  getBlockContent,
+  setExpanded,
+} from "./InlineCollapsibleBlock";
 
 /**
  * MarkdownMessageRenderer – isolated helper responsible solely for
@@ -225,7 +230,7 @@ export class MarkdownMessageRenderer extends Component {
       link.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        
+
         // Get the file path from the href or data-href attribute
         const href = link.getAttribute("href") || link.getAttribute("data-href");
         if (href) {
@@ -235,9 +240,98 @@ export class MarkdownMessageRenderer extends Component {
       });
     });
 
+    // Handle external links – ensure they open in the default browser.
+    // In custom ItemViews, Obsidian's default external-link click handling
+    // may not be inherited, so we add explicit handlers.
+    // Also collect unique citation URLs for the Sources footer.
+    const citationUrls: { title: string; url: string }[] = [];
+    const seenUrls = new Set<string>();
+
+    container.querySelectorAll("a.external-link, a[href^='http://'], a[href^='https://']").forEach((link: Element) => {
+      const anchor = link as HTMLAnchorElement;
+      if (anchor.dataset.ssExternalHandled) return;
+      anchor.dataset.ssExternalHandled = "true";
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+
+      const href = anchor.getAttribute("href");
+      if (href && !seenUrls.has(href)) {
+        seenUrls.add(href);
+        const text = anchor.textContent?.trim() || "";
+        let title = text;
+        try { title = title || new URL(href).hostname; } catch { title = title || href; }
+        citationUrls.push({ title, url: href });
+      }
+
+      anchor.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (href) {
+          window.open(href, "_blank");
+        }
+      });
+    });
+
+    // Render a "Sources" footer when the content contains inline citation links
+    if (citationUrls.length > 0) {
+      this.renderInlineCitationFooter(container, citationUrls);
+    }
+
     // Mermaid post-processing – ensure labels are quoted so Obsidian's bundled
     // Mermaid doesn't choke on spaces / punctuation.
     this.postProcessMermaid(container);
+  }
+
+  /**
+   * Render a collapsible "Sources" block from inline citation links.
+   * Uses the same InlineCollapsibleBlock pattern as reasoning, collapsed by default.
+   */
+  private renderInlineCitationFooter(container: HTMLElement, citations: { title: string; url: string }[]): void {
+    // Remove any existing sources block to avoid duplicates on re-render
+    container.querySelector(".systemsculpt-inline-collapsible[data-block-type='sources']")?.remove();
+
+    const block = createInlineBlock({
+      type: "sources",
+      partId: "inline-sources",
+      isStreaming: false,
+      title: `Sources (${citations.length})`,
+      icon: "globe",
+    });
+
+    const contentContainer = getBlockContent(block);
+    if (!contentContainer) return;
+
+    const citationsList = contentContainer.createEl("div", {
+      cls: "systemsculpt-citations-list",
+    });
+
+    for (const citation of citations) {
+      const li = citationsList.createEl("div", { cls: "systemsculpt-citation-item" });
+
+      const titleLink = li.createEl("a", {
+        cls: "systemsculpt-citation-title",
+        text: citation.title,
+        attr: {
+          href: citation.url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+      });
+      titleLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.open(citation.url, "_blank");
+      });
+
+      li.createEl("div", {
+        cls: "systemsculpt-citation-url",
+        text: citation.url,
+      });
+    }
+
+    // Collapsed by default
+    setExpanded(block, false);
+    container.appendChild(block);
   }
 
   private postProcessMermaid(containerEl: HTMLElement): void {
