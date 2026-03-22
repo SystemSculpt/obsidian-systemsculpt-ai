@@ -86,10 +86,7 @@ async function resolveInputImages(
   context: StudioNodeExecutionContext,
   structuredInputImages: StudioImageInputCandidate[]
 ): Promise<StudioAssetRef[]> {
-  const merged = [
-    ...structuredInputImages,
-    ...extractImageInputCandidates(context.inputs.images),
-  ];
+  const merged = [...structuredInputImages, ...extractImageInputCandidates(context.inputs.images)];
   if (merged.length === 0) {
     return [];
   }
