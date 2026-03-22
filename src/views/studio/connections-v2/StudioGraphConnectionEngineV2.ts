@@ -323,19 +323,27 @@ export class StudioGraphConnectionEngineV2 {
       return;
     }
 
-    project.graph.edges.push({
-      id: randomId("edge"),
-      fromNodeId: source.fromNodeId,
-      fromPortId: source.fromPortId,
-      toNodeId: targetNodeId,
-      toPortId: targetPortId,
+    const changed = this.host.commitProjectMutation("graph.connection", (currentProject) => {
+      currentProject.graph.edges.push({
+        id: randomId("edge"),
+        fromNodeId: source.fromNodeId,
+        fromPortId: source.fromPortId,
+        toNodeId: targetNodeId,
+        toPortId: targetPortId,
+      });
+      return true;
     });
+    if (!changed) {
+      return;
+    }
 
     this.pendingConnection = null;
     this.hideAutoCreateHint();
     this.clearAutoCreateHintTimer();
-    this.host.recomputeEntryNodes(project);
-    this.host.scheduleProjectSave();
+    const currentProject = this.host.getCurrentProject();
+    if (currentProject) {
+      this.host.recomputeEntryNodes(currentProject);
+    }
     this.host.requestRender();
   }
 
@@ -630,15 +638,22 @@ export class StudioGraphConnectionEngineV2 {
   }
 
   private removeEdge(edgeId: string): void {
-    const project = this.host.getCurrentProject();
-    if (!project) {
+    this.closeEdgeContextMenu();
+    const changed = this.host.commitProjectMutation("graph.connection", (project) => {
+      const nextEdges = project.graph.edges.filter((edge) => edge.id !== edgeId);
+      if (nextEdges.length === project.graph.edges.length) {
+        return false;
+      }
+      project.graph.edges = nextEdges;
+      return true;
+    });
+    if (!changed) {
       return;
     }
-
-    this.closeEdgeContextMenu();
-    project.graph.edges = project.graph.edges.filter((edge) => edge.id !== edgeId);
-    this.host.recomputeEntryNodes(project);
-    this.host.scheduleProjectSave();
+    const currentProject = this.host.getCurrentProject();
+    if (currentProject) {
+      this.host.recomputeEntryNodes(currentProject);
+    }
     this.host.requestRender();
   }
 

@@ -1,4 +1,5 @@
 import type {
+  StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
   StudioNodeDefinition,
@@ -13,6 +14,7 @@ import {
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -47,9 +49,19 @@ export type StudioGraphWorkspaceRendererOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
+  onNodeSizeChange?: (
+    nodeId: string,
+    size: { width: number; height: number },
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
-  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
   getJsonEditorPreferredMode?: () => "composer" | "raw";
   onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
   renderMarkdownPreview?: (
@@ -78,8 +90,6 @@ export type StudioGraphWorkspaceRendererOptions = {
     terminalAnchorEl: HTMLElement;
     interactionLocked: boolean;
     graphInteraction: StudioGraphInteractionEngine;
-    onNodeConfigMutated: (node: StudioNodeInstance) => void;
-    onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   }) => void;
 };
 
@@ -116,9 +126,10 @@ export function renderStudioGraphWorkspace(
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
+    onNodeSizeChange,
     onOpenImageEditor,
     onCopyNodeImageToClipboard,
-    onNodePresentationMutated,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
     renderMarkdownPreview,
@@ -391,9 +402,10 @@ export function renderStudioGraphWorkspace(
       onRemoveNode,
       onNodeTitleInput,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
+      onNodeSizeChange,
       onOpenImageEditor,
       onCopyNodeImageToClipboard,
-      onNodePresentationMutated,
       getJsonEditorPreferredMode,
       onJsonEditorPreferredModeChange,
       renderMarkdownPreview,

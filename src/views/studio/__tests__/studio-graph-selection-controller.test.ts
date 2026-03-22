@@ -7,12 +7,20 @@ import {
 type TestHost = ConstructorParameters<typeof StudioGraphSelectionController>[0];
 
 function createHost(): TestHost {
-  return {
+  const host: TestHost = {
     isBusy: () => false,
     getCurrentProject: () => null,
     renderEdgeLayer: () => undefined,
     scheduleProjectSave: () => undefined,
+    commitProjectMutation: (_reason, mutator) => {
+      const project = host.getCurrentProject();
+      if (!project) {
+        return false;
+      }
+      return mutator(project) !== false;
+    },
   };
+  return host;
 }
 
 function createViewport(): HTMLElement {
@@ -559,10 +567,8 @@ describe("StudioGraphSelectionController fit selection", () => {
 describe("StudioGraphSelectionController drag behavior", () => {
   it("allows dragging regular nodes while busy so layout can be reorganized during runs", () => {
     const host = createHost();
-    const scheduleProjectSave = jest.fn();
     const renderEdgeLayer = jest.fn();
     host.isBusy = () => true;
-    host.scheduleProjectSave = scheduleProjectSave;
     host.renderEdgeLayer = renderEdgeLayer;
 
     const project = {
@@ -577,7 +583,9 @@ describe("StudioGraphSelectionController drag behavior", () => {
         ],
       },
     } as any;
+    const commitProjectMutation = jest.fn((_reason, mutator) => mutator(project) !== false);
     host.getCurrentProject = () => project;
+    host.commitProjectMutation = commitProjectMutation;
 
     const controller = new StudioGraphSelectionController(host);
     const nodeEl = createElementStub();
@@ -617,7 +625,19 @@ describe("StudioGraphSelectionController drag behavior", () => {
     expect(project.graph.nodes[0].position).toEqual({ x: 80, y: 110 });
     expect(nodeEl.style.transform).toBe("translate(80px, 110px)");
     expect(renderEdgeLayer).toHaveBeenCalled();
-    expect(scheduleProjectSave).toHaveBeenCalledTimes(1);
+    expect(commitProjectMutation).toHaveBeenCalledTimes(2);
+    expect(commitProjectMutation).toHaveBeenNthCalledWith(
+      1,
+      "node.position",
+      expect.any(Function),
+      { captureHistory: true, mode: "continuous" }
+    );
+    expect(commitProjectMutation).toHaveBeenNthCalledWith(
+      2,
+      "node.position",
+      expect.any(Function),
+      { captureHistory: false, mode: "discrete" }
+    );
   });
 
   it("allows marquee selection while busy so multi-node layout changes stay available during runs", () => {

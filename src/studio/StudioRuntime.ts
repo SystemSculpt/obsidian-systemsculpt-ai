@@ -24,6 +24,7 @@ import type {
   StudioRunSummary,
 } from "./types";
 import { deriveStudioRunsDir } from "./paths";
+import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
 import { nowIso, randomId } from "./utils";
 import { sha256HexFromArrayBuffer } from "./hash";
 
@@ -181,8 +182,13 @@ export class StudioRuntime {
     return this.nodeResultCacheStore.load(normalizedPath, project.projectId);
   }
 
-  async runProject(projectPath: string, options?: StudioRunOptions): Promise<StudioRunSummary> {
+  private async enqueueRun(
+    projectPath: string,
+    project: StudioProjectV1,
+    options?: StudioRunOptions
+  ): Promise<StudioRunSummary> {
     const normalizedPath = normalizePath(projectPath);
+    const queuedProject = cloneStudioProjectSnapshot(project);
     const runId = randomId("run");
     const startedAt = nowIso();
     const scopedEntryNodeIds = Array.from(
@@ -200,6 +206,7 @@ export class StudioRuntime {
         execute: () =>
           this.executeRun(
             normalizedPath,
+            queuedProject,
             runId,
             startedAt,
             scopedEntryNodeIds.length > 0 || scopedForceNodeIds.length > 0
@@ -225,6 +232,20 @@ export class StudioRuntime {
         });
       });
     });
+  }
+
+  async runProject(projectPath: string, options?: StudioRunOptions): Promise<StudioRunSummary> {
+    const normalizedPath = normalizePath(projectPath);
+    const project = await this.projectStore.loadProject(normalizedPath);
+    return await this.enqueueRun(normalizedPath, project, options);
+  }
+
+  async runProjectSnapshot(
+    projectPath: string,
+    project: StudioProjectV1,
+    options?: StudioRunOptions
+  ): Promise<StudioRunSummary> {
+    return await this.enqueueRun(projectPath, project, options);
   }
 
   private async drainQueue(projectPath: string): Promise<void> {
@@ -325,12 +346,12 @@ export class StudioRuntime {
 
   private async executeRun(
     projectPath: string,
+    fullProject: StudioProjectV1,
     runId: string,
     startedAt: string,
     options?: StudioRunOptions
   ): Promise<StudioRunSummary> {
-    const fullProject = await this.projectStore.loadProject(projectPath);
-    const project = scopeProjectForRun(fullProject, options?.entryNodeIds);
+    const project = scopeProjectForRun(cloneStudioProjectSnapshot(fullProject), options?.entryNodeIds);
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);

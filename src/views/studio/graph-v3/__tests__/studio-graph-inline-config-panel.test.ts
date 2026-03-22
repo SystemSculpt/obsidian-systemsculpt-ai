@@ -123,4 +123,63 @@ describe("renderInlineConfigPanel", () => {
     expect(tokenField!.classList.contains("is-hidden")).toBe(false);
     expect(mutateCalls).toBe(1);
   });
+
+  it("uses config value change callbacks while still refreshing visibleWhen state", () => {
+    const root = document.createElement("div");
+    const node = createNode();
+    const definition = createDefinition(
+      [
+        {
+          key: "enabled",
+          label: "Enabled",
+          type: "boolean",
+        },
+        {
+          key: "token",
+          label: "Token",
+          type: "text",
+          visibleWhen: {
+            key: "enabled",
+            equals: true,
+          },
+        },
+      ],
+      { enabled: false }
+    );
+    const onNodeConfigMutated = jest.fn();
+    const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
+      expect(nodeId).toBe(node.id);
+      node.config[key] = value as never;
+    });
+
+    const rendered = renderInlineConfigPanel({
+      nodeEl: root,
+      node,
+      definition,
+      orderedFieldKeys: ["enabled", "token"],
+      interactionLocked: false,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+    });
+
+    expect(rendered).toBe(true);
+    const tokenField = root.querySelector<HTMLElement>(".ss-studio-node-inline-config-field--token");
+    const enabledCheckbox = root.querySelector<HTMLInputElement>(
+      ".ss-studio-node-inline-config-field--enabled .ss-studio-node-inline-config-checkbox"
+    );
+    expect(tokenField?.classList.contains("is-hidden")).toBe(true);
+
+    enabledCheckbox!.checked = true;
+    enabledCheckbox!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(node.config.enabled).toBe(true);
+    expect(tokenField?.classList.contains("is-hidden")).toBe(false);
+    expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+      node.id,
+      "enabled",
+      true,
+      expect.objectContaining({ mode: "discrete" })
+    );
+    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+  });
 });

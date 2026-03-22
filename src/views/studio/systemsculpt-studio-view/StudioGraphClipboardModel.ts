@@ -1,3 +1,4 @@
+import { cloneStudioProjectSnapshot, serializeStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 import type {
   StudioEdge,
   StudioNodeGroup,
@@ -35,13 +36,8 @@ export function normalizeNodeIdList(nodeIds: string[]): string[] {
   );
 }
 
-export function cloneProjectSnapshot(project: StudioProjectV1): StudioProjectV1 {
-  return JSON.parse(JSON.stringify(project)) as StudioProjectV1;
-}
-
-export function serializeProjectSnapshot(project: StudioProjectV1): string {
-  return JSON.stringify(project);
-}
+export const cloneProjectSnapshot = cloneStudioProjectSnapshot;
+export const serializeProjectSnapshot = serializeStudioProjectSnapshot;
 
 export function cloneHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
   return {

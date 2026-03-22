@@ -1,4 +1,5 @@
 import type { StudioNodeInstance } from "../../../studio/types";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import {
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeResizeBounds,
@@ -19,6 +20,11 @@ type MountStudioGraphNodeResizeHandleOptions = {
   interactionLocked: boolean;
   getGraphZoom: () => number;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeSizeChange?: (
+    nodeId: string,
+    size: StudioGraphNodeSize,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   applySize: (size: StudioGraphNodeSize) => void;
   readInitialSize?: () => StudioGraphNodeSize;
@@ -84,6 +90,7 @@ export function mountStudioGraphNodeResizeHandle(
   let pendingWidth = 0;
   let pendingHeight = 0;
   let didMutateDuringDrag = false;
+  let capturedHistoryForDrag = false;
 
   const applyPendingSize = (): void => {
     frameId = null;
@@ -98,16 +105,31 @@ export function mountStudioGraphNodeResizeHandle(
     if (previousWidth === nextWidth && previousHeight === nextHeight) {
       return;
     }
-    nodeConfig.width = nextWidth;
-    nodeConfig.height = nextHeight;
+    if (options.onNodeSizeChange) {
+      options.onNodeSizeChange(
+        options.node.id,
+        {
+          width: nextWidth,
+          height: nextHeight,
+        },
+        {
+          mode: "continuous",
+          captureHistory: !capturedHistoryForDrag,
+        }
+      );
+      capturedHistoryForDrag = true;
+    } else {
+      nodeConfig.width = nextWidth;
+      nodeConfig.height = nextHeight;
+      options.onNodeGeometryMutated(options.node);
+      if (options.commitConfigOnMove === true) {
+        options.onNodeConfigMutated(options.node);
+      }
+    }
     options.applySize({
       width: nextWidth,
       height: nextHeight,
     });
-    options.onNodeGeometryMutated(options.node);
-    if (options.commitConfigOnMove === true) {
-      options.onNodeConfigMutated(options.node);
-    }
     didMutateDuringDrag = true;
   };
 
@@ -139,6 +161,20 @@ export function mountStudioGraphNodeResizeHandle(
     }
     activePointerId = null;
     handleEl.classList.remove("is-active");
+    if (options.onNodeSizeChange && didMutateDuringDrag) {
+      options.onNodeSizeChange(
+        options.node.id,
+        {
+          width: Number(nodeConfig.width) || clampRounded(pendingWidth, 1, Number.MAX_SAFE_INTEGER),
+          height: Number(nodeConfig.height) || clampRounded(pendingHeight, 1, Number.MAX_SAFE_INTEGER),
+        },
+        {
+          mode: "discrete",
+          captureHistory: false,
+        }
+      );
+      return;
+    }
     if (options.commitConfigOnMove !== true && didMutateDuringDrag) {
       options.onNodeConfigMutated(options.node);
     }
@@ -172,6 +208,7 @@ export function mountStudioGraphNodeResizeHandle(
 
     activePointerId = event.pointerId;
     didMutateDuringDrag = false;
+    capturedHistoryForDrag = false;
     startClientX = event.clientX;
     startClientY = event.clientY;
     const initialSize = options.readInitialSize

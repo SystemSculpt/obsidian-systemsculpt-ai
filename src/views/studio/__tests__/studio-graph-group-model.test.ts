@@ -6,7 +6,7 @@ import {
   removeNodesFromGroups,
   setGroupColor,
   sanitizeGraphGroups,
-} from "../graph-v3/StudioGraphGroupModel";
+} from "../../../studio/StudioGraphGroupModel";
 
 function createProject(): StudioProjectV1 {
   return {

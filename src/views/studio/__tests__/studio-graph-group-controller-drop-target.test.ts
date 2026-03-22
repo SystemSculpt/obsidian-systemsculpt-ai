@@ -102,6 +102,7 @@ function createController(
     notifyNodePositionsChanged: () => undefined,
     requestRender: () => undefined,
     scheduleProjectSave: () => undefined,
+    commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
     ...overrides,
   });
 }
@@ -134,12 +135,12 @@ describe("StudioGraphGroupController drop target resolution", () => {
   it("allows dragging groups while busy so graph layout can still be organized during runs", () => {
     const project = createProject();
     const notifyNodePositionsChanged = jest.fn();
-    const scheduleProjectSave = jest.fn();
+    const commitProjectMutation = jest.fn((_reason, mutator) => mutator(project) !== false);
     const memberEl = createElementStub();
     const controller = createController(project, {
       isBusy: () => true,
       notifyNodePositionsChanged,
-      scheduleProjectSave,
+      commitProjectMutation,
       getNodeElement: (nodeId) => (nodeId === "member" ? memberEl : null),
     });
     const frameEl = createElementStub();
@@ -181,6 +182,18 @@ describe("StudioGraphGroupController drop target resolution", () => {
     expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(startEvent.stopPropagation).toHaveBeenCalledTimes(1);
     expect(notifyNodePositionsChanged).toHaveBeenCalled();
-    expect(scheduleProjectSave).toHaveBeenCalledTimes(1);
+    expect(commitProjectMutation).toHaveBeenCalledTimes(2);
+    expect(commitProjectMutation).toHaveBeenNthCalledWith(
+      1,
+      "node.position",
+      expect.any(Function),
+      { captureHistory: true, mode: "continuous" }
+    );
+    expect(commitProjectMutation).toHaveBeenNthCalledWith(
+      2,
+      "node.position",
+      expect.any(Function),
+      { captureHistory: false, mode: "discrete" }
+    );
   });
 });

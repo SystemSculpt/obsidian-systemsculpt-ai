@@ -21,8 +21,9 @@ import {
   renderStudioCaptionBoardImageFromBytes,
 } from "../../../studio/StudioCaptionBoardComposition";
 import { inferMimeTypeFromPath, isLikelyAbsolutePath } from "../../../studio/nodes/shared";
-import type { StudioAssetRef, StudioNodeInstance } from "../../../studio/types";
+import type { StudioAssetRef, StudioJsonValue, StudioNodeInstance } from "../../../studio/types";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 type BoardSelection =
   | { kind: "label"; id: string }
@@ -50,6 +51,12 @@ type StudioCaptionBoardModalOptions = {
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
   storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   onRenderedAssetCommitted?: (node: StudioNodeInstance) => void;
 };
 
@@ -62,6 +69,7 @@ type StudioCaptionBoardSurfaceLayout = {
   stageHeight: number;
 };
 
+const CAPTION_BOARD_CONFIG_KEY = "captionBoard";
 const LABEL_MIN_WIDTH = 0.12;
 const LABEL_MIN_HEIGHT = 0.08;
 const LABEL_DEFAULT_WIDTH = 0.44;
@@ -1427,16 +1435,46 @@ class StudioCaptionBoardModal extends Modal {
     });
   }
 
-  private commitDraftMutation(nextState: StudioCaptionBoardState): void {
-    writeStudioCaptionBoardState(this.options.node, {
-      ...nextState,
-      lastRenderedAsset: null,
-      sourceAssetPath: "",
-      updatedAt: new Date().toISOString(),
-    });
-    this.boardState = readStudioCaptionBoardState(this.options.node.config);
+  private commitBoardState(
+    nextState: StudioCaptionBoardState,
+    mutationOptions?: StudioGraphNodeMutationOptions
+  ): void {
+    const draftNode: StudioNodeInstance = {
+      ...this.options.node,
+      config: {
+        ...this.options.node.config,
+      },
+    };
+    writeStudioCaptionBoardState(draftNode, nextState);
+    const normalizedState = readStudioCaptionBoardState(draftNode.config);
+    if (this.options.onNodeConfigValueChange) {
+      this.options.onNodeConfigValueChange(
+        this.options.node.id,
+        CAPTION_BOARD_CONFIG_KEY,
+        (draftNode.config[CAPTION_BOARD_CONFIG_KEY] ?? null) as StudioJsonValue,
+        mutationOptions
+      );
+    } else {
+      writeStudioCaptionBoardState(this.options.node, normalizedState);
+      this.options.onNodeConfigMutated(this.options.node);
+    }
+    this.boardState = normalizedState;
     this.selectedItem = normalizeSelection(this.boardState, this.selectedItem);
-    this.options.onNodeConfigMutated(this.options.node);
+  }
+
+  private commitDraftMutation(
+    nextState: StudioCaptionBoardState,
+    mutationOptions: StudioGraphNodeMutationOptions = { mode: "continuous" }
+  ): void {
+    this.commitBoardState(
+      {
+        ...nextState,
+        lastRenderedAsset: null,
+        sourceAssetPath: "",
+        updatedAt: new Date().toISOString(),
+      },
+      mutationOptions
+    );
     this.renderBoard();
     void this.refreshRenderedPreview();
   }
@@ -1448,7 +1486,9 @@ class StudioCaptionBoardModal extends Modal {
     this.isDoneSaving = true;
     this.syncActionState();
     try {
-      let nextState = readStudioCaptionBoardState(this.options.node.config);
+      let nextState: StudioCaptionBoardState = {
+        ...this.boardState,
+      };
       if (this.baseImageAsset && boardStateHasRenderableEdits(nextState)) {
         const renderedAsset = await composeStudioCaptionBoardImage({
           baseImage: this.baseImageAsset,
@@ -1463,10 +1503,7 @@ class StudioCaptionBoardModal extends Modal {
           updatedAt: new Date().toISOString(),
         };
       }
-      writeStudioCaptionBoardState(this.options.node, nextState);
-      this.boardState = readStudioCaptionBoardState(this.options.node.config);
-      this.selectedItem = normalizeSelection(this.boardState, this.selectedItem);
-      this.options.onNodeConfigMutated(this.options.node);
+      this.commitBoardState(nextState, { mode: "discrete" });
       this.options.onRenderedAssetCommitted?.(this.options.node);
       this.close();
     } catch (error) {

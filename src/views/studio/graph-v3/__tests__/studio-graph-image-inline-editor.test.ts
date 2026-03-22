@@ -313,6 +313,65 @@ describe("StudioGraphImageInlineEditor", () => {
     expect(onNodeConfigMutated).toHaveBeenCalled();
   });
 
+  it("uses config value change callbacks for live board edits", async () => {
+    const node = mediaNodeFixture({
+      sourcePath: "Assets/source.png",
+      captionBoard: {
+        version: 1,
+        labels: [
+          {
+            id: "label-1",
+            text: "Drag me",
+            x: 0.2,
+            y: 0.2,
+            width: 0.4,
+            height: 0.2,
+            fontSize: 56,
+            textAlign: "center",
+            textColor: "#ffffff",
+            styleVariant: "shadow",
+            zIndex: 0,
+          },
+        ],
+        sourceAssetPath: PREVIEW_ASSET.path,
+        lastRenderedAsset: null,
+        updatedAt: "2026-03-22T00:00:00.000Z",
+      },
+    });
+    const onNodeConfigMutated = jest.fn();
+    const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
+      expect(nodeId).toBe(node.id);
+      node.config[key] = value as never;
+    });
+
+    openStudioImageEditorModal({
+      app: {} as App,
+      node,
+      nodeRunState: imageNodeRunState(),
+      projectPath: "Studio/Test.systemsculpt",
+      resolveAssetPreviewSrc: () => "app://preview",
+      readAsset: jest.fn(async () => tinyPngBytes()),
+      storeAsset: jest.fn(async () => RENDERED_ASSET),
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+    });
+    await flushAsync();
+
+    const textInput = document.body.querySelector<HTMLTextAreaElement>(".ss-studio-caption-board__textarea");
+    expect(textInput).not.toBeNull();
+    typeValue(textInput!, "Updated headline via callback");
+
+    const boardState = readStudioCaptionBoardState(node.config);
+    expect(boardState.labels[0]?.text).toBe("Updated headline via callback");
+    expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+      node.id,
+      "captionBoard",
+      expect.any(Object),
+      expect.objectContaining({ mode: "continuous" })
+    );
+    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+  });
+
   it("adds callouts and crop controls through the editor UI", async () => {
     const node = mediaNodeFixture({
       sourcePath: "Assets/source.png",

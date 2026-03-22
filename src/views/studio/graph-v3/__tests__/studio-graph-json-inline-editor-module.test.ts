@@ -65,4 +65,49 @@ describe("renderJsonNodeEditor module seam", () => {
     });
     expect(onNodeConfigMutated).toHaveBeenCalled();
   });
+
+  it("uses config value change callbacks for composer edits", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture();
+    const onNodeConfigMutated = jest.fn();
+    const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
+      expect(nodeId).toBe(node.id);
+      node.config[key] = value as never;
+    });
+
+    renderJsonNodeEditor({
+      nodeEl,
+      node,
+      nodeRunState: {
+        status: "idle",
+        message: "",
+        updatedAt: null,
+        outputs: null,
+      },
+      interactionLocked: false,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+    });
+
+    const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "Add Field"
+    );
+    click(addButton!);
+
+    const keyInput = nodeEl.querySelector<HTMLInputElement>(".ss-studio-node-json-row-key");
+    const valueInput = nodeEl.querySelector<HTMLInputElement>(".ss-studio-node-json-row-value");
+    typeValue(keyInput!, "subject");
+    typeValue(valueInput!, "Session-backed composer");
+
+    expect(node.config.value).toEqual({
+      subject: "Session-backed composer",
+    });
+    expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+      node.id,
+      "value",
+      expect.any(Object),
+      expect.objectContaining({ mode: "continuous" })
+    );
+    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+  });
 });

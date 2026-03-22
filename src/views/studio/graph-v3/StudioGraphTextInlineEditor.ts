@@ -1,5 +1,6 @@
 import type { StudioNodeInstance } from "../../../studio/types";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 type StudioTextDisplayMode = "raw" | "rendered";
 
@@ -9,7 +10,12 @@ export type RenderStudioTextNodeInlineEditorOptions = {
   nodeRunState: StudioNodeRunDisplayState;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: string,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
     markdown: string,
@@ -150,7 +156,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     nodeRunState,
     interactionLocked,
     onNodeConfigMutated,
-    onNodePresentationMutated,
+    onNodeConfigValueChange,
     renderMarkdownPreview,
     showTextEditor = true,
   } = options;
@@ -212,7 +218,12 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   textEditorEl.disabled = false;
   if (!isNoteNode) {
     textEditorEl.addEventListener("input", (event) => {
-      node.config.value = (event.target as HTMLTextAreaElement).value;
+      const nextValue = (event.target as HTMLTextAreaElement).value;
+      if (onNodeConfigValueChange) {
+        onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+        return;
+      }
+      node.config.value = nextValue;
       onNodeConfigMutated(node);
     });
   }
@@ -230,11 +241,12 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     event.stopPropagation();
   });
 
-  const commitPresentationMutation = (): void => {
-    if (onNodePresentationMutated) {
-      onNodePresentationMutated(node);
+  const commitPresentationMutation = (nextMode: StudioTextDisplayMode): void => {
+    if (onNodeConfigValueChange) {
+      onNodeConfigValueChange(node.id, TEXT_DISPLAY_MODE_CONFIG_KEY, nextMode, { mode: "discrete" });
       return;
     }
+    node.config[TEXT_DISPLAY_MODE_CONFIG_KEY] = nextMode;
     onNodeConfigMutated(node);
   };
 
@@ -300,8 +312,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
       return;
     }
     textDisplayMode = "raw";
-    node.config[TEXT_DISPLAY_MODE_CONFIG_KEY] = "raw";
-    commitPresentationMutation();
+    commitPresentationMutation("raw");
     applyDisplayMode();
   });
 
@@ -312,8 +323,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
       return;
     }
     textDisplayMode = "rendered";
-    node.config[TEXT_DISPLAY_MODE_CONFIG_KEY] = "rendered";
-    commitPresentationMutation();
+    commitPresentationMutation("rendered");
     applyDisplayMode();
   });
 

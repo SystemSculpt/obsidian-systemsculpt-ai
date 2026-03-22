@@ -1,4 +1,4 @@
-import { isManagedOutputPlaceholderNode } from "../StudioManagedOutputNodes";
+import { isManagedOutputPlaceholderNode } from "../../../studio/StudioManagedOutputNodes";
 import { formatNodeConfigPreview } from "../StudioViewHelpers";
 import { renderLabelNodeCard } from "./StudioGraphLabelNodeCard";
 import {
@@ -40,9 +40,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
+    onNodeSizeChange,
     onOpenImageEditor,
     onCopyNodeImageToClipboard,
-    onNodePresentationMutated,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
     renderMarkdownPreview,
@@ -89,6 +90,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       graphInteraction,
       onRemoveNode,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
+      onNodeSizeChange,
       onNodeGeometryMutated,
       isEditing: isLabelEditing(node.id),
       shouldAutoFocus: consumeLabelAutoFocus(node.id),
@@ -201,7 +204,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       inboundEdges: options.inboundEdges,
       interactionLocked,
       onNodeConfigMutated,
-      onNodePresentationMutated,
+      onNodeConfigValueChange,
       getJsonEditorPreferredMode,
       onJsonEditorPreferredModeChange,
       renderMarkdownPreview,
@@ -230,8 +233,6 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
         terminalAnchorEl,
         interactionLocked,
         graphInteraction,
-        onNodeConfigMutated,
-        onNodeGeometryMutated,
       });
     }
   }
@@ -245,6 +246,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     interactionLocked,
     getGraphZoom: () => graphInteraction.getGraphZoom(),
     onNodeConfigMutated,
+    onNodeSizeChange,
     onNodeGeometryMutated,
     applySize: ({ width, height }) => {
       nodeEl.style.width = `${width}px`;
@@ -275,9 +277,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       nodeDetailMode,
       nodeRunState,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       onOpenImageEditor,
       onCopyNodeImageToClipboard,
-      onNodePresentationMutated,
     });
   }
 

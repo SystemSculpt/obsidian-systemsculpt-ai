@@ -1,4 +1,8 @@
 import type { StudioProjectV1 } from "../../studio/types";
+import type {
+  StudioProjectSessionAutosaveMode,
+  StudioProjectSessionMutationReason,
+} from "../../studio/StudioProjectSession";
 import {
   STUDIO_GRAPH_CANVAS_BASE_HEIGHT,
   STUDIO_GRAPH_CANVAS_BASE_WIDTH,
@@ -46,12 +50,23 @@ export type ConnectionAutoCreateRequest = {
   clientY: number;
 };
 
+export type StudioGraphProjectMutationOptions = {
+  mode?: StudioProjectSessionAutosaveMode;
+  captureHistory?: boolean;
+};
+
+export type StudioGraphProjectMutator = (project: StudioProjectV1) => boolean | void;
+
 export type StudioGraphInteractionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
   setError: (error: unknown) => void;
   recomputeEntryNodes: (project: StudioProjectV1) => void;
-  scheduleProjectSave: () => void;
+  commitProjectMutation: (
+    reason: StudioProjectSessionMutationReason,
+    mutator: StudioGraphProjectMutator,
+    options?: StudioGraphProjectMutationOptions
+  ) => boolean;
   requestRender: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   onNodePositionsChanged?: () => void;

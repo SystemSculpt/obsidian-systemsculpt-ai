@@ -146,14 +146,21 @@ export class StudioProjectStore {
     await this.adapter.write(backupPath, rawText);
   }
 
-  async loadProject(projectPath: string): Promise<StudioProjectV1> {
+  async readProjectRawText(projectPath: string): Promise<string | null> {
     const normalizedPath = normalizeStudioProjectPath(projectPath);
     const exists = await this.adapter.exists(normalizedPath);
     if (!exists) {
+      return null;
+    }
+    return this.adapter.read(normalizedPath);
+  }
+
+  async loadProject(projectPath: string): Promise<StudioProjectV1> {
+    const normalizedPath = normalizeStudioProjectPath(projectPath);
+    const rawText = await this.readProjectRawText(normalizedPath);
+    if (rawText == null) {
       throw new Error(`Studio project not found: ${normalizedPath}`);
     }
-
-    const rawText = await this.adapter.read(normalizedPath);
     let rawSchema = "";
     try {
       const parsed: unknown = JSON.parse(rawText);

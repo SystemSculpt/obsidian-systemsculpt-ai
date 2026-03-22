@@ -1,5 +1,6 @@
 import type { StudioJsonValue, StudioNodeInstance } from "../../../studio/types";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 export type StudioJsonEditorMode = "composer" | "raw";
 type StudioJsonHtmlViewMode = "source" | "preview";
@@ -20,6 +21,12 @@ type RenderStudioJsonNodeEditorOptions = {
   nodeRunState: StudioNodeRunDisplayState;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   getJsonEditorPreferredMode?: () => StudioJsonEditorMode;
   onJsonEditorPreferredModeChange?: (mode: StudioJsonEditorMode) => void;
   showOutputPreview?: boolean;
@@ -468,6 +475,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     nodeRunState,
     interactionLocked,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
     showOutputPreview = true,
@@ -552,6 +560,18 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
   let composerRows: StudioJsonComposerRow[] = [];
   let editorMode = normalizeJsonEditorMode(getJsonEditorPreferredMode?.());
 
+  const commitJsonValue = (
+    value: StudioJsonValue,
+    mutationOptions?: StudioGraphNodeMutationOptions
+  ): void => {
+    if (onNodeConfigValueChange) {
+      onNodeConfigValueChange(node.id, JSON_VALUE_CONFIG_KEY, value, mutationOptions);
+      return;
+    }
+    writeJsonNodeConfigValue(node, value);
+    onNodeConfigMutated(node);
+  };
+
   const createEmptyComposerRow = (): StudioJsonComposerRow => ({
     id: nextJsonComposerRowId(),
     key: "",
@@ -612,8 +632,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         if (interactionLocked) {
           return;
         }
-        writeJsonNodeConfigValue(node, {});
-        onNodeConfigMutated(node);
+        commitJsonValue({}, { mode: "discrete" });
         hydrateComposerRowsFromConfig();
         renderComposerRows();
         refreshJsonEditorSourceState();
@@ -630,9 +649,8 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
       cls: "ss-studio-node-json-composer-duplicates is-hidden",
     });
 
-    const commitComposerRows = (): void => {
-      writeJsonNodeConfigValue(node, collectComposerRowsValue(composerRows));
-      onNodeConfigMutated(node);
+    const commitComposerRows = (mutationOptions?: StudioGraphNodeMutationOptions): void => {
+      commitJsonValue(collectComposerRowsValue(composerRows), mutationOptions);
       syncRawEditorFromConfig();
       refreshJsonEditorSourceState();
     };
@@ -700,7 +718,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         keyEl.disabled = interactionLocked;
         keyEl.addEventListener("input", () => {
           row.key = keyEl.value;
-          commitComposerRows();
+          commitComposerRows({ mode: "continuous" });
           refreshComposerValidation();
         });
 
@@ -735,7 +753,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           if (nextType === "html") {
             row.htmlViewMode = "source";
           }
-          commitComposerRows();
+          commitComposerRows({ mode: "discrete" });
           renderComposerRows(row.id);
         });
 
@@ -756,7 +774,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
             return;
           }
           composerRows = composerRows.filter((entry) => entry.id !== row.id);
-          commitComposerRows();
+          commitComposerRows({ mode: "discrete" });
           renderComposerRows();
         });
 
@@ -840,7 +858,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
 
           valueEl.addEventListener("input", () => {
             row.value = valueEl.value;
-            commitComposerRows();
+            commitComposerRows({ mode: "continuous" });
             refreshComposerValidation();
             if (row.htmlViewMode === "preview") {
               htmlPreviewFrameEl.setAttr("srcdoc", sanitizeHtmlPreviewSource(row.value));
@@ -860,7 +878,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           valueEl.disabled = valueReadOnly;
           valueEl.addEventListener("input", () => {
             row.value = valueEl.value;
-            commitComposerRows();
+            commitComposerRows({ mode: "continuous" });
             refreshComposerValidation();
           });
         } else {
@@ -876,7 +894,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           valueEl.disabled = valueReadOnly;
           valueEl.addEventListener("input", () => {
             row.value = valueEl.value;
-            commitComposerRows();
+            commitComposerRows({ mode: "continuous" });
             refreshComposerValidation();
           });
         }
@@ -945,7 +963,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
       }
       const newRow = createEmptyComposerRow();
       composerRows.push(newRow);
-      commitComposerRows();
+      commitComposerRows({ mode: "discrete" });
       renderComposerRows(newRow.id);
     });
 
@@ -981,8 +999,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
       baseObject.subject = typeof baseObject.subject === "string" ? baseObject.subject : "";
       baseObject.text = typeof baseObject.text === "string" ? baseObject.text : "";
       baseObject.html = typeof baseObject.html === "string" ? baseObject.html : "";
-      writeJsonNodeConfigValue(node, baseObject);
-      onNodeConfigMutated(node);
+      commitJsonValue(baseObject, { mode: "discrete" });
       hydrateComposerRowsFromConfig();
       syncRawEditorFromConfig();
       renderComposerRows();
@@ -1047,8 +1064,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     }
     rawErrorEl.addClass("is-hidden");
     rawErrorEl.setText("");
-    writeJsonNodeConfigValue(node, parsed.value);
-    onNodeConfigMutated(node);
+    commitJsonValue(parsed.value, { mode: "continuous" });
     refreshJsonEditorSourceState();
   });
 

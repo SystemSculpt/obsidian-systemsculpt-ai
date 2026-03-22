@@ -28,7 +28,8 @@ export class StudioGraphInteractionEngine {
         this.groupController.refreshGroupBounds();
         this.host.onNodePositionsChanged?.();
       },
-      scheduleProjectSave: () => this.host.scheduleProjectSave(),
+      commitProjectMutation: (reason, mutator, options) =>
+        this.host.commitProjectMutation(reason, mutator, options),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       resolveNodeDragHoverGroup: (draggedNodeIds) =>
         this.groupController.resolveDropTargetGroupId(draggedNodeIds),
@@ -51,7 +52,8 @@ export class StudioGraphInteractionEngine {
       notifyNodePositionsChanged: (options) => this.selectionController.notifyNodePositionsChanged(options),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
       requestRender: () => this.host.requestRender(),
-      scheduleProjectSave: () => this.host.scheduleProjectSave(),
+      commitProjectMutation: (reason, mutator, options) =>
+        this.host.commitProjectMutation(reason, mutator, options),
     });
 
     this.connectionEngine = new StudioGraphConnectionEngineV2({

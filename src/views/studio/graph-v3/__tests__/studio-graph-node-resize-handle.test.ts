@@ -152,4 +152,61 @@ describe("mountStudioGraphNodeResizeHandle", () => {
     expect(onNodeConfigMutated).not.toHaveBeenCalled();
     expect(onNodeGeometryMutated).not.toHaveBeenCalled();
   });
+
+  it("uses node size change callbacks instead of direct config mutation", () => {
+    const node = createNode();
+    const nodeEl = document.body.createDiv();
+    const onNodeConfigMutated = jest.fn();
+    const onNodeGeometryMutated = jest.fn();
+    const onNodeSizeChange = jest.fn(
+      (
+        _nodeId: string,
+        size: { width: number; height: number },
+        _options?: { mode?: "continuous" | "discrete"; captureHistory?: boolean }
+      ) => {
+        node.config.width = size.width;
+        node.config.height = size.height;
+      }
+    );
+
+    mountStudioGraphNodeResizeHandle({
+      node,
+      nodeEl,
+      title: "Resize node",
+      ariaLabel: "Resize node",
+      interactionLocked: false,
+      getGraphZoom: () => 1,
+      onNodeConfigMutated,
+      onNodeSizeChange,
+      onNodeGeometryMutated,
+      applySize: ({ width, height }) => {
+        nodeEl.style.width = `${width}px`;
+        nodeEl.style.minHeight = `${height}px`;
+      },
+      readInitialSize: () => ({ width: 300, height: 200 }),
+    });
+
+    const handleEl = nodeEl.querySelector<HTMLElement>(".ss-studio-node-resize-handle");
+    expect(handleEl).not.toBeNull();
+    handleEl?.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 21, clientX: 100, clientY: 100 }));
+    window.dispatchEvent(createPointerEvent("pointermove", { pointerId: 21, clientX: 140, clientY: 150 }));
+    window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 21, clientX: 140, clientY: 150 }));
+
+    expect(node.config.width).toBe(340);
+    expect(node.config.height).toBe(250);
+    expect(onNodeSizeChange).toHaveBeenNthCalledWith(
+      1,
+      node.id,
+      { width: 340, height: 250 },
+      expect.objectContaining({ mode: "continuous", captureHistory: true })
+    );
+    expect(onNodeSizeChange).toHaveBeenNthCalledWith(
+      2,
+      node.id,
+      { width: 340, height: 250 },
+      expect.objectContaining({ mode: "discrete", captureHistory: false })
+    );
+    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+    expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+  });
 });

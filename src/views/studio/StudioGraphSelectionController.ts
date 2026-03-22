@@ -1,3 +1,4 @@
+import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
 import {
   STUDIO_GRAPH_CANVAS_HEIGHT,
@@ -6,6 +7,7 @@ import {
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
   STUDIO_GRAPH_OVERVIEW_MIN_ZOOM,
+  type StudioGraphProjectMutationOptions,
   type StudioGraphZoomChangeContext,
   type StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
@@ -46,7 +48,11 @@ type StudioGraphSelectionHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   renderEdgeLayer: () => void;
   onNodePositionsChanged?: () => void;
-  scheduleProjectSave: () => void;
+  commitProjectMutation: (
+    reason: StudioProjectSessionMutationReason,
+    mutator: (project: StudioProjectV1) => boolean | void,
+    options?: StudioGraphProjectMutationOptions
+  ) => boolean;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   resolveNodeDragHoverGroup?: (draggedNodeIds: string[]) => string | null;
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
@@ -760,6 +766,7 @@ export class StudioGraphSelectionController {
     let pendingClientY = startY;
     let dragFrameRequested = false;
     let dragged = false;
+    let captureHistoryOnNextMutation = false;
     let hoveredGroupId: string | null = null;
     const syncHoveredGroup = (): void => {
       const nextGroupId = this.host.resolveNodeDragHoverGroup?.(dragNodeIds) || null;
@@ -777,11 +784,46 @@ export class StudioGraphSelectionController {
       }
     }
 
+    const commitDraggedNodePositions = (options?: {
+      captureHistory?: boolean;
+      mode?: StudioGraphProjectMutationOptions["mode"];
+      forceChanged?: boolean;
+    }): boolean => {
+      const deltaX = (pendingClientX - startX) / zoom;
+      const deltaY = (pendingClientY - startY) / zoom;
+      return this.host.commitProjectMutation(
+        "node.position",
+        (currentProject) => {
+          let changed = false;
+          for (const dragNodeId of dragNodeIds) {
+            const dragNode = this.findNode(currentProject, dragNodeId);
+            const origin = originByNodeId.get(dragNodeId);
+            if (!dragNode || !origin) {
+              continue;
+            }
+            const nextX = Math.max(24, Math.round(origin.x + deltaX));
+            const nextY = Math.max(24, Math.round(origin.y + deltaY));
+            if (dragNode.position.x !== nextX || dragNode.position.y !== nextY) {
+              dragNode.position.x = nextX;
+              dragNode.position.y = nextY;
+              changed = true;
+            }
+          }
+          return changed || options?.forceChanged === true;
+        },
+        {
+          mode: options?.mode,
+          captureHistory: options?.captureHistory,
+        }
+      );
+    };
+
     const flushDragFrame = (): void => {
       dragFrameRequested = false;
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
+        captureHistoryOnNextMutation = true;
         this.host.onNodeDragStateChange?.(true);
         syncHoveredGroup();
       }
@@ -789,13 +831,16 @@ export class StudioGraphSelectionController {
         return;
       }
 
-      const deltaX = (pendingClientX - startX) / zoom;
-      const deltaY = (pendingClientY - startY) / zoom;
-      for (const [dragNodeId, dragNode] of dragNodes.entries()) {
-        const origin = originByNodeId.get(dragNodeId);
-        if (!origin) continue;
-        dragNode.position.x = Math.max(24, Math.round(origin.x + deltaX));
-        dragNode.position.y = Math.max(24, Math.round(origin.y + deltaY));
+      const changed = commitDraggedNodePositions({
+        captureHistory: captureHistoryOnNextMutation,
+        mode: "continuous",
+      });
+      captureHistoryOnNextMutation = false;
+      if (!changed) {
+        syncHoveredGroup();
+        return;
+      }
+      for (const dragNodeId of dragNodeIds) {
         this.updateNodePosition(dragNodeId);
       }
       this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
@@ -849,8 +894,12 @@ export class StudioGraphSelectionController {
         this.host.onNodeDropToGroup?.(hoveredGroupId, dragNodeIds);
         hoveredGroupId = null;
         this.host.onNodeDragHoverGroupChange?.(null, dragNodeIds);
+        void commitDraggedNodePositions({
+          captureHistory: false,
+          mode: "discrete",
+          forceChanged: true,
+        });
         this.notifyNodePositionsChanged();
-        this.host.scheduleProjectSave();
         return;
       }
 

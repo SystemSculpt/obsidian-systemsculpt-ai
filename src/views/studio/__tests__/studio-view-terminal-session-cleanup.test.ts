@@ -34,7 +34,7 @@ type RemoveNodesContext = {
   nodeContextMenuOverlay: { hide: jest.Mock<void, []> } | null;
   nodeActionContextMenuOverlay: { hide: jest.Mock<void, []> } | null;
   recomputeEntryNodes: jest.Mock<void, [unknown]>;
-  scheduleProjectSave: jest.Mock<void, []>;
+  commitCurrentProjectMutation: jest.Mock<boolean, [string, (project: RemoveNodesContext["currentProject"]) => boolean | void]>;
   render: jest.Mock<void, []>;
   stopTerminalSessionsForRemovedNodes: (nodes: StudioNodeLike[]) => void;
 };
@@ -92,7 +92,12 @@ function createContext(): {
     nodeContextMenuOverlay: { hide: jest.fn() },
     nodeActionContextMenuOverlay: { hide: jest.fn() },
     recomputeEntryNodes: jest.fn(),
-    scheduleProjectSave: jest.fn(),
+    commitCurrentProjectMutation: jest.fn((_, mutator) => {
+      if (!context.currentProject) {
+        return false;
+      }
+      return mutator(context.currentProject as RemoveNodesContext["currentProject"]) !== false;
+    }),
     render: jest.fn(),
     stopTerminalSessionsForRemovedNodes,
   };

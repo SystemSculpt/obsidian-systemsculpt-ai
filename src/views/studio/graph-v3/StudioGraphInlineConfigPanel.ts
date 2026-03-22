@@ -22,6 +22,7 @@ import {
 } from "../StudioPathFieldUi";
 import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 function readConfigString(value: unknown): string {
   if (typeof value === "string") {
@@ -59,6 +60,32 @@ function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefiniti
   }
   const raw = String(field.label || field.key || "option").trim().toLowerCase();
   return raw ? `Select ${raw}` : "Select option";
+}
+
+function commitInlineConfigValueChange(options: {
+  node: StudioNodeInstance;
+  key: string;
+  value: StudioJsonValue;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
+  mutationOptions?: StudioGraphNodeMutationOptions;
+}): void {
+  if (options.onNodeConfigValueChange) {
+    options.onNodeConfigValueChange(
+      options.node.id,
+      options.key,
+      options.value,
+      options.mutationOptions
+    );
+    return;
+  }
+  options.node.config[options.key] = options.value;
+  options.onNodeConfigMutated(options.node);
 }
 
 function buildOrderedFieldList(options: {
@@ -117,6 +144,12 @@ function renderInlineConfigSelectField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
@@ -128,6 +161,7 @@ function renderInlineConfigSelectField(options: {
     fieldEl,
     interactionLocked,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     resolveDynamicSelectOptions,
   } = options;
 
@@ -150,9 +184,15 @@ function renderInlineConfigSelectField(options: {
       buttonEl.disabled = interactionLocked;
       buttonEl.addEventListener("click", (event) => {
         event.preventDefault();
-        node.config[field.key] = option.value;
+        commitInlineConfigValueChange({
+          node,
+          key: field.key,
+          value: option.value,
+          onNodeConfigMutated,
+          onNodeConfigValueChange,
+          mutationOptions: { mode: "discrete" },
+        });
         refreshActiveState(option.value);
-        onNodeConfigMutated(node);
       });
     }
     refreshActiveState(currentValue);
@@ -178,8 +218,14 @@ function renderInlineConfigSelectField(options: {
       noResultsText: "No matching options.",
       loadOptions,
       onValueChange: (value) => {
-        node.config[field.key] = value;
-        onNodeConfigMutated(node);
+        commitInlineConfigValueChange({
+          node,
+          key: field.key,
+          value,
+          onNodeConfigMutated,
+          onNodeConfigValueChange,
+          mutationOptions: { mode: "discrete" },
+        });
       },
     });
     return;
@@ -218,8 +264,14 @@ function renderInlineConfigSelectField(options: {
   }
   selectEl.value = currentValue;
   selectEl.addEventListener("change", () => {
-    node.config[field.key] = selectEl.value;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: selectEl.value,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "discrete" },
+    });
   });
 }
 
@@ -230,8 +282,14 @@ function renderInlineConfigNumberField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, definition, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, definition, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const inputEl = fieldEl.createEl("input", {
     cls: "ss-studio-node-inline-config-input",
     type: "number",
@@ -271,9 +329,15 @@ function renderInlineConfigNumberField(options: {
     if (field.integer === true) {
       normalized = Math.round(normalized);
     }
-    node.config[field.key] = normalized;
     inputEl.value = String(normalized);
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: normalized,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "discrete" },
+    });
   };
 
   inputEl.addEventListener("change", commit);
@@ -293,8 +357,14 @@ function renderInlineConfigTextField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const inputEl = fieldEl.createEl("input", {
     cls: "ss-studio-node-inline-config-input",
     type: field.inputType === "password" ? "password" : "text",
@@ -306,8 +376,14 @@ function renderInlineConfigTextField(options: {
   inputEl.disabled = interactionLocked;
   inputEl.value = readConfigString(node.config[field.key]);
   inputEl.addEventListener("input", () => {
-    node.config[field.key] = inputEl.value;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: inputEl.value,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "continuous" },
+    });
   });
 }
 
@@ -318,8 +394,22 @@ function renderInlineConfigTextareaField(options: {
   interactionLocked: boolean;
   compactSingleRow?: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, compactSingleRow = false, onNodeConfigMutated } = options;
+  const {
+    node,
+    field,
+    fieldEl,
+    interactionLocked,
+    compactSingleRow = false,
+    onNodeConfigMutated,
+    onNodeConfigValueChange,
+  } = options;
   const textareaClassName = compactSingleRow
     ? "ss-studio-node-inline-config-textarea is-single-row"
     : "ss-studio-node-inline-config-textarea";
@@ -334,8 +424,14 @@ function renderInlineConfigTextareaField(options: {
   textAreaEl.disabled = interactionLocked;
   textAreaEl.value = readConfigString(node.config[field.key]);
   textAreaEl.addEventListener("input", () => {
-    node.config[field.key] = textAreaEl.value;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: textAreaEl.value,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "continuous" },
+    });
   });
 }
 
@@ -345,8 +441,14 @@ function renderInlineConfigBooleanField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-checkbox-row" });
   const checkboxEl = rowEl.createEl("input", {
     cls: "ss-studio-node-inline-config-checkbox",
@@ -358,8 +460,14 @@ function renderInlineConfigBooleanField(options: {
   checkboxEl.checked = node.config[field.key] === true;
   checkboxEl.disabled = interactionLocked;
   checkboxEl.addEventListener("change", () => {
-    node.config[field.key] = checkboxEl.checked;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: checkboxEl.checked,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "discrete" },
+    });
   });
 }
 
@@ -369,8 +477,14 @@ function renderInlineConfigJsonObjectField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const textAreaEl = fieldEl.createEl("textarea", {
     cls: "ss-studio-node-inline-config-textarea",
     attr: {
@@ -388,8 +502,14 @@ function renderInlineConfigJsonObjectField(options: {
   const commit = (): void => {
     const raw = textAreaEl.value.trim();
     if (!raw) {
-      node.config[field.key] = {};
-      onNodeConfigMutated(node);
+      commitInlineConfigValueChange({
+        node,
+        key: field.key,
+        value: {},
+        onNodeConfigMutated,
+        onNodeConfigValueChange,
+        mutationOptions: { mode: "discrete" },
+      });
       return;
     }
     try {
@@ -397,8 +517,14 @@ function renderInlineConfigJsonObjectField(options: {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return;
       }
-      node.config[field.key] = parsed as any;
-      onNodeConfigMutated(node);
+      commitInlineConfigValueChange({
+        node,
+        key: field.key,
+        value: parsed as Record<string, StudioJsonValue>,
+        onNodeConfigMutated,
+        onNodeConfigValueChange,
+        mutationOptions: { mode: "discrete" },
+      });
     } catch {
       // Keep local text for user correction; validation will fail loudly on run.
     }
@@ -413,8 +539,14 @@ function renderInlineConfigStringListField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const textAreaEl = fieldEl.createEl("textarea", {
     cls: "ss-studio-node-inline-config-textarea",
     attr: {
@@ -426,11 +558,18 @@ function renderInlineConfigStringListField(options: {
   const current = Array.isArray(node.config[field.key]) ? (node.config[field.key] as unknown[]) : [];
   textAreaEl.value = current.map((entry) => String(entry ?? "")).join("\n");
   textAreaEl.addEventListener("input", () => {
-    node.config[field.key] = textAreaEl.value
+    const nextValues = textAreaEl.value
       .split(/\r?\n/g)
       .map((value) => value.trim())
-      .filter((value) => value.length > 0) as any;
-    onNodeConfigMutated(node);
+      .filter((value) => value.length > 0);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: nextValues,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "continuous" },
+    });
   });
 }
 
@@ -440,8 +579,14 @@ function renderInlineConfigNoteSelectorField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
 
   const items = parseStudioNoteItems(node.config[field.key] as StudioJsonValue | undefined);
   const container = fieldEl.createDiv({ cls: "ss-studio-note-selector" });
@@ -480,10 +625,17 @@ function renderInlineConfigNoteSelectorField(options: {
     statusEl.setText(`${enabled} included, ${skipped} skipped.`);
   };
 
-  const emitChange = (): void => {
-    node.config[field.key] = serializeStudioNoteItems(items);
+  const emitChange = (mutationOptions?: StudioGraphNodeMutationOptions): void => {
+    const serialized = serializeStudioNoteItems(items);
     updateSummary();
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: serialized,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions,
+    });
   };
 
   const bindActionButton = (
@@ -566,7 +718,7 @@ function renderInlineConfigNoteSelectorField(options: {
         items[i - 1] = item;
         items[i] = previous;
         renderItems();
-        emitChange();
+        emitChange({ mode: "discrete" });
       });
 
       const moveDownButton = actionsEl.createEl("button", {
@@ -587,7 +739,7 @@ function renderInlineConfigNoteSelectorField(options: {
         items[i + 1] = item;
         items[i] = next;
         renderItems();
-        emitChange();
+        emitChange({ mode: "discrete" });
       });
 
       const removeButton = actionsEl.createEl("button", {
@@ -603,7 +755,7 @@ function renderInlineConfigNoteSelectorField(options: {
       bindActionButton(removeButton, () => {
         items.splice(i, 1);
         renderItems();
-        emitChange();
+        emitChange({ mode: "discrete" });
       });
 
       const syncEnabledState = (): void => {
@@ -614,7 +766,7 @@ function renderInlineConfigNoteSelectorField(options: {
       checkbox.addEventListener("change", () => {
         item.enabled = checkbox.checked;
         syncEnabledState();
-        emitChange();
+        emitChange({ mode: "discrete" });
       });
 
       const fieldsEl = cardEl.createDiv({ cls: "ss-studio-note-selector-fields" });
@@ -647,7 +799,7 @@ function renderInlineConfigNoteSelectorField(options: {
         item.path = pathInput.value;
         syncCardIndex();
         syncPathState();
-        emitChange();
+        emitChange({ mode: "continuous" });
       });
 
       const browseButtonEl = pathRow.createEl("button", {
@@ -682,7 +834,7 @@ function renderInlineConfigNoteSelectorField(options: {
         pathInput.value = selected;
         syncCardIndex();
         syncPathState();
-        emitChange();
+        emitChange({ mode: "discrete" });
       });
     }
     updateSummary();
@@ -691,7 +843,7 @@ function renderInlineConfigNoteSelectorField(options: {
   bindActionButton(addButton, () => {
     items.push({ path: "", enabled: true });
     renderItems();
-    emitChange();
+    emitChange({ mode: "discrete" });
   });
 
   renderItems();
@@ -704,8 +856,14 @@ function renderInlineConfigPathField(options: {
   fieldEl: HTMLElement;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated } = options;
+  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
   const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-path-row" });
   const inputEl = rowEl.createEl("input", {
     cls: "ss-studio-node-inline-config-input ss-studio-node-inline-config-path-input",
@@ -718,8 +876,14 @@ function renderInlineConfigPathField(options: {
   inputEl.disabled = interactionLocked;
   inputEl.value = readConfigString(node.config[field.key]);
   inputEl.addEventListener("input", () => {
-    node.config[field.key] = inputEl.value;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: inputEl.value,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "continuous" },
+    });
   });
 
   const browseButtonEl = rowEl.createEl("button", {
@@ -751,8 +915,14 @@ function renderInlineConfigPathField(options: {
       return;
     }
     inputEl.value = selected;
-    node.config[field.key] = selected;
-    onNodeConfigMutated(node);
+    commitInlineConfigValueChange({
+      node,
+      key: field.key,
+      value: selected,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      mutationOptions: { mode: "discrete" },
+    });
   });
 }
 
@@ -763,6 +933,12 @@ export function renderInlineConfigPanel(options: {
   orderedFieldKeys: string[];
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   panelClassName?: string;
   hiddenFieldKeys?: Set<string>;
   compactTextareaFieldKeys?: Set<string>;
@@ -779,6 +955,7 @@ export function renderInlineConfigPanel(options: {
     orderedFieldKeys,
     interactionLocked,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     panelClassName,
     hiddenFieldKeys,
     compactTextareaFieldKeys,
@@ -811,6 +988,17 @@ export function renderInlineConfigPanel(options: {
     refreshVisibilityState();
     onNodeConfigMutated(mutatedNode);
   };
+  const handleNodeConfigValueChange = onNodeConfigValueChange
+    ? (
+        nodeId: string,
+        key: string,
+        value: StudioJsonValue,
+        mutationOptions?: StudioGraphNodeMutationOptions
+      ): void => {
+        onNodeConfigValueChange(nodeId, key, value, mutationOptions);
+        refreshVisibilityState();
+      }
+    : undefined;
   let renderedAnyField = false;
 
   for (const field of fields) {
@@ -842,6 +1030,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
         resolveDynamicSelectOptions,
       });
       renderedAnyField = true;
@@ -855,6 +1044,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -870,6 +1060,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -882,6 +1073,7 @@ export function renderInlineConfigPanel(options: {
         interactionLocked,
         compactSingleRow: compactTextareaFieldKeys?.has(field.key) === true,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -893,6 +1085,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -904,6 +1097,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -915,6 +1109,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -926,6 +1121,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
       continue;
@@ -937,6 +1133,7 @@ export function renderInlineConfigPanel(options: {
         fieldEl,
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
+        onNodeConfigValueChange: handleNodeConfigValueChange,
       });
       renderedAnyField = true;
     }

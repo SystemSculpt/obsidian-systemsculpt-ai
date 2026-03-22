@@ -1,5 +1,5 @@
 import { Notice } from "obsidian";
-import type { StudioNodeDefinition, StudioNodeInstance } from "../../../studio/types";
+import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInstance } from "../../../studio/types";
 import { isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import {
@@ -7,6 +7,7 @@ import {
   listStudioCollapsedDetailSections,
   resolveStudioCollapsedSectionLabel,
   resolveStudioNodeDetailSectionVisibility,
+  STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY,
   writeStudioCollapsedSectionVisibilityOverride,
   type StudioNodeDetailMode,
 } from "./StudioGraphNodeDetailMode";
@@ -292,9 +293,14 @@ export function renderCollapsedVisibilityControls(options: {
   nodeDetailMode: StudioNodeDetailMode;
   nodeRunState: StudioNodeRunDisplayState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue | null,
+    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
+  ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
-  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
 }): void {
   const {
     nodeEl,
@@ -303,9 +309,9 @@ export function renderCollapsedVisibilityControls(options: {
     nodeDetailMode,
     nodeRunState,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     onOpenImageEditor,
     onCopyNodeImageToClipboard,
-    onNodePresentationMutated,
   } = options;
   if (nodeDetailMode !== "expanded") {
     return;
@@ -330,9 +336,14 @@ export function renderCollapsedVisibilityControls(options: {
     text: "Quick Actions",
   });
   const buttonsEl = wrapEl.createDiv({ cls: "ss-studio-node-collapsed-visibility-buttons" });
-  const commitPresentationMutation = (): void => {
-    if (onNodePresentationMutated) {
-      onNodePresentationMutated(node);
+  const commitPresentationMutation = (nextValue: StudioJsonValue | null): void => {
+    if (onNodeConfigValueChange) {
+      onNodeConfigValueChange(
+        node.id,
+        STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY,
+        nextValue,
+        { mode: "discrete" }
+      );
       return;
     }
     onNodeConfigMutated(node);
@@ -372,15 +383,23 @@ export function renderCollapsedVisibilityControls(options: {
         mode: "collapsed",
         section,
       });
+      const draftNode: StudioNodeInstance = {
+        ...node,
+        config: {
+          ...node.config,
+        },
+      };
       const changed = writeStudioCollapsedSectionVisibilityOverride({
-        node,
+        node: draftNode,
         section,
         visibleInCollapsed: !currentlyVisible,
       });
       if (!changed) {
         return;
       }
-      commitPresentationMutation();
+      commitPresentationMutation(
+        (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
+      );
       syncVisualState();
     });
   }

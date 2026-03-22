@@ -19,7 +19,7 @@ import {
   materializeTextOutputsAsTextNodes,
   removeManagedTextOutputNodes,
   removePendingManagedOutputNodes,
-} from "../StudioManagedOutputNodes";
+} from "../../../studio/StudioManagedOutputNodes";
 
 function createProject(
   sourceNode: StudioNodeInstance,

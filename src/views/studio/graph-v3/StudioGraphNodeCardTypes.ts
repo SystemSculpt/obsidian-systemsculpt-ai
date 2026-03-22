@@ -1,4 +1,6 @@
+import type { StudioProjectSessionAutosaveMode } from "../../../studio/StudioProjectSession";
 import type {
+  StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
   StudioNodeDefinition,
@@ -7,6 +9,11 @@ import type {
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+
+export type StudioGraphNodeMutationOptions = {
+  mode?: StudioProjectSessionAutosaveMode;
+  captureHistory?: boolean;
+};
 
 export type RenderStudioGraphNodeCardOptions = {
   layer: HTMLElement;
@@ -34,9 +41,19 @@ export type RenderStudioGraphNodeCardOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
+  onNodeSizeChange?: (
+    nodeId: string,
+    size: { width: number; height: number },
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
-  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
   getJsonEditorPreferredMode?: () => "composer" | "raw";
   onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
   renderMarkdownPreview?: (
@@ -65,7 +82,5 @@ export type RenderStudioGraphNodeCardOptions = {
     terminalAnchorEl: HTMLElement;
     interactionLocked: boolean;
     graphInteraction: StudioGraphInteractionEngine;
-    onNodeConfigMutated: (node: StudioNodeInstance) => void;
-    onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   }) => void;
 };

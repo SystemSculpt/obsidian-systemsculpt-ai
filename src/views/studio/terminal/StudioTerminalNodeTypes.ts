@@ -28,8 +28,6 @@ export type StudioTerminalNodeMountOptions = {
   getSidecarStatus: () => StudioTerminalSidecarStatus | null;
   subscribeSidecarStatus: (listener: StudioTerminalSidecarStatusListener) => () => void;
   refreshSidecarStatus?: () => Promise<StudioTerminalSidecarStatus | null>;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   getGraphZoom: () => number;
   subscribeToGraphZoomChanges?: (listener: () => void) => () => void;
 };

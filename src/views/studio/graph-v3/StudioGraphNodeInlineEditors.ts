@@ -5,6 +5,7 @@ import type {
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderInlineConfigPanel } from "./StudioGraphInlineConfigPanel";
@@ -23,7 +24,12 @@ type RenderStudioNodeInlineEditorOptions = {
   }>;
   interactionLocked: boolean;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodePresentationMutated?: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: StudioGraphNodeMutationOptions
+  ) => void;
   getJsonEditorPreferredMode?: () => StudioJsonEditorMode;
   onJsonEditorPreferredModeChange?: (mode: StudioJsonEditorMode) => void;
   renderMarkdownPreview?: (
@@ -207,6 +213,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     definition,
     interactionLocked,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     nodeDetailMode,
     showSystemPromptField = true,
     showOutputPreview = true,
@@ -227,6 +234,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["modelId", "count", "aspectRatio"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -240,6 +248,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["sourcePath"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -254,6 +263,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["ffmpegCommand", "outputFormat", "outputPath", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -269,6 +279,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["preface", "notes"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       compactTextareaFieldKeys,
       showFieldHelp,
       resolveDynamicSelectOptions,
@@ -283,6 +294,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["modelId", "reasoningEffort", "systemPrompt"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       panelClassName: "ss-studio-node-inline-config--text-generation",
       hiddenFieldKeys,
       showFieldHelp,
@@ -306,6 +318,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       ],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -352,6 +365,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       ],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -370,6 +384,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["command", "args", "cwd", "timeoutMs", "maxOutputBytes"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -383,6 +398,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["shellProfile", "cwd"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       panelClassName: "ss-studio-node-inline-config--terminal",
       showFieldHelp,
       resolveDynamicSelectOptions,
@@ -397,6 +413,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       orderedFieldKeys: ["value"],
       interactionLocked,
       onNodeConfigMutated,
+      onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
@@ -413,6 +430,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     orderedFieldKeys: definition.configSchema.fields.map((field) => field.key),
     interactionLocked,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
     showFieldHelp,
     resolveDynamicSelectOptions,
   });

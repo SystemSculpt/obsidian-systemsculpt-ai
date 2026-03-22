@@ -17,6 +17,17 @@ type RenderLabelNodeCardOptions = {
   graphInteraction: StudioGraphInteractionEngine;
   onRemoveNode: (nodeId: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: (
+    nodeId: string,
+    key: string,
+    value: string | number,
+    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
+  ) => void;
+  onNodeSizeChange?: (
+    nodeId: string,
+    size: { width: number; height: number },
+    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
+  ) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   isEditing: boolean;
   shouldAutoFocus: boolean;
@@ -50,6 +61,8 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     graphInteraction,
     onRemoveNode,
     onNodeConfigMutated,
+    onNodeConfigValueChange,
+    onNodeSizeChange,
     onNodeGeometryMutated,
     isEditing,
     shouldAutoFocus,
@@ -61,8 +74,6 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
   const applyDimensions = (): void => {
     const width = resolveStudioLabelWidth(node);
     const height = resolveStudioLabelHeight(node);
-    node.config.width = width;
-    node.config.height = height;
     nodeEl.style.width = `${width}px`;
     nodeEl.style.height = `${height}px`;
   };
@@ -116,8 +127,12 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
       STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
       STUDIO_GRAPH_LABEL_MAX_FONT_SIZE
     );
-    node.config.fontSize = normalized;
     applyFontSize(normalized);
+    if (onNodeConfigValueChange) {
+      onNodeConfigValueChange(node.id, "fontSize", normalized, { mode: "discrete" });
+      return;
+    }
+    node.config.fontSize = normalized;
     onNodeConfigMutated(node);
   };
   decreaseButton.addEventListener("click", (event) => {
@@ -158,7 +173,12 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     textSurfaceEl = textAreaEl;
     applyFontSize(fontSize);
     textAreaEl.addEventListener("input", (event) => {
-      node.config.value = (event.target as HTMLTextAreaElement).value;
+      const nextValue = (event.target as HTMLTextAreaElement).value;
+      if (onNodeConfigValueChange) {
+        onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+        return;
+      }
+      node.config.value = nextValue;
       onNodeConfigMutated(node);
     });
     textAreaEl.addEventListener("keydown", (event) => {
@@ -213,6 +233,7 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     interactionLocked: busy,
     getGraphZoom: () => graphInteraction.getGraphZoom(),
     onNodeConfigMutated,
+    onNodeSizeChange,
     onNodeGeometryMutated,
     applySize: ({ width, height }) => {
       nodeEl.style.width = `${width}px`;

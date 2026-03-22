@@ -1,5 +1,10 @@
+import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeGroup, StudioProjectV1 } from "../../studio/types";
-import { autoAlignGroupNodes } from "./graph-v3/StudioGraphGroupAutoLayout";
+import type { StudioGraphProjectMutationOptions } from "./StudioGraphInteractionTypes";
+import {
+  autoAlignGroupNodes,
+  type GroupAutoAlignResult,
+} from "./graph-v3/StudioGraphGroupAutoLayout";
 import {
   computeStudioGraphGroupBounds,
   STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT,
@@ -14,7 +19,7 @@ import {
   normalizeGroupColor,
   renameGroup,
   setGroupColor,
-} from "./graph-v3/StudioGraphGroupModel";
+} from "../../studio/StudioGraphGroupModel";
 
 const DEFAULT_GROUP_COLOR = "#8de8bc";
 const GROUP_DROP_TARGET_MIN_OVERLAP_RATIO = 0.08;
@@ -65,7 +70,11 @@ type StudioGraphGroupControllerHost = {
   notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
-  scheduleProjectSave: () => void;
+  commitProjectMutation: (
+    reason: StudioProjectSessionMutationReason,
+    mutator: (project: StudioProjectV1) => boolean | void,
+    options?: StudioGraphProjectMutationOptions
+  ) => boolean;
 };
 
 function normalizeGroupName(value: string): string {
@@ -418,17 +427,14 @@ export class StudioGraphGroupController {
       return;
     }
 
-    const project = this.host.getCurrentProject();
-    if (!project) {
-      return;
-    }
-
-    const changed = assignNodesToGroup(project, normalizedGroupId, draggedNodeIds);
+    const changed = this.host.commitProjectMutation(
+      "graph.group",
+      (project) => assignNodesToGroup(project, normalizedGroupId, draggedNodeIds)
+    );
     if (!changed) {
       return;
     }
 
-    this.host.scheduleProjectSave();
     this.host.requestRender();
   }
 
@@ -594,11 +600,15 @@ export class StudioGraphGroupController {
       swatchEl.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const changed = setGroupColor(project, group.id, swatchColor);
+        const changed = this.host.commitProjectMutation(
+          "graph.group",
+          (currentProject) => setGroupColor(currentProject, group.id, swatchColor)
+        );
         this.openColorPaletteGroupId = null;
         this.previewColorByGroupId.delete(group.id);
         if (changed) {
-          this.host.scheduleProjectSave();
+          this.renderGroupLayer();
+          return;
         }
         this.renderGroupLayer();
       });
@@ -652,32 +662,47 @@ export class StudioGraphGroupController {
       return;
     }
 
-    const result = autoAlignGroupNodes(project, groupId, {
-      getNodeWidth: (nodeId) => {
-        const node = this.findNode(project, nodeId);
-        const nodeEl = this.host.getNodeElement(nodeId);
-        if (!node) {
-          return nodeEl ? nodeEl.offsetWidth : null;
-        }
-        return nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node);
-      },
-      getNodeHeight: (nodeId) => {
-        const nodeEl = this.host.getNodeElement(nodeId);
-        if (!nodeEl) {
-          return null;
-        }
-        return Math.max(
-          STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
-          nodeEl.offsetHeight || STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT
-        );
-      },
-    });
-    if (!result.changed) {
+    let result: GroupAutoAlignResult | null = null;
+    const changed = this.host.commitProjectMutation(
+      "node.position",
+      (currentProject) => {
+        result = autoAlignGroupNodes(currentProject, groupId, {
+          getNodeWidth: (nodeId) => {
+            const node = this.findNode(currentProject, nodeId);
+            const nodeEl = this.host.getNodeElement(nodeId);
+            if (!node) {
+              return nodeEl ? nodeEl.offsetWidth : null;
+            }
+            return nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node);
+          },
+          getNodeHeight: (nodeId) => {
+            const nodeEl = this.host.getNodeElement(nodeId);
+            if (!nodeEl) {
+              return null;
+            }
+            return Math.max(
+              STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT,
+              nodeEl.offsetHeight || STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT
+            );
+          },
+        });
+        return result.changed;
+      }
+    );
+    if (!changed || !result) {
       return;
     }
 
-    const nodeMap = buildNodeMap(project);
-    for (const nodeId of result.movedNodeIds) {
+    const currentProject = this.host.getCurrentProject();
+    if (!currentProject) {
+      return;
+    }
+    const currentGroup = (currentProject.graph.groups || []).find((entry) => entry.id === groupId);
+    if (!currentGroup) {
+      return;
+    }
+    const nodeMap = buildNodeMap(currentProject);
+    for (const nodeId of currentGroup.nodeIds) {
       const node = nodeMap.get(nodeId);
       const nodeEl = this.host.getNodeElement(nodeId);
       if (!node || !nodeEl) {
@@ -686,7 +711,6 @@ export class StudioGraphGroupController {
       nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
     }
     this.host.notifyNodePositionsChanged();
-    this.host.scheduleProjectSave();
   }
 
   private startGroupDrag(groupId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
@@ -721,6 +745,7 @@ export class StudioGraphGroupController {
     let pendingClientX = startX;
     let pendingClientY = startY;
     let dragFrameRequested = false;
+    let captureHistoryOnNextMutation = false;
     const originByNodeId = new Map(
       dragNodes.map((node) => [
         node.id,
@@ -740,11 +765,46 @@ export class StudioGraphGroupController {
       }
     }
 
+    const commitDraggedNodePositions = (options?: {
+      captureHistory?: boolean;
+      mode?: StudioGraphProjectMutationOptions["mode"];
+      forceChanged?: boolean;
+    }): boolean => {
+      const deltaX = (pendingClientX - startX) / zoom;
+      const deltaY = (pendingClientY - startY) / zoom;
+      return this.host.commitProjectMutation(
+        "node.position",
+        (currentProject) => {
+          let changed = false;
+          for (const dragNodeId of group.nodeIds) {
+            const currentNode = this.findNode(currentProject, dragNodeId);
+            const origin = originByNodeId.get(dragNodeId);
+            if (!currentNode || !origin) {
+              continue;
+            }
+            const nextX = Math.max(24, Math.round(origin.x + deltaX));
+            const nextY = Math.max(24, Math.round(origin.y + deltaY));
+            if (currentNode.position.x !== nextX || currentNode.position.y !== nextY) {
+              currentNode.position.x = nextX;
+              currentNode.position.y = nextY;
+              changed = true;
+            }
+          }
+          return changed || options?.forceChanged === true;
+        },
+        {
+          mode: options?.mode,
+          captureHistory: options?.captureHistory,
+        }
+      );
+    };
+
     const flushDragFrame = (): void => {
       dragFrameRequested = false;
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
+        captureHistoryOnNextMutation = true;
         dragSurfaceEl.classList.add("is-dragging");
         this.host.onNodeDragStateChange?.(true);
       }
@@ -752,19 +812,25 @@ export class StudioGraphGroupController {
         return;
       }
 
-      const deltaX = (pendingClientX - startX) / zoom;
-      const deltaY = (pendingClientY - startY) / zoom;
-      for (const node of dragNodes) {
-        const origin = originByNodeId.get(node.id);
-        if (!origin) {
+      const changed = commitDraggedNodePositions({
+        captureHistory: captureHistoryOnNextMutation,
+        mode: "continuous",
+      });
+      captureHistoryOnNextMutation = false;
+      if (!changed) {
+        return;
+      }
+      const currentProject = this.host.getCurrentProject();
+      if (!currentProject) {
+        return;
+      }
+      for (const nodeId of group.nodeIds) {
+        const currentNode = this.findNode(currentProject, nodeId);
+        const nodeEl = this.host.getNodeElement(nodeId);
+        if (!currentNode || !nodeEl) {
           continue;
         }
-        node.position.x = Math.max(24, Math.round(origin.x + deltaX));
-        node.position.y = Math.max(24, Math.round(origin.y + deltaY));
-        const nodeEl = this.host.getNodeElement(node.id);
-        if (nodeEl) {
-          nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
-        }
+        nodeEl.style.transform = `translate(${currentNode.position.x}px, ${currentNode.position.y}px)`;
       }
       this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
     };
@@ -817,8 +883,12 @@ export class StudioGraphGroupController {
         return;
       }
       this.host.onNodeDragStateChange?.(false);
+      void commitDraggedNodePositions({
+        captureHistory: false,
+        mode: "discrete",
+        forceChanged: true,
+      });
       this.host.notifyNodePositionsChanged();
-      this.host.scheduleProjectSave();
     };
 
     window.addEventListener("pointermove", onPointerMove);
@@ -912,10 +982,9 @@ export class StudioGraphGroupController {
       if (mode === "commit") {
         const fallbackName = normalizeGroupName(group.name) || nextDefaultGroupName(project);
         const nextName = normalizeGroupName(inputEl.value) || fallbackName;
-        const changed = renameGroup(project, group.id, nextName);
-        if (changed) {
-          this.host.scheduleProjectSave();
-        }
+        this.host.commitProjectMutation("graph.group", (currentProject) =>
+          renameGroup(currentProject, group.id, nextName)
+        );
       }
 
       this.editingGroupId = null;

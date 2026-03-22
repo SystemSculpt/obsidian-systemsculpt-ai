@@ -27,12 +27,16 @@ import { isStudioVisualOnlyNodeKind } from "../../studio/StudioNodeKinds";
 import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { resolveNodeDefinitionPorts } from "../../studio/StudioNodePortResolution";
+import {
+  StudioProjectSession,
+  type StudioProjectSessionAutosaveMode,
+  type StudioProjectSessionMutationReason,
+} from "../../studio/StudioProjectSession";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
   removeNodesFromGroups,
-  sanitizeGraphGroups,
-} from "./graph-v3/StudioGraphGroupModel";
+} from "../../studio/StudioGraphGroupModel";
 import { computeStudioGraphGroupBounds } from "./graph-v3/StudioGraphGroupBounds";
 import {
   openStudioMediaPreviewModal,
@@ -62,6 +66,7 @@ import {
   upsertGraphViewStateForProject,
 } from "./graph-v3/StudioGraphViewStateStore";
 import {
+  STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY,
   STUDIO_NODE_DETAIL_DEFAULT_MODE,
   type StudioNodeDetailMode,
 } from "./graph-v3/StudioGraphNodeDetailMode";
@@ -97,11 +102,7 @@ import {
   formatNodeConfigPreview,
   prettifyNodeKind,
 } from "./StudioViewHelpers";
-import {
-  cleanupStaleManagedOutputPlaceholders,
-  removeManagedTextOutputNodes,
-  removePendingManagedOutputNodes,
-} from "./StudioManagedOutputNodes";
+import { removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import { tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -160,22 +161,17 @@ import {
   materializeManagedOutputPlaceholdersForStartedNode,
   syncDatasetOutputFieldsToProjectNodeConfig,
   syncInlineTextOutputToProjectNodeConfig,
-} from "./systemsculpt-studio-view/StudioRunOutputProjectors";
+} from "../../studio/StudioRunOutputProjectors";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
 } from "./systemsculpt-studio-view/StudioVaultReferenceResolver";
 import {
-  computeStudioProjectTextSignature,
-  consumeExpectedStudioProjectWriteSignature,
-  resolveStudioProjectModifyDecision,
-  trackExpectedStudioProjectWriteSignature,
-} from "./systemsculpt-studio-view/StudioProjectLiveSync";
-import {
   isStudioProjectPath,
   remapPathScopedRecord,
   resolveProjectPathAfterFolderRename,
 } from "./systemsculpt-studio-view/StudioProjectPathState";
+import { repairStudioProjectForLoad } from "../../studio/StudioProjectRepairs";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 
 export { SYSTEMSCULPT_STUDIO_VIEW_TYPE };
@@ -208,8 +204,6 @@ type StudioTerminalRenderCandidate = {
   terminalAnchorEl: HTMLElement;
   interactionLocked: boolean;
   graphInteraction: StudioGraphInteractionEngine;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
 };
 
 type StudioTerminalMount = {
@@ -227,21 +221,15 @@ type StudioTerminalMount = {
 export class SystemSculptStudioView extends ItemView {
   private currentProject: StudioProjectV1 | null = null;
   private currentProjectPath: string | null = null;
+  private currentProjectSession: StudioProjectSession | null = null;
   private busy = false;
   private lastError: string | null = null;
   private nodeDefinitions: StudioNodeDefinition[] = [];
   private nodeDefinitionsByKey = new Map<string, StudioNodeDefinition>();
-  private saveTimer: number | null = null;
   private layoutSaveTimer: number | null = null;
   private viewportScrollCaptureFrame: number | null = null;
   private viewportScrollingClassTimer: number | null = null;
-  private saveInFlight = false;
-  private saveQueued = false;
   private projectLiveSyncWarning: string | null = null;
-  private pendingExternalProjectSync = false;
-  private lastAcceptedProjectSignature: string | null = null;
-  private lastRejectedProjectSignature: string | null = null;
-  private expectedProjectWriteSignatures = new Set<string>();
   private graphViewportEl: HTMLElement | null = null;
   private graphViewportProjectPath: string | null = null;
   private inspectorOverlay: StudioNodeInspectorOverlay | null = null;
@@ -283,7 +271,8 @@ export class SystemSculptStudioView extends ItemView {
       getCurrentProject: () => this.currentProject,
       setError: (error) => this.setError(error),
       recomputeEntryNodes: (project) => this.recomputeEntryNodes(project),
-      scheduleProjectSave: () => this.scheduleProjectSave(),
+      commitProjectMutation: (reason, mutator, options) =>
+        this.commitCurrentProjectMutation(reason, mutator, options),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
       onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
@@ -369,11 +358,15 @@ export class SystemSculptStudioView extends ItemView {
     this.resetProjectHistory(null);
     this.captureGraphViewportState();
     this.app.workspace.requestSaveLayout();
+    await this.flushPendingProjectSaveWork();
     this.clearSaveTimer();
     this.clearLayoutSaveTimer();
     this.resetViewportScrollingState();
     this.runPresentation.reset();
     this.clearProjectLiveSyncState();
+    this.currentProjectSession = null;
+    this.currentProjectPath = null;
+    this.currentProject = null;
     this.editingLabelNodeIds.clear();
     this.pendingLabelAutofocusNodeId = null;
     this.inspectorOverlay?.destroy();
@@ -463,8 +456,6 @@ export class SystemSculptStudioView extends ItemView {
           getSidecarStatus: () => studio.getTerminalSidecarStatus(),
           subscribeSidecarStatus: (listener) => studio.subscribeTerminalSidecarStatus(listener),
           refreshSidecarStatus: () => studio.refreshTerminalSidecarStatus(),
-          onNodeConfigMutated: candidate.onNodeConfigMutated,
-          onNodeGeometryMutated: (node) => candidate.onNodeGeometryMutated(node),
           getGraphZoom: () => candidate.graphInteraction.getGraphZoom(),
           subscribeToGraphZoomChanges: (listener) => this.subscribeTerminalZoomChanges(listener),
         });
@@ -578,7 +569,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private applyHistorySnapshot(snapshot: StudioGraphHistorySnapshot): void {
-    if (!this.currentProjectPath) {
+    if (!this.currentProjectPath || !this.currentProjectSession) {
       return;
     }
 
@@ -588,7 +579,12 @@ export class SystemSculptStudioView extends ItemView {
       nextNodeIdSet.has(nodeId)
     );
 
-    this.currentProject = nextProject;
+    this.currentProjectSession.replaceProjectSnapshot(nextProject, {
+      projectPath: this.currentProjectPath,
+      notifyListeners: false,
+    });
+    this.currentProjectSession.schedulePersist({ mode: "discrete", reason: "history.apply" });
+    this.currentProject = this.currentProjectSession.getProject();
     this.transientFieldErrorsByNodeId.clear();
     this.runPresentation.reset();
     this.editingLabelNodeIds.clear();
@@ -597,15 +593,15 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.clearPendingConnection({ requestRender: false });
     this.graphInteraction.clearProjectState();
-    this.recomputeEntryNodes(nextProject);
-    this.setHistoryCurrentSnapshot(nextProject, nextSelection);
-    this.scheduleProjectSave({ captureHistory: false });
+    this.recomputeEntryNodes(this.currentProject);
+    this.setHistoryCurrentSnapshot(this.currentProject, nextSelection);
     this.render();
     this.graphInteraction.setSelectedNodeIds(nextSelection);
-    void this.refreshNoteNodePreviewsFromVault(nextProject).then((changed) => {
-      if (changed) {
-        this.scheduleProjectSave({ captureHistory: false });
-      }
+    void this.commitCurrentProjectMutationAsync(
+      "history.apply",
+      async (project) => await this.refreshNoteNodePreviewsFromVault(project),
+      { captureHistory: false }
+    ).then(() => {
       this.render();
     });
   }
@@ -662,8 +658,17 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (isTextGenerationOutputLocked(node)) {
-      delete node.config.lockOutput;
-      this.scheduleProjectSave();
+      const changed = this.commitCurrentProjectMutation("node.config", (project) => {
+        const target = this.findNode(project, nodeId);
+        if (!target || target.kind !== "studio.text_generation") {
+          return false;
+        }
+        delete target.config.lockOutput;
+        return true;
+      });
+      if (!changed) {
+        return;
+      }
       this.render();
       new Notice("Text generation output unlocked.");
       return;
@@ -677,14 +682,23 @@ export class SystemSculptStudioView extends ItemView {
       node,
       runtimeText,
     });
-    node.config.lockOutput = true;
-    node.config.value = snapshotText;
+    const changed = this.commitCurrentProjectMutation("node.config", (project) => {
+      const target = this.findNode(project, nodeId);
+      if (!target || target.kind !== "studio.text_generation") {
+        return false;
+      }
+      target.config.lockOutput = true;
+      target.config.value = snapshotText;
+      return true;
+    });
+    if (!changed) {
+      return;
+    }
     this.runPresentation.primeNodeOutput(
       node.id,
       { text: snapshotText },
       { message: "Output locked" }
     );
-    this.scheduleProjectSave();
     this.render();
     new Notice(snapshotText.trim() ? "Text generation output locked." : "Text output locked (currently empty).");
   }
@@ -821,15 +835,21 @@ export class SystemSculptStudioView extends ItemView {
     }
     const { newNodes, newEdges, newGroups, nextSelection } = materializedPaste;
 
-    project.graph.nodes.push(...newNodes);
-    if (newEdges.length > 0) {
-      project.graph.edges.push(...newEdges);
-    }
-    if (newGroups.length > 0) {
-      if (!Array.isArray(project.graph.groups)) {
-        project.graph.groups = [];
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(...newNodes);
+      if (newEdges.length > 0) {
+        currentProject.graph.edges.push(...newEdges);
       }
-      project.graph.groups.push(...newGroups);
+      if (newGroups.length > 0) {
+        if (!Array.isArray(currentProject.graph.groups)) {
+          currentProject.graph.groups = [];
+        }
+        currentProject.graph.groups.push(...newGroups);
+      }
+      return true;
+    });
+    if (!changed) {
+      return false;
     }
 
     this.nodeContextMenuOverlay?.hide();
@@ -837,7 +857,6 @@ export class SystemSculptStudioView extends ItemView {
     this.graphInteraction.clearPendingConnection({ requestRender: false });
     this.graphInteraction.setSelectedNodeIds(nextSelection);
     this.recomputeEntryNodes(project);
-    this.scheduleProjectSave();
     this.render();
     const pastedNoteNodeIds = newNodes
       .filter((node) => node.kind === "studio.note")
@@ -1046,11 +1065,16 @@ export class SystemSculptStudioView extends ItemView {
       cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
       normalizeNodePosition: (position) => this.normalizeNodePosition(position),
     });
-    project.graph.nodes.push(node);
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(node);
+      return true;
+    });
+    if (!changed) {
+      return;
+    }
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(project);
-    this.scheduleProjectSave();
     this.render();
     new Notice("Pasted text as a Text node.");
   }
@@ -1085,13 +1109,18 @@ export class SystemSculptStudioView extends ItemView {
     if (nodes.length === 0) {
       return;
     }
-    project.graph.nodes.push(...nodes);
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(...nodes);
+      return true;
+    });
+    if (!changed) {
+      return;
+    }
     const createdNodeIds = nodes.map((node) => node.id);
 
     this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(project);
-    this.scheduleProjectSave();
     this.render();
     new Notice(
       createdNodeIds.length === 1
@@ -1278,7 +1307,7 @@ export class SystemSculptStudioView extends ItemView {
     const uniquePaths = Array.from(
       new Set(notePaths.map((path) => String(path || "").trim()).filter(Boolean))
     );
-    const createdNodeIds: string[] = [];
+    const createdNodes: StudioNodeInstance[] = [];
 
     for (let index = 0; index < uniquePaths.length; index += 1) {
       const notePath = uniquePaths[index];
@@ -1303,18 +1332,25 @@ export class SystemSculptStudioView extends ItemView {
         continueOnError: false,
         disabled: false,
       };
-      project.graph.nodes.push(node);
-      createdNodeIds.push(node.id);
+      createdNodes.push(node);
     }
 
-    if (createdNodeIds.length === 0) {
+    if (createdNodes.length === 0) {
       return;
     }
 
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(...createdNodes);
+      return true;
+    });
+    if (!changed) {
+      return;
+    }
+
+    const createdNodeIds = createdNodes.map((node) => node.id);
     this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(project);
-    this.scheduleProjectSave();
     this.render();
     void this.refreshNoteNodePreviewsFromVault(project, {
       onlyNodeIds: new Set(createdNodeIds),
@@ -1485,13 +1521,15 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const changed = syncInlineTextOutputToProjectNodeConfig({
-      project: this.currentProject,
-      event,
-    });
-    if (changed) {
-      this.scheduleProjectSave();
-    }
+    this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) =>
+        syncInlineTextOutputToProjectNodeConfig({
+          project,
+          event,
+        }),
+      { captureHistory: false }
+    );
   }
 
   private syncDatasetOutputFieldsToNodeConfig(
@@ -1500,13 +1538,15 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const changed = syncDatasetOutputFieldsToProjectNodeConfig({
-      project: this.currentProject,
-      event,
-    });
-    if (changed) {
-      this.scheduleProjectSave();
-    }
+    this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) =>
+        syncDatasetOutputFieldsToProjectNodeConfig({
+          project,
+          event,
+        }),
+      { captureHistory: false }
+    );
   }
 
   private materializeManagedOutputPlaceholders(
@@ -1515,19 +1555,23 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const changed = materializeManagedOutputPlaceholdersForStartedNode({
-      project: this.currentProject,
-      event,
-      createNodeId: () => randomId("node"),
-      createEdgeId: () => randomId("edge"),
-    });
+    const changed = this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) =>
+        materializeManagedOutputPlaceholdersForStartedNode({
+          project,
+          event,
+          createNodeId: () => randomId("node"),
+          createEdgeId: () => randomId("edge"),
+        }),
+      { captureHistory: false }
+    );
 
     if (!changed) {
       return;
     }
 
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
   }
 
   private materializeManagedOutputNodes(event: Extract<StudioRunEvent, { type: "node.output" }>): void {
@@ -1539,19 +1583,23 @@ export class SystemSculptStudioView extends ItemView {
       runId: event.runId,
     });
     changed =
-      materializeManagedOutputNodesForNodeOutput({
-        project: this.currentProject,
-        event,
-        createNodeId: () => randomId("node"),
-        createEdgeId: () => randomId("edge"),
-      }) || changed;
+      this.commitCurrentProjectMutation(
+        "runtime.projector",
+        (project) =>
+          materializeManagedOutputNodesForNodeOutput({
+            project,
+            event,
+            createNodeId: () => randomId("node"),
+            createEdgeId: () => randomId("edge"),
+          }),
+        { captureHistory: false }
+      ) || changed;
 
     if (!changed) {
       return;
     }
 
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
   }
 
   private materializeManagedOutputNodesFromCache(
@@ -1560,19 +1608,23 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const changed = materializeManagedOutputNodesFromCacheEntries({
-      project: this.currentProject,
-      entries,
-      createNodeId: () => randomId("node"),
-      createEdgeId: () => randomId("edge"),
-    });
+    const changed = this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) =>
+        materializeManagedOutputNodesFromCacheEntries({
+          project,
+          entries,
+          createNodeId: () => randomId("node"),
+          createEdgeId: () => randomId("edge"),
+        }),
+      { captureHistory: false }
+    );
 
     if (!changed) {
       return;
     }
 
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
   }
 
   private removePendingManagedOutputPlaceholders(options?: {
@@ -1582,15 +1634,27 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return false;
     }
-    const removed = removePendingManagedOutputNodes({
-      project: this.currentProject,
-      sourceNodeId: options?.sourceNodeId,
-      runId: options?.runId,
-    });
-    if (!removed.changed) {
+    let removedNodeIds: string[] = [];
+    const changed = this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) => {
+        const removed = removePendingManagedOutputNodes({
+          project,
+          sourceNodeId: options?.sourceNodeId,
+          runId: options?.runId,
+        });
+        if (!removed.changed) {
+          return false;
+        }
+        removedNodeIds = removed.removedNodeIds;
+        return true;
+      },
+      { captureHistory: false }
+    );
+    if (!changed) {
       return false;
     }
-    for (const nodeId of removed.removedNodeIds) {
+    for (const nodeId of removedNodeIds) {
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
@@ -1600,15 +1664,11 @@ export class SystemSculptStudioView extends ItemView {
       }
     }
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
     return true;
   }
 
   private clearSaveTimer(): void {
-    if (this.saveTimer !== null) {
-      window.clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
+    // Legacy wrapper retained while mutation call sites are still view-routed.
   }
 
   private clearLayoutSaveTimer(): void {
@@ -1633,7 +1693,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private hasPendingLocalProjectSaveWork(): boolean {
-    return this.saveTimer !== null || this.saveInFlight || this.saveQueued;
+    return this.currentProjectSession?.hasPendingLocalSaveWork() === true;
   }
 
   private async readStudioProjectRawText(projectPath: string): Promise<string | null> {
@@ -1653,23 +1713,12 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private markAcceptedProjectSignature(signature: string, options?: { trackExpectedWrite?: boolean }): void {
-    const normalized = String(signature || "").trim();
-    if (!normalized) {
-      return;
-    }
-    this.lastAcceptedProjectSignature = normalized;
-    this.lastRejectedProjectSignature = null;
-    if (options?.trackExpectedWrite === true) {
-      trackExpectedStudioProjectWriteSignature(this.expectedProjectWriteSignatures, normalized);
-    }
+    this.currentProjectSession?.markAcceptedProjectSignature(signature, options);
   }
 
   private clearProjectLiveSyncState(): void {
     this.projectLiveSyncWarning = null;
-    this.pendingExternalProjectSync = false;
-    this.lastAcceptedProjectSignature = null;
-    this.lastRejectedProjectSignature = null;
-    this.expectedProjectWriteSignatures.clear();
+    this.currentProjectSession?.clearLiveSyncState();
   }
 
   private applySelectionToCurrentProject(nodeIds: string[]): void {
@@ -1683,37 +1732,22 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private async processCurrentProjectFileMutation(rawText: string): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
+    if (!this.currentProject || !this.currentProjectPath || !this.currentProjectSession) {
       return;
     }
-    this.pendingExternalProjectSync = false;
-    const signature = computeStudioProjectTextSignature(rawText);
-    const isExpectedSelfWrite = consumeExpectedStudioProjectWriteSignature(
-      this.expectedProjectWriteSignatures,
-      signature
-    );
-    const decision = resolveStudioProjectModifyDecision({
+    const update = this.currentProjectSession.resolveExternalProjectTextUpdate(rawText, {
       isActiveProjectFile: true,
-      hasPendingLocalSaveWork: this.hasPendingLocalProjectSaveWork(),
-      isExpectedSelfWrite,
-      signature,
-      lastAcceptedSignature: this.lastAcceptedProjectSignature,
-      lastRejectedSignature: this.lastRejectedProjectSignature,
     });
-    if (decision.kind === "ignore") {
-      if (decision.reason === "self_write" || decision.reason === "duplicate_accepted") {
-        this.markAcceptedProjectSignature(signature);
-      }
+    if (update.decision.kind === "ignore") {
       return;
     }
-    if (decision.kind === "defer") {
-      this.pendingExternalProjectSync = true;
+    if (update.decision.kind === "defer") {
       return;
     }
 
     const lintResult = this.plugin.getStudioService().lintProjectText(rawText);
     if (!lintResult.ok) {
-      this.lastRejectedProjectSignature = signature;
+      this.currentProjectSession.markRejectedProjectSignature(update.signature);
       this.projectLiveSyncWarning = `External .systemsculpt change rejected: ${lintResult.error}`;
       this.render();
       return;
@@ -1726,24 +1760,24 @@ export class SystemSculptStudioView extends ItemView {
     });
     this.applySelectionToCurrentProject(selectedNodeIds);
     this.projectLiveSyncWarning = null;
-    this.markAcceptedProjectSignature(signature);
+    this.currentProjectSession?.markAcceptedProjectSignature(update.signature);
     this.lastError = null;
     this.render();
   }
 
   private async processPendingExternalProjectSync(): Promise<void> {
-    if (!this.pendingExternalProjectSync) {
+    if (!this.currentProjectSession?.hasDeferredExternalSync()) {
       return;
     }
     if (!this.currentProjectPath || !this.currentProject) {
-      this.pendingExternalProjectSync = false;
+      this.currentProjectSession?.consumeDeferredExternalSync();
       return;
     }
     if (this.hasPendingLocalProjectSaveWork()) {
       return;
     }
     const rawText = await this.readStudioProjectRawText(this.currentProjectPath);
-    this.pendingExternalProjectSync = false;
+    this.currentProjectSession.consumeDeferredExternalSync();
     if (rawText == null) {
       return;
     }
@@ -1758,39 +1792,57 @@ export class SystemSculptStudioView extends ItemView {
     }, 360);
   }
 
-  private scheduleProjectSave(options?: { captureHistory?: boolean }): void {
+  private commitCurrentProjectMutation(
+    reason: StudioProjectSessionMutationReason,
+    mutator: (project: StudioProjectV1) => boolean | void,
+    options?: {
+      captureHistory?: boolean;
+      mode?: StudioProjectSessionAutosaveMode;
+    }
+  ): boolean {
     if (options?.captureHistory !== false) {
       this.captureProjectHistoryCheckpoint();
     }
-    this.clearSaveTimer();
-    this.saveTimer = window.setTimeout(() => {
-      this.saveTimer = null;
-      void this.flushProjectSave();
-    }, 280);
+    return this.plugin.getStudioService().mutateCurrentProject(reason, mutator, {
+      mode: options?.mode || "discrete",
+    });
   }
 
-  private async flushProjectSave(options?: { showNotice?: boolean }): Promise<void> {
-    if (!this.currentProjectPath || !this.currentProject) {
+  private async commitCurrentProjectMutationAsync(
+    reason: StudioProjectSessionMutationReason,
+    mutator: (project: StudioProjectV1) => Promise<boolean | void>,
+    options?: {
+      captureHistory?: boolean;
+      mode?: StudioProjectSessionAutosaveMode;
+    }
+  ): Promise<boolean> {
+    if (options?.captureHistory !== false) {
+      this.captureProjectHistoryCheckpoint();
+    }
+    return await this.plugin.getStudioService().mutateCurrentProjectAsync(reason, mutator, {
+      mode: options?.mode || "discrete",
+    });
+  }
+
+  private scheduleSessionPersistFromLegacyMutation(options?: {
+    captureHistory?: boolean;
+    mode?: StudioProjectSessionAutosaveMode;
+  }): void {
+    if (options?.captureHistory !== false) {
+      this.captureProjectHistoryCheckpoint();
+    }
+    this.currentProjectSession?.schedulePersist({ mode: options?.mode || "discrete" });
+  }
+
+  private async flushPendingProjectSaveWork(options?: {
+    force?: boolean;
+    showNotice?: boolean;
+  }): Promise<void> {
+    if (!this.currentProjectSession) {
       return;
     }
-
-    if (this.saveInFlight) {
-      this.saveQueued = true;
-      return;
-    }
-
-    this.saveInFlight = true;
-    this.lastError = null;
     try {
-      await this.plugin
-        .getStudioService()
-        .saveProject(this.currentProjectPath, this.currentProject);
-      const savedRawText = await this.readStudioProjectRawText(this.currentProjectPath);
-      if (savedRawText != null) {
-        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(savedRawText), {
-          trackExpectedWrite: true,
-        });
-      }
+      await this.currentProjectSession.flushPendingSaveWork({ force: options?.force });
       this.projectLiveSyncWarning = null;
       if (options?.showNotice) {
         new Notice("Studio graph saved.");
@@ -1798,14 +1850,12 @@ export class SystemSculptStudioView extends ItemView {
     } catch (error) {
       this.setError(error);
     } finally {
-      this.saveInFlight = false;
-      if (this.saveQueued) {
-        this.saveQueued = false;
-        this.scheduleProjectSave();
-      } else {
-        void this.processPendingExternalProjectSync();
-      }
+      void this.processPendingExternalProjectSync();
     }
+  }
+
+  private async flushProjectSave(options?: { showNotice?: boolean }): Promise<void> {
+    await this.flushPendingProjectSaveWork({ force: true, showNotice: options?.showNotice });
   }
 
   private async loadProjectFromPath(
@@ -1816,18 +1866,19 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
+    if (projectPath !== this.currentProjectPath && this.currentProjectPath && this.currentProject) {
+      await this.flushPendingProjectSaveWork();
+    }
+
     if (projectPath !== this.currentProjectPath || options?.forceReload) {
       this.captureGraphViewportState();
       this.editingLabelNodeIds.clear();
       this.pendingLabelAutofocusNodeId = null;
     }
-    if (projectPath !== this.currentProjectPath) {
-      this.pendingExternalProjectSync = false;
-      this.lastRejectedProjectSignature = null;
-      this.expectedProjectWriteSignatures.clear();
-    }
 
     if (!projectPath) {
+      await this.plugin.getStudioService().closeCurrentProject({ terminateTerminalSessions: false });
+      this.currentProjectSession = null;
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1842,6 +1893,8 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (!isStudioProjectPath(projectPath)) {
+      await this.plugin.getStudioService().closeCurrentProject({ terminateTerminalSessions: false });
+      this.currentProjectSession = null;
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1864,12 +1917,12 @@ export class SystemSculptStudioView extends ItemView {
 
     try {
       const studio = this.plugin.getStudioService();
-      const project = await studio.openProject(projectPath);
-      const groupsSanitized = sanitizeGraphGroups(project);
-      const mediaTitlesNormalized = this.normalizeLegacyMediaNodeTitles(project);
-      const stalePendingRemoved = cleanupStaleManagedOutputPlaceholders(project).changed;
-      const legacyManagedTextRemoved = removeManagedTextOutputNodes({ project }).changed;
+      const session = await studio.openProjectSession(projectPath, {
+        forceReload: options?.forceReload,
+      });
+      const project = session.getProject();
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
+      this.currentProjectSession = session;
       this.currentProjectPath = projectPath;
       this.currentProject = project;
       this.graphInteraction.clearProjectState();
@@ -1884,6 +1937,13 @@ export class SystemSculptStudioView extends ItemView {
             zoom: this.graphInteraction.getGraphZoom(),
             projectPath,
           };
+      await this.commitCurrentProjectMutationAsync(
+        "project.repair",
+        async (currentProject) => {
+          return repairStudioProjectForLoad(currentProject);
+        },
+        { captureHistory: false }
+      );
       try {
         const cacheSnapshot = await studio.getProjectNodeCache(projectPath);
         if (cacheSnapshot) {
@@ -1898,30 +1958,24 @@ export class SystemSculptStudioView extends ItemView {
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
       }
-      const noteValuesHydrated = await this.refreshNoteNodePreviewsFromVault(project);
+      await this.commitCurrentProjectMutationAsync(
+        "project.repair",
+        async (currentProject) => await this.refreshNoteNodePreviewsFromVault(currentProject),
+        { captureHistory: false }
+      );
       this.resetProjectHistory(project);
-      if (
-        groupsSanitized ||
-        mediaTitlesNormalized ||
-        stalePendingRemoved ||
-        legacyManagedTextRemoved ||
-        noteValuesHydrated
-      ) {
-        this.scheduleProjectSave();
-      }
       const loadedRawText = await this.readStudioProjectRawText(projectPath);
       if (loadedRawText != null) {
-        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(loadedRawText));
+        this.currentProjectSession?.markAcceptedProjectText(loadedRawText);
       } else {
-        this.lastAcceptedProjectSignature = null;
+        this.currentProjectSession?.clearLiveSyncState();
       }
-      this.lastRejectedProjectSignature = null;
-      this.pendingExternalProjectSync = false;
-      this.expectedProjectWriteSignatures.clear();
       this.projectLiveSyncWarning = null;
       this.lastError = null;
       this.syncInspectorSelection();
     } catch (error) {
+      await this.plugin.getStudioService().closeCurrentProject({ terminateTerminalSessions: false });
+      this.currentProjectSession = null;
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1969,12 +2023,14 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const changed = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
-      onlyNodeIds: new Set(matchingNodeIds),
-    });
-    if (changed) {
-      this.scheduleProjectSave();
-    }
+    await this.commitCurrentProjectMutationAsync(
+      "vault.sync",
+      async (project) =>
+        await this.refreshNoteNodePreviewsFromVault(project, {
+          onlyNodeIds: new Set(matchingNodeIds),
+        }),
+      { captureHistory: false }
+    );
     this.render();
   }
 
@@ -2011,7 +2067,7 @@ export class SystemSculptStudioView extends ItemView {
       this.applySelectionToCurrentProject(selectedNodeIds);
       const renamedRawText = await this.readStudioProjectRawText(renamedPath);
       if (renamedRawText != null) {
-        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(renamedRawText));
+        this.currentProjectSession?.markAcceptedProjectText(renamedRawText);
       }
       this.projectLiveSyncWarning = null;
       this.render();
@@ -2048,84 +2104,90 @@ export class SystemSculptStudioView extends ItemView {
       this.applySelectionToCurrentProject(selectedNodeIds);
       const remappedRawText = await this.readStudioProjectRawText(remappedProjectPath);
       if (remappedRawText != null) {
-        this.markAcceptedProjectSignature(computeStudioProjectTextSignature(remappedRawText));
+        this.currentProjectSession?.markAcceptedProjectText(remappedRawText);
       }
       this.projectLiveSyncWarning = null;
       this.render();
       return;
     }
 
-    let changed = false;
-    const changedNodeIds = new Set<string>();
-    if (this.isMarkdownVaultFile(file)) {
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        if (this.normalizeNoteNodeConfig(node)) {
-          changed = true;
-        }
-        const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-          path: item.path ? normalizePath(item.path) : "",
-          enabled: item.enabled !== false,
-        }));
-        const remappedItems = existingItems.map((item) => ({
-          path: item.path === previousPath ? normalizePath(file.path) : item.path,
-          enabled: item.enabled,
-        }));
-        if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-          continue;
-        }
-        node.config.notes = serializeStudioNoteItems(remappedItems);
-        const previousTitle = deriveStudioNoteTitleFromPath(previousPath);
-        if (!node.title || node.title === "Note" || node.title === previousTitle) {
-          node.title = file.basename || node.title;
-        }
-        changed = true;
-        changedNodeIds.add(node.id);
-      }
-    } else if (this.isVaultFolder(file)) {
-      const prefix = `${previousPath}/`;
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        if (this.normalizeNoteNodeConfig(node)) {
-          changed = true;
-        }
-        const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-          path: item.path ? normalizePath(item.path) : "",
-          enabled: item.enabled !== false,
-        }));
-        const remappedItems = existingItems.map((item) => {
-          if (!item.path.startsWith(prefix)) {
-            return item;
+    const changed = await this.commitCurrentProjectMutationAsync(
+      "vault.sync",
+      async (project) => {
+        let nextChanged = false;
+        const changedNodeIds = new Set<string>();
+        if (this.isMarkdownVaultFile(file)) {
+          for (const node of project.graph.nodes) {
+            if (node.kind !== "studio.note") {
+              continue;
+            }
+            if (this.normalizeNoteNodeConfig(node)) {
+              nextChanged = true;
+            }
+            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
+              path: item.path ? normalizePath(item.path) : "",
+              enabled: item.enabled !== false,
+            }));
+            const remappedItems = existingItems.map((item) => ({
+              path: item.path === previousPath ? normalizePath(file.path) : item.path,
+              enabled: item.enabled,
+            }));
+            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
+              continue;
+            }
+            node.config.notes = serializeStudioNoteItems(remappedItems);
+            const previousTitle = deriveStudioNoteTitleFromPath(previousPath);
+            if (!node.title || node.title === "Note" || node.title === previousTitle) {
+              node.title = file.basename || node.title;
+            }
+            nextChanged = true;
+            changedNodeIds.add(node.id);
           }
-          const suffix = item.path.slice(prefix.length);
-          return {
-            path: normalizePath(`${file.path}/${suffix}`),
-            enabled: item.enabled,
-          };
-        });
-        if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-          continue;
+        } else if (this.isVaultFolder(file)) {
+          const prefix = `${previousPath}/`;
+          for (const node of project.graph.nodes) {
+            if (node.kind !== "studio.note") {
+              continue;
+            }
+            if (this.normalizeNoteNodeConfig(node)) {
+              nextChanged = true;
+            }
+            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
+              path: item.path ? normalizePath(item.path) : "",
+              enabled: item.enabled !== false,
+            }));
+            const remappedItems = existingItems.map((item) => {
+              if (!item.path.startsWith(prefix)) {
+                return item;
+              }
+              const suffix = item.path.slice(prefix.length);
+              return {
+                path: normalizePath(`${file.path}/${suffix}`),
+                enabled: item.enabled,
+              };
+            });
+            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
+              continue;
+            }
+            node.config.notes = serializeStudioNoteItems(remappedItems);
+            nextChanged = true;
+            changedNodeIds.add(node.id);
+          }
         }
-        node.config.notes = serializeStudioNoteItems(remappedItems);
-        changed = true;
-        changedNodeIds.add(node.id);
-      }
-    }
 
-    if (changedNodeIds.size > 0) {
-      const hydrated = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
-        onlyNodeIds: changedNodeIds,
-      });
-      changed = changed || hydrated;
-    }
+        if (changedNodeIds.size > 0) {
+          const hydrated = await this.refreshNoteNodePreviewsFromVault(project, {
+            onlyNodeIds: changedNodeIds,
+          });
+          nextChanged = nextChanged || hydrated;
+        }
+        return nextChanged;
+      },
+      { captureHistory: false }
+    );
     if (!changed) {
       return;
     }
-    this.scheduleProjectSave();
     this.render();
   }
 
@@ -2171,11 +2233,17 @@ export class SystemSculptStudioView extends ItemView {
     if (matchingNodeIds.size === 0) {
       return;
     }
-    const changed = await this.refreshNoteNodePreviewsFromVault(this.currentProject, {
-      onlyNodeIds: matchingNodeIds,
-    });
-    if (changed) {
-      this.scheduleProjectSave();
+    const changed = await this.commitCurrentProjectMutationAsync(
+      "vault.sync",
+      async (project) =>
+        await this.refreshNoteNodePreviewsFromVault(project, {
+          onlyNodeIds: matchingNodeIds,
+        }),
+      { captureHistory: false }
+    );
+    if (!changed) {
+      this.render();
+      return;
     }
     this.render();
   }
@@ -2473,7 +2541,94 @@ export class SystemSculptStudioView extends ItemView {
     if (node.kind === "studio.note") {
       this.handleNoteNodeConfigMutated(node);
     }
-    this.scheduleProjectSave();
+    this.scheduleSessionPersistFromLegacyMutation();
+  }
+
+  private handleNodeConfigValueChange(
+    nodeId: string,
+    key: string,
+    value: StudioJsonValue,
+    options?: {
+      mode?: StudioProjectSessionAutosaveMode;
+      captureHistory?: boolean;
+    }
+  ): void {
+    const changed = this.commitCurrentProjectMutation(
+      "node.config",
+      (project) => {
+        const target = this.findNode(project, nodeId);
+        if (!target) {
+          return false;
+        }
+        if (key === STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY && value === null) {
+          if (!Object.prototype.hasOwnProperty.call(target.config, key)) {
+            return false;
+          }
+          delete target.config[key];
+          return true;
+        }
+        const previousSerialized = JSON.stringify(target.config[key] ?? null);
+        const nextValue = this.cloneJsonValue(value);
+        const nextSerialized = JSON.stringify(nextValue ?? null);
+        if (previousSerialized === nextSerialized) {
+          return false;
+        }
+        target.config[key] = nextValue;
+        return true;
+      },
+      {
+        captureHistory: options?.captureHistory,
+        mode: options?.mode,
+      }
+    );
+    if (!changed || !this.currentProject) {
+      return;
+    }
+    const node = this.findNode(this.currentProject, nodeId);
+    if (!node) {
+      return;
+    }
+    this.refreshNodeCardPreview(node);
+    if (node.kind === "studio.note") {
+      this.handleNoteNodeConfigMutated(node);
+    }
+  }
+
+  private handleNodeSizeChange(
+    nodeId: string,
+    size: { width: number; height: number },
+    options?: {
+      mode?: StudioProjectSessionAutosaveMode;
+      captureHistory?: boolean;
+    }
+  ): void {
+    const nextWidth = Math.max(1, Math.round(size.width));
+    const nextHeight = Math.max(1, Math.round(size.height));
+    const changed = this.commitCurrentProjectMutation(
+      "node.geometry",
+      (project) => {
+        const target = this.findNode(project, nodeId);
+        if (!target) {
+          return false;
+        }
+        const previousWidth = Number(target.config.width);
+        const previousHeight = Number(target.config.height);
+        if (previousWidth === nextWidth && previousHeight === nextHeight) {
+          return false;
+        }
+        target.config.width = nextWidth;
+        target.config.height = nextHeight;
+        return true;
+      },
+      {
+        captureHistory: options?.captureHistory,
+        mode: options?.mode,
+      }
+    );
+    if (!changed) {
+      return;
+    }
+    this.graphInteraction.notifyNodePositionsChanged();
   }
 
   private openImageEditorForNode(node: StudioNodeInstance): void {
@@ -2493,8 +2648,10 @@ export class SystemSculptStudioView extends ItemView {
       onNodeConfigMutated: (nextNode) => {
         this.handleNodeConfigMutated(nextNode);
       },
-      onRenderedAssetCommitted: (nextNode) => {
-        this.handleNodeConfigMutated(nextNode);
+      onNodeConfigValueChange: (nodeId, key, value, options) => {
+        this.handleNodeConfigValueChange(nodeId, key, value, options);
+      },
+      onRenderedAssetCommitted: () => {
         this.render();
       },
     });
@@ -2548,13 +2705,27 @@ export class SystemSculptStudioView extends ItemView {
         readAsset: (asset) => studio.readAsset(asset),
         storeAsset: (bytes, mimeType) => studio.storeAsset(this.currentProjectPath!, bytes, mimeType),
       });
-      writeStudioCaptionBoardState(node, {
-        ...boardState,
-        sourceAssetPath: sourcePreviewAsset.path,
-        lastRenderedAsset: renderedAsset,
-        updatedAt: new Date().toISOString(),
-      });
-      this.handleNodeConfigMutated(node);
+      const changed = await this.commitCurrentProjectMutationAsync(
+        "media.editor",
+        async (project) => {
+          const targetNode = this.findNode(project, node.id);
+          if (!targetNode || targetNode.kind !== "studio.media_ingest") {
+            return false;
+          }
+          writeStudioCaptionBoardState(targetNode, {
+            ...boardState,
+            sourceAssetPath: sourcePreviewAsset.path,
+            lastRenderedAsset: renderedAsset,
+            updatedAt: new Date().toISOString(),
+          });
+          return true;
+        },
+        { captureHistory: false }
+      );
+      if (!changed) {
+        return renderedAsset;
+      }
+      this.refreshNodeCardPreview(node);
       this.render();
       return renderedAsset;
     }
@@ -2751,8 +2922,7 @@ export class SystemSculptStudioView extends ItemView {
       fromNodeId: fromNodeId || null,
     });
 
-    this.clearSaveTimer();
-    await this.flushProjectSave();
+    await this.flushPendingProjectSaveWork({ force: true });
 
     this.setBusy(true);
     this.lastError = null;
@@ -3040,20 +3210,48 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
 
-    const createdNode = this.createNodeFromDefinition(definition, {
-      position: {
+    const createdNode: StudioNodeInstance = {
+      id: randomId("node"),
+      kind: definition.kind,
+      version: definition.version,
+      title: this.buildAutoCreatedNodeTitle(template.nodeKind, request.fromPortId),
+      position: this.normalizeNodePosition({
         x: anchor.x + 48,
         y: anchor.y + 10,
-      },
-    });
-    if (!createdNode || !this.currentProject) {
-      return false;
-    }
-    createdNode.title = this.buildAutoCreatedNodeTitle(template.nodeKind, request.fromPortId);
+      }),
+      config: cloneConfigDefaults(definition),
+      continueOnError: false,
+      disabled: false,
+    };
 
     const sourceValue = this.resolveSourcePortValue(sourceNode.id, request.fromPortId);
     if (typeof sourceValue !== "undefined") {
       this.seedAutoCreatedNodeConfig(createdNode, template.nodeKind, sourceValue);
+    }
+
+    const createdNodeDefinition = resolveNodeDefinitionPorts(createdNode, definition);
+    const targetPortType =
+      createdNodeDefinition.inputPorts.find((port) => port.id === template.targetPortId)?.type || null;
+    if (!targetPortType || !this.portTypeCompatible(sourcePortType, targetPortType)) {
+      return false;
+    }
+
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (project) => {
+      project.graph.nodes.push(createdNode);
+      project.graph.edges.push({
+        id: randomId("edge"),
+        fromNodeId: sourceNode.id,
+        fromPortId: request.fromPortId,
+        toNodeId: createdNode.id,
+        toPortId: template.targetPortId,
+      });
+      return true;
+    });
+    if (!changed || !this.currentProject) {
+      return false;
+    }
+
+    if (typeof sourceValue !== "undefined") {
       const previewOutputs = this.buildSeededPreviewOutputs(template.nodeKind, sourceValue);
       if (previewOutputs) {
         this.runPresentation.primeNodeOutput(createdNode.id, previewOutputs, {
@@ -3062,21 +3260,9 @@ export class SystemSculptStudioView extends ItemView {
       }
     }
 
-    const targetPortType = this.getPortType(createdNode.id, "in", template.targetPortId);
-    if (!targetPortType || !this.portTypeCompatible(sourcePortType, targetPortType)) {
-      return false;
-    }
-
-    this.currentProject.graph.edges.push({
-      id: randomId("edge"),
-      fromNodeId: sourceNode.id,
-      fromPortId: request.fromPortId,
-      toNodeId: createdNode.id,
-      toPortId: template.targetPortId,
-    });
-
+    this.graphInteraction.selectOnlyNode(createdNode.id);
+    this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
     this.render();
     return true;
   }
@@ -3107,21 +3293,6 @@ export class SystemSculptStudioView extends ItemView {
       x: Math.max(24, Math.round(normalizeGraphCoordinate(position.x))),
       y: Math.max(24, Math.round(normalizeGraphCoordinate(position.y))),
     };
-  }
-
-  private normalizeLegacyMediaNodeTitles(project: StudioProjectV1): boolean {
-    let changed = false;
-    for (const node of project.graph.nodes) {
-      if (node.kind !== "studio.media_ingest") {
-        continue;
-      }
-      const currentTitle = String(node.title || "").trim();
-      if (!currentTitle || currentTitle === "Media Ingest") {
-        node.title = "Media";
-        changed = true;
-      }
-    }
-    return changed;
   }
 
   private createNodeFromDefinition(
@@ -3159,7 +3330,13 @@ export class SystemSculptStudioView extends ItemView {
 
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
-    project.graph.nodes.push(node);
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(node);
+      return true;
+    });
+    if (!changed) {
+      return null;
+    }
     if (node.kind === "studio.label" && options?.autoEditLabel === true) {
       this.editingLabelNodeIds.add(node.id);
       this.pendingLabelAutofocusNodeId = node.id;
@@ -3169,7 +3346,6 @@ export class SystemSculptStudioView extends ItemView {
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(project);
-    this.scheduleProjectSave();
     this.render();
     return node;
   }
@@ -3433,23 +3609,31 @@ export class SystemSculptStudioView extends ItemView {
         return nodeEl ? nodeEl.offsetHeight : null;
       },
     });
-    const changed = removeNodesFromGroups(this.currentProject, [normalizedNodeId]);
+    const changed = this.commitCurrentProjectMutation("graph.group", (project) => {
+      const targetNode = this.findNode(project, normalizedNodeId);
+      if (!targetNode) {
+        return false;
+      }
+      const removed = removeNodesFromGroups(project, [normalizedNodeId]);
+      if (!removed) {
+        return false;
+      }
+      if (bounds) {
+        targetNode.position = this.normalizeNodePosition({
+          x: bounds.left + bounds.width + GROUP_DISCONNECT_OFFSET_X,
+          y: targetNode.position.y,
+        });
+      }
+      return true;
+    });
     if (!changed) {
       return;
-    }
-
-    if (bounds) {
-      node.position = this.normalizeNodePosition({
-        x: bounds.left + bounds.width + GROUP_DISCONNECT_OFFSET_X,
-        y: node.position.y,
-      });
     }
 
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.selectOnlyNode(normalizedNodeId);
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
     this.render();
   }
 
@@ -3458,16 +3642,21 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const createdGroup = createNodeGroupFromSelection(this.currentProject, selectedNodeIds, () =>
-      randomId("group")
-    );
-    if (!createdGroup) {
+    let createdGroupId: string | null = null;
+    const changed = this.commitCurrentProjectMutation("graph.group", (project) => {
+      const createdGroup = createNodeGroupFromSelection(project, selectedNodeIds, () => randomId("group"));
+      if (!createdGroup) {
+        return false;
+      }
+      createdGroupId = createdGroup.id;
+      return true;
+    });
+    if (!changed || !createdGroupId) {
       new Notice("Select at least two nodes to create a group.");
       return;
     }
 
-    this.graphInteraction.requestGroupNameEdit(createdGroup.id);
-    this.scheduleProjectSave();
+    this.graphInteraction.requestGroupNameEdit(createdGroupId);
     this.render();
   }
 
@@ -3515,19 +3704,23 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const previousCount = this.currentProject.graph.nodes.length;
-    this.currentProject.graph.nodes = this.currentProject.graph.nodes.filter(
-      (node) => !idsToRemove.has(node.id)
-    );
-    if (this.currentProject.graph.nodes.length === previousCount) {
+    const changed = this.commitCurrentProjectMutation("graph.node.remove", (project) => {
+      const previousCount = project.graph.nodes.length;
+      project.graph.nodes = project.graph.nodes.filter((node) => !idsToRemove.has(node.id));
+      if (project.graph.nodes.length === previousCount) {
+        return false;
+      }
+      project.graph.edges = project.graph.edges.filter(
+        (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
+      );
+      removeNodesFromGroups(project, Array.from(idsToRemove));
+      return true;
+    });
+    if (!changed) {
       return;
     }
-    this.stopTerminalSessionsForRemovedNodes(removedNodes);
-    this.currentProject.graph.edges = this.currentProject.graph.edges.filter(
-      (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
-    );
-    removeNodesFromGroups(this.currentProject, Array.from(idsToRemove));
 
+    this.stopTerminalSessionsForRemovedNodes(removedNodes);
     for (const nodeId of idsToRemove) {
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
@@ -3540,7 +3733,6 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.recomputeEntryNodes(this.currentProject);
-    this.scheduleProjectSave();
     this.render();
   }
 
@@ -3971,20 +4163,32 @@ export class SystemSculptStudioView extends ItemView {
         this.removeNode(nodeId);
       },
       onNodeTitleInput: (node, title) => {
-        node.title = title;
-        this.scheduleProjectSave();
+        const changed = this.commitCurrentProjectMutation("node.title", (project) => {
+          const target = this.findNode(project, node.id);
+          if (!target || target.title === title) {
+            return false;
+          }
+          target.title = title;
+          return true;
+        });
+        if (!changed) {
+          return;
+        }
       },
       onNodeConfigMutated: (node) => {
         this.handleNodeConfigMutated(node);
+      },
+      onNodeConfigValueChange: (nodeId, key, value, options) => {
+        this.handleNodeConfigValueChange(nodeId, key, value, options);
+      },
+      onNodeSizeChange: (nodeId, size, options) => {
+        this.handleNodeSizeChange(nodeId, size, options);
       },
       onOpenImageEditor: (node) => {
         this.openImageEditorForNode(node);
       },
       onCopyNodeImageToClipboard: (node) => {
         void this.copyImageForNodeToClipboard(node);
-      },
-      onNodePresentationMutated: (_node) => {
-        this.scheduleProjectSave();
       },
       getJsonEditorPreferredMode: () => this.readJsonEditorPreferredMode(),
       onJsonEditorPreferredModeChange: (mode) => this.updateJsonEditorPreferredMode(mode),
@@ -3993,7 +4197,6 @@ export class SystemSculptStudioView extends ItemView {
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
-        this.scheduleProjectSave();
       },
       resolveDynamicSelectOptions: (source, node) =>
         this.resolveDynamicSelectOptionsForNode(source, node),
@@ -4011,8 +4214,6 @@ export class SystemSculptStudioView extends ItemView {
         terminalAnchorEl,
         interactionLocked,
         graphInteraction,
-        onNodeConfigMutated,
-        onNodeGeometryMutated,
       }) => {
         const projectPath = this.currentProjectPath;
         if (!projectPath) {
@@ -4025,8 +4226,6 @@ export class SystemSculptStudioView extends ItemView {
           terminalAnchorEl,
           interactionLocked,
           graphInteraction,
-          onNodeConfigMutated,
-          onNodeGeometryMutated,
         });
       },
     });

@@ -31,6 +31,10 @@ function nodeFixture(
   };
 }
 
+function click(element: HTMLElement): void {
+  element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+}
+
 describe("StudioGraphTextInlineEditor module", () => {
   it("limits inline text support to text-like node kinds", () => {
     expect(isInlineTextNodeKind("studio.note")).toBe(true);
@@ -78,5 +82,51 @@ describe("StudioGraphTextInlineEditor module", () => {
     expect(textarea?.value).toContain("Path: Notes/One.md");
     expect(textarea?.value).toContain("Path: Notes/Two.md");
     expect(textarea?.value).toContain("---");
+  });
+
+  it("uses config value change callbacks for display mode and text edits", () => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture("studio.text", { value: "Hello" });
+    const onNodeConfigMutated = jest.fn();
+    const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
+      expect(nodeId).toBe(node.id);
+      node.config[key] = value as never;
+    });
+
+    renderTextNodeInlineEditor({
+      nodeEl,
+      node,
+      nodeRunState: IDLE_NODE_RUN_STATE,
+      interactionLocked: false,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+    });
+
+    const rawButton = Array.from(
+      nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-text-display-mode-button")
+    ).find((button) => button.textContent?.trim() === "Raw");
+    const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
+    expect(rawButton).toBeDefined();
+    expect(textarea).toBeDefined();
+
+    click(rawButton!);
+    textarea!.value = "Updated via callback";
+    textarea!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(node.config.textDisplayMode).toBe("raw");
+    expect(node.config.value).toBe("Updated via callback");
+    expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+      node.id,
+      "textDisplayMode",
+      "raw",
+      expect.objectContaining({ mode: "discrete" })
+    );
+    expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+      node.id,
+      "value",
+      "Updated via callback",
+      expect.objectContaining({ mode: "continuous" })
+    );
+    expect(onNodeConfigMutated).not.toHaveBeenCalled();
   });
 });
