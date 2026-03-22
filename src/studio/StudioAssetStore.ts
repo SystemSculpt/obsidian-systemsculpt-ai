@@ -13,6 +13,7 @@ type BinaryAdapter = {
 
 function mimeToExtension(mimeType: string): string {
   const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("svg")) return "svg";
   if (normalized.includes("png")) return "png";
   if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
   if (normalized.includes("webp")) return "webp";

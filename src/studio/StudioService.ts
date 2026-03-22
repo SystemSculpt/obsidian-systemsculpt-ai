@@ -337,6 +337,10 @@ export class StudioService {
     return this.assetStore.storeArrayBuffer(targetPath, bytes, mimeType);
   }
 
+  async readAsset(asset: StudioAssetRef): Promise<ArrayBuffer> {
+    return this.assetStore.readArrayBuffer(asset);
+  }
+
   async addCapabilityGrant(grant: {
     capability: StudioCapability;
     scope: StudioCapabilityGrant["scope"];

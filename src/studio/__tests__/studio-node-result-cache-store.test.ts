@@ -183,6 +183,83 @@ describe("StudioNodeResultCacheStore", () => {
     expect(fingerprintA).toBe(fingerprintB);
   });
 
+  it("includes caption board labels in media-ingest fingerprints but ignores rendered asset snapshots", async () => {
+    const mediaNode = (config: StudioNodeInstance["config"]): StudioNodeInstance => ({
+      id: "node_media",
+      kind: "studio.media_ingest",
+      version: "1.0.0",
+      title: "Media",
+      position: { x: 0, y: 0 },
+      config,
+    });
+
+    const baseConfig = {
+      sourcePath: "Assets/source.png",
+      captionBoard: {
+        version: 1,
+        labels: [
+          {
+            id: "label-1",
+            text: "Quarterly update",
+            x: 0.16,
+            y: 0.12,
+            width: 0.52,
+            height: 0.24,
+            fontSize: 56,
+            textAlign: "center",
+            textColor: "#ffffff",
+            styleVariant: "banner",
+            zIndex: 0,
+          },
+        ],
+        sourceAssetPath: "Assets/source.png",
+        lastRenderedAsset: {
+          hash: "hash-a",
+          path: "Studio/assets/captioned-a.svg",
+          mimeType: "image/svg+xml",
+          sizeBytes: 256,
+        },
+        updatedAt: "2026-03-22T01:00:00.000Z",
+      },
+    };
+
+    const fingerprintA = await buildNodeInputFingerprint(mediaNode(baseConfig), {});
+    const fingerprintB = await buildNodeInputFingerprint(
+      mediaNode({
+        ...baseConfig,
+        captionBoard: {
+          ...baseConfig.captionBoard,
+          lastRenderedAsset: {
+            hash: "hash-b",
+            path: "Studio/assets/captioned-b.svg",
+            mimeType: "image/svg+xml",
+            sizeBytes: 999,
+          },
+          updatedAt: "2026-03-22T02:00:00.000Z",
+        },
+      }),
+      {}
+    );
+    const fingerprintC = await buildNodeInputFingerprint(
+      mediaNode({
+        ...baseConfig,
+        captionBoard: {
+          ...baseConfig.captionBoard,
+          labels: [
+            {
+              ...baseConfig.captionBoard.labels[0],
+              text: "New caption text",
+            },
+          ],
+        },
+      }),
+      {}
+    );
+
+    expect(fingerprintA).toBe(fingerprintB);
+    expect(fingerprintC).not.toBe(fingerprintA);
+  });
+
   it("round-trips cache snapshots to the project cache file", async () => {
     const { store } = createCacheStore();
     const projectPath = "SystemSculpt/Studio/Cache Test.systemsculpt";

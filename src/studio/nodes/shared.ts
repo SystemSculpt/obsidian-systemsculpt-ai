@@ -21,6 +21,7 @@ export function getText(value: StudioJsonValue | undefined): string {
 
 export function inferMimeTypeFromPath(path: string): string {
   const lower = String(path || "").toLowerCase();
+  if (lower.endsWith(".svg")) return "image/svg+xml";
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".webp")) return "image/webp";

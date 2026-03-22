@@ -1,6 +1,17 @@
-import type { StudioJsonValue, StudioNodeDefinition, StudioNodeExecutionContext } from "../types";
-import { getText } from "./shared";
-import { extname, isAbsolute } from "node:path";
+import type {
+  StudioAssetRef,
+  StudioJsonValue,
+  StudioNodeDefinition,
+  StudioNodeExecutionContext,
+} from "../types";
+import { composeStudioCaptionBoardImage } from "../StudioCaptionBoardComposition";
+import {
+  boardStateHasRenderableEdits,
+  readStudioCaptionBoardState,
+  resolveStudioCaptionBoardRenderedAsset,
+} from "../StudioCaptionBoardState";
+import { getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
+import { extname } from "node:path";
 
 const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
 const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
@@ -53,12 +64,15 @@ function isPinnedGeneratedMediaNode(context: StudioNodeExecutionContext): boolea
   return owner === MANAGED_MEDIA_OWNER;
 }
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".avif"]);
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".avif", ".svg"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpeg", ".mpg"]);
 
 function inferPreviewMimeType(path: string): string {
   const extension = extname(String(path || "").trim()).toLowerCase();
   if (IMAGE_EXTENSIONS.has(extension)) {
+    if (extension === ".svg") {
+      return "image/svg+xml";
+    }
     if (extension === ".jpg") {
       return "image/jpeg";
     }
@@ -76,18 +90,16 @@ function inferPreviewMimeType(path: string): string {
 async function buildPreviewAssetPath(
   context: StudioNodeExecutionContext,
   sourcePath: string
-): Promise<{ previewPath: string; previewError: string }> {
-  if (!isAbsolute(sourcePath)) {
-    return { previewPath: "", previewError: "" };
-  }
-
-  const mimeType = inferPreviewMimeType(sourcePath);
+): Promise<{ previewAsset: StudioAssetRef | null; previewPath: string; previewError: string }> {
+  const mimeType = inferPreviewMimeType(sourcePath) || inferMimeTypeFromPath(sourcePath);
   if (!mimeType) {
-    return { previewPath: "", previewError: "" };
+    return { previewAsset: null, previewPath: "", previewError: "" };
   }
 
   try {
-    const bytes = await context.services.readLocalFileBinary(sourcePath);
+    const bytes = isLikelyAbsolutePath(sourcePath)
+      ? await context.services.readLocalFileBinary(sourcePath)
+      : await context.services.readVaultBinary(sourcePath);
     const stored = await context.services.storeAsset(bytes, mimeType);
     const previewPath = String(stored.path || "").trim();
     if (!previewPath) {
@@ -95,13 +107,14 @@ async function buildPreviewAssetPath(
         `Media ingest preview staging produced an empty asset path for "${sourcePath}".`
       );
     }
-    return { previewPath, previewError: "" };
+    return { previewAsset: stored, previewPath, previewError: "" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     context.log(
       `[studio.media_ingest] Preview staging skipped for "${sourcePath}": ${message.slice(0, 320)}`
     );
     return {
+      previewAsset: null,
       previewPath: "",
       previewError: message,
     };
@@ -145,14 +158,36 @@ export const mediaIngestNode: StudioNodeDefinition = {
       );
     }
     context.services.assertFilesystemPath(sourcePath);
-    const { previewPath, previewError } = await buildPreviewAssetPath(context, sourcePath);
+    const { previewAsset, previewPath, previewError } = await buildPreviewAssetPath(context, sourcePath);
+    const boardState = readStudioCaptionBoardState(context.node.config);
+    const shouldComposeBoard = boardStateHasRenderableEdits(boardState);
+    let finalAsset: StudioAssetRef | null = null;
+
+    if (shouldComposeBoard && previewAsset?.mimeType.startsWith("image/")) {
+      finalAsset = resolveStudioCaptionBoardRenderedAsset(
+        context.node.config,
+        previewAsset.path || sourcePath
+      );
+      if (!finalAsset) {
+        finalAsset = await composeStudioCaptionBoardImage({
+          baseImage: previewAsset,
+          boardState,
+          readAsset: context.services.readAsset,
+          storeAsset: context.services.storeAsset,
+        });
+      }
+    }
 
     return {
       outputs: {
-        path: sourcePath,
-        preview_path: previewPath as StudioJsonValue,
+        path: (finalAsset?.path || sourcePath) as StudioJsonValue,
+        preview_path: (finalAsset?.path || previewPath) as StudioJsonValue,
         preview_error: previewError as StudioJsonValue,
+        source_preview_path: previewPath as StudioJsonValue,
+        preview_asset: (finalAsset || previewAsset) as StudioJsonValue,
+        source_preview_asset: previewAsset as StudioJsonValue,
       },
+      artifacts: finalAsset ? [finalAsset] : undefined,
     };
   },
 };

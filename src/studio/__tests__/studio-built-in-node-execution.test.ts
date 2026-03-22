@@ -17,6 +17,7 @@ function createContext(options: {
   readAssetMock?: jest.Mock;
   writeTempFileMock?: jest.Mock;
   readVaultTextMock?: jest.Mock;
+  readVaultBinaryMock?: jest.Mock;
   readLocalFileBinaryMock?: jest.Mock;
   deleteLocalFileMock?: jest.Mock;
 }): StudioNodeExecutionContext {
@@ -42,6 +43,7 @@ function createContext(options: {
   const readAssetMock = options.readAssetMock || jest.fn(async () => new ArrayBuffer(0));
   const writeTempFileMock = options.writeTempFileMock || jest.fn(async () => "/tmp/file.bin");
   const readVaultTextMock = options.readVaultTextMock || jest.fn(async () => "");
+  const readVaultBinaryMock = options.readVaultBinaryMock || jest.fn(async () => new ArrayBuffer(0));
   const readLocalFileBinaryMock =
     options.readLocalFileBinaryMock || jest.fn(async () => new ArrayBuffer(0));
   const deleteLocalFileMock = options.deleteLocalFileMock || jest.fn(async () => {});
@@ -74,7 +76,7 @@ function createContext(options: {
       readAsset: readAssetMock,
       resolveAbsolutePath: (path) => path,
       readVaultText: readVaultTextMock,
-      readVaultBinary: async () => new ArrayBuffer(0),
+      readVaultBinary: readVaultBinaryMock,
       readLocalFileBinary: readLocalFileBinaryMock,
       writeTempFile: writeTempFileMock,
       deleteLocalFile: deleteLocalFileMock,
@@ -84,6 +86,26 @@ function createContext(options: {
     },
     log: () => {},
   };
+}
+
+function tinyPngBytes(): ArrayBuffer {
+  return Uint8Array.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+    0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x01, 0xe5, 0x27, 0xd4, 0xa2, 0x00,
+    0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+  ]).buffer;
+}
+
+function captionBoardBaseSvgBytes(): ArrayBuffer {
+  return new TextEncoder().encode(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#1c2f27"/></svg>'
+  ).buffer;
 }
 
 describe("Studio built-in text/image node execution", () => {
@@ -819,8 +841,14 @@ describe("Studio built-in text/image node execution", () => {
     );
 
     expect(result.outputs.path).toBe("SystemSculpt/Assets/second.png");
-    expect(result.outputs.preview_path).toBe("");
+    expect(result.outputs.preview_path).toBe("asset.bin");
     expect(result.outputs.preview_error).toBe("");
+    expect(result.outputs.preview_asset).toEqual({
+      hash: "hash",
+      mimeType: "application/octet-stream",
+      sizeBytes: 0,
+      path: "asset.bin",
+    });
   });
 
   it("media ingest keeps pinned generated-media source paths stable across reruns", async () => {
@@ -843,8 +871,166 @@ describe("Studio built-in text/image node execution", () => {
     );
 
     expect(result.outputs.path).toBe("SystemSculpt/Assets/pinned.png");
-    expect(result.outputs.preview_path).toBe("");
+    expect(result.outputs.preview_path).toBe("asset.bin");
     expect(result.outputs.preview_error).toBe("");
+    expect(result.outputs.preview_asset).toEqual({
+      hash: "hash",
+      mimeType: "application/octet-stream",
+      sizeBytes: 0,
+      path: "asset.bin",
+    });
+  });
+
+  it("media ingest composes captioned image outputs for ingested images", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    expect(definition).toBeDefined();
+    const previewAsset = {
+      hash: "base-hash",
+      mimeType: "image/svg+xml",
+      sizeBytes: captionBoardBaseSvgBytes().byteLength,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.svg",
+    };
+    const captionedAsset = {
+      hash: "caption-hash",
+      mimeType: "image/svg+xml",
+      sizeBytes: 512,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/cd/captioned.svg",
+    };
+    const storeAssetMock = jest
+      .fn()
+      .mockResolvedValueOnce(previewAsset)
+      .mockResolvedValueOnce(captionedAsset);
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/source.svg",
+        captionBoard: {
+          version: 1,
+          labels: [
+            {
+              id: "label-1",
+              text: "Quarterly update",
+              x: 0.16,
+              y: 0.12,
+              width: 0.52,
+              height: 0.24,
+              fontSize: 56,
+              textAlign: "center",
+              textColor: "#ffffff",
+              styleVariant: "banner",
+              zIndex: 0,
+            },
+          ],
+          sourceAssetPath: "",
+          lastRenderedAsset: null,
+          updatedAt: "2026-03-22T00:00:00.000Z",
+        },
+      },
+      storeAssetMock,
+      readVaultBinaryMock: jest.fn(async () => captionBoardBaseSvgBytes()),
+      readAssetMock: jest.fn(async () => captionBoardBaseSvgBytes()),
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(context.services.readVaultBinary).toHaveBeenCalledWith("Assets/source.svg");
+    expect(storeAssetMock).toHaveBeenNthCalledWith(1, expect.any(ArrayBuffer), "image/svg+xml");
+    expect(storeAssetMock).toHaveBeenNthCalledWith(2, expect.any(ArrayBuffer), "image/svg+xml");
+    const svg = new TextDecoder().decode(storeAssetMock.mock.calls[1][0]);
+    expect(svg).toContain("Quarterly update");
+    expect(result.outputs.path).toBe(captionedAsset.path);
+    expect(result.outputs.preview_path).toBe(captionedAsset.path);
+    expect(result.outputs.source_preview_path).toBe(previewAsset.path);
+    expect(result.outputs.preview_asset).toEqual(captionedAsset);
+    expect(result.outputs.source_preview_asset).toEqual(previewAsset);
+    expect(result.artifacts).toEqual([captionedAsset]);
+  });
+
+  it("media ingest composes crop, blur, and highlight overlays for image-editor edits", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    expect(definition).toBeDefined();
+    const previewAsset = {
+      hash: "base-hash",
+      mimeType: "image/svg+xml",
+      sizeBytes: captionBoardBaseSvgBytes().byteLength,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.svg",
+    };
+    const editedAsset = {
+      hash: "edited-hash",
+      mimeType: "image/svg+xml",
+      sizeBytes: 768,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ef/edited.svg",
+    };
+    const storeAssetMock = jest
+      .fn()
+      .mockResolvedValueOnce(previewAsset)
+      .mockResolvedValueOnce(editedAsset);
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/source.svg",
+        captionBoard: {
+          version: 1,
+          labels: [],
+          annotations: [
+            {
+              id: "annotation-circle",
+              kind: "highlight_circle",
+              x: 0.22,
+              y: 0.18,
+              width: 0.28,
+              height: 0.22,
+              color: "#ff4d4f",
+              strokeWidth: 8,
+              blurRadius: 16,
+              zIndex: 0,
+            },
+            {
+              id: "annotation-blur",
+              kind: "blur_rect",
+              x: 0.54,
+              y: 0.24,
+              width: 0.22,
+              height: 0.2,
+              color: "#ff4d4f",
+              strokeWidth: 8,
+              blurRadius: 20,
+              zIndex: 1,
+            },
+          ],
+          crop: {
+            x: 0.1,
+            y: 0.1,
+            width: 0.6,
+            height: 0.5,
+          },
+          sourceAssetPath: "",
+          lastRenderedAsset: null,
+          updatedAt: "2026-03-22T00:00:00.000Z",
+        },
+      },
+      storeAssetMock,
+      readVaultBinaryMock: jest.fn(async () => captionBoardBaseSvgBytes()),
+      readAssetMock: jest.fn(async () => captionBoardBaseSvgBytes()),
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(context.services.readVaultBinary).toHaveBeenCalledWith("Assets/source.svg");
+    expect(storeAssetMock).toHaveBeenNthCalledWith(1, expect.any(ArrayBuffer), "image/svg+xml");
+    expect(storeAssetMock).toHaveBeenNthCalledWith(2, expect.any(ArrayBuffer), "image/svg+xml");
+    const svg = new TextDecoder().decode(storeAssetMock.mock.calls[1][0]);
+    expect(svg).toContain("feGaussianBlur");
+    expect(svg).toContain("<ellipse");
+    expect(svg).toContain('viewBox="120.00 80.00 720.00 400.00"');
+    expect(result.outputs.path).toBe(editedAsset.path);
+    expect(result.outputs.preview_path).toBe(editedAsset.path);
+    expect(result.outputs.source_preview_path).toBe(previewAsset.path);
+    expect(result.outputs.preview_asset).toEqual(editedAsset);
+    expect(result.outputs.source_preview_asset).toEqual(previewAsset);
+    expect(result.artifacts).toEqual([editedAsset]);
   });
 
   it("media ingest stages preview assets for absolute local videos", async () => {

@@ -53,6 +53,19 @@ function normalizeNodeConfigForFingerprint(node: StudioNodeInstance): StudioNode
     return config;
   }
 
+  if (kind === "studio.media_ingest") {
+    const captionBoard = isRecord(config.captionBoard)
+      ? { ...(config.captionBoard as Record<string, StudioJsonValue>) }
+      : null;
+    if (captionBoard) {
+      delete captionBoard.lastRenderedAsset;
+      delete captionBoard.updatedAt;
+      delete captionBoard.sourceAssetPath;
+      config.captionBoard = captionBoard;
+    }
+    return config;
+  }
+
   return config;
 }
 
