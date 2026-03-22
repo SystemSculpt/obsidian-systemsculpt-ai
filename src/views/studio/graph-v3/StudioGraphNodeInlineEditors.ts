@@ -233,7 +233,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
   }
 
   if (kind === "studio.media_ingest") {
-    return renderInlineConfigPanel({
+    renderInlineConfigPanel({
       nodeEl,
       node,
       definition,
@@ -243,6 +243,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       resolveDynamicSelectOptions,
     });
+    return true;
   }
 
   if (kind === "studio.audio_extract") {

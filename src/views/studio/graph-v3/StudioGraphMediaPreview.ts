@@ -1,11 +1,12 @@
 import type { StudioNodeInstance } from "../../../studio/types";
+import { resolveStudioCaptionBoardRenderedAsset } from "../../../studio/StudioCaptionBoardState";
 
 export type StudioNodeMediaPreview = {
   kind: "image" | "video";
   path: string;
 };
 
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "avif"]);
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "avif", "svg"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v", "mpeg", "mpg"]);
 
 function isAbsoluteFilesystemPath(path: string): boolean {
@@ -73,15 +74,20 @@ export function resolveNodeMediaPreview(
 
   if (node.kind === "studio.media_ingest") {
     const config = (node.config || {}) as Record<string, unknown>;
+    const sourcePreviewPath = typeof outputs?.source_preview_path === "string" ? outputs.source_preview_path.trim() : "";
     const previewPath = typeof outputs?.preview_path === "string" ? outputs.preview_path.trim() : "";
     const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
     const outputPath = typeof outputs?.path === "string" ? outputs.path.trim() : "";
-    const mediaKindPath = outputPath || configuredPath || previewPath;
-    const renderPath = previewPath || outputPath || configuredPath;
+    const renderedAsset = resolveStudioCaptionBoardRenderedAsset(
+      node.config,
+      sourcePreviewPath || configuredPath
+    );
+    const mediaKindPath = outputPath || configuredPath || sourcePreviewPath || previewPath;
+    const renderPath = renderedAsset?.path || previewPath || outputPath || sourcePreviewPath || configuredPath;
     if (!mediaKindPath || !renderPath) {
       return null;
     }
-    if (!previewPath && isAbsoluteFilesystemPath(mediaKindPath)) {
+    if (!previewPath && !renderedAsset && isAbsoluteFilesystemPath(mediaKindPath)) {
       return null;
     }
     const kind = inferMediaKind({ path: mediaKindPath });

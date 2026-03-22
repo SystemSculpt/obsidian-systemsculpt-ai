@@ -13,6 +13,7 @@ import {
 import type SystemSculptPlugin from "../../main";
 import { randomId } from "../../studio/utils";
 import type {
+  StudioAssetRef,
   StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
@@ -37,6 +38,14 @@ import {
   openStudioMediaPreviewModal,
   resolveStudioAssetPreviewSrc,
 } from "./graph-v3/StudioGraphMediaPreviewModal";
+import { openStudioImageEditorModal } from "./graph-v3/StudioGraphImageEditorModal";
+import { composeStudioCaptionBoardImage } from "../../studio/StudioCaptionBoardComposition";
+import {
+  boardStateHasRenderableEdits,
+  readStudioCaptionBoardState,
+  resolveStudioCaptionBoardRenderedAsset,
+  writeStudioCaptionBoardState,
+} from "../../studio/StudioCaptionBoardState";
 import {
   getSavedGraphViewState,
   getSavedNodeDetailMode,
@@ -94,7 +103,7 @@ import {
   removePendingManagedOutputNodes,
 } from "./StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
-import { tryCopyToClipboard } from "../../utils/clipboard";
+import { tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
 import {
@@ -2467,6 +2476,111 @@ export class SystemSculptStudioView extends ItemView {
     this.scheduleProjectSave();
   }
 
+  private openImageEditorForNode(node: StudioNodeInstance): void {
+    if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
+      return;
+    }
+    const projectPath = this.currentProjectPath;
+    const studio = this.plugin.getStudioService();
+    openStudioImageEditorModal({
+      app: this.app,
+      node,
+      nodeRunState: this.runPresentation.getNodeState(node.id),
+      projectPath,
+      resolveAssetPreviewSrc: (assetPath) => resolveStudioAssetPreviewSrc(this.app, assetPath),
+      readAsset: (asset) => studio.readAsset(asset),
+      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
+      onNodeConfigMutated: (nextNode) => {
+        this.handleNodeConfigMutated(nextNode);
+      },
+      onRenderedAssetCommitted: (nextNode) => {
+        this.handleNodeConfigMutated(nextNode);
+        this.render();
+      },
+    });
+  }
+
+  private normalizeStudioAssetRefLike(value: unknown): StudioAssetRef | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    const hash = typeof record.hash === "string" ? record.hash.trim() : "";
+    const path = typeof record.path === "string" ? record.path.trim() : "";
+    const mimeType =
+      typeof record.mimeType === "string"
+        ? record.mimeType.trim()
+        : typeof record.mime_type === "string"
+          ? record.mime_type.trim()
+          : "";
+    const sizeBytes = Number(record.sizeBytes ?? record.size_bytes);
+    if (!hash || !path || !mimeType || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      return null;
+    }
+    return {
+      hash,
+      path,
+      mimeType,
+      sizeBytes: Math.floor(sizeBytes),
+    };
+  }
+
+  private async ensureRenderedImageAssetForNode(node: StudioNodeInstance): Promise<StudioAssetRef | null> {
+    if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
+      return null;
+    }
+
+    const nodeRunState = this.runPresentation.getNodeState(node.id);
+    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
+    const sourcePreviewAsset = this.normalizeStudioAssetRefLike(outputs.source_preview_asset);
+    const previewAsset = this.normalizeStudioAssetRefLike(outputs.preview_asset);
+    const boardState = readStudioCaptionBoardState(node.config);
+
+    if (boardStateHasRenderableEdits(boardState) && sourcePreviewAsset) {
+      const existing = resolveStudioCaptionBoardRenderedAsset(node.config, sourcePreviewAsset.path);
+      if (existing) {
+        return existing;
+      }
+      const studio = this.plugin.getStudioService();
+      const renderedAsset = await composeStudioCaptionBoardImage({
+        baseImage: sourcePreviewAsset,
+        boardState,
+        readAsset: (asset) => studio.readAsset(asset),
+        storeAsset: (bytes, mimeType) => studio.storeAsset(this.currentProjectPath!, bytes, mimeType),
+      });
+      writeStudioCaptionBoardState(node, {
+        ...boardState,
+        sourceAssetPath: sourcePreviewAsset.path,
+        lastRenderedAsset: renderedAsset,
+        updatedAt: new Date().toISOString(),
+      });
+      this.handleNodeConfigMutated(node);
+      this.render();
+      return renderedAsset;
+    }
+
+    return previewAsset || sourcePreviewAsset;
+  }
+
+  private async copyImageForNodeToClipboard(node: StudioNodeInstance): Promise<void> {
+    const asset = await this.ensureRenderedImageAssetForNode(node);
+    if (!asset) {
+      new Notice("Run this image node once before copying the image.");
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(asset.path);
+    if (!(file instanceof TFile)) {
+      new Notice("Unable to copy image to clipboard.");
+      return;
+    }
+    const copied = await tryCopyImageFileToClipboard(this.app, file);
+    if (!copied) {
+      new Notice("Unable to copy image to clipboard.");
+      return;
+    }
+    new Notice("Image copied to clipboard.");
+  }
+
   private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
     if (this.normalizeNoteNodeConfig(node)) {
       this.refreshNodeCardPreview(node);
@@ -3862,6 +3976,12 @@ export class SystemSculptStudioView extends ItemView {
       },
       onNodeConfigMutated: (node) => {
         this.handleNodeConfigMutated(node);
+      },
+      onOpenImageEditor: (node) => {
+        this.openImageEditorForNode(node);
+      },
+      onCopyNodeImageToClipboard: (node) => {
+        void this.copyImageForNodeToClipboard(node);
       },
       onNodePresentationMutated: (_node) => {
         this.scheduleProjectSave();

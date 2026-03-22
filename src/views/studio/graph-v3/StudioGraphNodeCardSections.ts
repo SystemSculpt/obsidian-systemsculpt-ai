@@ -14,6 +14,7 @@ import {
   statusLabelForNode,
   type StudioNodeRunDisplayState,
 } from "../StudioRunPresentationState";
+import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 
 export function bindNodeCardPointerDown(options: {
   nodeEl: HTMLElement;
@@ -256,12 +257,43 @@ export function renderNodePorts(options: {
   }
 }
 
+function extractPathExtension(path: string): string {
+  const normalized = String(path || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  const withoutQuery = normalized.split(/[?#]/, 1)[0];
+  const dot = withoutQuery.lastIndexOf(".");
+  return dot >= 0 ? withoutQuery.slice(dot + 1) : "";
+}
+
+function mediaIngestLooksLikeImage(node: StudioNodeInstance, nodeRunState: StudioNodeRunDisplayState): boolean {
+  const mediaPreview = resolveNodeMediaPreview(node, nodeRunState.outputs as Record<string, unknown> | null);
+  if (mediaPreview?.kind === "image") {
+    return true;
+  }
+  if (node.kind !== "studio.media_ingest") {
+    return false;
+  }
+  const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
+  const candidatePaths = [
+    typeof outputs.preview_path === "string" ? outputs.preview_path : "",
+    typeof outputs.path === "string" ? outputs.path : "",
+    typeof node.config.sourcePath === "string" ? node.config.sourcePath : "",
+  ];
+  const extension = candidatePaths.map((value) => extractPathExtension(value)).find(Boolean) || "";
+  return new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "avif", "svg"]).has(extension);
+}
+
 export function renderCollapsedVisibilityControls(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   busy: boolean;
   nodeDetailMode: StudioNodeDetailMode;
+  nodeRunState: StudioNodeRunDisplayState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   onNodePresentationMutated?: (node: StudioNodeInstance) => void;
 }): void {
   const {
@@ -269,7 +301,10 @@ export function renderCollapsedVisibilityControls(options: {
     node,
     busy,
     nodeDetailMode,
+    nodeRunState,
     onNodeConfigMutated,
+    onOpenImageEditor,
+    onCopyNodeImageToClipboard,
     onNodePresentationMutated,
   } = options;
   if (nodeDetailMode !== "expanded") {
@@ -282,14 +317,17 @@ export function renderCollapsedVisibilityControls(options: {
   const sections = listStudioCollapsedDetailSections().filter((section) =>
     isStudioCollapsedSectionApplicableToNode(node, section)
   );
-  if (sections.length === 0) {
+  const hasImageActions = mediaIngestLooksLikeImage(node, nodeRunState);
+  const showEditorAction = node.kind === "studio.media_ingest" && hasImageActions && typeof onOpenImageEditor === "function";
+  const showCopyImageAction = hasImageActions && typeof onCopyNodeImageToClipboard === "function";
+  if (sections.length === 0 && !showEditorAction && !showCopyImageAction) {
     return;
   }
 
   const wrapEl = nodeEl.createDiv({ cls: "ss-studio-node-collapsed-visibility" });
   wrapEl.createDiv({
     cls: "ss-studio-node-collapsed-visibility-title",
-    text: "Collapsed Visibility",
+    text: "Quick Actions",
   });
   const buttonsEl = wrapEl.createDiv({ cls: "ss-studio-node-collapsed-visibility-buttons" });
   const commitPresentationMutation = (): void => {
@@ -299,6 +337,7 @@ export function renderCollapsedVisibilityControls(options: {
     }
     onNodeConfigMutated(node);
   };
+
   for (const section of sections) {
     const metadata = resolveStudioCollapsedSectionLabel(section);
     const button = buttonsEl.createEl("button", {
@@ -343,6 +382,46 @@ export function renderCollapsedVisibilityControls(options: {
       }
       commitPresentationMutation();
       syncVisualState();
+    });
+  }
+
+  if (showEditorAction) {
+    const button = buttonsEl.createEl("button", {
+      cls: "ss-studio-node-collapsed-visibility-button",
+      text: "Edit Image",
+      attr: {
+        "aria-label": "Open image editor",
+        title: "Open image editor",
+      },
+    });
+    button.type = "button";
+    button.disabled = busy;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) {
+        onOpenImageEditor?.(node);
+      }
+    });
+  }
+
+  if (showCopyImageAction) {
+    const button = buttonsEl.createEl("button", {
+      cls: "ss-studio-node-collapsed-visibility-button",
+      text: "Copy Image",
+      attr: {
+        "aria-label": "Copy image to clipboard",
+        title: "Copy image to clipboard",
+      },
+    });
+    button.type = "button";
+    button.disabled = busy;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) {
+        onCopyNodeImageToClipboard?.(node);
+      }
     });
   }
 }

@@ -47,6 +47,8 @@ export type StudioGraphWorkspaceRendererOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   onNodePresentationMutated?: (node: StudioNodeInstance) => void;
   getJsonEditorPreferredMode?: () => "composer" | "raw";
   onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
@@ -114,6 +116,8 @@ export function renderStudioGraphWorkspace(
     onRemoveNode,
     onNodeTitleInput,
     onNodeConfigMutated,
+    onOpenImageEditor,
+    onCopyNodeImageToClipboard,
     onNodePresentationMutated,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
@@ -387,6 +391,8 @@ export function renderStudioGraphWorkspace(
       onRemoveNode,
       onNodeTitleInput,
       onNodeConfigMutated,
+      onOpenImageEditor,
+      onCopyNodeImageToClipboard,
       onNodePresentationMutated,
       getJsonEditorPreferredMode,
       onJsonEditorPreferredModeChange,

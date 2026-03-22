@@ -1,4 +1,5 @@
 import type { StudioNodeInstance } from "../../../studio/types";
+import { resolveStudioCaptionBoardRenderedAsset } from "../../../studio/StudioCaptionBoardState";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 import { shouldSuppressNodeOutputPreview } from "./StudioGraphNodeInlineEditors";
 import {
@@ -15,12 +16,21 @@ export function resolveMediaIngestRevealPath(
     return "";
   }
 
+  const config = (node.config || {}) as Record<string, unknown>;
+  const sourcePreviewPath = typeof outputs?.source_preview_path === "string" ? outputs.source_preview_path.trim() : "";
+  const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
+  const renderedAsset = resolveStudioCaptionBoardRenderedAsset(
+    node.config,
+    sourcePreviewPath || configuredPath
+  );
+  if (renderedAsset?.path) {
+    return renderedAsset.path;
+  }
+
   const outputPath = typeof outputs?.path === "string" ? outputs.path.trim() : "";
   if (outputPath) {
     return outputPath;
   }
-  const config = (node.config || {}) as Record<string, unknown>;
-  const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
   if (configuredPath) {
     return configuredPath;
   }
@@ -102,6 +112,10 @@ export function renderNodeMediaPreview(options: {
 
   const previewEl = nodeEl.createDiv({ cls: "ss-studio-node-media-preview" });
   if (node.kind === "studio.media_ingest") {
+    previewEl.addClass("is-media-ingest");
+    if (mediaPreview.kind === "image") {
+      previewEl.addClass("is-contained-image");
+    }
     previewEl.setAttribute("title", "Double-click to reveal in Finder");
   }
   previewEl.addEventListener("dblclick", (event) => {
