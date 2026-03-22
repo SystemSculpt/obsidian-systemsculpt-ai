@@ -159,6 +159,71 @@ describe("StudioService session-backed mutation commands", () => {
     expect(session.getProject().name).toBe("Reloaded Project");
   });
 
+  it("preserves resized media ingest geometry when legacy config is normalized during reload", async () => {
+    const service = new StudioService(createPluginStub());
+    const reloadedProject = projectFixture();
+    reloadedProject.graph.nodes.push({
+      id: "media_1",
+      kind: "studio.media_ingest",
+      version: "1.0.0",
+      title: "Media Ingest",
+      position: { x: 0, y: 0 },
+      config: {
+        vaultPath: "/media/input.mp4",
+        sourceMode: "local",
+        assetMode: "auto",
+        mediaKind: "video",
+        width: 512,
+        height: 356,
+        captionBoard: {
+          version: 1,
+          labels: [],
+        },
+      },
+      continueOnError: false,
+      disabled: false,
+    });
+    const loadProject = jest
+      .spyOn((service as any).projectStore, "loadProject")
+      .mockResolvedValue(reloadedProject);
+    const saveProject = jest
+      .spyOn((service as any).projectStore, "saveProject")
+      .mockResolvedValue();
+    jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue("{}");
+    jest.spyOn(service as any, "ensureDefaultPolicy").mockResolvedValue(undefined);
+
+    const session = await service.openProjectSession("Studio/Test.systemsculpt", { forceReload: true });
+    const mediaNode = session.getProject().graph.nodes.find((node) => node.id === "media_1");
+
+    expect(loadProject).toHaveBeenCalledWith("Studio/Test.systemsculpt");
+    expect(mediaNode?.config).toEqual({
+      sourcePath: "/media/input.mp4",
+      width: 512,
+      height: 356,
+      captionBoard: {
+        version: 1,
+        labels: [],
+      },
+    });
+    expect(saveProject).toHaveBeenCalledWith(
+      "Studio/Test.systemsculpt",
+      expect.objectContaining({
+        graph: expect.objectContaining({
+          nodes: expect.arrayContaining([
+            expect.objectContaining({
+              id: "media_1",
+              config: expect.objectContaining({
+                sourcePath: "/media/input.mp4",
+                width: 512,
+                height: 356,
+              }),
+            }),
+          ]),
+        }),
+      })
+    );
+  });
+
   it("runs the current project from the live session snapshot", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();

@@ -72,16 +72,13 @@ function mapEdgePorts(edge: StudioEdge, sourceKind: string, targetKind: string):
 function normalizeMediaIngestConfig(config: Record<string, StudioJsonValue>): Record<string, StudioJsonValue> {
   const sourcePath = asText(config.sourcePath).trim() || asText(config.vaultPath).trim();
   const next: Record<string, StudioJsonValue> = {
+    ...config,
     sourcePath,
   };
-  for (const [key, value] of Object.entries(config)) {
-    if (key === "sourcePath" || key === "vaultPath") {
-      continue;
-    }
-    if (key.startsWith("__studio_")) {
-      next[key] = value;
-    }
-  }
+  delete next.vaultPath;
+  delete next.sourceMode;
+  delete next.assetMode;
+  delete next.mediaKind;
   return next;
 }
 

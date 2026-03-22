@@ -124,6 +124,64 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     ).toBe(true);
   });
 
+  it("preserves non-legacy media ingest config like resized geometry and caption edits", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "media",
+        kind: "studio.media_ingest",
+        version: "1.0.0",
+        title: "Media",
+        position: { x: 0, y: 0 },
+        config: {
+          vaultPath: "/media/input.mp4",
+          sourceMode: "local",
+          assetMode: "auto",
+          mediaKind: "video",
+          width: 512,
+          height: 356,
+          captionBoard: {
+            version: 1,
+            labels: [],
+          },
+          __studio_renderedAsset: {
+            path: "SystemSculpt/Studio/rendered.png",
+          },
+        },
+      },
+      {
+        id: "audio",
+        kind: "studio.audio_extract",
+        version: "1.0.0",
+        title: "Audio",
+        position: { x: 250, y: 0 },
+        config: {},
+      }
+    );
+    project.graph.edges.push({
+      id: "edge",
+      fromNodeId: "media",
+      fromPortId: "path",
+      toNodeId: "audio",
+      toPortId: "path",
+    });
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.project.graph.nodes[0].config).toEqual({
+      sourcePath: "/media/input.mp4",
+      width: 512,
+      height: 356,
+      captionBoard: {
+        version: 1,
+        labels: [],
+      },
+      __studio_renderedAsset: {
+        path: "SystemSculpt/Studio/rendered.png",
+      },
+    });
+  });
+
   it("is idempotent once a project already uses path-only ports", () => {
     const project = baseProject();
     project.graph.nodes.push(
