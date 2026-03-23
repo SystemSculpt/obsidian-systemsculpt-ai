@@ -68,6 +68,7 @@ function renderNodeCard(options: {
   nodeRunState?: StudioNodeRunDisplayState;
   resolveAssetPreviewSrc?: (assetPath: string) => string | null;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
 }): HTMLElement {
   const {
@@ -76,6 +77,7 @@ function renderNodeCard(options: {
     nodeRunState = IDLE_NODE_RUN_STATE,
     resolveAssetPreviewSrc,
     onOpenImageEditor,
+    onEditImageWithAi,
     onCopyNodeImageToClipboard,
   } = options;
   const node = createNode(kind, config);
@@ -99,6 +101,7 @@ function renderNodeCard(options: {
     onNodeTitleInput: jest.fn(),
     onNodeConfigMutated: jest.fn(),
     onOpenImageEditor,
+    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     onNodeGeometryMutated: jest.fn(),
     isLabelEditing: jest.fn(() => false),
@@ -161,6 +164,7 @@ describe("renderStudioGraphNodeCard", () => {
 
   it("renders quick actions for image media-ingest nodes", () => {
     const onOpenImageEditor = jest.fn();
+    const onEditImageWithAi = jest.fn();
     const onCopyNodeImageToClipboard = jest.fn();
     const nodeEl = renderNodeCard({
       kind: "studio.media_ingest",
@@ -174,21 +178,26 @@ describe("renderStudioGraphNodeCard", () => {
         },
       },
       onOpenImageEditor,
+      onEditImageWithAi,
       onCopyNodeImageToClipboard,
     });
 
     const quickActions = nodeEl.querySelector<HTMLElement>(".ss-studio-node-collapsed-visibility");
     const buttons = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-collapsed-visibility-button"));
+    const aiEditButton = buttons.find((button) => button.textContent?.trim() === "Edit with AI");
     const editButton = buttons.find((button) => button.textContent?.trim() === "Edit Image");
     const copyButton = buttons.find((button) => button.textContent?.trim() === "Copy Image");
 
     expect(quickActions?.textContent).toContain("Quick Actions");
+    expect(aiEditButton).toBeDefined();
     expect(editButton).toBeDefined();
     expect(copyButton).toBeDefined();
 
+    aiEditButton?.click();
     editButton?.click();
     copyButton?.click();
 
+    expect(onEditImageWithAi).toHaveBeenCalledTimes(1);
     expect(onOpenImageEditor).toHaveBeenCalledTimes(1);
     expect(onCopyNodeImageToClipboard).toHaveBeenCalledTimes(1);
   });

@@ -300,6 +300,7 @@ export function renderCollapsedVisibilityControls(options: {
     options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
 }): void {
   const {
@@ -311,6 +312,7 @@ export function renderCollapsedVisibilityControls(options: {
     onNodeConfigMutated,
     onNodeConfigValueChange,
     onOpenImageEditor,
+    onEditImageWithAi,
     onCopyNodeImageToClipboard,
   } = options;
   if (nodeDetailMode !== "expanded") {
@@ -324,9 +326,11 @@ export function renderCollapsedVisibilityControls(options: {
     isStudioCollapsedSectionApplicableToNode(node, section)
   );
   const hasImageActions = mediaIngestLooksLikeImage(node, nodeRunState);
+  const showAiEditAction =
+    node.kind === "studio.media_ingest" && hasImageActions && typeof onEditImageWithAi === "function";
   const showEditorAction = node.kind === "studio.media_ingest" && hasImageActions && typeof onOpenImageEditor === "function";
   const showCopyImageAction = hasImageActions && typeof onCopyNodeImageToClipboard === "function";
-  if (sections.length === 0 && !showEditorAction && !showCopyImageAction) {
+  if (sections.length === 0 && !showAiEditAction && !showEditorAction && !showCopyImageAction) {
     return;
   }
 
@@ -401,6 +405,26 @@ export function renderCollapsedVisibilityControls(options: {
         (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
       );
       syncVisualState();
+    });
+  }
+
+  if (showAiEditAction) {
+    const button = buttonsEl.createEl("button", {
+      cls: "ss-studio-node-collapsed-visibility-button",
+      text: "Edit with AI",
+      attr: {
+        "aria-label": "Edit image with AI",
+        title: "Edit image with AI",
+      },
+    });
+    button.type = "button";
+    button.disabled = busy;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) {
+        onEditImageWithAi?.(node);
+      }
     });
   }
 

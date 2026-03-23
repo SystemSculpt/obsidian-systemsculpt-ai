@@ -43,6 +43,7 @@ import {
   resolveStudioAssetPreviewSrc,
 } from "./graph-v3/StudioGraphMediaPreviewModal";
 import { openStudioImageEditorModal } from "./graph-v3/StudioGraphImageEditorModal";
+import { openStudioAiImageEditPromptModal } from "./graph-v3/StudioGraphAiImageEditPromptModal";
 import { composeStudioCaptionBoardImage } from "../../studio/StudioCaptionBoardComposition";
 import {
   boardStateHasRenderableEdits,
@@ -145,6 +146,10 @@ import {
   buildPastedTextNode,
   materializePastedMediaNodes,
 } from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
+import {
+  inferAiImageEditAspectRatio,
+  insertAiImageEditNodes,
+} from "./systemsculpt-studio-view/StudioAiImageEditFlow";
 import {
   coerceNotePreviewText,
   isTextGenerationOutputLocked,
@@ -2657,6 +2662,126 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
+  private async editImageWithAiForNode(node: StudioNodeInstance): Promise<void> {
+    if (this.busy || !this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    if (node.kind !== "studio.media_ingest") {
+      return;
+    }
+
+    const textDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
+    const imageGenerationDefinition = this.nodeDefinitions.find(
+      (definition) => definition.kind === "studio.image_generation"
+    );
+    if (!textDefinition || !imageGenerationDefinition) {
+      this.setError("Studio image-edit dependencies are unavailable.");
+      return;
+    }
+
+    const prompt = await openStudioAiImageEditPromptModal({
+      app: this.app,
+      title: "Edit with AI",
+      description:
+        "Describe how you want the AI to change this image. Studio will add an AI image step, keep the original image, and append the edited result.",
+    });
+    if (!prompt) {
+      return;
+    }
+
+    const aspectRatio = await this.resolveAiImageEditAspectRatioForNode(node);
+    let createdImageGenerationNodeId: string | null = null;
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (project) => {
+      const sourceNode = this.findNode(project, node.id);
+      if (!sourceNode) {
+        return false;
+      }
+      const inserted = insertAiImageEditNodes({
+        project,
+        sourceNode,
+        prompt,
+        aspectRatio,
+        textDefinition,
+        imageGenerationDefinition,
+        nextNodeId: () => randomId("node"),
+        nextEdgeId: () => randomId("edge"),
+        cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
+        normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+      });
+      createdImageGenerationNodeId = inserted.imageGenerationNodeId;
+      return true;
+    });
+    if (!changed || !createdImageGenerationNodeId || !this.currentProject) {
+      return;
+    }
+
+    this.graphInteraction.selectOnlyNode(createdImageGenerationNodeId);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(this.currentProject);
+    this.render();
+    new Notice("AI image edit added. Running now...");
+    void this.runGraph({ fromNodeId: createdImageGenerationNodeId });
+  }
+
+  private async resolveAiImageEditAspectRatioForNode(node: StudioNodeInstance): Promise<string> {
+    const ensuredAsset = await this.ensureRenderedImageAssetForNode(node);
+    const nodeRunState = this.runPresentation.getNodeState(node.id);
+    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
+    const candidatePaths = [
+      ensuredAsset?.path || "",
+      typeof outputs.preview_path === "string" ? outputs.preview_path : "",
+      typeof outputs.source_preview_path === "string" ? outputs.source_preview_path : "",
+      typeof outputs.path === "string" ? outputs.path : "",
+      typeof node.config.sourcePath === "string" ? node.config.sourcePath : "",
+    ];
+
+    for (const candidatePath of candidatePaths) {
+      const previewSrc = this.resolveImagePreviewSrcFromPath(candidatePath);
+      if (!previewSrc) {
+        continue;
+      }
+      try {
+        const dimensions = await this.measureImageDimensions(previewSrc);
+        return inferAiImageEditAspectRatio(dimensions.width, dimensions.height);
+      } catch {
+        continue;
+      }
+    }
+
+    return "1:1";
+  }
+
+  private resolveImagePreviewSrcFromPath(path: string): string | null {
+    const normalizedPath = String(path || "").trim();
+    if (!normalizedPath) {
+      return null;
+    }
+    const assetSrc = resolveStudioAssetPreviewSrc(this.app, normalizedPath);
+    if (assetSrc) {
+      return assetSrc;
+    }
+    if (isAbsoluteFilesystemPath(normalizedPath)) {
+      return `file://${encodeURI(normalizedPath)}`;
+    }
+    return null;
+  }
+
+  private measureImageDimensions(src: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+      const imageEl = new Image();
+      imageEl.onload = () => {
+        resolve({
+          width: imageEl.naturalWidth || 1,
+          height: imageEl.naturalHeight || 1,
+        });
+      };
+      imageEl.onerror = () => {
+        reject(new Error("Preview image failed to load."));
+      };
+      imageEl.src = src;
+    });
+  }
+
   private normalizeStudioAssetRefLike(value: unknown): StudioAssetRef | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return null;
@@ -2691,13 +2816,18 @@ export class SystemSculptStudioView extends ItemView {
     const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
     const sourcePreviewAsset = this.normalizeStudioAssetRefLike(outputs.source_preview_asset);
     const previewAsset = this.normalizeStudioAssetRefLike(outputs.preview_asset);
+    const configuredSourcePath = typeof node.config.sourcePath === "string" ? node.config.sourcePath.trim() : "";
     const boardState = readStudioCaptionBoardState(node.config);
+    const existingRenderedAsset = resolveStudioCaptionBoardRenderedAsset(
+      node.config,
+      sourcePreviewAsset?.path || configuredSourcePath
+    );
+
+    if (existingRenderedAsset) {
+      return existingRenderedAsset;
+    }
 
     if (boardStateHasRenderableEdits(boardState) && sourcePreviewAsset) {
-      const existing = resolveStudioCaptionBoardRenderedAsset(node.config, sourcePreviewAsset.path);
-      if (existing) {
-        return existing;
-      }
       const studio = this.plugin.getStudioService();
       const renderedAsset = await composeStudioCaptionBoardImage({
         baseImage: sourcePreviewAsset,
@@ -4186,6 +4316,9 @@ export class SystemSculptStudioView extends ItemView {
       },
       onOpenImageEditor: (node) => {
         this.openImageEditorForNode(node);
+      },
+      onEditImageWithAi: (node) => {
+        void this.editImageWithAiForNode(node);
       },
       onCopyNodeImageToClipboard: (node) => {
         void this.copyImageForNodeToClipboard(node);

@@ -43,6 +43,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onNodeConfigValueChange,
     onNodeSizeChange,
     onOpenImageEditor,
+    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
@@ -279,6 +280,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onNodeConfigMutated,
       onNodeConfigValueChange,
       onOpenImageEditor,
+      onEditImageWithAi,
       onCopyNodeImageToClipboard,
     });
   }

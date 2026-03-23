@@ -10,6 +10,22 @@ import {
   registerPiRuntimeBootstrapContext,
 } from "../PiRuntimeBootstrap";
 
+function readInstalledPiRuntimeVersion(): string {
+  const packageJsonPath = join(process.cwd(), "node_modules", "@mariozechner", "pi-coding-agent", "package.json");
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: string };
+  const version = String(packageJson.version || "").trim();
+  if (!version) {
+    throw new Error(`Missing Pi runtime version in ${packageJsonPath}`);
+  }
+  return version;
+}
+
+const PI_RUNTIME_VERSION = readInstalledPiRuntimeVersion();
+
+function createRuntimeArchiveName(target: string): string {
+  return `studio-pi-runtime-${PI_RUNTIME_VERSION}-${target}.tgz`;
+}
+
 function createPluginStub(version = "9.9.9", pluginDir?: string): any {
   return {
     manifest: {
@@ -39,7 +55,7 @@ function createPiRuntimeSkeleton(rootDir: string): void {
     join(entryRoot, "package.json"),
     JSON.stringify({
       name: "@mariozechner/pi-coding-agent",
-      version: "0.56.2",
+      version: PI_RUNTIME_VERSION,
       dependencies: {
         "pi-helper": "^1.0.0",
       },

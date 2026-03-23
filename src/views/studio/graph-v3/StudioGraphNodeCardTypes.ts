@@ -53,6 +53,7 @@ export type RenderStudioGraphNodeCardOptions = {
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   getJsonEditorPreferredMode?: () => "composer" | "raw";
   onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;

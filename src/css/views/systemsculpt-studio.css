@@ -4326,6 +4326,31 @@ select.ss-pi-wizard__select { width: 100%; }
     linear-gradient(135deg, transparent 86%, color-mix(in srgb, var(--ss-studio-border) 72%, #8de8bc 28%) 87%);
 }
 
+.ss-studio-ai-image-edit-modal {
+  display: grid;
+  gap: 12px;
+  min-width: min(72vw, 640px);
+  max-width: min(92vw, 760px);
+}
+
+.ss-studio-ai-image-edit-modal-copy {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.ss-studio-ai-image-edit-modal-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+}
+
+.ss-studio-ai-image-edit-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .ss-studio-media-preview-modal {
   display: grid;
   gap: 10px;

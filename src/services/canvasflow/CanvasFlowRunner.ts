@@ -35,6 +35,7 @@ import {
   resolveCanvasFlowOutputDirectory,
   resolveCanvasFlowSafeFileStem,
 } from "./CanvasFlowStoragePaths";
+import { resolveSystemSculptImageAspectRatio } from "./SystemSculptImageAspectRatio";
 
 type RunStatusUpdater = (status: string) => void;
 const MAX_CANVASFLOW_INPUT_IMAGES = 8;
@@ -1231,12 +1232,16 @@ export class CanvasFlowRunner {
     }
 
     options.status("Submitting generation job...");
+    const resolvedAspectRatio = resolveSystemSculptImageAspectRatio({
+      requestedAspectRatio: options.aspectRatio,
+      inputImageBytes: options.inputImages.map((input) => input.bytes),
+    });
     const runAttemptId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const payloadSignature = stableSerialize({
       prompt: options.promptText,
       options: {
         count: options.imageCount,
-        aspect_ratio: options.aspectRatio || null,
+        aspect_ratio: resolvedAspectRatio || null,
         seed: options.seed,
       },
       input_images: uploadedInputRefs.map((input) => ({
@@ -1253,7 +1258,7 @@ export class CanvasFlowRunner {
       input_images: uploadedInputRefs,
       options: {
         count: options.imageCount,
-        ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+        ...(resolvedAspectRatio ? { aspect_ratio: resolvedAspectRatio } : {}),
         ...(options.seed !== null && Number.isFinite(options.seed) ? { seed: options.seed } : {}),
       },
     }, { idempotencyKey });

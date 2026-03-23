@@ -61,6 +61,7 @@ export type StudioGraphWorkspaceRendererOptions = {
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   getJsonEditorPreferredMode?: () => "composer" | "raw";
   onJsonEditorPreferredModeChange?: (mode: "composer" | "raw") => void;
@@ -129,6 +130,7 @@ export function renderStudioGraphWorkspace(
     onNodeConfigValueChange,
     onNodeSizeChange,
     onOpenImageEditor,
+    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     getJsonEditorPreferredMode,
     onJsonEditorPreferredModeChange,
@@ -405,6 +407,7 @@ export function renderStudioGraphWorkspace(
       onNodeConfigValueChange,
       onNodeSizeChange,
       onOpenImageEditor,
+      onEditImageWithAi,
       onCopyNodeImageToClipboard,
       getJsonEditorPreferredMode,
       onJsonEditorPreferredModeChange,

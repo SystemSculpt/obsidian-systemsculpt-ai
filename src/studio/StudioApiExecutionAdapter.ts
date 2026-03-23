@@ -6,6 +6,7 @@ import {
   SystemSculptImageGenerationService,
   type SystemSculptImageInput,
 } from "../services/canvasflow/SystemSculptImageGenerationService";
+import { resolveSystemSculptImageAspectRatio } from "../services/canvasflow/SystemSculptImageAspectRatio";
 import type {
   StudioApiAdapter,
   StudioImageGenerationRequest,
@@ -245,10 +246,16 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   private async uploadInputImagesForStudioGeneration(
     imageClient: SystemSculptImageGenerationService,
     assets: StudioImageGenerationRequest["inputImages"]
-  ): Promise<SystemSculptImageInput[]> {
+  ): Promise<{
+    uploadedInputImages: SystemSculptImageInput[];
+    inputImageBytes: ArrayBuffer[];
+  }> {
     const inputAssets = Array.isArray(assets) ? assets : [];
     if (inputAssets.length === 0) {
-      return [];
+      return {
+        uploadedInputImages: [],
+        inputImageBytes: [],
+      };
     }
 
     const normalizedAssets = inputAssets.map((asset, index) => {
@@ -278,6 +285,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     );
     const uploadByIndex = new Map(preparedUploads.input_uploads.map((item) => [item.index, item]));
     const uploadedInputRefs: Extract<SystemSculptImageInput, { type: "uploaded" }>[] = [];
+    const inputImageBytes: ArrayBuffer[] = [];
 
     for (let idx = 0; idx < normalizedAssets.length; idx += 1) {
       const localAsset = normalizedAssets[idx];
@@ -315,9 +323,13 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
         extraHeaders: upload.upload.headers,
       });
       uploadedInputRefs.push(remoteInput);
+      inputImageBytes.push(bytes);
     }
 
-    return uploadedInputRefs;
+    return {
+      uploadedInputImages: uploadedInputRefs,
+      inputImageBytes,
+    };
   }
 
   private async removeTempPath(path: string): Promise<void> {
@@ -401,7 +413,14 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {
     const modelId = String(request.modelId || STUDIO_MANAGED_IMAGE_MODEL_ID).trim() || STUDIO_MANAGED_IMAGE_MODEL_ID;
     const imageClient = this.ensureImageClient();
-    const uploadedInputImages = await this.uploadInputImagesForStudioGeneration(imageClient, request.inputImages);
+    const { uploadedInputImages, inputImageBytes } = await this.uploadInputImagesForStudioGeneration(
+      imageClient,
+      request.inputImages
+    );
+    const resolvedAspectRatio = resolveSystemSculptImageAspectRatio({
+      requestedAspectRatio: request.aspectRatio,
+      inputImageBytes,
+    });
     const startedAtMs = Date.now();
 
     for (let attempt = 1; attempt <= STUDIO_IMAGE_RETRY_MAX_ATTEMPTS; attempt += 1) {
@@ -413,7 +432,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
             input_images: uploadedInputImages,
             options: {
               count: request.count,
-              aspect_ratio: request.aspectRatio,
+              aspect_ratio: resolvedAspectRatio || undefined,
             },
           },
           {
@@ -423,7 +442,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const fullMessage =
-          `Image generation request failed (aspectRatio: "${String(request.aspectRatio || "").trim() || "default"}"): ${message}`;
+          `Image generation request failed (aspectRatio: "${String(resolvedAspectRatio || request.aspectRatio || "").trim() || "default"}"): ${message}`;
         if (shouldRetryStudioImageError({ message: fullMessage, attempt, startedAtMs })) {
           const delayMs = computeStudioImageRetryDelayMs(attempt);
           await waitForStudioImageRetry(delayMs);
