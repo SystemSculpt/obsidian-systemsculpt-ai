@@ -11,6 +11,8 @@ import {
 } from "../studio/piAuth/StudioPiAuthStorage";
 import {
   getApiKeyEnvVarForProvider,
+  getStudioPiAuthMethodRestriction,
+  isStudioPiAuthMethodEnabled,
   resolveProviderLabel,
   supportsOAuthLogin,
   selectDefaultAuthMethod,
@@ -69,6 +71,29 @@ function authSummary(record: StudioPiProviderAuthRecord): string {
     default:
       return "Connected";
   }
+}
+
+function resolveConnectMethod(
+  providerId: string,
+  preferredMethod: "oauth" | "api_key" | null,
+  oauthProvidersById: Map<string, StudioPiOAuthProvider>
+): "oauth" | "api_key" | null {
+  const oauthEnabled = isStudioPiAuthMethodEnabled(providerId, "oauth", oauthProvidersById);
+  const apiKeyEnabled = isStudioPiAuthMethodEnabled(providerId, "api_key", oauthProvidersById);
+
+  if (preferredMethod === "oauth" && oauthEnabled) {
+    return "oauth";
+  }
+  if (preferredMethod === "api_key" && apiKeyEnabled) {
+    return "api_key";
+  }
+  if (oauthEnabled) {
+    return "oauth";
+  }
+  if (apiKeyEnabled) {
+    return "api_key";
+  }
+  return null;
 }
 
 // ─── Main renderer ──────────────────────────────────────────────────────────
@@ -305,8 +330,9 @@ function renderProviderRow(
         state.oauthAbortController = null;
       } else {
         state.activeConnectProvider = record.provider;
-        state.activeConnectMethod = selectDefaultAuthMethod(
+        state.activeConnectMethod = resolveConnectMethod(
           record.provider,
+          selectDefaultAuthMethod(record.provider, state.oauthProvidersById),
           state.oauthProvidersById
         );
       }
@@ -335,36 +361,90 @@ function renderConnectPanel(
   const label = providerLabel(providerId, state.oauthProvidersById);
   const hasOAuth = supportsOAuthLogin(providerId, state.oauthProvidersById);
   const envVar = getApiKeyEnvVarForProvider(providerId);
+  const oauthRestriction = getStudioPiAuthMethodRestriction(providerId, "oauth");
+  const apiKeyRestriction = getStudioPiAuthMethodRestriction(providerId, "api_key");
+  const resolvedConnectMethod = resolveConnectMethod(
+    providerId,
+    state.activeConnectMethod,
+    state.oauthProvidersById
+  );
+  state.activeConnectMethod = resolvedConnectMethod;
 
   // Method tabs (if both are available)
   if (hasOAuth && envVar) {
     const methods = panel.createDiv({ cls: "ss-provider-connect-methods" });
 
-    const oauthBtn = methods.createEl("button", {
-      cls: `ss-provider-connect-method ${state.activeConnectMethod === "oauth" ? "ss-provider-connect-method--active" : ""}`,
+    const oauthGroup = methods.createDiv({ cls: "ss-provider-connect-method-group" });
+    const oauthBtn = oauthGroup.createEl("button", {
+      cls: `ss-provider-connect-method ${resolvedConnectMethod === "oauth" ? "ss-provider-connect-method--active" : ""}`,
       text: "Subscription login",
     });
-    oauthBtn.disabled = state.actionRunning;
-    oauthBtn.addEventListener("click", () => {
-      state.activeConnectMethod = "oauth";
-      rerender();
-    });
+    oauthBtn.disabled = state.actionRunning || oauthRestriction.disabled;
+    if (oauthRestriction.hoverDetails) {
+      oauthBtn.title = oauthRestriction.hoverDetails;
+    }
+    if (!oauthRestriction.disabled) {
+      oauthBtn.addEventListener("click", () => {
+        state.activeConnectMethod = "oauth";
+        rerender();
+      });
+    }
+    if (oauthRestriction.disabled && oauthRestriction.inlineReason) {
+      const reasonEl = oauthGroup.createDiv({
+        cls: "ss-provider-connect-method-reason",
+        text: oauthRestriction.inlineReason,
+      });
+      if (oauthRestriction.hoverDetails) {
+        reasonEl.title = oauthRestriction.hoverDetails;
+      }
+    }
 
-    const apiKeyBtn = methods.createEl("button", {
-      cls: `ss-provider-connect-method ${state.activeConnectMethod === "api_key" ? "ss-provider-connect-method--active" : ""}`,
+    const apiKeyGroup = methods.createDiv({ cls: "ss-provider-connect-method-group" });
+    const apiKeyBtn = apiKeyGroup.createEl("button", {
+      cls: `ss-provider-connect-method ${resolvedConnectMethod === "api_key" ? "ss-provider-connect-method--active" : ""}`,
       text: "API key",
     });
-    apiKeyBtn.disabled = state.actionRunning;
-    apiKeyBtn.addEventListener("click", () => {
-      state.activeConnectMethod = "api_key";
-      rerender();
-    });
+    apiKeyBtn.disabled = state.actionRunning || apiKeyRestriction.disabled;
+    if (apiKeyRestriction.hoverDetails) {
+      apiKeyBtn.title = apiKeyRestriction.hoverDetails;
+    }
+    if (!apiKeyRestriction.disabled) {
+      apiKeyBtn.addEventListener("click", () => {
+        state.activeConnectMethod = "api_key";
+        rerender();
+      });
+    }
+    if (apiKeyRestriction.disabled && apiKeyRestriction.inlineReason) {
+      const reasonEl = apiKeyGroup.createDiv({
+        cls: "ss-provider-connect-method-reason",
+        text: apiKeyRestriction.inlineReason,
+      });
+      if (apiKeyRestriction.hoverDetails) {
+        reasonEl.title = apiKeyRestriction.hoverDetails;
+      }
+    }
   } else {
     // Force the only available method
-    state.activeConnectMethod = hasOAuth ? "oauth" : "api_key";
+    state.activeConnectMethod = resolvedConnectMethod;
   }
 
-  if (state.activeConnectMethod === "oauth") {
+  if (!resolvedConnectMethod) {
+    const message =
+      oauthRestriction.inlineReason ||
+      apiKeyRestriction.inlineReason ||
+      `No available connection method for ${label}.`;
+    const blockedHint = panel.createDiv({
+      cls: "ss-provider-connect-hint ss-provider-connect-hint--warning",
+      text: message,
+    });
+    blockedHint.title =
+      oauthRestriction.hoverDetails ||
+      apiKeyRestriction.hoverDetails ||
+      message;
+    return;
+  }
+
+  if (resolvedConnectMethod === "oauth") {
     renderOAuthConnect(panel, tabInstance, state, providerId, label, rerender);
   } else {
     renderApiKeyConnect(panel, tabInstance, state, providerId, label, envVar, rerender);

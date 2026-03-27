@@ -5,6 +5,14 @@ export type StudioPiDynamicOAuthProvider = {
   name?: string;
 };
 
+export type StudioPiAuthMethod = "oauth" | "api_key";
+
+export type StudioPiAuthMethodRestriction = {
+  disabled: boolean;
+  inlineReason?: string;
+  hoverDetails?: string;
+};
+
 export const API_KEY_ENV_VAR_BY_PROVIDER: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -71,6 +79,20 @@ export const DEFAULT_PI_PROVIDER_HINTS = [
   "mistral",
   "xai",
 ];
+
+const PROVIDER_AUTH_METHOD_RESTRICTIONS: Record<
+  string,
+  Partial<Record<StudioPiAuthMethod, Omit<StudioPiAuthMethodRestriction, "disabled">>>
+> = {
+  anthropic: {
+    oauth: {
+      inlineReason:
+        "Disabled for now: Anthropic says using its plan outside Claude Code risks account bans.",
+      hoverDetails:
+        "Anthropic has explicitly mentioned that if you use their Anthropic plan for anything other than Claude Code you risk getting banned, so we are leaving this option visible but disabling it until further notice.",
+    },
+  },
+};
 
 const STRICT_PI_ENDPOINT_MAPPING_RULES: Array<{ providerId: string; markers: string[] }> = [
   {
@@ -145,11 +167,56 @@ export function supportsOAuthLogin(
   return KNOWN_OAUTH_PROVIDER_IDS.has(normalized) || Boolean(dynamicOAuthProviders?.has(normalized));
 }
 
+export function getStudioPiAuthMethodRestriction(
+  providerId: string,
+  method: StudioPiAuthMethod
+): StudioPiAuthMethodRestriction {
+  const normalized = normalizeProviderId(providerId);
+  if (!normalized) {
+    return { disabled: false };
+  }
+  const restriction = PROVIDER_AUTH_METHOD_RESTRICTIONS[normalized]?.[method];
+  if (!restriction) {
+    return { disabled: false };
+  }
+  return {
+    disabled: true,
+    inlineReason: restriction.inlineReason,
+    hoverDetails: restriction.hoverDetails,
+  };
+}
+
+export function isStudioPiAuthMethodEnabled(
+  providerId: string,
+  method: StudioPiAuthMethod,
+  dynamicOAuthProviders?: ReadonlyMap<string, StudioPiDynamicOAuthProvider>
+): boolean {
+  const normalized = normalizeProviderId(providerId);
+  if (!normalized) {
+    return false;
+  }
+  const restriction = getStudioPiAuthMethodRestriction(normalized, method);
+  if (restriction.disabled) {
+    return false;
+  }
+  if (method === "oauth") {
+    return supportsOAuthLogin(normalized, dynamicOAuthProviders);
+  }
+  return Boolean(getApiKeyEnvVarForProvider(normalized));
+}
+
 export function selectDefaultAuthMethod(
   providerId: string,
   dynamicOAuthProviders?: ReadonlyMap<string, StudioPiDynamicOAuthProvider>
 ): "oauth" | "api_key" {
-  return supportsOAuthLogin(providerId, dynamicOAuthProviders) ? "oauth" : "api_key";
+  const normalized = normalizeProviderId(providerId);
+  if (isStudioPiAuthMethodEnabled(normalized, "oauth", dynamicOAuthProviders)) {
+    return "oauth";
+  }
+  if (isStudioPiAuthMethodEnabled(normalized, "api_key", dynamicOAuthProviders)) {
+    return "api_key";
+  }
+  return "api_key";
 }
 
 export function resolveProviderLabel(

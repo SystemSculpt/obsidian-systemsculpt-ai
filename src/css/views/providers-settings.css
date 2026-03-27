@@ -148,8 +148,16 @@
   margin-bottom: var(--size-4-3);
 }
 
-.ss-provider-connect-method {
+.ss-provider-connect-method-group {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-provider-connect-method {
+  width: 100%;
   padding: var(--size-2-3) var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
@@ -178,6 +186,12 @@
   color: var(--text-on-accent);
 }
 
+.ss-provider-connect-method-reason {
+  font-size: 0.78em;
+  line-height: 1.4;
+  color: var(--text-warning);
+}
+
 /* Body */
 .ss-provider-connect-body {
   display: flex;
@@ -188,6 +202,10 @@
 .ss-provider-connect-hint {
   font-size: 0.9em;
   color: var(--text-muted);
+}
+
+.ss-provider-connect-hint--warning {
+  color: var(--text-warning);
 }
 
 /* API key input row */

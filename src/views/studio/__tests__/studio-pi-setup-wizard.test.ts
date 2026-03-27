@@ -1,6 +1,7 @@
 import {
   buildApiKeyHint,
   getApiKeyEnvVarForProvider,
+  getStudioPiAuthMethodRestriction,
   KNOWN_OAUTH_PROVIDER_IDS,
   PROVIDER_AUTH_HINT_OVERRIDES,
   PROVIDER_LABEL_OVERRIDES,
@@ -123,8 +124,8 @@ describe("selectDefaultAuthMethod", () => {
     expect(selectDefaultAuthMethod("some-oauth-provider", dynamic)).toBe("oauth");
   });
 
-  it("selects oauth for anthropic (OAuth support)", () => {
-    expect(selectDefaultAuthMethod("anthropic", EMPTY_OAUTH)).toBe("oauth");
+  it("selects api_key for anthropic because subscription login is disabled", () => {
+    expect(selectDefaultAuthMethod("anthropic", EMPTY_OAUTH)).toBe("api_key");
   });
 
   it("selects api_key for openai (no OAuth support)", () => {
@@ -137,6 +138,30 @@ describe("selectDefaultAuthMethod", () => {
 
   it("selects api_key for an empty provider id", () => {
     expect(selectDefaultAuthMethod("", EMPTY_OAUTH)).toBe("api_key");
+  });
+});
+
+// ─── getStudioPiAuthMethodRestriction ──────────────────────────────────────
+
+describe("getStudioPiAuthMethodRestriction", () => {
+  it("disables anthropic oauth with an inline reason and hover details", () => {
+    const restriction = getStudioPiAuthMethodRestriction("anthropic", "oauth");
+
+    expect(restriction.disabled).toBe(true);
+    expect(restriction.inlineReason).toContain("Claude Code");
+    expect(restriction.hoverDetails).toContain("risk getting banned");
+  });
+
+  it("leaves anthropic api key auth enabled", () => {
+    expect(getStudioPiAuthMethodRestriction("anthropic", "api_key")).toEqual({
+      disabled: false,
+    });
+  });
+
+  it("returns enabled for providers without a restriction", () => {
+    expect(getStudioPiAuthMethodRestriction("openai-codex", "oauth")).toEqual({
+      disabled: false,
+    });
   });
 });
 
