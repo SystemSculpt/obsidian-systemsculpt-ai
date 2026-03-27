@@ -16,6 +16,13 @@ interface CachedStatus {
   failedFiles: number;
 }
 
+const EMBEDDINGS_STATUS_BAR_SINGLETON_KEY = "__systemsculptEmbeddingsStatusBarSingleton";
+
+type EmbeddingsStatusBarSingletonEntry = {
+  token: symbol;
+  unload: () => void;
+};
+
 export class EmbeddingsStatusBar extends Component {
   private plugin: SystemSculptPlugin;
   private statusBarEl: HTMLElement;
@@ -37,14 +44,47 @@ export class EmbeddingsStatusBar extends Component {
   private currentErrorRetryMs: number | null = null;
   private currentErrorCode: string | null = null;
   private currentErrorDetails: Record<string, unknown> | null = null;
+  private readonly singletonToken = Symbol("EmbeddingsStatusBar");
 
   constructor(plugin: SystemSculptPlugin) {
     super();
     this.plugin = plugin;
+    this.claimSingleton();
     this.initializeStatusBar();
   }
 
+  private claimSingleton(): void {
+    const globalScope = globalThis as Record<string, unknown>;
+    const existing = globalScope[
+      EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
+    ] as EmbeddingsStatusBarSingletonEntry | undefined;
+
+    globalScope[EMBEDDINGS_STATUS_BAR_SINGLETON_KEY] = {
+      token: this.singletonToken,
+      unload: () => this.unload(),
+    };
+
+    if (existing && existing.token !== this.singletonToken) {
+      try {
+        existing.unload();
+      } catch {
+        // ignore stale singleton cleanup failures
+      }
+    }
+  }
+
+  private releaseSingleton(): void {
+    const globalScope = globalThis as Record<string, unknown>;
+    const existing = globalScope[
+      EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
+    ] as EmbeddingsStatusBarSingletonEntry | undefined;
+    if (existing?.token === this.singletonToken) {
+      delete globalScope[EMBEDDINGS_STATUS_BAR_SINGLETON_KEY];
+    }
+  }
+
   private initializeStatusBar(): void {
+    this.removeStaleStatusBarItems();
     this.statusBarEl = this.plugin.addStatusBarItem();
     this.statusBarEl.addClass("mod-clickable");
     this.statusBarEl.title = "Click to view embeddings status";
@@ -372,6 +412,36 @@ export class EmbeddingsStatusBar extends Component {
     }
   }
 
+  private removeStaleStatusBarItems(): void {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const pluginStatusBarClass = `plugin-${String(this.plugin.manifest?.id || "")
+      .toLowerCase()
+      .replace(/[^_a-zA-Z0-9-]/g, "-")}`;
+    if (!pluginStatusBarClass || pluginStatusBarClass === "plugin-") {
+      return;
+    }
+
+    const staleItems = Array.from(document.querySelectorAll(`.${pluginStatusBarClass}`)).filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && String(element.textContent || "").includes("Embeddings:")
+    );
+
+    for (const staleItem of staleItems) {
+      try {
+        if (typeof (staleItem as any).detach === "function") {
+          (staleItem as any).detach();
+        } else {
+          staleItem.remove();
+        }
+      } catch {
+        // ignore stale cleanup failures
+      }
+    }
+  }
+
   private setVisibility(visible: boolean): void {
     if (!this.statusBarEl) {
       return;
@@ -576,6 +646,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   onunload(): void {
+    this.releaseSingleton();
     this.clearUpdateInterval();
     try {
       for (const off of this.unsubscribes) {
@@ -588,6 +659,16 @@ export class EmbeddingsStatusBar extends Component {
       this.unsubscribes = [];
     } catch {
       // ignore unsubscribe failures
+    }
+
+    try {
+      if (typeof (this.statusBarEl as any)?.detach === "function") {
+        (this.statusBarEl as any).detach();
+      } else {
+        this.statusBarEl.remove();
+      }
+    } catch {
+      // ignore DOM cleanup failures
     }
   }
 }

@@ -7,6 +7,7 @@ import { SystemSculptSettings } from '../types';
 export interface SystemSculptWorkspaceEvents {
   'systemsculpt:settings-loaded': (settings: SystemSculptSettings) => void;
   'systemsculpt:settings-updated': (oldSettings: SystemSculptSettings, newSettings: SystemSculptSettings) => void;
+  'systemsculpt:settings-file-touched': (settings: SystemSculptSettings) => void;
   'systemsculpt:license-validated': (isValid: boolean) => void;
   'systemsculpt:embeddings-progress': (progress: { current: number; total: number }) => void;
   'systemsculpt:chat-created': (chatId: string) => void;

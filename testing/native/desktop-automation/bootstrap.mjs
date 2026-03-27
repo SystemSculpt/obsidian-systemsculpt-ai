@@ -2,11 +2,17 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { createDesktopAutomationClient, waitForDesktopAutomationClient } from "./client.mjs";
-import { DEFAULT_PLUGIN_ID } from "./discovery.mjs";
+import {
+  createDesktopAutomationClient,
+  waitForStableDesktopAutomationClient,
+} from "./client.mjs";
+import { DEFAULT_PLUGIN_ID, loadDiscoveryEntries } from "./discovery.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const DEFAULT_RELOAD_TIMEOUT_MS = 45000;
+export const DEFAULT_RELOAD_STABLE_FOR_MS = 1500;
+export const DEFAULT_RELOAD_SETTLE_INTERVAL_MS = 250;
+export const DEFAULT_SETTINGS_REASSERT_INTERVAL_MS = 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -138,6 +144,61 @@ export function selectPluginTarget(targets, options = {}) {
   return targets[0];
 }
 
+function hasExplicitTargetSelector(options = {}) {
+  return Boolean(
+    String(options.vaultPath || "").trim() ||
+      String(options.vaultName || "").trim() ||
+      options.targetIndex === 0 ||
+      options.targetIndex
+  );
+}
+
+async function inferPluginTargetFromDiscovery(targets, options = {}) {
+  const loadEntries =
+    typeof options.loadEntries === "function" ? options.loadEntries : loadDiscoveryEntries;
+  const pluginId = String(options.pluginId || DEFAULT_PLUGIN_ID).trim() || DEFAULT_PLUGIN_ID;
+
+  try {
+    const entries = await loadEntries({
+      ...options,
+      pluginId,
+    });
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return null;
+    }
+
+    for (const entry of entries) {
+      const entryVaultPath = String(entry?.vaultPath || "").trim();
+      const entryVaultName = String(entry?.vaultName || "").trim();
+      const resolvedEntryVaultPath = entryVaultPath ? path.resolve(entryVaultPath) : "";
+      const match = targets.find((target) => {
+        return (
+          (resolvedEntryVaultPath && target.vaultRoot === resolvedEntryVaultPath) ||
+          (entryVaultName && target.vaultName === entryVaultName)
+        );
+      });
+      if (match) {
+        return match;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function resolvePluginTarget(targets, options = {}) {
+  if (hasExplicitTargetSelector(options)) {
+    return selectPluginTarget(targets, options);
+  }
+
+  const discoveryTarget = await inferPluginTargetFromDiscovery(targets, options);
+  if (discoveryTarget) {
+    return discoveryTarget;
+  }
+
+  return selectPluginTarget(targets, options);
+}
+
 async function chooseSeedTarget(targets, selectedTarget) {
   for (const candidate of targets) {
     if (!candidate || candidate.pluginDir === selectedTarget.pluginDir) {
@@ -249,11 +310,20 @@ async function keepDesktopAutomationSettingsAsserted(target, ensured) {
 async function waitForTargetClientWithSettingsKeepalive(target, ensured, options = {}) {
   const timeoutMs = options.timeoutMs || DEFAULT_RELOAD_TIMEOUT_MS;
   const intervalMs = Math.max(100, options.intervalMs || 500);
+  const settingsReassertIntervalMs = Math.max(
+    intervalMs,
+    options.settingsReassertIntervalMs || DEFAULT_SETTINGS_REASSERT_INTERVAL_MS
+  );
   const startedAt = Date.now();
+  let lastSettingsAssertAt = options.assumeRecentlySignaled ? Date.now() : 0;
   let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    await keepDesktopAutomationSettingsAsserted(target, ensured);
+    const now = Date.now();
+    if (lastSettingsAssertAt === 0 || now - lastSettingsAssertAt >= settingsReassertIntervalMs) {
+      await keepDesktopAutomationSettingsAsserted(target, ensured);
+      lastSettingsAssertAt = Date.now();
+    }
     try {
       return await tryCreateTargetClient(target, options);
     } catch (error) {
@@ -266,22 +336,30 @@ async function waitForTargetClientWithSettingsKeepalive(target, ensured, options
 }
 
 function buildClientFilter(target, options = {}) {
-  return {
+  const filter = {
     pluginId: String(options.pluginId || DEFAULT_PLUGIN_ID).trim() || DEFAULT_PLUGIN_ID,
     vaultName: target.vaultName,
     vaultPath: target.vaultRoot,
   };
+
+  if (typeof options.loadEntries === "function") {
+    filter.loadEntries = options.loadEntries;
+  }
+
+  return filter;
 }
 
 async function tryCreateTargetClient(target, options = {}) {
   return await createDesktopAutomationClient(buildClientFilter(target, options));
 }
 
-async function waitForTargetClient(target, options = {}) {
-  return await waitForDesktopAutomationClient({
+async function waitForStableTargetClient(target, options = {}) {
+  return await waitForStableDesktopAutomationClient({
     ...buildClientFilter(target, options),
     timeoutMs: options.timeoutMs || DEFAULT_RELOAD_TIMEOUT_MS,
     intervalMs: options.intervalMs || 500,
+    settleIntervalMs: options.settleIntervalMs || DEFAULT_RELOAD_SETTLE_INTERVAL_MS,
+    stableForMs: options.stableForMs || DEFAULT_RELOAD_STABLE_FOR_MS,
     excludeStartedAt: options.excludeStartedAt,
   });
 }
@@ -291,7 +369,7 @@ export async function bootstrapDesktopAutomationClient(options = {}) {
     Array.isArray(options.targets) && options.targets.length > 0
       ? options.targets
       : await loadPluginTargetsFromSyncConfig(options.syncConfigPath);
-  const target = selectPluginTarget(targets, options);
+  const target = await resolvePluginTarget(targets, options);
   const ensured = await ensureDesktopAutomationSettings(target, {
     targets,
     seedFromOtherTargets: options.seedFromOtherTargets,
@@ -305,7 +383,7 @@ export async function bootstrapDesktopAutomationClient(options = {}) {
   if (existingClient && options.reload !== false) {
     const previousRecord = await existingClient.ping().catch(() => existingClient.record || {});
     await existingClient.reloadPlugin();
-    const client = await waitForTargetClient(target, {
+    const client = await waitForStableTargetClient(target, {
       ...options,
       excludeStartedAt: String(previousRecord?.startedAt || "").trim() || undefined,
     });
@@ -322,8 +400,9 @@ export async function bootstrapDesktopAutomationClient(options = {}) {
   }
 
   if (existingClient) {
+    const client = await waitForStableTargetClient(target, options);
     return {
-      client: existingClient,
+      client,
       target,
       ensured,
       reload: {
@@ -344,15 +423,23 @@ export async function bootstrapDesktopAutomationClient(options = {}) {
 
   let client;
   try {
-    client = await waitForTargetClientWithSettingsKeepalive(target, ensured, options);
+    client = await waitForTargetClientWithSettingsKeepalive(target, ensured, {
+      ...options,
+      assumeRecentlySignaled: true,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "Unknown error");
+    const wedgedBridgeHint = /aborted|timeout|timed out|fetch failed/i.test(message)
+      ? " The published bridge appears to be wedged or stale; if this vault was exposed to older broken reloads, do one clean manual plugin reload or Obsidian restart once to flush the stale listeners, then the no-focus path can take over again."
+      : "";
     throw new Error(
       `No live desktop automation bridge was found after updating ${path.basename(target.dataFilePath)}. ` +
         "This runner only attaches to an already-running Obsidian vault and will not launch or focus the app for you. " +
         "The running plugin must support external settings sync for no-focus bootstrap. " +
         "If the currently open vault is still on an older runtime, do one manual plugin reload once in that vault; " +
-        "after that, desktop automation bootstraps stay no-focus. " +
+        "after that, desktop automation bootstraps stay no-focus." +
+        wedgedBridgeHint +
+        " " +
         `Details: ${message}.`
     );
   }

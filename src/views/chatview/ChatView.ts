@@ -43,6 +43,7 @@ import {
   type PiSessionState,
 } from "./storage/ChatPersistenceTypes";
 import { loadPiTextMigrationModule } from "./runtimeModules";
+import { mergePiTranscriptMessages } from "./piTranscriptMerge";
 import type { SystemSculptModel } from "../../types/llm";
 
 import { uiSetup } from "./uiSetup";
@@ -52,9 +53,13 @@ import { chatSettingsHandling } from "./chatSettingsHandling";
 import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
 import {
   getChatModelDisplayName,
-  getChatModelSetupMessage,
   getChatModelSetupSurface,
   getEffectiveChatModelId,
+  openChatModelSetupTab,
+  promptChatModelSetup,
+  type ChatModelSetupPromptOverrides,
+  type ChatModelSetupSurface,
+  type ChatModelSetupTab,
 } from "./modelSelection";
 
 export { CHAT_VIEW_TYPE };
@@ -631,8 +636,13 @@ export class ChatView extends ItemView {
     return this.isManagedSelectedModel() ? hasManagedSystemSculptAccess(this.plugin) : true;
   }
 
-  public openSetupTab(targetTab: string = "account"): void {
-    this.plugin.openSettingsTab(targetTab);
+  public openSetupTab(targetTab: ChatModelSetupTab = "account"): void {
+    openChatModelSetupTab(
+      (nextTargetTab) => {
+        this.plugin.openSettingsTab(nextTargetTab);
+      },
+      targetTab,
+    );
   }
 
   public getEffectiveSelectedModelId(): string {
@@ -647,11 +657,7 @@ export class ChatView extends ItemView {
     return await this.plugin.modelService.getModelById(this.getEffectiveSelectedModelId());
   }
 
-  public getSelectedModelSetupSurface(): {
-    targetTab: string;
-    title: string;
-    primaryButton: string;
-  } {
+  public getSelectedModelSetupSurface(): ChatModelSetupSurface {
     return getChatModelSetupSurface(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
 
@@ -714,24 +720,19 @@ export class ChatView extends ItemView {
 
   public async promptProviderSetup(
     customMessage?: string,
-    overrides?: {
-      title?: string;
-      primaryButton?: string;
-      targetTab?: string;
-    }
+    overrides?: ChatModelSetupPromptOverrides
   ): Promise<void> {
-    const setupSurface = this.getSelectedModelSetupSurface();
-    const targetTab = overrides?.targetTab || setupSurface.targetTab;
-    const message = customMessage ?? getChatModelSetupMessage(targetTab as "account" | "providers", { retryHint: true });
-    const result = await showPopup(this.app, message, {
-      title: overrides?.title || setupSurface.title,
-      icon: "plug-zap",
-      primaryButton: overrides?.primaryButton || setupSurface.primaryButton,
-      secondaryButton: "Not Now",
+    await promptChatModelSetup({
+      app: this.app,
+      openSettingsTab: (targetTab) => {
+        this.plugin.openSettingsTab(targetTab);
+      },
+      selectedModelId: this.selectedModelId,
+      fallbackModelId: this.plugin.settings.selectedModelId,
+      message: customMessage,
+      retryHint: true,
+      overrides,
     });
-    if (result?.confirmed) {
-      this.openSetupTab(targetTab);
-    }
   }
 
   private removeLastAssistantMessageFromDom(): void {
@@ -1111,10 +1112,14 @@ export class ChatView extends ItemView {
     if (!state?.chatId) {
       this.chatId = "";
       this.initializeChatTitle();
-      // Ensure the selectedModelId for a new chat defaults to the plugin's setting
+      // Preserve an explicitly requested model for fresh chats, including
+      // automation resets that open an empty composer with a non-default model.
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
-      this.selectedModelId = this.plugin.settings.selectedModelId || "";
+      this.selectedModelId =
+        ensureCanonicalId(String(state?.selectedModelId || "").trim()) ||
+        this.plugin.settings.selectedModelId ||
+        "";
  
       // Restore chat font size for new chats if provided in state
       if (state?.chatFontSize) {
@@ -1125,6 +1130,7 @@ export class ChatView extends ItemView {
       this.hasAdjustedInitialWindow = false;
       this.messages = [];
       this.contextManager?.clearContext();
+      this.inputHandler?.resetForFreshChat?.();
       void this.refreshModelMetadata();
       this.updateSystemPromptIndicator();
       // Don't render messages here - let onOpen handle it after UI is ready
@@ -1139,30 +1145,6 @@ export class ChatView extends ItemView {
     }
 
     if (this.chatId === state.chatId && this.isFullyLoaded) {
-      return;
-    }
-
-    // Only proceed with loading if we have a non-empty chatId
-    if (!state.chatId || state.chatId === "") {
-      // For empty/new chats, just update the state but don't load
-      this.chatId = "";
-      this.virtualStartIndex = 0;
-      this.hasAdjustedInitialWindow = false;
-      this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
-      this.initializeChatTitle(state.chatTitle);
-      this.chatVersion = state.version !== undefined ? state.version : -1;
-
-      this.applyChatLeafState(state);
-
-      if (state.chatFontSize) {
-        this.chatFontSize = state.chatFontSize;
-        this.scheduleChatFontSizeClassSync();
-      }
-
-      this.isFullyLoaded = true;
-      if (previousChatId !== this.chatId) {
-        this.debugLogService?.resetStreamBuffer();
-      }
       return;
     }
     
@@ -1204,6 +1186,7 @@ export class ChatView extends ItemView {
       this.contextManager?.clearContext();
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
+      this.inputHandler?.resetForFreshChat?.();
       // Don't render here if UI not ready yet
       if (this.chatContainer) {
         this.renderMessagesInChunks();
@@ -2325,7 +2308,9 @@ export class ChatView extends ItemView {
       (!!nextLastEntryId && nextLastEntryId !== this.piLastEntryId);
 
     if (shouldReplaceTranscript && snapshot.messages.length > 0) {
-      this.messages = snapshot.messages;
+      this.messages = mergePiTranscriptMessages(this.messages, snapshot.messages, {
+        hadSyncedPiTranscript: !!this.piLastEntryId,
+      });
     }
     this.applyPiSessionState(
       {
@@ -2586,8 +2571,12 @@ export class ChatView extends ItemView {
   ): Promise<void> {
     const requestedModelId = ensureCanonicalId(modelId);
     const canonicalId = requestedModelId || getManagedSystemSculptModelId();
+    const previousModelId = this.getEffectiveSelectedModelId();
 
     this.selectedModelId = canonicalId;
+    if (canonicalId !== previousModelId && (this.getPiSessionFile() || this.getPiSessionId())) {
+      this.clearPiSessionState({ save: false, updateViewState: true });
+    }
     // If global policy is to use latest everywhere (or Standard mode), make this the global default
     try {
       const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
@@ -2670,7 +2659,7 @@ export class ChatView extends ItemView {
       this.leaf.setViewState({
         type: CHAT_VIEW_TYPE,
         state: currentState
-      }, { focus: true });
+      }, { focus: false });
     }
   }
 

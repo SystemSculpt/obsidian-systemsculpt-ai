@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-symphony_elixir_root="/Users/systemsculpt/gits/symphony/elixir"
+symphony_elixir_root="${SYMPHONY_ELIXIR_ROOT:-$HOME/gits/symphony/elixir}"
 
 export SYMPHONY_SMOKE_REPO_ROOT="$repo_root"
 

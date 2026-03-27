@@ -675,7 +675,7 @@ export default class SystemSculptPlugin extends Plugin {
 
         this.registerEvent(
           this.app.workspace.on("systemsculpt:settings-file-touched", () => {
-            this.syncDesktopAutomationBridge().catch((error) => {
+            this.syncDesktopAutomationBridge({ forceRestart: true }).catch((error) => {
               const logger = this.getLogger();
               logger.error("Desktop automation bridge file-touch sync failed", error, {
                 source: "SystemSculptPlugin",
@@ -909,6 +909,9 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.criticalInitializationPromise = (async () => {
       await yieldToEventLoop();
+      if (this.isUnloading) {
+        return;
+      }
       await this.lifecycleCoordinator!.runPhase("critical");
     })();
 
@@ -929,6 +932,9 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.deferredInitializationPromise = this.criticalInitializationPromise.then(async () => {
       await yieldToEventLoop();
+      if (this.isUnloading) {
+        return;
+      }
       await this.lifecycleCoordinator!.runPhase("deferred");
     });
 
@@ -947,6 +953,9 @@ export default class SystemSculptPlugin extends Plugin {
   private bootstrapPostCriticalServices(tracer: InitializationTracer, logger: PluginLogger): void {
     this.waitForCriticalInitialization()
       .then(() => {
+        if (this.isUnloading) {
+          return;
+        }
         try {
           logger.debug("Starting file context menu service after critical initialization", {
             source: "SystemSculptPlugin",
@@ -1490,6 +1499,12 @@ export default class SystemSculptPlugin extends Plugin {
       slowThresholdMs: 1000,
       timeoutMs: 9000,
     });
+
+    if (this.isUnloading) {
+      phase.complete({ skipped: true });
+      return;
+    }
+
     const logger = this.getLogger();
 
     try {
@@ -1501,6 +1516,11 @@ export default class SystemSculptPlugin extends Plugin {
         if (PlatformContext.get().supportsEagerVaultWrites()) {
           await this.directoryManager.initialize();
         }
+      }
+
+      if (this.isUnloading) {
+        phase.complete({ skipped: true, stage: "post-directory-init" });
+        return;
       }
 
       if (PlatformContext.get().supportsStatusBar() && !this.embeddingsStatusBar) {
@@ -1708,8 +1728,8 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-  private async syncDesktopAutomationBridge(): Promise<void> {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+  private async syncDesktopAutomationBridge(options?: { forceRestart?: boolean }): Promise<void> {
+    if (this.isUnloading || !PlatformContext.get().supportsDesktopOnlyFeatures()) {
       return;
     }
 
@@ -1718,7 +1738,11 @@ export default class SystemSculptPlugin extends Plugin {
       this.desktopAutomationBridge = new DesktopAutomationBridge(this);
     }
 
-    await this.desktopAutomationBridge.syncFromSettings();
+    await this.desktopAutomationBridge.syncFromSettings(options);
+  }
+
+  public isPluginUnloading(): boolean {
+    return this.isUnloading;
   }
 
   private async stopDesktopAutomationBridge(): Promise<void> {

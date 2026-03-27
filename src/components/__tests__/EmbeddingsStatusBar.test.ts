@@ -34,6 +34,7 @@ describe("EmbeddingsStatusBar", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    delete (globalThis as any).__systemsculptEmbeddingsStatusBarSingleton;
 
     mockStatusBarEl = document.createElement("div");
     mockStatusBarEl.addClass = jest.fn();
@@ -42,6 +43,9 @@ describe("EmbeddingsStatusBar", () => {
 
     mockPlugin = {
       addStatusBarItem: jest.fn().mockReturnValue(mockStatusBarEl),
+      manifest: {
+        id: "systemsculpt-ai",
+      },
       settings: {
         embeddingsEnabled: true,
       },
@@ -62,6 +66,10 @@ describe("EmbeddingsStatusBar", () => {
   });
 
   afterEach(() => {
+    try {
+      (statusBar as any)?.onunload?.();
+    } catch {}
+    delete (globalThis as any).__systemsculptEmbeddingsStatusBarSingleton;
     jest.useRealTimers();
   });
 
@@ -204,6 +212,35 @@ describe("EmbeddingsStatusBar", () => {
       const disabledStatusBar = new EmbeddingsStatusBar(mockPlugin);
 
       expect((disabledStatusBar as any).isVisible).toBe(false);
+    });
+  });
+
+  describe("cleanup", () => {
+    it("removes stale embeddings items before creating a fresh status bar", () => {
+      const staleEl = document.createElement("div");
+      staleEl.className = "plugin-systemsculpt-ai";
+      staleEl.textContent = "Embeddings: 4/12";
+      document.body.appendChild(staleEl);
+
+      new EmbeddingsStatusBar(mockPlugin);
+
+      expect(staleEl.isConnected).toBe(false);
+    });
+
+    it("removes the status bar element on unload", () => {
+      document.body.appendChild(mockStatusBarEl);
+
+      (statusBar as any).onunload();
+
+      expect(mockStatusBarEl.isConnected).toBe(false);
+    });
+
+    it("unloads the previous singleton instance before claiming a fresh one", () => {
+      const unloadSpy = jest.spyOn(statusBar, "unload");
+
+      new EmbeddingsStatusBar(mockPlugin);
+
+      expect(unloadSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

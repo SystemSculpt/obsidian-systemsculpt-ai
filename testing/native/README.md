@@ -18,8 +18,13 @@ It is built around one idea: **test the plugin inside the actual Obsidian runtim
 ```bash
 npm run test:native:desktop
 npm run test:native:desktop:extended
+npm run test:native:desktop:chatview-stress
 npm run test:native:desktop:stress
-node testing/native/desktop-automation/run.mjs --vault-name private-vault --case extended --no-reload
+npm run test:native:desktop:soak
+node testing/native/desktop-automation/run.mjs --case extended --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case chatview-stress --repeat 5 --pause-ms 750 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case stress --repeat 5 --pause-ms 1500 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case soak --repeat 25 --pause-ms 1500 --no-reload
 ```
 
 Desktop docs:
@@ -56,9 +61,12 @@ The desktop bridge runner currently covers:
 - `file-write`
 - `web-fetch`
 - `youtube-transcript` in `extended`
+- `reload-stress` in `stress`, which repeats no-focus reloads and asserts that the status bar stays singular before and after model/chat work
+- `chatview-stress`, which churns real chatview state on one automation leaf: model switches, repeated sends, reset/resume, approval-mode overrides, and web-search toggles
+- `soak`, which runs `reload-stress` and `chatview-stress` back to back for longer unattended desktop validation
 
 When the bridge is already live, prefer attach-only `--no-reload` runs.
-If discovery disappears while the vault stays open, touching the target plugin `data.json` should republish the bridge on watcher-enabled runtimes without any manual UI interaction.
+If discovery disappears while the vault stays open, touching the target plugin `data.json` should republish the bridge on runtimes whose external-settings sync path is alive, whether that change is observed by `fs.watch` or by the polling fallback.
 
 The shared mobile smoke harness currently covers:
 
@@ -89,3 +97,5 @@ When desktop and mobile parity matters, use the native surface that matches the 
 
 Desktop means attach-only to an already-running Obsidian vault. The harness does not launch or foreground the app.
 Keep the synced bundle current in the background with `./run.sh --headless` when you want continuous live validation without terminal noise.
+Repeated `run.sh --headless` launches now deduplicate to one active watcher, and the desktop client refreshes itself if the live bridge republishes with a new token or port.
+When you do not pass a selector, the desktop runner now prefers the latest live bridge target automatically.

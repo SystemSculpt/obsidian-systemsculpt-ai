@@ -97,12 +97,14 @@ npm run release:plugin -- --bump patch # force a specific bump
 ```
 
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
+Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
 
 Windows still needs a human-run host pass, but the shared native runtime smoke runner is documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
 Desktop validation is now bridge-based and no-focus by default; the old renderer-driving desktop lane is retired.
+When multiple synced desktop vaults exist, use `--vault-name <vault-name>` or `--vault-path <absolute-path>` to pin one explicitly. Otherwise the desktop runner prefers the latest live bridge target automatically.
 
 ## Canonical source files for docs
 

@@ -37,20 +37,30 @@ This is the canonical desktop lane.
 - No renderer driving or app focus takeover
 - Already-running Obsidian only; the harness never launches the app
 - Localhost bridge owned by the plugin itself
-- Settings-file bootstrap and recovery: patch or touch the target `data.json`, let the running plugin watcher reassert the bridge, and stay off the renderer entirely
+- Settings-file bootstrap and recovery: patch or touch the target `data.json`, let the running plugin's external-settings sync path reassert the bridge, and on unchanged-file touches expect the bridge to restart in place so wedged listeners can heal without focus takeover
+- The external desktop client now tracks discovery changes and can reconnect to a newer bridge record mid-run instead of treating that as a hard failure
 
 Core entrypoints:
 
 ```bash
 npm run test:native:desktop
 npm run test:native:desktop:extended
+npm run test:native:desktop:chatview-stress
 npm run test:native:desktop:stress
-node testing/native/desktop-automation/run.mjs --vault-name private-vault --case extended --no-reload
+npm run test:native:desktop:soak
+node testing/native/desktop-automation/run.mjs --case extended --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case chatview-stress --repeat 5 --pause-ms 750 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case stress --repeat 5 --pause-ms 1500 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case soak --repeat 25 --pause-ms 1500 --no-reload
 node scripts/reload-local-obsidian-plugin.mjs
 ```
 
 `node scripts/reload-local-obsidian-plugin.mjs` is for an explicit in-place plugin reload after code sync.
 Routine attach-only validation should prefer `--no-reload` when the bridge is already live.
+`./run.sh --headless` is safe to invoke repeatedly; duplicate launches now reuse the existing watcher instead of stacking background sync loops.
+`test:native:desktop:stress` now specifically churns repeated in-place plugin reloads and fails if the live desktop bridge comes back with duplicate plugin or embeddings status-bar items.
+`test:native:desktop:chatview-stress` now churns real chatview state on the same automation leaf, and `test:native:desktop:soak` combines both stress lanes for a longer unattended release candidate run.
+When you do not pass a selector, the runner now prefers the latest live bridge target and falls back to the first synced desktop target only if no live bridge can be matched.
 
 Docs:
 
@@ -83,9 +93,9 @@ Docs:
 
 These are the real-device and real-emulator setup/debug loops around the native smoke harness.
 
-- Android: [testing/native/device/android/README.md](/Users/systemsculpt/gits/obsidian-systemsculpt-ai/testing/native/device/android/README.md)
-- iOS/iPad: [testing/native/device/ios/README.md](/Users/systemsculpt/gits/obsidian-systemsculpt-ai/testing/native/device/ios/README.md)
-- Windows desktop: [testing/native/device/windows/README.md](/Users/systemsculpt/gits/obsidian-systemsculpt-ai/testing/native/device/windows/README.md)
+- Android: [Native Android](./native/device/android/README.md)
+- iOS/iPad: [Native iOS and iPad](./native/device/ios/README.md)
+- Windows desktop: [Native Windows Desktop](./native/device/windows/README.md)
 
 ## Naming Rules
 

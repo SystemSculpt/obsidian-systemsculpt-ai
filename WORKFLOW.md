@@ -22,12 +22,13 @@ workspace:
 hooks:
   timeout_ms: 1800000
   after_create: |
-    git clone /Users/systemsculpt/gits/obsidian-systemsculpt-ai .
+    source_repo="${OBSIDIAN_SYSTEMSCULPT_AI_SOURCE_REPO:-$HOME/gits/obsidian-systemsculpt-ai}"
+    git clone "$source_repo" .
     git remote set-url origin https://github.com/SystemSculpt/obsidian-systemsculpt-ai.git
     mkdir -p .codex
-    if [ -d /Users/systemsculpt/gits/obsidian-systemsculpt-ai/.codex/skills ]; then
+    if [ -d "$source_repo/.codex/skills" ]; then
       rm -rf .codex/skills
-      cp -R /Users/systemsculpt/gits/obsidian-systemsculpt-ai/.codex/skills .codex/skills
+      cp -R "$source_repo/.codex/skills" .codex/skills
     fi
     npm ci
 agent:

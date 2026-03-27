@@ -118,6 +118,81 @@ function runCapture(command, commandArgs, allowFailure = false) {
   return run(command, commandArgs, { capture: true, allowFailure });
 }
 
+const REPO_SAFETY_SCAN_EXCLUDED_FILES = new Set(["scripts/release-plugin.mjs"]);
+
+const TRACKED_LOCAL_ONLY_FILE_RULES = [
+  {
+    label: "tracked env file",
+    test(filePath) {
+      return /(^|\/)\.env(?:\.|$)/.test(filePath)
+        && !/\.env(?:\.[^.\/]+)*\.(?:example|sample|template)$/i.test(filePath);
+    },
+  },
+  {
+    label: "tracked sync config",
+    test(filePath) {
+      return /(^|\/)systemsculpt-sync(?:\.[^.\/]+)?\.json$/i.test(filePath);
+    },
+  },
+  {
+    label: "tracked vault directory",
+    test(filePath) {
+      return /(^|\/)(?:\.obsidian|vault)(\/|$)/.test(filePath);
+    },
+  },
+  {
+    label: "tracked local config",
+    test(filePath) {
+      return /(^|\/)config\.json$/i.test(filePath);
+    },
+  },
+  {
+    label: "tracked local launcher",
+    test(filePath) {
+      return /(^|\/)run\.sh$/i.test(filePath);
+    },
+  },
+  {
+    label: "tracked log file",
+    test(filePath) {
+      return /\.log$/i.test(filePath) || /(^|\/)logs?(\/|$)/.test(filePath);
+    },
+  },
+  {
+    label: "tracked database or key material",
+    test(filePath) {
+      return /\.(?:db|sqlite|pem|key|p12|pfx)$/i.test(filePath);
+    },
+  },
+];
+
+const CONTENT_SAFETY_RULES = [
+  {
+    label: "absolute local filesystem path",
+    pattern: /\/Users\/[^/\s"'`]+|\/home\/[^/\s"'`]+|[A-Za-z]:\\Users\\[^\\\s"'`]+/,
+  },
+  {
+    label: "hardcoded vault selector",
+    pattern: /--vault-name\s+(?!<|\$|\$\{)[^\s"'`]+/,
+  },
+  {
+    label: "private key material",
+    pattern: /BEGIN (?:RSA|OPENSSH|EC|DSA) PRIVATE KEY/,
+  },
+  {
+    label: "GitHub token",
+    pattern: /\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/,
+  },
+  {
+    label: "OpenAI-style secret key",
+    pattern: /\bsk-[A-Za-z0-9]{20,}\b/,
+  },
+  {
+    label: "Slack token",
+    pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
+  },
+];
+
 function logStep(message) {
   console.log(`[release] ${message}`);
 }
@@ -133,6 +208,152 @@ function readJson(filePath) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function normalizeRepoPath(filePath) {
+  return String(filePath || "").split(path.sep).join("/");
+}
+
+function listTrackedFiles() {
+  const output = runCapture("git", ["ls-files", "-z"]).stdout;
+  if (!output) {
+    return [];
+  }
+
+  return output
+    .split("\u0000")
+    .map((entry) => normalizeRepoPath(entry))
+    .filter(Boolean);
+}
+
+function listUntrackedNonIgnoredFiles() {
+  const output = runCapture("git", ["ls-files", "--others", "--exclude-standard", "-z"]).stdout;
+  if (!output) {
+    return [];
+  }
+
+  return output
+    .split("\u0000")
+    .map((entry) => normalizeRepoPath(entry))
+    .filter(Boolean);
+}
+
+function getLineNumberForIndex(content, index) {
+  return content.slice(0, index).split("\n").length;
+}
+
+function truncateSample(value, maxLength = 120) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function scanTrackedFilesForLocalOnlyPaths(files) {
+  const findings = [];
+
+  for (const filePath of files) {
+    for (const rule of TRACKED_LOCAL_ONLY_FILE_RULES) {
+      if (rule.test(filePath)) {
+        findings.push({
+          filePath,
+          label: rule.label,
+        });
+        break;
+      }
+    }
+  }
+
+  return findings;
+}
+
+function scanTrackedFilesForSensitiveContent(files) {
+  const findings = [];
+
+  for (const filePath of files) {
+    if (REPO_SAFETY_SCAN_EXCLUDED_FILES.has(filePath)) {
+      continue;
+    }
+
+    const absolutePath = path.join(cwd, filePath);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    const buffer = fs.readFileSync(absolutePath);
+    if (buffer.includes(0)) {
+      continue;
+    }
+
+    const content = buffer.toString("utf8");
+    for (const rule of CONTENT_SAFETY_RULES) {
+      const match = rule.pattern.exec(content);
+      if (!match) {
+        continue;
+      }
+
+      findings.push({
+        filePath,
+        label: rule.label,
+        line: getLineNumberForIndex(content, match.index),
+        sample: truncateSample(match[0]),
+      });
+      break;
+    }
+  }
+
+  return findings;
+}
+
+function formatRepoSafetyFindings(findings) {
+  return findings
+    .map((finding) => {
+      const location = finding.line ? `${finding.filePath}:${finding.line}` : finding.filePath;
+      return `- ${location} (${finding.label}${finding.sample ? `: ${finding.sample}` : ""})`;
+    })
+    .join("\n");
+}
+
+function runRepoSafetyChecks() {
+  logStep("Running release safety preflight");
+  const trackedFiles = listTrackedFiles();
+  const untrackedNonIgnoredFiles = listUntrackedNonIgnoredFiles();
+  const localOnlyFindings = scanTrackedFilesForLocalOnlyPaths(trackedFiles);
+  const missingIgnoreFindings = scanTrackedFilesForLocalOnlyPaths(untrackedNonIgnoredFiles);
+  const contentFindings = scanTrackedFilesForSensitiveContent(trackedFiles);
+
+  if (localOnlyFindings.length > 0 || missingIgnoreFindings.length > 0 || contentFindings.length > 0) {
+    const sections = [];
+    if (localOnlyFindings.length > 0) {
+      sections.push(
+        "Tracked files that look local-only and should probably live in .gitignore:\n"
+          + formatRepoSafetyFindings(localOnlyFindings)
+      );
+    }
+    if (missingIgnoreFindings.length > 0) {
+      sections.push(
+        "Untracked local-only files are visible to git and should probably be added to .gitignore:\n"
+          + formatRepoSafetyFindings(missingIgnoreFindings)
+      );
+    }
+    if (contentFindings.length > 0) {
+      sections.push(
+        "Tracked text that looks private, machine-specific, or secret-like:\n"
+          + formatRepoSafetyFindings(contentFindings)
+      );
+    }
+
+    fail(
+      "Release safety preflight failed.\n"
+        + `${sections.join("\n\n")}\n\n`
+        + "Remove or generalize these before creating a release commit or tag."
+    );
+  }
+
+  logStep(
+    "Release safety preflight passed (no tracked local-only files, missing ignore rules for local-only files, local paths, hardcoded vault selectors, or secret-looking tokens found)."
+  );
 }
 
 function isSemver(value) {
@@ -436,6 +657,7 @@ function main() {
   ensureExpectedFiles();
   ensureCleanTree(options.allowDirty);
   ensureGitHubCliReady();
+  runRepoSafetyChecks();
 
   const manifestPath = path.join(cwd, "manifest.json");
   const packagePath = path.join(cwd, "package.json");

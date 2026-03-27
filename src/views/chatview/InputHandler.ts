@@ -1,11 +1,10 @@
-import { App, TFile, Component, Notice, ButtonComponent, setIcon } from "obsidian";
+import { App, TFile, Component, Notice, ButtonComponent } from "obsidian";
 import {
   ChatMessage,
   ChatRole,
   Annotation,
   UrlCitation,
 } from "../../types";
-import type { SystemSculptModel } from "../../types/llm";
 import { ToolCall } from "../../types/toolCalls";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SystemSculptError } from "../../utils/errors";
@@ -25,15 +24,8 @@ import { showPopup } from "../../core/ui/";
 
 import { createChatComposer } from "./ui/createInputUI";
 import {
-  getChatModelSetupMessage,
-  getChatModelSetupNotice,
-  getChatModelSetupSurface,
-  getChatModelPickerIcon,
   getEffectiveChatModelId,
-  loadChatModelPickerOptions,
-  type ChatModelPickerOption,
-  type ChatModelSetupSurface,
-  type ChatModelSetupTab,
+  type ChatModelSetupPromptOverrides,
 } from "./modelSelection";
 import { renderContextAttachmentPill } from "./ui/ContextAttachmentPills";
 import { handlePaste as handlePasteExternal, handleLargeTextPaste as handleLargeTextPasteExternal, showLargeTextWarning as showLargeTextWarningExternal } from "./handlers/LargePasteHandlers";
@@ -47,19 +39,7 @@ import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleCont
 import { errorLogger } from "../../utils/errorLogger";
 import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
-import {
-  assertPiTextExecutionReady,
-  type PiTextExecutionPlan,
-} from "../../services/pi-native/PiTextRuntime";
-import {
-  buildPiTextProviderSetupMessage,
-  hasPiTextProviderAuth,
-} from "../../services/pi-native/PiTextAuth";
-import {
-  hasManagedSystemSculptAccess,
-  isManagedSystemSculptModelId,
-} from "../../services/systemsculpt/ManagedSystemSculptModel";
-import { ChatModelPickerModal } from "./ChatModelPickerModal";
+import { ChatModelSelectionController } from "./ChatModelSelectionController";
 
 export interface InputHandlerOptions {
   app: App;
@@ -103,9 +83,7 @@ export class InputHandler extends Component {
   private onOpenChatSettings: () => void;
   private input: HTMLTextAreaElement;
   private inputWrapper: HTMLDivElement | null = null;
-  private modelPickerHost: HTMLElement | null = null;
-  private modelPickerOptionsCache: ChatModelPickerOption[] | null = null;
-  private modelPickerOptionsPromise: Promise<ChatModelPickerOption[]> | null = null;
+  private modelSelectionController!: ChatModelSelectionController;
   private attachmentsEl: HTMLDivElement | null = null;
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
@@ -185,6 +163,25 @@ export class InputHandler extends Component {
     this.getChatId = options.getChatId;
     this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
+    this.modelSelectionController = new ChatModelSelectionController({
+      app: this.app,
+      container: this.container,
+      plugin: this.plugin,
+      getSelectedModelId: () => this.getSelectedModelIdForChat(),
+      getSelectedModelRecord: async () => await this.getSelectedModelRecordForChat(),
+      isAutomationRequestActive: () => this.isAutomationRequestActive(),
+      setSelectedModelId: async (value: string) => {
+        await this.chatView?.setSelectedModelId?.(value);
+      },
+      promptProviderSetup: async (message, overrides) => {
+        if (typeof this.chatView?.promptProviderSetup !== "function") {
+          return false;
+        }
+        await this.chatView.promptProviderSetup(message, overrides);
+        return true;
+      },
+    });
+    this.addChild(this.modelSelectionController);
 
     // InputHandler initialized with RecorderService - silent setup
     this.recorderService = RecorderService.getInstance(this.app, this.plugin, {
@@ -254,155 +251,13 @@ export class InputHandler extends Component {
     return getEffectiveChatModelId(selectedModelId, this.plugin.settings.selectedModelId);
   }
 
-  private async getSelectedModelRecordForChat(): Promise<SystemSculptModel | undefined> {
+  private async getSelectedModelRecordForChat() {
     if (typeof this.chatView?.getSelectedModelRecord === "function") {
       return await this.chatView.getSelectedModelRecord();
     }
 
     const modelId = this.getSelectedModelIdForChat();
     return await this.plugin.modelService?.getModelById?.(modelId);
-  }
-
-  private getSelectedModelSetupSurface(): ChatModelSetupSurface {
-    if (typeof this.chatView?.getSelectedModelSetupSurface === "function") {
-      return this.chatView.getSelectedModelSetupSurface();
-    }
-
-    return getChatModelSetupSurface(this.getSelectedModelIdForChat());
-  }
-
-  private async loadChatModelOptions(forceReload: boolean = false): Promise<ChatModelPickerOption[]> {
-    if (forceReload) {
-      this.modelPickerOptionsCache = null;
-      this.modelPickerOptionsPromise = null;
-    } else if (this.modelPickerOptionsCache) {
-      return this.modelPickerOptionsCache;
-    }
-
-    if (!this.modelPickerOptionsPromise) {
-      this.modelPickerOptionsPromise = loadChatModelPickerOptions(this.plugin)
-        .then((nextOptions) => {
-          this.modelPickerOptionsCache = nextOptions;
-          return nextOptions;
-        })
-        .finally(() => {
-        this.modelPickerOptionsPromise = null;
-      });
-    }
-
-    return await this.modelPickerOptionsPromise;
-  }
-
-  private ensureModelPickerHost(composer: { modelSlot?: HTMLElement | null; toolbar?: HTMLElement | null }): void {
-    if (composer.modelSlot instanceof HTMLElement) {
-      this.modelPickerHost = composer.modelSlot;
-      return;
-    }
-
-    const parent = composer.toolbar instanceof HTMLElement ? composer.toolbar : this.container;
-    const modelSlot = document.createElement("div");
-    modelSlot.className =
-      "systemsculpt-chat-composer-toolbar-center systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips";
-    const rightGroup = parent.querySelector(".systemsculpt-chat-composer-toolbar-group.mod-right");
-    if (rightGroup?.parentElement === parent) {
-      parent.insertBefore(modelSlot, rightGroup);
-    } else {
-      parent.appendChild(modelSlot);
-    }
-    this.modelPickerHost = modelSlot;
-  }
-
-  private renderModelPicker(): void {
-    if (!this.modelPickerHost) {
-      return;
-    }
-    if (typeof (this.modelPickerHost as any).createDiv !== "function") {
-      return;
-    }
-
-    this.modelPickerHost.replaceChildren();
-    this.modelPickerHost.classList.add("systemsculpt-chat-model-picker");
-    const currentModelId = this.getSelectedModelIdForChat();
-    const currentOption =
-      this.modelPickerOptionsCache?.find((option) => option.value === currentModelId) || null;
-    const triggerButtonEl = this.modelPickerHost.createEl("button", {
-      cls: "systemsculpt-chat-model-trigger",
-      attr: {
-        type: "button",
-        "aria-label": "Select chat model",
-        "aria-haspopup": "dialog",
-        "aria-expanded": "false",
-      },
-    });
-
-    const currentModelReady = currentOption
-      ? currentOption.providerAuthenticated
-      : isManagedSystemSculptModelId(currentModelId)
-        ? hasManagedSystemSculptAccess(this.plugin)
-        : false;
-    const fallbackSection = isManagedSystemSculptModelId(currentModelId) ? "systemsculpt" : "pi";
-
-    triggerButtonEl.classList.toggle("is-provider-authenticated", currentModelReady);
-    triggerButtonEl.classList.toggle("is-managed", isManagedSystemSculptModelId(currentModelId));
-    triggerButtonEl.classList.toggle("is-setup-required", !currentModelReady);
-
-    const iconEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-icon" });
-    setIcon(iconEl, currentOption?.icon || getChatModelPickerIcon(fallbackSection));
-
-    const bodyEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-body" });
-    bodyEl.createSpan({
-      cls: "systemsculpt-chat-model-trigger-label",
-      text:
-        currentOption?.label ||
-        (typeof this.chatView?.getCurrentModelName === "function"
-          ? this.chatView.getCurrentModelName()
-          : "Select model"),
-    });
-
-    const badgeText = currentOption?.providerLabel || (isManagedSystemSculptModelId(currentModelId) ? "SystemSculpt" : "Pi");
-    bodyEl.createSpan({
-      cls: "systemsculpt-chat-model-trigger-badge",
-      text: badgeText,
-    });
-
-    const chevronEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-chevron" });
-    setIcon(chevronEl, "chevrons-up-down");
-
-    const titleParts = [currentOption?.label, badgeText, currentOption?.description].filter(Boolean);
-    triggerButtonEl.title = titleParts.join(" • ");
-
-    this.registerDomEvent(triggerButtonEl, "click", () => {
-      triggerButtonEl.setAttribute("aria-expanded", "true");
-      const modal = new ChatModelPickerModal(this.app, {
-        currentValue: currentModelId,
-        loadOptions: async () => await this.loadChatModelOptions(true),
-        onSelect: async (value: string) => {
-          await this.chatView?.setSelectedModelId?.(value);
-          await this.loadChatModelOptions(true).catch(() => []);
-          this.renderModelPicker();
-        },
-        onOpenSetup: (tab: ChatModelSetupTab) => {
-          this.openSetupTabFallback(tab);
-        },
-      });
-      const originalOnClose = modal.onClose.bind(modal);
-      modal.onClose = (): void => {
-        originalOnClose();
-        triggerButtonEl.setAttribute("aria-expanded", "false");
-        triggerButtonEl.focus();
-      };
-      modal.open();
-    });
-
-    if (!this.modelPickerOptionsCache && !this.modelPickerOptionsPromise) {
-      void this.loadChatModelOptions()
-        .then(() => {
-          if (this.modelPickerHost?.isConnected) {
-            this.renderModelPicker();
-          }
-        })
-        .catch(() => {});
-    }
   }
 
   private async streamAssistantTurn(
@@ -655,11 +510,11 @@ export class InputHandler extends Component {
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
-    this.ensureModelPickerHost({
+    this.modelSelectionController.ensureHost({
       modelSlot: (composer as any).modelSlot,
       toolbar: (composer as any).toolbar,
     });
-    this.renderModelPicker();
+    this.modelSelectionController.render();
 
     // Initialize states that depend on runtime conditions
     this.updateSendButtonState();
@@ -1307,6 +1162,13 @@ export class InputHandler extends Component {
     this.automationApprovalMode = mode;
   }
 
+  public resetForFreshChat(): void {
+    this.pendingLargeTextContent = null;
+    this.webSearchEnabled = false;
+    this.automationApprovalMode = "interactive";
+    this.setValue("", { focus: false });
+  }
+
   private disposeLocalResources(): void {
     if (this.localResourcesDisposed) {
       return;
@@ -1398,11 +1260,9 @@ export class InputHandler extends Component {
   }
 
   public onModelChange(options?: { refreshOptions?: boolean }): void {
-    if (options?.refreshOptions) {
-      this.modelPickerOptionsCache = null;
-      this.modelPickerOptionsPromise = null;
-    }
-    this.renderModelPicker();
+    this.modelSelectionController.refresh({
+      reloadOptions: options?.refreshOptions,
+    });
     this.notifyModelChange(options);
   }
 
@@ -1508,113 +1368,13 @@ export class InputHandler extends Component {
   }
 
   private async ensureProviderReadyForChat(): Promise<boolean> {
-    const selectedModelId = this.getSelectedModelIdForChat();
-    const setupSurface = this.getSelectedModelSetupSurface();
-
-    if (isManagedSystemSculptModelId(selectedModelId)) {
-      if (hasManagedSystemSculptAccess(this.plugin)) {
-        return true;
-      }
-
-      await this.invokeProviderSetupPrompt(
-        "Activate your SystemSculpt license in Account before starting a chat.",
-        setupSurface
-      );
-      return false;
-    }
-
-    const selectedModel = await this.getSelectedModelRecordForChat();
-    if (!selectedModel) {
-      await this.invokeProviderSetupPrompt(
-        "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers.",
-        setupSurface
-      );
-      return false;
-    }
-
-    let executionPlan: PiTextExecutionPlan;
-    try {
-      executionPlan = await assertPiTextExecutionReady(selectedModel);
-    } catch (error: any) {
-      await this.invokeProviderSetupPrompt(
-        error?.message || "Pi is not ready to run the selected model yet.",
-        setupSurface
-      );
-      return false;
-    }
-
-    try {
-      const hasAuth = await hasPiTextProviderAuth(executionPlan.providerId);
-      if (!hasAuth) {
-        await this.invokeProviderSetupPrompt(
-          buildPiTextProviderSetupMessage(executionPlan.providerId, executionPlan.actualModelId),
-          setupSurface
-        );
-        return false;
-      }
-    } catch (error: any) {
-      await this.invokeProviderSetupPrompt(
-        error?.message || "Pi provider credentials are not ready yet.",
-        setupSurface
-      );
-      return false;
-    }
-
-    return true;
+    return await this.modelSelectionController.ensureProviderReadyForChat();
   }
 
   private async invokeProviderSetupPrompt(
     message?: string,
-    overrides?: {
-      title?: string;
-      primaryButton?: string;
-      targetTab?: ChatModelSetupTab;
-    }
+    overrides?: ChatModelSetupPromptOverrides
   ): Promise<void> {
-    if (this.isAutomationRequestActive()) {
-      throw new Error(message ?? getChatModelSetupMessage(overrides?.targetTab || "account"));
-    }
-
-    if (typeof this.chatView?.promptProviderSetup === 'function') {
-      await this.chatView.promptProviderSetup(message, overrides);
-      return;
-    }
-    await this.promptProviderSetupFallback(message, overrides);
-  }
-
-  private async promptProviderSetupFallback(
-    message?: string,
-    overrides?: {
-      title?: string;
-      primaryButton?: string;
-      targetTab?: ChatModelSetupTab;
-    }
-  ): Promise<void> {
-    const setupSurface = {
-      ...this.getSelectedModelSetupSurface(),
-      ...overrides,
-    };
-    const targetTab = setupSurface.targetTab || "account";
-    const result = await showPopup(
-      this.app,
-      message ?? getChatModelSetupMessage(targetTab),
-      {
-        title: setupSurface.title || "Finish setup",
-        icon: "plug-zap",
-        primaryButton: setupSurface.primaryButton || "Open Account",
-        secondaryButton: "Not Now",
-      }
-    );
-    if (result?.confirmed) {
-      this.openSetupTabFallback(targetTab);
-    }
-  }
-
-  private openSetupTabFallback(tabId: ChatModelSetupTab = "account"): void {
-    try {
-      this.plugin.openSettingsTab(tabId);
-    } catch (error) {
-      new Notice(getChatModelSetupNotice(tabId), 6000);
-    }
+    await this.modelSelectionController.invokeProviderSetupPrompt(message, overrides);
   }
 }

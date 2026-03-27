@@ -178,6 +178,95 @@ describe("ChatView loaded model migration", () => {
     expect(chatView.getSelectedModelId()).toBe("local-pi-openai@@gpt-4.1");
   });
 
+  it("clears stale Pi session state when the selected model changes", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+      getModelById: jest.fn(async (id: string) => ({
+        id,
+        provider: "systemsculpt",
+      })),
+    });
+
+    chatView.selectedModelId = "local-pi-github-copilot@@claude-haiku-4.5";
+    chatView.piSessionFile = "/tmp/pi-session.jsonl";
+    chatView.piSessionId = "session-123";
+    chatView.piLastEntryId = "entry-456";
+    chatView.piLastSyncedAt = "2026-03-28T00:00:00.000Z";
+
+    jest.spyOn(chatView as any, "refreshModelMetadata").mockResolvedValue(undefined);
+    jest.spyOn(chatView, "focusInput").mockImplementation(() => {});
+    jest.spyOn(chatView as any, "notifySettingsChanged").mockImplementation(() => {});
+
+    await chatView.setSelectedModelId("systemsculpt@@systemsculpt/ai-agent");
+
+    expect(chatView.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(chatView.piSessionFile).toBeUndefined();
+    expect(chatView.piSessionId).toBeUndefined();
+    expect(chatView.piLastEntryId).toBeUndefined();
+    expect(chatView.piLastSyncedAt).toBeUndefined();
+  });
+
+  it("preserves an explicitly requested model when resetting to a fresh chat", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+    });
+
+    jest.spyOn(chatView as any, "refreshModelMetadata").mockResolvedValue(undefined);
+    jest.spyOn(chatView, "updateSystemPromptIndicator").mockImplementation(() => {});
+
+    await chatView.setState({
+      chatId: "",
+      selectedModelId: "local-pi-github-copilot@@claude-haiku-4.5",
+    });
+
+    expect(chatView.chatId).toBe("");
+    expect(chatView.selectedModelId).toBe("local-pi-github-copilot@@claude-haiku-4.5");
+    expect(chatView.getSelectedModelId()).toBe("local-pi-github-copilot@@claude-haiku-4.5");
+  });
+
+  it("resets composer automation state when resetting to a fresh chat", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+    });
+
+    const resetForFreshChat = jest.fn();
+    (chatView as any).inputHandler = {
+      resetForFreshChat,
+    };
+
+    jest.spyOn(chatView as any, "refreshModelMetadata").mockResolvedValue(undefined);
+    jest.spyOn(chatView, "updateSystemPromptIndicator").mockImplementation(() => {});
+
+    await chatView.setState({
+      chatId: "",
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+    });
+
+    expect(resetForFreshChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates leaf state without requesting focus", () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+    });
+
+    const setViewState = jest.fn();
+    (chatView.leaf as any).setViewState = setViewState;
+
+    (chatView as any).updateViewState();
+
+    expect(setViewState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: chatView.getViewType(),
+      }),
+      { focus: false }
+    );
+  });
+
   it("preserves completed tool results when assistant updates are persisted", async () => {
     const chatView = createChatView({
       getCachedModels: jest.fn(() => []),

@@ -9,6 +9,21 @@ jest.mock("obsidian", () => ({
   normalizePath: (value: string) => String(value || "").replace(/\\/g, "/"),
 }));
 
+const mockFsWatcherOn = jest.fn();
+const mockFsWatcherClose = jest.fn();
+const mockFsWatch = jest.fn(() => ({
+  on: mockFsWatcherOn,
+  close: mockFsWatcherClose,
+}));
+const mockFsPromisesStat = jest.fn();
+
+jest.mock("node:fs", () => ({
+  watch: (...args: unknown[]) => mockFsWatch(...args),
+  promises: {
+    stat: (...args: unknown[]) => mockFsPromisesStat(...args),
+  },
+}));
+
 // Mock AutomaticBackupService
 const mockAutomaticBackupServiceStart = jest.fn();
 const mockAutomaticBackupServiceStop = jest.fn();
@@ -84,12 +99,18 @@ describe("SettingsManager", () => {
     jest.clearAllMocks();
 
     mockPlugin = {
+      manifest: {
+        id: "systemsculpt-ai",
+      },
       loadData: jest.fn().mockResolvedValue({}),
       saveData: jest.fn().mockResolvedValue(undefined),
       storage: null,
+      register: jest.fn(),
       app: {
         vault: {
+          configDir: ".obsidian",
           adapter: {
+            basePath: "/tmp/systemsculpt-test-vault",
             exists: jest.fn().mockResolvedValue(false),
             read: jest.fn(),
             list: jest.fn().mockResolvedValue({ files: [] }),
@@ -101,6 +122,15 @@ describe("SettingsManager", () => {
       },
       _internal_settings_systemsculpt_plugin: {},
     };
+
+    mockFsWatcherOn.mockReset();
+    mockFsWatcherClose.mockReset();
+    mockFsWatch.mockReset();
+    mockFsWatch.mockImplementation(() => ({
+      on: mockFsWatcherOn,
+      close: mockFsWatcherClose,
+    }));
+    mockFsPromisesStat.mockReset();
 
     settingsManager = new SettingsManager(mockPlugin);
   });
@@ -637,6 +667,7 @@ describe("SettingsManager", () => {
 
     it("ignores unchanged external settings payloads", async () => {
       await settingsManager.loadSettings();
+      (settingsManager as any).recentInternalPluginDataWrites = [];
       jest.clearAllMocks();
 
       mockPlugin.loadData.mockResolvedValue({ ...settingsManager.settings });
@@ -653,6 +684,127 @@ describe("SettingsManager", () => {
         expect.anything(),
         expect.anything()
       );
+    });
+
+    it("ignores watcher echoes from the plugin's own saveData writes", async () => {
+      await settingsManager.loadSettings();
+      await settingsManager.saveSettings();
+      jest.clearAllMocks();
+
+      mockPlugin.loadData.mockResolvedValue({ ...settingsManager.settings });
+
+      const changed = await settingsManager.reloadSettingsFromDisk();
+
+      expect(changed).toBe(false);
+      expect(mockPlugin.app.workspace.trigger).not.toHaveBeenCalledWith(
+        "systemsculpt:settings-file-touched",
+        expect.anything()
+      );
+      expect(mockPlugin.app.workspace.trigger).not.toHaveBeenCalledWith(
+        "systemsculpt:settings-updated",
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
+    it("ignores watcher bursts after back-to-back internal saveData writes", async () => {
+      await settingsManager.loadSettings();
+      await settingsManager.updateSettings({
+        selectedModelId: "local-pi-github-copilot@@claude-haiku-4.5",
+      });
+      await settingsManager.updateSettings({
+        activeProvider: {
+          id: "local-pi-github-copilot",
+          name: "GitHub Copilot",
+          type: "native",
+        },
+      });
+      jest.clearAllMocks();
+
+      mockPlugin.loadData.mockResolvedValue({ ...settingsManager.settings });
+
+      for (let index = 0; index < 8; index += 1) {
+        const changed = await settingsManager.reloadSettingsFromDisk();
+        expect(changed).toBe(false);
+      }
+
+      expect(mockPlugin.app.workspace.trigger).not.toHaveBeenCalledWith(
+        "systemsculpt:settings-file-touched",
+        expect.anything()
+      );
+      expect(mockPlugin.app.workspace.trigger).not.toHaveBeenCalledWith(
+        "systemsculpt:settings-updated",
+        expect.anything(),
+        expect.anything()
+      );
+    });
+  });
+
+  describe("startWatchingPluginDataFile", () => {
+    const flushMicrotasks = async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    });
+
+    it("keeps polling when fs.watch setup fails", async () => {
+      mockFsWatch.mockImplementation(() => {
+        throw new Error("watch unavailable");
+      });
+      mockFsPromisesStat
+        .mockResolvedValueOnce({ mtimeMs: 1000 })
+        .mockResolvedValueOnce({ mtimeMs: 1000 })
+        .mockResolvedValueOnce({ mtimeMs: 2000 });
+
+      const reloadSpy = jest.spyOn(settingsManager, "reloadSettingsFromDisk").mockResolvedValue(false);
+
+      settingsManager.startWatchingPluginDataFile();
+      await flushMicrotasks();
+
+      jest.advanceTimersByTime(1000);
+      await flushMicrotasks();
+      jest.advanceTimersByTime(1000);
+      await flushMicrotasks();
+      jest.advanceTimersByTime(150);
+      await flushMicrotasks();
+
+      expect(mockFsWatch).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.register).toHaveBeenCalledTimes(1);
+      expect((settingsManager as any).pluginDataPollInterval).not.toBeNull();
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("snapshots watched touches so the poller does not double-reload the same change", async () => {
+      mockFsPromisesStat
+        .mockResolvedValueOnce({ mtimeMs: 1000 })
+        .mockResolvedValueOnce({ mtimeMs: 2000 })
+        .mockResolvedValueOnce({ mtimeMs: 2000 });
+
+      const reloadSpy = jest.spyOn(settingsManager, "reloadSettingsFromDisk").mockResolvedValue(false);
+
+      settingsManager.startWatchingPluginDataFile();
+      await flushMicrotasks();
+
+      const watchCallback = mockFsWatch.mock.calls[0]?.[2] as ((eventType: string, filename?: string) => void) | undefined;
+      expect(typeof watchCallback).toBe("function");
+
+      watchCallback?.("change", "data.json");
+      await flushMicrotasks();
+      jest.advanceTimersByTime(150);
+      await flushMicrotasks();
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(1000);
+      await flushMicrotasks();
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
     });
   });
 

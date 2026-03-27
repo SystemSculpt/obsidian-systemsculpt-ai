@@ -13,15 +13,22 @@ This runner will never launch Obsidian, create a hidden host, or steal focus.
 ```bash
 npm run test:native:desktop
 npm run test:native:desktop:extended
+npm run test:native:desktop:chatview-stress
 npm run test:native:desktop:stress
-node testing/native/desktop-automation/run.mjs --vault-name private-vault --case extended --no-reload
+npm run test:native:desktop:soak
+node testing/native/desktop-automation/run.mjs --case extended --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case chatview-stress --repeat 5 --pause-ms 750 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case stress --repeat 5 --pause-ms 1500 --no-reload
+node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case soak --repeat 25 --pause-ms 1500 --no-reload
 node scripts/reload-local-obsidian-plugin.mjs
 ./run.sh --headless
 ```
 
 Use `./run.sh --headless` to keep the bundle synced in the background.
+`run.sh` now self-deduplicates, so repeated launches reuse the existing watcher instead of stacking multiple sync and reload loops.
 Use `node scripts/reload-local-obsidian-plugin.mjs` only when you intentionally want the live plugin to reload in place after a code change.
 Use `--no-reload` for routine attach-only validation when the bridge is already up.
+When no vault selector is supplied, the runner now prefers the latest live bridge target and falls back to the first synced desktop target only when no live bridge can be matched.
 
 ## What the desktop runner covers
 
@@ -44,6 +51,22 @@ Current case profiles:
   - `web-fetch`
 - `extended`
   - everything above plus `youtube-transcript`
+- `stress` / `reload-stress`
+  - attach to the already-open vault without an implicit bootstrap reload
+  - explicitly reload the live plugin in place on every iteration
+  - wait for a new stable bridge generation after each reload
+  - assert `pluginStatusBarItemCount === 1`
+  - assert `embeddingsStatusBarItemCount === 1`
+  - run model switching and a real chat send after each reload to prove the chat view is still healthy
+- `chatview-stress`
+  - reset the automation chat and prove a fresh empty composer comes up on the same automation leaf
+  - toggle web search and approval mode directly through the live chat view
+  - send repeated real chat turns while switching between authenticated models
+  - verify the chat can be resumed, reset, and reused without replacing the automation leaf
+  - verify one-shot automation approval overrides do not permanently mutate the chat's configured approval mode
+- `soak`
+  - run `reload-stress` and `chatview-stress` back to back for each iteration
+  - intended for unattended longer runs before release or after reload-hardening changes
 
 ## Bootstrap behavior
 
@@ -57,16 +80,21 @@ When the target desktop vault does not have a `data.json` yet, the bootstrap hel
 
 After that the bootstrap helper does one of three things:
 
-- attaches immediately when a live bridge is already present and you passed `--no-reload`
-- touches or patches `data.json` so the running plugin watcher republishes the bridge without touching the renderer
-- reloads the live plugin through the bridge when you explicitly requested reload semantics
+- waits for the currently published bridge generation to stay stable when a live bridge is already present and you passed `--no-reload`
+- touches or patches `data.json` so the running plugin's external-settings sync path republishes the bridge without touching the renderer
+- reloads the live plugin through the bridge when you explicitly requested reload semantics, then waits for the new bridge generation to stay stable before any chat/model requests run
 
-When the running desktop plugin already includes the external settings watcher, patching or touching `data.json`
-is enough to start or heal the bridge without focusing Obsidian or touching the renderer.
+When the running desktop plugin already includes the external settings sync path, patching or touching `data.json`
+is enough to start or heal the bridge without focusing Obsidian or touching the renderer. That sync path now uses
+`fs.watch` first and falls back to a lightweight mtime poll so missed watcher events do not strand attach-only recovery.
 
 The discovery file is now treated as owned state. A stale unload should not delete a newer bridge record, and an unchanged `data.json` touch should cause the running plugin to reassert discovery if that file disappears.
+The external desktop client also refreshes itself when discovery rolls to a newer live bridge record, so attach-only runs can survive bridge restarts without taking focus.
+Attach-only bootstrap now waits for a stable bridge generation before starting cases, which avoids binding to a bridge that is already mid-reload because of a background sync or hot-reload cycle.
+When bootstrap has to heal a missing or wedged bridge through `data.json`, it now reasserts settings on a backoff instead of rewriting the file every poll cycle, so recovery does not create a restart storm.
+If multiple synced desktop vaults exist and you want to pin one explicitly, pass `--vault-name <vault-name>` or `--vault-path <absolute-path>`.
 
-If the currently open vault is still on an older runtime that predates the watcher, do one manual
+If the currently open vault is still on an older runtime that predates this external settings sync path, do one manual
 plugin reload once. After that, future desktop automation bootstraps stay no-focus.
 
 ## Important boundary
@@ -76,3 +104,37 @@ If no live bridge appears after patching `data.json`, the command fails and tell
 
 Once the bridge is live, the external runner is cross-platform. The no-focus bootstrap path is now
 also cross-platform as long as the open vault is already on a watcher-enabled plugin runtime.
+
+## What `test:native:desktop:stress` now proves
+
+The stress command is no longer just the normal suite repeated.
+
+It now performs repeated no-focus reload churn against the already-open desktop vault:
+
+1. Attach to the existing live bridge without an extra bootstrap reload
+2. Request an in-place plugin reload through the bridge
+3. Wait for a new stable bridge generation
+4. Verify the status bar still has exactly one plugin item and one embeddings item
+5. Switch models and send a real chat turn
+6. Re-check the same health assertions after chat activity
+
+That specifically targets the earlier failure mode where reloads could leave stale listeners,
+duplicate status bar items, or a bridge that looked published but was not actually healthy.
+
+## What `test:native:desktop:chatview-stress` now proves
+
+The chatview stress lane is intentionally about state churn instead of reload churn:
+
+1. Reset to a fresh automation chat on the existing automation leaf
+2. Toggle web search and approval mode through the real chat controls
+3. Send a real turn, resume the same chat, and confirm state stayed attached to the same leaf
+4. Switch to a second authenticated model and send another real turn in the same chat
+5. Reset the chat again and prove the same leaf can host a fresh chat immediately afterward
+
+That directly covers the release-critical behavior the Pi integration changed: model switching, repeated sends,
+new-vs-resumed chat handling, and input state churn in the actual live chat view without taking focus.
+
+## Soak guidance
+
+Use `test:native:desktop:stress` as the fast regression gate.
+Use `test:native:desktop:soak` when you want a longer unattended no-focus run before release.

@@ -16,6 +16,7 @@ type NodeCryptoModule = typeof import("node:crypto");
 type IncomingMessage = import("node:http").IncomingMessage;
 type ServerResponse = import("node:http").ServerResponse;
 type Server = import("node:http").Server;
+type Socket = import("node:net").Socket;
 
 type BridgeRuntime = {
   http: NodeHttpModule;
@@ -45,6 +46,13 @@ type EnsureChatOptions = {
   createIfMissing?: boolean;
   reset?: boolean;
   selectedModelId?: string;
+};
+
+const DESKTOP_AUTOMATION_BRIDGE_SINGLETON_KEY = "__systemsculptDesktopAutomationBridgeSingleton";
+
+type DesktopAutomationBridgeSingletonEntry = {
+  token: symbol;
+  stop: () => Promise<void>;
 };
 
 class BridgeHttpError extends Error {
@@ -98,31 +106,79 @@ async function delay(ms: number): Promise<void> {
 export class DesktopAutomationBridge {
   private readonly host = "127.0.0.1";
   private server: Server | null = null;
+  private serverSockets = new Set<Socket>();
   private token: string | null = null;
   private port: number | null = null;
   private startedAt: string | null = null;
   private discoveryFilePath: string | null = null;
   private automationLeaf: WorkspaceLeaf | null = null;
+  private lifecycleTask: Promise<void> = Promise.resolve();
+  private selfReloadScheduled = false;
+  private selfReloadPromise: Promise<void> | null = null;
+  private selfReloadRequestedAt: string | null = null;
+  private readonly singletonToken = Symbol("DesktopAutomationBridge");
 
   constructor(private readonly plugin: SystemSculptPlugin) {}
 
-  public async syncFromSettings(): Promise<void> {
-    if (!this.plugin.settings.desktopAutomationBridgeEnabled) {
-      await this.stop();
-      return;
-    }
-
-    if (this.server) {
-      await this.writeDiscoveryFile();
-      return;
-    }
-
-    await this.start();
+  public async syncFromSettings(options?: { forceRestart?: boolean }): Promise<void> {
+    await this.enqueueLifecycle(async () => {
+      await this.syncFromSettingsNow(options);
+    });
   }
 
   public async stop(): Promise<void> {
+    await this.enqueueLifecycle(async () => {
+      await this.stopNow();
+    });
+  }
+
+  private async enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const nextTask = this.lifecycleTask
+      .catch(() => {})
+      .then(async () => {
+        await operation();
+      });
+
+    this.lifecycleTask = nextTask;
+    await nextTask;
+  }
+
+  private async syncFromSettingsNow(options?: { forceRestart?: boolean }): Promise<void> {
+    if (this.plugin.isPluginUnloading()) {
+      await this.stopNow();
+      return;
+    }
+
+    if (!this.plugin.settings.desktopAutomationBridgeEnabled) {
+      await this.stopNow();
+      return;
+    }
+
+    await this.claimSingleton();
+
+    try {
+      if (this.server && !options?.forceRestart) {
+        await this.writeDiscoveryFile();
+        return;
+      }
+
+      if (this.server) {
+        await this.stopNow();
+      }
+
+      await this.start();
+    } catch (error) {
+      if (!this.server) {
+        this.releaseSingleton();
+      }
+      throw error;
+    }
+  }
+
+  private async stopNow(): Promise<void> {
     const runtime = loadBridgeRuntime();
     const server = this.server;
+    const sockets = Array.from(this.serverSockets);
     const discoveryFilePath = this.discoveryFilePath;
     const ownership = {
       token: this.token,
@@ -131,15 +187,52 @@ export class DesktopAutomationBridge {
     };
 
     this.server = null;
+    this.serverSockets.clear();
     this.token = null;
     this.port = null;
     this.startedAt = null;
     this.discoveryFilePath = null;
     this.automationLeaf = null;
+    this.releaseSingleton();
 
     if (server) {
       await new Promise<void>((resolve) => {
-        server.close(() => resolve());
+        let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        const finish = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (timeout) {
+            clearTimeout(timeout);
+          }
+          resolve();
+        };
+
+        timeout = setTimeout(() => finish(), 1000);
+        if (typeof (timeout as any)?.unref === "function") {
+          (timeout as any).unref();
+        }
+
+        try {
+          server.close(() => finish());
+        } catch {
+          finish();
+          return;
+        }
+
+        try {
+          (server as any).closeIdleConnections?.();
+        } catch {}
+        try {
+          (server as any).closeAllConnections?.();
+        } catch {}
+        for (const socket of sockets) {
+          try {
+            socket.destroy();
+          } catch {}
+        }
       }).catch(() => {});
     }
 
@@ -192,6 +285,12 @@ export class DesktopAutomationBridge {
     const runtime = loadBridgeRuntime();
     const server = runtime.http.createServer((request, response) => {
       void this.handleRequest(request, response);
+    });
+    server.on("connection", (socket: Socket) => {
+      this.serverSockets.add(socket);
+      socket.once("close", () => {
+        this.serverSockets.delete(socket);
+      });
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -499,15 +598,16 @@ export class DesktopAutomationBridge {
       }
 
       if (method === "POST" && url.pathname === "/v1/plugin/reload") {
+        const reload = this.requestSelfReload();
         response.once("finish", () => {
-          setTimeout(() => {
-            void this.performSelfReload();
-          }, 50);
+          this.startScheduledSelfReload();
         });
         this.sendJson(response, 202, {
           ok: true,
           data: {
-            scheduled: true,
+            scheduled: !reload.alreadyScheduled,
+            alreadyScheduled: reload.alreadyScheduled,
+            requestedAt: reload.requestedAt,
             startedAt: this.startedAt,
           },
         });
@@ -583,6 +683,11 @@ export class DesktopAutomationBridge {
         port: this.port,
         startedAt: this.startedAt,
         discoveryFilePath: this.discoveryFilePath,
+        reload: {
+          scheduled: this.selfReloadScheduled,
+          inFlight: this.selfReloadPromise !== null,
+          requestedAt: this.selfReloadRequestedAt,
+        },
       },
       plugin: {
         id: this.plugin.manifest.id,
@@ -594,7 +699,39 @@ export class DesktopAutomationBridge {
         configDir: this.plugin.app.vault.configDir,
         vaultInstanceId: this.plugin.settings.vaultInstanceId ?? null,
       },
+      ui: this.getUiDiagnostics(),
       chat: await this.getChatSnapshotIfAvailable(),
+    };
+  }
+
+  private getUiDiagnostics(): Record<string, unknown> {
+    const pluginStatusBarClass = `plugin-${String(this.plugin.manifest.id || "")
+      .toLowerCase()
+      .replace(/[^_a-zA-Z0-9-]/g, "-")}`;
+
+    if (typeof document === "undefined") {
+      return {
+        pluginStatusBarClass,
+        pluginStatusBarItemCount: 0,
+        embeddingsStatusBarItemCount: 0,
+        embeddingsStatusBarTexts: [],
+      };
+    }
+
+    const pluginItems = Array.from(document.querySelectorAll(`.${pluginStatusBarClass}`)).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement
+    );
+    const embeddingsItems = pluginItems.filter((element) =>
+      String(element.textContent || "").includes("Embeddings:")
+    );
+
+    return {
+      pluginStatusBarClass,
+      pluginStatusBarItemCount: pluginItems.length,
+      embeddingsStatusBarItemCount: embeddingsItems.length,
+      embeddingsStatusBarTexts: embeddingsItems
+        .map((element) => String(element.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean),
     };
   }
 
@@ -607,16 +744,65 @@ export class DesktopAutomationBridge {
     }
   }
 
+  private async claimSingleton(): Promise<void> {
+    const globalScope = globalThis as Record<string, unknown>;
+    const existing = globalScope[
+      DESKTOP_AUTOMATION_BRIDGE_SINGLETON_KEY
+    ] as DesktopAutomationBridgeSingletonEntry | undefined;
+
+    globalScope[DESKTOP_AUTOMATION_BRIDGE_SINGLETON_KEY] = {
+      token: this.singletonToken,
+      stop: () => this.stop(),
+    };
+
+    if (existing && existing.token !== this.singletonToken) {
+      try {
+        await existing.stop();
+      } catch {
+        // ignore stale bridge cleanup failures
+      }
+    }
+  }
+
+  private releaseSingleton(): void {
+    const globalScope = globalThis as Record<string, unknown>;
+    const existing = globalScope[
+      DESKTOP_AUTOMATION_BRIDGE_SINGLETON_KEY
+    ] as DesktopAutomationBridgeSingletonEntry | undefined;
+    if (existing?.token === this.singletonToken) {
+      delete globalScope[DESKTOP_AUTOMATION_BRIDGE_SINGLETON_KEY];
+    }
+  }
+
+  private normalizeAutomationLeafMarkers(existingLeaves: WorkspaceLeaf[]): WorkspaceLeaf | null {
+    const markedLeaves = existingLeaves.filter((leaf) => Boolean((leaf as any).__systemsculptAutomation));
+    if (markedLeaves.length === 0) {
+      return null;
+    }
+
+    const [primaryLeaf, ...staleLeaves] = markedLeaves;
+    for (const staleLeaf of staleLeaves) {
+      try {
+        delete (staleLeaf as any).__systemsculptAutomation;
+      } catch {
+        (staleLeaf as any).__systemsculptAutomation = false;
+      }
+    }
+
+    this.automationLeaf = primaryLeaf;
+    return primaryLeaf;
+  }
+
   private async getAutomationLeaf(createIfMissing: boolean): Promise<WorkspaceLeaf | null> {
     const existingLeaves = this.plugin.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
     const currentAutomationLeaf =
       this.automationLeaf && existingLeaves.includes(this.automationLeaf) ? this.automationLeaf : null;
     if (currentAutomationLeaf) {
+      this.normalizeAutomationLeafMarkers(existingLeaves);
       return currentAutomationLeaf;
     }
 
-    const markedLeaf =
-      existingLeaves.find((leaf) => Boolean((leaf as any).__systemsculptAutomation === true)) || null;
+    const markedLeaf = this.normalizeAutomationLeafMarkers(existingLeaves);
     if (markedLeaf) {
       this.automationLeaf = markedLeaf;
       return markedLeaf;
@@ -648,8 +834,16 @@ export class DesktopAutomationBridge {
       throw new BridgeHttpError(404, "No chat view is available.");
     }
 
-    const selectedModelId = String(options.selectedModelId || this.plugin.settings.selectedModelId || "").trim();
+    const requestedModelId = String(options.selectedModelId || "").trim();
     const currentType = String(leaf.getViewState()?.type || "");
+    const currentViewModelId =
+      currentType === CHAT_VIEW_TYPE && typeof (leaf.view as ChatView | null)?.getEffectiveSelectedModelId === "function"
+        ? String((leaf.view as ChatView).getEffectiveSelectedModelId() || "").trim()
+        : "";
+    const selectedModelId =
+      requestedModelId ||
+      currentViewModelId ||
+      String(this.plugin.settings.selectedModelId || "").trim();
     if (options.reset || currentType !== CHAT_VIEW_TYPE) {
       await leaf.setViewState({
         type: CHAT_VIEW_TYPE,
@@ -662,8 +856,8 @@ export class DesktopAutomationBridge {
     }
 
     const view = await this.waitForChatViewReady(leaf);
-    if (selectedModelId && view.getEffectiveSelectedModelId() !== selectedModelId) {
-      await view.setSelectedModelId(selectedModelId, { focusInput: false });
+    if (requestedModelId && view.getEffectiveSelectedModelId() !== requestedModelId) {
+      await view.setSelectedModelId(requestedModelId, { focusInput: false });
     }
 
     return view;
@@ -734,15 +928,66 @@ export class DesktopAutomationBridge {
     }
   }
 
+  private requestSelfReload(): { alreadyScheduled: boolean; requestedAt: string } {
+    const alreadyScheduled = this.selfReloadScheduled || this.selfReloadPromise !== null;
+    if (alreadyScheduled) {
+      return {
+        alreadyScheduled: true,
+        requestedAt: this.selfReloadRequestedAt || new Date().toISOString(),
+      };
+    }
+
+    this.selfReloadScheduled = true;
+    this.selfReloadRequestedAt = new Date().toISOString();
+    return {
+      alreadyScheduled: false,
+      requestedAt: this.selfReloadRequestedAt,
+    };
+  }
+
+  private startScheduledSelfReload(): void {
+    if (!this.selfReloadScheduled || this.selfReloadPromise) {
+      return;
+    }
+
+    this.selfReloadScheduled = false;
+    this.selfReloadPromise = (async () => {
+      try {
+        await delay(50);
+        await this.performSelfReload();
+      } catch (error) {
+        this.plugin.getLogger().error("Desktop automation self-reload failed", error, {
+          source: "DesktopAutomationBridge",
+        });
+      } finally {
+        this.selfReloadPromise = null;
+        this.selfReloadRequestedAt = null;
+      }
+    })();
+  }
+
   private async performSelfReload(): Promise<void> {
     const plugins = (this.plugin.app as any)?.plugins;
-    if (!plugins?.disablePlugin || !plugins?.enablePlugin) {
+    const unloadPlugin =
+      typeof plugins?.unloadPlugin === "function"
+        ? plugins.unloadPlugin.bind(plugins)
+        : typeof plugins?.disablePlugin === "function"
+          ? plugins.disablePlugin.bind(plugins)
+          : null;
+    const loadPlugin =
+      typeof plugins?.loadPlugin === "function"
+        ? plugins.loadPlugin.bind(plugins)
+        : typeof plugins?.enablePlugin === "function"
+          ? plugins.enablePlugin.bind(plugins)
+          : null;
+
+    if (!unloadPlugin || !loadPlugin) {
       throw new Error("Obsidian plugin manager is unavailable for reload.");
     }
 
     const pluginId = this.plugin.manifest.id;
-    await plugins.disablePlugin(pluginId);
+    await unloadPlugin(pluginId);
     await delay(150);
-    await plugins.enablePlugin(pluginId);
+    await loadPlugin(pluginId);
   }
 }

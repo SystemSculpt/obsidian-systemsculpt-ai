@@ -501,6 +501,68 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.promptProviderSetup).not.toHaveBeenCalled();
   });
 
+  it("uses the selected model setup target when automation blocks a setup prompt without overrides", async () => {
+    const app = new App();
+    const container = document.createElement("div");
+    const chatContainer = document.createElement("div");
+    container.appendChild(chatContainer);
+
+    const chatView = {
+      promptProviderSetup: jest.fn().mockResolvedValue(undefined),
+      getSelectedModelId: jest.fn(() => "openai@@gpt-4.1"),
+    } as any;
+
+    const handler = new InputHandler({
+      app,
+      container,
+      aiService: {
+        streamMessage: jest.fn(),
+      } as any,
+      getMessages: () => [],
+      isChatReady: () => true,
+      chatContainer,
+      scrollManager: {
+        requestStickToBottom: jest.fn(),
+        setGenerating: jest.fn(),
+      } as any,
+      messageRenderer: {
+        addMessageButtonToolbar: jest.fn(),
+        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
+        renderUnifiedMessageParts: jest.fn(),
+      } as any,
+      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
+      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
+      onError: jest.fn(),
+      onAddContextFile: jest.fn(),
+      onOpenChatSettings: jest.fn(),
+      plugin: {
+        app,
+        settings: {
+          licenseKey: "",
+          licenseValid: false,
+          autoSubmitAfterTranscription: false,
+          selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+        },
+        modelService: {
+          getModels: jest.fn(async () => []),
+        },
+      } as any,
+      getChatMarkdown: jest.fn().mockResolvedValue(""),
+      getChatTitle: jest.fn(() => "Chat"),
+      addFileToContext: jest.fn(),
+      getChatId: jest.fn(() => "chat-1"),
+      chatView,
+    });
+
+    (handler as any).automationRequestDepth = 1;
+
+    await expect((handler as any).invokeProviderSetupPrompt()).rejects.toThrow(
+      "Open Settings -> Providers to connect the selected Pi provider."
+    );
+
+    expect(chatView.promptProviderSetup).not.toHaveBeenCalled();
+  });
+
   it("auto-approves destructive hosted tool calls during automation when configured", async () => {
     const app = new App();
     const container = document.createElement("div");
@@ -732,18 +794,17 @@ describe("InputHandler hosted tool loop", () => {
       chatView: {},
     });
 
-    const renderModelPickerSpy = jest
-      .spyOn(handler as any, "renderModelPicker")
-      .mockImplementation(() => {});
-
-    (handler as any).modelPickerOptionsCache = [{ value: "model-a" }];
-    (handler as any).modelPickerOptionsPromise = Promise.resolve([]);
+    const controller = (handler as any).modelSelectionController;
+    const refreshSpy = jest.spyOn(controller, "refresh");
+    (controller as any).modelPickerOptionsCache = [{ value: "model-a" } as any];
+    const stalePromise = Promise.resolve([]);
+    (controller as any).modelPickerOptionsPromise = stalePromise;
 
     handler.onModelChange({ refreshOptions: true });
 
-    expect((handler as any).modelPickerOptionsCache).toBeNull();
-    expect((handler as any).modelPickerOptionsPromise).toBeNull();
-    expect(renderModelPickerSpy).toHaveBeenCalledTimes(1);
+    expect((controller as any).modelPickerOptionsCache).toBeNull();
+    expect((controller as any).modelPickerOptionsPromise).not.toBe(stalePromise);
+    expect(refreshSpy).toHaveBeenCalledWith({ reloadOptions: true });
     expect(onModelChange).toHaveBeenCalledWith({ refreshOptions: true });
   });
 });

@@ -1,4 +1,6 @@
+import { App, Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { showPopup } from "../../core/ui/";
 import { getDisplayName, ensureCanonicalId } from "../../utils/modelUtils";
 import type { SystemSculptModel, SystemSculptTextModelSourceMode } from "../../types/llm";
 import {
@@ -21,6 +23,12 @@ export type ChatModelSetupSurface = {
   targetTab: ChatModelSetupTab;
   title: string;
   primaryButton: string;
+};
+
+export type ChatModelSetupPromptOverrides = {
+  title?: string;
+  primaryButton?: string;
+  targetTab?: ChatModelSetupTab;
 };
 
 export type ChatModelPickerSection = "systemsculpt" | "pi" | "local";
@@ -89,6 +97,53 @@ export function getChatModelSetupNotice(targetTab: ChatModelSetupTab): string {
   return targetTab === "providers"
     ? "Open Settings -> SystemSculpt AI -> Providers to finish Pi setup."
     : "Open Settings -> SystemSculpt AI -> Account to finish SystemSculpt setup.";
+}
+
+export function openChatModelSetupTab(
+  openSettingsTab: (targetTab: ChatModelSetupTab) => void,
+  targetTab: ChatModelSetupTab = "account",
+): void {
+  try {
+    openSettingsTab(targetTab);
+  } catch {
+    new Notice(getChatModelSetupNotice(targetTab), 6000);
+  }
+}
+
+export async function promptChatModelSetup(options: {
+  app: App;
+  openSettingsTab: (targetTab: ChatModelSetupTab) => void;
+  selectedModelId?: string | null;
+  fallbackModelId?: string | null;
+  message?: string;
+  retryHint?: boolean;
+  overrides?: ChatModelSetupPromptOverrides;
+}): Promise<boolean> {
+  const baseSurface = getChatModelSetupSurface(
+    options.selectedModelId,
+    options.fallbackModelId,
+  );
+  const setupSurface = {
+    ...baseSurface,
+    ...options.overrides,
+  };
+  const targetTab = setupSurface.targetTab || "account";
+  const result = await showPopup(
+    options.app,
+    options.message ?? getChatModelSetupMessage(targetTab, { retryHint: options.retryHint }),
+    {
+      title: setupSurface.title || "Finish setup",
+      icon: "plug-zap",
+      primaryButton: setupSurface.primaryButton || "Open Account",
+      secondaryButton: "Not Now",
+    },
+  );
+  if (!result?.confirmed) {
+    return false;
+  }
+
+  openChatModelSetupTab(options.openSettingsTab, targetTab);
+  return true;
 }
 
 export function formatChatModelContextLength(tokens: number): string {

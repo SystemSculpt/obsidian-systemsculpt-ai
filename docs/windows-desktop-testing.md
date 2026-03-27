@@ -1,9 +1,5 @@
 # Windows Desktop Testing
 
-The canonical Windows desktop testing doc moved to:
+The canonical Windows desktop testing doc moved to [Native Windows Desktop](../testing/native/device/windows/README.md).
 
-[testing/native/device/windows/README.md](/Users/systemsculpt/gits/obsidian-systemsculpt-ai/testing/native/device/windows/README.md)
-
-Use that doc plus the main testing architecture hub:
-
-[testing/README.md](/Users/systemsculpt/gits/obsidian-systemsculpt-ai/testing/README.md)
+Use that doc plus the main testing architecture hub: [Testing Architecture](../testing/README.md).

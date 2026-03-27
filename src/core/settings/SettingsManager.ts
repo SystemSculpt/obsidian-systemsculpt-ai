@@ -9,6 +9,7 @@ import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 type NodeFsModule = typeof import("node:fs");
 type NodePathModule = typeof import("node:path");
 type NodeFsWatcher = import("node:fs").FSWatcher;
+type NodeFsStats = import("node:fs").Stats;
 
 function loadNodeFs(): NodeFsModule {
   return require("node:fs") as NodeFsModule;
@@ -20,6 +21,7 @@ function loadNodePath(): NodePathModule {
 
 // Current settings version - increment when making breaking changes to settings structure
 const CURRENT_SETTINGS_VERSION = "1.0";
+const PLUGIN_DATA_POLL_INTERVAL_MS = 1000;
 
 /**
  * SettingsManager handles loading, saving, and updating plugin settings
@@ -35,7 +37,16 @@ export class SettingsManager {
   private automaticBackupService: AutomaticBackupService;
   private pluginDataWatcher: NodeFsWatcher | null = null;
   private pluginDataWatcherTimer: ReturnType<typeof setTimeout> | null = null;
+  private pluginDataPollInterval: ReturnType<typeof setInterval> | null = null;
   private pluginDataWatcherCleanupRegistered = false;
+  private pluginDataWatcherFilePath: string | null = null;
+  private pluginDataLastObservedMtimeMs: number | null = null;
+  private pluginDataPollInFlight = false;
+  private recentInternalPluginDataWrites: Array<{
+    snapshot: string;
+    ignoreUntil: number;
+    remainingBudget: number;
+  }> = [];
 
 
   constructor(plugin: SystemSculptPlugin) {
@@ -765,10 +776,78 @@ export class SettingsManager {
     }
   }
 
+  private async readPluginDataMtimeMs(pluginDataFilePath: string): Promise<number | null> {
+    try {
+      const stats = (await loadNodeFs().promises.stat(pluginDataFilePath)) as NodeFsStats;
+      return Number.isFinite(stats.mtimeMs) ? Number(stats.mtimeMs) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async refreshPluginDataMtimeSnapshot(
+    pluginDataFilePath: string | null = this.pluginDataWatcherFilePath,
+  ): Promise<void> {
+    if (!pluginDataFilePath) {
+      return;
+    }
+
+    const nextMtimeMs = await this.readPluginDataMtimeMs(pluginDataFilePath);
+    if (nextMtimeMs !== null) {
+      this.pluginDataLastObservedMtimeMs = nextMtimeMs;
+    }
+  }
+
+  private startPluginDataPolling(pluginDataFilePath: string): void {
+    if (this.pluginDataPollInterval) {
+      return;
+    }
+
+    void this.refreshPluginDataMtimeSnapshot(pluginDataFilePath);
+
+    this.pluginDataPollInterval = setInterval(() => {
+      void this.pollPluginDataFile(pluginDataFilePath);
+    }, PLUGIN_DATA_POLL_INTERVAL_MS);
+
+    const interval = this.pluginDataPollInterval as { unref?: () => void } | null;
+    if (typeof interval?.unref === "function") {
+      interval.unref();
+    }
+  }
+
+  private async pollPluginDataFile(
+    pluginDataFilePath: string | null = this.pluginDataWatcherFilePath,
+  ): Promise<void> {
+    if (!pluginDataFilePath || this.pluginDataPollInFlight) {
+      return;
+    }
+
+    this.pluginDataPollInFlight = true;
+    try {
+      const nextMtimeMs = await this.readPluginDataMtimeMs(pluginDataFilePath);
+      if (nextMtimeMs === null) {
+        return;
+      }
+
+      const previousMtimeMs = this.pluginDataLastObservedMtimeMs;
+      this.pluginDataLastObservedMtimeMs = nextMtimeMs;
+
+      if (previousMtimeMs === null || nextMtimeMs <= previousMtimeMs) {
+        return;
+      }
+
+      this.schedulePluginDataReload();
+    } finally {
+      this.pluginDataPollInFlight = false;
+    }
+  }
+
   private schedulePluginDataReload(): void {
     if (this.pluginDataWatcherTimer) {
       clearTimeout(this.pluginDataWatcherTimer);
     }
+
+    void this.refreshPluginDataMtimeSnapshot();
 
     this.pluginDataWatcherTimer = setTimeout(() => {
       this.pluginDataWatcherTimer = null;
@@ -776,15 +855,96 @@ export class SettingsManager {
     }, 150);
   }
 
-  public startWatchingPluginDataFile(): void {
-    if (this.pluginDataWatcher) {
+  private serializeSettingsForWatcher(settings: SystemSculptSettings): string {
+    try {
+      return JSON.stringify(settings);
+    } catch {
+      return "";
+    }
+  }
+
+  private pruneRecentInternalPluginDataWrites(): void {
+    const now = Date.now();
+    this.recentInternalPluginDataWrites = this.recentInternalPluginDataWrites.filter(
+      (entry) => entry.remainingBudget > 0 && now <= entry.ignoreUntil && entry.snapshot.length > 0,
+    );
+  }
+
+  private markInternalPluginDataWrite(settings: SystemSculptSettings): void {
+    const snapshot = this.serializeSettingsForWatcher(settings);
+    if (!snapshot) {
       return;
     }
 
+    this.pruneRecentInternalPluginDataWrites();
+    const existingEntry = this.recentInternalPluginDataWrites.find((entry) => entry.snapshot === snapshot);
+    if (existingEntry) {
+      existingEntry.ignoreUntil = Date.now() + 5000;
+      // Native saveData writes can surface multiple fs.watch events on macOS.
+      existingEntry.remainingBudget = Math.max(existingEntry.remainingBudget, 10);
+      return;
+    }
+
+    this.recentInternalPluginDataWrites.push({
+      snapshot,
+      ignoreUntil: Date.now() + 5000,
+      remainingBudget: 10,
+    });
+
+    if (this.recentInternalPluginDataWrites.length > 8) {
+      this.recentInternalPluginDataWrites.splice(
+        0,
+        this.recentInternalPluginDataWrites.length - 8,
+      );
+    }
+  }
+
+  private shouldIgnoreInternalPluginDataEcho(nextSettings: SystemSculptSettings): boolean {
+    this.pruneRecentInternalPluginDataWrites();
+    if (this.recentInternalPluginDataWrites.length === 0) {
+      return false;
+    }
+
+    const snapshot = this.serializeSettingsForWatcher(nextSettings);
+    if (!snapshot) {
+      return false;
+    }
+
+    const matchingEntry = this.recentInternalPluginDataWrites.find((entry) => entry.snapshot === snapshot);
+    if (!matchingEntry) {
+      return false;
+    }
+
+    matchingEntry.remainingBudget -= 1;
+    this.pruneRecentInternalPluginDataWrites();
+    return true;
+  }
+
+  private ensurePluginDataWatcherCleanupRegistered(): void {
+    if (this.pluginDataWatcherCleanupRegistered) {
+      return;
+    }
+
+    this.plugin.register(() => {
+      this.stopWatchingPluginDataFile();
+    });
+    this.pluginDataWatcherCleanupRegistered = true;
+  }
+
+  public startWatchingPluginDataFile(): void {
     const pluginDataFilePath = this.getPluginDataFilePath();
     if (!pluginDataFilePath) {
       return;
     }
+
+    this.ensurePluginDataWatcherCleanupRegistered();
+
+    if (this.pluginDataWatcher || this.pluginDataPollInterval) {
+      return;
+    }
+
+    this.pluginDataWatcherFilePath = pluginDataFilePath;
+    this.startPluginDataPolling(pluginDataFilePath);
 
     try {
       const nodeFs = loadNodeFs();
@@ -805,17 +965,16 @@ export class SettingsManager {
       });
 
       this.pluginDataWatcher.on("error", () => {
-        this.stopWatchingPluginDataFile();
+        if (this.pluginDataWatcher) {
+          this.pluginDataWatcher.close();
+          this.pluginDataWatcher = null;
+        }
       });
-
-      if (!this.pluginDataWatcherCleanupRegistered) {
-        this.plugin.register(() => {
-          this.stopWatchingPluginDataFile();
-        });
-        this.pluginDataWatcherCleanupRegistered = true;
-      }
     } catch {
-      this.stopWatchingPluginDataFile();
+      if (this.pluginDataWatcher) {
+        this.pluginDataWatcher.close();
+        this.pluginDataWatcher = null;
+      }
     }
   }
 
@@ -829,6 +988,15 @@ export class SettingsManager {
       this.pluginDataWatcher.close();
       this.pluginDataWatcher = null;
     }
+
+    if (this.pluginDataPollInterval) {
+      clearInterval(this.pluginDataPollInterval);
+      this.pluginDataPollInterval = null;
+    }
+
+    this.pluginDataWatcherFilePath = null;
+    this.pluginDataLastObservedMtimeMs = null;
+    this.pluginDataPollInFlight = false;
   }
 
   public async reloadSettingsFromDisk(): Promise<boolean> {
@@ -845,6 +1013,10 @@ export class SettingsManager {
     const nextSettings = await this.validateSettingsAsync(mergedSettings);
 
     if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) {
+      if (this.shouldIgnoreInternalPluginDataEcho(nextSettings)) {
+        return false;
+      }
+
       this.plugin.app.workspace.trigger(
         "systemsculpt:settings-file-touched",
         this.plugin._internal_settings_systemsculpt_plugin
@@ -881,6 +1053,7 @@ export class SettingsManager {
       } as SystemSculptSettings);
       this.settings = persistedSettings;
       this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
+      this.markInternalPluginDataWrite(persistedSettings);
       await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);
       this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, this.plugin._internal_settings_systemsculpt_plugin);
       await this.backupSettings();
