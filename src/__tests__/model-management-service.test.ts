@@ -56,6 +56,32 @@ describe("ModelManagementService", () => {
     });
   });
 
+  it("routes non-SystemSculpt Pi models through the local Pi execution path", async () => {
+    const plugin = buildPlugin();
+    (plugin.modelService.getModelById as jest.Mock).mockResolvedValue({
+      id: "local-pi-openai@@gpt-4.1",
+      provider: "openai",
+      sourceMode: "pi_local",
+      sourceProviderId: "openai",
+      piExecutionModelId: "openai/gpt-4.1",
+      piLocalAvailable: true,
+    });
+
+    const service = new ModelManagementService(plugin, "https://api.systemsculpt.com/api/v1");
+    const info = await service.getModelInfo("local-pi-openai@@gpt-4.1");
+
+    expect(info).toMatchObject({
+      isCustom: false,
+      modelSource: "pi_local",
+      actualModelId: "openai/gpt-4.1",
+      model: expect.objectContaining({
+        id: "local-pi-openai@@gpt-4.1",
+        provider: "openai",
+        sourceMode: "pi_local",
+      }),
+    });
+  });
+
   it("falls back to the managed SystemSculpt model when a legacy model id is requested", async () => {
     const plugin = buildPlugin();
     (plugin.modelService.getModelById as jest.Mock).mockResolvedValue(undefined);

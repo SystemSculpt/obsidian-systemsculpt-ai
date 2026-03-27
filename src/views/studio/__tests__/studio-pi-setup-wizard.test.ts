@@ -8,7 +8,7 @@ import {
   selectDefaultAuthMethod,
   supportsOAuthLogin,
 } from "../../../studio/piAuth/StudioPiProviderRegistry";
-import type { StudioPiOAuthProvider } from "../../../studio/StudioLocalTextModelCatalog";
+import type { StudioPiOAuthProvider } from "../../../studio/piAuth/StudioPiAuthStorage";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 

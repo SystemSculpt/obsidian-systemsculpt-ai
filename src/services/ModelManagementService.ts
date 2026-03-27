@@ -2,7 +2,7 @@ import type SystemSculptPlugin from "../main";
 import type { SystemSculptModel } from "../types";
 import type { SystemSculptTextModelSourceMode } from "../types/llm";
 import { SYSTEMSCULPT_PI_EXECUTION_MODEL_ID } from "./pi/PiCanonicalIds";
-import { buildManagedSystemSculptModel } from "./systemsculpt/ManagedSystemSculptModel";
+import { buildManagedSystemSculptModel, isManagedSystemSculptModelId } from "./systemsculpt/ManagedSystemSculptModel";
 
 async function loadPiTextCatalogModule(): Promise<typeof import("./pi-native/PiTextCatalog")> {
   return await import("./pi-native/PiTextCatalog");
@@ -36,15 +36,34 @@ export class ModelManagementService {
     model: SystemSculptModel;
     actualModelId: string;
   }> {
-    const resolvedModel =
-      (await this.plugin.modelService.getModelById(modelId)) || buildManagedSystemSculptModel(this.plugin);
+    const resolvedModel = await this.plugin.modelService.getModelById(modelId);
+
+    // If the resolved model is a Pi-local BYOK model (not the managed SystemSculpt model),
+    // respect its sourceMode and route through the local Pi runtime.
+    if (
+      resolvedModel &&
+      resolvedModel.sourceMode === "pi_local" &&
+      resolvedModel.piLocalAvailable &&
+      resolvedModel.piExecutionModelId &&
+      !isManagedSystemSculptModelId(resolvedModel.id)
+    ) {
+      return {
+        isCustom: false,
+        modelSource: "pi_local",
+        model: resolvedModel,
+        actualModelId: resolvedModel.piExecutionModelId,
+      };
+    }
+
+    // Default: route through the managed SystemSculpt hosted model
     const managedModel = buildManagedSystemSculptModel(this.plugin);
+    const baseModel = resolvedModel || managedModel;
 
     return {
       isCustom: false,
       modelSource: "systemsculpt",
       model: {
-        ...resolvedModel,
+        ...baseModel,
         ...managedModel,
         id: managedModel.id,
         name: managedModel.name,

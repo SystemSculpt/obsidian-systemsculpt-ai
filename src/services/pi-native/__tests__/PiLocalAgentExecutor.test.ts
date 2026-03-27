@@ -1,35 +1,30 @@
-const mockClientInstances: MockPiRpcProcessClient[] = [];
-let configureNextClient: ((client: MockPiRpcProcessClient) => void) | null = null;
+const mockSessionInstances: MockPiSession[] = [];
+let configureNextSession: ((session: MockPiSession) => void) | null = null;
 
-class MockPiRpcProcessClient {
+class MockPiSession {
   public readonly options: any;
-  public readonly prompt = jest.fn(async (message: string, images?: any[]) => {
-    await this.promptImpl(message, images);
+  public readonly prompt = jest.fn(async (message: string, promptOptions?: any) => {
+    await this.promptImpl(message, promptOptions);
   });
   public readonly abort = jest.fn(async () => {});
-  public readonly stop = jest.fn(async () => {});
-  public readonly start = jest.fn(async () => {});
-  public readonly getState = jest.fn(async () => ({
-    sessionId: "sess_pi_local",
-    sessionFile: "/vault/.pi/sessions/session.jsonl",
-    thinkingLevel: "medium",
-    model: {
-      provider: "openai",
-      id: "gpt-5-mini",
-    },
-  }));
+  public readonly dispose = jest.fn(() => {});
+  public readonly sessionManager = {
+    getSessionName: jest.fn(() => undefined),
+  };
+  public readonly sessionFile = "/vault/.pi/sessions/session.jsonl";
+  public readonly sessionId = "sess_pi_local";
 
   private readonly listeners = new Set<(event: any) => void>();
-  private promptImpl: (message: string, images?: any[]) => Promise<void> = async () => {};
+  private promptImpl: (message: string, promptOptions?: any) => Promise<void> = async () => {};
 
   constructor(options: any) {
     this.options = options;
-    mockClientInstances.push(this);
-    configureNextClient?.(this);
-    configureNextClient = null;
+    mockSessionInstances.push(this);
+    configureNextSession?.(this);
+    configureNextSession = null;
   }
 
-  public onEvent(listener: (event: any) => void): () => void {
+  public subscribe(listener: (event: any) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -42,15 +37,17 @@ class MockPiRpcProcessClient {
     }
   }
 
-  public setPromptImplementation(impl: (message: string, images?: any[]) => Promise<void>): void {
+  public setPromptImplementation(impl: (message: string, promptOptions?: any) => Promise<void>): void {
     this.promptImpl = impl;
   }
 }
 
-jest.mock("../../pi/PiRpcProcessClient", () => ({
-  PiRpcProcessClient: jest.fn((options: any) => new MockPiRpcProcessClient(options)),
+jest.mock("../../pi/PiSdkRuntime", () => ({
+  installPiDesktopFetchShim: jest.fn(() => () => {}),
+  openPiAgentSession: jest.fn(async (options: any) => new MockPiSession(options)),
 }));
 
+import { openPiAgentSession } from "../../pi/PiSdkRuntime";
 import {
   runPiLocalTextGeneration,
   streamPiLocalAgentTurn,
@@ -68,12 +65,12 @@ function createPlugin() {
   } as any;
 }
 
-function latestClient(): MockPiRpcProcessClient {
-  const client = mockClientInstances[mockClientInstances.length - 1];
-  if (!client) {
-    throw new Error("Expected a Pi RPC client instance to be created.");
+function latestSession(): MockPiSession {
+  const session = mockSessionInstances[mockSessionInstances.length - 1];
+  if (!session) {
+    throw new Error("Expected a Pi SDK session instance to be created.");
   }
-  return client;
+  return session;
 }
 
 async function collectEvents(generator: AsyncGenerator<any, void, unknown>) {
@@ -87,25 +84,28 @@ async function collectEvents(generator: AsyncGenerator<any, void, unknown>) {
 describe("PiLocalAgentExecutor", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockClientInstances.splice(0, mockClientInstances.length);
-    configureNextClient = null;
+    mockSessionInstances.splice(0, mockSessionInstances.length);
+    configureNextSession = null;
   });
 
-  it("streams assistant text from Pi RPC and finalizes the session metadata", async () => {
+  it("streams assistant text from the Pi SDK session and finalizes the session metadata", async () => {
     const onSessionReady = jest.fn();
-    configureNextClient = (client) => {
-      client.setPromptImplementation(async (message, images) => {
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async (message, promptOptions) => {
         expect(message).toBe("Continue the draft.");
-        expect(images).toBeUndefined();
+        expect(promptOptions).toEqual({
+          expandPromptTemplates: false,
+          images: undefined,
+        });
 
-        client.emit({
+        session.emit({
           type: "message_update",
           assistantMessageEvent: {
             type: "text_delta",
             delta: "Hello",
           },
         });
-        client.emit({
+        session.emit({
           type: "message_end",
           message: {
             role: "assistant",
@@ -116,7 +116,7 @@ describe("PiLocalAgentExecutor", () => {
             stopReason: "stop",
           },
         });
-        client.emit({
+        session.emit({
           type: "agent_end",
           messages: [],
         });
@@ -144,14 +144,18 @@ describe("PiLocalAgentExecutor", () => {
       sessionFile: "/vault/.pi/sessions/session.jsonl",
       sessionId: "sess_pi_local",
     });
-    expect(latestClient().start).toHaveBeenCalledTimes(1);
-    expect(latestClient().stop).toHaveBeenCalledTimes(1);
+    expect(openPiAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: "openai/gpt-5-mini",
+      })
+    );
+    expect(latestSession().dispose).toHaveBeenCalledTimes(1);
   });
 
   it("reuses an existing Pi session file when provided", async () => {
-    configureNextClient = (client) => {
-      client.setPromptImplementation(async () => {
-        client.emit({
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async () => {
+        session.emit({
           type: "message_end",
           message: {
             role: "assistant",
@@ -159,7 +163,7 @@ describe("PiLocalAgentExecutor", () => {
             stopReason: "stop",
           },
         });
-        client.emit({ type: "agent_end", messages: [] });
+        session.emit({ type: "agent_end", messages: [] });
       });
     };
 
@@ -172,8 +176,11 @@ describe("PiLocalAgentExecutor", () => {
       })
     );
 
-    const client = latestClient();
-    expect(client.options.sessionFile).toBe("/vault/.pi/sessions/existing.jsonl");
+    expect(openPiAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionFile: "/vault/.pi/sessions/existing.jsonl",
+      })
+    );
 
     await expect(drain).resolves.toEqual([
       { type: "content", text: "Resumed reply" },
@@ -182,10 +189,10 @@ describe("PiLocalAgentExecutor", () => {
   });
 
   it("sends only the latest user turn while keeping the Pi system prompt configured on the session", async () => {
-    configureNextClient = (client) => {
-      client.setPromptImplementation(async (message) => {
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async (message) => {
         expect(message).toBe("Latest question");
-        client.emit({
+        session.emit({
           type: "message_end",
           message: {
             role: "assistant",
@@ -193,7 +200,7 @@ describe("PiLocalAgentExecutor", () => {
             stopReason: "stop",
           },
         });
-        client.emit({ type: "agent_end", messages: [] });
+        session.emit({ type: "agent_end", messages: [] });
       });
     };
 
@@ -212,9 +219,12 @@ describe("PiLocalAgentExecutor", () => {
       })
     );
 
-    const client = latestClient();
-    expect(client.options.sessionFile).toBe("/vault/.pi/sessions/existing.jsonl");
-    expect(client.options.systemPrompt).toBe("You are SystemSculpt AI.");
+    expect(openPiAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionFile: "/vault/.pi/sessions/existing.jsonl",
+        systemPrompt: "You are SystemSculpt AI.",
+      })
+    );
 
     await expect(drain).resolves.toEqual([
       { type: "content", text: "Latest answer" },
@@ -222,11 +232,11 @@ describe("PiLocalAgentExecutor", () => {
     ]);
   });
 
-  it("aborts the underlying Pi RPC turn when the caller aborts", async () => {
+  it("aborts the underlying Pi session when the caller aborts", async () => {
     const abortController = new AbortController();
     let releasePrompt: (() => void) | null = null;
-    configureNextClient = (client) => {
-      client.setPromptImplementation(
+    configureNextSession = (session) => {
+      session.setPromptImplementation(
         () =>
           new Promise<void>((resolve) => {
             releasePrompt = resolve;
@@ -243,7 +253,10 @@ describe("PiLocalAgentExecutor", () => {
       })
     );
 
-    const client = latestClient();
+    for (let attempt = 0; attempt < 10 && mockSessionInstances.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const session = latestSession();
 
     for (let attempt = 0; attempt < 10 && !releasePrompt; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -252,7 +265,7 @@ describe("PiLocalAgentExecutor", () => {
 
     abortController.abort();
     releasePrompt?.();
-    client.emit({
+    session.emit({
       type: "message_end",
       message: {
         role: "assistant",
@@ -260,17 +273,17 @@ describe("PiLocalAgentExecutor", () => {
         stopReason: "aborted",
       },
     });
-    client.emit({ type: "agent_end", messages: [] });
+    session.emit({ type: "agent_end", messages: [] });
 
     await drain;
-    expect(client.abort).toHaveBeenCalledTimes(1);
-    expect(client.stop).toHaveBeenCalledTimes(1);
+    expect(session.abort).toHaveBeenCalledTimes(1);
+    expect(session.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("throws Pi's final assistant error message instead of yielding an empty completion", async () => {
-    configureNextClient = (client) => {
-      client.setPromptImplementation(async () => {
-        client.emit({
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async () => {
+        session.emit({
           type: "message_end",
           message: {
             role: "assistant",
@@ -294,17 +307,17 @@ describe("PiLocalAgentExecutor", () => {
   });
 
   it("returns trimmed text for direct local Pi text generation", async () => {
-    configureNextClient = (client) => {
-      client.setPromptImplementation(async (message) => {
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async (message) => {
         expect(message).toBe("Summarize this.");
-        client.emit({
+        session.emit({
           type: "message_update",
           assistantMessageEvent: {
             type: "text_delta",
             delta: "  local result  ",
           },
         });
-        client.emit({ type: "agent_end", messages: [] });
+        session.emit({ type: "agent_end", messages: [] });
       });
     };
 
@@ -319,6 +332,10 @@ describe("PiLocalAgentExecutor", () => {
       text: "local result",
       modelId: "openai/gpt-5-mini",
     });
-    expect(latestClient().options.systemPrompt).toBe("Keep it short.");
+    expect(openPiAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPrompt: "Keep it short.",
+      })
+    );
   });
 });

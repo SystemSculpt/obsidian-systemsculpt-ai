@@ -17,6 +17,7 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     const configs = buildSettingsTabConfigs(createTabStub());
     expect(configs.map((config) => ({ id: config.id, label: config.label }))).toEqual([
       { id: "account", label: "Account" },
+      { id: "providers", label: "Providers" },
       { id: "chat", label: "Chat" },
       { id: "workflow", label: "Workflow" },
       { id: "knowledge", label: "Knowledge" },
@@ -27,6 +28,7 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     ]);
 
     const account = configs.find((config) => config.id === "account");
+    const providers = configs.find((config) => config.id === "providers");
     const chat = configs.find((config) => config.id === "chat");
     const workflow = configs.find((config) => config.id === "workflow");
     const knowledge = configs.find((config) => config.id === "knowledge");
@@ -39,6 +41,9 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(account?.anchor?.desc).toContain("credits and billing details");
     expect(account?.anchor?.title).not.toMatch(/providers|api keys/i);
     expect(account?.anchor?.desc).not.toMatch(/fallback|openai|anthropic|ollama/i);
+
+    expect(providers?.anchor?.title).toContain("Providers");
+    expect(providers?.anchor?.desc).toContain("Connect your own AI provider accounts");
 
     expect(chat?.anchor?.title).toContain("Chat");
     expect(chat?.anchor?.title).not.toMatch(/favorites|prompts|templates/i);

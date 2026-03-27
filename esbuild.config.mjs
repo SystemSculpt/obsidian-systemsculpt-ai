@@ -4,12 +4,6 @@ import builtins from "builtin-modules";
 import fs from "fs";
 import path from "path";
 import { BuildLogger, formatBytes, formatDuration } from "./build-logger.mjs";
-import { collectPiRuntimePackageRoots } from "./scripts/pi-runtime-package-set.mjs";
-import {
-	computeRuntimeSyncSignature,
-	runtimePathsNeedSync,
-	writeRuntimeSyncState,
-} from "./scripts/runtime-sync.mjs";
 
 const banner =
 `/*
@@ -24,22 +18,22 @@ const cssLogger = new BuildLogger("CSS");
 
 const cssDir = path.join(process.cwd(), "src", "css");
 const indexCssPath = path.join(cssDir, "index.css");
-const piRuntimePackageRoots = collectPiRuntimePackageRoots({
-	rootDir: process.cwd(),
-}).map((entry) => entry.relativePath);
-const runtimePaths = [
-	"node_modules/node-pty",
-	...piRuntimePackageRoots,
+const builtinExternals = Array.from(new Set(
+	builtins.flatMap((name) => {
+		const normalized = String(name || "").replace(/^node:/, "");
+		return normalized ? [normalized, `node:${normalized}`] : [];
+	})
+));
+const legacyReleaseExtras = [
+	"README.md",
+	"LICENSE",
+	"versions.json",
+	"studio-terminal-sidecar.cjs",
+	"studio-terminal-server.cjs",
+	"systemsculpt-pi-provider-extension.mjs",
+	"node_modules",
+	".systemsculpt-runtime-sync.json",
 ];
-const runtimeSyncSignature = computeRuntimeSyncSignature({
-	rootDir: process.cwd(),
-	runtimePaths,
-	signatureFiles: [
-		"package-lock.json",
-		"node_modules/.package-lock.json",
-		"scripts/pi-runtime-package-set.mjs",
-	],
-});
 
 // Auto-sync built artifacts after each build/rebuild.
 // Set `SYSTEMSCULPT_AUTO_SYNC_PATH` to a plugin directory to sync into a real vault.
@@ -124,6 +118,94 @@ const clearDestinationPath = (targetPath) => {
 	});
 };
 
+const createPiSdkBuildFixPlugins = () => {
+	const piPkg = JSON.parse(fs.readFileSync(
+		path.join(process.cwd(), "node_modules", "@mariozechner", "pi-coding-agent", "package.json"),
+		"utf-8"
+	));
+	const version = piPkg.version || "0.0.0";
+	const appName = piPkg.piConfig?.name || "pi";
+	const configDir = piPkg.piConfig?.configDir || ".pi";
+
+	return [
+		{
+			name: "pi-sdk-config-shim",
+			setup(build) {
+				build.onResolve({ filter: /\/config\.js$/ }, (args) => {
+					if (args.importer?.includes("@mariozechner/pi-coding-agent")) {
+						return { path: args.path, namespace: "pi-config-shim", pluginData: { resolveDir: args.resolveDir } };
+					}
+				});
+				build.onLoad({ filter: /.*/, namespace: "pi-config-shim" }, () => ({
+					contents: `
+						import { existsSync } from "fs";
+						import { homedir } from "os";
+						import { dirname, join, resolve } from "path";
+
+						export const isBunBinary = false;
+						export const isBunRuntime = false;
+						export function detectInstallMethod() { return "npm"; }
+						export function getUpdateInstruction(pkg) { return "Run: npm install -g " + pkg; }
+						export function getPackageDir() { return ""; }
+						export function getThemesDir() { return ""; }
+						export function getExportTemplateDir() { return ""; }
+						export function getPackageJsonPath() { return ""; }
+						export function getReadmePath() { return ""; }
+						export function getDocsPath() { return ""; }
+						export function getExamplesPath() { return ""; }
+						export function getChangelogPath() { return ""; }
+						export const APP_NAME = ${JSON.stringify(appName)};
+						export const CONFIG_DIR_NAME = ${JSON.stringify(configDir)};
+						export const VERSION = ${JSON.stringify(version)};
+						export const ENV_AGENT_DIR = ${JSON.stringify(appName.toUpperCase() + "_CODING_AGENT_DIR")};
+						export function getShareViewerUrl(gistId) { return "https://pi.dev/session/#" + gistId; }
+						export function getAgentDir() {
+							const envDir = process.env[${JSON.stringify(appName.toUpperCase() + "_CODING_AGENT_DIR")}];
+							if (envDir) {
+								if (envDir === "~") return homedir();
+								if (envDir.startsWith("~/")) return homedir() + envDir.slice(1);
+								return envDir;
+							}
+							return join(homedir(), ${JSON.stringify(configDir)}, "agent");
+						}
+						export function getCustomThemesDir() { return join(getAgentDir(), "themes"); }
+						export function getModelsPath() { return join(getAgentDir(), "models.json"); }
+						export function getAuthPath() { return join(getAgentDir(), "auth.json"); }
+						export function getSettingsPath() { return join(getAgentDir(), "settings.json"); }
+						export function getToolsDir() { return join(getAgentDir(), "tools"); }
+						export function getBinDir() { return join(getAgentDir(), "bin"); }
+						export function getPromptsDir() { return join(getAgentDir(), "prompts"); }
+						export function getSessionsDir() { return join(getAgentDir(), "sessions"); }
+						export function getDebugLogPath() { return join(getAgentDir(), ${JSON.stringify(appName + "-debug.log")}); }
+					`,
+					resolveDir: path.join(process.cwd(), "node_modules", "@mariozechner", "pi-coding-agent", "dist"),
+					loader: "js",
+				}));
+			}
+		},
+		{
+			name: "pi-sdk-dynamic-import-fix",
+			setup(build) {
+				build.onLoad({ filter: /[\\/]@mariozechner[\\/]pi-ai[\\/]dist[\\/].*\.js$/ }, async (args) => {
+					let contents = await fs.promises.readFile(args.path, "utf8");
+
+					contents = contents.replace(
+						/const\s+dynamicImport\s*=\s*\(specifier\)\s*=>\s*import\(specifier\);?/g,
+						"const dynamicImport = (specifier) => Promise.resolve(require(specifier));"
+					);
+
+					contents = contents.replace(
+						/\bimport\(\s*"(node:[a-z_]+)"\s*\)/g,
+						'Promise.resolve(require("$1"))'
+					);
+
+					return { contents, loader: "js" };
+				});
+			}
+		},
+	];
+};
+
 const buildOptions = {
 	banner: {
 		js: banner,
@@ -152,7 +234,7 @@ const buildOptions = {
 		"@lezer/highlight",
 		"@lezer/lr",
 		"node-pty",
-		...builtins
+		...builtinExternals,
 	],
 	format: "cjs",
 	target: "es2018",
@@ -166,6 +248,7 @@ const buildOptions = {
 		".wasm": "file",
 	},
 	plugins: [
+		...createPiSdkBuildFixPlugins(),
 		{
 			name: "build-reporter",
 			setup(build) {
@@ -190,7 +273,7 @@ const buildOptions = {
 				build.onStart(() => {
 					buildStart = Date.now();
 				});
-				build.onEnd(result => {
+				build.onEnd((result) => {
 					if (result.errors.length > 0) {
 						return;
 					}
@@ -205,45 +288,26 @@ let isWatching = false;
 
 const finalizeBuild = (startedAt, { watch } = {}) => {
 	buildCSS();
-	const stats = fs.statSync("main.js");
+	const mainStats = fs.statSync("main.js");
 	const duration = Date.now() - startedAt;
 
 	if (watch) {
 		logger.info(`Rebuild updated assets (${formatDuration(duration)})`);
-		logger.info(`Bundle size: ${formatBytes(stats.size)}`);
+		logger.info(`Main bundle size: ${formatBytes(mainStats.size)}`);
 		syncArtifacts();
 		return;
 	}
 
 	logger.divider();
 	logger.success(`Build complete (${formatDuration(duration)})`);
-	logger.info(`Bundle size: ${formatBytes(stats.size)}`);
+	logger.info(`Main bundle size: ${formatBytes(mainStats.size)}`);
 	logger.divider();
 	syncArtifacts();
 };
 
 const syncArtifacts = () => {
 	if (!autoSyncTargets || autoSyncTargets.length === 0) return;
-	const requiredFiles = ["manifest.json", "main.js", "styles.css", "studio-terminal-sidecar.cjs"];
-	const optionalFiles = ["README.md", "LICENSE", "versions.json"];
-
-	const copyDirectoryRecursive = (src, dest) => {
-		const stats = fs.statSync(src);
-		if (!stats.isDirectory()) {
-			throw new Error(`Expected directory, got file: ${src}`);
-		}
-		fs.mkdirSync(dest, { recursive: true });
-		for (const entry of fs.readdirSync(src)) {
-			const srcEntry = path.join(src, entry);
-			const destEntry = path.join(dest, entry);
-			const entryStats = fs.statSync(srcEntry);
-			if (entryStats.isDirectory()) {
-				copyDirectoryRecursive(srcEntry, destEntry);
-			} else {
-				fs.copyFileSync(srcEntry, destEntry);
-			}
-		}
-	};
+	const requiredFiles = ["manifest.json", "main.js", "styles.css"];
 
 	for (const rawTarget of autoSyncTargets) {
 		const target = rawTarget.startsWith("~")
@@ -252,36 +316,19 @@ const syncArtifacts = () => {
 
 		try {
 			fs.mkdirSync(target, { recursive: true });
-			for (const file of requiredFiles.concat(optionalFiles)) {
+			for (const file of requiredFiles) {
 				const src = path.join(process.cwd(), file);
 				if (!fs.existsSync(src)) {
-					if (requiredFiles.includes(file)) {
-						throw new Error(`Required file missing: ${src}`);
-					}
-					continue;
+					throw new Error(`Required file missing: ${src}`);
 				}
 				const dest = path.join(target, path.basename(file));
 				fs.copyFileSync(src, dest);
 			}
-			if (runtimePathsNeedSync({
-				targetPath: target,
-				runtimePaths,
-				sourceSignature: runtimeSyncSignature,
-			})) {
-				for (const relativeRuntimePath of runtimePaths) {
-					const srcModulePath = path.join(process.cwd(), relativeRuntimePath);
-					if (!fs.existsSync(srcModulePath)) {
-						throw new Error(`Runtime dependency missing: ${srcModulePath}`);
-					}
-					const destModulePath = path.join(target, relativeRuntimePath);
-					clearDestinationPath(destModulePath);
-					copyDirectoryRecursive(srcModulePath, destModulePath);
+			for (const legacyPath of legacyReleaseExtras) {
+				const dest = path.join(target, legacyPath);
+				if (fs.existsSync(dest)) {
+					clearDestinationPath(dest);
 				}
-				writeRuntimeSyncState({
-					targetPath: target,
-					sourceSignature: runtimeSyncSignature,
-					runtimePaths,
-				});
 			}
 			logger.info(`[Sync] Updated ${target}`);
 		} catch (error) {

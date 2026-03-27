@@ -80,6 +80,34 @@ describe("ChatView loaded model migration", () => {
     expect(getModels).not.toHaveBeenCalled();
   });
 
+  it("keeps resolving legacy custom-provider chat selections after provider keys are redacted", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => [
+        {
+          id: "openai@@gpt-4.1",
+          provider: "openai",
+          piExecutionModelId: "openai/gpt-4.1",
+          piLocalAvailable: true,
+        },
+      ]),
+      getModels: jest.fn(async () => []),
+    });
+
+    (chatView as any).plugin.settings.customProviders = [
+      {
+        id: "provider_1",
+        name: "My OpenAI",
+        endpoint: "https://api.openai.com/v1",
+        apiKey: "",
+        isEnabled: true,
+      },
+    ];
+
+    await expect(
+      (chatView as any).resolveLoadedSelectedModelId("my-openai@@gpt-4.1")
+    ).resolves.toBe("openai@@gpt-4.1");
+  });
+
   it("keeps mobile restore on a safe alias path without loading the live Pi catalog", async () => {
     (PlatformContext.get as jest.Mock).mockReturnValue({
       supportsDesktopOnlyFeatures: () => false,

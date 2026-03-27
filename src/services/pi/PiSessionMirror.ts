@@ -1,8 +1,14 @@
+/**
+ * Pi session mirror — reads a Pi session file and converts it to ChatMessage[].
+ *
+ * Uses the Pi SDK's SessionManager directly (npm dependency).
+ */
+
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type SystemSculptPlugin from "../../main";
 import type { ChatMessage } from "../../types";
-import { loadPiSdkModule } from "./PiSdk";
 import { buildPiSessionTranscript } from "./PiSessionTranscriptBuilder";
 
 export type PiSessionMirrorSnapshot = {
@@ -18,11 +24,9 @@ export async function loadPiSessionMirror(options: {
   plugin: SystemSculptPlugin;
   sessionFile: string;
 }): Promise<PiSessionMirrorSnapshot> {
-  void options.plugin;
-  const sdk = await loadPiSdkModule();
-  const sessionManager = sdk.SessionManager.open(options.sessionFile);
+  const sessionManager = SessionManager.open(options.sessionFile);
   const entries = sessionManager.getBranch();
-  const messages = buildPiSessionTranscript(entries);
+  const messages = buildPiSessionTranscript(entries as any);
   const lastEntryId = String(entries[entries.length - 1]?.id || "").trim() || undefined;
 
   const model = sessionManager.buildSessionContext().model;
@@ -44,11 +48,7 @@ export async function loadPiSessionMirror(options: {
 
 function normalizeEntryIds(values: Array<string | undefined | null>): string[] {
   return Array.from(
-    new Set(
-      values
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    )
+    new Set(values.map((v) => String(v || "").trim()).filter(Boolean)),
   );
 }
 
@@ -59,48 +59,35 @@ export async function recoverPiSessionMirror(options: {
   messageEntryIds?: string[];
 }): Promise<PiSessionMirrorSnapshot | null> {
   const sessionFile = String(options.sessionFile || "").trim();
-  if (!sessionFile) {
-    return null;
-  }
+  if (!sessionFile) return null;
 
   const sessionDir = dirname(sessionFile);
-  if (!sessionDir || !existsSync(sessionDir)) {
-    return null;
-  }
+  if (!sessionDir || !existsSync(sessionDir)) return null;
 
-  const expectedEntryIds = normalizeEntryIds([
+  const expectedIds = normalizeEntryIds([
     options.lastEntryId,
     ...(options.messageEntryIds || []),
   ]);
-  if (expectedEntryIds.length === 0) {
-    return null;
-  }
+  if (expectedIds.length === 0) return null;
 
-  const candidateFiles = readdirSync(sessionDir)
-    .filter((name) => name.endsWith(".jsonl"))
-    .map((name) => join(sessionDir, name))
-    .filter((candidate) => candidate !== sessionFile)
-    .sort((left, right) => right.localeCompare(left));
+  const candidates = readdirSync(sessionDir)
+    .filter((n) => n.endsWith(".jsonl"))
+    .map((n) => join(sessionDir, n))
+    .filter((c) => c !== sessionFile)
+    .sort((a, b) => b.localeCompare(a));
 
-  for (const candidateFile of candidateFiles) {
+  for (const candidate of candidates) {
     try {
-      const snapshot = await loadPiSessionMirror({
-        plugin: options.plugin,
-        sessionFile: candidateFile,
-      });
-      const candidateEntryIds = normalizeEntryIds([
+      const snapshot = await loadPiSessionMirror({ plugin: options.plugin, sessionFile: candidate });
+      const ids = normalizeEntryIds([
         snapshot.lastEntryId,
-        ...snapshot.messages.map((message) => message.pi_entry_id),
+        ...snapshot.messages.map((m) => m.pi_entry_id),
       ]);
-      const matches = expectedEntryIds.some((entryId) => candidateEntryIds.includes(entryId));
-      if (matches) {
-        return snapshot;
-      }
+      if (expectedIds.some((id) => ids.includes(id))) return snapshot;
     } catch {
-      // Ignore unreadable/non-matching session files while searching for recovery candidates.
+      // Skip unreadable session files.
     }
   }
-
   return null;
 }
 
@@ -111,48 +98,32 @@ export async function loadPiSessionMirrorWithRecovery(options: {
   messageEntryIds?: string[];
 }): Promise<PiSessionMirrorSnapshot> {
   const sessionFile = String(options.sessionFile || "").trim();
-  const expectedEntryIds = normalizeEntryIds([
+  const expectedIds = normalizeEntryIds([
     options.lastEntryId,
     ...(options.messageEntryIds || []),
   ]);
 
   if (sessionFile && !existsSync(sessionFile)) {
-    const recovered = await recoverPiSessionMirror({
-      ...options,
-      sessionFile,
-    });
-    if (recovered) {
-      return recovered;
-    }
+    const recovered = await recoverPiSessionMirror(options);
+    if (recovered) return recovered;
   }
 
   try {
-    const snapshot = await loadPiSessionMirror({
-      plugin: options.plugin,
-      sessionFile,
-    });
-    if (expectedEntryIds.length > 0) {
-      const snapshotEntryIds = normalizeEntryIds([
+    const snapshot = await loadPiSessionMirror({ plugin: options.plugin, sessionFile });
+    if (expectedIds.length > 0) {
+      const snapshotIds = normalizeEntryIds([
         snapshot.lastEntryId,
-        ...snapshot.messages.map((message) => message.pi_entry_id),
+        ...snapshot.messages.map((m) => m.pi_entry_id),
       ]);
-      const matchesExpectedEntry = expectedEntryIds.some((entryId) => snapshotEntryIds.includes(entryId));
-      if (!matchesExpectedEntry) {
-        const recovered = await recoverPiSessionMirror({
-          ...options,
-          sessionFile,
-        });
-        if (recovered) {
-          return recovered;
-        }
+      if (!expectedIds.some((id) => snapshotIds.includes(id))) {
+        const recovered = await recoverPiSessionMirror(options);
+        if (recovered) return recovered;
       }
     }
     return snapshot;
   } catch (error) {
     const recovered = await recoverPiSessionMirror(options);
-    if (recovered) {
-      return recovered;
-    }
+    if (recovered) return recovered;
     throw error;
   }
 }

@@ -1,17 +1,20 @@
+/**
+ * Pi provider auth storage — thin wrapper around the Pi SDK's AuthStorage.
+ *
+ * The SDK is a direct npm dependency (`@mariozechner/pi-coding-agent`).
+ * Desktop-only: all callers must gate on PlatformContext before reaching here.
+ */
+
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { Platform } from "obsidian";
-import { loginStudioPiProviderOAuthThroughNode } from "./StudioPiOAuthBridge";
-import {
-  loadPiSdkModule,
-  resolvePiPackageEntryPath,
-  type PiSdkAuthCredential,
-  type PiSdkAuthStorageInstance,
-} from "../../services/pi/PiSdk";
-import { ensureBundledPiRuntime } from "../../services/pi/PiRuntimeBootstrap";
+import { withPiDesktopFetchShim } from "../../services/pi/PiSdkRuntime";
 import {
   getStudioPiProviderLabelOrUndefined,
   supportsOAuthLogin,
 } from "./StudioPiProviderRegistry";
 import { normalizeStudioPiProviderHint } from "./StudioPiProviderUtils";
+
+// ── Public types ──────────────────────────────────────────────────────────
 
 export type StudioPiOAuthProvider = {
   id: string;
@@ -84,193 +87,159 @@ export type StudioPiOAuthLoginOptions = {
   signal?: AbortSignal;
 };
 
-type StudioPiAuthCredentialRecord = PiSdkAuthCredential;
-type StudioPiAuthStorageData = Record<string, StudioPiAuthCredentialRecord>;
+// Re-export the SDK instance type so consumers don't need to import the SDK directly.
+export type StudioPiAuthStorageInstance = ReturnType<typeof AuthStorage.create>;
 
-type StudioPiOAuthProviderRecord = {
-  id?: unknown;
-  name?: unknown;
-  usesCallbackServer?: unknown;
-};
+// ── Internal helpers ──────────────────────────────────────────────────────
 
-export type StudioPiAuthStorageInstance = PiSdkAuthStorageInstance;
+/** Single shared instance — AuthStorage.create() is cheap and reads from disk. */
+function getAuthStorage(override?: StudioPiAuthStorageInstance): StudioPiAuthStorageInstance {
+  return override ?? AuthStorage.create();
+}
 
-function normalizeAuthSource(credentialType: unknown, hasAnyAuth: boolean): StudioPiAuthState["source"] {
-  if (credentialType === "oauth") {
-    return "oauth";
-  }
-  if (credentialType === "api_key") {
-    return "api_key";
-  }
-  if (hasAnyAuth) {
-    return "environment_or_fallback";
-  }
+function normalizeAuthSource(
+  credentialType: unknown,
+  hasAnyAuth: boolean,
+): StudioPiAuthState["source"] {
+  if (credentialType === "oauth") return "oauth";
+  if (credentialType === "api_key") return "api_key";
+  if (hasAnyAuth) return "environment_or_fallback";
   return "none";
 }
 
 function normalizeCredentialType(credentialType: unknown): StudioPiAuthCredentialType {
-  if (credentialType === "oauth") {
-    return "oauth";
-  }
-  if (credentialType === "api_key") {
-    return "api_key";
-  }
-  if (credentialType === undefined || credentialType === null || credentialType === "") {
-    return "none";
-  }
+  if (credentialType === "oauth") return "oauth";
+  if (credentialType === "api_key") return "api_key";
+  if (!credentialType) return "none";
   return "unknown";
 }
 
-async function resolvePiAuthStorage(
-  storageOverride?: StudioPiAuthStorageInstance
-): Promise<StudioPiAuthStorageInstance> {
-  if (storageOverride) {
-    return storageOverride;
-  }
-  const sdk = await loadPiSdkModule();
-  return sdk.AuthStorage.create();
-}
-
-async function resolveProviderApiKeyFromStorage(
+async function resolveProviderApiKey(
   storage: StudioPiAuthStorageInstance,
-  provider: string
+  provider: string,
 ): Promise<string> {
-  const getApiKey = storage.getApiKey;
-  if (typeof getApiKey !== "function") {
-    return "";
-  }
-
+  if (typeof storage.getApiKey !== "function") return "";
   try {
-    return String((await getApiKey.call(storage, provider)) || "").trim();
+    return await withPiDesktopFetchShim(async () =>
+      String((await storage.getApiKey(provider)) || "").trim()
+    );
   } catch {
     return "";
   }
 }
 
-async function resolveProviderHasAnyAuth(
+async function resolveHasAnyAuth(
   storage: StudioPiAuthStorageInstance,
-  provider: string
+  provider: string,
 ): Promise<boolean> {
-  const resolvedApiKey = await resolveProviderApiKeyFromStorage(storage, provider);
-  if (resolvedApiKey) {
-    return true;
-  }
+  if (await resolveProviderApiKey(storage, provider)) return true;
   return storage.hasAuth(provider);
 }
 
 function getStoredProviderIds(storage: StudioPiAuthStorageInstance): string[] {
   if (typeof storage.list === "function") {
-    return storage.list().map((provider) => normalizeStudioPiProviderHint(provider)).filter(Boolean);
+    return storage.list().map(normalizeStudioPiProviderHint).filter(Boolean);
   }
-
   if (typeof storage.getAll === "function") {
-    return Object.keys(storage.getAll())
-      .map((provider) => normalizeStudioPiProviderHint(provider))
-      .filter(Boolean);
+    return Object.keys(storage.getAll()).map(normalizeStudioPiProviderHint).filter(Boolean);
   }
-
   return [];
 }
 
 function hasStoredCredential(
   storage: StudioPiAuthStorageInstance,
   provider: string,
-  credential: StudioPiAuthCredentialRecord | undefined
+  credential: { type?: unknown } | undefined,
 ): boolean {
-  if (typeof storage.has === "function") {
-    return storage.has(provider);
-  }
+  if (typeof storage.has === "function") return storage.has(provider);
   return Boolean(credential);
 }
+
+// ── Public API ────────────────────────────────────────────────────────────
 
 export function buildStudioPiLoginCommand(providerHint: string): string {
   const provider = normalizeStudioPiProviderHint(providerHint);
   return provider ? `pi /login ${provider}` : "pi /login";
 }
 
-export async function listStudioPiOAuthProviders(): Promise<StudioPiOAuthProvider[]> {
-  const storage = await resolvePiAuthStorage();
-  return storage.getOAuthProviders().map((provider) => ({
-    id: String(provider.id || "").trim(),
-    name: String(provider.name || provider.id || "").trim(),
-    usesCallbackServer: Boolean(provider.usesCallbackServer),
-  }))
-    .filter((provider) => provider.id.length > 0)
-    .sort((left, right) => left.name.localeCompare(right.name));
+export function listStudioPiOAuthProviders(): StudioPiOAuthProvider[] {
+  const storage = getAuthStorage();
+  return storage
+    .getOAuthProviders()
+    .map((p) => ({
+      id: String(p.id || "").trim(),
+      name: String(p.name || p.id || "").trim(),
+      usesCallbackServer: Boolean(p.usesCallbackServer),
+    }))
+    .filter((p) => p.id.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function listStudioPiProviderAuthRecords(
   options: { providerHints?: string[] } = {},
-  storageOverride?: StudioPiAuthStorageInstance
+  storageOverride?: StudioPiAuthStorageInstance,
 ): Promise<StudioPiProviderAuthRecord[]> {
-  const storage = await resolvePiAuthStorage(storageOverride);
+  const storage = getAuthStorage(storageOverride);
   const providerIds = new Set<string>();
-  const oauthProvidersById = new Map<string, StudioPiOAuthProvider>();
+  const oauthById = new Map<string, StudioPiOAuthProvider>();
 
-  for (const provider of storage.getOAuthProviders()) {
-    const id = normalizeStudioPiProviderHint(provider.id);
-    if (!id) {
-      continue;
-    }
+  for (const p of storage.getOAuthProviders()) {
+    const id = normalizeStudioPiProviderHint(p.id);
+    if (!id) continue;
     providerIds.add(id);
-    oauthProvidersById.set(id, {
+    oauthById.set(id, {
       id,
-      name: String(provider.name || provider.id || id).trim(),
-      usesCallbackServer: Boolean(provider.usesCallbackServer),
+      name: String(p.name || p.id || id).trim(),
+      usesCallbackServer: Boolean(p.usesCallbackServer),
     });
   }
 
-  for (const provider of getStoredProviderIds(storage)) {
-    providerIds.add(provider);
-  }
-
-  for (const provider of options.providerHints || []) {
-    const normalized = normalizeStudioPiProviderHint(provider);
-    if (normalized) {
-      providerIds.add(normalized);
-    }
+  for (const id of getStoredProviderIds(storage)) providerIds.add(id);
+  for (const hint of options.providerHints || []) {
+    const id = normalizeStudioPiProviderHint(hint);
+    if (id) providerIds.add(id);
   }
 
   const records: StudioPiProviderAuthRecord[] = [];
-  for (const provider of providerIds.values()) {
+
+  for (const provider of providerIds) {
     const credential = storage.get(provider);
-    const hasAnyAuth = await resolveProviderHasAnyAuth(storage, provider);
-    const credentialType = normalizeCredentialType(credential?.type);
-    const source = normalizeAuthSource(credential?.type, hasAnyAuth);
-    const hasStored = hasStoredCredential(storage, provider, credential);
+    const hasAuth = await resolveHasAnyAuth(storage, provider);
+    const credType = normalizeCredentialType(credential?.type);
+    const source = normalizeAuthSource(credential?.type, hasAuth);
     const oauthExpiresAt =
-      credentialType === "oauth" && typeof credential?.expires === "number"
-        ? credential.expires
+      credType === "oauth" && credential?.type === "oauth" && typeof (credential as any).expires === "number"
+        ? (credential as any).expires as number
         : null;
-    const oauthInfo = oauthProvidersById.get(provider);
-    const displayName = getStudioPiProviderLabelOrUndefined(provider, oauthProvidersById);
+    const oauthInfo = oauthById.get(provider);
 
     records.push({
       provider,
-      displayName: displayName || oauthInfo?.name?.trim() || undefined,
-      supportsOAuth: supportsOAuthLogin(provider, oauthProvidersById),
-      hasAnyAuth,
-      hasStoredCredential: hasStored,
+      displayName:
+        getStudioPiProviderLabelOrUndefined(provider, oauthById) ||
+        oauthInfo?.name?.trim() ||
+        undefined,
+      supportsOAuth: supportsOAuthLogin(provider, oauthById),
+      hasAnyAuth: hasAuth,
+      hasStoredCredential: hasStoredCredential(storage, provider, credential),
       source,
-      credentialType,
+      credentialType: credType,
       oauthExpiresAt,
     });
   }
 
-  records.sort((left, right) => {
-    const leftLabel = left.displayName || left.provider;
-    const rightLabel = right.displayName || right.provider;
-    return leftLabel.localeCompare(rightLabel);
-  });
+  records.sort((a, b) =>
+    (a.displayName || a.provider).localeCompare(b.displayName || b.provider),
+  );
 
   return records;
 }
 
 export async function migrateStudioPiProviderApiKeys(
   candidates: StudioPiApiKeyMigrationCandidate[],
-  storageOverride?: StudioPiAuthStorageInstance
+  storageOverride?: StudioPiAuthStorageInstance,
 ): Promise<StudioPiApiKeyMigrationReport> {
-  const storage = await resolvePiAuthStorage(storageOverride);
+  const storage = getAuthStorage(storageOverride);
   const report: StudioPiApiKeyMigrationReport = {
     migrated: [],
     skipped: [],
@@ -283,55 +252,33 @@ export async function migrateStudioPiProviderApiKeys(
     const origin = String(candidate.origin || "").trim() || undefined;
 
     if (!provider) {
-      report.skipped.push({
-        provider: String(candidate.providerId || "").trim() || "<unknown>",
-        origin,
-        reason: "invalid_provider",
-      });
+      report.skipped.push({ provider: String(candidate.providerId || "").trim() || "<unknown>", origin, reason: "invalid_provider" });
       continue;
     }
-
     if (!key) {
-      report.skipped.push({
-        provider,
-        origin,
-        reason: "empty_key",
-      });
+      report.skipped.push({ provider, origin, reason: "empty_key" });
       continue;
     }
 
-    const existingCredential = storage.get(provider);
-    const storedCredentialExists = hasStoredCredential(storage, provider, existingCredential);
-    if (storedCredentialExists) {
-      const existingType = normalizeCredentialType(existingCredential?.type);
+    const existing = storage.get(provider);
+    if (hasStoredCredential(storage, provider, existing)) {
+      const existingType = normalizeCredentialType(existing?.type);
       const reason: StudioPiApiKeyMigrationReason =
-        existingType === "oauth"
-          ? "existing_oauth"
-          : existingType === "api_key"
-            ? "existing_api_key"
+        existingType === "oauth" ? "existing_oauth"
+          : existingType === "api_key" ? "existing_api_key"
             : "existing_stored_credential";
-      report.skipped.push({
-        provider,
-        origin,
-        reason,
-      });
+      report.skipped.push({ provider, origin, reason });
       continue;
     }
 
     try {
-      storage.set(provider, {
-        type: "api_key",
-        key,
-      });
-      report.migrated.push({
-        provider,
-        origin,
-      });
+      storage.set(provider, { type: "api_key", key } as any);
+      report.migrated.push({ provider, origin });
     } catch (error) {
       report.errors.push({
         provider,
         origin,
-        message: error instanceof Error ? error.message : String(error || "Failed to migrate key."),
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -339,70 +286,64 @@ export async function migrateStudioPiProviderApiKeys(
   return report;
 }
 
-export async function loginStudioPiProviderOAuth(options: StudioPiOAuthLoginOptions): Promise<void> {
+/**
+ * OAuth login — calls the SDK's AuthStorage.login() directly in-process.
+ * No child process bridge needed since the SDK is a bundled npm dependency.
+ */
+export async function loginStudioPiProviderOAuth(
+  options: StudioPiOAuthLoginOptions,
+): Promise<void> {
   const providerId = normalizeStudioPiProviderHint(options.providerId);
-  if (!providerId) {
-    throw new Error("Select a valid provider before starting OAuth login.");
-  }
-  if (!Platform.isDesktopApp) {
-    throw new Error("OAuth login is only available on desktop.");
-  }
-  await ensureBundledPiRuntime();
-  const sdkEntryPath = resolvePiPackageEntryPath();
-  await loginStudioPiProviderOAuthThroughNode(providerId, sdkEntryPath, options);
+  if (!providerId) throw new Error("Select a valid provider before starting OAuth login.");
+  if (!Platform.isDesktopApp) throw new Error("OAuth login is only available on desktop.");
+
+  const storage = getAuthStorage();
+  await withPiDesktopFetchShim(async () => {
+    await storage.login(providerId, {
+      onAuth: options.onAuth,
+      onPrompt: options.onPrompt,
+      onProgress: options.onProgress,
+      onManualCodeInput: options.onManualCodeInput,
+      signal: options.signal,
+    });
+  });
 }
 
-export async function setStudioPiProviderApiKey(providerHint: string, apiKey: string): Promise<void> {
+export async function setStudioPiProviderApiKey(
+  providerHint: string,
+  apiKey: string,
+): Promise<void> {
   const provider = normalizeStudioPiProviderHint(providerHint);
   const key = String(apiKey || "").trim();
-  if (!provider) {
-    throw new Error("Select a valid provider before saving an API key.");
-  }
-  if (!key) {
-    throw new Error("API key cannot be empty.");
-  }
-  const storage = await resolvePiAuthStorage();
-  storage.set(provider, {
-    type: "api_key",
-    key,
-  });
+  if (!provider) throw new Error("Select a valid provider before saving an API key.");
+  if (!key) throw new Error("API key cannot be empty.");
+  const storage = getAuthStorage();
+  storage.set(provider, { type: "api_key", key } as any);
 }
 
 export async function clearStudioPiProviderAuth(providerHint: string): Promise<void> {
   const provider = normalizeStudioPiProviderHint(providerHint);
-  if (!provider) {
-    throw new Error("Select a valid provider before clearing credentials.");
-  }
-  const storage = await resolvePiAuthStorage();
+  if (!provider) throw new Error("Select a valid provider before clearing credentials.");
+  const storage = getAuthStorage();
   storage.remove(provider);
 }
 
-export async function readStudioPiProviderAuthState(providerHint: string): Promise<StudioPiAuthState> {
+export async function readStudioPiProviderAuthState(
+  providerHint: string,
+): Promise<StudioPiAuthState> {
   const provider = normalizeStudioPiProviderHint(providerHint);
-  if (!provider) {
-    return {
-      provider: "",
-      hasAnyAuth: false,
-      source: "none",
-    };
-  }
-  const storage = await resolvePiAuthStorage();
-  const credentialType = storage.get(provider)?.type;
-  const hasAnyAuth = await resolveProviderHasAnyAuth(storage, provider);
-  return {
-    provider,
-    hasAnyAuth,
-    source: normalizeAuthSource(credentialType, hasAnyAuth),
-  };
+  if (!provider) return { provider: "", hasAnyAuth: false, source: "none" };
+  const storage = getAuthStorage();
+  const credType = storage.get(provider)?.type;
+  const hasAuth = await resolveHasAnyAuth(storage, provider);
+  return { provider, hasAnyAuth: hasAuth, source: normalizeAuthSource(credType, hasAuth) };
 }
 
-export async function resolveStudioPiProviderApiKey(providerHint: string): Promise<string | null> {
+export async function resolveStudioPiProviderApiKey(
+  providerHint: string,
+): Promise<string | null> {
   const provider = normalizeStudioPiProviderHint(providerHint);
-  if (!provider) {
-    return null;
-  }
-
-  const storage = await resolvePiAuthStorage();
-  const apiKey = await resolveProviderApiKeyFromStorage(storage, provider);
-  return apiKey || null;
+  if (!provider) return null;
+  const storage = getAuthStorage();
+  return (await resolveProviderApiKey(storage, provider)) || null;
 }

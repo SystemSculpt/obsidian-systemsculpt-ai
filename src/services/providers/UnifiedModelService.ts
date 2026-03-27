@@ -215,7 +215,7 @@ export class UnifiedModelService {
     return {
       systemSculpt: models.some((model) => model.id === managedModelId),
       customProviders: false,
-      localPi: false,
+      localPi: models.some((model) => model.sourceMode === "pi_local" && !!model.piLocalAvailable),
     };
   }
 

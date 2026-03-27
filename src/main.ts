@@ -2188,6 +2188,14 @@ export default class SystemSculptPlugin extends Plugin {
       .then(({ ChangeLogService }) => ChangeLogService.warmCache(this))
       .catch(() => {});
 
+    // Migrate legacy CustomProvider[] API keys into Pi auth storage (one-time, desktop only).
+    if (
+      PlatformContext.get().supportsDesktopOnlyFeatures() &&
+      this.settings.studioPiAuthMigrationVersion < 1
+    ) {
+      void this.migrateCustomProviderKeysToPiAuth().catch(() => {});
+    }
+
     logger.debug("Background preload completed", {
       source: "SystemSculptPlugin",
     });
@@ -2373,4 +2381,70 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   // Removed complex settings callback system - no longer needed for simplified embeddings
+
+  /**
+   * One-time migration: move legacy CustomProvider[] API keys into Pi auth storage.
+   * After migration, preserves provider metadata and only clears keys that were safely moved.
+   */
+  private async migrateCustomProviderKeysToPiAuth(): Promise<void> {
+    const customProviders = this.settings.customProviders;
+    if (!Array.isArray(customProviders) || customProviders.length === 0) {
+      // Nothing to migrate — just bump the version
+      await this.settingsManager.updateSettings({ studioPiAuthMigrationVersion: 1 });
+      return;
+    }
+
+    const { migrateStudioPiProviderApiKeys } = await import("./studio/piAuth/StudioPiAuthStorage");
+    const { resolvePiProviderFromEndpoint } = await import("./studio/piAuth/StudioPiProviderRegistry");
+
+    const candidates = customProviders
+      .filter((cp) => cp.apiKey && cp.endpoint)
+      .map((cp) => {
+        const providerId = resolvePiProviderFromEndpoint(cp.endpoint) || cp.name || cp.id;
+        return {
+          providerId,
+          apiKey: cp.apiKey,
+          origin: `legacy-custom-provider:${cp.id}`,
+        };
+      })
+      .filter((c) => c.providerId);
+
+    const report =
+      candidates.length > 0
+        ? await migrateStudioPiProviderApiKeys(candidates)
+        : { migrated: [], skipped: [], errors: [] };
+
+    const safeToRedactOrigins = new Set<string>();
+    for (const entry of report.migrated) {
+      const origin = String(entry.origin || "").trim();
+      if (origin) {
+        safeToRedactOrigins.add(origin);
+      }
+    }
+    for (const entry of report.skipped) {
+      const origin = String(entry.origin || "").trim();
+      if (!origin) {
+        continue;
+      }
+      if (
+        entry.reason === "existing_api_key" ||
+        entry.reason === "existing_oauth" ||
+        entry.reason === "existing_stored_credential"
+      ) {
+        safeToRedactOrigins.add(origin);
+      }
+    }
+
+    const redactedCustomProviders = customProviders.map((provider) => ({
+      ...provider,
+      apiKey: safeToRedactOrigins.has(`legacy-custom-provider:${String(provider.id || "").trim()}`)
+        ? ""
+        : provider.apiKey,
+    }));
+
+    await this.settingsManager.updateSettings({
+      customProviders: redactedCustomProviders,
+      studioPiAuthMigrationVersion: 1,
+    });
+  }
 }

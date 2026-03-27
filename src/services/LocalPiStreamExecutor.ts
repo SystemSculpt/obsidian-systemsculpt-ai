@@ -14,28 +14,13 @@ type LocalPiStreamExecutorInput = {
   sessionFile?: string;
   onSessionReady?: (session: PiLocalSessionRef) => void;
   signal?: AbortSignal;
+  reasoningEffort?: string;
   debug?: StreamDebugCallbacks;
 };
 
 export async function* executeLocalPiStream(
   input: LocalPiStreamExecutorInput
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  try {
-    input.debug?.onRequest?.({
-      provider: `local-pi:${input.prepared.resolvedModel.sourceProviderId || input.prepared.resolvedModel.provider}`,
-      endpoint: "local-pi-rpc",
-      headers: {},
-      body: {
-        model: input.prepared.actualModelId,
-        messageCount: input.prepared.preparedMessages.length,
-        toolMode: "pi-native",
-      },
-      transport: "pi-rpc",
-      canStream: true,
-      isCustomProvider: false,
-    });
-  } catch {}
-
   for await (const event of streamPiLocalAgentTurn({
     plugin: input.plugin,
     modelId: input.prepared.actualModelId,
@@ -44,6 +29,7 @@ export async function* executeLocalPiStream(
     sessionFile: input.sessionFile,
     onSessionReady: input.onSessionReady,
     signal: input.signal,
+    reasoningEffort: input.reasoningEffort,
   })) {
     try {
       input.debug?.onStreamEvent?.({ event });

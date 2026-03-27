@@ -1,11 +1,12 @@
 import type SystemSculptPlugin from "../../main";
 import type { StreamEvent } from "../../streaming/types";
 import type { ChatMessage } from "../../types";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import {
-  PiRpcProcessClient,
-  type PiRpcMessageImage,
-  type PiRpcThinkingLevel,
-} from "../pi/PiRpcProcessClient";
+  installPiDesktopFetchShim,
+  openPiAgentSession,
+  type PiSdkThinkingLevel,
+} from "../pi/PiSdkRuntime";
 
 type PiLocalSessionRef = {
   sessionFile?: string;
@@ -28,7 +29,7 @@ type QueueItem =
   | { kind: "done" }
   | { kind: "error"; error: Error };
 
-type PiImageContent = PiRpcMessageImage;
+type PiImageContent = ImageContent;
 
 function parseDataUrlImage(url: string): { mimeType: string; data: string } | null {
   const trimmed = String(url || "").trim();
@@ -178,7 +179,7 @@ function extractAssistantErrorMessage(message: any): string {
   return "";
 }
 
-function normalizePiThinkingLevel(rawValue: unknown): PiRpcThinkingLevel | undefined {
+function normalizePiThinkingLevel(rawValue: unknown): PiSdkThinkingLevel | undefined {
   const normalized = String(rawValue || "").trim().toLowerCase();
   if (
     normalized === "off" ||
@@ -201,33 +202,31 @@ export async function* streamPiLocalAgentTurn(
     throw new Error("Cannot start a local Pi turn without at least one user message.");
   }
 
-  const client = new PiRpcProcessClient({
-    plugin: options.plugin,
-    modelId: options.modelId,
-    thinkingLevel: normalizePiThinkingLevel(options.reasoningEffort),
-    systemPrompt: options.systemPrompt,
-    sessionFile: options.sessionFile,
-  });
+  const restoreFetch = installPiDesktopFetchShim();
+  let session: Awaited<ReturnType<typeof openPiAgentSession>> | null = null;
 
-  await client.start();
+  try {
+    session = await openPiAgentSession({
+      plugin: options.plugin,
+      modelId: options.modelId,
+      thinkingLevel: normalizePiThinkingLevel(options.reasoningEffort),
+      systemPrompt: options.systemPrompt,
+      sessionFile: options.sessionFile,
+    });
 
-  const state = await client.getState();
-  const sessionFile =
-    typeof state.sessionFile === "string" && state.sessionFile.trim().length > 0
-      ? state.sessionFile.trim()
-      : undefined;
-  const sessionId = String(state.sessionId || "").trim();
-  if (!sessionId) {
-    await client.stop();
-    throw new Error("Pi RPC session did not return a session id.");
-  }
+    const sessionFile = String(session.sessionFile || "").trim() || undefined;
+    const sessionId = String(session.sessionId || "").trim();
+    if (!sessionId) {
+      throw new Error("Pi SDK session did not return a session id.");
+    }
 
-  options.onSessionReady?.({
-    sessionFile,
-    sessionId,
-  });
+    options.onSessionReady?.({
+      sessionFile,
+      sessionId,
+    });
 
-  const queue: QueueItem[] = [];
+    const activeSession = session;
+    const queue: QueueItem[] = [];
   let waitingResolver: ((item: QueueItem) => void) | null = null;
   let streamedText = "";
   let streamedReasoning = "";
@@ -271,11 +270,12 @@ export async function* streamPiLocalAgentTurn(
     return currentValue;
   };
 
-  const unsubscribe = client.onEvent((event) => {
-    const type = String(event.type || "").trim().toLowerCase();
+  const unsubscribe = activeSession.subscribe((event) => {
+    const sessionEvent = event as Record<string, any>;
+    const type = String(sessionEvent.type || "").trim().toLowerCase();
 
     if (type === "message_update") {
-      const assistantEvent = event.assistantMessageEvent as Record<string, unknown> | undefined;
+      const assistantEvent = sessionEvent.assistantMessageEvent as Record<string, unknown> | undefined;
       const assistantType = String(assistantEvent?.type || "").trim().toLowerCase();
       switch (assistantType) {
         case "text_delta": {
@@ -347,12 +347,12 @@ export async function* streamPiLocalAgentTurn(
       return;
     }
 
-    if (type === "message_end" && event.message && (event.message as any).role === "assistant") {
-      const { text, reasoning } = extractAssistantContent(event.message);
+    if (type === "message_end" && sessionEvent.message && sessionEvent.message.role === "assistant") {
+      const { text, reasoning } = extractAssistantContent(sessionEvent.message);
       streamedText = emitRemainder("content", text, streamedText);
       streamedReasoning = emitRemainder("reasoning", reasoning, streamedReasoning);
 
-      const errorMessage = extractAssistantErrorMessage(event.message);
+      const errorMessage = extractAssistantErrorMessage(sessionEvent.message);
       if (errorMessage && !options.signal?.aborted) {
         push({
           kind: "error",
@@ -361,7 +361,7 @@ export async function* streamPiLocalAgentTurn(
         return;
       }
 
-      const stopReason = String((event.message as any)?.stopReason || "").trim();
+      const stopReason = String(sessionEvent.message?.stopReason || "").trim();
       if (stopReason) {
         push({
           kind: "event",
@@ -394,12 +394,15 @@ export async function* streamPiLocalAgentTurn(
   });
 
   const onAbort = () => {
-    void client.abort().catch(() => {});
+    void activeSession.abort().catch(() => {});
   };
   options.signal?.addEventListener("abort", onAbort, { once: true });
 
-  void client
-    .prompt(promptInput.text, promptInput.images.length > 0 ? promptInput.images : undefined)
+  void activeSession
+    .prompt(promptInput.text, {
+      expandPromptTemplates: false,
+      images: promptInput.images.length > 0 ? promptInput.images : undefined,
+    })
     .catch((error: unknown) => {
       push({
         kind: "error",
@@ -430,7 +433,10 @@ export async function* streamPiLocalAgentTurn(
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
     unsubscribe();
-    await client.stop();
+  }
+  } finally {
+    session?.dispose();
+    restoreFetch();
   }
 }
 

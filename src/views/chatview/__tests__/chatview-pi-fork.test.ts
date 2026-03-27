@@ -8,8 +8,10 @@ jest.mock("../../../services/SystemSculptService", () => ({
   },
 }));
 
-jest.mock("../../../services/pi/PiRpcProcessClient", () => ({
-  PiRpcProcessClient: jest.fn(),
+jest.mock("../../../services/pi/PiSessionService", () => ({
+  forkPiSession: jest.fn(),
+  listPiForkMessages: jest.fn(),
+  setPiSessionName: jest.fn(),
 }));
 
 jest.mock("node:fs", () => {
@@ -22,7 +24,7 @@ jest.mock("node:fs", () => {
 
 import { existsSync } from "node:fs";
 import { Platform } from "obsidian";
-import { PiRpcProcessClient } from "../../../services/pi/PiRpcProcessClient";
+import { forkPiSession } from "../../../services/pi/PiSessionService";
 import { ChatView } from "../ChatView";
 
 describe("ChatView Pi fork state", () => {
@@ -46,18 +48,13 @@ describe("ChatView Pi fork state", () => {
       return normalized === oldSessionFile;
     });
 
-    const client = {
-      start: jest.fn(async () => {}),
-      fork: jest.fn(async () => ({ text: "Retry me", cancelled: false })),
-      getState: jest.fn(async () => ({
-        sessionFile: newSessionFile,
-        sessionId: "sess_new",
-        sessionName: "Forked Pi",
-      })),
-      stop: jest.fn(async () => {}),
-    };
-
-    (PiRpcProcessClient as jest.Mock).mockImplementation(() => client);
+    (forkPiSession as jest.Mock).mockResolvedValue({
+      text: "Retry me",
+      cancelled: false,
+      sessionFile: newSessionFile,
+      sessionId: "sess_new",
+      sessionName: "Forked Pi",
+    });
 
     const chatView = Object.create(ChatView.prototype) as ChatView & Record<string, any>;
     chatView.plugin = {};
@@ -92,7 +89,11 @@ describe("ChatView Pi fork state", () => {
     expect(chatView.updateViewState).toHaveBeenCalled();
     expect(chatView.renderMessagesInChunks).toHaveBeenCalledTimes(1);
     expect(chatView.saveChat).toHaveBeenCalledTimes(1);
-    expect(client.stop).toHaveBeenCalledTimes(1);
+    expect(forkPiSession).toHaveBeenCalledWith({
+      plugin: chatView.plugin,
+      sessionFile: oldSessionFile,
+      entryId: "entry_user_2",
+    });
   });
 
   it("truncates the visible transcript locally when only a session id is present", async () => {
@@ -129,5 +130,6 @@ describe("ChatView Pi fork state", () => {
     expect(chatView.updateViewState).toHaveBeenCalled();
     expect(chatView.renderMessagesInChunks).toHaveBeenCalledTimes(1);
     expect(chatView.saveChat).toHaveBeenCalledTimes(1);
+    expect(forkPiSession).not.toHaveBeenCalled();
   });
 });

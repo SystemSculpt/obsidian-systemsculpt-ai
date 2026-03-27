@@ -6,6 +6,7 @@ import {
   resolvePiProviderFromEndpoint,
   resolveProviderLabel,
 } from "../../studio/piAuth/StudioPiProviderRegistry";
+import { createPiModelRegistry } from "./PiSdkRuntime";
 import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import {
   buildLocalPiCanonicalModelId,
@@ -237,21 +238,11 @@ export async function listLocalPiTextModels(
     return [];
   }
 
-  const { PiRpcProcessClient } = await import("./PiRpcProcessClient");
-  const client = new PiRpcProcessClient({
-    plugin,
-    noSession: true,
-  });
-
-  let models: LocalPiListedModel[] = [];
-  await client.start();
-  try {
-    models = (await client.getAvailableModels())
-      .map((model) => toLocalPiListEntry(model))
-      .filter((model): model is LocalPiListedModel => !!model);
-  } finally {
-    await client.stop();
-  }
+  const modelRegistry = createPiModelRegistry();
+  const models: LocalPiListedModel[] = modelRegistry
+    .getAvailable()
+    .map((model) => toLocalPiListEntry(model))
+    .filter((model): model is LocalPiListedModel => !!model);
 
   const byCanonicalId = new Map<string, LocalPiListedModel>();
   for (const model of models) {

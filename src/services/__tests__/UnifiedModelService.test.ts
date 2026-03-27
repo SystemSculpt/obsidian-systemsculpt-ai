@@ -88,15 +88,26 @@ describe("UnifiedModelService", () => {
     });
   });
 
-  it("reports the managed-only connection contract", async () => {
+  it("reports local Pi availability when Pi-backed models are present", async () => {
     const plugin = buildPlugin();
+    listPiTextCatalogModels.mockResolvedValue([
+      { ...MANAGED_MODEL },
+      {
+        ...MANAGED_MODEL,
+        id: "local-pi-openai@@gpt-4.1",
+        provider: "openai",
+        sourceMode: "pi_local",
+        piExecutionModelId: "openai/gpt-4.1",
+        piLocalAvailable: true,
+      },
+    ]);
     const service = UnifiedModelService.getInstance(plugin);
 
     await service.getModels();
     await expect(service.testAllConnections()).resolves.toEqual({
       systemSculpt: true,
       customProviders: false,
-      localPi: false,
+      localPi: true,
     });
   });
 });

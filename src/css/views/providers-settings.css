@@ -1,0 +1,214 @@
+/**
+ * Providers settings tab – provider status list with connect/disconnect
+ */
+
+/* ── Loading / error ─────────────────────────────────────────────────────── */
+
+.ss-providers-loading,
+.ss-providers-error {
+  padding: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.ss-providers-error {
+  color: var(--text-error);
+}
+
+/* ── Provider list ───────────────────────────────────────────────────────── */
+
+.ss-providers-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+/* ── Provider row ────────────────────────────────────────────────────────── */
+
+.ss-provider-row {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.ss-provider-row--connected {
+  border-left: 3px solid var(--text-success);
+}
+
+.ss-provider-row--disconnected {
+  border-left: 3px solid var(--background-modifier-border);
+}
+
+.ss-provider-row__header {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+}
+
+/* Status dot */
+.ss-provider-row__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ss-provider-row--connected .ss-provider-row__status-dot {
+  background: var(--text-success);
+}
+
+.ss-provider-row--disconnected .ss-provider-row__status-dot {
+  background: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* Info */
+.ss-provider-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ss-provider-row__name {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--text-normal);
+}
+
+.ss-provider-row__auth-summary {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.ss-provider-row--connected .ss-provider-row__auth-summary {
+  color: var(--text-success);
+}
+
+/* Actions */
+.ss-provider-row__actions {
+  display: flex;
+  gap: var(--size-2-2);
+  flex-shrink: 0;
+}
+
+.ss-provider-row__btn {
+  padding: var(--size-2-2) var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: 0.85em;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  transition: background 0.15s ease;
+}
+
+.ss-provider-row__btn:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+}
+
+.ss-provider-row__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ss-provider-row__btn--connect {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ss-provider-row__btn--connect:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.ss-provider-row__btn--disconnect {
+  color: var(--text-muted);
+}
+
+.ss-provider-row__btn--disconnect:hover:not(:disabled) {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}
+
+/* ── Connect panel ───────────────────────────────────────────────────────── */
+
+.ss-provider-connect-panel {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+}
+
+/* Method toggle */
+.ss-provider-connect-methods {
+  display: flex;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-4-3);
+}
+
+.ss-provider-connect-method {
+  flex: 1;
+  padding: var(--size-2-3) var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.ss-provider-connect-method:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ss-provider-connect-method--active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ss-provider-connect-method--active:hover:not(:disabled) {
+  opacity: 0.9;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Body */
+.ss-provider-connect-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.ss-provider-connect-hint {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+/* API key input row */
+.ss-provider-connect-input-row {
+  display: flex;
+  gap: var(--size-2-2);
+  align-items: center;
+}
+
+.ss-provider-connect-input {
+  flex: 1;
+  padding: var(--size-2-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+.ss-provider-connect-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}

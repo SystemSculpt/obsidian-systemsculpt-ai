@@ -24,7 +24,6 @@ describe("LocalPiStreamExecutor", () => {
       { type: "meta", key: "stop-reason", value: "stop" },
     ];
     const debug = {
-      onRequest: jest.fn(),
       onStreamEvent: jest.fn(),
     };
 
@@ -45,17 +44,17 @@ describe("LocalPiStreamExecutor", () => {
             sourceProviderId: "openai",
           } as any,
         } as any,
+        reasoningEffort: "high",
         debug,
       })
     );
 
     expect(events).toEqual(streamed);
     expect(events.some((event) => event.type === "meta" && event.key === "inline-footnote")).toBe(false);
-    expect(debug.onRequest).toHaveBeenCalledWith(
+    expect(streamPiLocalAgentTurn).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: "local-pi:openai",
-        endpoint: "local-pi-rpc",
-        transport: "pi-rpc",
+        modelId: "openai/gpt-4o",
+        reasoningEffort: "high",
       })
     );
     expect(debug.onStreamEvent).toHaveBeenCalledTimes(streamed.length);

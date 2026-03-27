@@ -30,6 +30,7 @@ import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
 import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
+import { executeLocalPiStream } from "./LocalPiStreamExecutor";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 import { MCPService } from "../mcp/MCPService";
@@ -570,6 +571,37 @@ export class SystemSculptService {
     return body;
   }
 
+  private buildLocalPiRequestPreview(options: {
+    prepared: PreparedChatRequest;
+    sessionFile?: string;
+    reasoningEffort?: string;
+  }): Record<string, any> {
+    const body: Record<string, any> = {
+      transport: "pi-sdk",
+      model: options.prepared.actualModelId,
+      messageCount: options.prepared.preparedMessages.length,
+      messages: this.toSystemSculptApiMessages(options.prepared.preparedMessages),
+      sourceMode: options.prepared.modelSource,
+    };
+
+    const systemPrompt = String(options.prepared.finalSystemPrompt || "").trim();
+    if (systemPrompt) {
+      body.system_prompt = systemPrompt;
+    }
+
+    const normalizedReasoningEffort = this.normalizeReasoningEffort(options.reasoningEffort);
+    if (normalizedReasoningEffort) {
+      body.reasoning_effort = normalizedReasoningEffort;
+    }
+
+    const sessionFile = String(options.sessionFile || "").trim();
+    if (sessionFile) {
+      body.session_file = sessionFile;
+    }
+
+    return body;
+  }
+
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = plugin.settings;
@@ -1072,6 +1104,47 @@ export class SystemSculptService {
       const {
         resolvedModel,
       } = prepared;
+
+      if (prepared.modelSource === "pi_local") {
+        const preview = this.buildLocalPiRequestPreview({
+          prepared,
+          sessionFile,
+          reasoningEffort,
+        });
+
+        try {
+          debug?.onRequest?.({
+            provider: String(resolvedModel.sourceProviderId || resolvedModel.provider || "unknown"),
+            endpoint: "local-pi-sdk",
+            headers: {},
+            body: preview,
+            transport: "pi-sdk",
+            canStream: true,
+            isCustomProvider: false,
+          });
+        } catch {}
+
+        for await (const event of executeLocalPiStream({
+          plugin: this.plugin,
+          prepared,
+          sessionFile,
+          onSessionReady: onPiSessionReady,
+          signal,
+          reasoningEffort,
+          debug,
+        })) {
+          yield event;
+        }
+
+        try {
+          debug?.onStreamEnd?.({
+            completed: !signal?.aborted,
+            aborted: !!signal?.aborted,
+          });
+        } catch {}
+        return;
+      }
+
       const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
       const requestBody = this.buildHostedChatRequestBody({
         prepared,
@@ -1194,7 +1267,9 @@ export class SystemSculptService {
       contextFiles,
       emitNotices: false,
     });
-    const requestBody = this.buildHostedChatRequestBody({ prepared });
+    const requestBody = prepared.modelSource === "pi_local"
+      ? this.buildLocalPiRequestPreview({ prepared })
+      : this.buildHostedChatRequestBody({ prepared });
 
     return {
       requestBody,

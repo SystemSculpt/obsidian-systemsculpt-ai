@@ -55,6 +55,24 @@ describe("resolveLegacyPiTextSelection", () => {
     expect(resolved?.id).toBe("openai@@gpt-4.1");
   });
 
+  it("still maps legacy custom-provider selections after provider secrets are redacted", () => {
+    const resolved = resolveLegacyPiTextSelection(
+      "my-openai@@gpt-4.1",
+      models,
+      [
+        {
+          id: "provider_1",
+          name: "My OpenAI",
+          endpoint: "https://api.openai.com/v1",
+          apiKey: "",
+          isEnabled: true,
+        },
+      ] as any
+    );
+
+    expect(resolved?.id).toBe("openai@@gpt-4.1");
+  });
+
   it("maps the legacy SystemSculpt alias back onto the canonical SystemSculpt Pi model", () => {
     const resolved = resolveLegacyPiTextSelection("systemsculpt@@systemsculpt/managed", models, []);
     expect(resolved?.id).toBe("systemsculpt@@systemsculpt/ai-agent");

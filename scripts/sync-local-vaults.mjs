@@ -2,13 +2,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { collectPiRuntimePackageRoots } from './pi-runtime-package-set.mjs';
-import {
-  clearRuntimeSyncState,
-  computeRuntimeSyncSignature,
-  runtimePathsNeedSync,
-  writeRuntimeSyncState,
-} from './runtime-sync.mjs';
 
 const usage = () => {
   console.log(`Usage: node scripts/sync-local-vaults.mjs [--config <path>]
@@ -73,26 +66,17 @@ const requiredFiles = [
   'manifest.json',
   'main.js',
   'styles.css',
+];
+const legacyReleaseExtras = [
+  'README.md',
+  'LICENSE',
+  'versions.json',
   'studio-terminal-sidecar.cjs',
+  'studio-terminal-server.cjs',
+  'systemsculpt-pi-provider-extension.mjs',
+  'node_modules',
+  '.systemsculpt-runtime-sync.json',
 ];
-const optionalFiles = ['README.md', 'LICENSE', 'versions.json'];
-const runtimePaths = [
-  'node_modules/node-pty',
-  ...collectPiRuntimePackageRoots({
-    rootDir: process.cwd(),
-  }).map((entry) => entry.relativePath),
-];
-const runtimeSyncSignature = computeRuntimeSyncSignature({
-  rootDir: process.cwd(),
-  runtimePaths,
-  signatureFiles: [
-    'package-lock.json',
-    'node_modules/.package-lock.json',
-    'scripts/pi-runtime-package-set.mjs',
-  ],
-});
-const verboseRuntimeLogging = process.env.SYSTEMSCULPT_SYNC_VERBOSE_RUNTIME === '1';
-
 const resolvePath = (maybeRelative) => (
   path.isAbsolute(maybeRelative)
     ? maybeRelative
@@ -168,50 +152,17 @@ const syncTarget = (target) => {
   try {
     ensureDir(targetPath);
     console.log(`[sync] Updating ${targetPath}`);
-    requiredFiles.concat(optionalFiles).forEach(file => {
+    requiredFiles.forEach(file => {
       copyFile(file, targetPath);
     });
 
-    const includeRuntimePaths = target.includeRuntimePaths !== false;
-    if (!includeRuntimePaths) {
-      const runtimeRootPath = path.join(targetPath, 'node_modules');
-      if (fs.existsSync(runtimeRootPath)) {
-        console.log('[sync]  └─ removing runtime path node_modules');
-        clearDestinationPath(runtimeRootPath);
+    legacyReleaseExtras.forEach(relativePath => {
+      const extraPath = path.join(targetPath, relativePath);
+      if (fs.existsSync(extraPath)) {
+        console.log(`[sync]  └─ removing legacy extra ${relativePath}`);
+        clearDestinationPath(extraPath);
       }
-      clearRuntimeSyncState(targetPath);
-    }
-
-    if (includeRuntimePaths) {
-      const shouldSyncRuntimePaths = runtimePathsNeedSync({
-        targetPath,
-        runtimePaths,
-        sourceSignature: runtimeSyncSignature,
-      });
-
-      if (shouldSyncRuntimePaths) {
-        console.log(`[sync]  └─ syncing ${runtimePaths.length} runtime paths`);
-        runtimePaths.forEach(relativeRuntimePath => {
-          const sourcePath = path.join(process.cwd(), relativeRuntimePath);
-          if (!fs.existsSync(sourcePath)) {
-            throw new Error(`Runtime dependency missing: ${sourcePath}`);
-          }
-          const destinationPath = path.join(targetPath, relativeRuntimePath);
-          if (verboseRuntimeLogging) {
-            console.log(`[sync]     - ${relativeRuntimePath}`);
-          }
-          clearDestinationPath(destinationPath);
-          copyDirectory(sourcePath, destinationPath);
-        });
-        writeRuntimeSyncState({
-          targetPath,
-          sourceSignature: runtimeSyncSignature,
-          runtimePaths,
-        });
-      } else {
-        console.log(`[sync]  └─ runtime paths unchanged (${runtimePaths.length} skipped)`);
-      }
-    }
+    });
 
     if (Array.isArray(target.extraCopies)) {
       target.extraCopies.forEach(extra => {

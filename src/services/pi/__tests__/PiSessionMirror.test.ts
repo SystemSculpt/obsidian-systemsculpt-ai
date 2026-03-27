@@ -2,13 +2,15 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadPiSessionMirror, loadPiSessionMirrorWithRecovery } from "../PiSessionMirror";
-import { loadPiSdkModule } from "../PiSdk";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 
-jest.mock("../PiSdk", () => ({
-  loadPiSdkModule: jest.fn(),
+jest.mock("@mariozechner/pi-coding-agent", () => ({
+  SessionManager: {
+    open: jest.fn(),
+  },
 }));
 
-const loadPiSdkModuleMock = loadPiSdkModule as jest.MockedFunction<typeof loadPiSdkModule>;
+const SessionManagerOpenMock = SessionManager.open as jest.MockedFunction<typeof SessionManager.open>;
 
 describe("PiSessionMirror", () => {
   let tempDir: string;
@@ -94,21 +96,14 @@ describe("PiSessionMirror", () => {
       },
     ];
 
-    loadPiSdkModuleMock.mockResolvedValue({
-      SessionManager: {
-        open: jest.fn(() => ({
-          getBranch: () => entries,
-          buildSessionContext: () => ({
-            model: {
-              provider: "openai",
-              modelId: "gpt-5.3-codex-spark",
-            },
-          }),
-          getSessionId: () => "sess_pi",
-          getSessionFile: () => "/vault/.pi/sessions/session.jsonl",
-          getSessionName: () => "Pi Session Name",
-        })),
-      },
+    SessionManagerOpenMock.mockReturnValue({
+      getBranch: () => entries,
+      buildSessionContext: () => ({
+        model: { provider: "openai", modelId: "gpt-5.3-codex-spark" },
+      }),
+      getSessionId: () => "sess_pi",
+      getSessionFile: () => "/vault/.pi/sessions/session.jsonl",
+      getSessionName: () => "Pi Session Name",
     } as any);
 
     const snapshot = await loadPiSessionMirror({
@@ -128,10 +123,7 @@ describe("PiSessionMirror", () => {
           pi_entry_id: "entry_user",
           content: [
             { type: "text", text: "Look at this image" },
-            {
-              type: "image_url",
-              image_url: { url: "data:image/png;base64,YWJj" },
-            },
+            { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
           ],
         }),
         expect.objectContaining({
@@ -144,10 +136,7 @@ describe("PiSessionMirror", () => {
               id: "call_1",
               state: "completed",
               request: expect.objectContaining({
-                function: {
-                  name: "read",
-                  arguments: "{\"file\":\"notes.md\"}",
-                },
+                function: { name: "read", arguments: "{\"file\":\"notes.md\"}" },
               }),
             }),
           ],
@@ -177,28 +166,12 @@ describe("PiSessionMirror", () => {
         recoveredSessionFile,
         [
           {
-            type: "message",
-            id: "entry_user_match",
-            parentId: null,
-            timestamp: "100",
-            message: {
-              role: "user",
-              timestamp: 100,
-              content: "hi :)",
-            },
+            type: "message", id: "entry_user_match", parentId: null, timestamp: "100",
+            message: { role: "user", timestamp: 100, content: "hi :)" },
           },
           {
-            type: "message",
-            id: "entry_assistant_match",
-            parentId: "entry_user_match",
-            timestamp: "200",
-            message: {
-              role: "assistant",
-              timestamp: 200,
-              provider: "anthropic",
-              model: "claude-haiku-4-5",
-              content: [{ type: "text", text: "Hey there" }],
-            },
+            type: "message", id: "entry_assistant_match", parentId: "entry_user_match", timestamp: "200",
+            message: { role: "assistant", timestamp: 200, provider: "anthropic", model: "claude-haiku-4-5", content: [{ type: "text", text: "Hey there" }] },
           },
         ],
       ],
@@ -206,42 +179,28 @@ describe("PiSessionMirror", () => {
         unrelatedSessionFile,
         [
           {
-            type: "message",
-            id: "entry_other",
-            parentId: null,
-            timestamp: "100",
-            message: {
-              role: "user",
-              timestamp: 100,
-              content: "other chat",
-            },
+            type: "message", id: "entry_other", parentId: null, timestamp: "100",
+            message: { role: "user", timestamp: 100, content: "other chat" },
           },
         ],
       ],
     ]);
 
-    loadPiSdkModuleMock.mockResolvedValue({
-      SessionManager: {
-        open: jest.fn((sessionFile: string) => {
-          if (!sessionEntriesByFile.has(sessionFile)) {
-            throw new Error(`ENOENT: no such file or directory, open '${sessionFile}'`);
-          }
-          const entries = sessionEntriesByFile.get(sessionFile) || [];
-          return {
-            getBranch: () => entries,
-            buildSessionContext: () => ({
-              model: {
-                provider: "anthropic",
-                modelId: "claude-haiku-4-5",
-              },
-            }),
-            getSessionId: () => `sess-${sessionFile.includes("recovered") ? "recovered" : "other"}`,
-            getSessionFile: () => sessionFile,
-            getSessionName: () => undefined,
-          };
+    SessionManagerOpenMock.mockImplementation((sessionFile: string) => {
+      if (!sessionEntriesByFile.has(sessionFile)) {
+        throw new Error(`ENOENT: no such file or directory, open '${sessionFile}'`);
+      }
+      const entries = sessionEntriesByFile.get(sessionFile) || [];
+      return {
+        getBranch: () => entries,
+        buildSessionContext: () => ({
+          model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
         }),
-      },
-    } as any);
+        getSessionId: () => `sess-${sessionFile.includes("recovered") ? "recovered" : "other"}`,
+        getSessionFile: () => sessionFile,
+        getSessionName: () => undefined,
+      } as any;
+    });
 
     const snapshot = await loadPiSessionMirrorWithRecovery({
       plugin: {} as any,
@@ -254,16 +213,8 @@ describe("PiSessionMirror", () => {
     expect(snapshot.sessionId).toBe("sess-recovered");
     expect(snapshot.lastEntryId).toBe("entry_assistant_match");
     expect(snapshot.messages).toEqual([
-      expect.objectContaining({
-        role: "user",
-        pi_entry_id: "entry_user_match",
-        content: "hi :)",
-      }),
-      expect.objectContaining({
-        role: "assistant",
-        pi_entry_id: "entry_assistant_match",
-        content: "Hey there",
-      }),
+      expect.objectContaining({ role: "user", pi_entry_id: "entry_user_match", content: "hi :)" }),
+      expect.objectContaining({ role: "assistant", pi_entry_id: "entry_assistant_match", content: "Hey there" }),
     ]);
   });
 });

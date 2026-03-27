@@ -83,6 +83,7 @@
 @import 'views/chat.css';
 @import 'views/model-select.css';
 @import 'views/settings.css';
+@import 'views/providers-settings.css';
 @import 'views/preview.css';
 @import 'views/context.css';
 @import 'views/custom-provider.css';

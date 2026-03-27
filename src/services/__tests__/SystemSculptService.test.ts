@@ -43,6 +43,9 @@ const mcpService = {
   getAvailableTools: jest.fn(),
   executeTool: jest.fn(),
 };
+const localPiStreamExecutor = {
+  executeLocalPiStream: jest.fn(),
+};
 
 jest.mock("../StreamingService", () => ({
   StreamingService: jest.fn().mockImplementation(() => {
@@ -69,6 +72,10 @@ jest.mock("../DocumentUploadService", () => ({
 
 jest.mock("../AudioUploadService", () => ({
   AudioUploadService: jest.fn().mockImplementation(() => audioUploadService),
+}));
+
+jest.mock("../LocalPiStreamExecutor", () => ({
+  executeLocalPiStream: jest.fn((...args) => localPiStreamExecutor.executeLocalPiStream(...args)),
 }));
 
 jest.mock("../../mcp/MCPService", () => ({
@@ -153,6 +160,9 @@ describe("SystemSculptService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     SystemSculptService.clearInstance();
+    localPiStreamExecutor.executeLocalPiStream.mockImplementation(async function* () {
+      return;
+    });
     mcpService.getAvailableTools.mockResolvedValue([
       {
         type: "function",
@@ -236,6 +246,43 @@ describe("SystemSculptService", () => {
       AGENT_PRESET.systemPrompt
     );
     expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
+  });
+
+  it("builds local Pi request previews for Pi-backed desktop models", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    modelManagementService.getModelInfo.mockResolvedValueOnce({
+      isCustom: false,
+      actualModelId: "openai/gpt-4.1",
+      modelSource: "pi_local",
+      model: {
+        id: "local-pi-openai@@gpt-4.1",
+        provider: "openai",
+        sourceMode: "pi_local",
+        sourceProviderId: "openai",
+        piExecutionModelId: "openai/gpt-4.1",
+        piLocalAvailable: true,
+        supported_parameters: ["tools"],
+      },
+    });
+
+    const { requestBody, preparedMessages, actualModelId } = await service.buildRequestPreview({
+      messages: [{ role: "user", content: "Hello from Pi", message_id: "msg_pi_preview_1" } as any],
+      model: "local-pi-openai@@gpt-4.1",
+    });
+
+    expect(requestBody).toEqual({
+      transport: "pi-sdk",
+      model: "openai/gpt-4.1",
+      messageCount: 1,
+      messages: [{ role: "user", content: "Hello from Pi" }],
+      sourceMode: "pi_local",
+    });
+    expect(preparedMessages).toEqual([
+      { role: "user", content: "Hello from Pi", message_id: "msg_pi_preview_1" },
+    ]);
+    expect(actualModelId).toBe("openai/gpt-4.1");
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
   });
 
   it("executes hosted tool calls through the local MCP service", async () => {
@@ -382,6 +429,80 @@ describe("SystemSculptService", () => {
       new Set(),
       true,
       "Studio system prompt"
+    );
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+  });
+
+  it("routes Pi-local chat turns through the local Pi stream executor", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    const debug = {
+      onRequest: jest.fn(),
+      onStreamEnd: jest.fn(),
+    };
+    modelManagementService.getModelInfo.mockResolvedValueOnce({
+      isCustom: false,
+      actualModelId: "openai/gpt-4.1",
+      modelSource: "pi_local",
+      model: {
+        id: "local-pi-openai@@gpt-4.1",
+        provider: "openai",
+        sourceMode: "pi_local",
+        sourceProviderId: "openai",
+        piExecutionModelId: "openai/gpt-4.1",
+        piLocalAvailable: true,
+        supported_parameters: ["tools"],
+      },
+    });
+    localPiStreamExecutor.executeLocalPiStream.mockImplementation(async function* () {
+      yield { type: "content", text: "Pi says hi" };
+      yield { type: "meta", key: "stop-reason", value: "stop" };
+    });
+
+    const events = await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Use Pi", message_id: "msg_pi_1" } as any],
+        model: "local-pi-openai@@gpt-4.1",
+        reasoningEffort: "high",
+        sessionFile: "/vault/.pi/sessions/session.jsonl",
+        debug,
+      })
+    );
+
+    expect(events).toEqual([
+      { type: "content", text: "Pi says hi" },
+      { type: "meta", key: "stop-reason", value: "stop" },
+    ]);
+    expect(global.fetch).toBeUndefined();
+    expect(localPiStreamExecutor.executeLocalPiStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plugin,
+        sessionFile: "/vault/.pi/sessions/session.jsonl",
+        reasoningEffort: "high",
+        prepared: expect.objectContaining({
+          actualModelId: "openai/gpt-4.1",
+          modelSource: "pi_local",
+        }),
+      })
+    );
+    expect(debug.onRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        endpoint: "local-pi-sdk",
+        transport: "pi-sdk",
+        body: expect.objectContaining({
+          model: "openai/gpt-4.1",
+          sourceMode: "pi_local",
+          session_file: "/vault/.pi/sessions/session.jsonl",
+          reasoning_effort: "high",
+        }),
+      })
+    );
+    expect(debug.onStreamEnd).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completed: true,
+        aborted: false,
+      })
     );
     expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
   });

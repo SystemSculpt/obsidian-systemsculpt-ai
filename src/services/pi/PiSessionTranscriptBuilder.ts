@@ -1,7 +1,20 @@
 import type { ChatMessage, MessagePart, MultiPartContent } from "../../types";
 import type { ToolCall, ToolCallResult, ToolCallState } from "../../types/toolCalls";
 import { deterministicId } from "../../utils/id";
-import type { PiSdkSessionEntry } from "./PiSdk";
+import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+
+/**
+ * Internal entry type used by the transcript builder.
+ * The SDK's SessionEntry is a discriminated union — we access `.message`
+ * only after runtime type-checking, so we use a loose record shape here.
+ */
+type PiSessionEntry = {
+  type: string;
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+  message?: Record<string, unknown>;
+};
 
 type AssistantTurnState = {
   messageId: string;
@@ -163,7 +176,7 @@ function extractIncrementalText(current: string, previous: string): string {
   return normalizedCurrent;
 }
 
-function parseTimestamp(entry: PiSdkSessionEntry, fallback: number): number {
+function parseTimestamp(entry: PiSessionEntry, fallback: number): number {
   const parsed = Date.parse(String(entry.timestamp || "").trim());
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
@@ -177,7 +190,7 @@ function parseTimestamp(entry: PiSdkSessionEntry, fallback: number): number {
   return fallback;
 }
 
-function createAssistantTurn(entry: PiSdkSessionEntry, fallbackTimestamp: number): AssistantTurnState {
+function createAssistantTurn(entry: PiSessionEntry, fallbackTimestamp: number): AssistantTurnState {
   const baseTimestamp = parseTimestamp(entry, fallbackTimestamp);
   return {
     messageId: createStableId("pi_asst", {
@@ -195,7 +208,7 @@ function createAssistantTurn(entry: PiSdkSessionEntry, fallbackTimestamp: number
   };
 }
 
-function nextPartTimestamp(turn: AssistantTurnState, entry: PiSdkSessionEntry, fallbackTimestamp: number): number {
+function nextPartTimestamp(turn: AssistantTurnState, entry: PiSessionEntry, fallbackTimestamp: number): number {
   turn.timestampCursor = Math.max(turn.timestampCursor, parseTimestamp(entry, fallbackTimestamp));
   turn.timestampCursor += 1;
   return turn.timestampCursor;
@@ -203,7 +216,7 @@ function nextPartTimestamp(turn: AssistantTurnState, entry: PiSdkSessionEntry, f
 
 function appendAssistantEntry(
   turn: AssistantTurnState,
-  entry: PiSdkSessionEntry,
+  entry: PiSessionEntry,
   fallbackTimestamp: number,
 ): void {
   if (!turn.entryIds.includes(entry.id)) {
@@ -285,7 +298,7 @@ function appendAssistantEntry(
   }
 }
 
-function parseToolResult(entry: PiSdkSessionEntry): { state: ToolCallState; result: ToolCallResult } {
+function parseToolResult(entry: PiSessionEntry): { state: ToolCallState; result: ToolCallResult } {
   const text = textBlocksToString((entry.message as any)?.content);
   if (!text) {
     return {
@@ -323,7 +336,7 @@ function parseToolResult(entry: PiSdkSessionEntry): { state: ToolCallState; resu
   }
 }
 
-function attachToolResult(turn: AssistantTurnState, entry: PiSdkSessionEntry, fallbackTimestamp: number): void {
+function attachToolResult(turn: AssistantTurnState, entry: PiSessionEntry, fallbackTimestamp: number): void {
   const message = entry.message as Record<string, any>;
   const toolCallId = String(message?.toolCallId || "").trim();
   if (!toolCallId) {
@@ -403,7 +416,7 @@ function finalizeAssistantTurn(turn: AssistantTurnState | null): ChatMessage | n
   };
 }
 
-export function buildPiSessionTranscript(entries: PiSdkSessionEntry[]): ChatMessage[] {
+export function buildPiSessionTranscript(entries: PiSessionEntry[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   let pendingAssistantTurn: AssistantTurnState | null = null;
   let previousUserCumulativeText = "";

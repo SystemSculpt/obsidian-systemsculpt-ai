@@ -4,10 +4,10 @@ Last verified against code, tests, and device workflow docs: **2026-03-12**.
 
 ## Canonical contract
 
-- `SystemSculpt` is the only shipped chat path.
-- Desktop, Android, and iPad validation all ride the same hosted chat contract.
+- `SystemSculpt` hosted chat and desktop-only Pi-backed chat are the shipped chat paths.
+- Mobile validation stays on the hosted SystemSculpt contract; desktop validation covers both hosted and Pi-backed paths.
 - `testing/native/` is the only integration-testing architecture in this repo.
-- Desktop Studio remains part of the shipped plugin contract, so release verification still includes Pi runtime assets and `studio-terminal-sidecar.cjs`.
+- Release verification targets the standard Obsidian plugin artifact set only: `main.js`, `manifest.json`, and `styles.css`.
 - Benchmark surfaces are removed; there is no benchmark runner or benchmark-results release/test lane anymore.
 
 ## Current verified unit and service coverage
@@ -67,12 +67,9 @@ The current release contract is:
 - `npm run check:plugin`
 - `npm test`
 - `npm run build`
-- `npm run build:pi-runtime`
-- `npm run verify:pi-runtime`
-- `npm run build:terminal-runtime`
 - `npm run release:plugin -- --dry-run` when validating the full publish path
 
-Those runtime asset builds are intentional because the shipped desktop Studio surface still depends on them.
+Releases now ship only the standard Obsidian plugin assets: `main.js`, `manifest.json`, and `styles.css`.
 
 ## Current cleanup status
 

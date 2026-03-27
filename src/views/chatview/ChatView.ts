@@ -2170,7 +2170,7 @@ export class ChatView extends ItemView {
   }
 
   private async resolvePiForkEntryId(
-    client: { getForkMessages(): Promise<Array<{ entryId?: string }>> },
+    sessionFile: string,
     messageId: string,
   ): Promise<string> {
     const userMessages = this.messages.filter((message) => message.role === "user");
@@ -2179,7 +2179,8 @@ export class ChatView extends ItemView {
       return "";
     }
 
-    const forkMessages = await client.getForkMessages();
+    const { listPiForkMessages } = await import("../../services/pi/PiSessionService");
+    const forkMessages = await listPiForkMessages(sessionFile);
     if (userIndex >= forkMessages.length) {
       return "";
     }
@@ -2225,50 +2226,36 @@ export class ChatView extends ItemView {
       };
     }
 
-    const { PiRpcProcessClient } = await import("../../services/pi/PiRpcProcessClient");
-    const client = new PiRpcProcessClient({
+    const { forkPiSession } = await import("../../services/pi/PiSessionService");
+    const entryId =
+      String(targetMessage.pi_entry_id || "").trim() ||
+      (await this.resolvePiForkEntryId(sessionFile!, messageId));
+    if (!entryId) {
+      throw new Error("Pi could not resolve a fork point for this message.");
+    }
+
+    const result = await forkPiSession({
       plugin: this.plugin,
       sessionFile: sessionFile!,
+      entryId,
     });
+    if (result.cancelled) {
+      return result;
+    }
 
-    await client.start();
-    try {
-      const entryId =
-        String(targetMessage.pi_entry_id || "").trim() ||
-        (await this.resolvePiForkEntryId(client, messageId));
-      if (!entryId) {
-        throw new Error("Pi could not resolve a fork point for this message.");
-      }
+    const nextSessionFile = String(result.sessionFile || "").trim() || sessionFile;
+    const nextSessionId = String(result.sessionId || "").trim() || this.piSessionId;
+    const nextSessionName = String(result.sessionName || "").trim();
 
-      const result = await client.fork(entryId);
-      if (result.cancelled) {
-        return result;
-      }
-
-      const state = await client.getState();
-      const nextSessionFile = String(state.sessionFile || "").trim() || sessionFile;
-      const nextSessionId = String(state.sessionId || "").trim() || this.piSessionId;
-      const nextSessionName = String(state.sessionName || "").trim();
-
-      if (nextSessionFile) {
-        const { existsSync } = await import("node:fs");
-        if (!existsSync(nextSessionFile)) {
-          await this.applyLocalPiForkState({
-            forkMessageId: messageId,
-            sessionFile: nextSessionFile,
-            sessionId: nextSessionId,
-            sessionName: nextSessionName,
-          });
-        } else {
-          await this.syncPiSessionTranscript({
-            sessionFile: nextSessionFile,
-            sessionId: nextSessionId,
-            syncTitle: true,
-            render: true,
-            persist: true,
-            force: true,
-          });
-        }
+    if (nextSessionFile) {
+      const { existsSync } = await import("node:fs");
+      if (!existsSync(nextSessionFile)) {
+        await this.applyLocalPiForkState({
+          forkMessageId: messageId,
+          sessionFile: nextSessionFile,
+          sessionId: nextSessionId,
+          sessionName: nextSessionName,
+        });
       } else {
         await this.syncPiSessionTranscript({
           sessionFile: nextSessionFile,
@@ -2279,11 +2266,21 @@ export class ChatView extends ItemView {
           force: true,
         });
       }
-
-      return result;
-    } finally {
-      await client.stop();
+    } else {
+      await this.syncPiSessionTranscript({
+        sessionFile: nextSessionFile,
+        sessionId: nextSessionId,
+        syncTitle: true,
+        render: true,
+        persist: true,
+        force: true,
+      });
     }
+
+    return {
+      text: result.text,
+      cancelled: result.cancelled,
+    };
   }
 
   private async syncPiSessionName(name: string): Promise<void> {
@@ -2293,28 +2290,21 @@ export class ChatView extends ItemView {
       return;
     }
 
-    const { PiRpcProcessClient } = await import("../../services/pi/PiRpcProcessClient");
-    const client = new PiRpcProcessClient({
+    const { setPiSessionName } = await import("../../services/pi/PiSessionService");
+    const state = await setPiSessionName({
       plugin: this.plugin,
       sessionFile,
+      name: sessionName,
     });
-
-    await client.start();
-    try {
-      await client.setSessionName(sessionName);
-      const state = await client.getState();
-      this.applyPiSessionState(
-        {
-          sessionFile: String(state.sessionFile || "").trim() || sessionFile,
-          sessionId: String(state.sessionId || "").trim() || this.piSessionId,
-        },
-        {
-          backend: "systemsculpt",
-        }
-      );
-    } finally {
-      await client.stop();
-    }
+    this.applyPiSessionState(
+      {
+        sessionFile: String(state.sessionFile || "").trim() || sessionFile,
+        sessionId: String(state.sessionId || "").trim() || this.piSessionId,
+      },
+      {
+        backend: "systemsculpt",
+      }
+    );
   }
 
   public clearPiSessionState(options?: { save?: boolean; updateViewState?: boolean }): void {
