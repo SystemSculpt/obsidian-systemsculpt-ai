@@ -17,6 +17,11 @@ const STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX = 760;
 const STUDIO_DROPDOWN_ESTIMATED_GLYPH_WIDTH_PX = 7.2;
 const STUDIO_DROPDOWN_ESTIMATED_PADDING_PX = 84;
 const STUDIO_DROPDOWN_MAX_DESCRIPTION_CHARS_FOR_WIDTH = 60;
+const STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX = 12;
+const STUDIO_DROPDOWN_PANEL_GAP_PX = 4;
+const STUDIO_DROPDOWN_FALLBACK_PANEL_HEIGHT_PX = 280;
+const STUDIO_DROPDOWN_FALLBACK_PANEL_CHROME_PX = 74;
+const STUDIO_DROPDOWN_MIN_LIST_HEIGHT_PX = 72;
 
 function optionSearchText(option: StudioNodeConfigSelectOption): string {
   const parts: string[] = [option.label, option.value, option.description || "", option.badge || ""];
@@ -57,6 +62,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   let activeIndex = -1;
   let open = false;
   let loadingPromise: Promise<void> | null = null;
+  let teardownViewportListeners: (() => void) | null = null;
 
   const rootEl = containerEl.createDiv({ cls: "ss-studio-searchable-select" });
   const triggerEl = rootEl.createEl("button", {
@@ -92,39 +98,118 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
 
   const positionPanel = (): void => {
     const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
     if (!viewportWidth) {
       panelEl.style.left = "0px";
       panelEl.style.right = "auto";
       panelEl.style.width = "100%";
+    } else {
+      const rect = rootEl.getBoundingClientRect();
+      const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
+      const availableWidth = Math.max(rect.width, viewportWidth - viewportMargin * 2);
+      const optionsForSizing = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
+      const estimatedContentWidth = estimatePreferredPanelWidth(optionsForSizing);
+      const minPanelWidth = Math.min(
+        availableWidth,
+        Math.max(rect.width, STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX)
+      );
+      const preferredWidth = Math.max(minPanelWidth, Math.max(rect.width, estimatedContentWidth));
+      const cappedPreferredWidth = Math.min(STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX, preferredWidth);
+      const panelWidth = Math.min(availableWidth, cappedPreferredWidth);
+
+      let leftOffset = 0;
+      const rightOverflow = rect.left + panelWidth - (viewportWidth - viewportMargin);
+      if (rightOverflow > 0) {
+        leftOffset -= rightOverflow;
+      }
+      const leftOverflow = viewportMargin - (rect.left + leftOffset);
+      if (leftOverflow > 0) {
+        leftOffset += leftOverflow;
+      }
+
+      panelEl.style.left = `${Math.round(leftOffset)}px`;
+      panelEl.style.right = "auto";
+      panelEl.style.width = `${Math.round(panelWidth)}px`;
+    }
+
+    if (!viewportHeight) {
+      rootEl.classList.remove("is-open-upward");
+      panelEl.style.top = `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
+      panelEl.style.bottom = "auto";
+      panelEl.style.maxHeight = "";
+      listEl.style.maxHeight = "";
       return;
     }
 
     const rect = rootEl.getBoundingClientRect();
-    const viewportMargin = 12;
-    const availableWidth = Math.max(rect.width, viewportWidth - viewportMargin * 2);
-    const optionsForSizing = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
-    const estimatedContentWidth = estimatePreferredPanelWidth(optionsForSizing);
-    const minPanelWidth = Math.min(
-      availableWidth,
-      Math.max(rect.width, STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX)
+    const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
+    const availableBelow = Math.max(
+      0,
+      viewportHeight - rect.bottom - viewportMargin - STUDIO_DROPDOWN_PANEL_GAP_PX
     );
-    const preferredWidth = Math.max(minPanelWidth, Math.max(rect.width, estimatedContentWidth));
-    const cappedPreferredWidth = Math.min(STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX, preferredWidth);
-    const panelWidth = Math.min(availableWidth, cappedPreferredWidth);
+    const availableAbove = Math.max(
+      0,
+      rect.top - viewportMargin - STUDIO_DROPDOWN_PANEL_GAP_PX
+    );
+    const panelRect = panelEl.getBoundingClientRect();
+    const naturalPanelHeight = Math.max(
+      panelEl.scrollHeight || 0,
+      panelRect.height || 0,
+      STUDIO_DROPDOWN_FALLBACK_PANEL_HEIGHT_PX
+    );
+    const listRect = listEl.getBoundingClientRect();
+    const estimatedChromeHeight = Math.max(
+      STUDIO_DROPDOWN_FALLBACK_PANEL_CHROME_PX,
+      naturalPanelHeight - (listRect.height || 0)
+    );
+    const openUpward = availableBelow < naturalPanelHeight && availableAbove > availableBelow;
+    const availableVerticalSpace = openUpward ? availableAbove : availableBelow;
+    const panelMaxHeight = Math.max(0, Math.min(naturalPanelHeight, availableVerticalSpace));
+    const listMaxHeight = Math.max(
+      0,
+      Math.min(
+        panelMaxHeight - estimatedChromeHeight,
+        Math.max(STUDIO_DROPDOWN_MIN_LIST_HEIGHT_PX, availableVerticalSpace - estimatedChromeHeight)
+      )
+    );
 
-    let leftOffset = 0;
-    const rightOverflow = rect.left + panelWidth - (viewportWidth - viewportMargin);
-    if (rightOverflow > 0) {
-      leftOffset -= rightOverflow;
-    }
-    const leftOverflow = viewportMargin - (rect.left + leftOffset);
-    if (leftOverflow > 0) {
-      leftOffset += leftOverflow;
+    rootEl.classList.toggle("is-open-upward", openUpward);
+    panelEl.style.top = openUpward ? "auto" : `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
+    panelEl.style.bottom = openUpward ? `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)` : "auto";
+    panelEl.style.maxHeight = `${Math.round(panelMaxHeight)}px`;
+    listEl.style.maxHeight = `${Math.round(listMaxHeight)}px`;
+  };
+
+  const syncOpenPanelPosition = (): void => {
+    if (!open) return;
+    positionPanel();
+  };
+
+  const bindViewportListeners = (): void => {
+    if (teardownViewportListeners) {
+      return;
     }
 
-    panelEl.style.left = `${Math.round(leftOffset)}px`;
-    panelEl.style.right = "auto";
-    panelEl.style.width = `${Math.round(panelWidth)}px`;
+    const handleViewportChange = (): void => {
+      syncOpenPanelPosition();
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.visualViewport?.addEventListener("resize", handleViewportChange);
+    window.visualViewport?.addEventListener("scroll", handleViewportChange);
+
+    teardownViewportListeners = () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.visualViewport?.removeEventListener("resize", handleViewportChange);
+      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+      teardownViewportListeners = null;
+    };
+  };
+
+  const unbindViewportListeners = (): void => {
+    teardownViewportListeners?.();
   };
 
   const ensureCurrentValuePresent = (optionsList: StudioNodeConfigSelectOption[]): StudioNodeConfigSelectOption[] => {
@@ -178,6 +263,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     listEl.empty();
     if (filteredOptions.length === 0) {
       renderEmptyState(noResultsText || "No matching options.");
+      syncOpenPanelPosition();
       return;
     }
 
@@ -232,6 +318,8 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
         event.stopPropagation();
       });
     }
+
+    syncOpenPanelPosition();
   };
 
   const applyFilter = (query: string): void => {
@@ -274,12 +362,12 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     }
     open = true;
     panelEl.style.display = "grid";
+    bindViewportListeners();
     positionPanel();
     rootEl.addClass("is-open");
     triggerEl.setAttribute("aria-expanded", "true");
     renderEmptyState("Loading options...");
     await ensureOptionsLoaded(true);
-    positionPanel();
     applyFilter("");
     searchEl.value = "";
     searchEl.focus();
@@ -292,7 +380,9 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     open = false;
     panelEl.style.display = "none";
     rootEl.removeClass("is-open");
+    rootEl.removeClass("is-open-upward");
     triggerEl.setAttribute("aria-expanded", "false");
+    unbindViewportListeners();
   }
 
   triggerEl.addEventListener("click", (event) => {
@@ -362,4 +452,5 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   });
 
   updateTriggerLabel();
+  void ensureOptionsLoaded();
 }

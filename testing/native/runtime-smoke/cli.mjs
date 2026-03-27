@@ -18,11 +18,11 @@ export function usage() {
   console.log(`Usage: node testing/native/runtime-smoke/run.mjs [options]
 
 Run the live hosted SystemSculpt runtime smoke matrix through an inspectable
-Obsidian runtime. This is the canonical native test lane for real desktop,
-Android WebView, and iOS adapter sessions against real vaults.
+mobile Obsidian runtime. Desktop moved to the bridge-based no-focus runner in
+testing/native/desktop-automation/.
 
 Options:
-  --mode <desktop|android|ios|json> Transport mode. Default: desktop
+  --mode <android|ios|json|desktop> Transport mode. Desktop redirects to the new desktop bridge runner.
   --case <name|all|extended>      Smoke case: chat-exact, file-read, file-write, embeddings, transcribe, record-transcribe, web-fetch, youtube-transcript, all, or extended. Default: all
   --desktop-port <n>              Desktop DevTools port. Default: 9222
   --android-serial <id>           adb serial for Android mode. Default: emulator-5554

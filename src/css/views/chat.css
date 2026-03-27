@@ -220,19 +220,14 @@
     gap: var(--size-4-2);
   }
 
-  /* Keep controls on one line; allow horizontal scroll */
+  /* Keep controls contained instead of forcing horizontal scroll */
   .systemsculpt-chat-composer-toolbar {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .systemsculpt-chat-composer-toolbar .systemsculpt-model-indicator-section {
-    flex-wrap: nowrap;
-  }
-
-  .systemsculpt-chat-composer-toolbar::-webkit-scrollbar {
-    display: none;
+    flex: 1 0 100%;
   }
 
   .systemsculpt-chat-composer-input {
@@ -334,6 +329,11 @@
   gap: var(--size-4-1);
 }
 
+.systemsculpt-chat-composer-toolbar-center {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
 .systemsculpt-chat-composer-toolbar-group.mod-right {
   margin-left: auto;
 }
@@ -384,8 +384,433 @@
 }
 
 .systemsculpt-chat-composer-chips {
+  min-width: 0;
+}
+
+.systemsculpt-chat-model-picker {
+  width: min(100%, 320px);
+  max-width: 100%;
+}
+
+.systemsculpt-chat-model-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 10px 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary) 8%),
+      color-mix(in srgb, var(--background-primary) 88%, var(--background-secondary) 12%)
+    );
+  color: var(--text-normal);
+  box-shadow: 0 1px 0 color-mix(in srgb, rgb(255, 255, 255) 6%, transparent);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.systemsculpt-chat-model-trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border) 60%);
+  background: color-mix(in srgb, var(--background-secondary-alt) 86%, var(--background-primary) 14%);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-chat-model-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--interactive-accent) 56%, var(--background-modifier-border) 44%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--interactive-accent) 26%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.systemsculpt-chat-model-trigger.is-provider-authenticated {
+  border-color: color-mix(in srgb, var(--color-green, #2ea043) 55%, var(--background-modifier-border) 45%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-green, #2ea043) 18%, transparent);
+}
+
+.systemsculpt-chat-model-trigger.is-managed {
+  border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border) 62%);
+}
+
+.systemsculpt-chat-model-trigger.is-setup-required {
+  border-color: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 45%, var(--background-modifier-border) 55%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 10%, transparent);
+}
+
+.systemsculpt-chat-model-trigger-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--background-modifier-hover) 74%, var(--background-primary) 26%);
+}
+
+.systemsculpt-chat-model-trigger.is-managed .systemsculpt-chat-model-trigger-icon {
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-trigger.is-provider-authenticated .systemsculpt-chat-model-trigger-icon {
+  color: var(--color-green, #2ea043);
+  background: color-mix(in srgb, var(--color-green, #2ea043) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-trigger.is-setup-required .systemsculpt-chat-model-trigger-icon {
+  color: var(--text-warning, var(--interactive-accent));
+  background: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-trigger-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.systemsculpt-chat-model-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-chat-model-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 75%, var(--interactive-accent) 25%);
+  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary) 22%);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.systemsculpt-chat-model-trigger.is-managed .systemsculpt-chat-model-trigger-badge {
+  border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border) 72%);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-model-trigger.is-provider-authenticated .systemsculpt-chat-model-trigger-badge {
+  border-color: color-mix(in srgb, var(--color-green, #2ea043) 45%, var(--background-modifier-border) 55%);
+  color: var(--color-green, #2ea043);
+}
+
+.systemsculpt-chat-model-trigger.is-setup-required .systemsculpt-chat-model-trigger-badge {
+  border-color: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 42%, var(--background-modifier-border) 58%);
+  color: var(--text-warning, var(--interactive-accent));
+}
+
+.systemsculpt-chat-model-trigger-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.systemsculpt-chat-model-trigger-icon svg,
+.systemsculpt-chat-model-trigger-chevron svg,
+.systemsculpt-chat-model-modal-search-icon svg,
+.systemsculpt-chat-model-modal-option-icon svg,
+.systemsculpt-chat-model-modal-empty-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.systemsculpt-chat-model-picker-modal.ss-modal--medium {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(80vh, 760px);
+}
+
+.systemsculpt-chat-model-picker-modal .ss-modal__content {
+  padding: 16px 20px 20px;
+}
+
+.systemsculpt-chat-model-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.systemsculpt-chat-model-modal-summary {
+  padding: 12px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--background-secondary) 90%, var(--background-primary) 10%),
+      color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary) 6%)
+    );
+}
+
+.systemsculpt-chat-model-modal-summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.systemsculpt-chat-model-modal-summary-value {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.systemsculpt-chat-model-modal-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary) 8%);
+}
+
+.systemsculpt-chat-model-modal-search:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 56%, var(--background-modifier-border) 44%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+}
+
+.systemsculpt-chat-model-modal-search-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-model-modal-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: none;
+}
+
+.systemsculpt-chat-model-modal-search-input::placeholder {
+  color: var(--text-faint);
+}
+
+.systemsculpt-chat-model-modal-search-input:focus {
+  outline: none;
+}
+
+.systemsculpt-chat-model-modal-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.systemsculpt-chat-model-modal-search-clear:hover,
+.systemsculpt-chat-model-modal-search-clear:focus-visible {
+  color: var(--text-normal);
+}
+
+.systemsculpt-chat-model-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.systemsculpt-chat-model-modal-section {
+  padding: 8px 2px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.systemsculpt-chat-model-modal-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, var(--interactive-accent) 20%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary) 8%);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.systemsculpt-chat-model-modal-option:hover,
+.systemsculpt-chat-model-modal-option.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border) 56%);
+  background: color-mix(in srgb, var(--background-secondary-alt) 84%, var(--background-primary) 16%);
+  transform: translateY(-1px);
+}
+
+.systemsculpt-chat-model-modal-option.is-current {
+  border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border) 48%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.systemsculpt-chat-model-modal-option.is-setup-required:not(.is-current) {
+  border-color: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 30%, var(--background-modifier-border) 70%);
+}
+
+.systemsculpt-chat-model-modal-option-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-modifier-hover) 74%, var(--background-primary) 26%);
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-model-modal-option.is-active .systemsculpt-chat-model-modal-option-icon,
+.systemsculpt-chat-model-modal-option.is-current .systemsculpt-chat-model-modal-option-icon {
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-modal-option.is-setup-required:not(.is-current) .systemsculpt-chat-model-modal-option-icon {
+  color: var(--text-warning, var(--interactive-accent));
+  background: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-modal-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.systemsculpt-chat-model-modal-option-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.systemsculpt-chat-model-modal-option-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.systemsculpt-chat-model-modal-option-description {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-model-modal-option-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.systemsculpt-chat-model-modal-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, var(--interactive-accent) 22%);
+  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary) 22%);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.systemsculpt-chat-model-modal-pill.is-context {
+  border-color: color-mix(in srgb, var(--background-modifier-border) 90%, var(--text-muted) 10%);
+}
+
+.systemsculpt-chat-model-modal-pill.is-current {
+  border-color: color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border) 56%);
+  color: var(--interactive-accent);
+}
+
+.systemsculpt-chat-model-modal-pill.is-setup-required {
+  border-color: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 40%, var(--background-modifier-border) 60%);
+  color: var(--text-warning, var(--interactive-accent));
+}
+
+.systemsculpt-chat-model-modal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 220px;
+  padding: 20px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--background-secondary) 88%, var(--background-primary) 12%);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.systemsculpt-chat-model-modal-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.systemsculpt-chat-model-modal-empty-text {
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .systemsculpt-chat-composer-attachments {
@@ -717,8 +1142,21 @@
 
   .systemsculpt-chat-composer-toolbar {
     gap: var(--size-4-1);
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .systemsculpt-chat-composer-toolbar-center {
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  .systemsculpt-chat-model-picker {
+    width: 100%;
+  }
+
+  .systemsculpt-chat-model-trigger {
+    width: 100%;
   }
 
   .systemsculpt-chat-composer-input {

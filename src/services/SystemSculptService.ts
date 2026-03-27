@@ -101,6 +101,55 @@ export type CreditsUsageHistoryPage = {
   nextBefore: string | null;
 };
 
+function serializeResponseHeaders(headers: unknown): Record<string, string> {
+  const serialized: Record<string, string> = {};
+  if (!headers) {
+    return serialized;
+  }
+
+  const maybeHeaders = headers as {
+    forEach?: (callback: (value: unknown, key: unknown) => void) => void;
+    entries?: () => Iterable<[unknown, unknown]>;
+  };
+
+  if (typeof maybeHeaders.forEach === "function") {
+    maybeHeaders.forEach((value, key) => {
+      serialized[String(key)] = String(value);
+    });
+    return serialized;
+  }
+
+  if (typeof maybeHeaders.entries === "function") {
+    try {
+      for (const [key, value] of maybeHeaders.entries()) {
+        serialized[String(key)] = String(value);
+      }
+      return serialized;
+    } catch {
+      // Fall through to object-style normalization below.
+    }
+  }
+
+  if (Array.isArray(headers)) {
+    for (const entry of headers) {
+      if (Array.isArray(entry) && entry.length >= 2) {
+        serialized[String(entry[0])] = String(entry[1]);
+      }
+    }
+    return serialized;
+  }
+
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      serialized[String(key)] = value.map((item) => String(item)).join(", ");
+    } else if (value !== undefined) {
+      serialized[String(key)] = String(value);
+    }
+  }
+
+  return serialized;
+}
+
 /**
  * Main service facade that delegates to specialized services
  */
@@ -1178,7 +1227,7 @@ export class SystemSculptService {
         provider: String(resolvedModel.provider || "systemsculpt"),
         endpoint,
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers: serializeResponseHeaders(response.headers),
         isCustomProvider: false,
       });
 

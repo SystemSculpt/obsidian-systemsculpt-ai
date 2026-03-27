@@ -81,6 +81,12 @@ export interface SystemSculptSettings {
   vaultInstanceId?: string;
 
   /**
+   * When enabled on desktop, expose a token-protected localhost bridge for
+   * no-focus automation against the already-running Obsidian instance.
+   */
+  desktopAutomationBridgeEnabled?: boolean;
+
+  /**
    * Internal migration flags (not user-facing).
    */
   embeddingsVectorFormatVersion?: number;
@@ -486,6 +492,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   // Default to a simple, friendly experience
   settingsMode: "standard",
   vaultInstanceId: "",
+  desktopAutomationBridgeEnabled: false,
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",
   licenseValid: false,

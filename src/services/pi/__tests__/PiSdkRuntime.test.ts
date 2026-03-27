@@ -1,50 +1,77 @@
+const sessionFetchMock = jest.fn();
+
+jest.mock(
+  "electron",
+  () => ({
+    remote: {
+      getCurrentWebContents: () => ({
+        session: {
+          fetch: sessionFetchMock,
+        },
+      }),
+    },
+  }),
+  { virtual: true }
+);
+
+import { installPiDesktopFetchShim } from "../PiSdkRuntime";
+
 describe("PiSdkRuntime", () => {
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
-    jest.resetModules();
-    jest.clearAllMocks();
+    sessionFetchMock.mockReset();
+    global.fetch = jest.fn(async () => new Response("original")) as typeof global.fetch;
   });
 
-  it("routes Pi SDK fetches through the current Electron session and normalizes headers", async () => {
-    const sessionFetch = jest.fn(async () => new Response("ok", { status: 200 }));
-    const previousFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
 
-    jest.doMock("electron", () => ({
-      remote: {
-        getCurrentWebContents: () => ({
-          session: {
-            fetch: sessionFetch,
-          },
-        }),
+  it("normalizes electron session.fetch response headers into a standard Headers object", async () => {
+    const text = jest.fn(async () => '{"ok":true}');
+    const json = jest.fn(async () => ({ ok: true }));
+    const makeResponse = () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      url: "https://example.com",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": "req_123",
       },
-    }), { virtual: true });
-
-    let installPiDesktopFetchShim: typeof import("../PiSdkRuntime").installPiDesktopFetchShim;
-    jest.isolateModules(() => {
-      ({ installPiDesktopFetchShim } = require("../PiSdkRuntime"));
+      text,
+      json,
+      clone() {
+        return makeResponse();
+      },
     });
 
-    const restore = installPiDesktopFetchShim!();
-    const request = new Request("https://example.com/test", {
-      method: "POST",
-      headers: new Headers({
-        "x-test": "123",
-      }),
-      body: "payload",
-    });
+    sessionFetchMock.mockResolvedValue(makeResponse());
 
-    try {
-      await global.fetch(request);
-      expect(sessionFetch).toHaveBeenCalledWith(
-        "https://example.com/test",
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ "x-test": "123" }),
-          body: "payload",
-        })
-      );
-    } finally {
-      restore();
-      global.fetch = previousFetch;
-    }
+    const restore = installPiDesktopFetchShim();
+    const response = await global.fetch("https://example.com", {
+      headers: {
+        authorization: "Bearer token",
+      },
+    });
+    const clonedResponse = response.clone();
+    restore();
+
+    expect(sessionFetchMock).toHaveBeenCalledWith(
+      "https://example.com",
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer token",
+        },
+      })
+    );
+
+    expect(response.headers).toBeInstanceOf(Headers);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(Array.from(response.headers.entries())).toContainEqual(["x-request-id", "req_123"]);
+
+    expect(clonedResponse.headers).toBeInstanceOf(Headers);
+    expect(clonedResponse.headers.get("x-request-id")).toBe("req_123");
   });
 });

@@ -29,6 +29,7 @@ type LoadedChatRecord = {
 };
 
 type SaveChatOptions = {
+  selectedModelId?: string;
   contextFiles?: Set<string>;
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
@@ -188,6 +189,11 @@ export class ChatStorageService {
         piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
         piLastSyncedAt: piState.lastSyncedAt,
       };
+      const selectedModelId = String(options.selectedModelId ?? existingMetadata?.model ?? "").trim();
+
+      if (selectedModelId) {
+        metadata.model = selectedModelId;
+      }
 
       if (resolvedBackend === "legacy") {
         metadata.chatBackend = "legacy";

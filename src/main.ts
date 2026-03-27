@@ -63,6 +63,7 @@ import { WebResearchCorpusService } from "./services/web/WebResearchCorpusServic
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
+import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -70,6 +71,7 @@ type StudioServiceModule = typeof import("./studio/StudioService");
 type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
 type RecorderServiceModule = typeof import("./services/RecorderService");
 type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
+type DesktopAutomationBridgeModule = typeof import("./testing/automation/DesktopAutomationBridge");
 
 function loadViewManagerModule(): ViewManagerModule {
   return require("./core/plugin/views");
@@ -93,6 +95,10 @@ function loadRecorderServiceModule(): RecorderServiceModule {
 
 function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
   return require("./context-menu/FileContextMenuService");
+}
+
+function loadDesktopAutomationBridgeModule(): DesktopAutomationBridgeModule {
+  return require("./testing/automation/DesktopAutomationBridge");
 }
 
 export default class SystemSculptPlugin extends Plugin {
@@ -145,6 +151,7 @@ export default class SystemSculptPlugin extends Plugin {
   private webResearchApiService: WebResearchApiService | null = null;
   private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
+  private desktopAutomationBridge: DesktopAutomationBridge | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
 
@@ -656,6 +663,24 @@ export default class SystemSculptPlugin extends Plugin {
                 source: "SystemSculptPlugin",
               });
             }
+
+            this.syncDesktopAutomationBridge().catch((error) => {
+              const logger = this.getLogger();
+              logger.error("Desktop automation bridge settings sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            });
+          })
+        );
+
+        this.registerEvent(
+          this.app.workspace.on("systemsculpt:settings-file-touched", () => {
+            this.syncDesktopAutomationBridge().catch((error) => {
+              const logger = this.getLogger();
+              logger.error("Desktop automation bridge file-touch sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            });
           })
         );
       },
@@ -1365,6 +1390,9 @@ export default class SystemSculptPlugin extends Plugin {
       const settingsManager = this.ensureSettingsManagerInstance();
       await settingsManager.loadSettings();
       this._internal_settings_systemsculpt_plugin = settingsManager.getSettings();
+      if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
+        settingsManager.startWatchingPluginDataFile();
+      }
 
       const debugMode = this.settings.debugMode ?? false;
       const logLevel = debugMode ? LogLevel.DEBUG : this.settings.logLevel ?? LogLevel.WARNING;
@@ -1680,6 +1708,28 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
+  private async syncDesktopAutomationBridge(): Promise<void> {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+      return;
+    }
+
+    if (!this.desktopAutomationBridge) {
+      const { DesktopAutomationBridge } = loadDesktopAutomationBridgeModule();
+      this.desktopAutomationBridge = new DesktopAutomationBridge(this);
+    }
+
+    await this.desktopAutomationBridge.syncFromSettings();
+  }
+
+  private async stopDesktopAutomationBridge(): Promise<void> {
+    if (!this.desktopAutomationBridge) {
+      return;
+    }
+
+    await this.desktopAutomationBridge.stop().catch(() => {});
+    this.desktopAutomationBridge = null;
+  }
+
   private async initializeManagers() {
     const tracer = this.getInitializationTracer();
     const phase = tracer.startPhase("managers.initialize", {
@@ -1700,6 +1750,14 @@ export default class SystemSculptPlugin extends Plugin {
       const { CommandManager } = loadCommandManagerModule();
       this.commandManager = new CommandManager(this, this.app);
       this.commandManager.registerCommands();
+
+      try {
+        await this.syncDesktopAutomationBridge();
+      } catch (error) {
+        logger.error("Desktop automation bridge failed to initialize", error, {
+          source: "SystemSculptPlugin",
+        });
+      }
 
       const metadata = {
         managers: [
@@ -1787,6 +1845,8 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
       }
+
+      await this.stopDesktopAutomationBridge();
 
       // Clean up settings manager (stop automatic backups)
       if (this.settingsManager) {

@@ -6,6 +6,7 @@
 jest.mock("obsidian", () => ({
   App: jest.fn(),
   Notice: jest.fn(),
+  normalizePath: (value: string) => String(value || "").replace(/\\/g, "/"),
 }));
 
 // Mock AutomaticBackupService
@@ -599,6 +600,55 @@ describe("SettingsManager", () => {
 
       // The updateSettings method calls trigger twice (old settings and new settings)
       expect(mockPlugin.app.workspace.trigger).toHaveBeenCalledWith(
+        "systemsculpt:settings-updated",
+        expect.anything(),
+        expect.anything()
+      );
+    });
+  });
+
+  describe("reloadSettingsFromDisk", () => {
+    it("applies external data.json changes and emits settings-updated", async () => {
+      await settingsManager.loadSettings();
+      jest.clearAllMocks();
+
+      mockPlugin.loadData.mockResolvedValue({
+        settingsMode: "advanced",
+        debugMode: true,
+        desktopAutomationBridgeEnabled: true,
+      });
+
+      const changed = await settingsManager.reloadSettingsFromDisk();
+
+      expect(changed).toBe(true);
+      expect(settingsManager.settings.settingsMode).toBe("advanced");
+      expect(settingsManager.settings.debugMode).toBe(true);
+      expect(settingsManager.settings.desktopAutomationBridgeEnabled).toBe(true);
+      expect(mockPlugin.app.workspace.trigger).toHaveBeenCalledWith(
+        "systemsculpt:settings-updated",
+        expect.anything(),
+        expect.objectContaining({
+          settingsMode: "advanced",
+          debugMode: true,
+          desktopAutomationBridgeEnabled: true,
+        })
+      );
+    });
+
+    it("ignores unchanged external settings payloads", async () => {
+      await settingsManager.loadSettings();
+      jest.clearAllMocks();
+
+      mockPlugin.loadData.mockResolvedValue({ ...settingsManager.settings });
+
+      const changed = await settingsManager.reloadSettingsFromDisk();
+
+      expect(changed).toBe(false);
+      expect(mockPlugin.app.workspace.trigger).toHaveBeenCalledWith(
+        "systemsculpt:settings-file-touched",
+        expect.objectContaining(settingsManager.settings)
+      );
+      expect(mockPlugin.app.workspace.trigger).not.toHaveBeenCalledWith(
         "systemsculpt:settings-updated",
         expect.anything(),
         expect.anything()

@@ -1,8 +1,22 @@
+import { normalizePath } from "obsidian";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflowEngineSettings } from "../../types";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
 import { canonicalizeSystemSculptServerUrlSetting } from "../../utils/urlHelpers";
+import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+
+type NodeFsModule = typeof import("node:fs");
+type NodePathModule = typeof import("node:path");
+type NodeFsWatcher = import("node:fs").FSWatcher;
+
+function loadNodeFs(): NodeFsModule {
+  return require("node:fs") as NodeFsModule;
+}
+
+function loadNodePath(): NodePathModule {
+  return require("node:path") as NodePathModule;
+}
 
 // Current settings version - increment when making breaking changes to settings structure
 const CURRENT_SETTINGS_VERSION = "1.0";
@@ -19,6 +33,9 @@ export class SettingsManager {
   private backupQueue: (() => Promise<void>)[] = [];
   private isProcessingBackupQueue: boolean = false;
   private automaticBackupService: AutomaticBackupService;
+  private pluginDataWatcher: NodeFsWatcher | null = null;
+  private pluginDataWatcherTimer: ReturnType<typeof setTimeout> | null = null;
+  private pluginDataWatcherCleanupRegistered = false;
 
 
   constructor(plugin: SystemSculptPlugin) {
@@ -51,6 +68,10 @@ export class SettingsManager {
 
     if (typeof migratedSettings.vaultInstanceId !== "string" || migratedSettings.vaultInstanceId.trim().length === 0) {
       migratedSettings.vaultInstanceId = generateVaultInstanceId();
+    }
+
+    if (typeof migratedSettings.desktopAutomationBridgeEnabled !== "boolean") {
+      migratedSettings.desktopAutomationBridgeEnabled = DEFAULT_SETTINGS.desktopAutomationBridgeEnabled;
     }
 
     if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
@@ -713,6 +734,136 @@ export class SettingsManager {
     }
   }
 
+  private getPluginDataFilePath(): string | null {
+    const pluginDataVaultPath = normalizePath(
+      `${this.plugin.app.vault.configDir || ".obsidian"}/plugins/${this.plugin.manifest.id}/data.json`
+    );
+    const absolutePath = resolveAbsoluteVaultPath(this.plugin.app.vault.adapter, pluginDataVaultPath);
+    if (typeof absolutePath === "string" && absolutePath.trim().length > 0) {
+      return absolutePath;
+    }
+
+    const adapter = this.plugin.app.vault.adapter as {
+      getBasePath?: () => string;
+      basePath?: string;
+    };
+    const basePath =
+      typeof adapter?.getBasePath === "function"
+        ? adapter.getBasePath()
+        : typeof adapter?.basePath === "string"
+          ? adapter.basePath
+          : "";
+    if (!basePath || typeof basePath !== "string" || basePath.trim().length === 0) {
+      return null;
+    }
+
+    try {
+      const nodePath = loadNodePath();
+      return nodePath.join(basePath, ".obsidian", "plugins", this.plugin.manifest.id, "data.json");
+    } catch {
+      return null;
+    }
+  }
+
+  private schedulePluginDataReload(): void {
+    if (this.pluginDataWatcherTimer) {
+      clearTimeout(this.pluginDataWatcherTimer);
+    }
+
+    this.pluginDataWatcherTimer = setTimeout(() => {
+      this.pluginDataWatcherTimer = null;
+      void this.reloadSettingsFromDisk().catch(() => {});
+    }, 150);
+  }
+
+  public startWatchingPluginDataFile(): void {
+    if (this.pluginDataWatcher) {
+      return;
+    }
+
+    const pluginDataFilePath = this.getPluginDataFilePath();
+    if (!pluginDataFilePath) {
+      return;
+    }
+
+    try {
+      const nodeFs = loadNodeFs();
+      const nodePath = loadNodePath();
+      const pluginDir = nodePath.dirname(pluginDataFilePath);
+
+      this.pluginDataWatcher = nodeFs.watch(pluginDir, { persistent: false }, (_eventType, filename) => {
+        const changedFileName =
+          typeof filename === "string"
+            ? filename
+            : filename && typeof (filename as any).toString === "function"
+              ? (filename as any).toString("utf8")
+              : "";
+        if (changedFileName && changedFileName !== "data.json") {
+          return;
+        }
+        this.schedulePluginDataReload();
+      });
+
+      this.pluginDataWatcher.on("error", () => {
+        this.stopWatchingPluginDataFile();
+      });
+
+      if (!this.pluginDataWatcherCleanupRegistered) {
+        this.plugin.register(() => {
+          this.stopWatchingPluginDataFile();
+        });
+        this.pluginDataWatcherCleanupRegistered = true;
+      }
+    } catch {
+      this.stopWatchingPluginDataFile();
+    }
+  }
+
+  public stopWatchingPluginDataFile(): void {
+    if (this.pluginDataWatcherTimer) {
+      clearTimeout(this.pluginDataWatcherTimer);
+      this.pluginDataWatcherTimer = null;
+    }
+
+    if (this.pluginDataWatcher) {
+      this.pluginDataWatcher.close();
+      this.pluginDataWatcher = null;
+    }
+  }
+
+  public async reloadSettingsFromDisk(): Promise<boolean> {
+    if (!this.isInitialized) {
+      return false;
+    }
+
+    const loadedData = await this.plugin.loadData();
+    const raw =
+      loadedData && typeof loadedData === "object" && !Array.isArray(loadedData)
+        ? (loadedData as Record<string, unknown>)
+        : {};
+    const mergedSettings = this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw });
+    const nextSettings = await this.validateSettingsAsync(mergedSettings);
+
+    if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) {
+      this.plugin.app.workspace.trigger(
+        "systemsculpt:settings-file-touched",
+        this.plugin._internal_settings_systemsculpt_plugin
+      );
+      return false;
+    }
+
+    const oldSettings = { ...this.settings };
+    this.settings = nextSettings;
+    this.plugin._internal_settings_systemsculpt_plugin = { ...nextSettings };
+    this.plugin.app.workspace.trigger(
+      "systemsculpt:settings-updated",
+      oldSettings,
+      this.plugin._internal_settings_systemsculpt_plugin
+    );
+    await this.backupSettings();
+    return true;
+  }
+
   /**
    * Save settings using Obsidian's native data API
    * This ensures settings are properly saved with fallback options
@@ -817,6 +968,7 @@ export class SettingsManager {
    * Clean up resources when the plugin is unloaded
    */
   public destroy(): void {
+    this.stopWatchingPluginDataFile();
     if (this.automaticBackupService) {
       this.automaticBackupService.stop();
     }

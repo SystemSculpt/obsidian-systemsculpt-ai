@@ -32,7 +32,7 @@ What the shared smoke now does for you:
 - auto-starts the WebKit adapter when `npm run test:native:ios` runs
 - reloads `systemsculpt-ai` before smoke so the live instance matches the synced files
 - seeds the canonical runtime fixtures directly into the device vault before the cases run
-- verifies the same hosted chat, Pi tool loop, embeddings, transcription, web fetch, and YouTube transcript cases as desktop and Android
+- verifies the shared mobile hosted chat, Pi tool loop, embeddings, transcription, web fetch, and YouTube transcript cases
 
 ## Important inspection rule
 

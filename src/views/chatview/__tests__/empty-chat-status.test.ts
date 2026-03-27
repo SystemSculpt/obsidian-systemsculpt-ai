@@ -153,7 +153,30 @@ describe("ChatView empty chat status", () => {
     expect(actionLabels).toHaveLength(1);
   });
 
-  it("does not persist model or prompt selection into new leaf state", () => {
+  it("keeps local Pi chats on a local-ready state instead of redirecting to Account copy", () => {
+    const chatView = createChatView({
+      selectedModelId: "local-pi-openai@@gpt-4.1",
+      cachedModels: [{ id: "local-pi-openai@@gpt-4.1" }],
+      licenseKey: "",
+      licenseValid: false,
+    });
+
+    chatView.displayChatStatus();
+
+    const statusText = chatView.chatContainer.textContent || "";
+    const actionLabels = Array.from(
+      chatView.chatContainer.querySelectorAll(".systemsculpt-chat-status-action-label")
+    ).map((el) => el.textContent?.trim());
+
+    expect(statusText).toContain("New chat");
+    expect(statusText).toContain("Ready");
+    expect(statusText).toContain("Pi will run gpt-4.1 locally on this desktop.");
+    expect(statusText).not.toContain("Open Account");
+    expect(statusText).not.toContain("Add and validate your SystemSculpt license");
+    expect(actionLabels).toContain("Add Context");
+  });
+
+  it("persists the active model and backend into leaf state without reviving legacy prompt fields", () => {
     const chatView = createChatView({
       selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
       cachedModels: [{ id: "systemsculpt@@systemsculpt/ai-agent" }],
@@ -167,10 +190,10 @@ describe("ChatView empty chat status", () => {
       expect.objectContaining({
         chatId: "chat-123",
         chatTitle: "Test Chat",
+        selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+        chatBackend: "systemsculpt",
       })
     );
-    expect(state).not.toHaveProperty("chatBackend");
-    expect(state).not.toHaveProperty("selectedModelId");
     expect(state).not.toHaveProperty("systemPromptType");
     expect(state).not.toHaveProperty("systemPromptPath");
   });

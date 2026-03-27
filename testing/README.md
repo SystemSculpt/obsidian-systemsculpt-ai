@@ -1,15 +1,15 @@
 # Testing Architecture
 
-Last updated: **2026-03-11**
+Last updated: **2026-03-27**
 
-This repo now has one integration-testing model.
+This repo now has two native integration surfaces.
 
 The canonical test story is:
 
 1. Real Obsidian runtime
 2. Real vaults
 3. Real hosted SystemSculpt flows
-4. Shared smoke cases across desktop and mobile
+4. Desktop and mobile use the native surface that matches the platform instead of forcing one harness to do both jobs
 
 The old separate-instance WDIO harness has been removed.
 Dev builds no longer auto-sync into any retired fixture vault path; use `SYSTEMSCULPT_AUTO_SYNC_PATH` or the native sync scripts when you want a live vault copy.
@@ -27,14 +27,17 @@ npm run test:embeddings
 npm run check:plugin:fast
 ```
 
-### 2. Native runtime smoke
+### 2. Desktop no-focus automation
 
-This is the main parity layer for desktop and mobile.
+This is the canonical desktop lane.
 
-- Real Obsidian app/runtime
-- Real vault fixtures and writes
-- Real SystemSculpt chat/tool/embeddings/transcription/web flows
-- Same smoke engine across macOS desktop, Windows desktop, Android, and iOS adapter sessions
+- Real Obsidian desktop app
+- Real synced vault
+- Real chat view and model switching
+- No renderer driving or app focus takeover
+- Already-running Obsidian only; the harness never launches the app
+- Localhost bridge owned by the plugin itself
+- Settings-file bootstrap and recovery: patch or touch the target `data.json`, let the running plugin watcher reassert the bridge, and stay off the renderer entirely
 
 Core entrypoints:
 
@@ -42,6 +45,29 @@ Core entrypoints:
 npm run test:native:desktop
 npm run test:native:desktop:extended
 npm run test:native:desktop:stress
+node testing/native/desktop-automation/run.mjs --vault-name private-vault --case extended --no-reload
+node scripts/reload-local-obsidian-plugin.mjs
+```
+
+`node scripts/reload-local-obsidian-plugin.mjs` is for an explicit in-place plugin reload after code sync.
+Routine attach-only validation should prefer `--no-reload` when the bridge is already live.
+
+Docs:
+
+- [Desktop Automation](./native/desktop-automation/README.md)
+
+### 3. Mobile runtime smoke
+
+This is the shared Android and iOS real-runtime harness.
+
+- Real Obsidian mobile runtime
+- Real vault fixtures and writes
+- Real hosted SystemSculpt chat/tool/embeddings/transcription/web flows
+- Shared smoke engine across Android WebView and iOS WebKit adapter sessions
+
+Core entrypoints:
+
+```bash
 npm run test:native:android
 npm run test:native:android:extended
 npm run test:native:android:stress
@@ -53,7 +79,7 @@ Docs:
 - [Native Testing](./native/README.md)
 - [Runtime Smoke](./native/runtime-smoke/README.md)
 
-### 3. Native device workflows
+### 4. Native device workflows
 
 These are the real-device and real-emulator setup/debug loops around the native smoke harness.
 
@@ -64,11 +90,13 @@ These are the real-device and real-emulator setup/debug loops around the native 
 ## Naming Rules
 
 - `test:native:*` is the canonical integration-testing surface.
-- `runtime:smoke:*`, `android:*`, and `ios:*` remain as compatibility aliases for the same native harness.
+- `runtime:smoke:desktop*` points at the desktop bridge runner.
+- `runtime:smoke/run.mjs` is mobile-only now.
+- `android:*` and `ios:*` remain aliases for the mobile runtime harness.
 
 ## Current Directory Shape
 
 - `testing/native/`
-  - native runtime smoke and real-device workflows
+  - desktop automation, mobile runtime smoke, and real-device workflows
 
 The important rule is that **all integration-test architecture now lives under `testing/native`**.

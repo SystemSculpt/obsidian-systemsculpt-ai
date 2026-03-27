@@ -85,6 +85,8 @@ Testing architecture docs:
 - `testing/README.md`
 - `testing/native/README.md`
 
+Desktop validation is attach-only to an already-open Obsidian vault. Keep live sync running with `./run.sh --headless` and use the desktop bridge runner when you need real chat/model verification without taking focus.
+
 
 ### Local plugin release
 
@@ -100,6 +102,7 @@ The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
 
 Windows still needs a human-run host pass, but the shared native runtime smoke runner is documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
+Desktop validation is now bridge-based and no-focus by default; the old renderer-driving desktop lane is retired.
 
 ## Canonical source files for docs
 

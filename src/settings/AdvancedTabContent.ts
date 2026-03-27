@@ -1,4 +1,4 @@
-import { Setting, Notice, ButtonComponent } from "obsidian";
+import { Setting, Notice, ButtonComponent, Platform } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPopup } from "../core/ui";
 import { DEFAULT_SETTINGS } from "../types";
@@ -14,6 +14,26 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     containerEl.createEl("h3", { text: "Advanced Settings" }); // Added header for clarity
     tabInstance.renderQuickActionsSection(containerEl);
+
+    if (Platform.isDesktopApp) {
+        new Setting(containerEl)
+            .setName("Desktop automation bridge")
+            .setDesc("Expose a token-protected localhost bridge so the already-running desktop Obsidian instance can be tested without taking application focus.")
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(Boolean(plugin.settings.desktopAutomationBridgeEnabled))
+                    .onChange(async (value) => {
+                        await plugin.getSettingsManager().updateSettings({
+                            desktopAutomationBridgeEnabled: value,
+                        });
+                        new Notice(
+                            value
+                                ? "Desktop automation bridge enabled."
+                                : "Desktop automation bridge disabled."
+                        );
+                    });
+            });
+    }
 
     // Update Notifications setting
     const updateNotificationsSetting = new Setting(containerEl)

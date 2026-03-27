@@ -1,15 +1,11 @@
-import { Notice, TFile, setIcon } from "obsidian";
+import { TFile, setIcon } from "obsidian";
 import { ChatView } from "./ChatView";
-import { ChatMessage, ToolCall, type SystemSculptSettings } from "../../types";
+import { type SystemSculptSettings } from "../../types";
 import { FileContextManager } from "./FileContextManager";
 import { ScrollManagerService } from "./ScrollManagerService";
 import { InputHandler } from "./InputHandler";
 import { ensureCanonicalId, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
 import { attachOverlapInsetManager } from "../../core/ui/services/OverlapInsetService";
-import {
-  getManagedSystemSculptModelId,
-  isManagedSystemSculptModelId,
-} from "../../services/systemsculpt/ManagedSystemSculptModel";
 import { renderChatCreditsIndicator } from "./ui/ChatComposerIndicators";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -272,81 +268,13 @@ export const uiSetup = {
       container,
       aiService: chatView.aiService,
       getMessages: () => chatView.getMessages(),
-      getContextFiles: () => chatView.contextManager.getContextFiles(),
       isChatReady: () => !chatView.chatId || chatView.isFullyLoaded,
       chatContainer: chatView.chatContainer,
       scrollManager: chatView.scrollManager,
       messageRenderer: chatView.messageRenderer,
-      onMessageSubmit: async (message) => {
-        chatView.messages.push(message);
-        await chatView.saveChat();
-        await chatView.addMessage(message.role, message.content, message.message_id);
-      },
+      onMessageSubmit: (message) => chatView.persistSubmittedUserMessage(message),
       onAssistantResponse: async (message) => {
-        const existingMessageIndex = chatView.messages.findIndex(m => m.message_id === message.message_id);
-        if (existingMessageIndex !== -1) {
-          const existingMessage = chatView.messages[existingMessageIndex];
-          
-          // Explicitly merge tool calls to preserve results
-          let mergedToolCalls: ToolCall[] | undefined = undefined;
-          if (existingMessage.tool_calls || message.tool_calls) {
-            const existingMap = new Map((existingMessage.tool_calls || []).map(tc => [tc.id, tc]));
-            const newMap = new Map((message.tool_calls || []).map(tc => [tc.id, tc]));
-            
-            const mergedMap = new Map([...existingMap, ...newMap]);
-            
-            // Ensure results from existing tool calls are not lost
-            for (const [id, existingTc] of existingMap) {
-              if (existingTc.result && mergedMap.has(id)) {
-                const mergedTc = mergedMap.get(id)!;
-                if (!mergedTc.result) {
-                  mergedTc.result = existingTc.result;
-                }
-              }
-            }
-            
-            mergedToolCalls = Array.from(mergedMap.values());
-          }
-
-          const mergedMessage: ChatMessage = {
-            ...existingMessage,
-            ...message,
-            content: message.content || existingMessage.content,
-            reasoning: message.reasoning || existingMessage.reasoning,
-            tool_calls: mergedToolCalls,
-            messageParts: message.messageParts || existingMessage.messageParts,
-          };
-          chatView.messages[existingMessageIndex] = mergedMessage;
-        } else {
-          chatView.messages.push(message);
-        }
-
-        if (chatView.isPiBackedChat() && chatView.getPiSessionFile()) {
-          try {
-            await chatView.syncPiSessionTranscript({
-              syncTitle: true,
-              render: false,
-              persist: true,
-              force: true,
-            });
-            return;
-          } catch (error) {
-            new Notice("Pi finished the turn, but transcript sync failed. The last synced chat snapshot is still preserved.", 7000);
-            return;
-          }
-        }
-
-        await chatView.saveChat();
-      },
-      onContextFileAdd: async (wikilink) => {
-        const files = chatView.contextManager.getContextFiles();
-        files.add(wikilink);
-        chatView.contextManager.setContextFiles(Array.from(files));
-        await chatView.saveChat();
-        if (chatView.messages.length === 0) {
-          chatView.displayChatStatus();
-        }
-        // Token counter update removed
+        await chatView.persistAssistantMessage(message);
       },
       onError: (error) => chatView.handleError(error),
       onAddContextFile: () => {
@@ -357,23 +285,16 @@ export const uiSetup = {
       getChatMarkdown: () => chatView.exportChatAsMarkdown(),
       getChatTitle: () => chatView.getChatTitle(),
       addFileToContext: (file: TFile) => chatView.addFileToContext(file),
-      chatStorage: chatView.chatStorage,
       getChatId: () => chatView.chatId,
-      addMessageToHistory: chatView.addMessageToHistory.bind(chatView),
+      onModelChange: () => {
+        if (chatView.messages.length === 0) {
+          chatView.displayChatStatus();
+        }
+      },
       chatView: chatView,
     });
 
     chatView.inputHandler.onModelChange();
-
-    // Wire up lightweight sync so the empty-chat status reflects runtime toggles
-    // without forcing a full re-render elsewhere.
-    const originalOnModelChange = chatView.inputHandler.onModelChange.bind(chatView.inputHandler);
-    chatView.inputHandler.onModelChange = () => {
-      originalOnModelChange();
-      if (chatView.messages.length === 0) {
-        chatView.displayChatStatus();
-      }
-    };
 
     chatView.registerEvent(
       chatView.app.workspace.on("active-leaf-change", (leaf) => {
@@ -387,17 +308,6 @@ export const uiSetup = {
     chatView.inputHandler.focus();
 
     void chatView.updateCreditsIndicator();
-
-    if (!isManagedSystemSculptModelId(chatView.plugin.settings.selectedModelId)) {
-      await chatView.plugin.getSettingsManager().updateSettings({
-        selectedModelId: getManagedSystemSculptModelId(),
-      });
-    }
-
-    if (!isManagedSystemSculptModelId(chatView.selectedModelId)) {
-      chatView.selectedModelId = getManagedSystemSculptModelId();
-      chatView.currentModelName = getDisplayName(chatView.selectedModelId);
-    }
 
     // After ensuring Mermaid is enabled, configure theme variables once
     try {
@@ -435,14 +345,6 @@ export const uiSetup = {
       // For existing chats, render the messages
       void chatView.renderMessagesInChunks();
     }
-  },
-
-  updateModelIndicator: async function(chatView: ChatView): Promise<void> {
-    if (chatView.modelIndicator) {
-      chatView.modelIndicator.remove();
-      chatView.modelIndicator = null as any;
-    }
-    await this.updateToolCompatibilityWarning(chatView);
   },
 
   updateSystemPromptIndicator: async function(chatView: ChatView): Promise<void> {
@@ -518,8 +420,13 @@ export const uiSetup = {
     // Find or create the warning banner
     let banner = container.querySelector(`.${TOOL_WARNING_BANNER_CLASS}`) as HTMLElement | null;
 
+    const selectedModelId =
+      typeof (chatView as any).getSelectedModelId === "function"
+        ? String((chatView as any).getSelectedModelId() || "").trim()
+        : String(chatView.selectedModelId || chatView.plugin.settings.selectedModelId || "").trim();
+
     // If no model selected, hide warning
-    if (!chatView.selectedModelId || chatView.selectedModelId.trim() === "") {
+    if (!selectedModelId) {
       if (banner) banner.style.display = "none";
       return;
     }
@@ -527,7 +434,7 @@ export const uiSetup = {
     try {
       // Get model info to check compatibility
       const models = await chatView.plugin.modelService.getModels();
-      const canonicalId = ensureCanonicalId(chatView.selectedModelId);
+      const canonicalId = ensureCanonicalId(selectedModelId);
       const model = models.find(m => ensureCanonicalId(m.id) === canonicalId);
 
       if (!model) {

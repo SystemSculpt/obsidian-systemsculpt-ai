@@ -91,7 +91,11 @@ describe("createChatComposer", () => {
     expect(composer.attachButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.settingsButton.buttonEl.tagName).toBe("BUTTON");
     expect(composer.micButton.buttonEl.tagName).toBe("BUTTON");
-    expect(root.querySelector(".systemsculpt-chat-composer-chips")).toBeNull();
+    expect(composer.modelSlot.tagName).toBe("DIV");
+    expect(composer.modelSlot.classList.contains("systemsculpt-chat-composer-chips")).toBe(true);
+    expect(composer.modelSlot.classList.contains("systemsculpt-chat-composer-toolbar-center")).toBe(true);
+    expect(root.querySelector(".systemsculpt-chat-composer-chips")).toBe(composer.modelSlot);
+    expect(composer.toolbar.children[1]).toBe(composer.modelSlot);
 
     // Send button starts disabled until the host enables it.
     expect(composer.sendButton.buttonEl.disabled).toBe(true);

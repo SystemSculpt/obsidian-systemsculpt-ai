@@ -1,6 +1,8 @@
 # Runtime Smoke
 
-`testing/native/runtime-smoke/` is the shared real-runtime smoke harness for desktop and mobile.
+`testing/native/runtime-smoke/` is the shared real-runtime smoke harness for **mobile only**.
+
+Desktop moved to [desktop automation](../desktop-automation/README.md).
 
 Entry point:
 
@@ -12,7 +14,7 @@ node testing/native/runtime-smoke/run.mjs
 
 The old separate-instance E2E lane was useful, but it was not the best truth source for real plugin behavior anymore.
 
-This harness directly drives the live Obsidian runtime through an inspectable target and verifies real end-to-end behaviors:
+This harness directly drives the live Obsidian mobile runtime through an inspectable target and verifies real end-to-end behaviors:
 
 - hosted chat
 - approval-gated tool execution
@@ -24,20 +26,6 @@ This harness directly drives the live Obsidian runtime through an inspectable ta
 - YouTube transcript retrieval
 
 ## Main modes
-
-### Desktop
-
-```bash
-npm run test:native:desktop
-npm run test:native:desktop:extended
-npm run test:native:desktop:stress
-```
-
-Requires Obsidian desktop running with:
-
-```bash
---remote-debugging-port=9222
-```
 
 ### Android
 
@@ -58,7 +46,7 @@ npm run test:native:ios
 This uses the plugged-in iPhone/iPad plus the RemoteDebug iOS WebKit adapter.
 The harness will auto-start the adapter when needed, reload the synced plugin
 before the smoke pass, and then drive the real Obsidian runtime through the same
-shared cases as desktop and Android.
+shared cases as Android.
 
 ## Case profiles
 
@@ -88,10 +76,9 @@ shared cases as desktop and Android.
 Examples:
 
 ```bash
-npm run test:native:desktop -- --case file-write
 npm run test:native:android -- --case web-fetch
 node testing/native/runtime-smoke/run.mjs --mode android --case record-transcribe --record-audio-path "SystemSculpt/QA/CrossPlatform-20260311/cross-platform-audio.m4a"
-node testing/native/runtime-smoke/run.mjs --mode desktop --case extended --repeat 3 --pause-ms 2000
+node testing/native/runtime-smoke/run.mjs --mode ios --case extended --repeat 3 --pause-ms 2000
 ```
 
 ## Architecture

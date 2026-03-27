@@ -22,6 +22,7 @@ describe("ChatView loaded model migration", () => {
   function createChatView(modelService: {
     getCachedModels: jest.Mock;
     getModels: jest.Mock;
+    getModelById?: jest.Mock;
   }): ChatView {
     const app = new App();
     const leaf = new WorkspaceLeaf(app);
@@ -44,6 +45,9 @@ describe("ChatView loaded model migration", () => {
       },
       modelService,
       openSettingsTab: jest.fn(),
+      getSettingsManager: jest.fn(() => ({
+        updateSettings: jest.fn().mockResolvedValue(undefined),
+      })),
     };
 
     return new ChatView(leaf as any, plugin);
@@ -152,5 +156,80 @@ describe("ChatView loaded model migration", () => {
     expect(chatView.piSessionId).toBeUndefined();
     expect(chatView.piLastEntryId).toBeUndefined();
     expect(chatView.piLastSyncedAt).toBeUndefined();
+  });
+
+  it("keeps a local Pi selection intact when the chat model is changed explicitly", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+      getModelById: jest.fn(async (id: string) => ({
+        id,
+        provider: "openai",
+      })),
+    });
+
+    jest.spyOn(chatView as any, "refreshModelMetadata").mockResolvedValue(undefined);
+    jest.spyOn(chatView, "focusInput").mockImplementation(() => {});
+    jest.spyOn(chatView as any, "notifySettingsChanged").mockImplementation(() => {});
+
+    await chatView.setSelectedModelId("local-pi-openai@@gpt-4.1");
+
+    expect(chatView.selectedModelId).toBe("local-pi-openai@@gpt-4.1");
+    expect(chatView.getSelectedModelId()).toBe("local-pi-openai@@gpt-4.1");
+  });
+
+  it("preserves completed tool results when assistant updates are persisted", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+    });
+
+    jest.spyOn(chatView, "saveChat").mockResolvedValue(undefined);
+
+    chatView.messages = [
+      {
+        role: "assistant",
+        content: "",
+        message_id: "assistant-1",
+        tool_calls: [
+          {
+            id: "call-1",
+            state: "completed",
+            result: {
+              success: true,
+              data: { path: "alpha.md" },
+            },
+          },
+        ],
+      } as any,
+    ];
+
+    const persisted = await chatView.persistAssistantMessage(
+      {
+        role: "assistant",
+        content: "Done",
+        message_id: "assistant-1",
+        tool_calls: [
+          {
+            id: "call-1",
+            state: "completed",
+          },
+        ],
+      } as any,
+      { syncPiTranscript: false }
+    );
+
+    expect(chatView.saveChat).toHaveBeenCalledTimes(1);
+    expect(persisted.tool_calls).toEqual([
+      expect.objectContaining({
+        id: "call-1",
+        state: "completed",
+        result: expect.objectContaining({
+          success: true,
+          data: { path: "alpha.md" },
+        }),
+      }),
+    ]);
+    expect(chatView.messages[0].tool_calls).toEqual(persisted.tool_calls);
   });
 });

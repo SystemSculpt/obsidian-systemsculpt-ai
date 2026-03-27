@@ -8,14 +8,13 @@ import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
 import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from "../../utils/errors";
 import { MessageRenderer } from "./MessageRenderer";
-import { InputHandler } from "./InputHandler";
+import { InputHandler, type AutomationApprovalMode } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 
 import {
   ensureCanonicalId,
   findModelById,
-  getDisplayName,
   getModelLabelWithProvider,
 } from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
@@ -25,6 +24,7 @@ import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import { removeGroupIfEmpty } from "./utils/MessageGrouping";
 import { classifyQuotaExceededError } from "./utils/quotaError";
+import type { ToolCall } from "../../types/toolCalls";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
@@ -43,12 +43,19 @@ import {
   type PiSessionState,
 } from "./storage/ChatPersistenceTypes";
 import { loadPiTextMigrationModule } from "./runtimeModules";
+import type { SystemSculptModel } from "../../types/llm";
 
 import { uiSetup } from "./uiSetup";
 import { messageHandling } from "./messageHandling";
 import { eventHandling } from "./eventHandling";
 import { chatSettingsHandling } from "./chatSettingsHandling";
 import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
+import {
+  getChatModelDisplayName,
+  getChatModelSetupMessage,
+  getChatModelSetupSurface,
+  getEffectiveChatModelId,
+} from "./modelSelection";
 
 export { CHAT_VIEW_TYPE };
 
@@ -61,16 +68,13 @@ export class ChatView extends ItemView {
   public plugin: SystemSculptPlugin;
   public chatId: string;
   public selectedModelId: string;
-  public modelIndicator: HTMLElement;
   public systemPromptIndicator: HTMLElement;
   public creditsIndicator: HTMLElement;
-  public currentModelName: string = "";
   public isGenerating = false;
   public creditsBalance: CreditsBalanceSnapshot | null = null;
   private creditsBalanceRefreshPromise: Promise<void> | null = null;
   public contextManager: FileContextManager;
   public scrollManager: ScrollManagerService;
-  public layoutChangeHandler: () => void;
   public isFullyLoaded = false; // Track when chat is fully loaded
   public messageRenderer: MessageRenderer;
   public chatTitle: string;
@@ -101,6 +105,7 @@ export class ChatView extends ItemView {
   private renderEpoch: number = 0;
   private loadEpoch: number = 0;
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
+  private resourcesDisposed = false;
 
   // Explicitly re-declare core ItemView fields for clarity / type checking
   declare app: App;
@@ -138,7 +143,6 @@ export class ChatView extends ItemView {
     this.initializeChatTitle(initialState.chatTitle);
 
     this.selectedModelId = initialState.selectedModelId || plugin.settings.selectedModelId;
-    this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
     this.isGenerating = false;
     this.isFullyLoaded = false; // Start as not loaded
 
@@ -151,7 +155,6 @@ export class ChatView extends ItemView {
 
     // Initialize chat font size from saved state or plugin settings
     this.chatFontSize = initialState.chatFontSize || (plugin.settings as any).chatFontSize || "medium";
-    this.layoutChangeHandler = this.onLayoutChange.bind(this);
   }
 
   private ensureCoreServicesReady(): void {
@@ -177,7 +180,11 @@ export class ChatView extends ItemView {
   }
 
   private getActiveSystemPromptType(): "general-use" | "agent" {
-    return isManagedSystemSculptModelId(this.selectedModelId) ? "agent" : "general-use";
+    return isManagedSystemSculptModelId(this.getEffectiveSelectedModelId()) ? "agent" : "general-use";
+  }
+
+  public getCurrentModelName(): string {
+    return getChatModelDisplayName(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
 
   getViewType(): string {
@@ -195,7 +202,6 @@ export class ChatView extends ItemView {
     await this.refreshModelMetadata();
     void this.refreshCreditsBalance();
   }
-  updateModelIndicator = () => uiSetup.updateModelIndicator(this);
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
   updateCreditsIndicator = () => uiSetup.updateCreditsIndicator(this);
   updateToolCompatibilityWarning = () => uiSetup.updateToolCompatibilityWarning(this);
@@ -252,6 +258,7 @@ export class ChatView extends ItemView {
         this.chatId,
         this.messages,
         {
+          selectedModelId: this.getEffectiveSelectedModelId(),
           contextFiles: this.contextManager?.getContextFiles() || new Set(),
           title: this.chatTitle,
           chatFontSize: this.chatFontSize,
@@ -287,14 +294,103 @@ export class ChatView extends ItemView {
     await this.saveChat();
   }
 
+  public async persistSubmittedUserMessage(message: ChatMessage): Promise<void> {
+    const existingMessage = this.messages.find((entry) => entry.message_id === message.message_id);
+    if (!existingMessage) {
+      this.messages.push(message);
+    }
+
+    await this.saveChat();
+    await this.addMessage(message.role, message.content, message.message_id, existingMessage || message);
+  }
+
+  private mergeAssistantToolCalls(existingToolCalls: ToolCall[] = [], nextToolCalls: ToolCall[] = []): ToolCall[] | undefined {
+    if (existingToolCalls.length === 0 && nextToolCalls.length === 0) {
+      return undefined;
+    }
+
+    const existingMap = new Map(existingToolCalls.map((toolCall) => [toolCall.id, toolCall]));
+    const mergedMap = new Map(existingMap);
+
+    for (const toolCall of nextToolCalls) {
+      mergedMap.set(toolCall.id, toolCall);
+    }
+
+    for (const [toolCallId, existingToolCall] of existingMap) {
+      if (!existingToolCall.result || !mergedMap.has(toolCallId)) {
+        continue;
+      }
+
+      const mergedToolCall = mergedMap.get(toolCallId)!;
+      if (!mergedToolCall.result) {
+        mergedToolCall.result = existingToolCall.result;
+      }
+    }
+
+    return Array.from(mergedMap.values());
+  }
+
+  public upsertAssistantMessage(message: ChatMessage): ChatMessage {
+    const existingMessageIndex = this.messages.findIndex((entry) => entry.message_id === message.message_id);
+    if (existingMessageIndex === -1) {
+      this.messages.push(message);
+      return message;
+    }
+
+    const existingMessage = this.messages[existingMessageIndex];
+    const mergedMessage: ChatMessage = {
+      ...existingMessage,
+      ...message,
+      content: message.content !== undefined ? message.content : existingMessage.content,
+      reasoning: message.reasoning || existingMessage.reasoning,
+      annotations: message.annotations || existingMessage.annotations,
+      tool_calls: this.mergeAssistantToolCalls(existingMessage.tool_calls || [], message.tool_calls || []),
+      messageParts: message.messageParts || existingMessage.messageParts,
+      reasoning_details: (message as any).reasoning_details || (existingMessage as any).reasoning_details,
+    };
+
+    this.messages[existingMessageIndex] = mergedMessage;
+    return mergedMessage;
+  }
+
+  public async persistAssistantMessage(
+    message: ChatMessage,
+    options?: { syncPiTranscript?: boolean }
+  ): Promise<ChatMessage> {
+    const mergedMessage = this.upsertAssistantMessage(message);
+    const shouldSyncPiTranscript =
+      options?.syncPiTranscript !== false && this.isPiBackedChat() && !!this.getPiSessionFile();
+
+    if (shouldSyncPiTranscript) {
+      try {
+        await this.syncPiSessionTranscript({
+          syncTitle: true,
+          render: false,
+          persist: true,
+          force: true,
+        });
+      } catch {
+        new Notice(
+          "Pi finished the turn, but transcript sync failed. The last synced chat snapshot is still preserved.",
+          7000
+        );
+      }
+      return mergedMessage;
+    }
+
+    await this.saveChat();
+    return mergedMessage;
+  }
+
   public async handleError(error: string | SystemSculptError): Promise<void> {
     let errorMessage = typeof error === "string" ? error : error.message;
+    const automationRequestActive = this.inputHandler?.isAutomationRequestActive?.() === true;
     
     // Log the error with full details
     const errorContext = {
       source: 'ChatView',
       method: 'handleError',
-      modelId: this.selectedModelId,
+      modelId: this.getEffectiveSelectedModelId(),
       metadata: {
         chatId: this.chatId,
         messageCount: this.messages.length,
@@ -315,6 +411,10 @@ export class ChatView extends ItemView {
 
     if (isContextOverflowErrorMessage(errorMessage) || isContextOverflowErrorMessage(upstreamMessage)) {
       await this.resetFailedAssistantTurn();
+
+      if (automationRequestActive) {
+        return;
+      }
 
       const result = await showPopup(
         this.app,
@@ -365,6 +465,11 @@ export class ChatView extends ItemView {
         : Number(error.metadata?.creditsRemaining ?? 0);
       const cycleEndsAt = typeof error.metadata?.cycleEndsAt === 'string' ? error.metadata.cycleEndsAt : '';
       const purchaseUrl = typeof error.metadata?.purchaseUrl === 'string' ? error.metadata.purchaseUrl : null;
+
+      if (automationRequestActive) {
+        void this.refreshCreditsBalance();
+        return;
+      }
 
       const actionLabel = purchaseUrl ? 'Buy credits' : 'Open Account';
       const result = await showPopup(
@@ -427,17 +532,23 @@ export class ChatView extends ItemView {
       error instanceof SystemSculptError &&
       (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR" || shouldRecoverFromQuotaBySwitching)
     ) {
-      if (!this.hasConfiguredProvider()) {
-        await this.promptProviderSetup(
-          "Finish setup in Settings → Account before starting a chat."
-        );
+      const isManagedSelection = this.isManagedSelectedModel();
+
+      if (isManagedSelection && !this.hasConfiguredProvider()) {
         await this.resetFailedAssistantTurn();
+        if (!automationRequestActive) {
+          await this.promptProviderSetup(
+            "Finish setup in Settings → Account before starting a chat."
+          );
+        }
         return;
       }
 
       await this.resetFailedAssistantTurn();
       new Notice(
-        "SystemSculpt could not complete this request right now. Please try again in a moment or check Account for license and account status.",
+        isManagedSelection
+          ? "SystemSculpt could not complete this request right now. Please try again in a moment or check Account for license and account status."
+          : "The selected Pi model could not complete this request right now. Please try again in a moment or check Providers to confirm the selected model and provider are configured.",
         10000
       );
     } else {
@@ -517,11 +628,31 @@ export class ChatView extends ItemView {
   }
 
   public hasConfiguredProvider(): boolean {
-    return hasManagedSystemSculptAccess(this.plugin);
+    return this.isManagedSelectedModel() ? hasManagedSystemSculptAccess(this.plugin) : true;
   }
 
   public openSetupTab(targetTab: string = "account"): void {
     this.plugin.openSettingsTab(targetTab);
+  }
+
+  public getEffectiveSelectedModelId(): string {
+    return getEffectiveChatModelId(this.selectedModelId, this.plugin.settings.selectedModelId);
+  }
+
+  public isManagedSelectedModel(): boolean {
+    return isManagedSystemSculptModelId(this.getEffectiveSelectedModelId());
+  }
+
+  public async getSelectedModelRecord(): Promise<SystemSculptModel | undefined> {
+    return await this.plugin.modelService.getModelById(this.getEffectiveSelectedModelId());
+  }
+
+  public getSelectedModelSetupSurface(): {
+    targetTab: string;
+    title: string;
+    primaryButton: string;
+  } {
+    return getChatModelSetupSurface(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
 
   private async resolveLoadedSelectedModelId(savedModelId: string): Promise<string> {
@@ -574,20 +705,32 @@ export class ChatView extends ItemView {
       // Keep the saved id when live model resolution isn't available.
     }
 
-    return isManagedSystemSculptModelId(rawModelId) ? rawModelId : getManagedSystemSculptModelId();
+    if (isManagedSystemSculptModelId(rawModelId) || isManagedSystemSculptModelId(normalizedRawModelId)) {
+      return getManagedSystemSculptModelId();
+    }
+
+    return normalizedRawModelId || rawModelId;
   }
 
-  public async promptProviderSetup(customMessage?: string): Promise<void> {
-    const message = customMessage ??
-      "Open Settings -> Account to activate your SystemSculpt license, then try again.";
+  public async promptProviderSetup(
+    customMessage?: string,
+    overrides?: {
+      title?: string;
+      primaryButton?: string;
+      targetTab?: string;
+    }
+  ): Promise<void> {
+    const setupSurface = this.getSelectedModelSetupSurface();
+    const targetTab = overrides?.targetTab || setupSurface.targetTab;
+    const message = customMessage ?? getChatModelSetupMessage(targetTab as "account" | "providers", { retryHint: true });
     const result = await showPopup(this.app, message, {
-      title: "Finish setup",
+      title: overrides?.title || setupSurface.title,
       icon: "plug-zap",
-      primaryButton: "Open Account",
+      primaryButton: overrides?.primaryButton || setupSurface.primaryButton,
       secondaryButton: "Not Now",
     });
     if (result?.confirmed) {
-      this.openSetupTab();
+      this.openSetupTab(targetTab);
     }
   }
 
@@ -629,12 +772,6 @@ export class ChatView extends ItemView {
   private async resetFailedAssistantTurn(): Promise<void> {
     this.removeLastAssistantMessageFromDom();
     await this.restoreLastUserMessageToComposer();
-  }
-
-  private async onLayoutChange() {
-    if (this.app.workspace.getActiveViewOfType(ItemView)?.leaf === this.leaf) {
-      if (this.inputHandler) this.inputHandler.focus();
-    }
   }
 
   public generateMessageId(): string {
@@ -701,14 +838,19 @@ export class ChatView extends ItemView {
       },
     };
 
+    const setupSurface = this.getSelectedModelSetupSurface();
+
     if (needsProviderSetup) {
       actionSpecs.push({
-        label: "Open Account",
+        label: setupSurface.primaryButton,
         icon: "plug-zap",
         primary: true,
-        title: "Open Account and activate your SystemSculpt license",
+        title:
+          setupSurface.targetTab === "account"
+            ? "Open Account and activate your SystemSculpt license"
+            : "Open Providers and connect the selected Pi provider",
         onClick: () => {
-          this.openSetupTab();
+          this.openSetupTab(setupSurface.targetTab);
         },
       });
     } else {
@@ -726,12 +868,19 @@ export class ChatView extends ItemView {
       });
     }
 
+    const isManagedSelection = this.isManagedSelectedModel();
+    const readyDescription = isManagedSelection
+      ? "Type below or attach context. SystemSculpt handles the rest."
+      : `Type below or attach context. Pi will run ${this.getCurrentModelName() || "the selected model"} locally on this desktop.`;
+    const setupDescription =
+      setupSurface.targetTab === "account"
+        ? "Add and validate your SystemSculpt license to start chatting."
+        : "Connect the selected Pi provider in Settings before starting this chat.";
+
     renderChatStatusSurface(statusContainer, {
       eyebrow: needsProviderSetup ? "Setup required" : "Ready",
-      title: needsProviderSetup ? "Finish setup" : "New chat",
-      description: needsProviderSetup
-        ? "Add and validate your SystemSculpt license to start chatting."
-        : "Type below or attach context. SystemSculpt handles the rest.",
+      title: needsProviderSetup ? setupSurface.title : "New chat",
+      description: needsProviderSetup ? setupDescription : readyDescription,
       chips: [
         {
           label: "Context",
@@ -820,7 +969,7 @@ export class ChatView extends ItemView {
       chat: {
         chatId: this.chatId || null,
         chatTitle: this.chatTitle || null,
-        modelId: this.selectedModelId || null,
+        modelId: this.getEffectiveSelectedModelId() || null,
         chatBackend: this.chatBackend || null,
         piSessionFile: this.piSessionFile || null,
         piSessionId: this.piSessionId || null,
@@ -855,9 +1004,12 @@ export class ChatView extends ItemView {
     new Notice("Chat file and log paths copied to clipboard.", 4000);
   }
 
-	  private async refreshModelMetadata(): Promise<void> {
-	    this.inputHandler?.refreshTokenCounter();
-	  }
+  private async refreshModelMetadata(): Promise<void> {
+    this.inputHandler?.refreshTokenCounter();
+    this.inputHandler?.onModelChange();
+    await uiSetup.updateToolCompatibilityWarning(this);
+    this.refreshChatStatusIfEmpty();
+  }
 
   /**
    * Re-render the chat status block when the chat is empty so UI stays in sync
@@ -880,32 +1032,62 @@ export class ChatView extends ItemView {
     this.refreshChatStatusIfEmpty();
   }
 
-  private getInputValue(): string {
-    return this.inputHandler?.getValue() ?? "";
+  private applyChatFontSizeClass(): void {
+    if (!this.chatContainer) {
+      return;
+    }
+
+    this.chatContainer.classList.remove(
+      "systemsculpt-chat-small",
+      "systemsculpt-chat-medium",
+      "systemsculpt-chat-large"
+    );
+    this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
   }
 
-  onunload() {
-    this.scrollManager.cleanup();
-    this.app.workspace.off("active-leaf-change", this.onLayoutChange);
+  private scheduleChatFontSizeClassSync(delayMs: number = 0): void {
+    globalThis.setTimeout(() => this.applyChatFontSizeClass(), delayMs);
+  }
 
-    // Cleanup interface observer
-    // Observer cleanup removed since we're no longer using MutationObserver
+  private disposeViewResources(): void {
+    if (this.resourcesDisposed) {
+      return;
+    }
+    this.resourcesDisposed = true;
 
     if (this.dragDropCleanup) {
       this.dragDropCleanup();
       this.dragDropCleanup = null;
     }
 
-    this.contextManager.destroy();
-    this.inputHandler.unload();
+    try {
+      this.scrollManager?.cleanup?.();
+    } catch {}
+    try {
+      (this.scrollManager as any)?.destroy?.();
+    } catch {}
+
+    try {
+      (this.contextManager as any)?.destroy?.();
+    } catch {}
+
+    try {
+      this.inputHandler?.unload?.();
+    } catch {}
+  }
+
+  onunload() {
+    this.disposeViewResources();
   }
 
   getState(): any {
     return {
       chatId: this.chatId,
       chatTitle: this.chatTitle,
+      selectedModelId: this.getEffectiveSelectedModelId(),
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
+      chatBackend: this.chatBackend,
       piSessionFile: this.piSessionFile,
       piSessionId: this.piSessionId,
       piLastEntryId: this.piLastEntryId,
@@ -933,24 +1115,17 @@ export class ChatView extends ItemView {
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.selectedModelId = this.plugin.settings.selectedModelId || "";
-      this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
  
       // Restore chat font size for new chats if provided in state
       if (state?.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
-        // Apply visually without saving
-        setTimeout(() => {
-          if (this.chatContainer) {
-            this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
-            this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
-          }
-        }, 0);
+        this.scheduleChatFontSizeClassSync();
       }
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
       this.messages = [];
       this.contextManager?.clearContext();
-      this.updateModelIndicator();
+      void this.refreshModelMetadata();
       this.updateSystemPromptIndicator();
       // Don't render messages here - let onOpen handle it after UI is ready
       // this.renderMessagesInChunks();
@@ -974,7 +1149,6 @@ export class ChatView extends ItemView {
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
       this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
-      this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
       this.initializeChatTitle(state.chatTitle);
       this.chatVersion = state.version !== undefined ? state.version : -1;
 
@@ -982,12 +1156,7 @@ export class ChatView extends ItemView {
 
       if (state.chatFontSize) {
         this.chatFontSize = state.chatFontSize;
-        setTimeout(() => {
-          if (this.chatContainer) {
-            this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
-            this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
-          }
-        }, 0);
+        this.scheduleChatFontSizeClassSync();
       }
 
       this.isFullyLoaded = true;
@@ -1005,7 +1174,6 @@ export class ChatView extends ItemView {
     this.hasAdjustedInitialWindow = false;
     // When loading an existing chat, use the stored model selection as-is
     this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
-    this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
     this.initializeChatTitle(state.chatTitle);
     this.chatVersion = state.version !== undefined ? state.version : -1;
 
@@ -1093,7 +1261,7 @@ export class ChatView extends ItemView {
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
           // UI indicators can update asynchronously
-          void this.updateModelIndicator();
+          void this.refreshModelMetadata();
           void this.updateSystemPromptIndicator();
           return;
         }
@@ -1102,7 +1270,6 @@ export class ChatView extends ItemView {
         this.selectedModelId = await this.resolveLoadedSelectedModelId(
           chatData.selectedModelId || this.plugin.settings.selectedModelId
         );
-        this.currentModelName = this.selectedModelId ? getDisplayName(ensureCanonicalId(this.selectedModelId)) : "";
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
         const persistedMessages = chatData.messages || [];
         this.chatVersion = chatData.version || 0;
@@ -1120,13 +1287,7 @@ export class ChatView extends ItemView {
 
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
-        // Apply it after UI is ready (don't save again, just apply visually)
-        setTimeout(() => {
-          if (this.chatContainer) {
-            this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
-            this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
-          }
-        }, 100);
+        this.scheduleChatFontSizeClassSync(100);
 
         // Restore context files without blocking first render.
         if (this.contextManager) {
@@ -1184,13 +1345,8 @@ export class ChatView extends ItemView {
         this.inputHandler?.notifyChatReadyChanged?.();
 
         // Update UI indicators (async; do not block chat readiness)
-        void this.updateModelIndicator();
-        void this.updateSystemPromptIndicator();
         void this.refreshModelMetadata();
-
-        if (this.inputHandler) {
-          this.inputHandler.onModelChange();
-        }
+        void this.updateSystemPromptIndicator();
 
         // Validate context files in the background
         void this.contextManager?.validateAndCleanContextFiles();
@@ -1531,7 +1687,7 @@ export class ChatView extends ItemView {
         chat: {
           chatId: this.chatId || null,
           chatTitle: this.chatTitle || null,
-          modelId: this.selectedModelId || null,
+          modelId: this.getEffectiveSelectedModelId() || null,
           chatVersion: this.chatVersion,
           chatBackend: this.chatBackend || null,
           piSessionFile: this.piSessionFile || null,
@@ -1850,8 +2006,8 @@ export class ChatView extends ItemView {
         chatVersion: this.chatVersion,
         isFullyLoaded: this.isFullyLoaded,
         isGenerating: this.isGenerating,
-        selectedModelId: this.selectedModelId,
-        currentModelName: this.currentModelName,
+        selectedModelId: this.getEffectiveSelectedModelId(),
+        currentModelName: this.getCurrentModelName(),
         promptProfile,
         systemPrompt: systemPromptDetails,
         currentPrompt: this.currentPrompt,
@@ -1877,7 +2033,6 @@ export class ChatView extends ItemView {
         chatContainer: chatContainerState,
         viewDom: viewDomState,
         indicators: {
-          modelIndicatorText: this.modelIndicator?.textContent ?? null,
           systemPromptIndicatorText: this.systemPromptIndicator?.textContent ?? null,
         },
       },
@@ -1917,6 +2072,98 @@ export class ChatView extends ItemView {
 
   public focusInput(): void {
     if(this.inputHandler) this.inputHandler.focus();
+  }
+
+  public getInputText(): string {
+    return this.inputHandler?.getValue?.() ?? "";
+  }
+
+  public setInputText(value: string | object, options?: { focus?: boolean }): void {
+    this.inputHandler?.setInputText(value, options);
+  }
+
+  public isWebSearchEnabled(): boolean {
+    return this.inputHandler?.isWebSearchEnabled?.() ?? false;
+  }
+
+  public setWebSearchEnabled(enabled: boolean): void {
+    this.inputHandler?.setWebSearchEnabled?.(enabled);
+  }
+
+  public getAutomationApprovalMode(): AutomationApprovalMode | null {
+    return this.inputHandler?.getAutomationApprovalMode?.() ?? null;
+  }
+
+  public setAutomationApprovalMode(mode: AutomationApprovalMode): void {
+    this.inputHandler?.setAutomationApprovalMode?.(mode);
+  }
+
+  public async sendAutomationMessage(options?: {
+    text?: string | object;
+    includeContextFiles?: boolean;
+    approvalMode?: AutomationApprovalMode;
+    webSearchEnabled?: boolean;
+  }): Promise<void> {
+    if (!this.inputHandler) {
+      throw new Error("Chat input is not ready yet.");
+    }
+
+    if (typeof options?.webSearchEnabled === "boolean") {
+      this.inputHandler.setWebSearchEnabled(options.webSearchEnabled);
+    }
+
+    if (options && "text" in options && options.text !== undefined) {
+      this.inputHandler.setInputText(options.text, { focus: false });
+    }
+
+    await this.inputHandler.submitForAutomation({
+      includeContextFiles: options?.includeContextFiles,
+      approvalMode: options?.approvalMode,
+      focusAfterSend: false,
+    });
+  }
+
+  public getAutomationSnapshot(): Record<string, unknown> {
+    const serializedMessages = this.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      messageId: message.message_id ?? null,
+      toolCalls: Array.isArray((message as any).tool_calls)
+        ? (message as any).tool_calls.map((toolCall: ToolCall) => ({
+            id: toolCall.id,
+            name: toolCall.request?.function?.name ?? "",
+            state: toolCall.state ?? "",
+            result: toolCall.result ?? null,
+            executionStartedAt: toolCall.executionStartedAt ?? null,
+            executionCompletedAt: toolCall.executionCompletedAt ?? null,
+          }))
+        : [],
+    }));
+
+    return {
+      leafId: (this.leaf as any)?.id ?? null,
+      chatId: this.chatId,
+      chatTitle: this.chatTitle,
+      backend: this.chatBackend,
+      isFullyLoaded: this.isFullyLoaded,
+      isGenerating: this.isGenerating,
+      selectedModelId: this.getEffectiveSelectedModelId(),
+      currentModelName: this.getCurrentModelName(),
+      messageCount: serializedMessages.length,
+      messages: serializedMessages,
+      contextFiles: Array.from(this.contextManager?.getContextFiles?.() || []),
+      piSession: {
+        sessionFile: this.getPiSessionFile() ?? null,
+        sessionId: this.getPiSessionId() ?? null,
+        lastEntryId: this.piLastEntryId ?? null,
+        lastSyncedAt: this.piLastSyncedAt ?? null,
+      },
+      input: {
+        value: this.getInputText(),
+        webSearchEnabled: this.isWebSearchEnabled(),
+        approvalMode: this.getAutomationApprovalMode(),
+      },
+    };
   }
 
   private readPiSessionState(): PiSessionState {
@@ -1992,7 +2239,7 @@ export class ChatView extends ItemView {
   }
 
   public getSelectedModelId(): string {
-    return this.selectedModelId;
+    return this.getEffectiveSelectedModelId();
   }
 
   public getPiSessionFile(): string | undefined {
@@ -2333,15 +2580,14 @@ export class ChatView extends ItemView {
     }
   }
 
-  public async setSelectedModelId(modelId: string): Promise<void> {
+  public async setSelectedModelId(
+    modelId: string,
+    options?: { focusInput?: boolean },
+  ): Promise<void> {
     const requestedModelId = ensureCanonicalId(modelId);
-    const canonicalId = isManagedSystemSculptModelId(requestedModelId)
-      ? requestedModelId
-      : getManagedSystemSculptModelId();
+    const canonicalId = requestedModelId || getManagedSystemSculptModelId();
 
     this.selectedModelId = canonicalId;
-    // Update display name immediately so any displayChatStatus() calls use the correct value
-    this.currentModelName = getDisplayName(canonicalId);
     // If global policy is to use latest everywhere (or Standard mode), make this the global default
     try {
       const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
@@ -2366,18 +2612,12 @@ export class ChatView extends ItemView {
     } catch (error) {
     }
 
-    await this.refreshModelMetadata();
-
     // Save the chat to persist the model change
     await this.saveChat();
-
-    // Update the model indicator UI
-    await this.updateModelIndicator();
-
-    if (this.inputHandler) {
-      this.inputHandler.onModelChange();
+    await this.refreshModelMetadata();
+    if (options?.focusInput !== false) {
+      this.focusInput();
     }
-    this.focusInput();
     // Centralized sync + broadcast
     this.notifySettingsChanged();
   }
@@ -2436,10 +2676,7 @@ export class ChatView extends ItemView {
 
   public async setChatFontSize(size: "small" | "medium" | "large"): Promise<void> {
     this.chatFontSize = size;
-    if (this.chatContainer) {
-      this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
-      this.chatContainer.classList.add(`systemsculpt-chat-${size}`);
-    }
+    this.applyChatFontSizeClass();
     this.updateViewState();
     // Save to the actual chat file to persist across reloads
     if (this.chatId && this.isFullyLoaded) {
@@ -2462,61 +2699,9 @@ export class ChatView extends ItemView {
     if (this.inputHandler && typeof (this.inputHandler as any).abortCurrentGeneration === 'function') {
       (this.inputHandler as any).abortCurrentGeneration();
     }
-    
-    // Clean up drag and drop
-    if (this.dragDropCleanup) {
-      this.dragDropCleanup();
-      this.dragDropCleanup = null;
-    }
-    
-    // Clean up services - call destroy if available
-    if (this.scrollManager) {
-      if (typeof (this.scrollManager as any).destroy === 'function') {
-        (this.scrollManager as any).destroy();
-      }
-      this.scrollManager = null as any;
-    }
-    
-    if (this.contextManager) {
-      if (typeof (this.contextManager as any).destroy === 'function') {
-        (this.contextManager as any).destroy();
-      }
-      this.contextManager = null as any;
-    }
-    
-    if (this.messageRenderer) {
-      if (typeof (this.messageRenderer as any).destroy === 'function') {
-        (this.messageRenderer as any).destroy();
-      }
-      this.messageRenderer = null as any;
-    }
-    
-    if (this.inputHandler) {
-      if (typeof (this.inputHandler as any).destroy === 'function') {
-        (this.inputHandler as any).destroy();
-      }
-      this.inputHandler = null as any;
-    }
-    
-    // Clear message array to free memory
+
+    this.disposeViewResources();
     this.messages = [];
-    
-    // Remove any DOM event listeners
-    if (this.chatContainer) {
-      // The message-edited listener is already registered with Component
-      // and will be cleaned up automatically
-      this.chatContainer = null as any;
-    }
-    
-    // Clear references to DOM elements
-    this.modelIndicator = null as any;
-    this.systemPromptIndicator = null as any;
-    
-    // Clear other references
-    this.aiService = null as any;
-    this.chatStorage = null as any;
-    
-    // Call parent cleanup
     await super.onClose?.();
   }
 }

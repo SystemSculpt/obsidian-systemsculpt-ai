@@ -433,6 +433,45 @@ describe("SystemSculptService", () => {
     expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
   });
 
+  it("serializes response headers for debug.onResponse when streaming hosted chat", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    const debug = {
+      onRequest: jest.fn(),
+      onResponse: jest.fn(),
+      onStreamEnd: jest.fn(),
+    };
+
+    (service as any).platformRequestClient.request = jest.fn().mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"Headers"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          "x-systemsculpt-trace": "trace-123",
+        },
+      })
+    );
+
+    const events = await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Check headers", message_id: "msg_headers_1" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+        debug,
+      })
+    );
+
+    expect(events).toEqual([{ type: "content", text: "Headers" }]);
+    expect(debug.onResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 200,
+        headers: expect.objectContaining({
+          "content-type": "text/event-stream",
+          "x-systemsculpt-trace": "trace-123",
+        }),
+      })
+    );
+  });
+
   it("routes Pi-local chat turns through the local Pi stream executor", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

@@ -81,12 +81,19 @@ type FetchLike = typeof globalThis.fetch;
 
 type PiDesktopFetchRestore = () => void;
 
+function isStandardHeaders(value: unknown): value is Headers {
+  return (
+    typeof Headers !== "undefined" &&
+    value instanceof Headers
+  );
+}
+
 function normalizeFetchHeaders(value: unknown): Record<string, string> | undefined {
   if (!value) {
     return undefined;
   }
 
-  if (typeof Headers !== "undefined" && value instanceof Headers) {
+  if (isStandardHeaders(value)) {
     return Object.fromEntries(Array.from(value.entries()).map(([key, headerValue]) => [String(key), String(headerValue)]));
   }
 
@@ -103,6 +110,57 @@ function normalizeFetchHeaders(value: unknown): Record<string, string> | undefin
   }
 
   return undefined;
+}
+
+function toStandardHeaders(value: unknown): Headers | undefined {
+  if (isStandardHeaders(value)) {
+    return value;
+  }
+
+  const normalized = normalizeFetchHeaders(value);
+  if (!normalized || typeof Headers === "undefined") {
+    return undefined;
+  }
+
+  const headers = new Headers();
+  for (const [key, headerValue] of Object.entries(normalized)) {
+    headers.set(String(key), String(headerValue));
+  }
+  return headers;
+}
+
+function normalizeFetchResponse<T>(response: T): T {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  const currentHeaders = (response as { headers?: unknown }).headers;
+  const headers = toStandardHeaders(currentHeaders);
+  if (!headers || headers === currentHeaders) {
+    return response;
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(response);
+  const patchedResponse = Object.create(Object.getPrototypeOf(response));
+  Object.defineProperties(patchedResponse, descriptors);
+  Object.defineProperty(patchedResponse, "headers", {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: headers,
+  });
+
+  const clone = (response as { clone?: () => unknown }).clone;
+  if (typeof clone === "function") {
+    Object.defineProperty(patchedResponse, "clone", {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: () => normalizeFetchResponse(clone.call(response)),
+    });
+  }
+
+  return patchedResponse;
 }
 
 async function normalizeFetchBody(input: unknown, init: RequestInit | undefined): Promise<BodyInit | undefined> {
@@ -174,7 +232,8 @@ export function installPiDesktopFetchShim(): PiDesktopFetchRestore {
       nextInit.body = body;
     }
 
-    return await sessionFetch!(url, nextInit);
+    const response = await sessionFetch!(url, nextInit);
+    return normalizeFetchResponse(response);
   }) as FetchLike;
 
   return () => {

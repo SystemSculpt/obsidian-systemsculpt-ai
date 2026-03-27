@@ -1,10 +1,11 @@
-import { App, TFile, Component, Notice, Modal, Setting, ButtonComponent, Platform } from "obsidian";
+import { App, TFile, Component, Notice, ButtonComponent, setIcon } from "obsidian";
 import {
   ChatMessage,
   ChatRole,
   Annotation,
   UrlCitation,
 } from "../../types";
+import type { SystemSculptModel } from "../../types/llm";
 import { ToolCall } from "../../types/toolCalls";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SystemSculptError } from "../../utils/errors";
@@ -23,6 +24,17 @@ import { ERROR_CODES } from "../../utils/errors";
 import { showPopup } from "../../core/ui/";
 
 import { createChatComposer } from "./ui/createInputUI";
+import {
+  getChatModelSetupMessage,
+  getChatModelSetupNotice,
+  getChatModelSetupSurface,
+  getChatModelPickerIcon,
+  getEffectiveChatModelId,
+  loadChatModelPickerOptions,
+  type ChatModelPickerOption,
+  type ChatModelSetupSurface,
+  type ChatModelSetupTab,
+} from "./modelSelection";
 import { renderContextAttachmentPill } from "./ui/ContextAttachmentPills";
 import { handlePaste as handlePasteExternal, handleLargeTextPaste as handleLargeTextPasteExternal, showLargeTextWarning as showLargeTextWarningExternal } from "./handlers/LargePasteHandlers";
 import { handleKeyDown as handleKeyDownExternal, handleInputChange as handleInputChangeExternal } from "./handlers/UIKeyHandlers";
@@ -36,24 +48,30 @@ import { errorLogger } from "../../utils/errorLogger";
 import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
 import {
-  getManagedSystemSculptModelId,
+  assertPiTextExecutionReady,
+  type PiTextExecutionPlan,
+} from "../../services/pi-native/PiTextRuntime";
+import {
+  buildPiTextProviderSetupMessage,
+  hasPiTextProviderAuth,
+} from "../../services/pi-native/PiTextAuth";
+import {
   hasManagedSystemSculptAccess,
   isManagedSystemSculptModelId,
 } from "../../services/systemsculpt/ManagedSystemSculptModel";
+import { ChatModelPickerModal } from "./ChatModelPickerModal";
 
 export interface InputHandlerOptions {
   app: App;
   container: HTMLElement;
   aiService: SystemSculptService;
   getMessages: () => ChatMessage[];
-  getContextFiles: () => Set<string>;
   isChatReady: () => boolean;
   chatContainer: HTMLElement;
   scrollManager: ScrollManagerService;
   messageRenderer: MessageRenderer;
   onMessageSubmit: (message: ChatMessage) => Promise<void>;
   onAssistantResponse: (message: ChatMessage) => Promise<void>;
-  onContextFileAdd: (wikilink: string) => Promise<void>;
   onError: (error: string | SystemSculptError) => void;
   onAddContextFile: () => void;
   onOpenChatSettings: () => void;
@@ -61,34 +79,39 @@ export interface InputHandlerOptions {
   getChatMarkdown: () => Promise<string>;
   getChatTitle: () => string;
   addFileToContext: (file: TFile) => Promise<void>;
-  addMessageToHistory: (message: ChatMessage) => Promise<void>;
-  chatStorage: any; // ChatStorageService
   getChatId: () => string;
+  onModelChange?: (options?: { refreshOptions?: boolean }) => void;
   chatView: any; // ChatView reference for message grouping
 }
+
+export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 
 export class InputHandler extends Component {
   private app: App;
   private container: HTMLElement;
   private aiService: SystemSculptService;
   private getMessages: () => ChatMessage[];
-  private getContextFiles: () => Set<string>;
   private isChatReady: () => boolean;
   private chatContainer: HTMLElement;
   private scrollManager: ScrollManagerService;
   private messageRenderer: MessageRenderer;
   private onMessageSubmit: (message: ChatMessage) => Promise<void>;
+  private persistAssistantResponse: (message: ChatMessage) => Promise<void>;
   private onAssistantResponse: (message: ChatMessage) => Promise<void>;
-  private onContextFileAdd: (wikilink: string) => Promise<void>;
   private onError: (error: string | SystemSculptError) => void;
   private onAddContextFile: () => void;
   private onOpenChatSettings: () => void;
   private input: HTMLTextAreaElement;
   private inputWrapper: HTMLDivElement | null = null;
+  private modelPickerHost: HTMLElement | null = null;
+  private modelPickerOptionsCache: ChatModelPickerOption[] | null = null;
+  private modelPickerOptionsPromise: Promise<ChatModelPickerOption[]> | null = null;
   private attachmentsEl: HTMLDivElement | null = null;
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
   private webSearchEnabled = false;
+  private automationApprovalMode: AutomationApprovalMode = "interactive";
+  private automationRequestDepth = 0;
   private renderTimeout: NodeJS.Timeout | null = null;
 
   /**
@@ -110,27 +133,20 @@ export class InputHandler extends Component {
   private getChatMarkdown: () => Promise<string>;
   private getChatTitle: () => string;
   private addFileToContext: (file: TFile) => Promise<void>;
-  private addMessageToHistory: (message: ChatMessage) => Promise<void>;
   private pendingLargeTextContent: string | null = null;
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
   private micButton: ButtonComponent;
   private sendButton: ButtonComponent;
-  private chatStorage: any; // ChatStorageService
   private getChatId: () => string;
+  private notifyModelChange: (options?: { refreshOptions?: boolean }) => void;
   private chatView: any;
   private slashCommandMenu?: SlashCommandMenu;
   private atMentionMenu?: AtMentionMenu;
   private agentSelectionMenu?: { isOpen?: () => boolean };
   private liveRegionEl: HTMLElement | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
-
-  /* ------------------------------------------------------------------
-   * Batching of tool-call state-changed events to avoid excessive DOM
-   * re-renders when many events fire in rapid succession.
-   * ------------------------------------------------------------------ */
-  private pendingToolCallUpdates: Set<string> = new Set();
-  private scheduledToolCallUpdateFrame: number | null = null;
+  private localResourcesDisposed = false;
 
   /**
    * A debounced handle used for throttling disk writes while streaming. Every
@@ -149,15 +165,13 @@ export class InputHandler extends Component {
     this.container = options.container;
     this.aiService = options.aiService;
     this.getMessages = options.getMessages;
-    this.getContextFiles = options.getContextFiles;
     this.isChatReady = options.isChatReady;
     this.chatContainer = options.chatContainer;
     this.scrollManager = options.scrollManager;
     this.messageRenderer = options.messageRenderer;
     this.onMessageSubmit = options.onMessageSubmit;
+    this.persistAssistantResponse = options.onAssistantResponse;
     this.onAssistantResponse = options.onAssistantResponse;
-    this.onContextFileAdd = options.onContextFileAdd;
-    this.addMessageToHistory = options.addMessageToHistory;
     this.onError = options.onError;
     this.onAddContextFile = options.onAddContextFile;
     this.onOpenChatSettings = options.onOpenChatSettings;
@@ -168,8 +182,8 @@ export class InputHandler extends Component {
     this.getChatMarkdown = options.getChatMarkdown;
     this.getChatTitle = options.getChatTitle;
     this.addFileToContext = options.addFileToContext;
-    this.chatStorage = options.chatStorage;
     this.getChatId = options.getChatId;
+    this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
 
     // InputHandler initialized with RecorderService - silent setup
@@ -196,9 +210,8 @@ export class InputHandler extends Component {
       } catch {}
     };
 
-    const originalAssistantResponse = options.onAssistantResponse;
     this.onAssistantResponse = async (message: ChatMessage) => {
-      await originalAssistantResponse(message);
+      await this.persistAssistantResponse(message);
       await this.renderPersistedAssistantMessage(message);
     };
 
@@ -233,6 +246,165 @@ export class InputHandler extends Component {
     });
   }
 
+  private getSelectedModelIdForChat(): string {
+    const selectedModelId =
+      typeof this.chatView?.getSelectedModelId === "function"
+        ? this.chatView.getSelectedModelId()
+        : this.chatView?.selectedModelId || this.plugin.settings.selectedModelId || "";
+    return getEffectiveChatModelId(selectedModelId, this.plugin.settings.selectedModelId);
+  }
+
+  private async getSelectedModelRecordForChat(): Promise<SystemSculptModel | undefined> {
+    if (typeof this.chatView?.getSelectedModelRecord === "function") {
+      return await this.chatView.getSelectedModelRecord();
+    }
+
+    const modelId = this.getSelectedModelIdForChat();
+    return await this.plugin.modelService?.getModelById?.(modelId);
+  }
+
+  private getSelectedModelSetupSurface(): ChatModelSetupSurface {
+    if (typeof this.chatView?.getSelectedModelSetupSurface === "function") {
+      return this.chatView.getSelectedModelSetupSurface();
+    }
+
+    return getChatModelSetupSurface(this.getSelectedModelIdForChat());
+  }
+
+  private async loadChatModelOptions(forceReload: boolean = false): Promise<ChatModelPickerOption[]> {
+    if (forceReload) {
+      this.modelPickerOptionsCache = null;
+      this.modelPickerOptionsPromise = null;
+    } else if (this.modelPickerOptionsCache) {
+      return this.modelPickerOptionsCache;
+    }
+
+    if (!this.modelPickerOptionsPromise) {
+      this.modelPickerOptionsPromise = loadChatModelPickerOptions(this.plugin)
+        .then((nextOptions) => {
+          this.modelPickerOptionsCache = nextOptions;
+          return nextOptions;
+        })
+        .finally(() => {
+        this.modelPickerOptionsPromise = null;
+      });
+    }
+
+    return await this.modelPickerOptionsPromise;
+  }
+
+  private ensureModelPickerHost(composer: { modelSlot?: HTMLElement | null; toolbar?: HTMLElement | null }): void {
+    if (composer.modelSlot instanceof HTMLElement) {
+      this.modelPickerHost = composer.modelSlot;
+      return;
+    }
+
+    const parent = composer.toolbar instanceof HTMLElement ? composer.toolbar : this.container;
+    const modelSlot = document.createElement("div");
+    modelSlot.className =
+      "systemsculpt-chat-composer-toolbar-center systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips";
+    const rightGroup = parent.querySelector(".systemsculpt-chat-composer-toolbar-group.mod-right");
+    if (rightGroup?.parentElement === parent) {
+      parent.insertBefore(modelSlot, rightGroup);
+    } else {
+      parent.appendChild(modelSlot);
+    }
+    this.modelPickerHost = modelSlot;
+  }
+
+  private renderModelPicker(): void {
+    if (!this.modelPickerHost) {
+      return;
+    }
+    if (typeof (this.modelPickerHost as any).createDiv !== "function") {
+      return;
+    }
+
+    this.modelPickerHost.replaceChildren();
+    this.modelPickerHost.classList.add("systemsculpt-chat-model-picker");
+    const currentModelId = this.getSelectedModelIdForChat();
+    const currentOption =
+      this.modelPickerOptionsCache?.find((option) => option.value === currentModelId) || null;
+    const triggerButtonEl = this.modelPickerHost.createEl("button", {
+      cls: "systemsculpt-chat-model-trigger",
+      attr: {
+        type: "button",
+        "aria-label": "Select chat model",
+        "aria-haspopup": "dialog",
+        "aria-expanded": "false",
+      },
+    });
+
+    const currentModelReady = currentOption
+      ? currentOption.providerAuthenticated
+      : isManagedSystemSculptModelId(currentModelId)
+        ? hasManagedSystemSculptAccess(this.plugin)
+        : false;
+    const fallbackSection = isManagedSystemSculptModelId(currentModelId) ? "systemsculpt" : "pi";
+
+    triggerButtonEl.classList.toggle("is-provider-authenticated", currentModelReady);
+    triggerButtonEl.classList.toggle("is-managed", isManagedSystemSculptModelId(currentModelId));
+    triggerButtonEl.classList.toggle("is-setup-required", !currentModelReady);
+
+    const iconEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-icon" });
+    setIcon(iconEl, currentOption?.icon || getChatModelPickerIcon(fallbackSection));
+
+    const bodyEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-body" });
+    bodyEl.createSpan({
+      cls: "systemsculpt-chat-model-trigger-label",
+      text:
+        currentOption?.label ||
+        (typeof this.chatView?.getCurrentModelName === "function"
+          ? this.chatView.getCurrentModelName()
+          : "Select model"),
+    });
+
+    const badgeText = currentOption?.providerLabel || (isManagedSystemSculptModelId(currentModelId) ? "SystemSculpt" : "Pi");
+    bodyEl.createSpan({
+      cls: "systemsculpt-chat-model-trigger-badge",
+      text: badgeText,
+    });
+
+    const chevronEl = triggerButtonEl.createSpan({ cls: "systemsculpt-chat-model-trigger-chevron" });
+    setIcon(chevronEl, "chevrons-up-down");
+
+    const titleParts = [currentOption?.label, badgeText, currentOption?.description].filter(Boolean);
+    triggerButtonEl.title = titleParts.join(" • ");
+
+    this.registerDomEvent(triggerButtonEl, "click", () => {
+      triggerButtonEl.setAttribute("aria-expanded", "true");
+      const modal = new ChatModelPickerModal(this.app, {
+        currentValue: currentModelId,
+        loadOptions: async () => await this.loadChatModelOptions(true),
+        onSelect: async (value: string) => {
+          await this.chatView?.setSelectedModelId?.(value);
+          await this.loadChatModelOptions(true).catch(() => []);
+          this.renderModelPicker();
+        },
+        onOpenSetup: (tab: ChatModelSetupTab) => {
+          this.openSetupTabFallback(tab);
+        },
+      });
+      const originalOnClose = modal.onClose.bind(modal);
+      modal.onClose = (): void => {
+        originalOnClose();
+        triggerButtonEl.setAttribute("aria-expanded", "false");
+        triggerButtonEl.focus();
+      };
+      modal.open();
+    });
+
+    if (!this.modelPickerOptionsCache && !this.modelPickerOptionsPromise) {
+      void this.loadChatModelOptions()
+        .then(() => {
+          if (this.modelPickerHost?.isConnected) {
+            this.renderModelPicker();
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
   private async streamAssistantTurn(
     signal: AbortSignal,
     includeContextFiles: boolean
@@ -245,32 +417,32 @@ export class InputHandler extends Component {
     }
 
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
-    const managedModelId = getManagedSystemSculptModelId();
-	    const stream = this.aiService.streamMessage({
-	      messages: this.getMessages(),
-	      model: managedModelId,
-	      contextFiles,
-	      signal,
+    const selectedModelId = this.getSelectedModelIdForChat();
+    const stream = this.aiService.streamMessage({
+      messages: this.getMessages(),
+      model: selectedModelId,
+      contextFiles,
+      signal,
         sessionFile: this.chatView?.getPiSessionFile?.(),
         sessionId: this.chatView?.getPiSessionId?.(),
         onPiSessionReady: (session) => {
           this.chatView?.setPiSessionState?.(session);
         },
         webSearchEnabled: this.webSearchEnabled,
-	      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
-	        chatId: this.getChatId(),
-	        assistantMessageId: messageId,
-        modelId: managedModelId,
+      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
+        chatId: this.getChatId(),
+        assistantMessageId: messageId,
+        modelId: selectedModelId,
       }) || undefined,
     });
 
-	    return await this.streamingController.stream(
-	      stream,
-	      messageEl,
-	      messageId,
-	      signal
-	    );
-	  }
+    return await this.streamingController.stream(
+      stream,
+      messageEl,
+      messageId,
+      signal
+    );
+  }
 
   private shouldContinueHostedToolLoop(message: ChatMessage, stopReason?: string): boolean {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
@@ -283,54 +455,6 @@ export class InputHandler extends Component {
     }
 
     return toolCalls.some((toolCall) => toolCall.state === "executing" || !toolCall.result);
-  }
-
-  private mergeToolCalls(existingToolCalls: ToolCall[] = [], nextToolCalls: ToolCall[] = []): ToolCall[] | undefined {
-    if (existingToolCalls.length === 0 && nextToolCalls.length === 0) {
-      return undefined;
-    }
-
-    const existingMap = new Map(existingToolCalls.map((toolCall) => [toolCall.id, toolCall]));
-    const mergedMap = new Map(existingMap);
-    for (const toolCall of nextToolCalls) {
-      mergedMap.set(toolCall.id, toolCall);
-    }
-
-    for (const [toolCallId, existingToolCall] of existingMap) {
-      if (!existingToolCall.result || !mergedMap.has(toolCallId)) {
-        continue;
-      }
-      const mergedToolCall = mergedMap.get(toolCallId)!;
-      if (!mergedToolCall.result) {
-        mergedToolCall.result = existingToolCall.result;
-      }
-    }
-
-    return Array.from(mergedMap.values());
-  }
-
-  private mergeAssistantMessageIntoHistory(message: ChatMessage): ChatMessage {
-    const messages = this.getMessages();
-    const existingMessageIndex = messages.findIndex((entry) => entry.message_id === message.message_id);
-    if (existingMessageIndex === -1) {
-      messages.push(message);
-      return message;
-    }
-
-    const existingMessage = messages[existingMessageIndex];
-    const mergedMessage: ChatMessage = {
-      ...existingMessage,
-      ...message,
-      content: message.content !== undefined ? message.content : existingMessage.content,
-      reasoning: message.reasoning || existingMessage.reasoning,
-      annotations: message.annotations || existingMessage.annotations,
-      tool_calls: this.mergeToolCalls(existingMessage.tool_calls || [], message.tool_calls || []),
-      messageParts: message.messageParts || existingMessage.messageParts,
-      reasoning_details: (message as any).reasoning_details || (existingMessage as any).reasoning_details,
-    };
-
-    messages[existingMessageIndex] = mergedMessage;
-    return mergedMessage;
   }
 
   private async renderPersistedAssistantMessage(
@@ -384,17 +508,27 @@ export class InputHandler extends Component {
     await messageHandling.addMessage(this.chatView, message.role, message.content, message.message_id, message);
   }
 
-  private async persistAssistantToolLoopUpdate(message: ChatMessage): Promise<ChatMessage> {
-    const mergedMessage = this.mergeAssistantMessageIntoHistory(message);
-    await this.saveChatImmediate();
-    await this.renderPersistedAssistantMessage(mergedMessage, { forceRerender: true });
-    return mergedMessage;
+  private async persistAssistantToolLoopUpdate(message: ChatMessage): Promise<void> {
+    if (typeof this.chatView?.persistAssistantMessage === "function") {
+      await this.chatView.persistAssistantMessage(message, { syncPiTranscript: false });
+    } else {
+      await this.persistAssistantResponse(message);
+    }
+    await this.renderPersistedAssistantMessage(message, { forceRerender: true });
   }
 
   private async confirmHostedToolExecution(toolCall: ToolCall): Promise<boolean> {
     const functionName = String(toolCall.request?.function?.name || "").trim();
     if (!requiresUserApproval(functionName, { trustedToolNames: new Set() })) {
       return true;
+    }
+
+    if (this.automationApprovalMode === "auto-approve") {
+      return true;
+    }
+
+    if (this.automationApprovalMode === "deny") {
+      return false;
     }
 
     let parsedArgs: Record<string, unknown> = {};
@@ -521,6 +655,11 @@ export class InputHandler extends Component {
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
+    this.ensureModelPickerHost({
+      modelSlot: (composer as any).modelSlot,
+      toolbar: (composer as any).toolbar,
+    });
+    this.renderModelPicker();
 
     // Initialize states that depend on runtime conditions
     this.updateSendButtonState();
@@ -587,6 +726,7 @@ export class InputHandler extends Component {
     this.registerEvent(
       this.app.workspace.on("systemsculpt:settings-updated", () => {
         this.updateGeneratingState();
+        this.onModelChange({ refreshOptions: true });
       })
     );
   }
@@ -629,7 +769,11 @@ export class InputHandler extends Component {
     // this.scrollManager.resetScrollState();
   }
 
-  private async handleSendMessage(overrides?: { includeContextFiles?: boolean }): Promise<void> {
+  private async handleSendMessage(overrides?: {
+    includeContextFiles?: boolean;
+    focusAfterSend?: boolean;
+    rethrowErrors?: boolean;
+  }): Promise<void> {
     let messageText: string = this.input.value.trim();
     if (!messageText) return;
 
@@ -683,17 +827,53 @@ export class InputHandler extends Component {
         errorLogger.debug("Chat turn failed", {
           source: "InputHandler",
           method: "handleSendMessage",
-          metadata: { modelId: getManagedSystemSculptModelId() },
+          metadata: { modelId: this.getSelectedModelIdForChat() },
         });
       } catch {}
+
+      if (overrides?.rethrowErrors) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error(String(err ?? "Unknown chat turn failure"));
+      }
     } finally {
-      this.focus();
+      if (overrides?.focusAfterSend !== false) {
+        this.focus();
+      }
       await this.chatView.contextManager.validateAndCleanContextFiles();
     }
   }
 
   public async submitWithOverrides(overrides: { includeContextFiles?: boolean }): Promise<void> {
     await this.handleSendMessage(overrides);
+  }
+
+  public async submitForAutomation(options?: {
+    includeContextFiles?: boolean;
+    approvalMode?: AutomationApprovalMode;
+    focusAfterSend?: boolean;
+  }): Promise<void> {
+    const previousApprovalMode = this.automationApprovalMode;
+    this.automationRequestDepth += 1;
+    if (options?.approvalMode) {
+      this.automationApprovalMode = options.approvalMode;
+    }
+
+    try {
+      await this.handleSendMessage({
+        includeContextFiles: options?.includeContextFiles,
+        focusAfterSend: options?.focusAfterSend,
+        rethrowErrors: true,
+      });
+    } finally {
+      this.automationApprovalMode = previousApprovalMode;
+      this.automationRequestDepth = Math.max(0, this.automationRequestDepth - 1);
+    }
+  }
+
+  public isAutomationRequestActive(): boolean {
+    return this.automationRequestDepth > 0;
   }
 
   private handleMicClick(): void {
@@ -1082,7 +1262,7 @@ export class InputHandler extends Component {
     return this.input.value;
   }
 
-  public setValue(value: string): void {
+  public setValue(value: string, options?: { focus?: boolean }): void {
     if (!this.input) {
       return;
     }
@@ -1101,20 +1281,42 @@ export class InputHandler extends Component {
       // Adjust height after value is set
       this.adjustInputHeight();
 
-      // Focus the input and move cursor to end
-      this.input.focus();
-      this.input.setSelectionRange(value.length, value.length);
+      if (options?.focus !== false) {
+        // Focus the input and move cursor to end
+        this.input.focus();
+        this.input.setSelectionRange(value.length, value.length);
+      }
     } catch (error) {
       new Notice("❌ Failed to set input value");
     }
   }
 
-  public unload(): void {
+  public isWebSearchEnabled(): boolean {
+    return this.webSearchEnabled;
+  }
+
+  public setWebSearchEnabled(enabled: boolean): void {
+    this.webSearchEnabled = Boolean(enabled);
+  }
+
+  public getAutomationApprovalMode(): AutomationApprovalMode {
+    return this.automationApprovalMode;
+  }
+
+  public setAutomationApprovalMode(mode: AutomationApprovalMode): void {
+    this.automationApprovalMode = mode;
+  }
+
+  private disposeLocalResources(): void {
+    if (this.localResourcesDisposed) {
+      return;
+    }
+    this.localResourcesDisposed = true;
+
     if (this.renderTimeout) {
       clearTimeout(this.renderTimeout);
     }
 
-    // Remove recorder UI elements and clean up
     if (this.recorderVisualizer) {
       this.recorderVisualizer.remove();
       this.recorderVisualizer = null;
@@ -1122,19 +1324,16 @@ export class InputHandler extends Component {
 
     this.recorderToggleUnsubscribe?.();
     this.recorderToggleUnsubscribe = null;
+    this.cleanupAllStatusIndicators();
+  }
 
-    // Clean up slash command menu
-    if (this.slashCommandMenu) {
-      this.slashCommandMenu.unload();
-    }
-
-    // Clean up @ mention menu
-    if (this.atMentionMenu) {
-      this.atMentionMenu.unload();
-    }
-
-    // Call Component's unload method to clean up event listeners
+  public unload(): void {
+    this.disposeLocalResources();
     super.unload();
+  }
+
+  public onunload(): void {
+    this.disposeLocalResources();
   }
 
   private generateMessageId(): string {
@@ -1198,8 +1397,13 @@ export class InputHandler extends Component {
     // Token counter has been removed
   }
 
-  public onModelChange(): void {
-    // no-op (kept for UI hooks)
+  public onModelChange(options?: { refreshOptions?: boolean }): void {
+    if (options?.refreshOptions) {
+      this.modelPickerOptionsCache = null;
+      this.modelPickerOptionsPromise = null;
+    }
+    this.renderModelPicker();
+    this.notifyModelChange(options);
   }
 
   public async handleOpenChatHistoryFile(): Promise<void> {
@@ -1214,9 +1418,14 @@ export class InputHandler extends Component {
    * Sets the input text content
    * @param content The content to set in the input field
    */
-  public setInputText(content: string | object): void {
-    this.setValue(typeof content === "string" ? content : JSON.stringify(content));
-    this.focus();
+  public setInputText(content: string | object, options?: { focus?: boolean }): void {
+    const shouldFocus = options?.focus !== false;
+    this.setValue(typeof content === "string" ? content : JSON.stringify(content), {
+      focus: shouldFocus,
+    });
+    if (shouldFocus) {
+      this.focus();
+    }
   }
 
   /**
@@ -1226,14 +1435,6 @@ export class InputHandler extends Component {
    */
   private extractAnnotationsFromResponse(responseText: string): Annotation[] {
     return extractAnnotationsFromResponseExternal(responseText);
-  }
-
-  public onunload(): void {
-    // Clean up any floating status indicators
-    this.cleanupAllStatusIndicators();
-    
-    // Call parent unload
-    super.unload();
   }
 
   /**
@@ -1307,66 +1508,113 @@ export class InputHandler extends Component {
   }
 
   private async ensureProviderReadyForChat(): Promise<boolean> {
-    if (!hasManagedSystemSculptAccess(this.plugin)) {
+    const selectedModelId = this.getSelectedModelIdForChat();
+    const setupSurface = this.getSelectedModelSetupSurface();
+
+    if (isManagedSystemSculptModelId(selectedModelId)) {
+      if (hasManagedSystemSculptAccess(this.plugin)) {
+        return true;
+      }
+
       await this.invokeProviderSetupPrompt(
-        "Activate your SystemSculpt license in Account before starting a chat."
+        "Activate your SystemSculpt license in Account before starting a chat.",
+        setupSurface
       );
       return false;
     }
 
-    const selectedModelId =
-      typeof this.chatView?.getSelectedModelId === "function"
-        ? String(this.chatView.getSelectedModelId() || "").trim()
-        : String(this.chatView?.selectedModelId || this.plugin.settings.selectedModelId || "").trim();
-    if (!isManagedSystemSculptModelId(selectedModelId)) {
-      try {
-        if (typeof this.chatView?.setSelectedModelId === "function") {
-          await this.chatView.setSelectedModelId(getManagedSystemSculptModelId());
-        } else {
-          await this.plugin.getSettingsManager().updateSettings({
-            selectedModelId: getManagedSystemSculptModelId(),
-          });
-        }
-      } catch (error: any) {
+    const selectedModel = await this.getSelectedModelRecordForChat();
+    if (!selectedModel) {
+      await this.invokeProviderSetupPrompt(
+        "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers.",
+        setupSurface
+      );
+      return false;
+    }
+
+    let executionPlan: PiTextExecutionPlan;
+    try {
+      executionPlan = await assertPiTextExecutionReady(selectedModel);
+    } catch (error: any) {
+      await this.invokeProviderSetupPrompt(
+        error?.message || "Pi is not ready to run the selected model yet.",
+        setupSurface
+      );
+      return false;
+    }
+
+    try {
+      const hasAuth = await hasPiTextProviderAuth(executionPlan.providerId);
+      if (!hasAuth) {
         await this.invokeProviderSetupPrompt(
-          error?.message || "SystemSculpt is not ready yet. Open Account to confirm your license."
+          buildPiTextProviderSetupMessage(executionPlan.providerId, executionPlan.actualModelId),
+          setupSurface
         );
         return false;
       }
+    } catch (error: any) {
+      await this.invokeProviderSetupPrompt(
+        error?.message || "Pi provider credentials are not ready yet.",
+        setupSurface
+      );
+      return false;
     }
 
     return true;
   }
 
-  private async invokeProviderSetupPrompt(message?: string): Promise<void> {
+  private async invokeProviderSetupPrompt(
+    message?: string,
+    overrides?: {
+      title?: string;
+      primaryButton?: string;
+      targetTab?: ChatModelSetupTab;
+    }
+  ): Promise<void> {
+    if (this.isAutomationRequestActive()) {
+      throw new Error(message ?? getChatModelSetupMessage(overrides?.targetTab || "account"));
+    }
+
     if (typeof this.chatView?.promptProviderSetup === 'function') {
-      await this.chatView.promptProviderSetup(message);
+      await this.chatView.promptProviderSetup(message, overrides);
       return;
     }
-    await this.promptProviderSetupFallback(message);
+    await this.promptProviderSetupFallback(message, overrides);
   }
 
-  private async promptProviderSetupFallback(message?: string): Promise<void> {
+  private async promptProviderSetupFallback(
+    message?: string,
+    overrides?: {
+      title?: string;
+      primaryButton?: string;
+      targetTab?: ChatModelSetupTab;
+    }
+  ): Promise<void> {
+    const setupSurface = {
+      ...this.getSelectedModelSetupSurface(),
+      ...overrides,
+    };
+    const targetTab = setupSurface.targetTab || "account";
     const result = await showPopup(
       this.app,
-      message ?? "Open Settings -> Account to activate your SystemSculpt license.",
+      message ?? getChatModelSetupMessage(targetTab),
       {
-        title: "Finish SystemSculpt setup",
+        title: setupSurface.title || "Finish setup",
         icon: "plug-zap",
-        primaryButton: "Open Account",
+        primaryButton: setupSurface.primaryButton || "Open Account",
         secondaryButton: "Not Now",
       }
     );
     if (result?.confirmed) {
-      this.openSetupTabFallback();
+      this.openSetupTabFallback(targetTab);
     }
   }
 
-  private openSetupTabFallback(tabId: string = "account"): void {
+  private openSetupTabFallback(tabId: ChatModelSetupTab = "account"): void {
     try {
       this.plugin.openSettingsTab(tabId);
     } catch (error) {
-      new Notice("Open Settings -> SystemSculpt AI -> Account to finish SystemSculpt setup.", 6000);
+      new Notice(getChatModelSetupNotice(tabId), 6000);
     }
   }
 }

@@ -22,6 +22,7 @@ export interface ChatComposerDeps {
 export interface ChatComposerElements {
   root: HTMLDivElement;
   toolbar: HTMLDivElement;
+  modelSlot: HTMLDivElement;
   attachments: HTMLDivElement;
   inputWrap: HTMLDivElement;
   input: HTMLTextAreaElement;
@@ -38,6 +39,9 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
 
   const toolbar = root.createDiv({ cls: "systemsculpt-chat-composer-toolbar" });
   const leftGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-left" });
+  const modelSlot = toolbar.createDiv({
+    cls: "systemsculpt-chat-composer-toolbar-center systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips",
+  });
 
   const rightGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-right" });
 
@@ -149,6 +153,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
   return {
     root,
     toolbar,
+    modelSlot,
     attachments,
     inputWrap,
     input: input as HTMLTextAreaElement,

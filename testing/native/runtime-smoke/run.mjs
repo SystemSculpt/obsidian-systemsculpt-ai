@@ -100,6 +100,12 @@ async function bootstrapHostedAuth(runtime) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.mode === "desktop") {
+    fail(
+      "Desktop runtime smoke now lives in testing/native/desktop-automation/run.mjs. " +
+        "Use `npm run test:native:desktop` or `npm run runtime:smoke:desktop`."
+    );
+  }
   const preparedRuntime = await ensureJsonUrl(options);
   const runtime = await connectToRuntime(preparedRuntime.jsonUrl, options.targetHint);
   const iterations = [];
