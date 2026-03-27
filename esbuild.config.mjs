@@ -233,7 +233,6 @@ const buildOptions = {
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		"node-pty",
 		...builtinExternals,
 	],
 	format: "cjs",

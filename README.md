@@ -97,7 +97,7 @@ npm run release:plugin -- --bump patch # force a specific bump
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
-That release path still builds the desktop Studio support assets the shipped plugin depends on: Pi runtime bundles plus `studio-terminal-sidecar.cjs`.
+That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
 
 Windows still needs a human-run host pass, but the shared native runtime smoke runner is documented cross-platform. Treat Windows as an explicit validation lane, not an implicit guess.
 

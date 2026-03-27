@@ -29,7 +29,6 @@ describe("Studio settings tab", () => {
         studioDefaultProjectsFolder: "SystemSculpt/Studio",
         studioRunRetentionMaxRuns: 100,
         studioRunRetentionMaxArtifactsMb: 1024,
-        studioTerminalSidecarTimeoutMinutes: 15,
         imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
         imageGenerationPollIntervalMs: 1000,
         imageGenerationSaveMetadataSidecar: true,
@@ -59,6 +58,7 @@ describe("Studio settings tab", () => {
     expect(text).toContain("through SystemSculpt");
     expect(names).toContain("Open SystemSculpt Studio");
     expect(names).not.toContain("Studio telemetry (remote)");
+    expect(names).not.toContain("Studio terminal sidecar timeout (minutes)");
     expect(text).not.toContain("redacted Studio run telemetry");
   });
 });

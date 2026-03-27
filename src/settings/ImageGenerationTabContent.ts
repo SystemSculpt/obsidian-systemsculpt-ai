@@ -95,26 +95,6 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
       text.inputEl.inputMode = "numeric";
     });
 
-  new Setting(containerEl)
-    .setName("Studio terminal sidecar timeout (minutes)")
-    .setDesc(
-      "How long terminal sessions can stay alive after Obsidian disconnects. After this timeout, the sidecar shuts down and kills child terminal processes."
-    )
-    .addText((text) => {
-      text
-        .setPlaceholder("15 (5-120)")
-        .setValue(String(plugin.settings.studioTerminalSidecarTimeoutMinutes ?? 15))
-        .onChange(async (value) => {
-          const parsed = Number.parseInt(value, 10);
-          if (!Number.isFinite(parsed)) return;
-          const clamped = Math.max(5, Math.min(120, parsed));
-          await plugin.getSettingsManager().updateSettings({
-            studioTerminalSidecarTimeoutMinutes: clamped,
-          });
-        });
-      text.inputEl.inputMode = "numeric";
-    });
-
   containerEl.createEl("h3", { text: "SystemSculpt Image Generation" });
 
   new Setting(containerEl)

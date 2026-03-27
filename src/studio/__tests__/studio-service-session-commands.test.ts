@@ -337,10 +337,6 @@ describe("StudioService session-backed mutation commands", () => {
     jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue(
       '{"name":"Renamed Project"}'
     );
-    const terminateSpy = jest
-      .spyOn((service as any).terminalService, "terminateProjectSessions")
-      .mockResolvedValue(undefined);
-
     await (service as any).projectSessionManager.retainSession("Studio/Test.systemsculpt", async () => session);
     (service as any).currentProjectSession = session;
     (service as any).currentProjectPath = "Studio/Test.systemsculpt";
@@ -348,10 +344,6 @@ describe("StudioService session-backed mutation commands", () => {
     const renamed = await service.renameProject("Studio/Test.systemsculpt", "Renamed");
 
     expect(flushSpy).toHaveBeenCalledWith({ force: true });
-    expect(terminateSpy).toHaveBeenCalledWith({
-      projectPath: "Studio/Test.systemsculpt",
-      reason: "project_rename",
-    });
     expect(renamed.newPath).toBe("Studio/Renamed.systemsculpt");
     expect((service as any).currentProjectPath).toBe("Studio/Renamed.systemsculpt");
     expect(session.getProjectPath()).toBe("Studio/Renamed.systemsculpt");

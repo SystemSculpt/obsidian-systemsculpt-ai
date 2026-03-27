@@ -14,16 +14,7 @@ import {
   type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
-import {
-  StudioTerminalSessionManager,
-  type StudioTerminalSidecarStatus,
-  type StudioTerminalSidecarStatusListener,
-  type StudioTerminalSessionListener,
-  type StudioTerminalSessionRequest,
-  type StudioTerminalSessionSnapshot,
-} from "./StudioTerminalSessionManager";
 import { resolveStudioDynamicSelectOptions } from "./StudioDynamicSelectOptions";
-import { StudioTerminalService } from "./StudioTerminalService";
 import { randomId } from "./utils";
 import type {
   StudioAssetRef,
@@ -102,7 +93,6 @@ export class StudioService {
   private readonly assetStore: StudioAssetStore;
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
-  private readonly terminalService: StudioTerminalService;
   private readonly projectSessionManager = new StudioProjectSessionManager();
   private currentProjectPath: string | null = null;
   private currentProjectSession: StudioProjectSession | null = null;
@@ -119,12 +109,6 @@ export class StudioService {
       this.compiler,
       this.assetStore,
       this.apiAdapter
-    );
-    const terminalSessionManager = new StudioTerminalSessionManager(plugin);
-    this.terminalService = new StudioTerminalService(
-      plugin,
-      this.projectStore,
-      terminalSessionManager
     );
 
     registerBuiltInStudioNodes(this.registry);
@@ -291,10 +275,6 @@ export class StudioService {
     const previousProjectPath = this.currentProjectPath;
     if (previousProjectPath && previousProjectPath !== normalized) {
       await this.projectSessionManager.releaseSession(previousProjectPath);
-      await this.terminalService.terminateProjectSessions({
-        projectPath: previousProjectPath,
-        reason: "project_switch",
-      });
     }
 
     const existingSession = this.projectSessionManager.getSession(normalized);
@@ -424,10 +404,6 @@ export class StudioService {
     const previousProjectPath = this.currentProjectPath;
     if (previousProjectPath && previousProjectPath !== created.path) {
       await this.projectSessionManager.releaseSession(previousProjectPath);
-      await this.terminalService.terminateProjectSessions({
-        projectPath: previousProjectPath,
-        reason: "project_switch",
-      });
     }
 
     const acceptedRawText = await this.projectStore.readProjectRawText(created.path);
@@ -466,13 +442,6 @@ export class StudioService {
     const renamed = await this.projectStore.renameProject(normalizedProjectPath, safeName, {
       project: projectSnapshot,
     });
-
-    if (renamed.oldPath !== renamed.newPath) {
-      await this.terminalService.terminateProjectSessions({
-        projectPath: renamed.oldPath,
-        reason: "project_rename",
-      });
-    }
 
     const nextRawText = await this.projectStore.readProjectRawText(renamed.newPath);
     if (session) {
@@ -614,95 +583,19 @@ export class StudioService {
     await this.projectStore.savePolicy(project.permissionsRef.policyPath, policy);
   }
 
-  async ensureTerminalSession(request: StudioTerminalSessionRequest): Promise<StudioTerminalSessionSnapshot> {
-    return await this.terminalService.ensureSession(request);
-  }
-
-  async restartTerminalSession(request: StudioTerminalSessionRequest): Promise<StudioTerminalSessionSnapshot> {
-    return await this.terminalService.restartSession(request);
-  }
-
-  async stopTerminalSession(options: { projectPath: string; nodeId: string }): Promise<void> {
-    await this.terminalService.stopSession(options);
-  }
-
-  clearTerminalSessionHistory(options: { projectPath: string; nodeId: string }): void {
-    this.terminalService.clearHistory(options);
-  }
-
-  writeTerminalInput(options: { projectPath: string; nodeId: string; data: string }): void {
-    this.terminalService.writeInput(options);
-  }
-
-  resizeTerminalSession(options: { projectPath: string; nodeId: string; cols: number; rows: number }): void {
-    this.terminalService.resizeSession(options);
-  }
-
-  getTerminalSessionSnapshot(options: {
-    projectPath: string;
-    nodeId: string;
-  }): StudioTerminalSessionSnapshot | null {
-    return this.terminalService.getSnapshot(options);
-  }
-
-  async peekTerminalSession(options: {
-    projectPath: string;
-    nodeId: string;
-  }): Promise<StudioTerminalSessionSnapshot | null> {
-    return await this.terminalService.peekSession(options);
-  }
-
-  subscribeTerminalSession(
-    options: { projectPath: string; nodeId: string },
-    listener: StudioTerminalSessionListener
-  ): () => void {
-    return this.terminalService.subscribe(options, listener);
-  }
-
-  getTerminalSidecarStatus(): StudioTerminalSidecarStatus | null {
-    return this.terminalService.getSidecarStatus();
-  }
-
-  subscribeTerminalSidecarStatus(listener: StudioTerminalSidecarStatusListener): () => void {
-    return this.terminalService.subscribeSidecarStatus(listener);
-  }
-
-  async refreshTerminalSidecarStatus(): Promise<StudioTerminalSidecarStatus | null> {
-    return await this.terminalService.refreshSidecarStatus();
-  }
-
-  buildTerminalSidecarStatusReport(): string {
-    return this.terminalService.buildSidecarStatusReport();
-  }
-
-  async terminateProjectTerminalSessions(options: { projectPath: string; reason?: string }): Promise<void> {
-    await this.terminalService.terminateProjectSessions({
-      projectPath: normalizeStudioProjectPath(String(options.projectPath || "").trim()),
-      reason: String(options.reason || "").trim(),
-    });
-  }
-
-  async closeCurrentProject(options?: { terminateTerminalSessions?: boolean }): Promise<void> {
+  async closeCurrentProject(): Promise<void> {
     const previousProjectPath = this.currentProjectPath;
     this.currentProjectPath = null;
     this.currentProjectSession = null;
     if (previousProjectPath) {
       await this.projectSessionManager.releaseSession(previousProjectPath);
     }
-    if (!previousProjectPath || options?.terminateTerminalSessions === false) {
-      return;
-    }
-    await this.terminalService.terminateProjectSessions({
-      projectPath: previousProjectPath,
-      reason: "project_close",
-    });
   }
 
   async dispose(): Promise<void> {
     this.currentProjectSession = null;
     this.currentProjectPath = null;
     await this.projectSessionManager.closeAll();
-    await this.terminalService.dispose();
   }
 
   listNodeDefinitions() {

@@ -19,7 +19,6 @@ const REQUIRED_FILES = [
   "manifest.json",
   "main.js",
   "styles.css",
-  "studio-terminal-sidecar.cjs",
 ];
 const OPTIONAL_FILES = ["README.md", "LICENSE", "versions.json"];
 
