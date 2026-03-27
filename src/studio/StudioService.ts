@@ -441,6 +441,57 @@ export class StudioService {
     return session.getProject();
   }
 
+  async renameProject(projectPath: string, nextName: string): Promise<{
+    oldPath: string;
+    newPath: string;
+    project: StudioProjectV1;
+  }> {
+    const normalizedProjectPath = normalizeStudioProjectPath(projectPath);
+    const safeName = sanitizeStudioProjectName(String(nextName || "").trim());
+    if (!safeName) {
+      throw new Error("Studio project name cannot be empty.");
+    }
+
+    const session = this.projectSessionManager.getSession(normalizedProjectPath);
+    const projectSnapshot = session?.getProjectSnapshot()
+      || (this.currentProjectPath === normalizedProjectPath ? this.currentProjectSession?.getProjectSnapshot() : null)
+      || undefined;
+
+    if (session) {
+      await session.flushPendingSaveWork({ force: true });
+    } else if (this.currentProjectSession?.getProjectPath() === normalizedProjectPath) {
+      await this.currentProjectSession.flushPendingSaveWork({ force: true });
+    }
+
+    const renamed = await this.projectStore.renameProject(normalizedProjectPath, safeName, {
+      project: projectSnapshot,
+    });
+
+    if (renamed.oldPath !== renamed.newPath) {
+      await this.terminalService.terminateProjectSessions({
+        projectPath: renamed.oldPath,
+        reason: "project_rename",
+      });
+    }
+
+    const nextRawText = await this.projectStore.readProjectRawText(renamed.newPath);
+    if (session) {
+      session.replaceProjectSnapshot(renamed.project, {
+        projectPath: renamed.newPath,
+        acceptedRawText: nextRawText,
+      });
+      this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
+      if (this.currentProjectSession === session || this.currentProjectPath === renamed.oldPath) {
+        this.currentProjectSession = session;
+        this.currentProjectPath = renamed.newPath;
+      }
+    } else if (this.currentProjectPath === renamed.oldPath) {
+      this.currentProjectPath = renamed.newPath;
+    }
+
+    return renamed;
+  }
+
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
     const normalizedProjectPath = normalizeStudioProjectPath(projectPath);
     await this.projectStore.saveProject(normalizedProjectPath, project);

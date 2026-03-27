@@ -95,4 +95,16 @@ describe("StudioProjectSessionManager", () => {
     expect(secondCloseSpy).toHaveBeenCalledTimes(1);
     expect(manager.listOpenSessions()).toHaveLength(0);
   });
+
+  it("moves retained sessions to a renamed project path", async () => {
+    const manager = new StudioProjectSessionManager();
+    const session = createSession("Studio/Original.systemsculpt");
+
+    await manager.retainSession("Studio/Original.systemsculpt", async () => session);
+
+    expect(manager.moveSession("Studio/Original.systemsculpt", "Studio/Renamed.systemsculpt")).toBe(true);
+    expect(manager.getSession("Studio/Original.systemsculpt")).toBeNull();
+    expect(manager.getSession("Studio/Renamed.systemsculpt")).toBe(session);
+    expect(manager.getRetainCount("Studio/Renamed.systemsculpt")).toBe(1);
+  });
 });

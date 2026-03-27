@@ -2076,6 +2076,7 @@ export class SystemSculptStudioView extends ItemView {
       }
       this.projectLiveSyncWarning = null;
       this.render();
+      this.refreshLeafDisplay();
       return;
     }
     const remappedProjectPath = this.isVaultFolder(file)
@@ -2113,6 +2114,7 @@ export class SystemSculptStudioView extends ItemView {
       }
       this.projectLiveSyncWarning = null;
       this.render();
+      this.refreshLeafDisplay();
       return;
     }
 
@@ -4474,6 +4476,22 @@ export class SystemSculptStudioView extends ItemView {
       viewport.scrollLeft = nextLeft;
       viewport.scrollTop = nextTop;
     });
+  }
+
+  /**
+   * Ask Obsidian to re-read getDisplayText() so the tab title reflects the
+   * current project path.  Uses the public setViewState API; the subsequent
+   * setState→loadProjectFromPath call is a no-op when the path hasn't changed.
+   */
+  private refreshLeafDisplay(): void {
+    try {
+      this.leaf?.setViewState({
+        type: this.getViewType(),
+        state: this.getState(),
+      });
+    } catch {
+      // Best-effort – never block the caller.
+    }
   }
 
   private render(): void {

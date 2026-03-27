@@ -10,6 +10,7 @@ import { showConfirm } from "../ui/notifications";
 import { PlatformContext } from "../../services/PlatformContext";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
+import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 
 type StudioCommandViewLike = {
   getViewType(): string;
@@ -380,19 +381,19 @@ export class CommandManager {
           return true;
         }
 
-        // If not in chat view, check if we're in a regular note
-        const activeFile = this.app.workspace.getActiveFile();
+        // If not in chat view, check if we're in a note or Studio workflow file
+        const activeFile = this.resolveTitleTargetFile();
         if (!activeFile) {
           if (!checking) {
-            new Notice("You need to be within a note or chat view to change the title.", 5000);
+            new Notice("You need to be within a note, Studio workflow, or chat view to change the title.", 5000);
           }
           return false;
         }
 
-        // Only allow for markdown files
-        if (activeFile.extension !== 'md') {
+        // Only allow for markdown notes and Studio workflow files
+        if (!this.canGenerateTitleForFile(activeFile)) {
           if (!checking) {
-            new Notice("Title generation is only available for markdown files.", 5000);
+            new Notice("Title generation is only available for markdown and .systemsculpt files.", 5000);
           }
           return false;
         }
@@ -417,11 +418,12 @@ export class CommandManager {
               );
 
               if (title && title !== activeFile.basename) {
-                // Get the new path with the new title
-                const newPath = activeFile.path.replace(activeFile.basename, title);
                 try {
-                  await this.app.fileManager.renameFile(activeFile, newPath);
-                  notice.setMessage("Note title updated successfully!");
+                  await this.renameTitleTargetFile(activeFile, title);
+                  const successLabel = activeFile.extension.toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1)
+                    ? "Studio project"
+                    : "Note";
+                  notice.setMessage(`${successLabel} title updated successfully!`);
                   notice.hide();
                 } catch (error) {
                   const errorMessage = error instanceof Error ? error.message : String(error);
@@ -778,6 +780,55 @@ export class CommandManager {
     }
 
     return abstractFile.path || normalizedPath;
+  }
+
+  private canGenerateTitleForFile(file: TFile | null | undefined): boolean {
+    if (!(file instanceof TFile)) {
+      return false;
+    }
+    const extension = String(file.extension || "").trim().toLowerCase();
+    return extension === "md" || extension === STUDIO_PROJECT_EXTENSION.slice(1);
+  }
+
+  private resolveTitleTargetFile(): TFile | null {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (this.canGenerateTitleForFile(activeFile)) {
+      return activeFile as TFile;
+    }
+
+    const resolvedPath = this.getCurrentActiveFilePath();
+    if (!resolvedPath) {
+      return null;
+    }
+
+    const abstractFile = this.app.vault.getAbstractFileByPath(resolvedPath);
+    return abstractFile instanceof TFile && this.canGenerateTitleForFile(abstractFile)
+      ? abstractFile
+      : null;
+  }
+
+  private buildSiblingFilePath(file: TFile, nextBasename: string): string {
+    const folderPath = file.path.split("/").slice(0, -1).join("/");
+    const extension = String(file.extension || "").trim().replace(/^\./, "");
+    const fileName = extension ? `${nextBasename}.${extension}` : nextBasename;
+    return folderPath ? `${folderPath}/${fileName}` : fileName;
+  }
+
+  private async renameTitleTargetFile(file: TFile, nextTitle: string): Promise<string> {
+    const safeTitle = String(nextTitle || "").trim();
+    if (!safeTitle) {
+      throw new Error("Generated title is empty.");
+    }
+
+    const isStudioProject = String(file.extension || "").trim().toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1);
+    if (isStudioProject) {
+      const result = await this.plugin.getStudioService().renameProject(file.path, safeTitle);
+      return result.newPath;
+    }
+
+    const newPath = this.buildSiblingFilePath(file, safeTitle);
+    await this.app.fileManager.renameFile(file, newPath);
+    return newPath;
   }
 
   private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {

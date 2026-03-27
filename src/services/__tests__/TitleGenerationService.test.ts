@@ -72,6 +72,9 @@ describe("TitleGenerationService", () => {
     const title = await service.generateTitle(messages);
 
     expect(streamMessage).toHaveBeenCalled();
+    expect(streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ allowTools: false })
+    );
     expect(title).toBe("My Title");
   });
 
@@ -218,6 +221,24 @@ describe("TitleGenerationService", () => {
         service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }])
       ).resolves.toBe("Untitled Chat");
       expect(streamMessage).not.toHaveBeenCalled();
+    });
+
+    it("disables tools for title generation to prevent tool-call responses", async () => {
+      const { plugin } = createPlugin();
+
+      let capturedParams: any = null;
+      streamMessage.mockImplementation((params: any) => {
+        capturedParams = params;
+        return (async function* () {
+          yield { type: "content", text: "Generated Title" };
+        })();
+      });
+
+      const service = TitleGenerationService.getInstance(plugin);
+      await service.generateTitle([{ role: "user", content: "Hello", message_id: "1" }]);
+
+      expect(capturedParams).not.toBeNull();
+      expect(capturedParams.allowTools).toBe(false);
     });
   });
 

@@ -169,6 +169,7 @@ describe("TranscriptionTitleService", () => {
         expect.objectContaining({
           model: "systemsculpt@@systemsculpt/ai-agent",
           systemPromptOverride: expect.stringContaining("audio transcripts"),
+          allowTools: false,
         })
       );
     });

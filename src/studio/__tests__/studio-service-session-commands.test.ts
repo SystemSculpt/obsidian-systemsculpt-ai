@@ -316,4 +316,46 @@ describe("StudioService session-backed mutation commands", () => {
     );
     expect(runtime.runProject).not.toHaveBeenCalled();
   });
+
+  it("renames the current project and moves the retained session path", async () => {
+    const service = new StudioService(createPluginStub());
+    const session = createSession();
+    const flushSpy = jest.spyOn(session, "flushPendingSaveWork").mockResolvedValue();
+    const renamedProject = {
+      ...projectFixture(),
+      name: "Renamed Project",
+      permissionsRef: {
+        policyVersion: 1,
+        policyPath: "Studio/Renamed.systemsculpt-assets/policy/grants.json",
+      },
+    };
+    jest.spyOn((service as any).projectStore, "renameProject").mockResolvedValue({
+      oldPath: "Studio/Test.systemsculpt",
+      newPath: "Studio/Renamed.systemsculpt",
+      project: renamedProject,
+    });
+    jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue(
+      '{"name":"Renamed Project"}'
+    );
+    const terminateSpy = jest
+      .spyOn((service as any).terminalService, "terminateProjectSessions")
+      .mockResolvedValue(undefined);
+
+    await (service as any).projectSessionManager.retainSession("Studio/Test.systemsculpt", async () => session);
+    (service as any).currentProjectSession = session;
+    (service as any).currentProjectPath = "Studio/Test.systemsculpt";
+
+    const renamed = await service.renameProject("Studio/Test.systemsculpt", "Renamed");
+
+    expect(flushSpy).toHaveBeenCalledWith({ force: true });
+    expect(terminateSpy).toHaveBeenCalledWith({
+      projectPath: "Studio/Test.systemsculpt",
+      reason: "project_rename",
+    });
+    expect(renamed.newPath).toBe("Studio/Renamed.systemsculpt");
+    expect((service as any).currentProjectPath).toBe("Studio/Renamed.systemsculpt");
+    expect(session.getProjectPath()).toBe("Studio/Renamed.systemsculpt");
+    expect(session.getProject().name).toBe("Renamed Project");
+    expect(service.getProjectSession("Studio/Renamed.systemsculpt")).toBe(session);
+  });
 });

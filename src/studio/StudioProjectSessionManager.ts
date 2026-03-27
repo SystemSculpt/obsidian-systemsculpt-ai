@@ -70,6 +70,30 @@ export class StudioProjectSessionManager {
     await session.flushPendingSaveWork({ force: options?.force });
   }
 
+  moveSession(oldProjectPath: string, newProjectPath: string): boolean {
+    const normalizedOldPath = this.normalizeProjectPath(oldProjectPath);
+    const normalizedNewPath = this.normalizeProjectPath(newProjectPath);
+    if (!normalizedOldPath || !normalizedNewPath) {
+      return false;
+    }
+    if (normalizedOldPath === normalizedNewPath) {
+      return this.entriesByPath.has(normalizedOldPath);
+    }
+
+    const existing = this.entriesByPath.get(normalizedOldPath);
+    if (!existing) {
+      return false;
+    }
+
+    this.entriesByPath.delete(normalizedOldPath);
+    this.entriesByPath.set(normalizedNewPath, {
+      path: normalizedNewPath,
+      session: existing.session,
+      retainCount: existing.retainCount,
+    });
+    return true;
+  }
+
   async releaseSession(projectPath: string): Promise<void> {
     const normalized = this.normalizeProjectPath(projectPath);
     if (!normalized) {

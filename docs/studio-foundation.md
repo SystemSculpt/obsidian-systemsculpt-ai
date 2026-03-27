@@ -23,7 +23,7 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/studio/StudioNodeResultCacheStore.ts`: persistent per-node output cache + input fingerprinting.
 - `src/studio/StudioRunScope.ts`: reusable run-scope projection for graph/node runs.
 - `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter for the SystemSculpt path.
-- `src/studio/StudioLocalTextModelCatalog.ts`: legacy local-model helper retained only while older migration paths are still being removed.
+- `src/studio/piAuth/StudioPiAuthStorage.ts`: desktop Pi auth storage bridge for provider discovery, OAuth state, and API-key management.
 - `src/studio/StudioRuntime.ts`: run queue, immutable snapshots, events, retention.
 - `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
 - `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
@@ -52,7 +52,7 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 ## Path Contracts
 - Project names are sanitized for path safety while preserving human-readable naming.
 - `.systemsculpt` is always normalized as the canonical extension.
-- Project create operations never overwrite an existing project path.
+- Project create operations never overwrite an existing project path or sibling `.systemsculpt-assets` folder.
 - Path collisions auto-suffix with ` (2)`, ` (3)`, etc.
 
 ## Runtime Contracts

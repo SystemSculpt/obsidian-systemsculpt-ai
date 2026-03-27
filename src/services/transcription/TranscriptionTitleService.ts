@@ -104,6 +104,7 @@ export class TranscriptionTitleService {
           messages,
           model,
           systemPromptOverride: TITLE_PROMPT,
+          allowTools: false,
         });
 
         for await (const event of stream) {
