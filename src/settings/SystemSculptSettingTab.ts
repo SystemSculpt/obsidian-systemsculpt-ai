@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, setIcon, ButtonComponent, Platform, EventRef } from "obsidian";
+import { App, PluginSettingTab, Setting, Notice, setIcon, Platform, EventRef } from "obsidian";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 import { showPopup } from "../core/ui";
 import SystemSculptPlugin from "../main";
@@ -204,30 +204,34 @@ async display(): Promise<void> {
   this.tabContainerEl = null;
   this.contentContainerEl = null;
 
-  containerEl.createEl("h2", { text: "SystemSculpt AI" });
+  const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
+  const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
+  titleGroup.createEl("h2", { text: "SystemSculpt AI" });
+  const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
+  this.versionInfoContainer = titleMeta.createDiv({ cls: "ss-settings-title-version" });
+  this.initializeVersionDisplay();
+
+  const refreshVersionButton = titleMeta.createEl("button", {
+    cls: "clickable-icon ss-settings-title-refresh",
+    attr: {
+      type: "button",
+      "aria-label": "Check for updates",
+      title: "Check for updates",
+    },
+  });
+  setIcon(refreshVersionButton, "refresh-cw");
+  this.registerListener(refreshVersionButton, "click", async () => {
+    refreshVersionButton.disabled = true;
+    try {
+      await this.checkForUpdates(true);
+    } finally {
+      refreshVersionButton.disabled = false;
+    }
+  });
+
   containerEl.createEl("p", {
     text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
     cls: "setting-item-description",
-  });
-
-  const versionSetting = new Setting(containerEl)
-    .setName("Plugin version")
-    .setDesc("");
-  versionSetting.controlEl.addClass("ss-inline-actions");
-  this.versionInfoContainer = versionSetting.descEl;
-  this.initializeVersionDisplay();
-  versionSetting.addExtraButton((button) => {
-    button
-      .setIcon("refresh-cw")
-      .setTooltip("Check for updates")
-      .onClick(async () => {
-        button.setDisabled(true);
-        try {
-          await this.checkForUpdates(true);
-        } finally {
-          button.setDisabled(false);
-        }
-      });
   });
 
   const searchSetting = new Setting(containerEl)

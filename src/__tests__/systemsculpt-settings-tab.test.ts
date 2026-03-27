@@ -28,7 +28,13 @@ const createPluginStub = () => {
   };
 
   const versionChecker = {
-    checkVersion: jest.fn().mockResolvedValue({ latestVersion: "1.2.3", isUpToDate: true }),
+    checkVersion: jest.fn().mockResolvedValue({
+      currentVersion: "1.2.3",
+      latestVersion: "1.2.3",
+      isLatest: true,
+      releaseUrl: "https://example.com/release",
+      updateUrl: "https://example.com/update",
+    }),
   };
 
   return {
@@ -136,6 +142,25 @@ describe("SystemSculptSettingTab native layout", () => {
     const text = tab.containerEl.textContent || "";
     expect(text).toContain("Manage your SystemSculpt account");
     expect(text).not.toContain("Configure AI models");
+  });
+
+  it("shows plugin version inline with the title instead of as its own settings row", async () => {
+    const tab = await renderTab();
+    const titleRow = tab.containerEl.querySelector(".ss-settings-title-row");
+    const title = titleRow?.querySelector("h2");
+    const versionPill = titleRow?.querySelector(".ss-version-pill");
+    const refreshButton = titleRow?.querySelector(
+      'button[aria-label="Check for updates"]'
+    ) as HTMLButtonElement | null;
+
+    expect(title?.textContent).toBe("SystemSculpt AI");
+    expect(versionPill?.textContent).toContain("v1.2.3");
+    expect(refreshButton).not.toBeNull();
+    expect(
+      Array.from(tab.containerEl.querySelectorAll(".setting-item-name")).some(
+        (el) => el.textContent?.trim() === "Plugin version"
+      )
+    ).toBe(false);
   });
 
   it("does not render the legacy settings mode control", async () => {
