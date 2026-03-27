@@ -37,6 +37,13 @@
   border-left: 3px solid var(--text-success);
 }
 
+.ss-provider-row--blocked {
+  border-left: 3px solid var(--text-warning);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--text-warning) 9%, transparent), transparent 28%),
+    var(--background-primary);
+}
+
 .ss-provider-row--disconnected {
   border-left: 3px solid var(--background-modifier-border);
 }
@@ -58,6 +65,10 @@
 
 .ss-provider-row--connected .ss-provider-row__status-dot {
   background: var(--text-success);
+}
+
+.ss-provider-row--blocked .ss-provider-row__status-dot {
+  background: var(--text-warning);
 }
 
 .ss-provider-row--disconnected .ss-provider-row__status-dot {
@@ -85,6 +96,17 @@
 
 .ss-provider-row--connected .ss-provider-row__auth-summary {
   color: var(--text-success);
+}
+
+.ss-provider-row--blocked .ss-provider-row__auth-summary {
+  color: var(--text-warning);
+}
+
+.ss-provider-row__warning {
+  font-size: 0.78em;
+  line-height: 1.45;
+  color: var(--text-warning);
+  margin-top: 5px;
 }
 
 /* Actions */

@@ -128,6 +128,65 @@ describe("Providers tab provider states", () => {
     expect(reasonEl?.getAttribute("title")).toBe(restriction.hoverDetails);
   });
 
+  it("shows stored Anthropic subscription auth as disabled instead of connected", async () => {
+    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "anthropic",
+        displayName: "Anthropic Claude Max",
+        supportsOAuth: true,
+        hasAnyAuth: true,
+        hasStoredCredential: true,
+        source: "oauth",
+        credentialType: "oauth",
+        oauthExpiresAt: null,
+      },
+    ]);
+
+    const plugin = {
+      app: new App(),
+      settings: {
+        customProviders: [],
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    await displayProvidersTabContent(container, tab);
+
+    const restriction = getStudioPiAuthMethodRestriction("anthropic", "oauth");
+    const row = container.querySelector(".ss-provider-row");
+    const warningEl = container.querySelector<HTMLElement>(".ss-provider-row__warning");
+    const fixButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Fix"
+    ) as HTMLButtonElement | undefined;
+    const disconnectButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Disconnect"
+    ) as HTMLButtonElement | undefined;
+
+    expect(container.textContent).toContain("Subscription login disabled. Use API key instead.");
+    expect(container.textContent).toContain("0 ready, 1 needs attention");
+    expect(container.textContent).not.toContain("Connected via subscription");
+    expect(row?.className).toContain("ss-provider-row--blocked");
+    expect(row?.className).not.toContain("ss-provider-row--connected");
+    expect(warningEl?.textContent).toContain(restriction.inlineReason || "");
+    expect(warningEl?.getAttribute("title")).toBe(restriction.hoverDetails);
+    expect(fixButton).toBeTruthy();
+    expect(disconnectButton).toBeTruthy();
+
+    fixButton?.click();
+    await Promise.resolve();
+
+    const connectPanel = container.querySelector(".ss-provider-connect-panel");
+    const apiKeyButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "API key"
+    ) as HTMLButtonElement | undefined;
+
+    expect(connectPanel?.textContent).toContain(
+      "Save an API key to replace the stored subscription login, or disconnect it from the row above."
+    );
+    expect(apiKeyButton?.className).toContain("ss-provider-connect-method--active");
+  });
+
   it("shows Ollama as a local setup flow with models.json guidance", async () => {
     listStudioPiOAuthProvidersMock.mockResolvedValue([]);
     listStudioPiProviderAuthRecordsMock.mockResolvedValue([

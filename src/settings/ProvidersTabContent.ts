@@ -34,6 +34,17 @@ type ProviderRowState = {
   expanding: boolean;
 };
 
+type ProviderDisplayState = {
+  blocked: boolean;
+  connected: boolean;
+  ready: boolean;
+  tone: "connected" | "blocked" | "disconnected";
+  statusLabel: string;
+  summary: string;
+  inlineReason: string | null;
+  hoverDetails: string | null;
+};
+
 type TabState = {
   providers: ProviderRowState[];
   loading: boolean;
@@ -69,45 +80,106 @@ function hasConfiguredLocalProvider(
   return localProviderIds.has(normalize(providerId));
 }
 
-function isProviderReady(
-  record: StudioPiProviderAuthRecord,
-  localProviderIds: ReadonlySet<string>
-): boolean {
-  return record.hasAnyAuth || hasConfiguredLocalProvider(record.provider, localProviderIds);
+function getStoredAuthRestriction(
+  record: StudioPiProviderAuthRecord
+): ReturnType<typeof getStudioPiAuthMethodRestriction> | null {
+  if (record.source !== "oauth") {
+    return null;
+  }
+  const restriction = getStudioPiAuthMethodRestriction(record.provider, "oauth");
+  return restriction.disabled ? restriction : null;
 }
 
-function providerStatusLabel(
+function getProviderDisplayState(
   record: StudioPiProviderAuthRecord,
   localProviderIds: ReadonlySet<string>
-): string {
+): ProviderDisplayState {
+  const localConfigured = hasConfiguredLocalProvider(record.provider, localProviderIds);
   if (isStudioPiLocalProvider(record.provider)) {
-    return hasConfiguredLocalProvider(record.provider, localProviderIds)
-      ? "Configured locally"
-      : "Not configured locally";
+    return {
+      blocked: false,
+      connected: false,
+      ready: localConfigured,
+      tone: localConfigured ? "connected" : "disconnected",
+      statusLabel: localConfigured ? "Configured locally" : "Not configured locally",
+      summary: localConfigured
+        ? "Configured locally via Pi models.json"
+        : "Set up locally via Pi models.json",
+      inlineReason: null,
+      hoverDetails: null,
+    };
   }
-  return record.hasAnyAuth ? "Connected" : "Not connected";
-}
+  const storedAuthRestriction = getStoredAuthRestriction(record);
+  if (storedAuthRestriction) {
+    return {
+      blocked: true,
+      connected: false,
+      ready: false,
+      tone: "blocked",
+      statusLabel: "Subscription login disabled",
+      summary: "Subscription login disabled. Use API key instead.",
+      inlineReason: storedAuthRestriction.inlineReason || null,
+      hoverDetails: storedAuthRestriction.hoverDetails || null,
+    };
+  }
 
-function authSummary(
-  record: StudioPiProviderAuthRecord,
-  localProviderIds: ReadonlySet<string>
-): string {
-  if (isStudioPiLocalProvider(record.provider)) {
-    return hasConfiguredLocalProvider(record.provider, localProviderIds)
-      ? "Configured locally via Pi models.json"
-      : "Set up locally via Pi models.json";
+  if (!record.hasAnyAuth) {
+    return {
+      blocked: false,
+      connected: false,
+      ready: false,
+      tone: "disconnected",
+      statusLabel: "Not connected",
+      summary: "Not connected",
+      inlineReason: null,
+      hoverDetails: null,
+    };
   }
-  if (!record.hasAnyAuth) return "Not connected";
+
+  let summary = "Connected";
   switch (record.source) {
     case "oauth":
-      return "Connected via subscription";
+      summary = "Connected via subscription";
+      break;
     case "api_key":
-      return "Connected via API key";
+      summary = "Connected via API key";
+      break;
     case "environment_or_fallback":
-      return "Connected from environment";
+      summary = "Connected from environment";
+      break;
     default:
-      return "Connected";
+      summary = "Connected";
+      break;
   }
+
+  return {
+    blocked: false,
+    connected: true,
+    ready: true,
+    tone: "connected",
+    statusLabel: "Connected",
+    summary,
+    inlineReason: null,
+    hoverDetails: null,
+  };
+}
+
+function formatProviderStatusSummary(
+  providers: ProviderRowState[],
+  localProviderIds: ReadonlySet<string>
+): string {
+  const readyCount = providers.filter((providerState) =>
+    getProviderDisplayState(providerState.record, localProviderIds).ready
+  ).length;
+  const blockedCount = providers.filter((providerState) =>
+    getProviderDisplayState(providerState.record, localProviderIds).blocked
+  ).length;
+
+  if (blockedCount > 0) {
+    return `${readyCount} ready, ${blockedCount} needs attention`;
+  }
+
+  return `${readyCount} ready`;
 }
 
 function resolveConnectMethod(
@@ -219,9 +291,11 @@ async function refreshProviderList(
 
     // Sort: connected first, then alphabetical
     records.sort((a, b) => {
-      const readyA = isProviderReady(a, state.localProviderIds);
-      const readyB = isProviderReady(b, state.localProviderIds);
-      if (readyA !== readyB) return readyA ? -1 : 1;
+      const displayA = getProviderDisplayState(a, state.localProviderIds);
+      const displayB = getProviderDisplayState(b, state.localProviderIds);
+      const rankA = displayA.ready ? 0 : displayA.blocked ? 1 : 2;
+      const rankB = displayB.ready ? 0 : displayB.blocked ? 1 : 2;
+      if (rankA !== rankB) return rankA - rankB;
       const labelA = providerLabel(a.provider, state.oauthProvidersById);
       const labelB = providerLabel(b.provider, state.oauthProvidersById);
       return labelA.localeCompare(labelB);
@@ -265,7 +339,7 @@ function renderProvidersList(
         ? "Loading providers…"
         : state.errorMessage
           ? state.errorMessage
-          : `${state.providers.filter((p) => isProviderReady(p.record, state.localProviderIds)).length} ready`
+          : formatProviderStatusSummary(state.providers, state.localProviderIds)
     );
 
   headerActions.addButton((button) => {
@@ -316,28 +390,38 @@ function renderProviderRow(
   const { record } = providerState;
   const label = providerLabel(record.provider, state.oauthProvidersById);
   const localProvider = isStudioPiLocalProvider(record.provider);
-  const connected = record.hasAnyAuth;
+  const displayState = getProviderDisplayState(record, state.localProviderIds);
+  const connected = displayState.connected;
+  const blocked = displayState.blocked;
   const localConfigured = hasConfiguredLocalProvider(record.provider, state.localProviderIds);
-  const ready = connected || localConfigured;
   const isExpanded =
     state.activeConnectProvider === record.provider;
 
   const row = listEl.createDiv({
-    cls: `ss-provider-row ${ready ? "ss-provider-row--connected" : "ss-provider-row--disconnected"}`,
+    cls: `ss-provider-row ss-provider-row--${displayState.tone}`,
   });
 
   // ── Header ──
   const header = row.createDiv({ cls: "ss-provider-row__header" });
 
   const statusDot = header.createSpan({ cls: "ss-provider-row__status-dot" });
-  statusDot.setAttribute("aria-label", providerStatusLabel(record, state.localProviderIds));
+  statusDot.setAttribute("aria-label", displayState.statusLabel);
 
   const info = header.createDiv({ cls: "ss-provider-row__info" });
   info.createDiv({ cls: "ss-provider-row__name", text: label });
   info.createDiv({
     cls: "ss-provider-row__auth-summary",
-    text: authSummary(record, state.localProviderIds),
+    text: displayState.summary,
   });
+  if (displayState.inlineReason) {
+    const warningEl = info.createDiv({
+      cls: "ss-provider-row__warning",
+      text: displayState.inlineReason,
+    });
+    if (displayState.hoverDetails) {
+      warningEl.title = displayState.hoverDetails;
+    }
+  }
 
   const actions = header.createDiv({ cls: "ss-provider-row__actions" });
 
@@ -356,6 +440,48 @@ function renderProviderRow(
         state.activeConnectMethod = null;
       }
       rerender();
+    });
+  } else if (blocked) {
+    const fixBtn = actions.createEl("button", {
+      cls: "ss-provider-row__btn ss-provider-row__btn--connect",
+      text: isExpanded ? "Close" : "Fix",
+    });
+    fixBtn.disabled = state.actionRunning;
+    fixBtn.addEventListener("click", () => {
+      if (isExpanded) {
+        state.activeConnectProvider = null;
+        state.activeConnectMethod = null;
+      } else {
+        state.activeConnectProvider = record.provider;
+        state.activeConnectMethod = resolveConnectMethod(
+          record.provider,
+          selectDefaultAuthMethod(record.provider, state.oauthProvidersById),
+          state.oauthProvidersById
+        );
+      }
+      rerender();
+    });
+
+    const disconnectBtn = actions.createEl("button", {
+      cls: "ss-provider-row__btn ss-provider-row__btn--disconnect",
+      text: "Disconnect",
+    });
+    disconnectBtn.disabled = state.actionRunning;
+    disconnectBtn.addEventListener("click", async () => {
+      state.actionRunning = true;
+      rerender();
+      try {
+        await clearStudioPiProviderAuth(record.provider);
+        new Notice(`Disconnected ${label}.`);
+        await refreshProviderList(state, plugin);
+      } catch (error) {
+        new Notice(
+          `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      } finally {
+        state.actionRunning = false;
+        rerender();
+      }
     });
   } else if (connected) {
     // Disconnect button
@@ -433,12 +559,27 @@ function renderConnectPanel(
   const envVar = getApiKeyEnvVarForProvider(providerId);
   const oauthRestriction = getStudioPiAuthMethodRestriction(providerId, "oauth");
   const apiKeyRestriction = getStudioPiAuthMethodRestriction(providerId, "api_key");
+  const storedAuthRestriction = getStoredAuthRestriction(record);
   const resolvedConnectMethod = resolveConnectMethod(
     providerId,
     state.activeConnectMethod,
     state.oauthProvidersById
   );
   state.activeConnectMethod = resolvedConnectMethod;
+
+  if (storedAuthRestriction) {
+    const warningEl = panel.createDiv({
+      cls: "ss-provider-connect-hint ss-provider-connect-hint--warning",
+      text: storedAuthRestriction.inlineReason || `${label} subscription login is disabled here.`,
+    });
+    if (storedAuthRestriction.hoverDetails) {
+      warningEl.title = storedAuthRestriction.hoverDetails;
+    }
+    panel.createDiv({
+      cls: "ss-provider-connect-hint",
+      text: "Save an API key to replace the stored subscription login, or disconnect it from the row above.",
+    });
+  }
 
   // Method tabs (if both are available)
   if (hasOAuth && envVar) {
