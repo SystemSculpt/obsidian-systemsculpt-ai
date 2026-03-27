@@ -85,13 +85,6 @@ export type StudioGraphWorkspaceRendererOptions = {
     tone?: "neutral" | "warning";
     title?: string;
   } | null;
-  mountTerminalNode?: (options: {
-    node: StudioNodeInstance;
-    nodeEl: HTMLElement;
-    terminalAnchorEl: HTMLElement;
-    interactionLocked: boolean;
-    graphInteraction: StudioGraphInteractionEngine;
-  }) => void;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
@@ -143,7 +136,6 @@ export function renderStudioGraphWorkspace(
     onStopLabelEdit,
     onRevealPathInFinder,
     resolveNodeBadge,
-    mountTerminalNode,
   } = options;
 
   const editor = root.createDiv({ cls: "ss-studio-graph-workspace" });
@@ -420,7 +412,6 @@ export function renderStudioGraphWorkspace(
       onStopLabelEdit,
       onRevealPathInFinder,
       resolveNodeBadge,
-      mountTerminalNode,
     });
   }
 

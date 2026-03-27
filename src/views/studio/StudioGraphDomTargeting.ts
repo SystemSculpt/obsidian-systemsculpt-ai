@@ -1,7 +1,5 @@
 const STUDIO_GRAPH_EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true']";
 const STUDIO_GRAPH_MENU_SELECTOR = ".ss-studio-node-context-menu, .ss-studio-simple-context-menu";
-const STUDIO_GRAPH_TERMINAL_INTERACTIVE_SELECTOR =
-  ".ss-studio-terminal-panel, .ss-studio-terminal-surface, .ss-studio-terminal-surface .xterm, .xterm-helper-textarea";
 const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
   ".ss-studio-node-inspector",
   ".ss-studio-node-context-menu",
@@ -31,21 +29,7 @@ export function isStudioGraphEditableTarget(target: EventTarget | null): boolean
   if (!targetEl) {
     return false;
   }
-  return Boolean(
-    targetEl.closest(
-      `${STUDIO_GRAPH_MENU_SELECTOR}, ${STUDIO_GRAPH_EDITABLE_SELECTOR}, ${STUDIO_GRAPH_TERMINAL_INTERACTIVE_SELECTOR}`
-    )
-  );
-}
-
-export function isStudioGraphTerminalInteractiveTarget(target: EventTarget | null): boolean {
-  const targetEl = resolveStudioGraphTargetElement(target);
-  if (!targetEl) {
-    return false;
-  }
-  return Boolean(
-    targetEl.closest(".ss-studio-terminal-panel, .ss-studio-terminal-surface, .ss-studio-terminal-surface .xterm")
-  );
+  return Boolean(targetEl.closest(`${STUDIO_GRAPH_MENU_SELECTOR}, ${STUDIO_GRAPH_EDITABLE_SELECTOR}`));
 }
 
 export function isStudioGraphEditableFieldActive(target: EventTarget | null): boolean {

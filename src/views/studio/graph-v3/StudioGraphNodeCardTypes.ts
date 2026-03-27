@@ -77,11 +77,4 @@ export type RenderStudioGraphNodeCardOptions = {
     tone?: "neutral" | "warning";
     title?: string;
   } | null;
-  mountTerminalNode?: (options: {
-    node: StudioNodeInstance;
-    nodeEl: HTMLElement;
-    terminalAnchorEl: HTMLElement;
-    interactionLocked: boolean;
-    graphInteraction: StudioGraphInteractionEngine;
-  }) => void;
 };

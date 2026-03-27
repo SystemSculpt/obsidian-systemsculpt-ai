@@ -22,7 +22,8 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.http_request":
     "Makes a straightforward API request with typed URL/header/query/body bindings, then returns status/body/json.",
   "studio.cli_command": "Runs a local shell command and captures output.",
-  "studio.terminal": "Hosts an interactive local terminal session directly on the canvas.",
+  "studio.terminal":
+    "Legacy terminal placeholder kept so older Studio workflows still load. Interactive terminal sessions are no longer supported.",
 };
 
 const NODE_DISPLAY_NAME_BY_KIND: Record<string, string> = {

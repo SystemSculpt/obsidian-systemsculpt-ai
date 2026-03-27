@@ -2,29 +2,27 @@
 import { isStudioGraphEditableTarget } from "../StudioGraphDomTargeting";
 
 describe("isStudioGraphEditableTarget", () => {
-  it("treats terminal surfaces as editable targets", () => {
+  it("treats form controls as editable targets", () => {
     const root = document.createElement("div");
-    const terminalSurface = document.createElement("div");
-    terminalSurface.className = "ss-studio-terminal-surface";
-    const terminalCanvas = document.createElement("canvas");
-    terminalSurface.appendChild(terminalCanvas);
-    root.appendChild(terminalSurface);
+    const textarea = document.createElement("textarea");
+    root.appendChild(textarea);
     document.body.appendChild(root);
 
-    expect(isStudioGraphEditableTarget(terminalSurface)).toBe(true);
-    expect(isStudioGraphEditableTarget(terminalCanvas)).toBe(true);
+    expect(isStudioGraphEditableTarget(textarea)).toBe(true);
 
     root.remove();
   });
 
-  it("treats terminal helper textarea as editable", () => {
+  it("treats Studio menus as editable targets", () => {
     const root = document.createElement("div");
-    const helperTextarea = document.createElement("textarea");
-    helperTextarea.className = "xterm-helper-textarea";
-    root.appendChild(helperTextarea);
+    const menu = document.createElement("div");
+    menu.className = "ss-studio-node-context-menu";
+    const menuButton = document.createElement("button");
+    menu.appendChild(menuButton);
+    root.appendChild(menu);
     document.body.appendChild(root);
 
-    expect(isStudioGraphEditableTarget(helperTextarea)).toBe(true);
+    expect(isStudioGraphEditableTarget(menuButton)).toBe(true);
 
     root.remove();
   });

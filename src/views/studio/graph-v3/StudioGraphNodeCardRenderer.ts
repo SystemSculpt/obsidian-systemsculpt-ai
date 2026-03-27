@@ -56,7 +56,6 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onStopLabelEdit,
     onRevealPathInFinder,
     resolveNodeBadge,
-    mountTerminalNode,
   } = options;
 
   const definition = findNodeDefinition(node);
@@ -226,22 +225,15 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   }
 
   if (node.kind === "studio.terminal") {
-    const terminalAnchorEl = nodeEl.createDiv({ cls: "ss-studio-terminal-anchor" });
-    if (mountTerminalNode) {
-      mountTerminalNode({
-        node,
-        nodeEl,
-        terminalAnchorEl,
-        interactionLocked,
-        graphInteraction,
-      });
-    }
+    nodeEl.createEl("p", {
+      cls: "ss-studio-muted",
+      text: "Legacy terminal node. Interactive terminal sessions are no longer available.",
+    });
   }
 
   mountStudioGraphNodeResizeHandle({
     node,
     nodeEl,
-    handleClassName: node.kind === "studio.terminal" ? "ss-studio-terminal-resize-handle" : undefined,
     title: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
     ariaLabel: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
     interactionLocked,

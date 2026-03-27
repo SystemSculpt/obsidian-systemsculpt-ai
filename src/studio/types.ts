@@ -368,6 +368,7 @@ export type StudioNodeExecutionContext = {
 export type StudioNodeDefinition<TConfig = Record<string, StudioJsonValue>> = {
   kind: string;
   version: string;
+  hiddenFromInsertMenu?: boolean;
   capabilityClass: StudioNodeCapabilityClass;
   cachePolicy?: StudioNodeCachePolicy;
   inputPorts: StudioPortDefinition[];

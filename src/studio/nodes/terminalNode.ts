@@ -3,6 +3,7 @@ import type { StudioNodeDefinition } from "../types";
 export const terminalNode: StudioNodeDefinition = {
   kind: "studio.terminal",
   version: "1.0.0",
+  hiddenFromInsertMenu: true,
   capabilityClass: "local_io",
   cachePolicy: "never",
   inputPorts: [],

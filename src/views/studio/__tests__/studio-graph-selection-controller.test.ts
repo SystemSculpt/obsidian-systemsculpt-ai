@@ -109,62 +109,6 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(240);
   });
 
-  it("keeps native scrolling for wheel events over terminal surfaces", () => {
-    const controller = new StudioGraphSelectionController(createHost());
-    const viewport = createViewport();
-    controller.registerViewportElement(viewport);
-
-    const preventDefault = jest.fn();
-    const event = {
-      target: {
-        closest: (selector: string) =>
-          selector.includes(".ss-studio-terminal-panel") ? ({} as Element) : null,
-      },
-      ctrlKey: false,
-      metaKey: false,
-      deltaX: 0,
-      deltaY: 72,
-      deltaMode: 0,
-      clientX: 0,
-      clientY: 0,
-      preventDefault,
-    } as unknown as WheelEvent;
-
-    controller.handleGraphViewportWheel(event);
-
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(viewport.scrollLeft).toBe(120);
-    expect(viewport.scrollTop).toBe(240);
-  });
-
-  it("still zooms graph for ctrl+wheel over terminal surfaces", () => {
-    const controller = new StudioGraphSelectionController(createHost());
-    const viewport = createViewport();
-    controller.registerViewportElement(viewport);
-    const initialZoom = controller.getGraphZoom();
-
-    const preventDefault = jest.fn();
-    const event = {
-      target: {
-        closest: (selector: string) =>
-          selector.includes(".ss-studio-terminal-panel") ? ({} as Element) : null,
-      },
-      ctrlKey: true,
-      metaKey: false,
-      deltaX: 0,
-      deltaY: -64,
-      deltaMode: 0,
-      clientX: 320,
-      clientY: 220,
-      preventDefault,
-    } as unknown as WheelEvent;
-
-    controller.handleGraphViewportWheel(event);
-
-    expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(controller.getGraphZoom()).toBeGreaterThan(initialZoom);
-  });
-
   it("pans the canvas for wheel events on the graph surface", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
