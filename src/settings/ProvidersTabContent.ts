@@ -11,8 +11,10 @@ import {
 } from "../studio/piAuth/StudioPiAuthStorage";
 import {
   getApiKeyEnvVarForProvider,
+  getStudioPiLocalProviderSetup,
   getStudioPiAuthMethodRestriction,
   isStudioPiAuthMethodEnabled,
+  isStudioPiLocalProvider,
   resolveProviderLabel,
   supportsOAuthLogin,
   selectDefaultAuthMethod,
@@ -37,6 +39,7 @@ type TabState = {
   loading: boolean;
   errorMessage: string | null;
   piReady: boolean;
+  localProviderIds: Set<string>;
   oauthProvidersById: Map<string, StudioPiOAuthProvider>;
   /** True when Pi SDK auth module loaded successfully (false in Obsidian sandbox on some platforms). */
   inModalAuthAvailable: boolean;
@@ -59,7 +62,41 @@ function providerLabel(
   return resolveProviderLabel(providerId, oauthProviders);
 }
 
-function authSummary(record: StudioPiProviderAuthRecord): string {
+function hasConfiguredLocalProvider(
+  providerId: string,
+  localProviderIds: ReadonlySet<string>
+): boolean {
+  return localProviderIds.has(normalize(providerId));
+}
+
+function isProviderReady(
+  record: StudioPiProviderAuthRecord,
+  localProviderIds: ReadonlySet<string>
+): boolean {
+  return record.hasAnyAuth || hasConfiguredLocalProvider(record.provider, localProviderIds);
+}
+
+function providerStatusLabel(
+  record: StudioPiProviderAuthRecord,
+  localProviderIds: ReadonlySet<string>
+): string {
+  if (isStudioPiLocalProvider(record.provider)) {
+    return hasConfiguredLocalProvider(record.provider, localProviderIds)
+      ? "Configured locally"
+      : "Not configured locally";
+  }
+  return record.hasAnyAuth ? "Connected" : "Not connected";
+}
+
+function authSummary(
+  record: StudioPiProviderAuthRecord,
+  localProviderIds: ReadonlySet<string>
+): string {
+  if (isStudioPiLocalProvider(record.provider)) {
+    return hasConfiguredLocalProvider(record.provider, localProviderIds)
+      ? "Configured locally via Pi models.json"
+      : "Set up locally via Pi models.json";
+  }
   if (!record.hasAnyAuth) return "Not connected";
   switch (record.source) {
     case "oauth":
@@ -124,6 +161,7 @@ export async function displayProvidersTabContent(
     loading: true,
     errorMessage: null,
     piReady: false,
+    localProviderIds: new Set(),
     oauthProvidersById: new Map(),
     inModalAuthAvailable: true,
     activeConnectProvider: null,
@@ -171,11 +209,19 @@ async function refreshProviderList(
   state.errorMessage = null;
   try {
     const hints = collectSharedPiProviderHints(plugin.settings.customProviders || []);
-    const records = await listStudioPiProviderAuthRecords({ providerHints: hints });
+    const [records, localProviderIds] = await Promise.all([
+      listStudioPiProviderAuthRecords({ providerHints: hints }),
+      listLocalPiProviderIds(plugin).catch(() => []),
+    ]);
+    state.localProviderIds = new Set(
+      localProviderIds.map((providerId) => normalize(providerId)).filter(Boolean)
+    );
 
     // Sort: connected first, then alphabetical
     records.sort((a, b) => {
-      if (a.hasAnyAuth !== b.hasAnyAuth) return a.hasAnyAuth ? -1 : 1;
+      const readyA = isProviderReady(a, state.localProviderIds);
+      const readyB = isProviderReady(b, state.localProviderIds);
+      if (readyA !== readyB) return readyA ? -1 : 1;
       const labelA = providerLabel(a.provider, state.oauthProvidersById);
       const labelB = providerLabel(b.provider, state.oauthProvidersById);
       return labelA.localeCompare(labelB);
@@ -207,19 +253,19 @@ function renderProvidersList(
 
   containerEl.createEl("h3", { text: "Providers" });
   containerEl.createEl("p", {
-    text: "Connect your own AI provider accounts to use in Chat and Studio. Models from connected providers appear in the model picker.",
+    text: "Connect your own AI provider accounts or configure local Pi runtimes to use in Chat and Studio. Models from connected providers and configured local runtimes appear in the model picker.",
     cls: "setting-item-description",
   });
 
   // Refresh button
   const headerActions = new Setting(containerEl)
-    .setName("Connected providers")
+    .setName("Provider status")
     .setDesc(
       state.loading
         ? "Loading providers…"
         : state.errorMessage
           ? state.errorMessage
-          : `${state.providers.filter((p) => p.record.hasAnyAuth).length} connected`
+          : `${state.providers.filter((p) => isProviderReady(p.record, state.localProviderIds)).length} ready`
     );
 
   headerActions.addButton((button) => {
@@ -269,30 +315,49 @@ function renderProviderRow(
   const { plugin } = tabInstance;
   const { record } = providerState;
   const label = providerLabel(record.provider, state.oauthProvidersById);
+  const localProvider = isStudioPiLocalProvider(record.provider);
   const connected = record.hasAnyAuth;
+  const localConfigured = hasConfiguredLocalProvider(record.provider, state.localProviderIds);
+  const ready = connected || localConfigured;
   const isExpanded =
     state.activeConnectProvider === record.provider;
 
   const row = listEl.createDiv({
-    cls: `ss-provider-row ${connected ? "ss-provider-row--connected" : "ss-provider-row--disconnected"}`,
+    cls: `ss-provider-row ${ready ? "ss-provider-row--connected" : "ss-provider-row--disconnected"}`,
   });
 
   // ── Header ──
   const header = row.createDiv({ cls: "ss-provider-row__header" });
 
   const statusDot = header.createSpan({ cls: "ss-provider-row__status-dot" });
-  statusDot.setAttribute("aria-label", connected ? "Connected" : "Not connected");
+  statusDot.setAttribute("aria-label", providerStatusLabel(record, state.localProviderIds));
 
   const info = header.createDiv({ cls: "ss-provider-row__info" });
   info.createDiv({ cls: "ss-provider-row__name", text: label });
   info.createDiv({
     cls: "ss-provider-row__auth-summary",
-    text: authSummary(record),
+    text: authSummary(record, state.localProviderIds),
   });
 
   const actions = header.createDiv({ cls: "ss-provider-row__actions" });
 
-  if (connected) {
+  if (localProvider) {
+    const setupBtn = actions.createEl("button", {
+      cls: "ss-provider-row__btn ss-provider-row__btn--connect",
+      text: isExpanded ? "Close" : localConfigured ? "Details" : "Set up",
+    });
+    setupBtn.disabled = state.actionRunning;
+    setupBtn.addEventListener("click", () => {
+      if (isExpanded) {
+        state.activeConnectProvider = null;
+        state.activeConnectMethod = null;
+      } else {
+        state.activeConnectProvider = record.provider;
+        state.activeConnectMethod = null;
+      }
+      rerender();
+    });
+  } else if (connected) {
     // Disconnect button
     const disconnectBtn = actions.createEl("button", {
       cls: "ss-provider-row__btn ss-provider-row__btn--disconnect",
@@ -359,6 +424,11 @@ function renderConnectPanel(
   const panel = row.createDiv({ cls: "ss-provider-connect-panel" });
   const providerId = record.provider;
   const label = providerLabel(providerId, state.oauthProvidersById);
+  if (isStudioPiLocalProvider(providerId)) {
+    renderLocalProviderSetup(panel, state, providerId, label);
+    return;
+  }
+
   const hasOAuth = supportsOAuthLogin(providerId, state.oauthProvidersById);
   const envVar = getApiKeyEnvVarForProvider(providerId);
   const oauthRestriction = getStudioPiAuthMethodRestriction(providerId, "oauth");
@@ -449,6 +519,53 @@ function renderConnectPanel(
   } else {
     renderApiKeyConnect(panel, tabInstance, state, providerId, label, envVar, rerender);
   }
+}
+
+function renderLocalProviderSetup(
+  panel: HTMLElement,
+  state: TabState,
+  providerId: string,
+  label: string
+): void {
+  const body = panel.createDiv({ cls: "ss-provider-connect-body" });
+  const setup = getStudioPiLocalProviderSetup(providerId);
+  const configured = hasConfiguredLocalProvider(providerId, state.localProviderIds);
+
+  if (!setup) {
+    body.createDiv({
+      cls: "ss-provider-connect-hint ss-provider-connect-hint--warning",
+      text: `No local setup instructions are available for ${label}.`,
+    });
+    return;
+  }
+
+  body.createDiv({
+    cls: "ss-provider-connect-hint",
+    text: configured
+      ? `Pi already detects ${label} from ${setup.filePath}. Its local models should already appear in the model picker.`
+      : `${label} is configured through ${setup.filePath}, not through subscription login or saved provider auth.`,
+  });
+  body.createDiv({
+    cls: "ss-provider-connect-hint",
+    text: setup.summary,
+  });
+  body.createDiv({
+    cls: "ss-provider-connect-hint",
+    text: `Use ${setup.endpoint} with ${setup.api}. Pi only needs model ids inside the models array.`,
+  });
+  body.createDiv({
+    cls: "ss-provider-connect-hint",
+    text: `Pi expects an apiKey field in the provider config. Use your real local server token if you have one; otherwise a placeholder like "${setup.apiKeyPlaceholder}" is fine for servers that ignore auth.`,
+  });
+  body.createDiv({
+    cls: "ss-provider-connect-hint",
+    text: configured
+      ? "If you change models.json, press Refresh in this tab to rescan providers."
+      : "Add or merge an entry like this into models.json, then press Refresh in this tab.",
+  });
+
+  const codeBlock = body.createEl("pre", { cls: "ss-provider-connect-code" });
+  codeBlock.createEl("code", { text: setup.snippet });
 }
 
 // ─── OAuth connect ──────────────────────────────────────────────────────────

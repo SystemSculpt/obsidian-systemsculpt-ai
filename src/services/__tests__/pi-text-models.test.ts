@@ -42,6 +42,8 @@ describe("PiTextModels", () => {
     expect(hints).toContain("openai");
     expect(hints).toContain("anthropic");
     expect(hints).toContain("openrouter");
+    expect(hints).toContain("ollama");
+    expect(hints).toContain("lmstudio");
   });
 
   it("converts Pi listings into unified text models", () => {

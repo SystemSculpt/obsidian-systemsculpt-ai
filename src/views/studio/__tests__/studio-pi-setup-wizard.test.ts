@@ -1,7 +1,10 @@
 import {
   buildApiKeyHint,
+  getDefaultStudioPiProviderHints,
   getApiKeyEnvVarForProvider,
   getStudioPiAuthMethodRestriction,
+  getStudioPiLocalProviderSetup,
+  isStudioPiLocalProvider,
   KNOWN_OAUTH_PROVIDER_IDS,
   PROVIDER_AUTH_HINT_OVERRIDES,
   PROVIDER_LABEL_OVERRIDES,
@@ -53,6 +56,36 @@ describe("KNOWN_OAUTH_PROVIDER_IDS", () => {
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("openai")).toBe(false);
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("mistral")).toBe(false);
     expect(KNOWN_OAUTH_PROVIDER_IDS.has("groq")).toBe(false);
+  });
+});
+
+// ─── Local provider setup ──────────────────────────────────────────────────
+
+describe("local provider setup", () => {
+  it("includes Ollama and LM Studio in the default provider hints", () => {
+    const hints = getDefaultStudioPiProviderHints();
+
+    expect(hints).toContain("ollama");
+    expect(hints).toContain("lmstudio");
+  });
+
+  it("marks Ollama and LM Studio as local providers", () => {
+    expect(isStudioPiLocalProvider("ollama")).toBe(true);
+    expect(isStudioPiLocalProvider("lmstudio")).toBe(true);
+    expect(isStudioPiLocalProvider("openai")).toBe(false);
+  });
+
+  it("returns setup snippets for supported local providers", () => {
+    const ollama = getStudioPiLocalProviderSetup("ollama");
+    const lmstudio = getStudioPiLocalProviderSetup("lmstudio");
+
+    expect(ollama?.filePath).toBe("~/.pi/agent/models.json");
+    expect(ollama?.endpoint).toBe("http://localhost:11434/v1");
+    expect(ollama?.snippet).toContain("\"ollama\"");
+
+    expect(lmstudio?.filePath).toBe("~/.pi/agent/models.json");
+    expect(lmstudio?.endpoint).toBe("http://localhost:1234/v1");
+    expect(lmstudio?.snippet).toContain("\"lmstudio\"");
   });
 });
 

@@ -13,6 +13,22 @@ export type StudioPiAuthMethodRestriction = {
   hoverDetails?: string;
 };
 
+export type StudioPiLocalProviderSetup = {
+  filePath: string;
+  endpoint: string;
+  api: string;
+  apiKeyPlaceholder: string;
+  summary: string;
+  snippet: string;
+};
+
+export const STUDIO_PI_LOCAL_MODELS_PATH = "~/.pi/agent/models.json";
+
+export const LOCAL_PI_PROVIDER_IDS = new Set<string>([
+  "ollama",
+  "lmstudio",
+]);
+
 export const API_KEY_ENV_VAR_BY_PROVIDER: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -46,6 +62,8 @@ export const PROVIDER_LABEL_OVERRIDES: Record<string, string> = {
   minimax: "MiniMax",
   mistral: "Mistral",
   xai: "xAI",
+  ollama: "Ollama",
+  lmstudio: "LM Studio",
 };
 
 export const PROVIDER_AUTH_HINT_OVERRIDES: Record<string, string> = {
@@ -78,6 +96,8 @@ export const DEFAULT_PI_PROVIDER_HINTS = [
   "google",
   "mistral",
   "xai",
+  "ollama",
+  "lmstudio",
 ];
 
 const PROVIDER_AUTH_METHOD_RESTRICTIONS: Record<
@@ -91,6 +111,57 @@ const PROVIDER_AUTH_METHOD_RESTRICTIONS: Record<
       hoverDetails:
         "Anthropic has explicitly mentioned that if you use their Anthropic plan for anything other than Claude Code you risk getting banned, so we are leaving this option visible but disabling it until further notice.",
     },
+  },
+};
+
+const LOCAL_PI_PROVIDER_SETUP: Record<string, StudioPiLocalProviderSetup> = {
+  ollama: {
+    filePath: STUDIO_PI_LOCAL_MODELS_PATH,
+    endpoint: "http://localhost:11434/v1",
+    api: "openai-completions",
+    apiKeyPlaceholder: "ollama",
+    summary:
+      "Point Pi at your local Ollama server and list the model ids you want exposed in Chat and Studio.",
+    snippet: `{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        { "id": "llama3.1:8b" }
+      ]
+    }
+  }
+}`,
+  },
+  lmstudio: {
+    filePath: STUDIO_PI_LOCAL_MODELS_PATH,
+    endpoint: "http://localhost:1234/v1",
+    api: "openai-completions",
+    apiKeyPlaceholder: "lmstudio",
+    summary:
+      "Point Pi at LM Studio's local OpenAI-compatible server and list the model ids you want exposed in Chat and Studio.",
+    snippet: `{
+  "providers": {
+    "lmstudio": {
+      "baseUrl": "http://localhost:1234/v1",
+      "api": "openai-completions",
+      "apiKey": "lmstudio",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        { "id": "qwen2.5-coder:7b" }
+      ]
+    }
+  }
+}`,
   },
 };
 
@@ -145,6 +216,24 @@ export function getStudioPiRegisteredProviderIds(): string[] {
 
 export function getDefaultStudioPiProviderHints(): string[] {
   return [...DEFAULT_PI_PROVIDER_HINTS];
+}
+
+export function isStudioPiLocalProvider(providerId: string): boolean {
+  const normalized = normalizeProviderId(providerId);
+  if (!normalized) {
+    return false;
+  }
+  return LOCAL_PI_PROVIDER_IDS.has(normalized);
+}
+
+export function getStudioPiLocalProviderSetup(
+  providerId: string
+): StudioPiLocalProviderSetup | null {
+  const normalized = normalizeProviderId(providerId);
+  if (!normalized) {
+    return null;
+  }
+  return LOCAL_PI_PROVIDER_SETUP[normalized] || null;
 }
 
 function resolveDynamicProviderName(
