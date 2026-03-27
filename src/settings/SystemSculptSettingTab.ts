@@ -1,130 +1,175 @@
-import { App, PluginSettingTab, Setting, Notice, setIcon, Platform, EventRef } from "obsidian";
+import {
+  App,
+  PluginSettingTab,
+  Setting,
+  Notice,
+  setIcon,
+  Platform,
+  EventRef,
+} from "obsidian";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 import { showPopup } from "../core/ui";
 import SystemSculptPlugin from "../main";
 import { VersionInfo } from "../services/VersionCheckerService";
-import { buildSettingsIndexFromRoot } from "./SettingsSearchIndex";
+import {
+  buildSettingsIndexFromRoot,
+  buildSettingsSearchHighlightParts,
+  searchSettingsIndex,
+  type SettingsIndexEntry,
+  type SettingsSearchGroup,
+  type SettingsSearchMatch,
+} from "./SettingsSearchIndex";
 import { buildSettingsTabConfigs } from "./SettingsTabRegistry";
-import { decorateRestoreDefaultsButton, RESTORE_DEFAULTS_COPY } from "./uiHelpers";
+import {
+  decorateRestoreDefaultsButton,
+  RESTORE_DEFAULTS_COPY,
+} from "./uiHelpers";
+
+type SettingsSearchViewState = {
+  query: string;
+  groups: SettingsSearchGroup[];
+  results: SettingsSearchMatch[];
+  selectedIndex: number;
+};
 
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
-  private debounceTimer: NodeJS.Timeout | null = null;
-  private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
+  private listeners: {
+    element: HTMLElement;
+    type: string;
+    listener: EventListener;
+  }[] = [];
   private versionInfoContainer: HTMLElement | null = null;
   private tabContainerEl: HTMLElement | null = null;
   private contentContainerEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
+  private searchShellEl: HTMLElement | null = null;
+  private searchMetaEl: HTMLElement | null = null;
+  private clearSearchButtonEl: HTMLButtonElement | null = null;
   private searchResultsContainerEl: HTMLElement | null = null;
-  private allSettingsIndex: {
-    tabId: string;
-    tabLabel: string;
-    title: string;
-    description: string;
-    element: HTMLElement;
-  }[] = [];
+  private allSettingsIndex: SettingsIndexEntry[] = [];
   private tabsDef: { id: string; label: string }[] = [];
   private contentMutationObserver: MutationObserver | null = null;
   private indexRebuildTimer: number | null = null;
   private activeTabId: string = "account";
   private focusTabEventRef: EventRef | null = null;
+  private searchState: SettingsSearchViewState = {
+    query: "",
+    groups: [],
+    results: [],
+    selectedIndex: -1,
+  };
+  private readonly searchResultsListId = "systemsculpt-settings-search-results";
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
 
-  registerListener(element: HTMLElement, type: string, listener: EventListener) {
+  registerListener(
+    element: HTMLElement,
+    type: string,
+    listener: EventListener,
+  ) {
     element.addEventListener(type, listener);
     this.listeners.push({ element, type, listener });
   }
 
   private generateFeedbackUrl(): string {
     const environmentInfo: string[] = [];
-    
+
     // Plugin version - always available
-    environmentInfo.push(`- SystemSculpt AI version: ${this.plugin.manifest.version}`);
-    
+    environmentInfo.push(
+      `- SystemSculpt AI version: ${this.plugin.manifest.version}`,
+    );
+
     // Obsidian version
-    const obsidianVersion = (this.app as any).apiVersion || 
-                           (this.app as any).vault?.config?.version || 
-                           '';
+    const obsidianVersion =
+      (this.app as any).apiVersion ||
+      (this.app as any).vault?.config?.version ||
+      "";
     if (obsidianVersion) {
       environmentInfo.push(`- Obsidian version: ${obsidianVersion}`);
     }
-    
+
     // OS
-    let os = '';
+    let os = "";
     if (Platform.isWin) {
-      os = 'Windows';
+      os = "Windows";
     } else if (Platform.isMacOS) {
-      os = 'macOS';
+      os = "macOS";
     } else if (Platform.isLinux) {
-      os = 'Linux';
+      os = "Linux";
     } else if (Platform.isIosApp) {
-      os = 'iOS';
+      os = "iOS";
     } else if (Platform.isAndroidApp) {
-      os = 'Android';
+      os = "Android";
     }
     if (os) {
       environmentInfo.push(`- OS: ${os}`);
     }
-    
+
     // Device type
-    let deviceType = '';
+    let deviceType = "";
     if (Platform.isDesktopApp) {
-      deviceType = 'Desktop';
+      deviceType = "Desktop";
     } else if (Platform.isMobileApp) {
-      deviceType = 'Mobile';
+      deviceType = "Mobile";
     } else if (Platform.isTablet) {
-      deviceType = 'Tablet';
+      deviceType = "Tablet";
     }
     if (deviceType) {
       environmentInfo.push(`- Device type: ${deviceType}`);
     }
-    
+
     // Theme
-    const isDarkTheme = document.body.classList.contains('theme-dark');
-    environmentInfo.push(`- Theme: ${isDarkTheme ? 'Dark' : 'Light'}`);
-    
+    const isDarkTheme = document.body.classList.contains("theme-dark");
+    environmentInfo.push(`- Theme: ${isDarkTheme ? "Dark" : "Light"}`);
+
     // Language/Locale
     if (navigator.language) {
       environmentInfo.push(`- Language: ${navigator.language}`);
     }
-    
-    const hasSystemSculptAccess =
-      !!(this.plugin.settings.licenseValid === true && this.plugin.settings.licenseKey?.trim());
-    environmentInfo.push(`- SystemSculpt access: ${hasSystemSculptAccess ? "Active" : "Needs setup"}`);
+
+    const hasSystemSculptAccess = !!(
+      this.plugin.settings.licenseValid === true &&
+      this.plugin.settings.licenseKey?.trim()
+    );
+    environmentInfo.push(
+      `- SystemSculpt access: ${hasSystemSculptAccess ? "Active" : "Needs setup"}`,
+    );
     environmentInfo.push("- Execution path: SystemSculpt");
-    
+
     // Vault Statistics (privacy-conscious)
     const files = this.app.vault.getFiles();
-    const noteCount = files.filter(f => f.extension === 'md').length;
-    let vaultSize = '';
-    if (noteCount < 100) vaultSize = 'Small (<100 notes)';
-    else if (noteCount < 500) vaultSize = 'Medium (100-500 notes)';
-    else if (noteCount < 2000) vaultSize = 'Large (500-2000 notes)';
-    else vaultSize = 'Very Large (2000+ notes)';
+    const noteCount = files.filter((f) => f.extension === "md").length;
+    let vaultSize = "";
+    if (noteCount < 100) vaultSize = "Small (<100 notes)";
+    else if (noteCount < 500) vaultSize = "Medium (100-500 notes)";
+    else if (noteCount < 2000) vaultSize = "Large (500-2000 notes)";
+    else vaultSize = "Very Large (2000+ notes)";
     environmentInfo.push(`- Vault size: ${vaultSize}`);
-    
+
     // Enabled Features
-    const enabledFeatures: string[] = ['MCP']; // MCP is always enabled (internal servers)
-    if (this.plugin.settings.embeddingsEnabled) enabledFeatures.push('Embeddings');
+    const enabledFeatures: string[] = ["MCP"]; // MCP is always enabled (internal servers)
+    if (this.plugin.settings.embeddingsEnabled)
+      enabledFeatures.push("Embeddings");
 
     if (enabledFeatures.length > 0) {
-      environmentInfo.push(`- Enabled features: ${enabledFeatures.join(', ')}`);
+      environmentInfo.push(`- Enabled features: ${enabledFeatures.join(", ")}`);
     }
-    
-    const title = encodeURIComponent('SystemSculpt Feedback: ');
+
+    const title = encodeURIComponent("SystemSculpt Feedback: ");
     const body = encodeURIComponent(
       `Please describe your feedback:\n\n` +
-      `- What happened or what would you like to see improved?\n` +
-      `- Steps to reproduce (if a bug):\n` +
-      `- Expected behavior:\n` +
-      `- Screenshots or logs:\n\n` +
-      `Environment:\n` +
-      environmentInfo.join('\n') + '\n\n' +
-      `Additional context:`
+        `- What happened or what would you like to see improved?\n` +
+        `- Steps to reproduce (if a bug):\n` +
+        `- Expected behavior:\n` +
+        `- Screenshots or logs:\n\n` +
+        `Environment:\n` +
+        environmentInfo.join("\n") +
+        "\n\n" +
+        `Additional context:`,
     );
 
     return `https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=${title}&body=${body}`;
@@ -138,16 +183,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     actionsSetting.addButton((button) => {
       decorateRestoreDefaultsButton(button.buttonEl);
       button.onClick(async () => {
-        const confirm = await showPopup(
-          this.app,
-          RESTORE_DEFAULTS_COPY.label,
-          {
-            description:
-              "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
-            primaryButton: "Restore Defaults",
-            secondaryButton: "Cancel",
-          }
-        );
+        const confirm = await showPopup(this.app, RESTORE_DEFAULTS_COPY.label, {
+          description:
+            "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
+          primaryButton: "Restore Defaults",
+          secondaryButton: "Cancel",
+        });
         if (!confirm?.confirmed) {
           return;
         }
@@ -184,7 +225,10 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         "aria-label": "Share feedback, report bugs, or suggest improvements",
       },
     });
-    setIcon(feedbackLink.createSpan({ cls: "ss-settings-link-icon" }), "external-link");
+    setIcon(
+      feedbackLink.createSpan({ cls: "ss-settings-link-icon" }),
+      "external-link",
+    );
   }
 
   private removeAllListeners() {
@@ -194,164 +238,243 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.listeners = [];
   }
 
+  async display(): Promise<void> {
+    this.removeAllListeners();
+    const { containerEl } = this;
+    containerEl.empty();
 
+    this.tabContainerEl = null;
+    this.contentContainerEl = null;
+    this.searchInputEl = null;
+    this.searchShellEl = null;
+    this.searchMetaEl = null;
+    this.clearSearchButtonEl = null;
+    this.searchResultsContainerEl = null;
+    this.searchState = {
+      query: "",
+      groups: [],
+      results: [],
+      selectedIndex: -1,
+    };
 
-async display(): Promise<void> {
-  this.removeAllListeners();
-  const { containerEl } = this;
-  containerEl.empty();
+    const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
+    const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
+    titleGroup.createEl("h2", { text: "SystemSculpt AI" });
+    const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
+    this.versionInfoContainer = titleMeta.createDiv({
+      cls: "ss-settings-title-version",
+    });
+    this.initializeVersionDisplay();
 
-  this.tabContainerEl = null;
-  this.contentContainerEl = null;
-
-  const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
-  const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
-  titleGroup.createEl("h2", { text: "SystemSculpt AI" });
-  const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
-  this.versionInfoContainer = titleMeta.createDiv({ cls: "ss-settings-title-version" });
-  this.initializeVersionDisplay();
-
-  const refreshVersionButton = titleMeta.createEl("button", {
-    cls: "clickable-icon ss-settings-title-refresh",
-    attr: {
-      type: "button",
-      "aria-label": "Check for updates",
-      title: "Check for updates",
-    },
-  });
-  setIcon(refreshVersionButton, "refresh-cw");
-  this.registerListener(refreshVersionButton, "click", async () => {
-    refreshVersionButton.disabled = true;
-    try {
-      await this.checkForUpdates(true);
-    } finally {
-      refreshVersionButton.disabled = false;
-    }
-  });
-
-  containerEl.createEl("p", {
-    text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
-    cls: "setting-item-description",
-  });
-
-  const searchSetting = new Setting(containerEl)
-    .setName("Search settings")
-    .setDesc("Search across every tab.");
-    searchSetting.addText((text) => {
-      text.setPlaceholder("Search settings...");
-    text.setValue("");
-    text.inputEl.type = "search";
-    text.inputEl.addClass("search-input");
-    this.searchInputEl = text.inputEl;
-    this.registerListener(text.inputEl, "input", () => this.handleSearchInput());
-    this.registerListener(text.inputEl, "keydown", (event: KeyboardEvent) => {
-      if (event.key === "Escape" && this.searchInputEl) {
-        this.searchInputEl.value = "";
-        this.exitSearchMode();
-        this.searchInputEl.focus();
+    const refreshVersionButton = titleMeta.createEl("button", {
+      cls: "clickable-icon ss-settings-title-refresh",
+      attr: {
+        type: "button",
+        "aria-label": "Check for updates",
+        title: "Check for updates",
+      },
+    });
+    setIcon(refreshVersionButton, "refresh-cw");
+    this.registerListener(refreshVersionButton, "click", async () => {
+      refreshVersionButton.disabled = true;
+      try {
+        await this.checkForUpdates(true);
+      } finally {
+        refreshVersionButton.disabled = false;
       }
     });
-  });
-  searchSetting.addExtraButton((button) => {
-    button
-      .setIcon("x-circle")
-      .setTooltip("Clear search")
-      .onClick(() => {
-        if (!this.searchInputEl) return;
-        this.searchInputEl.value = "";
-        this.exitSearchMode();
-        this.searchInputEl.focus();
+
+    containerEl.createEl("p", {
+      text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
+      cls: "setting-item-description",
+    });
+
+    this.searchShellEl = containerEl.createDiv({
+      cls: "ss-settings-search-shell",
+    });
+    const searchHeader = this.searchShellEl.createDiv({
+      cls: "ss-settings-search-shell__header",
+    });
+    const searchCopy = searchHeader.createDiv({
+      cls: "ss-settings-search-shell__copy",
+    });
+    searchCopy.createDiv({
+      cls: "ss-settings-search-shell__title",
+      text: "Search settings",
+    });
+    searchCopy.createDiv({
+      cls: "ss-settings-search-shell__description",
+      text: "Jump straight to any setting, section, or integration.",
+    });
+
+    const searchInputRow = this.searchShellEl.createDiv({
+      cls: "ss-settings-search-shell__input-row",
+    });
+    const searchIcon = searchInputRow.createSpan({
+      cls: "ss-settings-search-shell__icon",
+      attr: { "aria-hidden": "true" },
+    });
+    setIcon(searchIcon, "search");
+
+    this.searchInputEl = searchInputRow.createEl("input", {
+      cls: ["search-input", "ss-settings-search-input"],
+      attr: {
+        type: "search",
+        placeholder: "Search settings, providers, studio, vault...",
+        autocomplete: "off",
+        spellcheck: "false",
+        "aria-label": "Search SystemSculpt settings",
+        role: "combobox",
+        "aria-autocomplete": "list",
+        "aria-haspopup": "listbox",
+        "aria-controls": this.searchResultsListId,
+        "aria-expanded": "false",
+      },
+    }) as HTMLInputElement;
+    this.registerListener(this.searchInputEl, "input", () =>
+      this.handleSearchInput(),
+    );
+    this.registerListener(
+      this.searchInputEl,
+      "keydown",
+      (event: KeyboardEvent) => {
+        this.handleSearchKeydown(event);
+      },
+    );
+
+    this.clearSearchButtonEl = searchInputRow.createEl("button", {
+      cls: "clickable-icon ss-settings-search-clear",
+      attr: {
+        type: "button",
+        "aria-label": "Clear settings search",
+        title: "Clear search",
+      },
+    }) as HTMLButtonElement;
+    setIcon(this.clearSearchButtonEl, "x");
+    this.clearSearchButtonEl.hidden = true;
+    this.clearSearchButtonEl.disabled = true;
+    this.registerListener(this.clearSearchButtonEl, "click", () =>
+      this.clearSearch(true),
+    );
+
+    this.searchMetaEl = this.searchShellEl.createDiv({
+      cls: "ss-settings-search-meta",
+      attr: { "aria-live": "polite" },
+    });
+
+    const layout = containerEl.createDiv({ cls: "ss-settings-layout" });
+    const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
+    const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
+
+    this.tabContainerEl = tabBar;
+    this.contentContainerEl = contentContainer;
+
+    const tabConfigsAll = buildSettingsTabConfigs(this);
+    const visibleTabs = tabConfigsAll;
+
+    if (this.focusTabEventRef) {
+      this.app.workspace.offref(this.focusTabEventRef);
+      this.focusTabEventRef = null;
+    }
+    this.focusTabEventRef = this.app.workspace.on(
+      "systemsculpt:settings-focus-tab",
+      (requestedTab: string) => {
+        if (!requestedTab) return;
+        if (!this.tabContainerEl) return;
+        const target = this.tabContainerEl.querySelector(
+          `button[data-tab="${requestedTab}"]`,
+        ) as HTMLElement | null;
+        if (!target) return;
+        this.clearSearch(false);
+        this.activateTab(requestedTab);
+      },
+    );
+
+    this.tabsDef = visibleTabs.map(({ id, label }) => ({ id, label }));
+    const previousActiveTabId = this.activeTabId;
+    const hasPreviousActiveTab = this.tabsDef.some(
+      (tab) => tab.id === previousActiveTabId,
+    );
+    this.activeTabId = hasPreviousActiveTab
+      ? previousActiveTabId
+      : (this.tabsDef[0]?.id ?? "account");
+
+    for (const [index, cfg] of visibleTabs.entries()) {
+      const button = tabBar.createEl("button", {
+        cls: "ss-tab-button",
+        text: cfg.label,
       });
-  });
+      button.dataset.tab = cfg.id;
+      if (cfg.id === this.activeTabId || (index === 0 && !this.activeTabId)) {
+        button.addClass("mod-active");
+      }
+      this.registerListener(button, "click", () => this.activateTab(cfg.id));
 
-  const layout = containerEl.createDiv({ cls: "ss-settings-layout" });
-  const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
-  const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
-
-  this.tabContainerEl = tabBar;
-  this.contentContainerEl = contentContainer;
-
-  const tabConfigsAll = buildSettingsTabConfigs(this);
-  const visibleTabs = tabConfigsAll;
-
-  if (this.focusTabEventRef) {
-    this.app.workspace.offref(this.focusTabEventRef);
-    this.focusTabEventRef = null;
-  }
-  this.focusTabEventRef = this.app.workspace.on("systemsculpt:settings-focus-tab", (requestedTab: string) => {
-    if (!requestedTab) return;
-    if (!this.tabContainerEl) return;
-    const target = this.tabContainerEl.querySelector(`button[data-tab="${requestedTab}"]`) as HTMLElement | null;
-    if (!target) return;
-    this.exitSearchMode();
-    this.activateTab(requestedTab);
-  });
-
-  this.tabsDef = visibleTabs.map(({ id, label }) => ({ id, label }));
-  const previousActiveTabId = this.activeTabId;
-  const hasPreviousActiveTab = this.tabsDef.some((tab) => tab.id === previousActiveTabId);
-  this.activeTabId = hasPreviousActiveTab ? previousActiveTabId : (this.tabsDef[0]?.id ?? "account");
-
-  for (const [index, cfg] of visibleTabs.entries()) {
-    const button = tabBar.createEl("button", {
-      cls: "ss-tab-button",
-      text: cfg.label,
-    });
-    button.dataset.tab = cfg.id;
-    if (cfg.id === this.activeTabId || (index === 0 && !this.activeTabId)) {
-      button.addClass("mod-active");
-    }
-    this.registerListener(button, "click", () => this.activateTab(cfg.id));
-
-    const panel = contentContainer.createDiv({
-      cls: ["ss-tab-panel", "systemsculpt-tab-content"],
-    });
-    panel.dataset.tab = cfg.id;
-    if (cfg.id === this.activeTabId) {
-      panel.addClass("is-active");
-      panel.toggle(true);
-    } else {
-      panel.removeClass("is-active");
-      panel.toggle(false);
-    }
-  }
-
-  for (const cfg of visibleTabs) {
-    const sectionRoot = contentContainer.querySelector(`[data-tab="${cfg.id}"]`) as HTMLElement | null;
-    if (!sectionRoot) continue;
-    sectionRoot.empty();
-    for (const render of cfg.sections) {
-      render(sectionRoot);
-    }
-    if (cfg.anchor) {
-      const anchor = sectionRoot.createDiv({
-        attr: {
-          "data-ss-search": "true",
-          "data-ss-title": cfg.anchor.title,
-          "data-ss-desc": cfg.anchor.desc,
-        },
+      const panel = contentContainer.createDiv({
+        cls: ["ss-tab-panel", "systemsculpt-tab-content"],
       });
-      anchor.toggle(false);
+      panel.dataset.tab = cfg.id;
+      if (cfg.id === this.activeTabId) {
+        panel.addClass("is-active");
+        panel.toggle(true);
+      } else {
+        panel.removeClass("is-active");
+        panel.toggle(false);
+      }
     }
-  }
 
-  this.buildSettingsIndex();
-  window.setTimeout(() => this.buildSettingsIndex(), 300);
-
-  if (this.contentContainerEl) {
-    if (this.contentMutationObserver) {
-      this.contentMutationObserver.disconnect();
+    for (const cfg of visibleTabs) {
+      const sectionRoot = contentContainer.querySelector(
+        `[data-tab="${cfg.id}"]`,
+      ) as HTMLElement | null;
+      if (!sectionRoot) continue;
+      sectionRoot.empty();
+      for (const render of cfg.sections) {
+        render(sectionRoot);
+      }
+      if (cfg.anchor) {
+        const anchor = sectionRoot.createDiv({
+          attr: {
+            "data-ss-search": "true",
+            "data-ss-title": cfg.anchor.title,
+            "data-ss-desc": cfg.anchor.desc,
+          },
+        });
+        anchor.toggle(false);
+      }
     }
-    this.contentMutationObserver = new MutationObserver(() => {
-      if (this.indexRebuildTimer) window.clearTimeout(this.indexRebuildTimer);
-      this.indexRebuildTimer = window.setTimeout(() => this.buildSettingsIndex(), 150);
+
+    this.buildSettingsIndex();
+    window.setTimeout(() => this.buildSettingsIndex(), 300);
+
+    if (this.contentContainerEl) {
+      if (this.contentMutationObserver) {
+        this.contentMutationObserver.disconnect();
+      }
+      this.contentMutationObserver = new MutationObserver(() => {
+        if (this.indexRebuildTimer) window.clearTimeout(this.indexRebuildTimer);
+        this.indexRebuildTimer = window.setTimeout(
+          () => this.buildSettingsIndex(),
+          150,
+        );
+      });
+      this.contentMutationObserver.observe(this.contentContainerEl, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    this.searchResultsContainerEl = layout.createDiv({
+      cls: "ss-settings-search-results",
+      attr: {
+        id: this.searchResultsListId,
+        role: "listbox",
+        "aria-label": "Settings search results",
+      },
     });
-    this.contentMutationObserver.observe(this.contentContainerEl, { childList: true, subtree: true });
+    this.searchResultsContainerEl.toggle(false);
+    this.syncSearchChrome();
   }
-
-  this.searchResultsContainerEl = containerEl.createDiv({ cls: "ss-settings-search-results" });
-  this.searchResultsContainerEl.toggle(false);
-}
   /**
    * Initialize version display and check for updates
    */
@@ -365,7 +488,7 @@ async display(): Promise<void> {
     const currentVersion = this.plugin.manifest.version;
     this.versionInfoContainer.createSpan({
       cls: "ss-version-pill ss-version-pill--checking",
-      text: `v${currentVersion} (checking...)`
+      text: `v${currentVersion} (checking...)`,
     });
 
     // Check for updates
@@ -379,14 +502,21 @@ async display(): Promise<void> {
     if (!this.versionInfoContainer) return;
 
     try {
-      const versionInfo = await this.plugin.getVersionCheckerService().checkVersion(forceRefresh);
+      const versionInfo = await this.plugin
+        .getVersionCheckerService()
+        .checkVersion(forceRefresh);
       this.updateVersionDisplay(versionInfo);
     } catch (error) {
-
-      const versionText = this.versionInfoContainer.querySelector(".ss-version-pill") as HTMLElement | null;
+      const versionText = this.versionInfoContainer.querySelector(
+        ".ss-version-pill",
+      ) as HTMLElement | null;
       if (versionText) {
         versionText.setText(`v${this.plugin.manifest.version} (check failed)`);
-        versionText.removeClass("ss-version-pill--latest", "ss-version-pill--outdated", "ss-version-pill--checking");
+        versionText.removeClass(
+          "ss-version-pill--latest",
+          "ss-version-pill--outdated",
+          "ss-version-pill--checking",
+        );
         versionText.addClass("ss-version-pill--error");
       }
     }
@@ -398,16 +528,20 @@ async display(): Promise<void> {
   private updateVersionDisplay(versionInfo: VersionInfo) {
     if (!this.versionInfoContainer) return;
 
-    let versionText = this.versionInfoContainer.querySelector(".ss-version-pill") as HTMLElement | null;
+    let versionText = this.versionInfoContainer.querySelector(
+      ".ss-version-pill",
+    ) as HTMLElement | null;
     if (!versionText) {
-      versionText = this.versionInfoContainer.createSpan({ cls: "ss-version-pill" });
+      versionText = this.versionInfoContainer.createSpan({
+        cls: "ss-version-pill",
+      });
     }
 
     versionText.removeClass(
       "ss-version-pill--latest",
       "ss-version-pill--outdated",
       "ss-version-pill--error",
-      "ss-version-pill--checking"
+      "ss-version-pill--checking",
     );
 
     if (versionInfo.isLatest) {
@@ -415,7 +549,9 @@ async display(): Promise<void> {
       versionText.addClass("ss-version-pill--latest");
       this.versionInfoContainer.querySelector(".ss-version-update")?.remove();
     } else {
-      versionText.setText(`v${versionInfo.currentVersion} → v${versionInfo.latestVersion}`);
+      versionText.setText(
+        `v${versionInfo.currentVersion} → v${versionInfo.latestVersion}`,
+      );
       versionText.addClass("ss-version-pill--outdated");
 
       if (!this.versionInfoContainer.querySelector(".ss-version-update")) {
@@ -435,7 +571,7 @@ async display(): Promise<void> {
           window.open(versionInfo.updateUrl, "_blank");
           new Notice(
             "Opening SystemSculpt AI in Community Plugins...\n\nIf nothing happens, please update manually via Settings → Community plugins",
-            10000
+            10000,
           );
         });
       }
@@ -445,12 +581,14 @@ async display(): Promise<void> {
   // Override hide method to clean up event listeners
   hide() {
     // Clean up resources from the currently active tab before closing
-    const activeContent = this.containerEl.querySelector(".systemsculpt-tab-content.is-active") as any;
+    const activeContent = this.containerEl.querySelector(
+      ".systemsculpt-tab-content.is-active",
+    ) as any;
     if (activeContent && activeContent.cleanup) {
       activeContent.cleanup();
       activeContent.cleanup = null;
     }
-    
+
     this.removeAllListeners();
     if (this.contentMutationObserver) {
       this.contentMutationObserver.disconnect();
@@ -471,9 +609,17 @@ async display(): Promise<void> {
       return;
     }
 
-    const targetPanel = this.contentContainerEl.querySelector(`.systemsculpt-tab-content[data-tab="${tabId}"]`) as any;
-    const activePanel = this.contentContainerEl.querySelector(".systemsculpt-tab-content.is-active") as any;
-    if (activePanel && activePanel !== targetPanel && typeof activePanel?.cleanup === "function") {
+    const targetPanel = this.contentContainerEl.querySelector(
+      `.systemsculpt-tab-content[data-tab="${tabId}"]`,
+    ) as any;
+    const activePanel = this.contentContainerEl.querySelector(
+      ".systemsculpt-tab-content.is-active",
+    ) as any;
+    if (
+      activePanel &&
+      activePanel !== targetPanel &&
+      typeof activePanel?.cleanup === "function"
+    ) {
       try {
         activePanel.cleanup();
       } catch (_) {
@@ -483,27 +629,29 @@ async display(): Promise<void> {
 
     this.activeTabId = tabId;
 
-    Array.from(this.tabContainerEl.querySelectorAll("button[data-tab]"))
-      .forEach((button) => {
-        const el = button as HTMLElement;
-        if (el.dataset.tab === tabId) {
-          el.addClass("mod-active", "mod-cta");
-        } else {
-          el.removeClass("mod-active", "mod-cta");
-        }
-      });
+    Array.from(
+      this.tabContainerEl.querySelectorAll("button[data-tab]"),
+    ).forEach((button) => {
+      const el = button as HTMLElement;
+      if (el.dataset.tab === tabId) {
+        el.addClass("mod-active", "mod-cta");
+      } else {
+        el.removeClass("mod-active", "mod-cta");
+      }
+    });
 
-    Array.from(this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"))
-      .forEach((panel) => {
-        const el = panel as HTMLElement;
-        if (el.dataset.tab === tabId) {
-          el.addClass("is-active");
-          el.toggle(true);
-        } else {
-          el.removeClass("is-active");
-          el.toggle(false);
-        }
-      });
+    Array.from(
+      this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"),
+    ).forEach((panel) => {
+      const el = panel as HTMLElement;
+      if (el.dataset.tab === tabId) {
+        el.addClass("is-active");
+        el.toggle(true);
+      } else {
+        el.removeClass("is-active");
+        el.toggle(false);
+      }
+    });
   }
 
   /**
@@ -511,83 +659,477 @@ async display(): Promise<void> {
    */
   private buildSettingsIndex() {
     this.allSettingsIndex = [];
-    if (!this.contentContainerEl) return;
+    if (!this.contentContainerEl) {
+      this.renderSearchMeta();
+      return;
+    }
 
-    this.allSettingsIndex = buildSettingsIndexFromRoot(this.contentContainerEl, this.tabsDef);
+    this.allSettingsIndex = buildSettingsIndexFromRoot(
+      this.contentContainerEl,
+      this.tabsDef,
+    );
+    if (this.searchState.query) {
+      this.refreshSearchResults(this.searchState.query, false);
+      return;
+    }
+    this.renderSearchMeta();
   }
 
   /**
-   * Handle search input with debounce
+   * Handle search input
    */
   private handleSearchInput() {
     if (!this.searchInputEl) return;
     const query = this.searchInputEl.value.trim();
 
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer as any);
+    if (query.length === 0) {
+      this.clearSearch(false);
+      return;
     }
-    this.debounceTimer = setTimeout(() => {
-      if (query.length === 0) {
-        this.exitSearchMode();
-      } else {
-        this.enterSearchMode(query);
-      }
-    }, 200);
+
+    this.refreshSearchResults(query, true);
   }
 
   /**
-   * Enter search mode: hide tabs, show results
+   * Handle keyboard navigation while the search field is focused.
    */
-  private enterSearchMode(query: string) {
-    if (!this.tabContainerEl || !this.contentContainerEl || !this.searchResultsContainerEl) return;
+  private handleSearchKeydown(event: KeyboardEvent) {
+    const hasActiveSearch = this.searchState.query.length > 0;
+
+    if (event.key === "Escape") {
+      if (!hasActiveSearch && !this.searchInputEl?.value) {
+        return;
+      }
+      event.preventDefault();
+      this.clearSearch(true);
+      return;
+    }
+
+    if (!hasActiveSearch) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.moveSearchSelection(1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.moveSearchSelection(-1);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      this.setSearchSelection(0, true);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      this.setSearchSelection(this.searchState.results.length - 1, true);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      const match = this.searchState.results[this.searchState.selectedIndex];
+      if (!match) {
+        return;
+      }
+      event.preventDefault();
+      this.navigateToSetting(match.tabId, match.element);
+    }
+  }
+
+  /**
+   * Recompute and render search results.
+   */
+  private refreshSearchResults(query: string, resetSelection: boolean) {
+    if (
+      !this.tabContainerEl ||
+      !this.contentContainerEl ||
+      !this.searchResultsContainerEl
+    ) {
+      return;
+    }
+
+    const resultSet = searchSettingsIndex(this.allSettingsIndex, query);
+    const nextSelectedIndex =
+      resultSet.results.length === 0
+        ? -1
+        : resetSelection
+          ? 0
+          : Math.min(
+              Math.max(this.searchState.selectedIndex, 0),
+              resultSet.results.length - 1,
+            );
+
+    this.searchState = {
+      query,
+      groups: resultSet.groups,
+      results: resultSet.results,
+      selectedIndex: nextSelectedIndex,
+    };
 
     this.tabContainerEl.toggle(false);
-    Array.from(this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"))
-      .forEach((panel) => (panel as HTMLElement).toggle(false));
+    Array.from(
+      this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"),
+    ).forEach((panel) => (panel as HTMLElement).toggle(false));
 
-    this.renderSearchResults(query);
-    this.searchResultsContainerEl.toggle(true);
+    this.renderSearchMeta();
+    this.renderSearchResults();
+    this.syncSearchChrome();
   }
 
   /**
    * Exit search mode: show tabs and active content, hide results
    */
   private exitSearchMode() {
-    if (!this.tabContainerEl || !this.contentContainerEl || !this.searchResultsContainerEl) return;
-    this.searchResultsContainerEl.toggle(false);
-    this.tabContainerEl.toggle(true);
-    this.activateTab(this.activeTabId);
-  }
-
-  /**
-   * Render search results list
-   */
-  private renderSearchResults(query: string) {
-    if (!this.searchResultsContainerEl) return;
-    const q = query.toLowerCase();
-    const matches = this.allSettingsIndex.filter((item) =>
-      item.title.toLowerCase().includes(q) || item.description.toLowerCase().includes(q)
-    );
-
-    this.searchResultsContainerEl.empty();
-
-    const header = this.searchResultsContainerEl.createDiv({ cls: "ss-search-header" });
-    header.createSpan({ text: `Search results (${matches.length})`, cls: "ss-search-count" });
-
-    if (matches.length === 0) {
-      this.searchResultsContainerEl.createDiv({ cls: "ss-search-empty", text: "No settings match your search." });
+    if (
+      !this.tabContainerEl ||
+      !this.contentContainerEl ||
+      !this.searchResultsContainerEl
+    ) {
       return;
     }
 
-    for (const match of matches) {
-      const row = this.searchResultsContainerEl.createDiv({ cls: "ss-search-result" });
-      row.createDiv({ cls: "ss-search-title", text: match.title || "(Untitled setting)" });
-      if (match.description) {
-        row.createDiv({ cls: "ss-search-desc", text: match.description });
-      }
-      row.createDiv({ cls: "ss-search-tab", text: match.tabLabel });
-      row.addEventListener("click", () => this.navigateToSetting(match.tabId, match.element));
+    this.searchResultsContainerEl.empty();
+    this.searchResultsContainerEl.toggle(false);
+    this.tabContainerEl.toggle(true);
+    this.activateTab(this.activeTabId);
+    this.renderSearchMeta();
+    this.syncSearchChrome();
+  }
+
+  /**
+   * Clear the search shell and restore the normal tab view.
+   */
+  private clearSearch(restoreFocus: boolean) {
+    if (this.searchInputEl) {
+      this.searchInputEl.value = "";
     }
+    this.searchState = {
+      query: "",
+      groups: [],
+      results: [],
+      selectedIndex: -1,
+    };
+    this.exitSearchMode();
+    if (restoreFocus) {
+      this.searchInputEl?.focus();
+    }
+  }
+
+  private renderSearchMeta() {
+    if (!this.searchMetaEl) {
+      return;
+    }
+
+    this.searchMetaEl.empty();
+    const summary = this.searchMetaEl.createDiv({
+      cls: "ss-settings-search-meta__summary",
+    });
+    const actions = this.searchMetaEl.createDiv({
+      cls: "ss-settings-search-meta__actions",
+    });
+
+    if (this.searchState.query) {
+      if (this.searchState.results.length === 0) {
+        summary.createSpan({
+          cls: "ss-settings-search-meta__count",
+          text: "No matching settings",
+        });
+      } else {
+        summary.createSpan({
+          cls: "ss-settings-search-meta__count",
+          text: `${this.searchState.results.length} ${
+            this.searchState.results.length === 1 ? "result" : "results"
+          }`,
+        });
+        summary.createSpan({
+          cls: "ss-settings-search-meta__subtle",
+          text: `across ${this.searchState.groups.length} ${
+            this.searchState.groups.length === 1 ? "tab" : "tabs"
+          }`,
+        });
+      }
+
+      summary.createSpan({
+        cls: "ss-settings-search-meta__query",
+        text: `“${this.searchState.query}”`,
+      });
+
+      this.createKeyboardHint(actions, ["↑", "↓"], "move");
+      if (this.searchState.results.length > 0) {
+        this.createKeyboardHint(actions, ["Enter"], "open");
+      }
+      this.createKeyboardHint(actions, ["Esc"], "clear");
+      return;
+    }
+
+    const tabCount = new Set(
+      this.allSettingsIndex.map((entry) => entry.tabId).filter(Boolean),
+    ).size;
+    if (this.allSettingsIndex.length > 0) {
+      summary.createSpan({
+        cls: "ss-settings-search-meta__count",
+        text: `${this.allSettingsIndex.length} searchable items`,
+      });
+      summary.createSpan({
+        cls: "ss-settings-search-meta__subtle",
+        text: `across ${tabCount || this.tabsDef.length} ${
+          (tabCount || this.tabsDef.length) === 1 ? "tab" : "tabs"
+        }`,
+      });
+    } else {
+      summary.createSpan({
+        cls: "ss-settings-search-meta__count",
+        text: "Search across every tab",
+      });
+    }
+
+    actions.createSpan({
+      cls: "ss-settings-search-meta__idle-copy",
+      text: "Search titles, descriptions, and section anchors.",
+    });
+  }
+
+  private createKeyboardHint(
+    parent: HTMLElement,
+    keys: string[],
+    label: string,
+  ) {
+    const hint = parent.createSpan({ cls: "ss-settings-search-key-hint" });
+    for (const key of keys) {
+      hint.createEl("kbd", { text: key });
+    }
+    hint.createSpan({ text: label });
+  }
+
+  private syncSearchChrome() {
+    const searchActive = this.searchState.query.length > 0;
+    this.searchShellEl?.classList.toggle("is-search-active", searchActive);
+
+    if (this.clearSearchButtonEl) {
+      this.clearSearchButtonEl.hidden = !searchActive;
+      this.clearSearchButtonEl.disabled = !searchActive;
+    }
+
+    if (this.searchInputEl) {
+      this.searchInputEl.setAttribute(
+        "aria-expanded",
+        searchActive ? "true" : "false",
+      );
+      if (searchActive && this.searchState.selectedIndex >= 0) {
+        this.searchInputEl.setAttribute(
+          "aria-activedescendant",
+          this.getSearchResultId(this.searchState.selectedIndex),
+        );
+      } else {
+        this.searchInputEl.removeAttribute("aria-activedescendant");
+      }
+    }
+  }
+
+  /**
+   * Render the grouped search results list.
+   */
+  private renderSearchResults() {
+    if (!this.searchResultsContainerEl) {
+      return;
+    }
+
+    this.searchResultsContainerEl.empty();
+    this.searchResultsContainerEl.toggle(true);
+
+    if (this.searchState.results.length === 0) {
+      const emptyState = this.searchResultsContainerEl.createDiv({
+        cls: "ss-search-empty-state",
+      });
+      const emptyIcon = emptyState.createDiv({
+        cls: "ss-search-empty-state__icon",
+        attr: { "aria-hidden": "true" },
+      });
+      setIcon(emptyIcon, "search");
+      emptyState.createDiv({
+        cls: "ss-search-empty-state__title",
+        text: `No settings found for “${this.searchState.query}”`,
+      });
+      emptyState.createDiv({
+        cls: "ss-search-empty-state__description",
+        text: "Try a broader phrase, a tab name, or a feature like studio, provider, or embeddings.",
+      });
+      return;
+    }
+
+    let flatIndex = 0;
+    for (const group of this.searchState.groups) {
+      const groupEl = this.searchResultsContainerEl.createDiv({
+        cls: "ss-search-group",
+      });
+      const groupHeader = groupEl.createDiv({ cls: "ss-search-group__header" });
+      groupHeader.createSpan({
+        cls: "ss-search-group__title",
+        text: group.tabLabel,
+      });
+      groupHeader.createSpan({
+        cls: "ss-search-group__count",
+        text: `${group.results.length}`,
+      });
+
+      const groupResults = groupEl.createDiv({
+        cls: "ss-search-group__results",
+      });
+      for (const match of group.results) {
+        const rowIndex = flatIndex;
+        const row = groupResults.createEl("button", {
+          cls: "ss-search-result",
+          attr: {
+            id: this.getSearchResultId(rowIndex),
+            type: "button",
+            role: "option",
+            "aria-selected":
+              rowIndex === this.searchState.selectedIndex ? "true" : "false",
+          },
+        });
+        row.classList.toggle(
+          "is-selected",
+          rowIndex === this.searchState.selectedIndex,
+        );
+
+        const copy = row.createDiv({ cls: "ss-search-result__copy" });
+        const titleRow = copy.createDiv({ cls: "ss-search-result__title-row" });
+        const titleEl = titleRow.createDiv({ cls: "ss-search-result__title" });
+        this.renderHighlightedText(
+          titleEl,
+          match.title || match.description || "(Untitled setting)",
+          this.searchState.query,
+        );
+        if (match.kind === "anchor") {
+          titleRow.createSpan({
+            cls: "ss-search-result__badge",
+            text: "Section",
+          });
+        }
+
+        const descriptionEl = copy.createDiv({
+          cls: "ss-search-result__description",
+        });
+        const descriptionText =
+          match.description ||
+          (match.kind === "anchor"
+            ? `Jump to this section in ${group.tabLabel}.`
+            : `Open this setting in ${group.tabLabel}.`);
+        this.renderHighlightedText(
+          descriptionEl,
+          descriptionText,
+          this.searchState.query,
+        );
+
+        const meta = row.createDiv({ cls: "ss-search-result__meta" });
+        const openHint = meta.createDiv({ cls: "ss-search-result__open" });
+        const openIcon = openHint.createSpan({
+          cls: "ss-search-result__open-icon",
+          attr: { "aria-hidden": "true" },
+        });
+        setIcon(openIcon, "arrow-right");
+        openHint.createSpan({ text: "Open" });
+
+        row.addEventListener("mouseenter", () =>
+          this.setSearchSelection(rowIndex, false),
+        );
+        row.addEventListener("click", () =>
+          this.navigateToSetting(match.tabId, match.element),
+        );
+        flatIndex += 1;
+      }
+    }
+
+    this.syncRenderedSearchSelection(false);
+  }
+
+  private renderHighlightedText(
+    parent: HTMLElement,
+    text: string,
+    query: string,
+  ) {
+    parent.empty();
+    const parts = buildSettingsSearchHighlightParts(text, query);
+    for (const part of parts) {
+      if (!part.matched) {
+        parent.appendText(part.text);
+        continue;
+      }
+
+      parent.createEl("mark", {
+        cls: "ss-search-mark",
+        text: part.text,
+      });
+    }
+  }
+
+  private moveSearchSelection(delta: number) {
+    if (this.searchState.results.length === 0) {
+      return;
+    }
+
+    const currentIndex =
+      this.searchState.selectedIndex < 0 ? 0 : this.searchState.selectedIndex;
+    const nextIndex = Math.max(
+      0,
+      Math.min(currentIndex + delta, this.searchState.results.length - 1),
+    );
+    this.setSearchSelection(nextIndex, true);
+  }
+
+  private setSearchSelection(index: number, scrollIntoView: boolean) {
+    if (this.searchState.results.length === 0) {
+      this.searchState.selectedIndex = -1;
+      this.syncRenderedSearchSelection(false);
+      return;
+    }
+
+    const nextIndex = Math.max(
+      0,
+      Math.min(index, this.searchState.results.length - 1),
+    );
+    if (nextIndex === this.searchState.selectedIndex) {
+      if (scrollIntoView) {
+        this.syncRenderedSearchSelection(true);
+      }
+      return;
+    }
+
+    this.searchState.selectedIndex = nextIndex;
+    this.syncRenderedSearchSelection(scrollIntoView);
+  }
+
+  private syncRenderedSearchSelection(scrollIntoView: boolean) {
+    if (!this.searchResultsContainerEl) {
+      return;
+    }
+
+    const rows = Array.from(
+      this.searchResultsContainerEl.querySelectorAll<HTMLElement>(
+        ".ss-search-result",
+      ),
+    );
+    rows.forEach((row, index) => {
+      const selected = index === this.searchState.selectedIndex;
+      row.classList.toggle("is-selected", selected);
+      row.setAttribute("aria-selected", selected ? "true" : "false");
+      if (selected && scrollIntoView) {
+        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    });
+
+    this.syncSearchChrome();
+  }
+
+  private getSearchResultId(index: number): string {
+    return `${this.searchResultsListId}-${index}`;
   }
 
   /**
@@ -597,13 +1139,7 @@ async display(): Promise<void> {
     if (!this.tabContainerEl || !this.contentContainerEl) return;
 
     // Exit search mode and clear input
-    this.exitSearchMode();
-    if (this.searchInputEl) this.searchInputEl.value = "";
-
-    const targetButton = this.tabContainerEl.querySelector(`button[data-tab="${tabId}"]`) as HTMLElement | null;
-    if (!targetButton) {
-      return;
-    }
+    this.clearSearch(false);
 
     this.activateTab(tabId);
 

@@ -1,7 +1,11 @@
 /**
  * @jest-environment jsdom
  */
-import { buildSettingsIndexFromRoot, SettingsIndexEntry } from "../SettingsSearchIndex";
+import {
+  buildSettingsIndexFromRoot,
+  buildSettingsSearchHighlightParts,
+  searchSettingsIndex,
+} from "../SettingsSearchIndex";
 
 describe("SettingsSearchIndex", () => {
   describe("buildSettingsIndexFromRoot", () => {
@@ -18,7 +22,10 @@ describe("SettingsSearchIndex", () => {
       return section;
     }
 
-    function createSettingItem(title: string, description: string): HTMLElement {
+    function createSettingItem(
+      title: string,
+      description: string,
+    ): HTMLElement {
       const setting = document.createElement("div");
       setting.classList.add("setting-item");
 
@@ -35,7 +42,10 @@ describe("SettingsSearchIndex", () => {
       return setting;
     }
 
-    function createSearchableAnchor(title: string, description: string): HTMLElement {
+    function createSearchableAnchor(
+      title: string,
+      description: string,
+    ): HTMLElement {
       const anchor = document.createElement("div");
       anchor.dataset.ssSearch = "true";
       anchor.dataset.ssTitle = title;
@@ -55,7 +65,9 @@ describe("SettingsSearchIndex", () => {
     it("indexes setting items with title and description", () => {
       const container = document.createElement("div");
       const tabContent = createTabContent("general");
-      tabContent.appendChild(createSettingItem("API Key", "Your API key for authentication"));
+      tabContent.appendChild(
+        createSettingItem("API Key", "Your API key for authentication"),
+      );
       container.appendChild(tabContent);
 
       const result = buildSettingsIndexFromRoot(container, tabsDef);
@@ -65,13 +77,16 @@ describe("SettingsSearchIndex", () => {
       expect(result[0].tabLabel).toBe("General");
       expect(result[0].title).toBe("API Key");
       expect(result[0].description).toBe("Your API key for authentication");
+      expect(result[0].kind).toBe("setting");
     });
 
     it("indexes multiple settings from same tab", () => {
       const container = document.createElement("div");
       const tabContent = createTabContent("chat");
       tabContent.appendChild(createSettingItem("Model", "Select AI model"));
-      tabContent.appendChild(createSettingItem("Temperature", "Response creativity"));
+      tabContent.appendChild(
+        createSettingItem("Temperature", "Response creativity"),
+      );
       container.appendChild(tabContent);
 
       const result = buildSettingsIndexFromRoot(container, tabsDef);
@@ -127,7 +142,9 @@ describe("SettingsSearchIndex", () => {
     it("indexes searchable anchors", () => {
       const container = document.createElement("div");
       const tabContent = createTabContent("advanced");
-      tabContent.appendChild(createSearchableAnchor("Debug Mode", "Enable debug logging"));
+      tabContent.appendChild(
+        createSearchableAnchor("Debug Mode", "Enable debug logging"),
+      );
       container.appendChild(tabContent);
 
       const result = buildSettingsIndexFromRoot(container, tabsDef);
@@ -135,6 +152,7 @@ describe("SettingsSearchIndex", () => {
       expect(result).toHaveLength(1);
       expect(result[0].title).toBe("Debug Mode");
       expect(result[0].description).toBe("Enable debug logging");
+      expect(result[0].kind).toBe("anchor");
     });
 
     it("falls back to anchor text content for title", () => {
@@ -219,8 +237,12 @@ describe("SettingsSearchIndex", () => {
     it("indexes both settings and anchors from same tab", () => {
       const container = document.createElement("div");
       const tabContent = createTabContent("general");
-      tabContent.appendChild(createSettingItem("Regular Setting", "Setting desc"));
-      tabContent.appendChild(createSearchableAnchor("Anchor Item", "Anchor desc"));
+      tabContent.appendChild(
+        createSettingItem("Regular Setting", "Setting desc"),
+      );
+      tabContent.appendChild(
+        createSearchableAnchor("Anchor Item", "Anchor desc"),
+      );
       container.appendChild(tabContent);
 
       const result = buildSettingsIndexFromRoot(container, tabsDef);
@@ -270,6 +292,105 @@ describe("SettingsSearchIndex", () => {
       expect(result).toHaveLength(1);
       expect(result[0].title).toBe("");
       expect(result[0].description).toBe("Description Only");
+    });
+  });
+
+  describe("searchSettingsIndex", () => {
+    function createEntry(
+      partial: Partial<
+        ReturnType<typeof buildSettingsIndexFromRoot>[number]
+      > & {
+        title: string;
+        description?: string;
+      },
+    ) {
+      return {
+        tabId: partial.tabId || "general",
+        tabLabel: partial.tabLabel || "General",
+        title: partial.title,
+        description: partial.description || "",
+        element: partial.element || document.createElement("div"),
+        kind: partial.kind || "setting",
+      };
+    }
+
+    it("groups matches by tab and ranks title matches ahead of description matches", () => {
+      const entries = [
+        createEntry({
+          tabId: "account",
+          tabLabel: "Account",
+          title: "Provider connections",
+          description: "Manage auth and local runtimes",
+        }),
+        createEntry({
+          tabId: "knowledge",
+          tabLabel: "Knowledge",
+          title: "Local runtimes",
+          description: "Provider configuration and embeddings",
+        }),
+      ];
+
+      const result = searchSettingsIndex(entries, "provider");
+
+      expect(result.groups).toHaveLength(2);
+      expect(result.groups[0].tabLabel).toBe("Account");
+      expect(result.groups[0].results[0].title).toBe("Provider connections");
+      expect(result.results[0].title).toBe("Provider connections");
+      expect(result.results[1].title).toBe("Local runtimes");
+    });
+
+    it("matches tab labels so searching a tab name brings back that group", () => {
+      const entries = [
+        createEntry({
+          tabId: "knowledge",
+          tabLabel: "Knowledge",
+          title: "Embedding providers",
+        }),
+      ];
+
+      const result = searchSettingsIndex(entries, "knowledge");
+
+      expect(result.results).toHaveLength(1);
+      expect(result.groups[0].tabLabel).toBe("Knowledge");
+    });
+
+    it("requires all query tokens to be present somewhere in the entry", () => {
+      const entries = [
+        createEntry({
+          title: "Provider connections",
+          description: "Local runtime setup",
+        }),
+      ];
+
+      expect(
+        searchSettingsIndex(entries, "provider local").results,
+      ).toHaveLength(1);
+      expect(
+        searchSettingsIndex(entries, "provider missing").results,
+      ).toHaveLength(0);
+    });
+  });
+
+  describe("buildSettingsSearchHighlightParts", () => {
+    it("returns highlighted parts for one or more query tokens", () => {
+      const parts = buildSettingsSearchHighlightParts(
+        "Provider connections and provider auth",
+        "provider auth",
+      );
+
+      expect(parts).toEqual([
+        { text: "Provider", matched: true },
+        { text: " connections and ", matched: false },
+        { text: "provider", matched: true },
+        { text: " ", matched: false },
+        { text: "auth", matched: true },
+      ]);
+    });
+
+    it("returns the original text when nothing matches", () => {
+      expect(
+        buildSettingsSearchHighlightParts("Studio graph", "provider"),
+      ).toEqual([{ text: "Studio graph", matched: false }]);
     });
   });
 });
