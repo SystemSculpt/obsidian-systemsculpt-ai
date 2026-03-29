@@ -1,31 +1,34 @@
 ## Objective
 
-Make the Windows `Settings -> Providers` lane stable on the clean-install desktop path.
+Stabilize the Windows no-focus clean-install desktop automation baselines so
+transient hosted-provider throttling does not get misreported as a plugin
+regression.
 
-The current broken behavior is specific to the bridge route behind the Providers tab:
-
-- `POST /v1/settings/open` succeeds for `targetTab=providers`
-- `POST /v1/settings/providers/snapshot` crashes inside the live Windows plugin
+This segment is specifically about the external Windows runner and the shared
+desktop automation harness, not about adding new chat features.
 
 ## Primary metric
 
-`providers_snapshot_ok`
+`windows_baselines_ok`
 
-- `1` when the Windows live plugin returns a successful providers snapshot after a fresh Obsidian relaunch
+- `1` when both live Windows baseline commands exit successfully:
+  - `managed-baseline`
+  - `provider-connected-baseline`
 - `0` otherwise
 
-Secondary metrics:
+## Secondary metrics
 
-- `focused_tests_ok`
-- `build_ok`
-- `sync_ok`
-- `settings_open_ok`
+- `runner_tests_ok`
+- `managed_hosted_turn_ok`
+- `managed_transient_classified_ok`
+- `provider_connected_ok`
+- `provider_recovery_ok`
 
 ## Current segment
 
-- `segmentId`: `windows-providers-snapshot-v1`
-- `runTag`: `windows-providers-snapshot`
-- working tree: `main` with existing unrelated local changes
+- `segmentId`: `windows-baselines-transient-hosted-v1`
+- `runTag`: `windows-baselines-transient-hosted`
+- working tree: `main`
 
 ## Benchmark workload
 
@@ -33,44 +36,54 @@ Run `./autoresearch.sh`.
 
 It must:
 
-1. run the focused local Jest coverage for the provider/auth/bootstrap surface
-2. build the production plugin bundle
-3. sync the built plugin artifacts into configured plugin targets and Windows mirrors
-4. quit and reopen Obsidian on the Windows VM against the canonical QA vault
-5. probe the live Windows bridge for:
-   - `settings/open`
-   - `providers/snapshot`
+1. run the focused local desktop-automation runner tests
+2. attach to the already-open Windows QA vault through the no-focus bridge
+3. run `managed-baseline`
+4. run `provider-connected-baseline` with a runner-side OpenRouter key
+5. print `METRIC name=value` lines based on the resulting JSON payloads
 
 ## Editable surface
 
-- `src/services/pi/PiSdkAuthStorage.ts`
-- `src/services/pi/PiSdkRuntime.ts`
-- `src/services/pi/PiTextModels.ts`
-- `src/studio/piAuth/StudioPiAuthStorage.ts`
-- `src/settings/providerStatus.ts`
-- `src/settings/ProvidersTabContent.ts`
-- `src/testing/automation/DesktopAutomationBridge.ts`
-- focused tests that cover the above
+- `testing/native/desktop-automation/runner.mjs`
+- `testing/native/desktop-automation/runner.test.mjs`
+- `testing/native/desktop-automation/README.md`
+- `testing/native/device/windows/README.md`
+- `autoresearch.*`
 
 ## Locked harness
 
 - `autoresearch.sh`
 - `autoresearch.checks.sh`
-- Windows relaunch/probe flow inside the benchmark script
-- existing repo sync config and Windows QA vault target
+- Windows bridge attach path
+- live Windows QA vault
 
 ## Correctness gates
 
-- focused Jest suite passes
-- production build succeeds
-- Windows bridge returns `settings_open_ok=1`
-- Windows bridge returns `providers_snapshot_ok=1`
+- `node --test testing/native/desktop-automation/runner.test.mjs`
+- live Windows `managed-baseline` exits `0`
+- live Windows `provider-connected-baseline` exits `0`
 
 ## Keep / discard policy
 
-Keep a change only if it preserves the local correctness gates and improves the primary metric to `1`.
+Keep a change only if it preserves the local runner coverage and improves or
+preserves `windows_baselines_ok=1`.
 
-If a change still leaves `providers_snapshot_ok=0`, either discard it or keep only if it clearly improves failure visibility and is required for the next iteration.
+If a change makes the live Windows lane fail again, discard it unless it
+produces materially better failure classification that is needed for the next
+iteration.
+
+## Current best result
+
+- `runner_tests_ok=1`
+- `managed_hosted_turn_ok=1`
+- `managed_transient_classified_ok=1`
+- `provider_connected_ok=1`
+- `provider_recovery_ok=1`
+- `windows_baselines_ok=1`
+
+Managed baseline currently passes even when a later managed recovery send is
+rate-limited upstream: the runner records that under `transientFailures`
+instead of collapsing the whole case as a false plugin failure.
 
 ## Logs
 

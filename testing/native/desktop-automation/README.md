@@ -75,6 +75,11 @@ Current case profiles:
   - clear the provider auth again
   - prove the same provider path now fails with actionable Providers guidance
   - recover back to the managed SystemSculpt model
+- `managed-baseline`
+  - prove at least one real hosted SystemSculpt turn succeeds on the live vault
+  - switch to the canonical unavailable local-Pi model and verify the failure routes cleanly to Providers guidance
+  - try the managed recovery turn after the blocked local-Pi send
+  - if a later hosted retry is throttled upstream, keep that as `transientFailures` instead of misclassifying it as a bridge or model-selection regression
 - `chatview-stress`
   - reset the automation chat and prove a fresh empty composer comes up on the same automation leaf
   - toggle web search and approval mode directly through the live chat view

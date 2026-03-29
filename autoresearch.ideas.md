@@ -1,3 +1,3 @@
-- If `providers_snapshot_ok` stays `0` after the auth-storage export-shape fix, inspect the built `main.js` module-init order for every value imported by `PiSdkRuntime` and `StudioPiAuthStorage`, not just `createBundledPiAuthStorage`.
-- If the Windows route fails only after relaunch, add a minimal import-safety or bundled-init regression test that reproduces the exact crash path without requiring the VM.
-- If the probe succeeds but the Providers panel still renders badly, split the next segment and benchmark the UI interaction path separately from the bridge snapshot route.
+- Teach the release/check flow to surface `transientFailures` as hosted noise instead of flattening them into a generic plugin failure.
+- Add a combined Windows baseline command that runs managed and provider-connected lanes back to back and emits one summarized verdict for release prep.
+- Add a longer unattended Windows soak pass once the release-critical baseline lane stays green across multiple runs.

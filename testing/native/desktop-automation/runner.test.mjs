@@ -937,6 +937,138 @@ test("runManagedBaselineCase proves managed hosted chat and local Pi failure rec
   assert.match(outcome.recoveryTurn.response, /WINDOWS_MANAGED_RECOVERY_/);
 });
 
+test("runManagedBaselineCase retries transient hosted failures before succeeding", async () => {
+  let currentModelId = "systemsculpt@@systemsculpt/ai-agent";
+  let transientFailuresRemaining = 1;
+  let managedSendAttempts = 0;
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [
+          {
+            value: "systemsculpt@@systemsculpt/ai-agent",
+            label: "SystemSculpt Agent",
+            providerAuthenticated: true,
+            providerLabel: "SystemSculpt",
+            section: "systemsculpt",
+          },
+        ],
+      };
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      if (currentModelId !== "systemsculpt@@systemsculpt/ai-agent") {
+        throw new Error(
+          "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers."
+        );
+      }
+
+      managedSendAttempts += 1;
+      if (transientFailuresRemaining > 0) {
+        transientFailuresRemaining -= 1;
+        throw new Error(
+          "Provider returned error moonshotai/kimi-k2.5 is temporarily rate-limited upstream. Please retry shortly."
+        );
+      }
+
+      const token = String(body.text || "").replace("Reply with this exact token and nothing else: ", "");
+      return {
+        selectedModelId: currentModelId,
+        currentModelName: "SystemSculpt Agent",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runManagedBaselineCase(client);
+  assert.equal(managedSendAttempts, 3);
+  assert.equal(outcome.hostedTurn.transientRetries.length, 1);
+  assert.match(outcome.hostedTurn.transientRetries[0].error, /rate-limited upstream/i);
+  assert.match(outcome.hostedTurn.response, /WINDOWS_MANAGED_BASELINE_/);
+  assert.match(outcome.recoveryTurn.response, /WINDOWS_MANAGED_RECOVERY_/);
+});
+
+test("runManagedBaselineCase can recover when the first managed turn stays transiently throttled", async () => {
+  let currentModelId = "systemsculpt@@systemsculpt/ai-agent";
+  let transientFailuresRemaining = 3;
+  let managedSendAttempts = 0;
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [
+          {
+            value: "systemsculpt@@systemsculpt/ai-agent",
+            label: "SystemSculpt Agent",
+            providerAuthenticated: true,
+            providerLabel: "SystemSculpt",
+            section: "systemsculpt",
+          },
+        ],
+      };
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      if (currentModelId !== "systemsculpt@@systemsculpt/ai-agent") {
+        throw new Error(
+          "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers."
+        );
+      }
+
+      managedSendAttempts += 1;
+      if (transientFailuresRemaining > 0) {
+        transientFailuresRemaining -= 1;
+        throw new Error(
+          "Provider returned error moonshotai/kimi-k2.5 is temporarily rate-limited upstream. Please retry shortly."
+        );
+      }
+
+      const token = String(body.text || "").replace("Reply with this exact token and nothing else: ", "");
+      return {
+        selectedModelId: currentModelId,
+        currentModelName: "SystemSculpt Agent",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runManagedBaselineCase(client);
+  assert.equal(managedSendAttempts, 4);
+  assert.equal(outcome.hostedTurn, null);
+  assert.equal(outcome.recoveryTurn?.transientRetries.length, 0);
+  assert.equal(outcome.transientFailures.length, 1);
+  assert.equal(outcome.transientFailures[0].phase, "hosted");
+  assert.match(outcome.transientFailures[0].error, /rate-limited upstream/i);
+  assert.match(outcome.recoveryTurn?.response || "", /WINDOWS_MANAGED_RECOVERY_/);
+});
+
 test("runProviderConnectedBaselineCase drives provider auth through settings and recovers cleanly", async () => {
   const managedModel = {
     value: "systemsculpt@@systemsculpt/ai-agent",

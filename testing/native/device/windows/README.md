@@ -86,3 +86,11 @@ republish the bridge without foregrounding Obsidian.
 
 That split keeps Windows responsible for fresh-user truth while still reusing the same bridge
 automation layer as macOS once the runtime is open.
+
+## Interpreting transient hosted failures
+
+The managed baseline now distinguishes plugin regressions from upstream throttling:
+
+- If no managed hosted turn succeeds, the case still fails.
+- If the first hosted turn succeeds and a later managed recovery turn is rate-limited upstream, the case stays green and records that event under `transientFailures`.
+- Treat `transientFailures` as hosted-provider noise to investigate separately from bridge/bootstrap/model-selection bugs.

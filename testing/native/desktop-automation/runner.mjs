@@ -38,6 +38,8 @@ const PROVIDER_CONNECTED_API_KEY_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY";
 const PROVIDER_CONNECTED_API_KEYS_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS";
 const PROVIDER_CONNECTED_MODEL_ID_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID";
 const DEFAULT_PROVIDER_CONNECTED_WAIT_TIMEOUT_MS = 90_000;
+const DEFAULT_TRANSIENT_SEND_ATTEMPTS = 3;
+const DEFAULT_TRANSIENT_SEND_PAUSE_MS = 5_000;
 const DEFAULT_PROVIDER_CONNECTED_MODEL_PREFERENCES = new Map([
   [
     "openrouter",
@@ -928,46 +930,61 @@ async function expectChatSendFailure(client, body, options = {}) {
 
 async function runManagedExactTurn(client, model, tokenPrefix) {
   const token = `${tokenPrefix}_${Date.now()}`;
-  const snapshot = await retryTransientOperation(async () => {
-    const preSendSnapshot = await ensureChatModelSelection(client, model.value, {
-      reset: true,
-      label: `${model.label} selection before send`,
-    });
-    try {
-      return await client.sendChat({
-        text: `Reply with this exact token and nothing else: ${token}`,
-        includeContextFiles: false,
-        webSearchEnabled: false,
-        approvalMode: "interactive",
+  const transientRetries = [];
+  const snapshot = await retryTransientOperation(
+    async () => {
+      const preSendSnapshot = await ensureChatModelSelection(client, model.value, {
+        reset: true,
+        label: `${model.label} selection before send`,
       });
-    } catch (error) {
-      const failedSnapshot = await getChatSelectionSnapshot(client).catch(() => null);
-      throw new Error(
-        `${model.label} send failed for "${model.value}". ` +
-          `Pre-send snapshot: ${JSON.stringify({
-            selectedModelId:
-              typeof preSendSnapshot?.selectedModelId === "string"
-                ? preSendSnapshot.selectedModelId
-                : null,
-            currentModelName:
-              typeof preSendSnapshot?.currentModelName === "string"
-                ? preSendSnapshot.currentModelName
-                : null,
-          })}. ` +
-          `Failure snapshot: ${JSON.stringify({
-            selectedModelId:
-              typeof failedSnapshot?.selectedModelId === "string"
-                ? failedSnapshot.selectedModelId
-                : null,
-            currentModelName:
-              typeof failedSnapshot?.currentModelName === "string"
-                ? failedSnapshot.currentModelName
-                : null,
-          })}. ` +
-          `Upstream error: ${errorMessage(error)}`
-      );
+      try {
+        return await client.sendChat({
+          text: `Reply with this exact token and nothing else: ${token}`,
+          includeContextFiles: false,
+          webSearchEnabled: false,
+          approvalMode: "interactive",
+        });
+      } catch (error) {
+        const failedSnapshot = await getChatSelectionSnapshot(client).catch(() => null);
+        throw new Error(
+          `${model.label} send failed for "${model.value}". ` +
+            `Pre-send snapshot: ${JSON.stringify({
+              selectedModelId:
+                typeof preSendSnapshot?.selectedModelId === "string"
+                  ? preSendSnapshot.selectedModelId
+                  : null,
+              currentModelName:
+                typeof preSendSnapshot?.currentModelName === "string"
+                  ? preSendSnapshot.currentModelName
+                  : null,
+            })}. ` +
+            `Failure snapshot: ${JSON.stringify({
+              selectedModelId:
+                typeof failedSnapshot?.selectedModelId === "string"
+                  ? failedSnapshot.selectedModelId
+                  : null,
+              currentModelName:
+                typeof failedSnapshot?.currentModelName === "string"
+                  ? failedSnapshot.currentModelName
+                  : null,
+            })}. ` +
+            `Upstream error: ${errorMessage(error)}`
+        );
+      }
+    },
+    {
+      attempts: DEFAULT_TRANSIENT_SEND_ATTEMPTS,
+      pauseMs: DEFAULT_TRANSIENT_SEND_PAUSE_MS,
+      onTransientError: (error, attempt) => {
+        transientRetries.push({
+          attempt,
+          modelId: model.value,
+          label: model.label,
+          error: errorMessage(error),
+        });
+      },
     }
-  });
+  );
   const assistant = getLastAssistantMessage(snapshot);
   const assistantText = toMessageText(assistant?.content).trim();
 
@@ -978,9 +995,32 @@ async function runManagedExactTurn(client, model, tokenPrefix) {
     token,
     response: assistantText,
     model: buildModelSummary(model),
+    transientRetries,
     selectedModelId: snapshot.selectedModelId,
     currentModelName: snapshot.currentModelName || null,
   };
+}
+
+async function captureManagedTurnOutcome(client, model, tokenPrefix, phase) {
+  try {
+    return {
+      turn: await runManagedExactTurn(client, model, tokenPrefix),
+      failure: null,
+    };
+  } catch (error) {
+    if (!isTransientModelExecutionError(error)) {
+      throw error;
+    }
+    return {
+      turn: null,
+      failure: {
+        phase,
+        modelId: model.value,
+        label: model.label,
+        error: errorMessage(error),
+      },
+    };
+  }
 }
 
 function buildProviderTurnTokenPrefix(providerId) {
@@ -1230,7 +1270,12 @@ export async function runManagedBaselineCase(client) {
     throw new Error("Desktop automation expected at least one authenticated chat model.");
   }
 
-  const hostedTurn = await runManagedExactTurn(client, managedOption, "WINDOWS_MANAGED_BASELINE");
+  const hostedOutcome = await captureManagedTurnOutcome(
+    client,
+    managedOption,
+    "WINDOWS_MANAGED_BASELINE",
+    "hosted"
+  );
 
   await client.ensureChatOpen({
     reset: true,
@@ -1250,18 +1295,32 @@ export async function runManagedBaselineCase(client) {
     }
   );
 
-  const recoveryTurn = await runManagedExactTurn(client, managedOption, "WINDOWS_MANAGED_RECOVERY");
+  const recoveryOutcome = await captureManagedTurnOutcome(
+    client,
+    managedOption,
+    "WINDOWS_MANAGED_RECOVERY",
+    "recovery"
+  );
+  const transientFailures = [hostedOutcome.failure, recoveryOutcome.failure].filter(Boolean);
+  if (!hostedOutcome.turn && !recoveryOutcome.turn) {
+    throw new Error(
+      `Managed baseline could not complete a hosted turn after transient upstream failures. ${transientFailures
+        .map((entry) => `${entry.phase}: ${entry.error}`)
+        .join(" | ")}`
+    );
+  }
 
   return {
     availableModelCount: inventory.options.length,
     readyModelCount: inventory.ready.length,
     managedModel: buildModelSummary(managedOption),
-    hostedTurn,
+    hostedTurn: hostedOutcome.turn,
     blockedLocalPi: {
       modelId: WINDOWS_BASELINE_LOCAL_MODEL_ID,
       error: blockedLocalPi,
     },
-    recoveryTurn,
+    recoveryTurn: recoveryOutcome.turn,
+    transientFailures,
   };
 }
 
