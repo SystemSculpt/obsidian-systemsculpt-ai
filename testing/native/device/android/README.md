@@ -38,6 +38,10 @@ npm run test:native:android:stress
 4. Inspect the WebView through Chrome DevTools if needed.
 5. Run the native smoke matrix.
 
+`android:sync` now builds a production bundle by default and rejects `main.js`
+files that still contain inline `sourceMappingURL=data:` output. That keeps the
+mobile lane from accidentally syncing the dev watcher bundle.
+
 Example:
 
 ```bash
@@ -45,6 +49,20 @@ npm run build
 npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --sync
 npm run test:native:android:extended
 ```
+
+No-focus background lane:
+
+```bash
+npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --avd SystemSculpt_Pixel_9_API_36_1 --headless --sync
+npm run test:native:android:extended
+```
+
+If you intentionally want to reuse the current artifact set, pass `--skip-build`
+through to `android:sync` or `android:debug:open --sync`.
+
+Hosted smoke auth is bootstrapped automatically when either
+`SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY` or `SYSTEMSCULPT_E2E_LICENSE_KEY` is
+available in the repo environment, including `.env.local`.
 
 ## Vault contract
 

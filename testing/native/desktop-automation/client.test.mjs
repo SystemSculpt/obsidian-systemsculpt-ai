@@ -19,6 +19,10 @@ function createFetchStub(routeHandler) {
       url: String(url),
       method: String(options.method || "GET").toUpperCase(),
       authorization: String(options.headers?.authorization || ""),
+      body:
+        typeof options.body === "string" && options.body.trim().length > 0
+          ? JSON.parse(options.body)
+          : null,
     };
     calls.push(normalizedCall);
     return await routeHandler(normalizedCall);
@@ -94,6 +98,141 @@ test("createDesktopAutomationClient refreshes itself when discovery rolls to a n
         "GET http://127.0.0.1:62001/v1/ping",
         "GET http://127.0.0.1:62002/v1/ping",
         "GET http://127.0.0.1:62002/v1/status",
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("DesktopAutomationClient exposes settings, provider auth, and refreshable model routes", async () => {
+  const loadEntries = async () => [OLD_RECORD];
+
+  const originalFetch = globalThis.fetch;
+  const fetchStub = createFetchStub(async ({ url, method, authorization, body }) => {
+    assert.equal(authorization, "Bearer token-old");
+
+    if (url === "http://127.0.0.1:62001/v1/ping") {
+      return jsonResponse({ ok: true, data: OLD_RECORD });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/snapshot" && method === "GET") {
+      return jsonResponse({ ok: true, data: { settingsModalOpen: true } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/open" && method === "POST") {
+      assert.deepEqual(body, { targetTab: "providers" });
+      return jsonResponse({ ok: true, data: { activePluginTabId: "providers" } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/providers/snapshot" && method === "POST") {
+      assert.deepEqual(body, { ensureOpen: true, waitForLoaded: true });
+      return jsonResponse({ ok: true, data: { providers: { rowCount: 1 } } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/providers/api-key" && method === "POST") {
+      assert.deepEqual(body, { providerId: "openai", apiKey: "sk-test" });
+      return jsonResponse({ ok: true, data: { saved: true } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/providers/clear-auth" && method === "POST") {
+      assert.deepEqual(body, { providerId: "openai" });
+      return jsonResponse({ ok: true, data: { cleared: true } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/chat/models?refresh=1" && method === "GET") {
+      return jsonResponse({ ok: true, data: { options: [] } });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  });
+
+  globalThis.fetch = fetchStub;
+  try {
+    const client = await createDesktopAutomationClient({
+      vaultName: "automation-vault",
+      loadEntries,
+    });
+
+    const settings = await client.getSettingsSnapshot();
+    const opened = await client.openSettings("providers");
+    const providers = await client.getProvidersSnapshot({
+      ensureOpen: true,
+      waitForLoaded: true,
+    });
+    const saved = await client.setProviderApiKey("openai", "sk-test");
+    const cleared = await client.clearProviderAuth("openai");
+    const models = await client.listModels({ refresh: true });
+
+    assert.deepEqual(settings, { settingsModalOpen: true });
+    assert.deepEqual(opened, { activePluginTabId: "providers" });
+    assert.deepEqual(providers, { providers: { rowCount: 1 } });
+    assert.deepEqual(saved, { saved: true });
+    assert.deepEqual(cleared, { cleared: true });
+    assert.deepEqual(models, { options: [] });
+    assert.deepEqual(
+      fetchStub.calls.map((call) => `${call.method} ${call.url}`),
+      [
+        "GET http://127.0.0.1:62001/v1/ping",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "GET http://127.0.0.1:62001/v1/settings/snapshot",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/settings/open",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/settings/providers/snapshot",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/settings/providers/api-key",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/settings/providers/clear-auth",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "GET http://127.0.0.1:62001/v1/chat/models?refresh=1",
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("DesktopAutomationClient can skip bridge preflight and strips that flag from provider snapshot payloads", async () => {
+  const loadEntries = async () => [OLD_RECORD];
+
+  const originalFetch = globalThis.fetch;
+  const fetchStub = createFetchStub(async ({ url, method, authorization, body }) => {
+    assert.equal(authorization, "Bearer token-old");
+
+    if (url === "http://127.0.0.1:62001/v1/ping") {
+      return jsonResponse({ ok: true, data: OLD_RECORD });
+    }
+    if (url === "http://127.0.0.1:62001/v1/settings/providers/snapshot" && method === "POST") {
+      assert.deepEqual(body, {
+        ensureOpen: false,
+        waitForLoaded: true,
+      });
+      return jsonResponse({ ok: true, data: { providers: { rowCount: 1 } } });
+    }
+    if (url === "http://127.0.0.1:62001/v1/chat/models?refresh=1" && method === "GET") {
+      return jsonResponse({ ok: true, data: { options: [] } });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  });
+
+  globalThis.fetch = fetchStub;
+  try {
+    const client = await createDesktopAutomationClient({
+      vaultName: "automation-vault",
+      loadEntries,
+    });
+
+    const providers = await client.getProvidersSnapshot({
+      ensureOpen: false,
+      waitForLoaded: true,
+      preflightRefresh: false,
+    });
+    const models = await client.listModels({ refresh: true, preflightRefresh: false });
+
+    assert.deepEqual(providers, { providers: { rowCount: 1 } });
+    assert.deepEqual(models, { options: [] });
+    assert.deepEqual(
+      fetchStub.calls.map((call) => `${call.method} ${call.url}`),
+      [
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/settings/providers/snapshot",
+        "GET http://127.0.0.1:62001/v1/chat/models?refresh=1",
       ],
     );
   } finally {

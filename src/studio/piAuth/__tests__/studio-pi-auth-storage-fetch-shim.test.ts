@@ -19,44 +19,37 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     });
   });
 
-  it("wraps provider auth record loading with the desktop fetch shim before refreshing OAuth-backed API keys", async () => {
-    const storage = {
-      getOAuthProviders: jest.fn(() => [{ id: "anthropic", name: "Anthropic", usesCallbackServer: false }]),
-      get: jest.fn(() => ({ type: "oauth", access: "stale-token" })),
-      getApiKey: jest.fn(async () => "fresh-token"),
-      hasAuth: jest.fn(() => true),
-      has: jest.fn(() => true),
-      list: jest.fn(() => ["anthropic"]),
-      getAll: jest.fn(() => ({ anthropic: { type: "oauth", access: "stale-token" } })),
-    };
-    const withPiDesktopFetchShim = jest.fn(async (callback: () => Promise<unknown>) => await callback());
-
-    jest.doMock("@mariozechner/pi-coding-agent", () => ({
-      AuthStorage: {
-        create: jest.fn(() => storage),
-      },
-    }));
-    jest.doMock("../../../services/pi/PiSdkRuntime", () => ({
-      withPiDesktopFetchShim,
-    }));
-
-    let listStudioPiProviderAuthRecords: typeof import("../StudioPiAuthStorage").listStudioPiProviderAuthRecords;
-    jest.isolateModules(() => {
-      ({ listStudioPiProviderAuthRecords } = require("../StudioPiAuthStorage"));
+  it("loads provider auth records from static metadata without importing the Pi runtime", async () => {
+    jest.doMock("../../../services/pi/PiSdkRuntime", () => {
+      throw new Error("PiSdkRuntime should not load during provider inventory reads");
     });
 
-    const records = await listStudioPiProviderAuthRecords!({ providerHints: ["anthropic"] });
+    let listStudioPiProviderAuthRecords: typeof import("../StudioPiAuthInventory").listStudioPiProviderAuthRecords;
+    jest.isolateModules(() => {
+      ({ listStudioPiProviderAuthRecords } = require("../StudioPiAuthInventory"));
+    });
 
-    expect(withPiDesktopFetchShim).toHaveBeenCalled();
-    expect(storage.getApiKey).toHaveBeenCalledWith("anthropic");
-    expect(records).toEqual([
-      expect.objectContaining({
-        provider: "anthropic",
-        hasAnyAuth: true,
-        credentialType: "oauth",
-        source: "oauth",
-      }),
-    ]);
+    const records = await listStudioPiProviderAuthRecords!({
+      providerHints: ["anthropic"],
+      authData: {
+        anthropic: {
+          type: "oauth",
+          expires: 123456789,
+        },
+      },
+    });
+
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "anthropic",
+          hasAnyAuth: true,
+          credentialType: "oauth",
+          source: "oauth",
+          oauthExpiresAt: 123456789,
+        }),
+      ]),
+    );
   });
 
   it("wraps OAuth login with the desktop fetch shim", async () => {
@@ -66,12 +59,8 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     };
     const withPiDesktopFetchShim = jest.fn(async (callback: () => Promise<unknown>) => await callback());
 
-    jest.doMock("@mariozechner/pi-coding-agent", () => ({
-      AuthStorage: {
-        create: jest.fn(() => storage),
-      },
-    }));
-    jest.doMock("../../../services/pi/PiSdkRuntime", () => ({
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => storage),
       withPiDesktopFetchShim,
     }));
 
@@ -94,5 +83,31 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
         onPrompt: expect.any(Function),
       })
     );
+  });
+
+  it("saves provider API keys without importing the full Pi runtime", async () => {
+    const storage = {
+      set: jest.fn(),
+    };
+
+    jest.doMock("../../../services/pi/PiSdkRuntime", () => {
+      throw new Error("PiSdkRuntime should not load during provider auth writes");
+    });
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => storage),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let setStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").setStudioPiProviderApiKey;
+    jest.isolateModules(() => {
+      ({ setStudioPiProviderApiKey } = require("../StudioPiAuthStorage"));
+    });
+
+    await setStudioPiProviderApiKey!("openai", "sk-test");
+
+    expect(storage.set).toHaveBeenCalledWith("openai", {
+      type: "api_key",
+      key: "sk-test",
+    });
   });
 });

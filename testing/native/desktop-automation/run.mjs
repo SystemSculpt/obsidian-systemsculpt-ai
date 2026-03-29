@@ -18,7 +18,7 @@ Run no-focus desktop automation against the already-running Obsidian vault by
 talking to the plugin's localhost bridge instead of driving the renderer.
 
 Options:
-  --case <name|all|extended|stress|soak>   Case list: model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
+  --case <name|all|extended|stress|soak>   Case list: setup-baseline, managed-baseline, provider-connected-baseline, model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
   --sync-config <path>         Sync config used to resolve the desktop plugin target. Default: ./systemsculpt-sync.config.json
   --target-index <n>           Pin a pluginTargets entry from the sync config
   --vault-name <name>          Pin a specific sync target by vault name
@@ -30,6 +30,8 @@ Options:
   --pause-ms <n>               Delay between iterations. Default: ${DEFAULT_PAUSE_MS}
   --json-output <path>         Write the final JSON report to this path as well as stdout
   --no-reload                  Reuse a live bridge if one already exists instead of forcing a plugin reload
+  --allow-single-model-fallback
+                               Allow fresh-install fallback coverage when only one authenticated model exists
   --help, -h                   Show this help
 
 When no target selector is supplied, the runner prefers the latest live bridge
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     pauseMs: DEFAULT_PAUSE_MS,
     jsonOutput: "",
     reload: true,
+    allowSingleModelFallback: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -124,6 +127,10 @@ function parseArgs(argv) {
     }
     if (arg === "--no-reload") {
       options.reload = false;
+      continue;
+    }
+    if (arg === "--allow-single-model-fallback") {
+      options.allowSingleModelFallback = true;
       continue;
     }
     if (arg === "--help" || arg === "-h") {

@@ -1,7 +1,15 @@
 import type SystemSculptPlugin from "../main";
 import type { StreamEvent } from "../streaming/types";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
-import { streamPiLocalAgentTurn } from "./pi-native/PiLocalAgentExecutor";
+
+let piLocalAgentExecutorModulePromise: Promise<typeof import("./pi-native/PiLocalAgentExecutor")> | null = null;
+
+async function loadPiLocalAgentExecutorModule(): Promise<typeof import("./pi-native/PiLocalAgentExecutor")> {
+  if (!piLocalAgentExecutorModulePromise) {
+    piLocalAgentExecutorModulePromise = import("./pi-native/PiLocalAgentExecutor");
+  }
+  return await piLocalAgentExecutorModulePromise;
+}
 
 type PiLocalSessionRef = {
   sessionFile?: string;
@@ -21,6 +29,7 @@ type LocalPiStreamExecutorInput = {
 export async function* executeLocalPiStream(
   input: LocalPiStreamExecutorInput
 ): AsyncGenerator<StreamEvent, void, unknown> {
+  const { streamPiLocalAgentTurn } = await loadPiLocalAgentExecutorModule();
   for await (const event of streamPiLocalAgentTurn({
     plugin: input.plugin,
     modelId: input.prepared.actualModelId,

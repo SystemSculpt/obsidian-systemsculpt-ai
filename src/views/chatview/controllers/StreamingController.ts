@@ -28,6 +28,17 @@ export interface StreamingControllerOptions {
   autosaveDebounceMs?: number;
 }
 
+export type StreamCompletionState = "completed" | "aborted" | "empty";
+
+export interface StreamTurnResult {
+  messageId: string;
+  message: ChatMessage;
+  messageEl: HTMLElement;
+  completed: boolean;
+  completionState: StreamCompletionState;
+  stopReason?: string;
+}
+
 export class StreamingController extends Component {
   private readonly opts: StreamingControllerOptions;
   private readonly activeAssemblers = new Map<string, TranscriptAssembler>();
@@ -52,7 +63,7 @@ export class StreamingController extends Component {
     seedParts?: MessagePart[],
     externalTracker?: StreamingMetricsTracker,
     skipIndicatorLifecycle?: boolean,
-  ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
+  ): Promise<StreamTurnResult> {
     const {
       scrollManager,
       updateStreamingStatus,
@@ -259,24 +270,17 @@ export class StreamingController extends Component {
         (assistantMessage as any).stopReason = stopReason;
       }
 
+      // Reasoning alone is not a valid terminal assistant answer. If a provider
+      // finishes with only hidden reasoning and no visible content or tool calls,
+      // treat the turn as empty so higher-level retry/error policy can recover.
       const hasRenderableOutput =
         summary.content.trim().length > 0 ||
-        ((summary.reasoning ?? "").trim().length > 0) ||
         ((assistantMessage.tool_calls?.length ?? 0) > 0);
 
       if (!abortedBySignal && completedNaturally && !hasRenderableOutput) {
         completedNaturally = false;
         try {
           messageEl.remove();
-        } catch {}
-        try {
-          onError(
-            new SystemSculptError(
-              "Upstream model returned an empty completion.",
-              ERROR_CODES.STREAM_ERROR,
-              502
-            )
-          );
         } catch {}
       }
 
@@ -305,12 +309,18 @@ export class StreamingController extends Component {
       }
     }
 
-    const completed = !abortedBySignal && completedNaturally;
+    const completionState: StreamCompletionState = abortedBySignal
+      ? "aborted"
+      : completedNaturally
+        ? "completed"
+        : "empty";
+    const completed = completionState === "completed";
     return {
       messageId: assistantMessage.message_id ?? messageId,
       message: assistantMessage,
       messageEl,
       completed,
+      completionState,
       ...(stopReason ? { stopReason } : {}),
     };
   }

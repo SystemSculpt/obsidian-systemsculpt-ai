@@ -36,6 +36,9 @@ npm run test:native:android:stress
 ```
 
 This forwards the Android WebView DevTools socket over `adb`.
+Before running the smoke matrix, use `npm run test:native:android:sync` or
+`npm run test:native:android:debug:open -- --sync`; Android sync now forces a
+production bundle unless you explicitly pass `--skip-build`.
 
 ### iOS
 
@@ -81,6 +84,16 @@ node testing/native/runtime-smoke/run.mjs --mode android --case record-transcrib
 node testing/native/runtime-smoke/run.mjs --mode ios --case extended --repeat 3 --pause-ms 2000
 ```
 
+## Hosted auth
+
+The mobile smoke harness bootstraps hosted auth automatically when either of
+these are available:
+
+- `SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY`
+- `SYSTEMSCULPT_E2E_LICENSE_KEY` in the repo environment, including `.env.local`
+
+If neither is present, hosted chat cases will run without smoke auth bootstrap.
+
 ## Architecture
 
 - `cli.mjs`
@@ -91,7 +104,7 @@ node testing/native/runtime-smoke/run.mjs --mode ios --case extended --repeat 3 
 - `cases.mjs`
   - smoke-case expressions and assertions
   - desktop uses a fresh chat leaf per case
-  - mobile reuses the active smoke leaf when needed so the mobile workspace does not lose its tab group
+  - mobile now also starts each chat case from a fresh leaf so repeated Android/iOS runs do not inherit stale turn state
   - approval-gated chat completion keys off stable final runtime state, not only the send promise
   - embeddings waits for the manager's background timers and mutex work to go idle before asserting
   - recorder smoke feeds deterministic vault audio through the real recorder path, then waits for the saved recording and transcript artifacts

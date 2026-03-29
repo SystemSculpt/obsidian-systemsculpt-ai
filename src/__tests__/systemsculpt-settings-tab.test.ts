@@ -283,6 +283,51 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(knowledgePanelAfter?.classList.contains("is-active")).toBe(true);
   });
 
+  it("honors a queued providers focus request during initial render", async () => {
+    (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
+      {
+        id: "account",
+        label: "Account",
+        sections: [
+          (parent: HTMLElement) => {
+            parent.createDiv({ cls: "setting-item", text: "Account item" });
+          },
+        ],
+      },
+      {
+        id: "providers",
+        label: "Providers",
+        sections: [
+          (parent: HTMLElement) => {
+            parent.createDiv({ cls: "setting-item", text: "Providers item" });
+          },
+        ],
+      },
+    ]);
+
+    const plugin = createPluginStub();
+    plugin.consumePendingSettingsFocusTab = jest.fn(() => "providers");
+    plugin.clearPendingSettingsFocusTab = jest.fn();
+
+    const tab = new SystemSculptSettingTab(app, plugin);
+    await tab.display();
+
+    const providersButton = tab.containerEl.querySelector(
+      'button[data-tab="providers"]',
+    ) as HTMLElement | null;
+    const providersPanel = tab.containerEl.querySelector(
+      '.systemsculpt-tab-content[data-tab="providers"]',
+    ) as HTMLElement | null;
+    const accountPanel = tab.containerEl.querySelector(
+      '.systemsculpt-tab-content[data-tab="account"]',
+    ) as HTMLElement | null;
+
+    expect(plugin.consumePendingSettingsFocusTab).toHaveBeenCalledTimes(1);
+    expect(providersButton?.classList.contains("mod-active")).toBe(true);
+    expect(providersPanel?.classList.contains("is-active")).toBe(true);
+    expect(accountPanel?.classList.contains("is-active")).toBe(false);
+  });
+
   it("renders grouped search results with highlighted matches and keyboard guidance", async () => {
     (buildSettingsTabConfigs as jest.Mock).mockReturnValue([
       {

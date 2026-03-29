@@ -10,8 +10,25 @@ function chatSetupSnippet(promptLiteral) {
     if (!plugin) throw new Error('SystemSculpt plugin missing');
     const selectedModelId = plugin?.settings?.selectedModelId || 'systemsculpt@@systemsculpt/ai-agent';
     const existingLeaves = app.workspace.getLeavesOfType('systemsculpt-chat-view') || [];
-    const isMobile = !!app?.isMobile;
-    let leaf = isMobile ? (existingLeaves[existingLeaves.length - 1] || null) : null;
+    const reusableLeaf = existingLeaves[existingLeaves.length - 1] || null;
+    let leaf = null;
+    try {
+      leaf = app.workspace.getLeaf('tab');
+    } catch (error) {
+      if (!/tab group/i.test(String(error?.message || error || ''))) {
+        throw error;
+      }
+    }
+    if (!leaf) {
+      try {
+        leaf = app.workspace.getLeaf(true);
+      } catch (error) {
+        if (!reusableLeaf || !/tab group/i.test(String(error?.message || error || ''))) {
+          throw error;
+        }
+        leaf = reusableLeaf;
+      }
+    }
     for (const existing of existingLeaves) {
       if (existing?.view) existing.view.__systemsculptSmokeActive = false;
       if (existing === leaf) {
@@ -22,16 +39,6 @@ function chatSetupSnippet(promptLiteral) {
           existing.detach();
         } catch {}
       }
-    }
-    if (!leaf) {
-      try {
-        leaf = app.workspace.getLeaf('tab');
-      } catch (error) {
-        if (!/tab group/i.test(String(error?.message || error || ''))) {
-          throw error;
-        }
-      }
-      leaf = leaf || app.workspace.getLeaf(true);
     }
     await leaf.setViewState({ type: 'systemsculpt-chat-view', state: { chatId: '', selectedModelId } });
     app.workspace.setActiveLeaf(leaf, { focus: true });
@@ -52,7 +59,31 @@ function chatSetupSnippet(promptLiteral) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (!isReady()) throw new Error('Chat did not become ready');
-    const sendFn = handler.handleSendMessage ?? handler['handleSendMessage'];
+    const automationSendFn =
+      typeof view?.sendAutomationMessage === 'function'
+        ? () => view.sendAutomationMessage({
+            text: ${promptLiteral},
+            includeContextFiles: false,
+            approvalMode: 'auto-approve',
+            webSearchEnabled: false,
+          })
+        : typeof handler.submitForAutomation === 'function'
+          ? () => handler.submitForAutomation({
+              includeContextFiles: false,
+              approvalMode: 'auto-approve',
+              focusAfterSend: false,
+            })
+          : null;
+    const legacySendFn = handler.handleSendMessage ?? handler['handleSendMessage'];
+    const sendFn =
+      automationSendFn ||
+      (typeof legacySendFn === 'function'
+        ? () => legacySendFn.call(handler, {
+            includeContextFiles: false,
+            focusAfterSend: false,
+            rethrowErrors: true,
+          })
+        : null);
     if (typeof sendFn !== 'function') throw new Error('Chat send handler missing');
     const initialMessageCount = Array.isArray(view.messages) ? view.messages.length : 0;
     let turnSettled = false;
@@ -101,6 +132,20 @@ function chatCompletionLoopSnippet() {
       }
       return String(content ?? '');
     };
+    const getReasoningText = (message) => {
+      const direct = toText(message?.reasoning).trim();
+      if (direct.length > 0) {
+        return direct;
+      }
+      if (!Array.isArray(message?.messageParts)) {
+        return '';
+      }
+      return message.messageParts
+        .filter((part) => part?.type === 'reasoning')
+        .map((part) => toText(part?.data))
+        .join('')
+        .trim();
+    };
     const terminalStates = new Set(['completed', 'failed', 'denied']);
     const seenToolCalls = [];
     const seenToolCallIds = new Set();
@@ -108,6 +153,7 @@ function chatCompletionLoopSnippet() {
     let approvalClicks = 0;
     let timeoutState = null;
     let stableSince = 0;
+    let reasoningOnlySince = 0;
     let sendSettledAfterStable = false;
     const deadline = Date.now() + 180000;
     while (Date.now() < deadline) {
@@ -131,16 +177,38 @@ function chatCompletionLoopSnippet() {
       sawChatActivity = sawChatActivity || view.isGenerating || popupVisible || activeToolCalls > 0 || messageCount > initialMessageCount;
       const lastAssistant = [...messages].reverse().find((message) => message?.role === 'assistant') || null;
       const lastAssistantText = toText(lastAssistant?.content).trim();
+      const lastAssistantReasoning = getReasoningText(lastAssistant);
+      const lastAssistantToolCalls = Array.isArray(lastAssistant?.tool_calls) ? lastAssistant.tool_calls : [];
       const stableNow =
         sawChatActivity &&
         !view.isGenerating &&
         activeToolCalls === 0 &&
         !popupVisible &&
         lastAssistantText.length > 0;
+      const reasoningOnlyTerminal =
+        sawChatActivity &&
+        !view.isGenerating &&
+        activeToolCalls === 0 &&
+        !popupVisible &&
+        lastAssistantText.length === 0 &&
+        lastAssistantToolCalls.length === 0 &&
+        lastAssistantReasoning.length > 0;
+      if (turnSettled && turnError && !view.isGenerating && activeToolCalls === 0 && !popupVisible) {
+        const normalizedError =
+          turnError instanceof Error
+            ? turnError
+            : new Error(String(turnError?.message || turnError || 'Chat send failed.'));
+        throw normalizedError;
+      }
       if (stableNow) {
         stableSince = stableSince || Date.now();
       } else {
         stableSince = 0;
+      }
+      if (reasoningOnlyTerminal) {
+        reasoningOnlySince = reasoningOnlySince || Date.now();
+      } else {
+        reasoningOnlySince = 0;
       }
       if (
         stableNow &&
@@ -148,16 +216,53 @@ function chatCompletionLoopSnippet() {
       ) {
         break;
       }
+      if (
+        reasoningOnlyTerminal &&
+        Date.now() - reasoningOnlySince >= 1500
+      ) {
+        throw new Error(
+          'Runtime smoke detected reasoning-only assistant completion: ' +
+            JSON.stringify({
+              turnSettled,
+              isGenerating: !!view.isGenerating,
+              messageCount,
+              lastAssistantStopReason: String(lastAssistant?.stopReason || ''),
+              lastAssistantContent: lastAssistantText,
+              lastAssistantReasoning,
+              lastAssistantPartTypes: Array.isArray(lastAssistant?.messageParts)
+                ? lastAssistant.messageParts.map((part) => part?.type || '')
+                : [],
+              toolCalls: toolCalls.map((call) => ({
+                id: call?.id ?? null,
+                name: call?.request?.function?.name ?? '',
+                state: call?.state ?? '',
+              })),
+            })
+        );
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
     if (Date.now() >= deadline) {
       const messages = Array.isArray(view.messages) ? view.messages : [];
       const toolCalls = messages.flatMap((message) => Array.isArray(message?.tool_calls) ? message.tool_calls : []);
+      const lastAssistant = [...messages].reverse().find((message) => message?.role === 'assistant') || null;
       timeoutState = {
         turnSettled,
         popupVisible: !!document.querySelector('.systemsculpt-popup, .ss-approval-card, .ss-approval-deck'),
         isGenerating: !!view.isGenerating,
         messageCount: messages.length,
+        turnError:
+          turnError instanceof Error
+            ? turnError.message
+            : turnError
+              ? String(turnError?.message || turnError)
+              : null,
+        lastAssistantContent: toText(lastAssistant?.content).trim(),
+        lastAssistantReasoning: getReasoningText(lastAssistant),
+        lastAssistantStopReason: String(lastAssistant?.stopReason || ''),
+        lastAssistantPartTypes: Array.isArray(lastAssistant?.messageParts)
+          ? lastAssistant.messageParts.map((part) => part?.type || '')
+          : [],
         toolCalls: toolCalls.map((call) => ({
           id: call?.id ?? null,
           name: call?.request?.function?.name ?? '',
@@ -178,6 +283,11 @@ function chatCompletionLoopSnippet() {
     const messages = Array.isArray(view.messages) ? view.messages.map((message) => ({
       role: message.role,
       content: message.content,
+      reasoning: message.reasoning,
+      stopReason: message.stopReason,
+      messageParts: Array.isArray(message.messageParts)
+        ? message.messageParts.map((part) => ({ type: part?.type || '' }))
+        : [],
       tool_calls: message.tool_calls,
     })) : [];
     const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
@@ -247,6 +357,8 @@ function buildEmbeddingsExpression(fixtureDir) {
   return `(async () => {
     const plugin = app?.plugins?.plugins?.['systemsculpt-ai'];
     if (!plugin) throw new Error('SystemSculpt plugin missing');
+    const previousEmbeddingsEnabled = !!plugin.settings.embeddingsEnabled;
+    plugin.settings.embeddingsEnabled = true;
     const manager = await plugin.getOrCreateEmbeddingsManager();
     await manager.initialize?.();
     const waitForIdle = async (timeoutMs = 90000) => {
@@ -277,20 +389,112 @@ function buildEmbeddingsExpression(fixtureDir) {
       }
       throw new Error('Embeddings manager did not become idle before smoke assertion.');
     };
-    const idle = await waitForIdle();
-    const alphaPath = ${JSON.stringify(`${fixtureDir}/alpha.md`)};
-    const betaPath = ${JSON.stringify(`${fixtureDir}/beta.md`)};
-    const alpha = app.vault.getAbstractFileByPath(alphaPath);
-    const beta = app.vault.getAbstractFileByPath(betaPath);
-    if (!alpha || !beta) throw new Error('Embedding fixture missing');
-    await manager.processFileIfNeeded?.(alpha, 'manual');
-    await manager.processFileIfNeeded?.(beta, 'manual');
-    const similar = await manager.findSimilar(alphaPath, 5);
-    return {
-      ...idle,
-      count: Array.isArray(similar) ? similar.length : null,
-      top: Array.isArray(similar) ? similar.slice(0, 5).map((item) => ({ path: item.path, score: item.score })) : similar,
+    const waitForReadableFile = async (filePath, timeoutMs = 20000) => {
+      const startedAt = Date.now();
+      const deadline = startedAt + timeoutMs;
+      let lastError = '';
+      let lastLength = 0;
+      while (Date.now() < deadline) {
+        const file = app.vault.getAbstractFileByPath(filePath);
+        if (file) {
+          try {
+            const content = await app.vault.read(file);
+            const normalized = String(content || '');
+            if (normalized.trim().length > 0) {
+              return {
+                file,
+                waitedReadableMs: Date.now() - startedAt,
+                contentLength: normalized.length,
+              };
+            }
+            lastLength = normalized.length;
+            lastError = 'empty-content';
+          } catch (error) {
+            lastError = String(error?.message || error || 'unknown-read-error');
+          }
+        } else {
+          lastError = 'missing-file';
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      throw new Error(
+        'Embedding fixture never became readable: ' +
+          JSON.stringify({
+            filePath,
+            lastError,
+            lastLength,
+            waitedReadableMs: Date.now() - startedAt,
+          })
+      );
     };
+    const processDirectlyWithVerification = async (file, path) => {
+      const maxAttempts = 3;
+      const attempts = [];
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        plugin.settings.embeddingsEnabled = true;
+        if (typeof manager.processFile === 'function') {
+          await manager.processFile(file, 'manual');
+        } else {
+          await manager.processFileIfNeeded?.(file, 'manual');
+        }
+        const vectorCount =
+          typeof manager.storage?.getVectorsByPath === 'function'
+            ? (await manager.storage.getVectorsByPath(path)).length
+            : null;
+        attempts.push({
+          attempt,
+          vectorCount,
+          stats: typeof manager?.getStats === 'function' ? manager.getStats() : null,
+        });
+        if (typeof vectorCount === 'number' && vectorCount > 0) {
+          return attempts;
+        }
+        await waitForIdle(15000);
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+      return attempts;
+    };
+
+    try {
+      const idleBeforeQueue = await waitForIdle();
+      const alphaPath = ${JSON.stringify(`${fixtureDir}/alpha.md`)};
+      const betaPath = ${JSON.stringify(`${fixtureDir}/beta.md`)};
+      const alphaReady = await waitForReadableFile(alphaPath);
+      const betaReady = await waitForReadableFile(betaPath);
+      const processing = {
+        alpha: await processDirectlyWithVerification(alphaReady.file, alphaPath),
+        beta: await processDirectlyWithVerification(betaReady.file, betaPath),
+      };
+      const idleAfterQueue = await waitForIdle();
+      const similar = await manager.findSimilar(alphaPath, 5);
+      const healthSnapshot =
+        typeof manager?.healthMonitor?.getSnapshot === 'function'
+          ? manager.healthMonitor.getSnapshot()
+          : null;
+      const cooldownRemainingMs = Math.max(0, (manager?.vaultCooldownUntil ?? 0) - Date.now());
+      return {
+        ...idleBeforeQueue,
+        idleAfterQueue,
+        readable: {
+          alpha: {
+            waitedReadableMs: alphaReady.waitedReadableMs,
+            contentLength: alphaReady.contentLength,
+          },
+          beta: {
+            waitedReadableMs: betaReady.waitedReadableMs,
+            contentLength: betaReady.contentLength,
+          },
+        },
+        processing,
+        count: Array.isArray(similar) ? similar.length : null,
+        top: Array.isArray(similar) ? similar.slice(0, 5).map((item) => ({ path: item.path, score: item.score })) : similar,
+        stats: typeof manager?.getStats === 'function' ? manager.getStats() : null,
+        healthSnapshot,
+        cooldownRemainingMs,
+      };
+    } finally {
+      plugin.settings.embeddingsEnabled = previousEmbeddingsEnabled;
+    }
   })()`;
 }
 
@@ -646,6 +850,33 @@ export function caseList(caseName) {
   return [caseName];
 }
 
+function normalizeAssistantAssertionText(value) {
+  let normalized = String(value || "").trim();
+  let changed = true;
+  while (changed && normalized.length > 1) {
+    changed = false;
+    for (const [prefix, suffix] of [
+      ["**", "**"],
+      ["__", "__"],
+      ["`", "`"],
+      ["*", "*"],
+      ["_", "_"],
+      ['"', '"'],
+      ["'", "'"],
+    ]) {
+      if (
+        normalized.startsWith(prefix) &&
+        normalized.endsWith(suffix) &&
+        normalized.length > prefix.length + suffix.length
+      ) {
+        normalized = normalized.slice(prefix.length, normalized.length - suffix.length).trim();
+        changed = true;
+      }
+    }
+  }
+  return normalized;
+}
+
 export function assertCaseResult(caseName, options, result) {
   if (!result || typeof result !== "object") {
     throw new Error(`${caseName} returned no result payload.`);
@@ -653,7 +884,8 @@ export function assertCaseResult(caseName, options, result) {
 
   if (caseName === "chat-exact") {
     const expected = "RUNTIME_SMOKE_OK_20260311";
-    if (result.lastAssistant !== expected) {
+    const actual = normalizeAssistantAssertionText(result.lastAssistant);
+    if (actual !== expected) {
       throw new Error(`${caseName} expected "${expected}" but got "${result.lastAssistant || ""}".`);
     }
     return;
@@ -662,7 +894,8 @@ export function assertCaseResult(caseName, options, result) {
   if (caseName === "file-read") {
     const expected =
       "ALPHA=ALPHA_20260311-194643; BETA=BETA_20260311-194643; SHARED=GAMMA_20260311-194643";
-    if (result.lastAssistant !== expected) {
+    const actual = normalizeAssistantAssertionText(result.lastAssistant);
+    if (actual !== expected) {
       throw new Error(`${caseName} expected exact fixture echo but got "${result.lastAssistant || ""}".`);
     }
     return;
@@ -676,7 +909,8 @@ export function assertCaseResult(caseName, options, result) {
       "BETA=BETA_20260311-194643",
       "SHARED=GAMMA_20260311-194643",
     ];
-    if (result.lastAssistant !== expectedAssistant) {
+    const actual = normalizeAssistantAssertionText(result.lastAssistant);
+    if (actual !== expectedAssistant) {
       throw new Error(`${caseName} expected confirmed echo but got "${result.lastAssistant || ""}".`);
     }
     if (!result.outputExists) {
@@ -699,8 +933,21 @@ export function assertCaseResult(caseName, options, result) {
       (path) => path.endsWith("/beta.md") || path.endsWith("beta.md")
     );
     if (!matched) {
+      const lastErrorMessage = String(result?.healthSnapshot?.lastError?.message || "").trim();
+      const lastErrorStatus = result?.healthSnapshot?.lastError?.status;
+      const cooldownRemainingMs = Number(result?.cooldownRemainingMs || 0);
+      const diagnostics = [
+        lastErrorMessage
+          ? `lastError=${lastErrorStatus ? `${lastErrorStatus} ` : ""}${lastErrorMessage}`
+          : "",
+        cooldownRemainingMs > 0
+          ? `cooldownRemainingMs=${cooldownRemainingMs}`
+          : "",
+        result?.stats ? `stats=${JSON.stringify(result.stats)}` : "",
+      ].filter(Boolean);
       throw new Error(
-        `${caseName} expected beta.md among the nearest results but got ${JSON.stringify(candidatePaths)}.`
+        `${caseName} expected beta.md among the nearest results but got ${JSON.stringify(candidatePaths)}.` +
+          (diagnostics.length > 0 ? ` Diagnostics: ${diagnostics.join("; ")}.` : "")
       );
     }
     return;

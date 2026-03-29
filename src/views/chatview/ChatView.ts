@@ -147,7 +147,9 @@ export class ChatView extends ItemView {
     // Initialize the chat title
     this.initializeChatTitle(initialState.chatTitle);
 
-    this.selectedModelId = initialState.selectedModelId || plugin.settings.selectedModelId;
+    this.selectedModelId = this.resolveLeafSelectedModelId(initialState.selectedModelId, {
+      preserveCurrent: false,
+    });
     this.isGenerating = false;
     this.isFullyLoaded = false; // Start as not loaded
 
@@ -182,6 +184,28 @@ export class ChatView extends ItemView {
 
   private defaultChatBackend(): ChatBackend {
     return "systemsculpt";
+  }
+
+  private resolveLeafSelectedModelId(
+    nextSelectedModelId?: unknown,
+    options?: { preserveCurrent?: boolean },
+  ): string {
+    const requestedModelId = ensureCanonicalId(String(nextSelectedModelId || "").trim());
+    if (requestedModelId) {
+      return requestedModelId;
+    }
+
+    if (options?.preserveCurrent !== false) {
+      const currentModelId = ensureCanonicalId(String(this.selectedModelId || "").trim());
+      if (currentModelId) {
+        return currentModelId;
+      }
+    }
+
+    return (
+      ensureCanonicalId(String(this.plugin.settings.selectedModelId || "").trim()) ||
+      getManagedSystemSculptModelId()
+    );
   }
 
   private getActiveSystemPromptType(): "general-use" | "agent" {
@@ -1116,10 +1140,7 @@ export class ChatView extends ItemView {
       // automation resets that open an empty composer with a non-default model.
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
-      this.selectedModelId =
-        ensureCanonicalId(String(state?.selectedModelId || "").trim()) ||
-        this.plugin.settings.selectedModelId ||
-        "";
+      this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
  
       // Restore chat font size for new chats if provided in state
       if (state?.chatFontSize) {
@@ -1155,7 +1176,7 @@ export class ChatView extends ItemView {
     this.virtualStartIndex = 0;
     this.hasAdjustedInitialWindow = false;
     // When loading an existing chat, use the stored model selection as-is
-    this.selectedModelId = state.selectedModelId || this.plugin.settings.selectedModelId || "";
+    this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
     this.initializeChatTitle(state.chatTitle);
     this.chatVersion = state.version !== undefined ? state.version : -1;
 

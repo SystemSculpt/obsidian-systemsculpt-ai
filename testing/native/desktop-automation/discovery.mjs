@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { parseJsonText } from "../shared/json.mjs";
 
 export const DEFAULT_DISCOVERY_DIR = path.join(os.homedir(), ".systemsculpt", "obsidian-automation");
 export const DEFAULT_PLUGIN_ID = "systemsculpt-ai";
@@ -36,7 +37,7 @@ export async function loadDiscoveryEntries(options = {}) {
   for (const filePath of filePaths) {
     try {
       const raw = await fs.readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw);
+      const parsed = parseJsonText(raw);
       if (!parsed || typeof parsed !== "object") {
         continue;
       }
@@ -91,7 +92,7 @@ export async function inferVaultNameFromSyncConfig(configPath) {
 
   try {
     const raw = await fs.readFile(configPath, "utf8");
-    const parsed = JSON.parse(raw);
+    const parsed = parseJsonText(raw);
     const firstTarget = Array.isArray(parsed?.pluginTargets) ? parsed.pluginTargets[0] : null;
     const pluginPath = firstTarget?.path ? path.resolve(String(firstTarget.path)) : "";
     if (!pluginPath) {

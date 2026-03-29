@@ -4,6 +4,7 @@
  * Unified, quiet checker for the Obsidian plugin.
  * - TypeScript typecheck (noEmit)
  * - In-memory esbuild bundle resolution of src/main.ts
+ * - Release workflow node:test coverage
  * - Jest unit tests
  * Prints concise summary on success; details only on failure or --verbose.
  */
@@ -110,7 +111,10 @@ async function main() {
   results.push({ name: 'bundle', ...bundle });
 
   if (!skipTests) {
-    checks.push('tests');
+    checks.push('script-tests', 'tests');
+    const scriptTests = run('node --test scripts/release-plugin.test.mjs scripts/plugin-artifacts.test.mjs');
+    results.push({ name: 'script-tests', ...scriptTests });
+
     let tests;
     if (fast) {
       const changedFiles = listChangedFiles().filter(file => file.startsWith('src/'));
@@ -146,6 +150,11 @@ async function main() {
       console.error('[plugin] FAIL: Bundle/build check failed');
       if (verbose) {
         console.error(r.message || '');
+      }
+    } else if (r.name === 'script-tests') {
+      console.error('[plugin] FAIL: Script-level tests failed');
+      if (verbose) {
+        console.error(r.stdout || r.stderr || '');
       }
     } else if (r.name === 'tests') {
       console.error('[plugin] FAIL: Unit tests failed');

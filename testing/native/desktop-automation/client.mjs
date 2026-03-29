@@ -156,6 +156,54 @@ export class DesktopAutomationClient {
     return await this.request("/v1/status", { timeoutMs: 10000, allowRecovery: true });
   }
 
+  async getSettingsSnapshot() {
+    return await this.request("/v1/settings/snapshot", {
+      timeoutMs: 10000,
+      allowRecovery: true,
+    });
+  }
+
+  async openSettings(targetTab = "account") {
+    return await this.request("/v1/settings/open", {
+      method: "POST",
+      body: { targetTab },
+      timeoutMs: 30000,
+      allowRecovery: true,
+    });
+  }
+
+  async getProvidersSnapshot(body = {}) {
+    const requestBody =
+      body && typeof body === "object" && !Array.isArray(body) ? { ...body } : {};
+    const preflightRefresh = requestBody.preflightRefresh !== false;
+    delete requestBody.preflightRefresh;
+    return await this.request("/v1/settings/providers/snapshot", {
+      method: "POST",
+      body: requestBody,
+      timeoutMs: 60000,
+      allowRecovery: true,
+      preflightRefresh,
+    });
+  }
+
+  async setProviderApiKey(providerId, apiKey) {
+    return await this.request("/v1/settings/providers/api-key", {
+      method: "POST",
+      body: { providerId, apiKey },
+      timeoutMs: 60000,
+      allowRecovery: true,
+    });
+  }
+
+  async clearProviderAuth(providerId) {
+    return await this.request("/v1/settings/providers/clear-auth", {
+      method: "POST",
+      body: { providerId },
+      timeoutMs: 60000,
+      allowRecovery: true,
+    });
+  }
+
   async ensureChatOpen(body = {}) {
     return await this.request("/v1/chat/ensure-open", {
       method: "POST",
@@ -169,8 +217,18 @@ export class DesktopAutomationClient {
     return await this.request("/v1/chat/snapshot", { timeoutMs: 10000, allowRecovery: true });
   }
 
-  async listModels() {
-    return await this.request("/v1/chat/models", { timeoutMs: 60000, allowRecovery: true });
+  async listModels(options = {}) {
+    const preflightRefresh = options.preflightRefresh !== false;
+    const params = new URLSearchParams();
+    if (options.refresh) {
+      params.set("refresh", "1");
+    }
+    const pathname = params.size > 0 ? `/v1/chat/models?${params.toString()}` : "/v1/chat/models";
+    return await this.request(pathname, {
+      timeoutMs: 60000,
+      allowRecovery: true,
+      preflightRefresh,
+    });
   }
 
   async setModel(modelId) {

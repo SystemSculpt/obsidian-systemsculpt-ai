@@ -1,6 +1,6 @@
 # Testing Architecture
 
-Last updated: **2026-03-27**
+Last updated: **2026-03-29**
 
 This repo now has two native integration surfaces.
 
@@ -12,7 +12,8 @@ The canonical test story is:
 4. Desktop and mobile use the native surface that matches the platform instead of forcing one harness to do both jobs
 
 The old separate-instance WDIO harness has been removed.
-Dev builds no longer auto-sync into any retired fixture vault path; use `SYSTEMSCULPT_AUTO_SYNC_PATH` or the native sync scripts when you want a live vault copy.
+Dev builds now sync through the shared config-driven pipeline: keep a local-only `systemsculpt-sync.config.json` in the repo root and the watcher will push every successful rebuild into its `pluginTargets` plus any `mirrorTargets`.
+Use a `"type": "windows-ssh"` mirror target when the Windows VM should stay on the latest bundle without turning that VM path into a local desktop-automation selector on the Mac.
 
 ## Layers
 
@@ -37,6 +38,7 @@ This is the canonical desktop lane.
 - No renderer driving or app focus takeover
 - Already-running Obsidian only; the harness never launches the app
 - Localhost bridge owned by the plugin itself
+- Windows is the canonical clean-install desktop host: use a real Windows machine or VM to prove brand-new install, enable/load, and “no local Pi installed” behavior instead of inferring that from the already-open macOS dev vault
 - Settings-file bootstrap and recovery: patch or touch the target `data.json`, let the running plugin's external-settings sync path reassert the bridge, and on unchanged-file touches expect the bridge to restart in place so wedged listeners can heal without focus takeover
 - The external desktop client now tracks discovery changes and can reconnect to a newer bridge record mid-run instead of treating that as a hard failure
 
@@ -45,10 +47,13 @@ Core entrypoints:
 ```bash
 npm run test:native:desktop
 npm run test:native:desktop:extended
+npm run test:native:desktop:provider-connected
 npm run test:native:desktop:chatview-stress
 npm run test:native:desktop:stress
 npm run test:native:desktop:soak
+SYSTEMSCULPT_DESKTOP_PROVIDER_ID=openai SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY=... npm run test:native:desktop:provider-connected
 node testing/native/desktop-automation/run.mjs --case extended --no-reload
+SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS='{"openai":"..."}' node testing/native/desktop-automation/run.mjs --case provider-connected-baseline --no-reload
 node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case chatview-stress --repeat 5 --pause-ms 750 --no-reload
 node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case stress --repeat 5 --pause-ms 1500 --no-reload
 node testing/native/desktop-automation/run.mjs --vault-name <vault-name> --case soak --repeat 25 --pause-ms 1500 --no-reload
@@ -58,9 +63,13 @@ node scripts/reload-local-obsidian-plugin.mjs
 `node scripts/reload-local-obsidian-plugin.mjs` is for an explicit in-place plugin reload after code sync.
 Routine attach-only validation should prefer `--no-reload` when the bridge is already live.
 `./run.sh --headless` is safe to invoke repeatedly; duplicate launches now reuse the existing watcher instead of stacking background sync loops.
+That wrapper now relies on the build-integrated sync path rather than a second polling loop, so local vault sync and Windows VM mirroring move in lockstep with each successful rebuild.
+`test:native:desktop:provider-connected` is the canonical settings-auth round-trip lane: it injects a provider API key through the bridge, waits for the model catalog to refresh, proves a provider-backed turn, clears auth again, and verifies the same path drops back to Providers guidance.
 `test:native:desktop:stress` now specifically churns repeated in-place plugin reloads and fails if the live desktop bridge comes back with duplicate plugin or embeddings status-bar items.
 `test:native:desktop:chatview-stress` now churns real chatview state on the same automation leaf, and `test:native:desktop:soak` combines both stress lanes for a longer unattended release candidate run.
 When you do not pass a selector, the runner now prefers the latest live bridge target and falls back to the first synced desktop target only if no live bridge can be matched.
+Release-candidate desktop proof should include one Windows pass where local Pi is absent, the plugin enables cleanly on a fresh install, hosted SystemSculpt chat still works, and any local-Pi-only path degrades cleanly instead of crashing.
+When that release candidate also needs Pi-provider parity, add one provider-connected Windows pass with runner-side env vars (`SYSTEMSCULPT_DESKTOP_PROVIDER_ID`, `SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY`, `SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS`, or the provider-specific env var exposed by the Providers snapshot). Those env vars belong on the runner host, not on the already-running Obsidian process.
 
 Docs:
 

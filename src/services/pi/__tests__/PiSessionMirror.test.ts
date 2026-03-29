@@ -2,9 +2,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadPiSessionMirror, loadPiSessionMirrorWithRecovery } from "../PiSessionMirror";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "../PiSdkCore";
 
-jest.mock("@mariozechner/pi-coding-agent", () => ({
+jest.mock("../PiSdkCore", () => ({
   SessionManager: {
     open: jest.fn(),
   },

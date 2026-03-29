@@ -30,13 +30,21 @@ import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
 import { DocumentUploadService } from "./DocumentUploadService";
 import { AudioUploadService } from "./AudioUploadService";
-import { executeLocalPiStream } from "./LocalPiStreamExecutor";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 import { MCPService } from "../mcp/MCPService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
+
+let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
+
+async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
+  if (!localPiStreamExecutorModulePromise) {
+    localPiStreamExecutorModulePromise = import("./LocalPiStreamExecutor");
+  }
+  return await localPiStreamExecutorModulePromise;
+}
 
 export type CreditsBalanceSnapshot = {
   includedRemaining: number;
@@ -1155,6 +1163,7 @@ export class SystemSculptService {
       } = prepared;
 
       if (prepared.modelSource === "pi_local") {
+        const { executeLocalPiStream } = await loadLocalPiStreamExecutorModule();
         const preview = this.buildLocalPiRequestPreview({
           prepared,
           sessionFile,

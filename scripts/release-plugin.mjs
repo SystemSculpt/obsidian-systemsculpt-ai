@@ -4,9 +4,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { assertProductionPluginArtifacts } from "./plugin-artifacts.mjs";
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
+const GITHUB_ENV_TOKEN_KEYS = ["GITHUB_TOKEN", "GH_TOKEN"];
+const GITHUB_AUTH_FALLBACK_PATTERNS = [
+  /GH013/i,
+  /workflow scope/i,
+  /refusing to allow.*workflow/i,
+  /workflows? permission/i,
+  /resource not accessible by integration/i,
+];
 
 function parseArgs(argv) {
   const options = {
@@ -83,11 +93,37 @@ function parseArgs(argv) {
   return options;
 }
 
-function run(command, commandArgs, { capture = false, allowFailure = false } = {}) {
+function buildCommandEnv(envOverrides = {}) {
+  const env = { ...process.env };
+  for (const [key, value] of Object.entries(envOverrides)) {
+    if (value === null || value === undefined) {
+      delete env[key];
+      continue;
+    }
+    env[key] = String(value);
+  }
+  return env;
+}
+
+function formatCommandLabel(command, commandArgs) {
+  return `${command} ${commandArgs.join(" ")}`;
+}
+
+function combineCommandOutput(result) {
+  return [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+}
+
+function formatCommandFailure(command, commandArgs, result) {
+  const details = combineCommandOutput(result);
+  return `${formatCommandLabel(command, commandArgs)} failed.${details ? `\n${details}` : ""}`;
+}
+
+function run(command, commandArgs, { capture = false, allowFailure = false, envOverrides = {} } = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd,
     encoding: "utf8",
     stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    env: buildCommandEnv(envOverrides),
   });
 
   if (result.error) {
@@ -101,10 +137,7 @@ function run(command, commandArgs, { capture = false, allowFailure = false } = {
 
   const status = result.status ?? 1;
   if (status !== 0 && !allowFailure) {
-    const stderr = (result.stderr || "").trim();
-    const stdout = (result.stdout || "").trim();
-    const details = stderr || stdout;
-    fail(`${command} ${commandArgs.join(" ")} failed.${details ? `\n${details}` : ""}`);
+    fail(formatCommandFailure(command, commandArgs, result));
   }
 
   return {
@@ -114,8 +147,8 @@ function run(command, commandArgs, { capture = false, allowFailure = false } = {
   };
 }
 
-function runCapture(command, commandArgs, allowFailure = false) {
-  return run(command, commandArgs, { capture: true, allowFailure });
+function runCapture(command, commandArgs, allowFailure = false, options = {}) {
+  return run(command, commandArgs, { capture: true, allowFailure, ...options });
 }
 
 const REPO_SAFETY_SCAN_EXCLUDED_FILES = new Set(["scripts/release-plugin.mjs"]);
@@ -200,6 +233,169 @@ function logStep(message) {
 function fail(message) {
   console.error(`[release] ERROR: ${message}`);
   process.exit(1);
+}
+
+function withoutGitHubEnvTokens() {
+  return {
+    GITHUB_TOKEN: null,
+    GH_TOKEN: null,
+  };
+}
+
+function hasGitHubEnvTokens(env = process.env) {
+  return GITHUB_ENV_TOKEN_KEYS.some((key) => Boolean(env[key]));
+}
+
+function parseGitHubAuthStatus(output) {
+  const raw = String(output || "");
+  const scopeLine = raw.match(/Token scopes:\s*(.+)/i)?.[1] || "";
+  const scopes = scopeLine
+    .split(",")
+    .map((scope) => scope.replace(/['"`]/g, "").trim())
+    .filter(Boolean);
+
+  return {
+    raw,
+    scopes,
+    usesEnvToken: /\((?:GITHUB_TOKEN|GH_TOKEN)\)/i.test(raw),
+  };
+}
+
+function authHasScope(authStatus, scope) {
+  return authStatus.scopes.includes(scope);
+}
+
+function shouldRetryWithoutGitHubEnv(result) {
+  const output = combineCommandOutput(result);
+  return GITHUB_AUTH_FALLBACK_PATTERNS.some((pattern) => pattern.test(output));
+}
+
+function writeCapturedOutput(result) {
+  if (result.stdout) {
+    process.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
+  }
+  if (result.stderr) {
+    process.stderr.write(result.stderr.endsWith("\n") ? result.stderr : `${result.stderr}\n`);
+  }
+}
+
+function resolveGitHubReleaseAuthStrategy({
+  runCaptureImpl = runCapture,
+  logFn = logStep,
+} = {}) {
+  const auth = runCaptureImpl("gh", ["auth", "status"], true);
+  const envTokensPresent = hasGitHubEnvTokens();
+
+  if (!envTokensPresent) {
+    if (auth.status !== 0) {
+      const details = combineCommandOutput(auth) || "Run `gh auth login` before releasing.";
+      fail(`GitHub CLI is not authenticated for release creation.\n${details}`);
+    }
+    return {
+      name: "default",
+      envOverrides: {},
+    };
+  }
+
+  const tokenlessAuth = runCaptureImpl(
+    "gh",
+    ["auth", "status"],
+    true,
+    { envOverrides: withoutGitHubEnvTokens() }
+  );
+
+  if (auth.status !== 0 && tokenlessAuth.status === 0) {
+    logFn("Stored gh auth is available, so push/release steps will ignore GITHUB_TOKEN/GH_TOKEN.");
+    return {
+      name: "stored-gh-auth",
+      envOverrides: withoutGitHubEnvTokens(),
+    };
+  }
+
+  const authInfo = parseGitHubAuthStatus(combineCommandOutput(auth));
+  const tokenlessAuthInfo = parseGitHubAuthStatus(combineCommandOutput(tokenlessAuth));
+  if (
+    auth.status === 0
+    && authInfo.usesEnvToken
+    && !authHasScope(authInfo, "workflow")
+    && tokenlessAuth.status === 0
+    && authHasScope(tokenlessAuthInfo, "workflow")
+  ) {
+    logFn("Stored gh auth has workflow scope, so push/release steps will ignore GITHUB_TOKEN/GH_TOKEN.");
+    return {
+      name: "stored-gh-auth",
+      envOverrides: withoutGitHubEnvTokens(),
+    };
+  }
+
+  if (auth.status !== 0) {
+    const details = combineCommandOutput(auth) || combineCommandOutput(tokenlessAuth) || "Run `gh auth login` before releasing.";
+    fail(`GitHub CLI is not authenticated for release creation.\n${details}`);
+  }
+
+  return {
+    name: "default",
+    envOverrides: {},
+  };
+}
+
+function runWithGitHubAuthFallback(
+  command,
+  commandArgs,
+  {
+    allowFailure = false,
+    envOverrides = {},
+    authStrategyName,
+    name,
+    runImpl = run,
+    logFn = logStep,
+    emitFn = writeCapturedOutput,
+  } = {}
+) {
+  const strategyName = authStrategyName || name || "default";
+  const initial = runImpl(command, commandArgs, {
+    capture: true,
+    allowFailure: true,
+    envOverrides,
+  });
+
+  if (initial.status === 0) {
+    emitFn(initial);
+    return initial;
+  }
+
+  const shouldFallback =
+    hasGitHubEnvTokens()
+    && strategyName !== "stored-gh-auth"
+    && shouldRetryWithoutGitHubEnv(initial);
+
+  if (shouldFallback) {
+    logFn(`Retrying ${formatCommandLabel(command, commandArgs)} without GITHUB_TOKEN/GH_TOKEN.`);
+    const retry = runImpl(command, commandArgs, {
+      capture: true,
+      allowFailure: true,
+      envOverrides: withoutGitHubEnvTokens(),
+    });
+    if (retry.status === 0) {
+      emitFn(retry);
+      return retry;
+    }
+
+    if (allowFailure) {
+      return retry;
+    }
+
+    fail(
+      `${formatCommandFailure(command, commandArgs, retry)}\n\n`
+      + `Initial attempt used the inherited environment and failed with:\n${combineCommandOutput(initial)}`
+    );
+  }
+
+  if (allowFailure) {
+    return initial;
+  }
+
+  fail(formatCommandFailure(command, commandArgs, initial));
 }
 
 function readJson(filePath) {
@@ -532,11 +728,7 @@ function ensureTagDoesNotExist(version) {
 }
 
 function ensureGitHubCliReady() {
-  const auth = runCapture("gh", ["auth", "status"], true);
-  if (auth.status !== 0) {
-    const details = auth.stderr || auth.stdout || "Run `gh auth login` before releasing.";
-    fail(`GitHub CLI is not authenticated for release creation.\n${details}`);
-  }
+  return resolveGitHubReleaseAuthStrategy();
 }
 
 function updateReadmeVersion(readmePath, newVersion) {
@@ -565,6 +757,7 @@ function printPlan({
   lastTag,
   commitCount,
   dryRun,
+  githubAuthStrategyName,
 }) {
   console.log("\n[release] Plan");
   console.log(`[release] - Current version: ${currentVersion}`);
@@ -572,6 +765,7 @@ function printPlan({
   console.log(`[release] - Last tag: ${lastTag || "(none)"}`);
   console.log(`[release] - Commits included: ${commitCount}`);
   console.log("[release] - Local GitHub draft release via gh: yes");
+  console.log(`[release] - GitHub auth mode: ${githubAuthStrategyName}`);
   console.log("[release] - Windows validation: manual risk accepted");
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
@@ -616,12 +810,18 @@ function ensureReleaseAssets() {
     }
   }
 
+  try {
+    assertProductionPluginArtifacts({ root: cwd });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+
   return baseAssets;
 }
 
-function createDraftRelease(version, notesPath, releaseAssetFiles) {
+function createDraftRelease(version, notesPath, releaseAssetFiles, githubAuthStrategy) {
   logStep(`Creating local draft GitHub release ${version}`);
-  run("gh", [
+  runWithGitHubAuthFallback("gh", [
     "release",
     "create",
     version,
@@ -632,18 +832,18 @@ function createDraftRelease(version, notesPath, releaseAssetFiles) {
     "--notes-file",
     notesPath,
     ...releaseAssetFiles,
-  ]);
+  ], githubAuthStrategy);
 }
 
-function verifyDraftRelease(version) {
+function verifyDraftRelease(version, githubAuthStrategy) {
   logStep(`Verifying draft release ${version}`);
-  run("gh", [
+  runWithGitHubAuthFallback("gh", [
     "release",
     "view",
     version,
     "--json",
     "isDraft,assets,tagName,targetCommitish,url",
-  ]);
+  ], githubAuthStrategy);
 }
 
 function main() {
@@ -656,7 +856,7 @@ function main() {
 
   ensureExpectedFiles();
   ensureCleanTree(options.allowDirty);
-  ensureGitHubCliReady();
+  const githubAuthStrategy = ensureGitHubCliReady();
   runRepoSafetyChecks();
 
   const manifestPath = path.join(cwd, "manifest.json");
@@ -708,6 +908,7 @@ function main() {
     lastTag,
     commitCount: commits.length,
     dryRun: options.dryRun,
+    githubAuthStrategyName: githubAuthStrategy.name,
   });
 
   const notesPath = writeNotesFile(newVersion, commits, options.notesFile);
@@ -747,14 +948,29 @@ function main() {
   run("git", ["tag", "-a", newVersion, "-m", newVersion]);
 
   logStep("Pushing main");
-  run("git", ["push", "origin", "main"]);
+  runWithGitHubAuthFallback("git", ["push", "origin", "main"], githubAuthStrategy);
 
   logStep(`Pushing tag ${newVersion}`);
-  run("git", ["push", "origin", newVersion]);
+  runWithGitHubAuthFallback("git", ["push", "origin", newVersion], githubAuthStrategy);
 
-  createDraftRelease(newVersion, notesPath, releaseAssetFiles);
-  verifyDraftRelease(newVersion);
+  createDraftRelease(newVersion, notesPath, releaseAssetFiles, githubAuthStrategy);
+  verifyDraftRelease(newVersion, githubAuthStrategy);
   logStep(`Draft GitHub release is ready for review: ${newVersion}`);
 }
 
-main();
+const isDirectExecution = process.argv[1]
+  ? pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+  : false;
+
+if (isDirectExecution) {
+  main();
+}
+
+export {
+  hasGitHubEnvTokens,
+  parseGitHubAuthStatus,
+  resolveGitHubReleaseAuthStrategy,
+  runWithGitHubAuthFallback,
+  shouldRetryWithoutGitHubEnv,
+  withoutGitHubEnvTokens,
+};

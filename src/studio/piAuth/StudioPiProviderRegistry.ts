@@ -1,8 +1,15 @@
+import { DEFAULT_PI_MODELS_VAULT_PATH } from "../../services/pi/PiSdkStoragePaths";
 import { normalizeStudioPiProviderHint } from "./StudioPiProviderUtils";
 
 export type StudioPiDynamicOAuthProvider = {
   id?: string;
   name?: string;
+};
+
+export type StudioPiKnownOAuthProvider = {
+  id: string;
+  name: string;
+  usesCallbackServer: boolean;
 };
 
 export type StudioPiAuthMethod = "oauth" | "api_key";
@@ -22,7 +29,7 @@ export type StudioPiLocalProviderSetup = {
   snippet: string;
 };
 
-export const STUDIO_PI_LOCAL_MODELS_PATH = "~/.pi/agent/models.json";
+export const STUDIO_PI_LOCAL_MODELS_PATH = DEFAULT_PI_MODELS_VAULT_PATH;
 
 export const LOCAL_PI_PROVIDER_IDS = new Set<string>([
   "ollama",
@@ -75,13 +82,37 @@ export const PROVIDER_AUTH_HINT_OVERRIDES: Record<string, string> = {
     "Requires AZURE_OPENAI_API_KEY plus Azure endpoint/resource environment configuration.",
 };
 
-export const KNOWN_OAUTH_PROVIDER_IDS = new Set<string>([
-  "anthropic",
-  "openai-codex",
-  "github-copilot",
-  "google-gemini-cli",
-  "google-antigravity",
-]);
+export const KNOWN_OAUTH_PROVIDERS: ReadonlyArray<StudioPiKnownOAuthProvider> = [
+  {
+    id: "anthropic",
+    name: "Anthropic (Claude Pro/Max)",
+    usesCallbackServer: true,
+  },
+  {
+    id: "github-copilot",
+    name: "GitHub Copilot",
+    usesCallbackServer: false,
+  },
+  {
+    id: "google-gemini-cli",
+    name: "Google Cloud Code Assist (Gemini CLI)",
+    usesCallbackServer: true,
+  },
+  {
+    id: "google-antigravity",
+    name: "Antigravity (Gemini 3, Claude, GPT-OSS)",
+    usesCallbackServer: true,
+  },
+  {
+    id: "openai-codex",
+    name: "ChatGPT Plus/Pro (Codex Subscription)",
+    usesCallbackServer: true,
+  },
+] as const;
+
+export const KNOWN_OAUTH_PROVIDER_IDS = new Set<string>(
+  KNOWN_OAUTH_PROVIDERS.map((provider) => provider.id),
+);
 
 export const DEFAULT_PI_PROVIDER_HINTS = [
   "openai-codex",
@@ -214,6 +245,10 @@ export function getStudioPiRegisteredProviderIds(): string[] {
   );
 }
 
+export function getKnownStudioPiOAuthProviders(): StudioPiKnownOAuthProvider[] {
+  return KNOWN_OAUTH_PROVIDERS.map((provider) => ({ ...provider }));
+}
+
 export function getDefaultStudioPiProviderHints(): string[] {
   return [...DEFAULT_PI_PROVIDER_HINTS];
 }
@@ -227,13 +262,26 @@ export function isStudioPiLocalProvider(providerId: string): boolean {
 }
 
 export function getStudioPiLocalProviderSetup(
-  providerId: string
+  providerId: string,
+  options?: {
+    modelsPath?: string;
+  },
 ): StudioPiLocalProviderSetup | null {
   const normalized = normalizeProviderId(providerId);
   if (!normalized) {
     return null;
   }
-  return LOCAL_PI_PROVIDER_SETUP[normalized] || null;
+
+  const baseSetup = LOCAL_PI_PROVIDER_SETUP[normalized];
+  if (!baseSetup) {
+    return null;
+  }
+
+  const filePath = String(options?.modelsPath || baseSetup.filePath || "").trim() || baseSetup.filePath;
+  return {
+    ...baseSetup,
+    filePath,
+  };
 }
 
 function resolveDynamicProviderName(

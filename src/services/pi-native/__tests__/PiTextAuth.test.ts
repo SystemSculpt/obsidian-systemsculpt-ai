@@ -5,6 +5,9 @@ describe("PiTextAuth", () => {
   });
 
   it("stays import-safe when desktop auth storage is unavailable", () => {
+    jest.doMock("../../../studio/piAuth/StudioPiAuthInventory", () => {
+      throw new Error("StudioPiAuthInventory should not load during PiTextAuth import");
+    });
     jest.doMock("../../../studio/piAuth/StudioPiAuthStorage", () => {
       throw new Error("StudioPiAuthStorage should not load during PiTextAuth import");
     });
@@ -44,8 +47,11 @@ describe("PiTextAuth", () => {
       };
     });
 
-    jest.doMock("../../../studio/piAuth/StudioPiAuthStorage", () => ({
+    jest.doMock("../../../studio/piAuth/StudioPiAuthInventory", () => ({
       listStudioPiProviderAuthRecords,
+    }));
+
+    jest.doMock("../../../studio/piAuth/StudioPiAuthStorage", () => ({
       resolveStudioPiProviderApiKey: jest.fn(),
     }));
 

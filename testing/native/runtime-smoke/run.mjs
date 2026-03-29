@@ -1,9 +1,82 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import path from "node:path";
+import { config as loadDotEnv } from "dotenv";
 import { fail, parseArgs } from "./cli.mjs";
 import { assertCaseResult, caseList, runCase } from "./cases.mjs";
 import { seedFixtureBundle } from "./fixtures.mjs";
 import { connectToRuntime, ensureJsonUrl } from "./runtime.mjs";
+
+function loadRuntimeSmokeEnv() {
+  for (const relativePath of [".env.local", ".env"]) {
+    loadDotEnv({
+      path: path.resolve(process.cwd(), relativePath),
+      override: false,
+      quiet: true,
+    });
+  }
+}
+
+function resolveRuntimeSmokeLicenseKey() {
+  const explicitKey = String(process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || "").trim();
+  if (explicitKey) {
+    return explicitKey;
+  }
+
+  const e2eKey = String(process.env.SYSTEMSCULPT_E2E_LICENSE_KEY || "").trim();
+  if (!e2eKey) {
+    return "";
+  }
+
+  process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY = e2eKey;
+  return e2eKey;
+}
+
+loadRuntimeSmokeEnv();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientUpstreamRateLimit(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return (
+    (message.includes("429") && (message.includes("rate limit") || message.includes("rate-limited"))) ||
+    message.includes("temporarily rate-limited") ||
+    message.includes("retry shortly")
+  );
+}
+
+async function runCaseWithRetries(runtime, options, caseName) {
+  const maxTransientRateLimitRetries = 2;
+
+  for (let attempt = 0; attempt <= maxTransientRateLimitRetries; attempt += 1) {
+    try {
+      return {
+        result: await runCase(runtime, options, caseName),
+        attemptsUsed: attempt + 1,
+      };
+    } catch (error) {
+      if (!isTransientUpstreamRateLimit(error) || attempt >= maxTransientRateLimitRetries) {
+        throw error;
+      }
+
+      const retryDelayMs = 5000 * (attempt + 1);
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[runtime-smoke] ${caseName} hit a transient upstream rate limit ` +
+          `(attempt ${attempt + 1}/${maxTransientRateLimitRetries + 1}); retrying in ${retryDelayMs}ms: ${message}`
+      );
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw new Error(`Unreachable retry state for ${caseName}.`);
+}
 
 async function waitForObsidianApp(runtime, options) {
   const deadlineMs = options.mode === "ios" ? 90000 : 60000;
@@ -65,7 +138,7 @@ async function prepareRuntime(runtime, options) {
 }
 
 async function bootstrapHostedAuth(runtime) {
-  const licenseKey = String(process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || "").trim();
+  const licenseKey = resolveRuntimeSmokeLicenseKey();
   if (!licenseKey) {
     return null;
   }
@@ -127,11 +200,12 @@ async function main() {
         console.log(
           `[runtime-smoke] Running ${caseName} via ${options.mode} (iteration ${iteration + 1}/${options.repeat})`
         );
-        const result = await runCase(runtime, options, caseName);
+        const { result, attemptsUsed } = await runCaseWithRetries(runtime, options, caseName);
         assertCaseResult(caseName, options, result);
         const durationMs = Date.now() - startedAt;
         results[caseName] = {
           ...result,
+          attemptsUsed,
           durationMs,
         };
         console.log(

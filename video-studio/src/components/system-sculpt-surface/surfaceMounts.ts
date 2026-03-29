@@ -951,7 +951,7 @@ const mountStudioGraphView: SurfaceMountHandler<StudioGraphSurfaceSpec> = ({
     getCurrentProject: () => project,
     setError: () => {},
     recomputeEntryNodes: () => {},
-    scheduleProjectSave: () => {},
+    commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
     requestRender: () => {},
     getPortType: (nodeId, direction, portId) => {
       const definition = findStudioNodeDefinition(nodeId);
@@ -990,6 +990,7 @@ const mountStudioGraphView: SurfaceMountHandler<StudioGraphSurfaceSpec> = ({
     onZoomIn: () => {},
     onZoomOut: () => {},
     onZoomReset: () => {},
+    onZoomOverview: () => {},
     onToggleNodeDetailMode: () => {},
     onOpenNodeContextMenu: () => {},
     onCreateLabelAtPosition: () => {},
@@ -999,7 +1000,6 @@ const mountStudioGraphView: SurfaceMountHandler<StudioGraphSurfaceSpec> = ({
     onRemoveNode: () => {},
     onNodeTitleInput: () => {},
     onNodeConfigMutated: () => {},
-    onNodePresentationMutated: () => {},
     onNodeGeometryMutated: () => {},
     resolveDynamicSelectOptions: async (source) => {
       if (source === "studio.pi_text_models") {

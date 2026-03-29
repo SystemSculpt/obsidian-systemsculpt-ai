@@ -58,6 +58,7 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-seeded", abortController.signal, seedParts);
 
     expect(result.completed).toBe(true);
+    expect(result.completionState).toBe("completed");
     expect(result.messageId).toBe("assistant-seeded");
     expect(result.message.content).toBe("Hello world");
     expect(onAssistantResponse).toHaveBeenCalledTimes(1);
@@ -77,6 +78,7 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-stop-reason", abortController.signal);
 
     expect(result.completed).toBe(true);
+    expect(result.completionState).toBe("completed");
     expect(result.stopReason).toBe("toolUse");
     expect((result.message as any).stopReason).toBe("toolUse");
   });
@@ -137,6 +139,7 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-tools", abortController.signal);
 
     expect(result.completed).toBe(true);
+    expect(result.completionState).toBe("completed");
     expect(result.message.tool_calls?.[0]?.id).toBe(toolCallId);
     expect(result.message.tool_calls?.[0]?.state).toBe("executing");
     expect(Array.isArray((result.message as any).reasoning_details)).toBe(true);
@@ -159,6 +162,7 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-abort", abortController.signal);
 
     expect(result.completed).toBe(false);
+    expect(result.completionState).toBe("aborted");
     expect(saveChat).not.toHaveBeenCalled();
   });
 
@@ -184,11 +188,12 @@ describe("StreamingController stream behavior", () => {
     );
 
     expect(result.completed).toBe(false);
+    expect(result.completionState).toBe("aborted");
     expect(saveChat).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 
-  test("does not persist an empty assistant message when stream has no output", async () => {
+  test("returns an empty completion state when stream has no renderable output", async () => {
     const { controller, saveChat, onAssistantResponse, onError } = createController();
 
     const stream = (async function* () {})();
@@ -201,10 +206,39 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-empty", abortController.signal);
 
     expect(result.completed).toBe(false);
+    expect(result.completionState).toBe("empty");
     expect(saveChat).not.toHaveBeenCalled();
     expect(onAssistantResponse).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError.mock.calls[0]?.[0]?.message || "").toContain("empty completion");
+    expect(onError).not.toHaveBeenCalled();
+    expect(messageEl.isConnected).toBe(false);
+  });
+
+  test("treats reasoning-only terminal output as empty so blank assistant replies are not persisted", async () => {
+    const { controller, saveChat, onAssistantResponse, onError } = createController();
+
+    const stream = (async function* () {
+      yield { type: "reasoning", text: "Need to inspect the fixture carefully." } as any;
+    })();
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-reasoning-only";
+    document.body.appendChild(messageEl);
+
+    const abortController = new AbortController();
+    const result = await controller.stream(
+      stream,
+      messageEl,
+      "assistant-reasoning-only",
+      abortController.signal
+    );
+
+    expect(result.completed).toBe(false);
+    expect(result.completionState).toBe("empty");
+    expect(result.message.content).toBe("");
+    expect(result.message.reasoning).toContain("Need to inspect the fixture carefully.");
+    expect(saveChat).not.toHaveBeenCalled();
+    expect(onAssistantResponse).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
     expect(messageEl.isConnected).toBe(false);
   });
 });

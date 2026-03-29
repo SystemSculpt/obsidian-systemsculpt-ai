@@ -6,6 +6,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+const mockCreatePiAuthStorage = jest.fn();
+const mockCreatePiModelRegistry = jest.fn();
+const mockResolvePiAuthPath = jest.fn();
+const mockResolvePiModelsPath = jest.fn();
+const mockListLocalPiTextModels = jest.fn();
+const mockListPiTextCatalogModels = jest.fn();
+
 jest.mock("obsidian", () => ({
   TFile: class {},
   normalizePath: (value: string) => String(value || "").replace(/\\/g, "/"),
@@ -23,11 +30,84 @@ jest.mock("../../../views/chatview/modelSelection", () => ({
   loadChatModelPickerOptions: jest.fn().mockResolvedValue([]),
 }));
 
+jest.mock("../../../services/pi/PiSdkDesktopSupport", () => ({
+  createPiAuthStorage: (...args: any[]) => mockCreatePiAuthStorage(...args),
+}));
+
+jest.mock("../../../services/pi/PiSdkRuntime", () => ({
+  createPiModelRegistry: (...args: any[]) => mockCreatePiModelRegistry(...args),
+}));
+
+jest.mock("../../../services/pi/PiSdkStoragePaths", () => ({
+  resolvePiAuthPath: (...args: any[]) => mockResolvePiAuthPath(...args),
+  resolvePiModelsPath: (...args: any[]) => mockResolvePiModelsPath(...args),
+}));
+
+jest.mock("../../../services/pi/PiTextModels", () => ({
+  listLocalPiTextModels: (...args: any[]) => mockListLocalPiTextModels(...args),
+}));
+
+jest.mock("../../../services/pi-native/PiTextCatalog", () => ({
+  listPiTextCatalogModels: (...args: any[]) => mockListPiTextCatalogModels(...args),
+}));
+
+jest.mock("../../../settings/providerStatus", () => ({
+  loadProviderStatusInventory: jest.fn(async () => ({
+    records: [
+      {
+        provider: "openai",
+        source: "none",
+        supportsOAuth: true,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        credentialType: "none",
+      },
+    ],
+    localProviderIds: new Set(),
+    oauthProvidersById: new Map([["openai", { id: "openai", name: "OpenAI" }]]),
+  })),
+  loadProviderStatusInventoryWithTimeout: jest.fn(async () => ({
+    records: [
+      {
+        provider: "openai",
+        source: "none",
+        supportsOAuth: true,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        credentialType: "none",
+      },
+    ],
+    localProviderIds: new Set(),
+    oauthProvidersById: new Map([["openai", { id: "openai", name: "OpenAI" }]]),
+  })),
+  getProviderDisplayState: jest.fn((record: any) => ({
+    blocked: false,
+    connected: Boolean(record?.hasAnyAuth),
+    ready: Boolean(record?.hasAnyAuth),
+    tone: record?.hasAnyAuth ? "connected" : "disconnected",
+    statusLabel: record?.hasAnyAuth ? "Connected" : "Not connected",
+    summary: record?.hasAnyAuth ? "Connected via API key" : "Not connected",
+    inlineReason: null,
+    hoverDetails: null,
+  })),
+  getProviderLabel: jest.fn(() => "OpenAI"),
+}));
+
+jest.mock("../../../studio/piAuth/StudioPiProviderRegistry", () => ({
+  getApiKeyEnvVarForProvider: jest.fn(() => "OPENAI_API_KEY"),
+  isStudioPiAuthMethodEnabled: jest.fn((_providerId: string, method: string) => method === "oauth" || method === "api_key"),
+  isStudioPiLocalProvider: jest.fn(() => false),
+}));
+
 jest.mock("../../../utils/vaultPathUtils", () => ({
   resolveAbsoluteVaultPath: jest.fn(() => "/tmp/automation-vault/.obsidian"),
 }));
 
 import { DesktopAutomationBridge } from "../DesktopAutomationBridge";
+
+const {
+  loadProviderStatusInventoryWithTimeout: loadProviderStatusInventoryWithTimeoutMock,
+} = jest.requireMock("../../../settings/providerStatus") as Record<string, jest.Mock>;
 
 describe("DesktopAutomationBridge discovery cleanup", () => {
   let tempDir: string;
@@ -35,6 +115,26 @@ describe("DesktopAutomationBridge discovery cleanup", () => {
   beforeEach(async () => {
     delete (globalThis as any).__systemsculptDesktopAutomationBridgeSingleton;
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "desktop-automation-bridge-"));
+    mockCreatePiAuthStorage.mockReset();
+    mockCreatePiModelRegistry.mockReset();
+    mockResolvePiAuthPath.mockReset();
+    mockResolvePiModelsPath.mockReset();
+    mockListLocalPiTextModels.mockReset();
+    mockListPiTextCatalogModels.mockReset();
+
+    mockCreatePiAuthStorage.mockReturnValue({
+      list: () => [],
+      hasAuth: () => false,
+    });
+    mockCreatePiModelRegistry.mockReturnValue({
+      getError: () => null,
+      getAll: () => [],
+      getAvailable: () => [],
+    });
+    mockResolvePiAuthPath.mockReturnValue(path.join(tempDir, "auth.json"));
+    mockResolvePiModelsPath.mockReturnValue(path.join(tempDir, "models.json"));
+    mockListLocalPiTextModels.mockResolvedValue([]);
+    mockListPiTextCatalogModels.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -359,6 +459,198 @@ describe("DesktopAutomationBridge discovery cleanup", () => {
     expect(leaf.view.setSelectedModelId).toHaveBeenCalledWith(
       "local-pi-github-copilot@@claude-haiku-4.5",
       { focusInput: false }
+    );
+  });
+
+  it("status snapshot does not wait on an unready chat view", async () => {
+    const plugin = createPluginStub();
+    const leaf: any = {
+      getViewState: jest.fn(() => ({ type: "systemsculpt-chat-view" })),
+      view: {
+        getViewType: () => "systemsculpt-chat-view",
+        inputHandler: null,
+        getAutomationSnapshot: jest.fn(),
+      },
+    };
+    plugin.app.workspace.getLeavesOfType.mockReturnValue([leaf]);
+
+    const bridge = new DesktopAutomationBridge(plugin);
+    const waitSpy = jest.spyOn(bridge as any, "waitForChatViewReady");
+
+    const snapshot = await (bridge as any).getStatusSnapshot();
+
+    expect(waitSpy).not.toHaveBeenCalled();
+    expect(snapshot.chat).toBeNull();
+    expect(leaf.view.getAutomationSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("includes provider capability metadata in the providers snapshot", async () => {
+    const previousHTMLElement = (globalThis as any).HTMLElement;
+    (globalThis as any).HTMLElement = class HTMLElementMock {};
+
+    try {
+      const bridge = new DesktopAutomationBridge(createPluginStub());
+      const snapshot = await (bridge as any).getProvidersSettingsSnapshot({
+        ensureOpen: false,
+        waitForLoaded: false,
+      });
+
+      expect(snapshot.providers.rows).toEqual([
+        expect.objectContaining({
+          providerId: "openai",
+          label: "OpenAI",
+          isLocalProvider: false,
+          apiKeyEnvVar: "OPENAI_API_KEY",
+          oauthEnabled: true,
+          apiKeyEnabled: true,
+        }),
+      ]);
+    } finally {
+      if (previousHTMLElement === undefined) {
+        delete (globalThis as any).HTMLElement;
+      } else {
+        (globalThis as any).HTMLElement = previousHTMLElement;
+      }
+    }
+  });
+
+  it("returns provider inventory errors instead of hanging the snapshot", async () => {
+    const previousHTMLElement = (globalThis as any).HTMLElement;
+    (globalThis as any).HTMLElement = class HTMLElementMock {};
+    loadProviderStatusInventoryWithTimeoutMock.mockRejectedValueOnce(
+      new Error("Timed out while loading provider settings.")
+    );
+
+    try {
+      const bridge = new DesktopAutomationBridge(createPluginStub());
+      const snapshot = await (bridge as any).getProvidersSettingsSnapshot({
+        ensureOpen: false,
+        waitForLoaded: false,
+      });
+
+      expect(snapshot.providers).toEqual(
+        expect.objectContaining({
+          error: "Timed out while loading provider settings.",
+          rowCount: 0,
+          localProviderIds: [],
+          rows: [],
+        })
+      );
+    } finally {
+      if (previousHTMLElement === undefined) {
+        delete (globalThis as any).HTMLElement;
+      } else {
+        (globalThis as any).HTMLElement = previousHTMLElement;
+      }
+    }
+  });
+
+  it("captures live Pi catalog diagnostics even when models.json is absent", async () => {
+    const authPath = path.join(tempDir, "auth.json");
+    const modelsPath = path.join(tempDir, "models.json");
+    await fs.writeFile(
+      authPath,
+      JSON.stringify(
+        {
+          openrouter: {
+            type: "api_key",
+            key: "test-openrouter-key",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    mockResolvePiAuthPath.mockReturnValue(authPath);
+    mockResolvePiModelsPath.mockReturnValue(modelsPath);
+    mockCreatePiAuthStorage.mockReturnValue({
+      list: () => ["openrouter"],
+      hasAuth: (provider: string) => provider === "openrouter",
+    });
+    mockCreatePiModelRegistry.mockReturnValue({
+      getError: () => null,
+      getAll: () => [
+        {
+          provider: "openrouter",
+          id: "openai/gpt-5.4-mini",
+          name: "GPT-5.4 Mini",
+          api: "openai-completions",
+          baseUrl: "https://openrouter.ai/api/v1",
+        },
+        {
+          provider: "openrouter",
+          id: "moonshotai/kimi-k2.5",
+          name: "Kimi K2.5",
+          api: "openai-completions",
+          baseUrl: "https://openrouter.ai/api/v1",
+        },
+      ],
+      getAvailable: () => [
+        {
+          provider: "openrouter",
+          id: "openai/gpt-5.4-mini",
+          name: "GPT-5.4 Mini",
+          api: "openai-completions",
+          baseUrl: "https://openrouter.ai/api/v1",
+        },
+      ],
+    });
+    mockListLocalPiTextModels.mockResolvedValue([
+      {
+        providerId: "openrouter",
+        modelId: "openai/gpt-5.4-mini",
+        label: "GPT-5.4 Mini",
+      },
+    ]);
+    mockListPiTextCatalogModels.mockResolvedValue([
+      {
+        id: "systemsculpt@@systemsculpt/ai-agent",
+        provider: "systemsculpt",
+        sourceMode: "systemsculpt",
+      },
+      {
+        id: "local-pi-openrouter@@openai/gpt-5.4-mini",
+        provider: "openrouter",
+        sourceMode: "pi_local",
+        piExecutionModelId: "openrouter/openai/gpt-5.4-mini",
+      },
+    ]);
+
+    const bridge = new DesktopAutomationBridge(createPluginStub());
+    const diagnostics = await (bridge as any).getPiCatalogDiagnostics();
+
+    expect(diagnostics).toEqual(
+      expect.objectContaining({
+        authPath,
+        modelsPath,
+        authFileExists: true,
+        modelsFileExists: false,
+        authProviders: ["openrouter"],
+        modelsConfigProviders: [],
+        registry: expect.objectContaining({
+          error: null,
+          allCount: 2,
+          availableCount: 1,
+          authProviders: ["openrouter"],
+          hasAuthByProvider: {
+            openrouter: true,
+          },
+          allProviders: {
+            openrouter: 2,
+          },
+          availableProviders: {
+            openrouter: 1,
+          },
+        }),
+        localPiModels: expect.objectContaining({
+          count: 1,
+        }),
+        catalog: expect.objectContaining({
+          count: 2,
+        }),
+      }),
     );
   });
 

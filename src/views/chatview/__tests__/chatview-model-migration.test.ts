@@ -226,6 +226,26 @@ describe("ChatView loaded model migration", () => {
     expect(chatView.getSelectedModelId()).toBe("local-pi-github-copilot@@claude-haiku-4.5");
   });
 
+  it("preserves the current chat model when incoming leaf state omits selectedModelId", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => []),
+      getModels: jest.fn(async () => []),
+    });
+
+    chatView.selectedModelId = "systemsculpt@@systemsculpt/ai-agent";
+    (chatView as any).plugin.settings.selectedModelId = "local-pi-github-copilot@@claude-haiku-4.5";
+
+    jest.spyOn(chatView, "loadChatById").mockResolvedValue(undefined);
+
+    await chatView.setState({
+      chatId: "chat-123",
+      chatTitle: "Recovered Chat",
+    });
+
+    expect(chatView.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(chatView.getSelectedModelId()).toBe("systemsculpt@@systemsculpt/ai-agent");
+  });
+
   it("resets composer automation state when resetting to a fresh chat", async () => {
     const chatView = createChatView({
       getCachedModels: jest.fn(() => []),

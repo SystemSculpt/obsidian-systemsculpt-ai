@@ -1,3 +1,4 @@
+import { readFile } from "fs/promises";
 import type SystemSculptPlugin from "../../main";
 import type { CustomProvider, SystemSculptModel } from "../../types/llm";
 import { PlatformContext } from "../PlatformContext";
@@ -6,7 +7,7 @@ import {
   resolvePiProviderFromEndpoint,
   resolveProviderLabel,
 } from "../../studio/piAuth/StudioPiProviderRegistry";
-import { createPiModelRegistry } from "./PiSdkRuntime";
+import { resolvePiModelsPath } from "./PiSdkStoragePaths";
 import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import {
   buildLocalPiCanonicalModelId,
@@ -58,6 +59,12 @@ export type LocalPiListedModel = {
   supportsImages: boolean;
   keywords: string[];
 };
+
+async function loadPiSdkRuntimeModule(): Promise<
+  typeof import("./PiSdkRuntime")
+> {
+  return await import("./PiSdkRuntime");
+}
 
 function stripPinnedDateSuffix(modelId: string): string {
   const normalized = String(modelId || "").trim();
@@ -238,7 +245,9 @@ export async function listLocalPiTextModels(
     return [];
   }
 
-  const modelRegistry = createPiModelRegistry();
+  // Keep lightweight settings/provider inventory reads import-safe on clean hosts.
+  const { createPiModelRegistry } = await loadPiSdkRuntimeModule();
+  const modelRegistry = createPiModelRegistry({ plugin });
   const models: LocalPiListedModel[] = modelRegistry
     .getAvailable()
     .map((model) => toLocalPiListEntry(model))
@@ -312,14 +321,30 @@ export async function listLocalPiTextModelOptions(
 export async function listLocalPiProviderIds(
   plugin: SystemSculptPlugin
 ): Promise<string[]> {
-  const models = await listLocalPiTextModels(plugin);
-  return Array.from(
-    new Set(
-      models
-        .map((model) => normalizePiProviderId(model.providerId))
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right));
+  if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+    return [];
+  }
+
+  const modelsPath = resolvePiModelsPath(plugin);
+  if (!modelsPath) {
+    return [];
+  }
+
+  try {
+    const raw = await readFile(modelsPath, "utf8");
+    const parsed = JSON.parse(raw) as { providers?: Record<string, unknown> } | null;
+    const providers =
+      parsed?.providers && typeof parsed.providers === "object" && !Array.isArray(parsed.providers)
+        ? parsed.providers
+        : {};
+
+    return Object.keys(providers)
+      .map((providerId) => normalizePiProviderId(providerId))
+      .filter((providerId) => providerId.length > 0)
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
 }
 
 export function collectSharedPiProviderHints(customProviders: CustomProvider[]): string[] {

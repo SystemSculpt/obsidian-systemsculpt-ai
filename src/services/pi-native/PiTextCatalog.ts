@@ -3,6 +3,19 @@ import type { SystemSculptModel } from "../../types/llm";
 import { buildManagedSystemSculptModel } from "../systemsculpt/ManagedSystemSculptModel";
 import { PlatformContext } from "../PlatformContext";
 
+function logPiCatalogFailure(
+  plugin: SystemSculptPlugin,
+  error: unknown,
+): void {
+  try {
+    plugin.getLogger?.().warn("Pi text model catalog unavailable; falling back to managed model", {
+      error: error instanceof Error ? error.message : String(error || "Unknown error"),
+    });
+  } catch {
+    // Keep catalog fallback non-fatal even if logging is unavailable.
+  }
+}
+
 export async function listPiTextCatalogModels(
   plugin: SystemSculptPlugin
 ): Promise<SystemSculptModel[]> {
@@ -22,8 +35,8 @@ export async function listPiTextCatalogModels(
           existingIds.add(model.id);
         }
       }
-    } catch {
-      // Pi model registry unavailable — fall back to managed model only.
+    } catch (error) {
+      logPiCatalogFailure(plugin, error);
     }
   }
 

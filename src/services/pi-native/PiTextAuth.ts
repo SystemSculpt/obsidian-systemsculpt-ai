@@ -1,4 +1,5 @@
-import type { StudioPiProviderAuthRecord } from "../../studio/piAuth/StudioPiAuthStorage";
+import type { StudioPiProviderAuthRecord } from "../../studio/piAuth/StudioPiAuthInventory";
+import type SystemSculptPlugin from "../../main";
 import { PlatformContext } from "../PlatformContext";
 import {
   normalizeStudioPiProviderId,
@@ -13,8 +14,22 @@ export type PiTextProviderCredentialInput = {
   apiKey: string;
 };
 
-async function loadStudioPiAuthStorageModule(): Promise<typeof import("../../studio/piAuth/StudioPiAuthStorage")> {
+async function loadStudioPiAuthInventoryModule(): Promise<
+  typeof import("../../studio/piAuth/StudioPiAuthInventory")
+> {
+  return await import("../../studio/piAuth/StudioPiAuthInventory");
+}
+
+async function loadStudioPiAuthStorageModule(): Promise<
+  typeof import("../../studio/piAuth/StudioPiAuthStorage")
+> {
   return await import("../../studio/piAuth/StudioPiAuthStorage");
+}
+
+async function loadPiTextModelsModule(): Promise<
+  typeof import("../pi/PiTextModels")
+> {
+  return await import("../pi/PiTextModels");
 }
 
 function supportsDesktopPiFeatures(): boolean {
@@ -22,15 +37,16 @@ function supportsDesktopPiFeatures(): boolean {
 }
 
 export async function loadPiTextProviderAuth(
-  providerHints: string[]
+  providerHints: string[],
+  plugin?: SystemSculptPlugin
 ): Promise<Map<string, StudioPiProviderAuthRecord>> {
   if (!supportsDesktopPiFeatures() || providerHints.length === 0) {
     return new Map<string, StudioPiProviderAuthRecord>();
   }
 
   try {
-    const { listStudioPiProviderAuthRecords } = await loadStudioPiAuthStorageModule();
-    const records = await listStudioPiProviderAuthRecords({ providerHints });
+    const { listStudioPiProviderAuthRecords } = await loadStudioPiAuthInventoryModule();
+    const records = await listStudioPiProviderAuthRecords({ providerHints, plugin });
     return new Map(
       records
         .map((record) => [normalizeStudioPiProviderId(record.provider), record] as const)
@@ -41,15 +57,36 @@ export async function loadPiTextProviderAuth(
   }
 }
 
+export async function loadPiTextLocalProviderIds(
+  plugin?: SystemSculptPlugin
+): Promise<Set<string>> {
+  if (!supportsDesktopPiFeatures() || !plugin) {
+    return new Set<string>();
+  }
+
+  try {
+    const { listLocalPiProviderIds } = await loadPiTextModelsModule();
+    const providerIds = await listLocalPiProviderIds(plugin);
+    return new Set(
+      providerIds
+        .map((providerId) => normalizeStudioPiProviderId(providerId))
+        .filter((providerId) => providerId.length > 0)
+    );
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export async function resolvePiTextProviderCredential(
-  providerHint: string
+  providerHint: string,
+  plugin?: SystemSculptPlugin
 ): Promise<PiTextProviderCredentialInput | null> {
   if (!supportsDesktopPiFeatures()) {
     return null;
   }
 
   const { resolveStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
-  const apiKey = await resolveStudioPiProviderApiKey(providerHint);
+  const apiKey = await resolveStudioPiProviderApiKey(providerHint, { plugin });
   if (!apiKey) {
     return null;
   }
@@ -68,7 +105,10 @@ export function piTextProviderRequiresAuth(providerHint: string): boolean {
   return supportsOAuthLogin(providerId) || getApiKeyEnvVarForProvider(providerId).length > 0;
 }
 
-export async function hasPiTextProviderAuth(providerHint: string): Promise<boolean> {
+export async function hasPiTextProviderAuth(
+  providerHint: string,
+  plugin?: SystemSculptPlugin
+): Promise<boolean> {
   if (!piTextProviderRequiresAuth(providerHint)) {
     return true;
   }
@@ -83,7 +123,7 @@ export async function hasPiTextProviderAuth(providerHint: string): Promise<boole
   }
 
   const { resolveStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
-  const apiKey = await resolveStudioPiProviderApiKey(providerId);
+  const apiKey = await resolveStudioPiProviderApiKey(providerId, { plugin });
   return !!apiKey;
 }
 

@@ -3,9 +3,11 @@ import {
   type StudioPiAuthInfo,
   type StudioPiAuthPrompt,
 } from "./StudioPiAuthStorage";
+import type SystemSculptPlugin from "../../main";
 
 type StudioPiOAuthLoginFlowOptions = {
   providerId: string;
+  plugin?: SystemSculptPlugin;
   onAuth: (info: StudioPiAuthInfo) => void | Promise<void>;
   onPrompt: (prompt: StudioPiAuthPrompt) => Promise<string>;
   onProgress?: (message: string) => void;
@@ -26,6 +28,7 @@ export async function runStudioPiOAuthLoginFlow(
 
   await loginStudioPiProviderOAuth({
     providerId: options.providerId,
+    plugin: options.plugin,
     onAuth: async (info) => {
       sawAuthEvent = true;
       if (String(info.url || "").trim()) {

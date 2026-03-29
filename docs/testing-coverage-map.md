@@ -1,11 +1,12 @@
 # Testing coverage map
 
-Last verified against code, tests, and device workflow docs: **2026-03-12**.
+Last verified against code, tests, and device workflow docs: **2026-03-29**.
 
 ## Canonical contract
 
 - `SystemSculpt` hosted chat and desktop-only Pi-backed chat are the shipped chat paths.
 - Mobile validation stays on the hosted SystemSculpt contract; desktop validation covers both hosted and Pi-backed paths.
+- Windows desktop is the canonical clean-install desktop lane, including the “no local Pi installed” baseline; macOS remains the fastest already-open no-focus iteration lane.
 - `testing/native/` is the only integration-testing architecture in this repo.
 - Release verification targets the standard Obsidian plugin artifact set only: `main.js`, `manifest.json`, and `styles.css`.
 - Benchmark surfaces are removed; there is no benchmark runner or benchmark-results release/test lane anymore.
@@ -38,6 +39,7 @@ Last verified against code, tests, and device workflow docs: **2026-03-12**.
 
 - `npm run test:native:desktop`
 - `npm run test:native:desktop:extended`
+- `npm run test:native:desktop:provider-connected`
 - `npm run test:native:desktop:stress`
 - `npm run test:native:android`
 - `npm run test:native:android:extended`
@@ -47,6 +49,8 @@ Last verified against code, tests, and device workflow docs: **2026-03-12**.
 These are the authoritative live-runtime checks for:
 
 - hosted chat
+- fresh-install Windows desktop parity when paired with the Windows device workflow
+- provider-auth settings round-trips on desktop, including connect, model refresh, de-auth, and clean Providers guidance regression
 - approval-gated filesystem tools
 - vault reads and writes
 - embeddings / Similar Notes primitives
@@ -82,5 +86,6 @@ Releases now ship only the standard Obsidian plugin assets: `main.js`, `manifest
 
 ## Current gaps to close next
 
-- One real Windows desktop host pass is still needed for full release confidence.
+- Re-run the real Windows clean-install / no-local-Pi pass on the current release candidate before shipping; that stays a release-time runtime gate even with the new desktop automation architecture.
+- Re-run the new Windows provider-connected baseline on the release candidate with a real provider API key to prove fresh-install provider auth parity end to end.
 - `npm run release:plugin -- --dry-run` still requires at least one commit after the current release tag before it can progress past the script's commit-range gate.

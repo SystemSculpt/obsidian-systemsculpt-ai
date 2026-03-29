@@ -6,10 +6,10 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type SystemSculptPlugin from "../../main";
 import type { ChatMessage } from "../../types";
 import { buildPiSessionTranscript } from "./PiSessionTranscriptBuilder";
+import { SessionManager } from "./PiSdkCore";
 
 export type PiSessionMirrorSnapshot = {
   sessionFile?: string;

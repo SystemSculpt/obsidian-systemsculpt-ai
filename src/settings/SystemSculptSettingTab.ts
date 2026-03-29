@@ -371,6 +371,10 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const tabConfigsAll = buildSettingsTabConfigs(this);
     const visibleTabs = tabConfigsAll;
+    const pendingFocusTabId =
+      typeof (this.plugin as any).consumePendingSettingsFocusTab === "function"
+        ? String((this.plugin as any).consumePendingSettingsFocusTab() || "").trim()
+        : "";
 
     if (this.focusTabEventRef) {
       this.app.workspace.offref(this.focusTabEventRef);
@@ -380,6 +384,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       "systemsculpt:settings-focus-tab",
       (requestedTab: string) => {
         if (!requestedTab) return;
+        if (typeof (this.plugin as any).clearPendingSettingsFocusTab === "function") {
+          (this.plugin as any).clearPendingSettingsFocusTab(requestedTab);
+        }
         if (!this.tabContainerEl) return;
         const target = this.tabContainerEl.querySelector(
           `button[data-tab="${requestedTab}"]`,
@@ -392,12 +399,17 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     this.tabsDef = visibleTabs.map(({ id, label }) => ({ id, label }));
     const previousActiveTabId = this.activeTabId;
+    const hasPendingFocusTab = pendingFocusTabId
+      ? this.tabsDef.some((tab) => tab.id === pendingFocusTabId)
+      : false;
     const hasPreviousActiveTab = this.tabsDef.some(
       (tab) => tab.id === previousActiveTabId,
     );
-    this.activeTabId = hasPreviousActiveTab
-      ? previousActiveTabId
-      : (this.tabsDef[0]?.id ?? "account");
+    this.activeTabId = hasPendingFocusTab
+      ? pendingFocusTabId
+      : hasPreviousActiveTab
+        ? previousActiveTabId
+        : (this.tabsDef[0]?.id ?? "account");
 
     for (const [index, cfg] of visibleTabs.entries()) {
       const button = tabBar.createEl("button", {

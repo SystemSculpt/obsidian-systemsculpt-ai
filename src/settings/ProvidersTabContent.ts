@@ -1,48 +1,38 @@
-import { Notice, Platform, Setting, setIcon } from "obsidian";
+import { Notice, Setting } from "obsidian";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import {
-  listStudioPiProviderAuthRecords,
-  readStudioPiProviderAuthState,
-  setStudioPiProviderApiKey,
-  clearStudioPiProviderAuth,
-  listStudioPiOAuthProviders,
-  type StudioPiProviderAuthRecord,
-  type StudioPiOAuthProvider,
-} from "../studio/piAuth/StudioPiAuthStorage";
+import type {
+  StudioPiProviderAuthRecord,
+  StudioPiOAuthProvider,
+} from "../studio/piAuth/StudioPiAuthInventory";
 import {
   getApiKeyEnvVarForProvider,
   getStudioPiLocalProviderSetup,
   getStudioPiAuthMethodRestriction,
   isStudioPiAuthMethodEnabled,
   isStudioPiLocalProvider,
-  resolveProviderLabel,
   supportsOAuthLogin,
   selectDefaultAuthMethod,
-  getDefaultStudioPiProviderHints,
   buildApiKeyHint,
 } from "../studio/piAuth/StudioPiProviderRegistry";
-import { runStudioPiOAuthLoginFlow } from "../studio/piAuth/StudioPiOAuthLoginFlow";
 import { openExternalUrlForOAuth } from "../utils/oauthUiHelpers";
-import { collectSharedPiProviderHints, listLocalPiProviderIds } from "../services/pi/PiTextModels";
 import { PlatformContext } from "../services/PlatformContext";
 import { showPopup } from "../core/ui/modals/PopupModal";
+import {
+  formatProviderStatusSummary,
+  getProviderDisplayState,
+  getProviderLabel,
+  getStoredAuthRestriction,
+  hasConfiguredLocalProvider,
+  loadProviderStatusInventoryWithTimeout,
+  normalizeProviderId,
+} from "./providerStatus";
+import { getPiModelsDisplayPath } from "../services/pi/PiSdkStoragePaths";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type ProviderRowState = {
   record: StudioPiProviderAuthRecord;
   expanding: boolean;
-};
-
-type ProviderDisplayState = {
-  blocked: boolean;
-  connected: boolean;
-  ready: boolean;
-  tone: "connected" | "blocked" | "disconnected";
-  statusLabel: string;
-  summary: string;
-  inlineReason: string | null;
-  hoverDetails: string | null;
 };
 
 type TabState = {
@@ -52,7 +42,7 @@ type TabState = {
   piReady: boolean;
   localProviderIds: Set<string>;
   oauthProvidersById: Map<string, StudioPiOAuthProvider>;
-  /** True when Pi SDK auth module loaded successfully (false in Obsidian sandbox on some platforms). */
+  /** True when in-modal provider connect actions should be surfaced. */
   inModalAuthAvailable: boolean;
   activeConnectProvider: string | null;
   activeConnectMethod: "oauth" | "api_key" | null;
@@ -60,126 +50,22 @@ type TabState = {
   oauthAbortController: AbortController | null;
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function normalize(value: unknown): string {
-  return String(value || "").trim().toLowerCase();
+async function loadStudioPiAuthInventoryModule(): Promise<
+  typeof import("../studio/piAuth/StudioPiAuthInventory")
+> {
+  return await import("../studio/piAuth/StudioPiAuthInventory");
 }
 
-function providerLabel(
-  providerId: string,
-  oauthProviders?: Map<string, StudioPiOAuthProvider>
-): string {
-  return resolveProviderLabel(providerId, oauthProviders);
+async function loadStudioPiAuthStorageModule(): Promise<
+  typeof import("../studio/piAuth/StudioPiAuthStorage")
+> {
+  return await import("../studio/piAuth/StudioPiAuthStorage");
 }
 
-function hasConfiguredLocalProvider(
-  providerId: string,
-  localProviderIds: ReadonlySet<string>
-): boolean {
-  return localProviderIds.has(normalize(providerId));
-}
-
-function getStoredAuthRestriction(
-  record: StudioPiProviderAuthRecord
-): ReturnType<typeof getStudioPiAuthMethodRestriction> | null {
-  if (record.source !== "oauth") {
-    return null;
-  }
-  const restriction = getStudioPiAuthMethodRestriction(record.provider, "oauth");
-  return restriction.disabled ? restriction : null;
-}
-
-function getProviderDisplayState(
-  record: StudioPiProviderAuthRecord,
-  localProviderIds: ReadonlySet<string>
-): ProviderDisplayState {
-  const localConfigured = hasConfiguredLocalProvider(record.provider, localProviderIds);
-  if (isStudioPiLocalProvider(record.provider)) {
-    return {
-      blocked: false,
-      connected: false,
-      ready: localConfigured,
-      tone: localConfigured ? "connected" : "disconnected",
-      statusLabel: localConfigured ? "Configured locally" : "Not configured locally",
-      summary: localConfigured
-        ? "Configured locally via Pi models.json"
-        : "Set up locally via Pi models.json",
-      inlineReason: null,
-      hoverDetails: null,
-    };
-  }
-  const storedAuthRestriction = getStoredAuthRestriction(record);
-  if (storedAuthRestriction) {
-    return {
-      blocked: true,
-      connected: false,
-      ready: false,
-      tone: "blocked",
-      statusLabel: "Subscription login disabled",
-      summary: "Subscription login disabled. Use API key instead.",
-      inlineReason: storedAuthRestriction.inlineReason || null,
-      hoverDetails: storedAuthRestriction.hoverDetails || null,
-    };
-  }
-
-  if (!record.hasAnyAuth) {
-    return {
-      blocked: false,
-      connected: false,
-      ready: false,
-      tone: "disconnected",
-      statusLabel: "Not connected",
-      summary: "Not connected",
-      inlineReason: null,
-      hoverDetails: null,
-    };
-  }
-
-  let summary = "Connected";
-  switch (record.source) {
-    case "oauth":
-      summary = "Connected via subscription";
-      break;
-    case "api_key":
-      summary = "Connected via API key";
-      break;
-    case "environment_or_fallback":
-      summary = "Connected from environment";
-      break;
-    default:
-      summary = "Connected";
-      break;
-  }
-
-  return {
-    blocked: false,
-    connected: true,
-    ready: true,
-    tone: "connected",
-    statusLabel: "Connected",
-    summary,
-    inlineReason: null,
-    hoverDetails: null,
-  };
-}
-
-function formatProviderStatusSummary(
-  providers: ProviderRowState[],
-  localProviderIds: ReadonlySet<string>
-): string {
-  const readyCount = providers.filter((providerState) =>
-    getProviderDisplayState(providerState.record, localProviderIds).ready
-  ).length;
-  const blockedCount = providers.filter((providerState) =>
-    getProviderDisplayState(providerState.record, localProviderIds).blocked
-  ).length;
-
-  if (blockedCount > 0) {
-    return `${readyCount} ready, ${blockedCount} needs attention`;
-  }
-
-  return `${readyCount} ready`;
+async function loadStudioPiOAuthLoginFlowModule(): Promise<
+  typeof import("../studio/piAuth/StudioPiOAuthLoginFlow")
+> {
+  return await import("../studio/piAuth/StudioPiOAuthLoginFlow");
 }
 
 function resolveConnectMethod(
@@ -253,17 +139,18 @@ export async function displayProvidersTabContent(
   // Initial render with loading state
   render();
 
-  // Load providers — Pi SDK is always available as a direct dependency.
+  // Load provider metadata from the lightweight inventory module first.
   state.piReady = true;
 
   try {
-    const oauthProviders = await listStudioPiOAuthProviders();
+    const { listStudioPiOAuthProviders } = await loadStudioPiAuthInventoryModule();
+    const oauthProviders = await listStudioPiOAuthProviders({ plugin });
     state.inModalAuthAvailable = true;
     state.oauthProvidersById = new Map(
-      oauthProviders.map((p) => [normalize(p.id), p])
+      oauthProviders.map((p) => [normalizeProviderId(p.id), p])
     );
   } catch {
-    // Obsidian sandbox blocks module load — terminal fallback only
+    // If even the lightweight inventory cannot load, keep connect flows disabled.
     state.inModalAuthAvailable = false;
   }
 
@@ -280,28 +167,12 @@ async function refreshProviderList(
   state.loading = true;
   state.errorMessage = null;
   try {
-    const hints = collectSharedPiProviderHints(plugin.settings.customProviders || []);
-    const [records, localProviderIds] = await Promise.all([
-      listStudioPiProviderAuthRecords({ providerHints: hints }),
-      listLocalPiProviderIds(plugin).catch(() => []),
-    ]);
-    state.localProviderIds = new Set(
-      localProviderIds.map((providerId) => normalize(providerId)).filter(Boolean)
-    );
-
-    // Sort: connected first, then alphabetical
-    records.sort((a, b) => {
-      const displayA = getProviderDisplayState(a, state.localProviderIds);
-      const displayB = getProviderDisplayState(b, state.localProviderIds);
-      const rankA = displayA.ready ? 0 : displayA.blocked ? 1 : 2;
-      const rankB = displayB.ready ? 0 : displayB.blocked ? 1 : 2;
-      if (rankA !== rankB) return rankA - rankB;
-      const labelA = providerLabel(a.provider, state.oauthProvidersById);
-      const labelB = providerLabel(b.provider, state.oauthProvidersById);
-      return labelA.localeCompare(labelB);
+    const inventory = await loadProviderStatusInventoryWithTimeout(plugin, {
+      label: "provider settings",
     });
-
-    state.providers = records.map((record) => ({
+    state.localProviderIds = inventory.localProviderIds;
+    state.oauthProvidersById = inventory.oauthProvidersById;
+    state.providers = inventory.records.map((record) => ({
       record,
       expanding: state.activeConnectProvider === record.provider,
     }));
@@ -339,7 +210,10 @@ function renderProvidersList(
         ? "Loading providers…"
         : state.errorMessage
           ? state.errorMessage
-          : formatProviderStatusSummary(state.providers, state.localProviderIds)
+          : formatProviderStatusSummary(
+              state.providers.map((providerState) => providerState.record),
+              state.localProviderIds,
+            )
     );
 
   headerActions.addButton((button) => {
@@ -388,7 +262,7 @@ function renderProviderRow(
 ): void {
   const { plugin } = tabInstance;
   const { record } = providerState;
-  const label = providerLabel(record.provider, state.oauthProvidersById);
+  const label = getProviderLabel(record.provider, state.oauthProvidersById);
   const localProvider = isStudioPiLocalProvider(record.provider);
   const displayState = getProviderDisplayState(record, state.localProviderIds);
   const connected = displayState.connected;
@@ -471,7 +345,8 @@ function renderProviderRow(
       state.actionRunning = true;
       rerender();
       try {
-        await clearStudioPiProviderAuth(record.provider);
+        const { clearStudioPiProviderAuth } = await loadStudioPiAuthStorageModule();
+        await clearStudioPiProviderAuth(record.provider, { plugin });
         new Notice(`Disconnected ${label}.`);
         await refreshProviderList(state, plugin);
       } catch (error) {
@@ -494,7 +369,8 @@ function renderProviderRow(
       state.actionRunning = true;
       rerender();
       try {
-        await clearStudioPiProviderAuth(record.provider);
+        const { clearStudioPiProviderAuth } = await loadStudioPiAuthStorageModule();
+        await clearStudioPiProviderAuth(record.provider, { plugin });
         new Notice(`Disconnected ${label}.`);
         await refreshProviderList(state, plugin);
       } catch (error) {
@@ -549,9 +425,9 @@ function renderConnectPanel(
   const { plugin } = tabInstance;
   const panel = row.createDiv({ cls: "ss-provider-connect-panel" });
   const providerId = record.provider;
-  const label = providerLabel(providerId, state.oauthProvidersById);
+  const label = getProviderLabel(providerId, state.oauthProvidersById);
   if (isStudioPiLocalProvider(providerId)) {
-    renderLocalProviderSetup(panel, state, providerId, label);
+    renderLocalProviderSetup(panel, state, providerId, label, plugin);
     return;
   }
 
@@ -666,10 +542,13 @@ function renderLocalProviderSetup(
   panel: HTMLElement,
   state: TabState,
   providerId: string,
-  label: string
+  label: string,
+  plugin: SystemSculptSettingTab["plugin"],
 ): void {
   const body = panel.createDiv({ cls: "ss-provider-connect-body" });
-  const setup = getStudioPiLocalProviderSetup(providerId);
+  const setup = getStudioPiLocalProviderSetup(providerId, {
+    modelsPath: getPiModelsDisplayPath(plugin),
+  });
   const configured = hasConfiguredLocalProvider(providerId, state.localProviderIds);
 
   if (!setup) {
@@ -740,8 +619,10 @@ function renderOAuthConnect(
     rerender();
 
     try {
+      const { runStudioPiOAuthLoginFlow } = await loadStudioPiOAuthLoginFlowModule();
       await runStudioPiOAuthLoginFlow({
         providerId,
+        plugin,
         onAuth: async (info) => {
           if (info.url) {
             await openExternalUrlForOAuth(info.url);
@@ -847,7 +728,8 @@ function renderApiKeyConnect(
     state.actionRunning = true;
     rerender();
     try {
-      await setStudioPiProviderApiKey(providerId, key);
+      const { setStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
+      await setStudioPiProviderApiKey(providerId, key, { plugin });
       new Notice(`${label} API key saved.`);
       state.activeConnectProvider = null;
       state.activeConnectMethod = null;

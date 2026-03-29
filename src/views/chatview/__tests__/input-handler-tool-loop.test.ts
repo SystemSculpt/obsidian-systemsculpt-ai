@@ -91,7 +91,7 @@ describe("InputHandler hosted tool loop", () => {
     jest.clearAllMocks();
   });
 
-  it("executes hosted tool calls locally and continues the turn after toolUse", async () => {
+  const createHostedToolLoopHarness = () => {
     const app = new App();
     const container = document.createElement("div");
     const chatContainer = document.createElement("div");
@@ -129,6 +129,7 @@ describe("InputHandler hosted tool loop", () => {
         messages[index] = message;
       }
     });
+    const onError = jest.fn();
 
     const chatView = {
       contextManager: {
@@ -168,7 +169,7 @@ describe("InputHandler hosted tool loop", () => {
       } as any,
       onMessageSubmit,
       onAssistantResponse,
-      onError: jest.fn(),
+      onError,
       onAddContextFile: jest.fn(),
       onOpenChatSettings: jest.fn(),
       plugin,
@@ -178,6 +179,24 @@ describe("InputHandler hosted tool loop", () => {
       getChatId: jest.fn(() => "chat-1"),
       chatView,
     });
+
+    return {
+      app,
+      container,
+      chatContainer,
+      messages,
+      aiService,
+      plugin,
+      onMessageSubmit,
+      onAssistantResponse,
+      onError,
+      chatView,
+      handler,
+    };
+  };
+
+  it("executes hosted tool calls locally and continues the turn after toolUse", async () => {
+    const { aiService, chatView, handler, messages } = createHostedToolLoopHarness();
 
     const firstAssistantMessage: ChatMessage = {
       role: "assistant",
@@ -216,6 +235,7 @@ describe("InputHandler hosted tool loop", () => {
         message: firstAssistantMessage,
         messageEl: document.createElement("div"),
         completed: true,
+        completionState: "completed",
         stopReason: "toolUse",
       })
       .mockImplementationOnce(async () => {
@@ -225,6 +245,7 @@ describe("InputHandler hosted tool loop", () => {
           message: finalAssistantMessage,
           messageEl: document.createElement("div"),
           completed: true,
+          completionState: "completed",
         };
       });
 
@@ -260,6 +281,126 @@ describe("InputHandler hosted tool loop", () => {
     );
     expect(messageHandling.addMessage).toHaveBeenCalled();
     expect(chatView.refreshCreditsBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a reasoning-only continuation after hosted tool execution and finishes the turn", async () => {
+    const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
+
+    const firstAssistantMessage: ChatMessage = {
+      role: "assistant",
+      content: "",
+      message_id: "assistant-1",
+      tool_calls: [
+        {
+          id: "call_1",
+          messageId: "assistant-1",
+          request: {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "mcp-filesystem_write",
+              arguments: "{\"path\":\"alpha.md\",\"content\":\"Hello\"}",
+            },
+          },
+          state: "executing",
+          timestamp: 1,
+          executionStartedAt: 1,
+        },
+      ],
+      messageParts: [],
+    } as any;
+
+    const finalAssistantMessage: ChatMessage = {
+      role: "assistant",
+      content: "Saved the file and verified it.",
+      message_id: "assistant-2",
+    } as any;
+
+    const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn");
+    streamAssistantTurn
+      .mockResolvedValueOnce({
+        messageId: "assistant-1",
+        message: firstAssistantMessage,
+        messageEl: document.createElement("div"),
+        completed: true,
+        completionState: "completed",
+        stopReason: "toolUse",
+      })
+      .mockResolvedValueOnce({
+        messageId: "assistant-empty",
+        message: {
+          role: "assistant",
+          content: "",
+          reasoning: "I already know the answer but failed to emit final content.",
+          message_id: "assistant-empty",
+        } as any,
+        messageEl: document.createElement("div"),
+        completed: false,
+        completionState: "empty",
+      })
+      .mockImplementationOnce(async () => {
+        await (handler as any).onAssistantResponse(finalAssistantMessage);
+        return {
+          messageId: "assistant-2",
+          message: finalAssistantMessage,
+          messageEl: document.createElement("div"),
+          completed: true,
+          completionState: "completed",
+        };
+      });
+
+    handler.setValue("Retry the continuation if needed.");
+    await handler.submitWithOverrides({ includeContextFiles: false });
+
+    expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
+    expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message_id: "assistant-1",
+          tool_calls: [
+            expect.objectContaining({
+              id: "call_1",
+              state: "completed",
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          message_id: "assistant-2",
+          content: "Saved the file and verified it.",
+        }),
+      ])
+    );
+  });
+
+  it("surfaces an unrecoverable empty hosted turn instead of silently succeeding", async () => {
+    const { handler, onError } = createHostedToolLoopHarness();
+
+    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
+      messageId: "assistant-empty",
+      message: {
+        role: "assistant",
+        content: "",
+        message_id: "assistant-empty",
+      } as any,
+      messageEl: document.createElement("div"),
+      completed: false,
+      completionState: "empty",
+    });
+
+    handler.setValue("Tell me something.");
+
+    await expect(
+      handler.submitForAutomation({
+        includeContextFiles: false,
+        approvalMode: "auto-approve",
+        focusAfterSend: false,
+      })
+    ).rejects.toThrow("empty response");
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]?.message || "").toContain("empty response");
   });
 
   it("streams using the chat's selected model instead of forcing managed SystemSculpt", async () => {
@@ -338,6 +479,7 @@ describe("InputHandler hosted tool loop", () => {
       },
       messageEl: document.createElement("div"),
       completed: true,
+      completionState: "completed",
     });
 
     await (handler as any).streamAssistantTurn(new AbortController().signal, false);

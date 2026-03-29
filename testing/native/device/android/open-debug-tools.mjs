@@ -34,6 +34,8 @@ Options:
   --package-id <id>       Android package id. Default: md.obsidian
   --vault <name>          Vault name for obsidian://open. Inferred from config when possible.
   --sync                  Run android:sync before relaunching.
+  --skip-build            When used with --sync, skip npm run build and reuse the current artifact set.
+  --headless              Launch the emulator without a window and skip opening host apps.
   --skip-relaunch         Skip the adb relaunch step.
   --skip-open-apps        Skip opening Android Studio and Chrome inspect.
   --open-studio           Force-open Android Studio even when Android Studio is already running.
@@ -54,6 +56,8 @@ function parseArgs(argv) {
     packageId: DEFAULT_PACKAGE_ID,
     vaultName: null,
     sync: false,
+    build: true,
+    headless: false,
     relaunch: true,
     openApps: true,
     openStudio: false,
@@ -89,6 +93,15 @@ function parseArgs(argv) {
     }
     if (arg === "--sync") {
       options.sync = true;
+      continue;
+    }
+    if (arg === "--skip-build") {
+      options.build = false;
+      continue;
+    }
+    if (arg === "--headless") {
+      options.headless = true;
+      options.openApps = false;
       continue;
     }
     if (arg === "--skip-relaunch") {
@@ -159,7 +172,11 @@ async function main() {
   if (!device && options.avdName) {
     const emulatorPath = resolveEmulatorPath();
     console.log(`[android-debug] Launching AVD ${options.avdName}`);
-    spawnDetached(emulatorPath, ["-avd", options.avdName]);
+    const emulatorArgs = ["-avd", options.avdName];
+    if (options.headless) {
+      emulatorArgs.push("-no-window", "-no-boot-anim", "-gpu", "swiftshader_indirect", "-netfast");
+    }
+    spawnDetached(emulatorPath, emulatorArgs);
     await waitForDeviceBoot({
       adbPath,
       timeoutMs: options.bootTimeoutMs,
@@ -177,7 +194,14 @@ async function main() {
     console.log(`[android-debug] Syncing plugin via ${options.configPath}`);
     const syncResult = spawnSync(
       "node",
-      ["testing/native/device/android/sync-plugin.mjs", "--config", options.configPath, "--serial", device.serial],
+      [
+        "testing/native/device/android/sync-plugin.mjs",
+        "--config",
+        options.configPath,
+        "--serial",
+        device.serial,
+        ...(options.build ? [] : ["--skip-build"]),
+      ],
       {
         cwd: process.cwd(),
         stdio: "inherit",

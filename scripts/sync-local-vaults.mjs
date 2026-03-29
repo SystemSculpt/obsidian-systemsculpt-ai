@@ -1,229 +1,115 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
-import path from 'node:path';
-import process from 'node:process';
+import process from "node:process";
+import {
+  countConfiguredTargets,
+  formatSyncTarget,
+  loadConfiguredTargets,
+  resolveSyncConfigPath,
+  syncConfiguredTargets,
+} from "./plugin-sync.mjs";
 
 const usage = () => {
   console.log(`Usage: node scripts/sync-local-vaults.mjs [--config <path>]
 
 Copies the built plugin artifacts (main.js, manifest.json, styles.css, etc.) into
-one or more local Obsidian plugin folders. All destinations are defined in the
-configuration JSON. If --config is not supplied, the script looks for the path in
-SYSTEMSCULPT_SYNC_CONFIG or defaults to ./systemsculpt-sync.config.json.
+configured Obsidian plugin folders. Targets can be local filesystem paths or
+Windows SSH mirror targets defined in the configuration JSON. If --config is not
+supplied, the script looks for the path in SYSTEMSCULPT_SYNC_CONFIG or defaults
+to ./systemsculpt-sync.config.json.
 
 Options:
   --config, -c <path>      Use a custom sync config JSON file.
   --allow-partial          Exit successfully when at least one target updates,
                            even if other targets fail. This is now the default.
   --strict                 Require every target to sync successfully.
+  --count-targets          Print the resolved target count and exit.
+  --list-targets           Print the resolved targets and exit.
   --help, -h               Show this help text.`);
 };
 
-const args = process.argv.slice(2);
-let configPathFromArgs = null;
-let allowPartial = true;
-for (let i = 0; i < args.length; i += 1) {
-  const arg = args[i];
-  if ((arg === '--config' || arg === '-c') && i + 1 < args.length) {
-    configPathFromArgs = args[i + 1];
-    i += 1;
-    continue;
-  }
-  if (arg === '--allow-partial') {
-    allowPartial = true;
-    continue;
-  }
-  if (arg === '--strict') {
-    allowPartial = false;
-    continue;
-  }
-  if (arg === '--help' || arg === '-h') {
-    usage();
-    process.exit(0);
-  }
-}
+function parseArgs(argv) {
+  const options = {
+    configPath: null,
+    allowPartial: true,
+    countTargets: false,
+    listTargets: false,
+  };
 
-const defaultConfigPath = path.join(process.cwd(), 'systemsculpt-sync.config.json');
-const configPath = configPathFromArgs
-  || process.env.SYSTEMSCULPT_SYNC_CONFIG
-  || defaultConfigPath;
-
-if (!fs.existsSync(configPath)) {
-  console.error(`[sync] Config file not found at ${configPath}. Create one or pass --config.`);
-  process.exit(1);
-}
-
-const configRaw = fs.readFileSync(configPath, 'utf8');
-let config;
-try {
-  config = JSON.parse(configRaw);
-} catch (error) {
-  console.error('[sync] Failed to parse config JSON:', error.message || error);
-  process.exit(1);
-}
-
-const requiredFiles = [
-  'manifest.json',
-  'main.js',
-  'styles.css',
-];
-const legacyReleaseExtras = [
-  'README.md',
-  'LICENSE',
-  'versions.json',
-  'studio-terminal-sidecar.cjs',
-  'studio-terminal-server.cjs',
-  'systemsculpt-pi-provider-extension.mjs',
-  'node_modules',
-  '.systemsculpt-runtime-sync.json',
-];
-const resolvePath = (maybeRelative) => (
-  path.isAbsolute(maybeRelative)
-    ? maybeRelative
-    : path.resolve(process.cwd(), maybeRelative)
-);
-
-const ensureDir = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
-
-const clearDestinationPath = (targetPath) => {
-  fs.rmSync(targetPath, {
-    recursive: true,
-    force: true,
-    maxRetries: 8,
-    retryDelay: 150,
-  });
-};
-
-const copyFile = (file, destDir) => {
-  const sourcePath = path.join(process.cwd(), file);
-  if (!fs.existsSync(sourcePath)) {
-    if (requiredFiles.includes(file)) {
-      throw new Error(`Required file missing: ${sourcePath}`);
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if ((arg === "--config" || arg === "-c") && index + 1 < argv.length) {
+      options.configPath = argv[index + 1];
+      index += 1;
+      continue;
     }
-    return false;
+    if (arg === "--allow-partial") {
+      options.allowPartial = true;
+      continue;
+    }
+    if (arg === "--strict") {
+      options.allowPartial = false;
+      continue;
+    }
+    if (arg === "--count-targets") {
+      options.countTargets = true;
+      continue;
+    }
+    if (arg === "--list-targets") {
+      options.listTargets = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
   }
-  ensureDir(destDir);
-  const destPath = path.join(destDir, path.basename(file));
-  fs.copyFileSync(sourcePath, destPath);
-  return true;
-};
 
-const copyDirectory = (src, dest) => {
-  if (!fs.existsSync(src)) {
-    console.warn(`[sync] Source directory missing, skipping: ${src}`);
+  return options;
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    usage();
     return;
   }
-  const stats = fs.statSync(src);
-  if (!stats.isDirectory()) {
-    throw new Error(`Expected directory, got file: ${src}`);
+
+  const configPath = resolveSyncConfigPath(options.configPath);
+
+  if (options.countTargets) {
+    process.stdout.write(String(countConfiguredTargets({ configPath })));
+    return;
   }
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
+
+  if (options.listTargets) {
+    const loaded = loadConfiguredTargets({ configPath });
+    for (const target of loaded.targets) {
+      console.log(formatSyncTarget(target));
+    }
+    return;
   }
-  const entries = fs.readdirSync(src);
-  entries.forEach(entry => {
-    if (entry === '.obsidian') {
-      return;
-    }
-    const srcEntry = path.join(src, entry);
-    const destEntry = path.join(dest, entry);
-    const entryStats = fs.statSync(srcEntry);
-    if (entryStats.isDirectory()) {
-      copyDirectory(srcEntry, destEntry);
-    } else {
-      fs.copyFileSync(srcEntry, destEntry);
-    }
+
+  const result = syncConfiguredTargets({
+    configPath,
+    allowPartial: options.allowPartial,
   });
-};
 
-const syncTarget = (target) => {
-  if (!target || typeof target.path !== 'string') {
-    return {
-      ok: false,
-      path: '',
-      error: new Error('Invalid target entry (missing path).'),
-    };
+  if (result.failed.length === 0) {
+    console.log("[sync] Completed successfully.");
+    return;
   }
-  const targetPath = resolvePath(target.path);
-  try {
-    ensureDir(targetPath);
-    console.log(`[sync] Updating ${targetPath}`);
-    requiredFiles.forEach(file => {
-      copyFile(file, targetPath);
-    });
 
-    legacyReleaseExtras.forEach(relativePath => {
-      const extraPath = path.join(targetPath, relativePath);
-      if (fs.existsSync(extraPath)) {
-        console.log(`[sync]  └─ removing legacy extra ${relativePath}`);
-        clearDestinationPath(extraPath);
-      }
-    });
-
-    if (Array.isArray(target.extraCopies)) {
-      target.extraCopies.forEach(extra => {
-        if (!extra?.source || !extra?.destination) {
-          return;
-        }
-        const sourcePath = resolvePath(extra.source);
-        const destinationPath = path.join(targetPath, extra.destination);
-        console.log(`[sync]  └─ copying ${sourcePath} -> ${destinationPath}`);
-        if (fs.statSync(sourcePath).isDirectory()) {
-          copyDirectory(sourcePath, destinationPath);
-        } else {
-          ensureDir(path.dirname(destinationPath));
-          fs.copyFileSync(sourcePath, destinationPath);
-        }
-      });
-    }
-
-    return {
-      ok: true,
-      path: targetPath,
-    };
-  } catch (error) {
-    console.error(`[sync] Failed target ${targetPath}:`, error.message || error);
-    return {
-      ok: false,
-      path: targetPath,
-      error,
-    };
+  const failedTargets = result.failed.map((entry) => formatSyncTarget(entry.target)).join(", ");
+  if (result.ok) {
+    console.warn(`[sync] Completed with warnings. Failed targets: ${failedTargets}`);
+    return;
   }
-};
 
-const pluginTargets = Array.isArray(config.pluginTargets) ? config.pluginTargets : [];
-const mirrorTargets = Array.isArray(config.mirrorTargets) ? config.mirrorTargets : [];
-
-if (pluginTargets.length === 0 && mirrorTargets.length === 0) {
-  console.error('[sync] Config must define at least one pluginTargets or mirrorTargets entry.');
-  process.exit(1);
+  throw new Error(`[sync] Failed targets: ${failedTargets}`);
 }
 
-try {
-  const results = pluginTargets.concat(mirrorTargets).map(target => syncTarget(target));
-  const succeeded = results.filter(result => result.ok);
-  const failed = results.filter(result => !result.ok);
-
-  if (failed.length === 0) {
-    console.log('[sync] Completed successfully.');
-    process.exit(0);
-  }
-
-  const failureSummary = failed
-    .map(result => result.path || '<invalid target>')
-    .join(', ');
-  if (succeeded.length > 0 && allowPartial) {
-    console.warn(`[sync] Completed with warnings. Failed targets: ${failureSummary}`);
-    process.exit(0);
-  }
-
-  console.error(`[sync] Failed targets: ${failureSummary}`);
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error || "Unknown error"));
   process.exit(1);
-} catch (error) {
-  console.error('[sync] Failed:', error.message || error);
-  process.exit(1);
-}
+});

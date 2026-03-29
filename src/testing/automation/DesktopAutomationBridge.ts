@@ -79,6 +79,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function toDiagnosticErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || "Unknown error");
+}
+
+function summarizePiRegistryModel(model: unknown): Record<string, unknown> {
+  const candidate = isRecord(model) ? model : {};
+  return {
+    provider: String(candidate.provider || "").trim() || null,
+    id: String(candidate.id || "").trim() || null,
+    name: String(candidate.name || "").trim() || null,
+    api: String(candidate.api || "").trim() || null,
+    baseUrl: String(candidate.baseUrl || "").trim() || null,
+  };
+}
+
+function summarizePiRegistryProviderCounts(models: unknown[]): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const model of models) {
+    if (!isRecord(model)) {
+      continue;
+    }
+    const provider = String(model.provider || "").trim();
+    if (!provider) {
+      continue;
+    }
+    counts.set(provider, (counts.get(provider) || 0) + 1);
+  }
+  return Object.fromEntries(
+    Array.from(counts.entries()).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
 function normalizeVaultPath(value: unknown): string {
   const normalized = normalizePath(String(value || "").trim().replace(/\\/g, "/")).replace(/^\/+/, "");
   if (!normalized) {
@@ -384,6 +416,9 @@ export class DesktopAutomationBridge {
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const requestLabel = `${String(request.method || "GET").toUpperCase()} ${String(
+      request.url || "/",
+    )}`;
     try {
       this.assertAuthorized(request);
       const url = new URL(request.url || "/", `http://${this.host}`);
@@ -401,6 +436,86 @@ export class DesktopAutomationBridge {
         this.sendJson(response, 200, {
           ok: true,
           data: await this.getStatusSnapshot(),
+        });
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/v1/settings/snapshot") {
+        this.sendJson(response, 200, {
+          ok: true,
+          data: this.getSettingsSnapshot(),
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/v1/settings/open") {
+        const body = await this.readJsonBody(request);
+        const targetTab = String(body.targetTab || "account").trim() || "account";
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await this.openSettingsAndWait(targetTab),
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/v1/settings/providers/snapshot") {
+        const body = await this.readJsonBody(request);
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await this.getProvidersSettingsSnapshot({
+            ensureOpen: body.ensureOpen !== false,
+            waitForLoaded: body.waitForLoaded !== false,
+          }),
+        });
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/v1/diagnostics/pi-catalog") {
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await this.getPiCatalogDiagnostics(),
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/v1/settings/providers/api-key") {
+        const body = await this.readJsonBody(request);
+        const providerId = String(body.providerId || "").trim();
+        const apiKey = String(body.apiKey || "").trim();
+        if (!providerId) {
+          throw new BridgeHttpError(400, "providerId is required.");
+        }
+        if (!apiKey) {
+          throw new BridgeHttpError(400, "apiKey is required.");
+        }
+        const { setStudioPiProviderApiKey } = await import("../../studio/piAuth/StudioPiAuthStorage");
+        await setStudioPiProviderApiKey(providerId, apiKey, { plugin: this.plugin });
+        await Promise.all([
+          this.refreshModelCatalog(),
+          this.refreshVisibleSettingsTab("providers"),
+        ]);
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await this.getProvidersSettingsSnapshot({ ensureOpen: true, waitForLoaded: true }),
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/v1/settings/providers/clear-auth") {
+        const body = await this.readJsonBody(request);
+        const providerId = String(body.providerId || "").trim();
+        if (!providerId) {
+          throw new BridgeHttpError(400, "providerId is required.");
+        }
+        const { clearStudioPiProviderAuth } = await import("../../studio/piAuth/StudioPiAuthStorage");
+        await clearStudioPiProviderAuth(providerId, { plugin: this.plugin });
+        await Promise.all([
+          this.refreshModelCatalog(),
+          this.refreshVisibleSettingsTab("providers"),
+        ]);
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await this.getProvidersSettingsSnapshot({ ensureOpen: true, waitForLoaded: true }),
         });
         return;
       }
@@ -429,6 +544,9 @@ export class DesktopAutomationBridge {
       }
 
       if (method === "GET" && url.pathname === "/v1/chat/models") {
+        if (url.searchParams.get("refresh") === "1") {
+          await this.refreshModelCatalog();
+        }
         const view = await this.ensureChatView({ createIfMissing: true });
         this.sendJson(response, 200, {
           ok: true,
@@ -620,11 +738,19 @@ export class DesktopAutomationBridge {
       const message = error instanceof Error ? error.message : String(error || "Unknown error");
       this.plugin.getLogger().error("Desktop automation bridge request failed", error, {
         source: "DesktopAutomationBridge",
+        metadata: {
+          request: requestLabel,
+        },
       });
-      this.sendJson(response, statusCode, {
+      const payload: Record<string, unknown> = {
         ok: false,
         error: message,
-      });
+      };
+      if (statusCode >= 500 && error instanceof Error) {
+        payload.request = requestLabel;
+        payload.stack = String(error.stack || "").trim() || null;
+      }
+      this.sendJson(response, statusCode, payload);
     }
   }
 
@@ -737,11 +863,449 @@ export class DesktopAutomationBridge {
 
   private async getChatSnapshotIfAvailable(): Promise<Record<string, unknown> | null> {
     try {
-      const view = await this.ensureChatView({ createIfMissing: false });
-      return view?.getAutomationSnapshot?.() ?? null;
+      const leaf = await this.getAutomationLeaf(false);
+      const view = leaf?.view as ChatView | null;
+      if (
+        !view ||
+        typeof view.getViewType !== "function" ||
+        view.getViewType() !== CHAT_VIEW_TYPE ||
+        !view.inputHandler
+      ) {
+        return null;
+      }
+      return view.getAutomationSnapshot?.() ?? null;
     } catch {
       return null;
     }
+  }
+
+  private async refreshModelCatalog(): Promise<void> {
+    try {
+      await this.plugin.modelService?.refreshModels?.();
+    } catch {}
+  }
+
+  private async getPiCatalogDiagnostics(): Promise<Record<string, unknown>> {
+    const runtime = loadBridgeRuntime();
+    const [
+      { resolvePiAuthPath, resolvePiModelsPath },
+      { createPiAuthStorage },
+      { createPiModelRegistry },
+      { listStudioPiProviderAuthRecords },
+      { listLocalPiTextModels },
+      { listPiTextCatalogModels },
+    ] = await Promise.all([
+      import("../../services/pi/PiSdkStoragePaths"),
+      import("../../services/pi/PiSdkDesktopSupport"),
+      import("../../services/pi/PiSdkRuntime"),
+      import("../../studio/piAuth/StudioPiAuthInventory"),
+      import("../../services/pi/PiTextModels"),
+      import("../../services/pi-native/PiTextCatalog"),
+    ]);
+
+    const authPath = String(resolvePiAuthPath(this.plugin) || "").trim() || null;
+    const modelsPath = String(resolvePiModelsPath(this.plugin) || "").trim() || null;
+    const diagnostics: Record<string, unknown> = {
+      authPath,
+      modelsPath,
+      authFileExists: false,
+      modelsFileExists: false,
+      authProviders: [] as string[],
+      modelsConfigProviders: [] as string[],
+      providerAuthRecords: [] as Record<string, unknown>[],
+      registry: {
+        error: null,
+        allCount: 0,
+        availableCount: 0,
+        authProviders: [] as string[],
+        hasAuthByProvider: {} as Record<string, boolean>,
+        allProviders: {} as Record<string, number>,
+        availableProviders: {} as Record<string, number>,
+        allSamples: [] as Record<string, unknown>[],
+        availableSamples: [] as Record<string, unknown>[],
+      },
+      localPiModels: {
+        count: 0,
+        samples: [] as Record<string, unknown>[],
+      },
+      catalog: {
+        count: 0,
+        samples: [] as Record<string, unknown>[],
+      },
+    };
+
+    const readJsonFile = async (filePath: string | null): Promise<unknown | null> => {
+      if (!filePath) {
+        return null;
+      }
+      try {
+        const raw = await runtime.fs.readFile(filePath, "utf8");
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    };
+    const fileExists = async (filePath: string | null): Promise<boolean> => {
+      if (!filePath) {
+        return false;
+      }
+      try {
+        await runtime.fs.stat(filePath);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const authData = await readJsonFile(authPath);
+    diagnostics.authFileExists = await fileExists(authPath);
+    if (isRecord(authData)) {
+      diagnostics.authProviders = Object.keys(authData).sort((left, right) =>
+        left.localeCompare(right),
+      );
+    }
+
+    const modelsConfig = await readJsonFile(modelsPath);
+    diagnostics.modelsFileExists = await fileExists(modelsPath);
+    const configProviders =
+      isRecord(modelsConfig) && isRecord(modelsConfig.providers)
+        ? Object.keys(modelsConfig.providers)
+        : [];
+    diagnostics.modelsConfigProviders = configProviders.sort((left, right) =>
+      left.localeCompare(right),
+    );
+
+    try {
+      const authStorage = createPiAuthStorage({ plugin: this.plugin });
+      const modelRegistry = createPiModelRegistry({
+        plugin: this.plugin,
+        authStorage,
+      });
+      const allResult = modelRegistry.getAll?.();
+      const availableResult = modelRegistry.getAvailable?.();
+      const allModels = Array.isArray(allResult) ? allResult : [];
+      const availableModels = Array.isArray(availableResult) ? availableResult : [];
+      const providerHints = Array.from(
+        new Set(
+          [
+            ...Object.keys(isRecord(authData) ? authData : {}),
+            ...(typeof authStorage.list === "function" ? authStorage.list() : []),
+            ...allModels.map((model) =>
+              isRecord(model) ? String(model.provider || "").trim() : "",
+            ),
+            ...availableModels.map((model) =>
+              isRecord(model) ? String(model.provider || "").trim() : "",
+            ),
+          ].filter((provider) => String(provider || "").trim().length > 0),
+        ),
+      ).sort((left, right) => left.localeCompare(right));
+
+      diagnostics.registry = {
+        error: modelRegistry.getError?.() ?? null,
+        allCount: allModels.length,
+        availableCount: availableModels.length,
+        authProviders:
+          typeof authStorage.list === "function"
+            ? authStorage.list().slice().sort((left, right) => left.localeCompare(right))
+            : [],
+        hasAuthByProvider: Object.fromEntries(
+          providerHints.map((provider) => [provider, Boolean(authStorage.hasAuth?.(provider))]),
+        ),
+        allProviders: summarizePiRegistryProviderCounts(allModels),
+        availableProviders: summarizePiRegistryProviderCounts(availableModels),
+        allSamples: allModels.slice(0, 8).map((model) => summarizePiRegistryModel(model)),
+        availableSamples: availableModels
+          .slice(0, 8)
+          .map((model) => summarizePiRegistryModel(model)),
+      };
+    } catch (error) {
+      diagnostics.registry = {
+        error: toDiagnosticErrorMessage(error),
+        allCount: 0,
+        availableCount: 0,
+        authProviders: [],
+        hasAuthByProvider: {},
+        allProviders: {},
+        availableProviders: {},
+        allSamples: [],
+        availableSamples: [],
+      };
+    }
+
+    try {
+      const records = await listStudioPiProviderAuthRecords({ plugin: this.plugin });
+      diagnostics.providerAuthRecords = records.map((record) => ({
+        provider: String(record.provider || "").trim() || null,
+        source: record.source,
+        hasAnyAuth: Boolean(record.hasAnyAuth),
+        hasStoredCredential: Boolean(record.hasStoredCredential),
+        credentialType: record.credentialType,
+      }));
+    } catch (error) {
+      diagnostics.providerAuthRecords = [
+        {
+          error: toDiagnosticErrorMessage(error),
+        },
+      ];
+    }
+
+    try {
+      const localModels = await listLocalPiTextModels(this.plugin);
+      diagnostics.localPiModels = {
+        count: localModels.length,
+        samples: localModels.slice(0, 8).map((model) => ({
+          providerId: model.providerId,
+          modelId: model.modelId,
+          label: model.label,
+        })),
+      };
+    } catch (error) {
+      diagnostics.localPiModels = {
+        count: 0,
+        error: toDiagnosticErrorMessage(error),
+        samples: [],
+      };
+    }
+
+    try {
+      const catalogModels = await listPiTextCatalogModels(this.plugin);
+      diagnostics.catalog = {
+        count: catalogModels.length,
+        samples: catalogModels.slice(0, 8).map((model) => ({
+          id: String(model.id || "").trim() || null,
+          provider: String(model.provider || "").trim() || null,
+          sourceMode: String(model.sourceMode || "").trim() || null,
+          piExecutionModelId: String(model.piExecutionModelId || "").trim() || null,
+        })),
+      };
+    } catch (error) {
+      diagnostics.catalog = {
+        count: 0,
+        error: toDiagnosticErrorMessage(error),
+        samples: [],
+      };
+    }
+
+    return diagnostics;
+  }
+
+  private getSettingsSnapshot(): Record<string, unknown> {
+    const settingsApi = (this.plugin.app as any)?.setting;
+    const settingsModalOpen = typeof document !== "undefined" && !!document.querySelector(".modal.mod-settings");
+    const activeSettingsTabId = String(settingsApi?.activeTab?.id || "").trim() || null;
+    const activePluginTabId =
+      String((this.plugin.settingsTab as any)?.activeTabId || "").trim() || null;
+    const visiblePluginTabs =
+      typeof document === "undefined"
+        ? []
+        : Array.from(document.querySelectorAll(".ss-tab-button[data-tab]"))
+            .map((element) => String((element as HTMLElement).dataset.tab || "").trim())
+            .filter(Boolean);
+
+    return {
+      settingsModalOpen,
+      pluginSettingsOpen: activeSettingsTabId === this.plugin.manifest.id,
+      activeSettingsTabId,
+      activePluginTabId,
+      visiblePluginTabs,
+    };
+  }
+
+  private async waitForValue<T>(
+    factory: () => T | Promise<T>,
+    predicate: (value: T) => boolean,
+    options: { timeoutMs?: number; intervalMs?: number; label: string },
+  ): Promise<T> {
+    const deadline = Date.now() + Math.max(100, Number(options.timeoutMs) || 5000);
+    const intervalMs = Math.max(25, Number(options.intervalMs) || 75);
+    let lastValue: T | null = null;
+
+    while (Date.now() < deadline) {
+      lastValue = await factory();
+      if (predicate(lastValue)) {
+        return lastValue;
+      }
+      await delay(intervalMs);
+    }
+
+    throw new Error(`Timed out waiting for ${options.label}.`);
+  }
+
+  private async openSettingsAndWait(targetTab: string): Promise<Record<string, unknown>> {
+    const normalizedTargetTab = String(targetTab || "account").trim() || "account";
+    this.plugin.openSettingsTab(normalizedTargetTab);
+
+    await this.waitForValue(
+      async () => this.getSettingsSnapshot(),
+      (snapshot) =>
+        Boolean(
+          snapshot.settingsModalOpen &&
+            snapshot.pluginSettingsOpen &&
+            snapshot.activePluginTabId === normalizedTargetTab,
+        ),
+      {
+        label: `settings tab ${normalizedTargetTab}`,
+      },
+    );
+
+    return this.getSettingsSnapshot();
+  }
+
+  private getProviderSettingsPanel(): HTMLElement | null {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return document.querySelector(
+      '.systemsculpt-tab-content[data-tab="providers"].is-active',
+    ) as HTMLElement | null;
+  }
+
+  private async waitForProvidersPanelLoaded(): Promise<void> {
+    await this.waitForValue(
+      async () => this.getProviderSettingsPanel(),
+      (panel) => {
+        if (!panel) {
+          return false;
+        }
+        if (panel.querySelector(".ss-providers-loading")) {
+          return false;
+        }
+        return Boolean(
+          panel.querySelector(".ss-providers-list, .ss-providers-error, .ss-provider-row"),
+        );
+      },
+      {
+        label: "providers settings panel",
+        timeoutMs: 12_000,
+      },
+    );
+  }
+
+  private async refreshVisibleSettingsTab(targetTab: string): Promise<void> {
+    const snapshot = this.getSettingsSnapshot();
+    if (!snapshot.settingsModalOpen || !snapshot.pluginSettingsOpen) {
+      return;
+    }
+
+    await this.plugin.settingsTab.display();
+    await this.openSettingsAndWait(targetTab);
+  }
+
+  private async getProvidersSettingsSnapshot(options?: {
+    ensureOpen?: boolean;
+    waitForLoaded?: boolean;
+  }): Promise<Record<string, unknown>> {
+    if (options?.ensureOpen !== false) {
+      await this.openSettingsAndWait("providers");
+    }
+    if (options?.waitForLoaded !== false) {
+      await this.waitForProvidersPanelLoaded();
+    }
+
+    const panel = this.getProviderSettingsPanel();
+    const [
+      {
+        loadProviderStatusInventoryWithTimeout,
+        getProviderDisplayState,
+        getProviderLabel,
+      },
+      { getApiKeyEnvVarForProvider, isStudioPiAuthMethodEnabled, isStudioPiLocalProvider },
+    ] = await Promise.all([
+      import("../../settings/providerStatus"),
+      import("../../studio/piAuth/StudioPiProviderRegistry"),
+    ]);
+    let inventoryError: string | null = null;
+    let rows: Record<string, unknown>[] = [];
+    let localProviderIds: string[] = [];
+
+    try {
+      const inventory = await loadProviderStatusInventoryWithTimeout(this.plugin, {
+        label: "provider settings",
+      });
+      localProviderIds = Array.from(inventory.localProviderIds.values()).sort();
+      rows = inventory.records.map((record) => {
+        const displayState = getProviderDisplayState(record, inventory.localProviderIds);
+        const providerId = String(record.provider || "").trim();
+        return {
+          providerId,
+          label: getProviderLabel(providerId, inventory.oauthProvidersById),
+          source: record.source,
+          supportsOAuth: Boolean(record.supportsOAuth),
+          hasAnyAuth: Boolean(record.hasAnyAuth),
+          hasStoredCredential: Boolean(record.hasStoredCredential),
+          credentialType: record.credentialType,
+          isLocalProvider: isStudioPiLocalProvider(providerId),
+          apiKeyEnvVar: getApiKeyEnvVarForProvider(providerId) || null,
+          oauthEnabled: isStudioPiAuthMethodEnabled(
+            providerId,
+            "oauth",
+            inventory.oauthProvidersById,
+          ),
+          apiKeyEnabled: isStudioPiAuthMethodEnabled(
+            providerId,
+            "api_key",
+            inventory.oauthProvidersById,
+          ),
+          display: displayState,
+        };
+      });
+    } catch (error) {
+      inventoryError =
+        error instanceof Error ? error.message : String(error || "Failed to load provider status.");
+    }
+
+    const uiRows =
+      panel instanceof HTMLElement
+        ? Array.from(panel.querySelectorAll(".ss-provider-row")).map((row) => {
+            const element = row as HTMLElement;
+            const tone =
+              element.classList.contains("ss-provider-row--connected")
+                ? "connected"
+                : element.classList.contains("ss-provider-row--blocked")
+                  ? "blocked"
+                  : "disconnected";
+            return {
+              label:
+                String(
+                  element.querySelector<HTMLElement>(".ss-provider-row__name")?.textContent || "",
+                ).trim() || null,
+              summary:
+                String(
+                  element.querySelector<HTMLElement>(".ss-provider-row__auth-summary")?.textContent || "",
+                ).trim() || null,
+              warning:
+                String(
+                  element.querySelector<HTMLElement>(".ss-provider-row__warning")?.textContent || "",
+                ).trim() || null,
+              tone,
+              actions: Array.from(
+                element.querySelectorAll<HTMLButtonElement>(".ss-provider-row__actions button"),
+              ).map((button) => String(button.textContent || "").trim()),
+            };
+          })
+        : [];
+
+    return {
+      settings: this.getSettingsSnapshot(),
+      ui: {
+        panelVisible: panel instanceof HTMLElement,
+        loading:
+          panel instanceof HTMLElement && !!panel.querySelector(".ss-providers-loading"),
+        error:
+          panel instanceof HTMLElement
+            ? String(panel.querySelector<HTMLElement>(".ss-providers-error")?.textContent || "").trim() ||
+              null
+            : null,
+        rowCount: uiRows.length,
+        rows: uiRows,
+      },
+      providers: {
+        error: inventoryError,
+        rowCount: rows.length,
+        localProviderIds,
+        rows,
+      },
+    };
   }
 
   private async claimSingleton(): Promise<void> {

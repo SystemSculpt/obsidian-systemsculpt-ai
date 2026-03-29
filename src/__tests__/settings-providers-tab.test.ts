@@ -4,29 +4,17 @@ import { App } from "obsidian";
 import { displayProvidersTabContent } from "../settings/ProvidersTabContent";
 import { getStudioPiAuthMethodRestriction } from "../studio/piAuth/StudioPiProviderRegistry";
 
-var listStudioPiProviderAuthRecordsMock: jest.Mock;
-var listStudioPiOAuthProvidersMock: jest.Mock;
-var clearStudioPiProviderAuthMock: jest.Mock;
-var setStudioPiProviderApiKeyMock: jest.Mock;
-var collectSharedPiProviderHintsMock: jest.Mock;
-var listLocalPiProviderIdsMock: jest.Mock;
-
 jest.mock("../studio/piAuth/StudioPiAuthStorage", () => {
-  listStudioPiProviderAuthRecordsMock = jest.fn();
-  listStudioPiOAuthProvidersMock = jest.fn();
-  clearStudioPiProviderAuthMock = jest.fn();
-  setStudioPiProviderApiKeyMock = jest.fn();
-
   return {
-    listStudioPiProviderAuthRecords: (...args: unknown[]) =>
-      listStudioPiProviderAuthRecordsMock(...args),
-    readStudioPiProviderAuthState: jest.fn(),
-    setStudioPiProviderApiKey: (...args: unknown[]) =>
-      setStudioPiProviderApiKeyMock(...args),
-    clearStudioPiProviderAuth: (...args: unknown[]) =>
-      clearStudioPiProviderAuthMock(...args),
-    listStudioPiOAuthProviders: (...args: unknown[]) =>
-      listStudioPiOAuthProvidersMock(...args),
+    setStudioPiProviderApiKey: jest.fn(),
+    clearStudioPiProviderAuth: jest.fn(),
+  };
+});
+
+jest.mock("../studio/piAuth/StudioPiAuthInventory", () => {
+  return {
+    listStudioPiProviderAuthRecords: jest.fn(),
+    listStudioPiOAuthProviders: jest.fn(),
   };
 });
 
@@ -43,14 +31,9 @@ jest.mock("../core/ui/modals/PopupModal", () => ({
 }));
 
 jest.mock("../services/pi/PiTextModels", () => {
-  collectSharedPiProviderHintsMock = jest.fn(() => []);
-  listLocalPiProviderIdsMock = jest.fn(async () => []);
-
   return {
-    collectSharedPiProviderHints: (...args: unknown[]) =>
-      collectSharedPiProviderHintsMock(...args),
-    listLocalPiProviderIds: (...args: unknown[]) =>
-      listLocalPiProviderIdsMock(...args),
+    collectSharedPiProviderHints: jest.fn(() => []),
+    listLocalPiProviderIds: jest.fn(async () => []),
   };
 });
 
@@ -61,6 +44,16 @@ jest.mock("../services/PlatformContext", () => ({
     })),
   },
 }));
+
+const {
+  listStudioPiProviderAuthRecords: listStudioPiProviderAuthRecordsMock,
+  listStudioPiOAuthProviders: listStudioPiOAuthProvidersMock,
+} = jest.requireMock("../studio/piAuth/StudioPiAuthInventory") as Record<string, jest.Mock>;
+
+const {
+  collectSharedPiProviderHints: collectSharedPiProviderHintsMock,
+  listLocalPiProviderIds: listLocalPiProviderIdsMock,
+} = jest.requireMock("../services/pi/PiTextModels") as Record<string, jest.Mock>;
 
 describe("Providers tab provider states", () => {
   beforeEach(() => {
@@ -224,7 +217,7 @@ describe("Providers tab provider states", () => {
     await Promise.resolve();
 
     const setupPanel = container.querySelector(".ss-provider-connect-panel");
-    expect(setupPanel?.textContent).toContain("~/.pi/agent/models.json");
+    expect(setupPanel?.textContent).toContain(".systemsculpt/pi-agent/models.json");
     expect(setupPanel?.textContent).toContain("http://localhost:11434/v1");
     expect(setupPanel?.textContent).toContain("openai-completions");
     expect(setupPanel?.textContent).toContain("\"ollama\"");
@@ -273,5 +266,34 @@ describe("Providers tab provider states", () => {
 
     const row = container.querySelector(".ss-provider-row");
     expect(row?.className).toContain("ss-provider-row--connected");
+  });
+
+  it("fails closed with an error instead of spinning forever when provider inventory stalls", async () => {
+    jest.useFakeTimers();
+    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+    listStudioPiProviderAuthRecordsMock.mockImplementation(
+      () => new Promise(() => {})
+    );
+
+    const plugin = {
+      app: new App(),
+      settings: {
+        customProviders: [],
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    try {
+      const renderPromise = displayProvidersTabContent(container, tab);
+      await jest.advanceTimersByTimeAsync(5_100);
+      await renderPromise;
+
+      const errorEl = container.querySelector<HTMLElement>(".ss-providers-error");
+      expect(errorEl?.textContent).toContain("Timed out while loading provider settings.");
+      expect(container.querySelector(".ss-providers-loading")).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

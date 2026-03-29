@@ -1,6 +1,6 @@
-import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type SystemSculptPlugin from "../../main";
 import { openPiAgentSession } from "./PiSdkRuntime";
+import { SessionManager } from "./PiSdkCore";
 
 export type PiSessionForkMessage = {
   entryId: string;

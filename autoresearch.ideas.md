@@ -1,0 +1,3 @@
+- If `providers_snapshot_ok` stays `0` after the auth-storage export-shape fix, inspect the built `main.js` module-init order for every value imported by `PiSdkRuntime` and `StudioPiAuthStorage`, not just `createBundledPiAuthStorage`.
+- If the Windows route fails only after relaunch, add a minimal import-safety or bundled-init regression test that reproduces the exact crash path without requiring the VM.
+- If the probe succeeds but the Providers panel still renders badly, split the next segment and benchmark the UI interaction path separately from the bridge snapshot route.

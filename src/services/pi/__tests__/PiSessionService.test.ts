@@ -1,4 +1,4 @@
-jest.mock("@mariozechner/pi-coding-agent", () => ({
+jest.mock("../PiSdkCore", () => ({
   SessionManager: {
     open: jest.fn(),
   },
@@ -8,7 +8,7 @@ jest.mock("../PiSdkRuntime", () => ({
   openPiAgentSession: jest.fn(),
 }));
 
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "../PiSdkCore";
 import { openPiAgentSession } from "../PiSdkRuntime";
 import {
   forkPiSession,

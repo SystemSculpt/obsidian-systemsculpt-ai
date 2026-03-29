@@ -15,6 +15,11 @@ import {
 type ChatViewModule = typeof import("../../views/chatview/ChatView");
 type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
 type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
+type AppWithViewRegistry = App & {
+  viewRegistry?: {
+    viewByType?: Record<string, unknown>;
+  };
+};
 
 type ChatViewLike = ItemView & {
   isFullyLoaded: boolean;
@@ -73,6 +78,7 @@ export class ViewManager {
   private plugin: SystemSculptPlugin;
   private app: App;
   private ribbonManager: RibbonManager;
+  private hasStarted: boolean = false;
   private isInitialized: boolean = false;
   private isInitializing: boolean = false;
   private initPromise: Promise<void> | null = null;
@@ -90,7 +96,9 @@ export class ViewManager {
   }
 
   initialize() {
-    // Register views immediately - this is critical
+    if (this.hasStarted) {
+      return;
+    }
     this.registerView();
 
     // Initialize ribbon manager in the background
@@ -102,6 +110,8 @@ export class ViewManager {
       this.initializeInBackground().catch(error => {
       });
     });
+
+    this.hasStarted = true;
   }
 
   private scheduleChatRestore(leaf: WorkspaceLeaf, priority: "high" | "low"): void {
@@ -237,6 +247,24 @@ export class ViewManager {
     }
   }
 
+  private isViewTypeRegistered(viewType: string): boolean {
+    const viewRegistry = (this.app as AppWithViewRegistry).viewRegistry;
+    const viewByType = viewRegistry?.viewByType;
+    if (!viewByType) {
+      return false;
+    }
+
+    return Object.prototype.hasOwnProperty.call(viewByType, viewType);
+  }
+
+  private registerViewType(viewType: string, viewCreator: (leaf: WorkspaceLeaf) => ItemView): void {
+    if (this.isViewTypeRegistered(viewType)) {
+      return;
+    }
+
+    this.plugin.registerView(viewType, viewCreator);
+  }
+
   private async initializeModels() {
     try {
       const models = await this.plugin.modelService.getModels();
@@ -329,7 +357,7 @@ export class ViewManager {
 
   registerView() {
     const platform = PlatformContext.get();
-    this.plugin.registerView(
+    this.registerViewType(
       CHAT_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
         const { ChatView } = loadChatViewModule();
@@ -338,7 +366,7 @@ export class ViewManager {
     );
     
     
-    this.plugin.registerView(
+    this.registerViewType(
       EMBEDDINGS_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
         const { EmbeddingsView } = loadEmbeddingsViewModule();
@@ -346,7 +374,7 @@ export class ViewManager {
       }
     );
 
-    this.plugin.registerView(
+    this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
         if (!platform.supportsDesktopOnlyFeatures()) {

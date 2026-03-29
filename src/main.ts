@@ -152,6 +152,7 @@ export default class SystemSculptPlugin extends Plugin {
   private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
+  private pendingSettingsFocusTab: string | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
 
@@ -163,6 +164,9 @@ export default class SystemSculptPlugin extends Plugin {
 
   private criticalInitializationPromise: Promise<void> | null = null;
   private deferredInitializationPromise: Promise<void> | null = null;
+  private managersInitialized = false;
+  private managersInitializationPromise: Promise<void> | null = null;
+  private hasRegisteredStudioExtensions = false;
   
   // Lazy service getters to avoid blocking startup
   public get aiService(): SystemSculptService {
@@ -1755,6 +1759,65 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private async initializeManagers() {
+    if (this.managersInitialized) {
+      return;
+    }
+
+    const inFlightInitialization = this.managersInitializationPromise;
+    if (inFlightInitialization) {
+      await inFlightInitialization;
+      return;
+    }
+
+    const initialization = Promise.resolve()
+      .then(() => this.performManagersInitialization())
+      .finally(() => {
+        if (this.managersInitializationPromise === initialization) {
+          this.managersInitializationPromise = null;
+        }
+      });
+    this.managersInitializationPromise = initialization;
+    await initialization;
+  }
+
+  private ensureViewManager(): ViewManager {
+    if (this.viewManager) {
+      this.viewManager.initialize();
+      return this.viewManager;
+    }
+
+    const { ViewManager } = loadViewManagerModule();
+    const viewManager = new ViewManager(this, this.app);
+    viewManager.initialize();
+    this.viewManager = viewManager;
+    return this.viewManager;
+  }
+
+  private registerStudioExtensionsIfNeeded(): void {
+    if (
+      !PlatformContext.get().supportsDesktopOnlyFeatures() ||
+      this.hasRegisteredStudioExtensions
+    ) {
+      return;
+    }
+
+    this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+    this.hasRegisteredStudioExtensions = true;
+  }
+
+  private ensureCommandManager(): CommandManager {
+    if (this.commandManager) {
+      return this.commandManager;
+    }
+
+    const { CommandManager } = loadCommandManagerModule();
+    const commandManager = new CommandManager(this, this.app);
+    commandManager.registerCommands();
+    this.commandManager = commandManager;
+    return this.commandManager;
+  }
+
+  private async performManagersInitialization() {
     const tracer = this.getInitializationTracer();
     const phase = tracer.startPhase("managers.initialize", {
       slowThresholdMs: 4000,
@@ -1763,17 +1826,15 @@ export default class SystemSculptPlugin extends Plugin {
     const logger = this.getLogger();
 
     try {
-      this.licenseManager = new LicenseManager(this, this.app);
-      this.resumeChatService = new ResumeChatService(this);
-      const { ViewManager } = loadViewManagerModule();
-      this.viewManager = new ViewManager(this, this.app);
-      this.viewManager.initialize();
-      if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
-        this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+      if (!this.licenseManager) {
+        this.licenseManager = new LicenseManager(this, this.app);
       }
-      const { CommandManager } = loadCommandManagerModule();
-      this.commandManager = new CommandManager(this, this.app);
-      this.commandManager.registerCommands();
+      if (!this.resumeChatService) {
+        this.resumeChatService = new ResumeChatService(this);
+      }
+      this.ensureViewManager();
+      this.registerStudioExtensionsIfNeeded();
+      this.ensureCommandManager();
 
       try {
         await this.syncDesktopAutomationBridge();
@@ -1791,6 +1852,8 @@ export default class SystemSculptPlugin extends Plugin {
           "CommandManager",
         ],
       };
+
+      this.managersInitialized = true;
 
       logger.info("Managers initialized", {
         source: "SystemSculptPlugin",
@@ -1946,6 +2009,10 @@ export default class SystemSculptPlugin extends Plugin {
         this.fileContextMenuService = null;
       }
 
+      this.managersInitialized = false;
+      this.managersInitializationPromise = null;
+      this.hasRegisteredStudioExtensions = false;
+
       // Embeddings manager already cleaned up above
 
       // Cleanup services in reverse order of initialization
@@ -2090,26 +2157,67 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   public openSettingsTab(targetTab: string = "account"): void {
+    const normalizedTargetTab = String(targetTab || "account").trim() || "account";
+    this.pendingSettingsFocusTab = normalizedTargetTab;
+
     try {
       // @ts-ignore – Obsidian typings omit the settings API
       const settingsApi: any = this.app.setting;
-      const isSettingsModalOpen = !!document.querySelector(".modal.mod-settings");
-      const activeSettingsTabId = String(settingsApi?.activeTab?.id ?? "");
+      if (!settingsApi?.open || !settingsApi?.openTabById) {
+        throw new Error("Settings API unavailable");
+      }
 
-      if (!isSettingsModalOpen) {
+      const focusPluginTab = (attempt: number = 0) => {
+        const isSettingsModalOpen = !!document.querySelector(".modal.mod-settings");
+        if (!isSettingsModalOpen) {
+          if (attempt < 20) {
+            window.setTimeout(() => focusPluginTab(attempt + 1), 50);
+          }
+          return;
+        }
+
+        const activeSettingsTabId = String(settingsApi?.activeTab?.id ?? "");
+        if (activeSettingsTabId !== this.manifest.id) {
+          try {
+            settingsApi.openTabById(this.manifest.id);
+          } catch {
+            if (attempt < 20) {
+              window.setTimeout(() => focusPluginTab(attempt + 1), 50);
+            }
+            return;
+          }
+        }
+
+        const focusDelay = String(settingsApi?.activeTab?.id ?? "") === this.manifest.id ? 0 : 50;
+        window.setTimeout(() => {
+          this.app.workspace.trigger("systemsculpt:settings-focus-tab", normalizedTargetTab);
+        }, focusDelay);
+      };
+
+      if (!document.querySelector(".modal.mod-settings")) {
         settingsApi.open();
       }
-      if (activeSettingsTabId !== this.manifest.id) {
-        settingsApi.openTabById(this.manifest.id);
-      }
-
-      const focusDelay = activeSettingsTabId === this.manifest.id ? 0 : 100;
-      window.setTimeout(() => {
-        this.app.workspace.trigger("systemsculpt:settings-focus-tab", targetTab);
-      }, focusDelay);
+      focusPluginTab();
     } catch {
       new Notice("Open Settings → SystemSculpt AI to manage your account and plugin preferences.", 6000);
     }
+  }
+
+  public peekPendingSettingsFocusTab(): string | null {
+    return this.pendingSettingsFocusTab;
+  }
+
+  public consumePendingSettingsFocusTab(): string | null {
+    const pendingTab = this.pendingSettingsFocusTab;
+    this.pendingSettingsFocusTab = null;
+    return pendingTab;
+  }
+
+  public clearPendingSettingsFocusTab(targetTab?: string | null): void {
+    if (targetTab && this.pendingSettingsFocusTab !== String(targetTab || "").trim()) {
+      return;
+    }
+    this.pendingSettingsFocusTab = null;
   }
 
   public async openCreditsBalanceModal(options?: {
@@ -2495,7 +2603,7 @@ export default class SystemSculptPlugin extends Plugin {
 
     const report =
       candidates.length > 0
-        ? await migrateStudioPiProviderApiKeys(candidates)
+        ? await migrateStudioPiProviderApiKeys(candidates, { plugin: this })
         : { migrated: [], skipped: [], errors: [] };
 
     const safeToRedactOrigins = new Set<string>();

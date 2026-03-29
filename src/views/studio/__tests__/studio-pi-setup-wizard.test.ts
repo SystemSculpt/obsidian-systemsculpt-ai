@@ -79,11 +79,11 @@ describe("local provider setup", () => {
     const ollama = getStudioPiLocalProviderSetup("ollama");
     const lmstudio = getStudioPiLocalProviderSetup("lmstudio");
 
-    expect(ollama?.filePath).toBe("~/.pi/agent/models.json");
+    expect(ollama?.filePath).toBe(".systemsculpt/pi-agent/models.json");
     expect(ollama?.endpoint).toBe("http://localhost:11434/v1");
     expect(ollama?.snippet).toContain("\"ollama\"");
 
-    expect(lmstudio?.filePath).toBe("~/.pi/agent/models.json");
+    expect(lmstudio?.filePath).toBe(".systemsculpt/pi-agent/models.json");
     expect(lmstudio?.endpoint).toBe("http://localhost:1234/v1");
     expect(lmstudio?.snippet).toContain("\"lmstudio\"");
   });

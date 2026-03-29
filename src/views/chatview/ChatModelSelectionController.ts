@@ -245,7 +245,10 @@ export class ChatModelSelectionController extends Component {
     }
 
     try {
-      const hasAuth = await hasPiTextProviderAuth(executionPlan.providerId);
+      const hasAuth = await hasPiTextProviderAuth(
+        executionPlan.providerId,
+        this.options.plugin,
+      );
       if (!hasAuth) {
         await this.invokeProviderSetupPrompt(
           buildPiTextProviderSetupMessage(executionPlan.providerId, executionPlan.actualModelId),

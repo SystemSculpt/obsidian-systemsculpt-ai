@@ -15,7 +15,7 @@ import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
 import { MessagePart } from "../../types";
 import { SlashCommandMenu, SlashCommand } from "./SlashCommandMenu";
-import { StreamingController } from "./controllers/StreamingController";
+import { StreamingController, type StreamTurnResult } from "./controllers/StreamingController";
 import { messageHandling } from "./messageHandling";
 import { AtMentionMenu } from "../../components/AtMentionMenu";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../constants/largeText";
@@ -263,7 +263,7 @@ export class InputHandler extends Component {
   private async streamAssistantTurn(
     signal: AbortSignal,
     includeContextFiles: boolean
-  ): Promise<{ messageId: string; message: ChatMessage; messageEl: HTMLElement; completed: boolean; stopReason?: string }> {
+  ): Promise<StreamTurnResult> {
     const { messageEl } = this.createAssistantMessageContainer();
     let messageId = messageEl.dataset.messageId;
     if (!messageId || messageId.trim().length === 0) {
@@ -457,24 +457,84 @@ export class InputHandler extends Component {
     return message;
   }
 
+  private failHostedToolTurn(message: string, statusCode: number, metadata?: Record<string, unknown>): never {
+    const error = new SystemSculptError(
+      message,
+      ERROR_CODES.STREAM_ERROR,
+      statusCode,
+      {
+        errorCode: TOOL_LOOP_ERROR_CODE,
+        ...metadata,
+      }
+    );
+
+    try {
+      this.onError(error);
+    } catch {}
+
+    throw error;
+  }
+
   private async runHostedAgentTurnLoop(signal: AbortSignal, includeContextFiles: boolean): Promise<void> {
     const maxToolContinuationRounds = 8;
+    const maxEmptyContinuationRetries = 3;
+    let completedToolContinuationRounds = 0;
+    let emptyContinuationRetries = 0;
+    let hasExecutedHostedToolRound = false;
 
-    for (let round = 0; round < maxToolContinuationRounds; round += 1) {
+    while (completedToolContinuationRounds < maxToolContinuationRounds) {
       const streamedTurn = await this.streamAssistantTurn(signal, includeContextFiles);
+      if (streamedTurn.completionState === "aborted") {
+        return;
+      }
+
+      if (streamedTurn.completionState === "empty") {
+        if (hasExecutedHostedToolRound && emptyContinuationRetries < maxEmptyContinuationRetries) {
+          emptyContinuationRetries += 1;
+          try {
+            errorLogger.debug("Retrying empty hosted continuation round", {
+              source: "InputHandler",
+              method: "runHostedAgentTurnLoop",
+              metadata: {
+                retryAttempt: emptyContinuationRetries,
+                maxEmptyContinuationRetries,
+                chatId: this.getChatId(),
+              },
+            });
+          } catch {}
+          continue;
+        }
+
+        this.failHostedToolTurn(
+          hasExecutedHostedToolRound
+            ? "The hosted agent returned an empty continuation after tool execution."
+            : "The hosted agent returned an empty response.",
+          502,
+          {
+            reason: hasExecutedHostedToolRound ? "empty-continuation" : "empty-response",
+            emptyContinuationRetries,
+          }
+        );
+      }
+
+      emptyContinuationRetries = 0;
       if (!this.shouldContinueHostedToolLoop(streamedTurn.message, streamedTurn.stopReason)) {
         return;
       }
 
       const executedMessage = await this.executeHostedToolCalls(streamedTurn.message, signal);
       await this.persistAssistantToolLoopUpdate(executedMessage);
+      hasExecutedHostedToolRound = true;
+      completedToolContinuationRounds += 1;
     }
 
-    throw new SystemSculptError(
+    this.failHostedToolTurn(
       "The hosted agent exceeded the maximum tool continuation depth.",
-      ERROR_CODES.STREAM_ERROR,
       500,
-      { errorCode: TOOL_LOOP_ERROR_CODE }
+      {
+        reason: "max-tool-continuation-depth",
+        maxToolContinuationRounds,
+      }
     );
   }
 

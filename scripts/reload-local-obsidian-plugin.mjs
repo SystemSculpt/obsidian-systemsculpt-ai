@@ -99,10 +99,10 @@ async function inferTargetFromLiveBridge(options) {
 }
 
 async function main() {
+  const parsedOptions = parseArgs(process.argv.slice(2));
   let resolvedOptions = null;
   try {
-    const options = parseArgs(process.argv.slice(2));
-    resolvedOptions = await inferTargetFromLiveBridge(options);
+    resolvedOptions = await inferTargetFromLiveBridge(parsedOptions);
     const bootstrap = await bootstrapDesktopAutomationClient({
       pluginId: resolvedOptions.pluginId,
       syncConfigPath: resolvedOptions.syncConfigPath,
@@ -124,7 +124,7 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "Unknown error");
     if (
-      resolvedOptions?.quietUnavailable &&
+      (resolvedOptions?.quietUnavailable || parsedOptions.quietUnavailable) &&
       /No live desktop automation bridge|No plugin targets|external settings sync|manual plugin reload once|did not report a vault selector/i.test(
         message
       )

@@ -2,16 +2,18 @@ import { App, Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { showPopup } from "../../core/ui/";
 import { getDisplayName, ensureCanonicalId } from "../../utils/modelUtils";
-import type { SystemSculptModel, SystemSculptTextModelSourceMode } from "../../types/llm";
+import type { SystemSculptModel } from "../../types/llm";
 import {
   getManagedSystemSculptModelId,
   hasManagedSystemSculptAccess,
   isManagedSystemSculptModelId,
 } from "../../services/systemsculpt/ManagedSystemSculptModel";
 import {
+  loadPiTextLocalProviderIds,
   loadPiTextProviderAuth,
   piTextProviderRequiresAuth,
 } from "../../services/pi-native/PiTextAuth";
+import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import {
   isStudioPiLocalProvider,
   resolveProviderLabel,
@@ -182,20 +184,14 @@ export function buildChatModelDescription(
 }
 
 function resolveChatModelPickerSection(
-  model: Pick<SystemSculptModel, "id" | "sourceMode" | "sourceProviderId" | "provider" | "piLocalAvailable" | "piRemoteAvailable">,
+  model: Pick<SystemSculptModel, "id" | "sourceProviderId" | "provider">,
 ): ChatModelPickerSection {
   if (isManagedSystemSculptModelId(model.id)) {
     return "systemsculpt";
   }
 
-  const providerId = String(model.sourceProviderId || model.provider || "").trim();
-  const sourceMode = String(model.sourceMode || "").trim() as SystemSculptTextModelSourceMode | "";
-  if (
-    sourceMode === "pi_local" ||
-    sourceMode === "local_pi" ||
-    isStudioPiLocalProvider(providerId) ||
-    (Boolean(model.piLocalAvailable) && !Boolean(model.piRemoteAvailable))
-  ) {
+  const providerId = normalizeStudioPiProviderId(model.sourceProviderId || model.provider);
+  if (providerId && isStudioPiLocalProvider(providerId)) {
     return "local";
   }
 
@@ -338,14 +334,25 @@ export async function loadChatModelPickerOptions(
     )
   );
 
-  const providerAuth = await loadPiTextProviderAuth(providerHints);
+  const desktopPlugin = plugin as SystemSculptPlugin;
+  const [providerAuth, localProviderIds] = await Promise.all([
+    loadPiTextProviderAuth(providerHints, desktopPlugin),
+    loadPiTextLocalProviderIds(desktopPlugin),
+  ]);
 
   return models
     .map((model) => {
       const providerHint = String(model.sourceProviderId || model.provider || "").trim();
+      const normalizedProviderId = normalizeStudioPiProviderId(providerHint);
+      const section = resolveChatModelPickerSection(model);
+      const authRecord = normalizedProviderId
+        ? providerAuth.get(normalizedProviderId)
+        : undefined;
       const providerAuthenticated = isManagedSystemSculptModelId(model.id)
-        ? hasManagedSystemSculptAccess(plugin as SystemSculptPlugin)
-        : !piTextProviderRequiresAuth(providerHint) || Boolean(providerAuth.get(providerHint)?.hasAnyAuth);
+        ? hasManagedSystemSculptAccess(desktopPlugin)
+        : section === "local"
+          ? Boolean(normalizedProviderId && localProviderIds.has(normalizedProviderId))
+          : !piTextProviderRequiresAuth(providerHint) || Boolean(authRecord?.hasAnyAuth);
       return buildChatModelPickerOption(model, providerAuthenticated);
     })
     .sort(compareChatModelPickerOptions);

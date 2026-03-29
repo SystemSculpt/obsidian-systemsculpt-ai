@@ -7,6 +7,7 @@ import {
   waitForStableDesktopAutomationClient,
 } from "./client.mjs";
 import { DEFAULT_PLUGIN_ID, loadDiscoveryEntries } from "./discovery.mjs";
+import { parseJsonText } from "../shared/json.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const DEFAULT_RELOAD_TIMEOUT_MS = 45000;
@@ -32,7 +33,7 @@ function generateVaultInstanceId() {
 async function readJsonIfExists(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw);
+    return parseJsonText(raw);
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       return null;
@@ -66,7 +67,7 @@ function createMinimalSettings() {
 export async function loadPluginTargetsFromSyncConfig(configPath = DEFAULT_SYNC_CONFIG_PATH) {
   const resolvedConfigPath = path.resolve(String(configPath || DEFAULT_SYNC_CONFIG_PATH));
   const raw = await fs.readFile(resolvedConfigPath, "utf8");
-  const parsed = JSON.parse(raw);
+  const parsed = parseJsonText(raw);
   const pluginTargets = Array.isArray(parsed?.pluginTargets) ? parsed.pluginTargets : [];
 
   return pluginTargets

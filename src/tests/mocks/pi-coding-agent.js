@@ -13,6 +13,10 @@ class MockAuthStorageInstance {
     return sharedAuthState.get(String(provider || "").trim()) || undefined;
   }
 
+  getOAuthProviders() {
+    return [];
+  }
+
   has(provider) {
     return sharedAuthState.has(String(provider || "").trim());
   }
