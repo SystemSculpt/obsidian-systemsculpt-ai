@@ -88,7 +88,6 @@ export class StreamingController extends Component {
 
     const toolCallIdState = createToolCallIdState();
     const pendingToolCalls = new Map<string, StreamToolCall>();
-    const emittedToolCalls = new Set<string>();
 
     let stopReason: string | undefined;
     let collectedAnnotations: Annotation[] = [];
@@ -158,7 +157,6 @@ export class StreamingController extends Component {
               assistantMessage,
               messageId,
               pendingToolCalls,
-              emittedToolCalls,
               toolCallIdState,
             });
             break;
@@ -359,7 +357,6 @@ export class StreamingController extends Component {
     assistantMessage: ChatMessage;
     messageId: string;
     pendingToolCalls: Map<string, StreamToolCall>;
-    emittedToolCalls: Set<string>;
     toolCallIdState: ToolCallIdState;
   }): void {
     const {
@@ -369,7 +366,6 @@ export class StreamingController extends Component {
       assistantMessage,
       messageId,
       pendingToolCalls,
-      emittedToolCalls,
       toolCallIdState,
     } = params;
 
@@ -393,24 +389,41 @@ export class StreamingController extends Component {
       return;
     }
 
-    if (emittedToolCalls.has(sanitizedId)) {
-      return;
-    }
-
     const aggregated = pendingToolCalls.get(sanitizedId);
     pendingToolCalls.delete(sanitizedId);
+    const existingToolCall = this.findToolCall(assembler.getParts(), sanitizedId);
 
     const effectiveCall: StreamToolCall = {
+      ...(existingToolCall?.request ?? {}),
       ...(aggregated ?? {}),
       ...event.call,
       id: sanitizedId,
       type: "function",
       function: {
+        ...(existingToolCall?.request.function ?? {}),
         ...(aggregated?.function ?? {}),
         ...(event.call.function ?? {}),
-        name: event.call.function.name || aggregated?.function.name || "",
-        arguments: event.call.function.arguments || aggregated?.function.arguments || "",
+        name:
+          event.call.function.name ||
+          aggregated?.function.name ||
+          existingToolCall?.request.function?.name ||
+          "",
+        arguments:
+          event.call.function.arguments ||
+          aggregated?.function.arguments ||
+          existingToolCall?.request.function?.arguments ||
+          "",
       },
+      state: event.call.state ?? aggregated?.state ?? existingToolCall?.state,
+      result: event.call.result ?? aggregated?.result ?? existingToolCall?.result,
+      executionStartedAt:
+        event.call.executionStartedAt ??
+        aggregated?.executionStartedAt ??
+        existingToolCall?.executionStartedAt,
+      executionCompletedAt:
+        event.call.executionCompletedAt ??
+        aggregated?.executionCompletedAt ??
+        existingToolCall?.executionCompletedAt,
     } as StreamToolCall;
 
     if (!effectiveCall.function.name) {
@@ -424,16 +437,25 @@ export class StreamingController extends Component {
       return;
     }
 
-    let normalizedArgs = effectiveCall.function.arguments || "";
+    const normalizedArgs = effectiveCall.function.arguments || "";
+    const state = effectiveCall.state ?? existingToolCall?.state ?? "executing";
+    const now = Date.now();
 
-    const { index: _index, ...withoutIndex } = effectiveCall as any;
+    const {
+      index: _index,
+      state: _state,
+      result: _result,
+      executionStartedAt: _executionStartedAt,
+      executionCompletedAt: _executionCompletedAt,
+      ...withoutExecution
+    } = effectiveCall as any;
 
     const request: ToolCallRequest = {
-      ...withoutIndex,
+      ...withoutExecution,
       id: sanitizedId,
       type: "function",
       function: {
-        ...(withoutIndex.function ?? {}),
+        ...(withoutExecution.function ?? {}),
         name: effectiveCall.function.name,
         arguments: normalizedArgs,
       },
@@ -443,14 +465,31 @@ export class StreamingController extends Component {
       id: sanitizedId,
       messageId,
       request,
-      state: "executing",
-      timestamp: Date.now(),
-      executionStartedAt: Date.now(),
+      state,
+      timestamp: existingToolCall?.timestamp ?? now,
+      executionStartedAt:
+        effectiveCall.executionStartedAt ??
+        existingToolCall?.executionStartedAt ??
+        now,
+      executionCompletedAt:
+        state === "completed" || state === "failed"
+          ? effectiveCall.executionCompletedAt ??
+            existingToolCall?.executionCompletedAt ??
+            now
+          : undefined,
+      result: effectiveCall.result ?? existingToolCall?.result,
     };
 
-    emittedToolCalls.add(sanitizedId);
     assembler.attachToolCall(toolCall);
     this.updateMessageRendering(assembler, messageEl, assistantMessage, true);
+  }
+
+  private findToolCall(parts: MessagePart[], toolCallId: string): ToolCall | undefined {
+    const part = parts.find(
+      (entry): entry is MessagePart & { type: "tool_call"; data: ToolCall } =>
+        entry.type === "tool_call" && (entry.data as ToolCall).id === toolCallId
+    );
+    return part?.data;
   }
 
   private collectToolCalls(parts: MessagePart[]): ToolCall[] | undefined {

@@ -39,6 +39,7 @@ single section string.
 
 ```powershell
 npm run test:native:windows:prepare
+npm run test:native:windows:prepare -- --launch
 npm run test:native:windows:setup
 npm run test:native:windows:clean-install
 npm run test:native:windows:baselines
@@ -50,7 +51,12 @@ npm run test:native:windows:stress
 npm run test:native:windows:soak
 ```
 
-`npm run test:native:windows:prepare` now stages a bundled bootstrap workspace plus the latest local production plugin artifacts over SSH, so the Windows VM does not need its own checkout of this repo just to prepare the vault.
+`npm run test:native:windows:prepare` now stages a bundled bootstrap workspace plus the latest local production plugin artifacts over SSH, so the Windows VM does not need its own checkout of this repo just to prepare the vault. The npm wrapper now forwards extra task args too, so `npm run test:native:windows:prepare -- --launch` does a full remote sync plus Obsidian relaunch from the Mac.
+
+The printed bootstrap JSON now redacts sensitive seeded plugin fields such as
+license data, user identity, and API or access tokens. Future release prep can
+capture or share that output without leaking local credentials from the target
+vault.
 
 ## Host requirements
 
@@ -78,6 +84,11 @@ letting the live plugin react through external settings sync. If the currently o
 on an older runtime that predates that watcher, do one manual plugin reload once; after that, the
 desktop automation bootstrap stays no-focus on Windows too.
 
+If the bridge is live but still reports an older plugin version than the repo's local `manifest.json`,
+the Windows clean-install and desktop-automation runners now treat that as a stale runtime and
+automatically run the canonical remote bootstrap relaunch before continuing. That removes the old
+"sync it, reload it, see if the version changed" trial-and-error loop during release prep.
+
 If discovery disappears while the vault stays open, touching the same `data.json` again should
 republish the bridge without foregrounding Obsidian.
 
@@ -101,3 +112,4 @@ The managed baseline now distinguishes plugin regressions from upstream throttli
 - If no managed hosted turn succeeds, the case still fails.
 - If the first hosted turn succeeds and a later managed recovery turn is rate-limited upstream, the case stays green and records that event under `transientFailures`.
 - Treat `transientFailures` as hosted-provider noise to investigate separately from bridge/bootstrap/model-selection bugs.
+- If Windows throws the Win32 console-title pipe error (`No process is on the other end of the pipe` while calling `SetConsoleWindowTitle`) during provider setup, the provider-connected runner now classifies that as a transient candidate retry instead of treating it as a deterministic plugin regression.

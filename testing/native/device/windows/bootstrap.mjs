@@ -200,6 +200,61 @@ function runWindowsCommand(script) {
   return result;
 }
 
+const REDACTED_VALUE = "[REDACTED]";
+const SENSITIVE_BOOTSTRAP_KEYS = new Set([
+  "licensekey",
+  "useremail",
+  "username",
+  "displayname",
+]);
+const SENSITIVE_BOOTSTRAP_SUFFIXES = [
+  "apikey",
+  "apitoken",
+  "accesstoken",
+  "refreshtoken",
+  "secret",
+  "token",
+];
+
+function shouldRedactBootstrapKey(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (SENSITIVE_BOOTSTRAP_KEYS.has(normalized)) {
+    return true;
+  }
+  return SENSITIVE_BOOTSTRAP_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function redactBootstrapValue(value) {
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value ? REDACTED_VALUE : value;
+  }
+  return REDACTED_VALUE;
+}
+
+export function sanitizeWindowsBootstrapReport(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeWindowsBootstrapReport(entry));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      shouldRedactBootstrapKey(key)
+        ? redactBootstrapValue(entry)
+        : sanitizeWindowsBootstrapReport(entry),
+    ])
+  );
+}
+
 async function launchPreparedVault(options) {
   if (!options.keepExistingObsidian) {
     runWindowsCommand(
@@ -276,7 +331,7 @@ async function main() {
   }
 
   const result = await runWindowsBootstrap(options);
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(sanitizeWindowsBootstrapReport(result), null, 2));
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

@@ -3,6 +3,7 @@ import type {
   AuthCredential,
   PiAuthStorageInstance,
 } from "../../services/pi/PiSdkAuthStorage";
+import { createBundledPiAuthStorage } from "../../services/pi/PiSdkAuthStorage";
 import { resolvePiAuthPath } from "../../services/pi/PiSdkStoragePaths";
 import {
   getApiKeyEnvVarForProvider,
@@ -58,22 +59,6 @@ function normalizeStoredAuthData(value: unknown): StoredAuthData {
     : {};
 }
 
-function loadPiAuthStorageFactory():
-  | ((authPath?: string) => PiAuthStorageInstance)
-  | null {
-  const runtimeRequire = typeof require === "function" ? require : (globalThis as any).require;
-  if (typeof runtimeRequire !== "function") {
-    return null;
-  }
-
-  try {
-    return (runtimeRequire("../../services/pi/PiSdkAuthStorage") as typeof import("../../services/pi/PiSdkAuthStorage"))
-      .createBundledPiAuthStorage;
-  } catch {
-    return null;
-  }
-}
-
 function resolveInventoryAuthStorage(
   context: StudioPiAuthInventoryContext = {},
 ): PiAuthStorageInstance | null {
@@ -90,8 +75,7 @@ function resolveInventoryAuthStorage(
     return null;
   }
 
-  const createPiAuthStorage = loadPiAuthStorageFactory();
-  return createPiAuthStorage ? createPiAuthStorage(authPath) : null;
+  return createBundledPiAuthStorage(authPath);
 }
 
 function loadStoredAuthData(

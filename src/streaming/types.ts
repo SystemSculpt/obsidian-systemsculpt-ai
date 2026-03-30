@@ -1,8 +1,16 @@
 import type { Annotation } from "../types";
-import type { ToolCallRequest } from "../types/toolCalls";
+import type {
+  ToolCallRequest,
+  ToolCallResult,
+  ToolCallState,
+} from "../types/toolCalls";
 
 export interface StreamToolCall extends ToolCallRequest {
   index?: number;
+  state?: ToolCallState;
+  result?: ToolCallResult;
+  executionStartedAt?: number;
+  executionCompletedAt?: number;
 }
 
 export type StreamEvent =

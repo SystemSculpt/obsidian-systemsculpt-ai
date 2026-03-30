@@ -119,6 +119,10 @@ export function isTransientModelExecutionError(error) {
       message.includes("timed out waiting for") &&
       (message.includes("provider") || message.includes("settings panel"))
     ) ||
+    (
+      message.includes("no process is on the other end of the pipe") &&
+      (message.includes("setconsolewindowtitle") || message.includes("console window title"))
+    ) ||
     [
       "http 429",
       "status 429",
@@ -163,6 +167,19 @@ function getLastAssistantMessage(snapshot) {
     }
   }
   return null;
+}
+
+function getAssistantToolCalls(message) {
+  if (!message || typeof message !== "object") {
+    return [];
+  }
+  if (Array.isArray(message.toolCalls)) {
+    return message.toolCalls;
+  }
+  if (Array.isArray(message.tool_calls)) {
+    return message.tool_calls;
+  }
+  return [];
 }
 
 function assertIncludes(actual, expected, label) {
@@ -745,7 +762,10 @@ export function buildBaselineSummary(results, statusSummary = null) {
   const managedTransientFailureCount = Array.isArray(managed.transientFailures)
     ? managed.transientFailures.length
     : 0;
-  const providerConnectedOk = Boolean(provider.providerTurn);
+  const providerTurnOk = Boolean(provider.providerTurn);
+  const providerToolTurnOk =
+    provider.providerToolTurn == null ? null : Boolean(provider.providerToolTurn);
+  const providerConnectedOk = providerTurnOk && providerToolTurnOk !== false;
   const providerRecoverySelectionOk =
     provider?.recoverySelection?.selectedModelId === MANAGED_SYSTEMSCULPT_MODEL_ID;
   const finalChatModelId =
@@ -769,6 +789,7 @@ export function buildBaselineSummary(results, statusSummary = null) {
       providerId: typeof provider?.provider?.providerId === "string" ? provider.provider.providerId : null,
       modelId:
         typeof provider?.providerModel?.modelId === "string" ? provider.providerModel.modelId : null,
+      toolTurnOk: providerToolTurnOk,
       recoverySelectionOk: providerRecoverySelectionOk,
     },
     finalChatModelId,
@@ -1119,6 +1140,159 @@ function buildProviderTurnTokenPrefix(providerId) {
   return `PROVIDER_CONNECTED_${suffix}`;
 }
 
+function buildProviderToolTurnTokenPrefix(providerId) {
+  const suffix =
+    normalizeProviderId(providerId).replace(/[^a-z0-9]+/g, "_").toUpperCase() || "PROVIDER";
+  return `PROVIDER_CONNECTED_TOOLS_${suffix}`;
+}
+
+function buildProviderToolTurnExpectedOutput() {
+  return [
+    "ALPHA=ALPHA_20260311-194643",
+    "BETA=BETA_20260311-194643",
+    "SHARED=GAMMA_20260311-194643",
+  ].join("\n");
+}
+
+function isRelevantProviderToolCall(call, fixtureDir, outputPath) {
+  const name = String(call?.name || call?.request?.function?.name || "")
+    .trim()
+    .toLowerCase();
+  const resultPath = String(call?.result?.data?.path || call?.result?.path || "").trim();
+
+  if (
+    name.includes("filesystem") ||
+    name === "read" ||
+    name === "write"
+  ) {
+    return true;
+  }
+
+  if (outputPath && resultPath === outputPath) {
+    return true;
+  }
+
+  if (fixtureDir && resultPath.startsWith(fixtureDir)) {
+    return true;
+  }
+
+  return false;
+}
+
+async function runProviderConnectedFilesystemToolTurn(client, model, providerId, fixtureDir) {
+  const token = `${buildProviderToolTurnTokenPrefix(providerId)}_${Date.now()}`;
+  const transientRetries = [];
+  const outputPath = `${fixtureDir}/desktop-automation-output-${Date.now()}.md`;
+  const expectedOutput = buildProviderToolTurnExpectedOutput();
+  const prompt = [
+    "Use filesystem tools for this task.",
+    `Read "${fixtureDir}/alpha.md" and "${fixtureDir}/beta.md".`,
+    `Write "${outputPath}" with exactly these lines:`,
+    expectedOutput,
+    "",
+    `Reply with this exact token and nothing else: ${token}`,
+  ].join("\n");
+
+  const snapshot = await retryTransientOperation(
+    async () => {
+      const preSendSnapshot = await ensureChatModelSelection(client, model.value, {
+        reset: true,
+        label: `${model.label} provider tool selection`,
+      });
+      try {
+        return await client.sendChat({
+          text: prompt,
+          includeContextFiles: false,
+          webSearchEnabled: false,
+          approvalMode: "interactive",
+        });
+      } catch (error) {
+        const failedSnapshot = await getChatSelectionSnapshot(client).catch(() => null);
+        throw new Error(
+          `${model.label} provider tool turn failed for "${model.value}". ` +
+            `Pre-send snapshot: ${JSON.stringify({
+              selectedModelId:
+                typeof preSendSnapshot?.selectedModelId === "string"
+                  ? preSendSnapshot.selectedModelId
+                  : null,
+              currentModelName:
+                typeof preSendSnapshot?.currentModelName === "string"
+                  ? preSendSnapshot.currentModelName
+                  : null,
+            })}. ` +
+            `Failure snapshot: ${JSON.stringify({
+              selectedModelId:
+                typeof failedSnapshot?.selectedModelId === "string"
+                  ? failedSnapshot.selectedModelId
+                  : null,
+              currentModelName:
+                typeof failedSnapshot?.currentModelName === "string"
+                  ? failedSnapshot.currentModelName
+                  : null,
+            })}. ` +
+            `Upstream error: ${errorMessage(error)}`
+        );
+      }
+    },
+    {
+      attempts: DEFAULT_TRANSIENT_SEND_ATTEMPTS,
+      pauseMs: DEFAULT_TRANSIENT_SEND_PAUSE_MS,
+      onTransientError: (error, attempt) => {
+        transientRetries.push({
+          attempt,
+          modelId: model.value,
+          label: model.label,
+          error: errorMessage(error),
+        });
+      },
+    }
+  );
+
+  const assistant = getLastAssistantMessage(snapshot);
+  const assistantText = toMessageText(assistant?.content).trim();
+  const toolCalls = getAssistantToolCalls(assistant);
+  const relevantToolCalls = toolCalls.filter((call) =>
+    isRelevantProviderToolCall(call, fixtureDir, outputPath)
+  );
+  const completedRelevantToolCallCount = relevantToolCalls.filter(
+    (call) => String(call?.state || "").trim().toLowerCase() === "completed"
+  ).length;
+
+  assertEqual(
+    snapshot.selectedModelId,
+    model.value,
+    `${model.label} selected model after provider tool turn`
+  );
+  assertIncludes(assistantText, token, `${model.label} provider tool reply`);
+  assertGreaterThan(
+    relevantToolCalls.length,
+    0,
+    `${model.label} provider tool relevant tool call count`
+  );
+  assertEqual(
+    completedRelevantToolCallCount,
+    relevantToolCalls.length,
+    `${model.label} provider tool completed tool call count`
+  );
+
+  const written = await client.readVaultText(outputPath);
+  const outputPreview = String(written?.content || "").trim();
+  assertEqual(outputPreview, expectedOutput, `${model.label} provider tool output`);
+
+  return {
+    token,
+    response: assistantText,
+    model: buildModelSummary(model),
+    transientRetries,
+    selectedModelId: snapshot.selectedModelId,
+    currentModelName: snapshot.currentModelName || null,
+    outputPath,
+    outputPreview,
+    relevantToolCallCount: relevantToolCalls.length,
+    completedRelevantToolCallCount,
+  };
+}
+
 function isDisconnectedProviderRow(row) {
   return !Boolean(row?.hasAnyAuth) && !Boolean(row?.hasStoredCredential) && !Boolean(row?.display?.ready);
 }
@@ -1322,6 +1496,15 @@ async function runProviderConnectedCandidateCase(client, managedOption, candidat
     connected.model,
     buildProviderTurnTokenPrefix(candidate.providerId)
   );
+  const providerToolTurn =
+    typeof options.fixtureDir === "string" && options.fixtureDir.trim()
+      ? await runProviderConnectedFilesystemToolTurn(
+          client,
+          connected.model,
+          candidate.providerId,
+          options.fixtureDir.trim()
+        )
+      : null;
 
   const postClear = await clearProviderAuthAndWait(client, candidate, options);
   let blockedProviderSend = null;
@@ -1388,6 +1571,7 @@ async function runProviderConnectedCandidateCase(client, managedOption, candidat
       connectionMode: connected.mode,
     },
     providerTurn,
+    providerToolTurn,
     blockedProviderSend,
     providerTurnAfterClear,
     recoverySelection: {
@@ -1601,6 +1785,7 @@ export async function runProviderConnectedBaselineCase(client, options = {}) {
   }
 
   const candidateFailures = [];
+  const candidateTransientRetries = [];
   for (const candidate of candidates) {
     try {
       const result = await retryTransientOperation(
@@ -1617,6 +1802,14 @@ export async function runProviderConnectedBaselineCase(client, options = {}) {
         {
           attempts: DEFAULT_TRANSIENT_SEND_ATTEMPTS,
           pauseMs: DEFAULT_TRANSIENT_SEND_PAUSE_MS,
+          onTransientError: (error, attempt) => {
+            candidateTransientRetries.push({
+              attempt,
+              providerId: candidate.providerId,
+              label: candidate.label,
+              error: errorMessage(error),
+            });
+          },
         }
       );
       return {
@@ -1624,6 +1817,7 @@ export async function runProviderConnectedBaselineCase(client, options = {}) {
         readyModelCount: inventory.ready.length,
         candidateCount: candidates.length,
         attemptedCandidateIds: [...candidateFailures.map((entry) => entry.providerId), candidate.providerId],
+        candidateTransientRetries,
         ...result,
       };
     } catch (error) {

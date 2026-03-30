@@ -1,6 +1,7 @@
 import type SystemSculptPlugin from "../../main";
-import type { StreamEvent } from "../../streaming/types";
+import type { StreamEvent, StreamToolCall } from "../../streaming/types";
 import type { ChatMessage } from "../../types";
+import type { ToolCallResult, ToolCallState } from "../../types/toolCalls";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import {
   installPiDesktopFetchShim,
@@ -28,6 +29,14 @@ type QueueItem =
   | { kind: "event"; event: StreamEvent }
   | { kind: "done" }
   | { kind: "error"; error: Error };
+
+type PiToolCallSnapshot = {
+  id: string;
+  index: number;
+  name: string;
+  arguments: string;
+  executionStartedAt?: number;
+};
 
 type PiImageContent = ImageContent;
 
@@ -194,6 +203,97 @@ function normalizePiThinkingLevel(rawValue: unknown): PiSdkThinkingLevel | undef
   return undefined;
 }
 
+function serializeToolArguments(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || "{}";
+  }
+
+  if (value == null) {
+    return "{}";
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "{}";
+  }
+}
+
+function buildPiToolCallEvent(
+  snapshot: PiToolCallSnapshot,
+  state: ToolCallState,
+  options?: {
+    result?: ToolCallResult;
+    executionCompletedAt?: number;
+  }
+): StreamEvent & { type: "tool-call" } {
+  const call: StreamToolCall = {
+    id: snapshot.id,
+    index: snapshot.index,
+    type: "function",
+    function: {
+      name: snapshot.name,
+      arguments: snapshot.arguments,
+    },
+    state,
+  };
+
+  if (snapshot.executionStartedAt != null) {
+    call.executionStartedAt = snapshot.executionStartedAt;
+  }
+  if (options?.result !== undefined) {
+    call.result = options.result;
+  }
+  if (options?.executionCompletedAt != null) {
+    call.executionCompletedAt = options.executionCompletedAt;
+  }
+
+  return {
+    type: "tool-call",
+    phase: "final",
+    call,
+  };
+}
+
+function normalizePiToolExecutionResult(result: unknown, isError: boolean): ToolCallResult {
+  if (!isError) {
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  const nestedError =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>).error
+      : null;
+  const directResult =
+    nestedError && typeof nestedError === "object" && !Array.isArray(nestedError)
+      ? (nestedError as Record<string, unknown>)
+      : result && typeof result === "object" && !Array.isArray(result)
+        ? (result as Record<string, unknown>)
+        : null;
+
+  const message =
+    typeof directResult?.message === "string" && directResult.message.trim()
+      ? directResult.message
+      : toTextContent(result).trim() || "Tool execution failed.";
+
+  return {
+    success: false,
+    error: {
+      code:
+        typeof directResult?.code === "string" && directResult.code.trim()
+          ? directResult.code
+          : "EXECUTION_FAILED",
+      message,
+      details:
+        directResult && "details" in directResult ? directResult.details : result,
+    },
+  };
+}
+
 export async function* streamPiLocalAgentTurn(
   options: PiLocalAgentRunOptions
 ): AsyncGenerator<StreamEvent, void, unknown> {
@@ -227,213 +327,264 @@ export async function* streamPiLocalAgentTurn(
 
     const activeSession = session;
     const queue: QueueItem[] = [];
-  let waitingResolver: ((item: QueueItem) => void) | null = null;
-  let streamedText = "";
-  let streamedReasoning = "";
-  let finished = false;
+    const toolCallsById = new Map<string, PiToolCallSnapshot>();
+    let waitingResolver: ((item: QueueItem) => void) | null = null;
+    let streamedText = "";
+    let streamedReasoning = "";
+    let finished = false;
 
-  const push = (item: QueueItem) => {
-    if (finished && item.kind === "event") {
-      return;
-    }
-    if (waitingResolver) {
-      const resolve = waitingResolver;
-      waitingResolver = null;
-      resolve(item);
-      return;
-    }
-    queue.push(item);
-  };
-
-  const emitRemainder = (kind: "content" | "reasoning", nextValue: string, currentValue: string): string => {
-    if (!nextValue) {
-      return currentValue;
-    }
-
-    if (!currentValue) {
-      push({ kind: "event", event: { type: kind, text: nextValue } });
-      return nextValue;
-    }
-
-    if (nextValue === currentValue) {
-      return currentValue;
-    }
-
-    if (nextValue.startsWith(currentValue)) {
-      const delta = nextValue.slice(currentValue.length);
-      if (delta) {
-        push({ kind: "event", event: { type: kind, text: delta } });
+    const push = (item: QueueItem) => {
+      if (finished && item.kind === "event") {
+        return;
       }
-      return nextValue;
-    }
+      if (waitingResolver) {
+        const resolve = waitingResolver;
+        waitingResolver = null;
+        resolve(item);
+        return;
+      }
+      queue.push(item);
+    };
 
-    return currentValue;
-  };
+    const emitRemainder = (
+      kind: "content" | "reasoning",
+      nextValue: string,
+      currentValue: string
+    ): string => {
+      if (!nextValue) {
+        return currentValue;
+      }
 
-  const unsubscribe = activeSession.subscribe((event) => {
-    const sessionEvent = event as Record<string, any>;
-    const type = String(sessionEvent.type || "").trim().toLowerCase();
+      if (!currentValue) {
+        push({ kind: "event", event: { type: kind, text: nextValue } });
+        return nextValue;
+      }
 
-    if (type === "message_update") {
-      const assistantEvent = sessionEvent.assistantMessageEvent as Record<string, unknown> | undefined;
-      const assistantType = String(assistantEvent?.type || "").trim().toLowerCase();
-      switch (assistantType) {
-        case "text_delta": {
-          const delta = String(assistantEvent?.delta || "");
-          if (delta) {
-            streamedText += delta;
-            push({ kind: "event", event: { type: "content", text: delta } });
-          }
-          break;
+      if (nextValue === currentValue) {
+        return currentValue;
+      }
+
+      if (nextValue.startsWith(currentValue)) {
+        const delta = nextValue.slice(currentValue.length);
+        if (delta) {
+          push({ kind: "event", event: { type: kind, text: delta } });
         }
-        case "thinking_delta": {
-          const delta = String(assistantEvent?.delta || "");
-          if (delta) {
-            streamedReasoning += delta;
-            push({ kind: "event", event: { type: "reasoning", text: delta } });
-          }
-          break;
-        }
-        case "toolcall_end": {
-          const toolCall = assistantEvent?.toolCall as Record<string, unknown> | undefined;
-          const id = String(toolCall?.id || "").trim();
-          const name = String(toolCall?.name || "").trim();
-          if (id && name) {
-            const args =
-              toolCall?.arguments && typeof toolCall.arguments === "object"
-                ? toolCall.arguments
-                : {};
-            let serializedArguments = "{}";
-            try {
-              serializedArguments = JSON.stringify(args);
-            } catch {
-              serializedArguments = "{}";
+        return nextValue;
+      }
+
+      return currentValue;
+    };
+
+    const unsubscribe = activeSession.subscribe((event) => {
+      const sessionEvent = event as Record<string, any>;
+      const type = String(sessionEvent.type || "").trim().toLowerCase();
+
+      if (type === "message_update") {
+        const assistantEvent = sessionEvent.assistantMessageEvent as
+          | Record<string, unknown>
+          | undefined;
+        const assistantType = String(assistantEvent?.type || "").trim().toLowerCase();
+        switch (assistantType) {
+          case "text_delta": {
+            const delta = String(assistantEvent?.delta || "");
+            if (delta) {
+              streamedText += delta;
+              push({ kind: "event", event: { type: "content", text: delta } });
             }
+            break;
+          }
+          case "thinking_delta": {
+            const delta = String(assistantEvent?.delta || "");
+            if (delta) {
+              streamedReasoning += delta;
+              push({ kind: "event", event: { type: "reasoning", text: delta } });
+            }
+            break;
+          }
+          case "toolcall_end": {
+            const toolCall = assistantEvent?.toolCall as Record<string, unknown> | undefined;
+            const id = String(toolCall?.id || "").trim();
+            const name = String(toolCall?.name || "").trim();
+            if (id && name) {
+              const existing = toolCallsById.get(id);
+              const serializedArguments = serializeToolArguments(toolCall?.arguments);
+              const snapshot: PiToolCallSnapshot = {
+                id,
+                index:
+                  typeof assistantEvent?.contentIndex === "number"
+                    ? assistantEvent.contentIndex
+                    : existing?.index ?? 0,
+                name,
+                arguments: serializedArguments,
+                executionStartedAt: existing?.executionStartedAt,
+              };
+              toolCallsById.set(id, snapshot);
 
-            push({
-              kind: "event",
-              event: {
-                type: "tool-call",
-                phase: "final",
-                call: {
-                  id,
-                  index: typeof assistantEvent?.contentIndex === "number" ? assistantEvent.contentIndex : 0,
-                  type: "function",
-                  function: {
-                    name,
-                    arguments: serializedArguments,
-                  },
-                },
-              },
-            });
+              push({
+                kind: "event",
+                event: buildPiToolCallEvent(snapshot, "executing"),
+              });
+            }
+            break;
           }
-          break;
-        }
-        case "error": {
-          if (!options.signal?.aborted) {
-            const errorMessage =
-              String((assistantEvent as any)?.error?.errorMessage || "") ||
-              "Local Pi agent error";
-            push({
-              kind: "error",
-              error: new Error(errorMessage),
-            });
+          case "error": {
+            if (!options.signal?.aborted) {
+              const errorMessage =
+                String((assistantEvent as any)?.error?.errorMessage || "") ||
+                "Local Pi agent error";
+              push({
+                kind: "error",
+                error: new Error(errorMessage),
+              });
+            }
+            break;
           }
-          break;
+          default:
+            break;
         }
-        default:
-          break;
+        return;
       }
-      return;
-    }
 
-    if (type === "message_end" && sessionEvent.message && sessionEvent.message.role === "assistant") {
-      const { text, reasoning } = extractAssistantContent(sessionEvent.message);
-      streamedText = emitRemainder("content", text, streamedText);
-      streamedReasoning = emitRemainder("reasoning", reasoning, streamedReasoning);
+      if (type === "tool_execution_start") {
+        const toolCallId = String(sessionEvent.toolCallId || "").trim();
+        const toolName = String(sessionEvent.toolName || "").trim();
+        if (toolCallId) {
+          const existing = toolCallsById.get(toolCallId);
+          toolCallsById.set(toolCallId, {
+            id: toolCallId,
+            index: existing?.index ?? 0,
+            name: toolName || existing?.name || "tool",
+            arguments: existing?.arguments || serializeToolArguments(sessionEvent.args),
+            executionStartedAt: Date.now(),
+          });
+        }
+        return;
+      }
 
-      const errorMessage = extractAssistantErrorMessage(sessionEvent.message);
-      if (errorMessage && !options.signal?.aborted) {
+      if (type === "tool_execution_end") {
+        const toolCallId = String(sessionEvent.toolCallId || "").trim();
+      const toolName = String(sessionEvent.toolName || "").trim();
+      if (toolCallId) {
+        const existing = toolCallsById.get(toolCallId);
+        const snapshot: PiToolCallSnapshot = {
+          id: toolCallId,
+          index: existing?.index ?? 0,
+          name: toolName || existing?.name || "tool",
+            arguments: existing?.arguments || "{}",
+            executionStartedAt: existing?.executionStartedAt,
+          };
+          toolCallsById.delete(toolCallId);
+          push({
+            kind: "event",
+            event: buildPiToolCallEvent(
+              snapshot,
+              Boolean(sessionEvent.isError) ? "failed" : "completed",
+              {
+                result: normalizePiToolExecutionResult(
+                  sessionEvent.result,
+                  Boolean(sessionEvent.isError)
+                ),
+              }
+            ),
+          });
+        }
+        return;
+      }
+
+      if (
+        type === "message_end" &&
+        sessionEvent.message &&
+        sessionEvent.message.role === "assistant"
+      ) {
+        const { text, reasoning } = extractAssistantContent(sessionEvent.message);
+        streamedText = emitRemainder("content", text, streamedText);
+        streamedReasoning = emitRemainder("reasoning", reasoning, streamedReasoning);
+
+        const errorMessage = extractAssistantErrorMessage(sessionEvent.message);
+        if (errorMessage && !options.signal?.aborted) {
+          push({
+            kind: "error",
+            error: new Error(errorMessage),
+          });
+          return;
+        }
+
+        const stopReason = String(sessionEvent.message?.stopReason || "").trim();
+        if (stopReason) {
+          push({
+            kind: "event",
+            event: { type: "meta", key: "stop-reason", value: stopReason },
+          });
+        }
+        return;
+      }
+
+      if (type === "auto_retry_start") {
         push({
-          kind: "error",
-          error: new Error(errorMessage),
+          kind: "event",
+          event: { type: "meta", key: "inline-footnote", value: "Retrying with Pi…" },
         });
         return;
       }
 
-      const stopReason = String(sessionEvent.message?.stopReason || "").trim();
-      if (stopReason) {
+      if (type === "auto_compaction_start") {
         push({
           kind: "event",
-          event: { type: "meta", key: "stop-reason", value: stopReason },
+          event: { type: "meta", key: "inline-footnote", value: "Pi is compacting the session…" },
         });
+        return;
       }
-      return;
-    }
 
-    if (type === "auto_retry_start") {
-      push({
-        kind: "event",
-        event: { type: "meta", key: "inline-footnote", value: "Retrying with Pi…" },
-      });
-      return;
-    }
-
-    if (type === "auto_compaction_start") {
-      push({
-        kind: "event",
-        event: { type: "meta", key: "inline-footnote", value: "Pi is compacting the session…" },
-      });
-      return;
-    }
-
-    if (type === "agent_end") {
-      finished = true;
-      push({ kind: "done" });
-    }
-  });
-
-  const onAbort = () => {
-    void activeSession.abort().catch(() => {});
-  };
-  options.signal?.addEventListener("abort", onAbort, { once: true });
-
-  void activeSession
-    .prompt(promptInput.text, {
-      expandPromptTemplates: false,
-      images: promptInput.images.length > 0 ? promptInput.images : undefined,
-    })
-    .catch((error: unknown) => {
-      push({
-        kind: "error",
-        error: error instanceof Error ? error : new Error(String(error || "Local Pi turn failed.")),
-      });
+      if (type === "agent_end") {
+        finished = true;
+        push({ kind: "done" });
+      }
     });
 
-  try {
-    while (true) {
-      const nextItem =
-        queue.length > 0
-          ? queue.shift()!
-          : await new Promise<QueueItem>((resolve) => {
-              waitingResolver = resolve;
-            });
+    const onAbort = () => {
+      void activeSession.abort().catch(() => {});
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
 
-      if (nextItem.kind === "event") {
-        yield nextItem.event;
-        continue;
+    void activeSession
+      .prompt(promptInput.text, {
+        expandPromptTemplates: false,
+        images: promptInput.images.length > 0 ? promptInput.images : undefined,
+      })
+      .catch((error: unknown) => {
+        push({
+          kind: "error",
+          error:
+            error instanceof Error
+              ? error
+              : new Error(String(error || "Local Pi turn failed.")),
+        });
+      });
+
+    try {
+      while (true) {
+        const nextItem =
+          queue.length > 0
+            ? queue.shift()!
+            : await new Promise<QueueItem>((resolve) => {
+                waitingResolver = resolve;
+              });
+
+        if (nextItem.kind === "event") {
+          yield nextItem.event;
+          continue;
+        }
+
+        if (nextItem.kind === "error") {
+          throw nextItem.error;
+        }
+
+        return;
       }
-
-      if (nextItem.kind === "error") {
-        throw nextItem.error;
-      }
-
-      return;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      unsubscribe();
     }
-  } finally {
-    options.signal?.removeEventListener("abort", onAbort);
-    unsubscribe();
-  }
   } finally {
     session?.dispose();
     restoreFetch();

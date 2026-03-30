@@ -1,14 +1,19 @@
 {
-  "segmentId": "windows-baselines-combined-v1",
-  "runTag": "windows-baselines-combined",
+  "segmentId": "chatview-pi-tool-calling-v2",
+  "runTag": "chatview-pi-tool-calling",
   "workingDir": ".",
   "startingBranch": "main",
   "editablePaths": [
+    "src/services/pi-native/PiLocalAgentExecutor.ts",
+    "src/streaming/types.ts",
+    "src/views/chatview/controllers/StreamingController.ts",
+    "src/views/chatview/InputHandler.ts",
+    "src/studio/piAuth/StudioPiAuthInventory.ts",
+    "src/services/pi-native/__tests__/PiLocalAgentExecutor.test.ts",
+    "src/views/chatview/__tests__/streaming-controller.test.ts",
+    "src/views/chatview/__tests__/input-handler-tool-loop.test.ts",
     "testing/native/desktop-automation/runner.mjs",
     "testing/native/desktop-automation/runner.test.mjs",
-    "testing/native/desktop-automation/README.md",
-    "testing/native/device/windows/README.md",
-    "package.json",
     "autoresearch.md",
     "autoresearch.sh",
     "autoresearch.checks.sh",
@@ -17,9 +22,9 @@
     "autoresearch.jsonl"
   ],
   "lockedPaths": [
-    "testing/native/device/windows/run-desktop-automation.mjs",
     "testing/native/desktop-automation/client.mjs",
-    "testing/native/device/windows/remote-run.mjs"
+    "testing/native/device/windows/run-desktop-automation.mjs",
+    "scripts/jest.mjs"
   ],
   "benchmarkLogDir": "autoresearch-logs",
   "lowConfidenceThreshold": 0,

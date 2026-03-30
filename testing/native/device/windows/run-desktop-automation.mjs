@@ -25,6 +25,7 @@ import {
   assertNoLocalPiInstalled,
   readLatestWindowsLocalPiStatus,
 } from "./run-clean-install-parity.mjs";
+import { ensureFreshRemoteWindowsPluginVersion } from "./runtime-version.mjs";
 
 const DEFAULT_DISCOVERY_CACHE_TTL_MS = 250;
 
@@ -421,6 +422,21 @@ function buildSyntheticTarget(baseOptions, ping) {
   };
 }
 
+function summarizeRuntimeVersionRefresh(refresh) {
+  if (!refresh) {
+    return null;
+  }
+  return {
+    expectedPluginVersion: String(refresh.expectedPluginVersion || "").trim() || null,
+    relaunched: Boolean(refresh.relaunched),
+    beforePluginVersion: String(refresh.before?.pluginVersion || "").trim() || null,
+    afterPluginVersion: String(refresh.after?.pluginVersion || "").trim() || null,
+    beforeStartedAt: String(refresh.before?.startedAt || "").trim() || null,
+    afterStartedAt: String(refresh.after?.startedAt || "").trim() || null,
+    remoteManifestVersion: String(refresh.remoteManifestVersion || "").trim() || null,
+  };
+}
+
 export async function runWindowsDesktopAutomation(options, dependencies = {}) {
   const discovery =
     dependencies.discovery instanceof WindowsForwardedBridgeDiscovery
@@ -438,8 +454,23 @@ export async function runWindowsDesktopAutomation(options, dependencies = {}) {
     );
   }
 
+  const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion(
+    {
+      sshHost: options.sshHost,
+      vaultName: options.vaultName,
+      vaultPath: options.vaultPath,
+      artifactRoot: process.cwd(),
+    },
+    dependencies.runtimeVersionDependencies
+  );
+  if (runtimeVersionRefresh.relaunched) {
+    console.log(
+      `[windows-desktop-automation] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
+    );
+  }
+
   try {
-    return await runDesktopAutomation(
+    const payload = await runDesktopAutomation(
       {
         ...options,
         waitForStableClient: async (waitOptions) => {
@@ -495,6 +526,10 @@ export async function runWindowsDesktopAutomation(options, dependencies = {}) {
         },
       }
     );
+    return {
+      ...payload,
+      runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
+    };
   } finally {
     await discovery.close();
   }

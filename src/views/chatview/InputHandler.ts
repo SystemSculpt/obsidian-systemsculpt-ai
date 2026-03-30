@@ -299,17 +299,18 @@ export class InputHandler extends Component {
     );
   }
 
-  private shouldContinueHostedToolLoop(message: ChatMessage, stopReason?: string): boolean {
+  private shouldContinueHostedToolLoop(message: ChatMessage, _stopReason?: string): boolean {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
     if (toolCalls.length === 0) {
       return false;
     }
 
-    if (String(stopReason || "").trim() === "toolUse") {
-      return true;
-    }
-
-    return toolCalls.some((toolCall) => toolCall.state === "executing" || !toolCall.result);
+    return toolCalls.some(
+      (toolCall) =>
+        toolCall.state !== "completed" &&
+        toolCall.state !== "failed" &&
+        (toolCall.state === "executing" || !toolCall.result)
+    );
   }
 
   private async renderPersistedAssistantMessage(

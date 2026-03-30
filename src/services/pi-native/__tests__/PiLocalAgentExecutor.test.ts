@@ -232,6 +232,92 @@ describe("PiLocalAgentExecutor", () => {
     ]);
   });
 
+  it("emits a completed tool-call update when local Pi finishes executing a tool", async () => {
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async () => {
+        session.emit({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "toolcall_end",
+            contentIndex: 0,
+            toolCall: {
+              id: "call_read_1",
+              name: "read",
+              arguments: { filePath: "alpha.md" },
+            },
+          },
+        });
+        session.emit({
+          type: "tool_execution_end",
+          toolCallId: "call_read_1",
+          toolName: "read",
+          result: {
+            content: [{ type: "text", text: "ALPHA_20260311-194643" }],
+            details: { truncated: false },
+          },
+          isError: false,
+        });
+        session.emit({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Read complete." }],
+            stopReason: "stop",
+          },
+        });
+        session.emit({ type: "agent_end", messages: [] });
+      });
+    };
+
+    const drain = collectEvents(
+      streamPiLocalAgentTurn({
+        plugin: createPlugin(),
+        modelId: "openai/gpt-5-mini",
+        messages: [{ role: "user", content: "Read alpha.md", message_id: "tool_1" } as any],
+      })
+    );
+
+    await expect(drain).resolves.toEqual([
+      {
+        type: "tool-call",
+        phase: "final",
+        call: {
+          id: "call_read_1",
+          index: 0,
+          type: "function",
+          function: {
+            name: "read",
+            arguments: "{\"filePath\":\"alpha.md\"}",
+          },
+          state: "executing",
+        },
+      },
+      {
+        type: "tool-call",
+        phase: "final",
+        call: {
+          id: "call_read_1",
+          index: 0,
+          type: "function",
+          function: {
+            name: "read",
+            arguments: "{\"filePath\":\"alpha.md\"}",
+          },
+          state: "completed",
+          result: {
+            success: true,
+            data: {
+              content: [{ type: "text", text: "ALPHA_20260311-194643" }],
+              details: { truncated: false },
+            },
+          },
+        },
+      },
+      { type: "content", text: "Read complete." },
+      { type: "meta", key: "stop-reason", value: "stop" },
+    ]);
+  });
+
   it("aborts the underlying Pi session when the caller aborts", async () => {
     const abortController = new AbortController();
     let releasePrompt: (() => void) | null = null;

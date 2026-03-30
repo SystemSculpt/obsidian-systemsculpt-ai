@@ -4,7 +4,7 @@ SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcrip
 
 ## Current release facts
 
-- Plugin version: `5.3.1`
+- Plugin version: `5.3.2`
 - Minimum Obsidian version: `1.4.0`
 - Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
 - License: MIT

@@ -16,6 +16,7 @@ import {
   startSshLocalPortForward,
   stopChildProcess,
 } from "./remote-run.mjs";
+import { ensureFreshRemoteWindowsPluginVersion } from "./runtime-version.mjs";
 
 const KNOWN_PROVIDER_ENV_VARS = {
   anthropic: ["ANTHROPIC_API_KEY"],
@@ -334,6 +335,21 @@ function readLocalWindowsPiStatus() {
   };
 }
 
+function summarizeRuntimeVersionRefresh(refresh) {
+  if (!refresh) {
+    return null;
+  }
+  return {
+    expectedPluginVersion: String(refresh.expectedPluginVersion || "").trim() || null,
+    relaunched: Boolean(refresh.relaunched),
+    beforePluginVersion: String(refresh.before?.pluginVersion || "").trim() || null,
+    afterPluginVersion: String(refresh.after?.pluginVersion || "").trim() || null,
+    beforeStartedAt: String(refresh.before?.startedAt || "").trim() || null,
+    afterStartedAt: String(refresh.after?.startedAt || "").trim() || null,
+    remoteManifestVersion: String(refresh.remoteManifestVersion || "").trim() || null,
+  };
+}
+
 export async function withForwardedWindowsBridgeRecord(record, options = {}, operation) {
   const forward = await startSshLocalPortForward({
     ...options,
@@ -377,6 +393,7 @@ export async function runCleanInstallParity(options, env = process.env) {
     return {
       ...result,
       windowsHost,
+      runtimeVersionRefresh: null,
     };
   }
 
@@ -385,6 +402,15 @@ export async function runCleanInstallParity(options, env = process.env) {
       sshHost: options.sshHost,
     })
   );
+  const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion({
+    sshHost: options.sshHost,
+    artifactRoot: process.cwd(),
+  });
+  if (runtimeVersionRefresh.relaunched) {
+    console.log(
+      `[windows-clean-install-runner] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
+    );
+  }
   const remoteRecord = await readLatestWindowsBridgeRecord({
     sshHost: options.sshHost,
   });
@@ -399,6 +425,7 @@ export async function runCleanInstallParity(options, env = process.env) {
   return {
     ...result,
     windowsHost,
+    runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
   };
 }
 

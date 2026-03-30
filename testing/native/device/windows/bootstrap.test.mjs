@@ -10,7 +10,10 @@ import {
   resolveWindowsHostedAuthSeed,
   upsertObsidianVaultRegistry,
 } from "./common.mjs";
-import { buildWindowsLaunchScript } from "./bootstrap.mjs";
+import {
+  buildWindowsLaunchScript,
+  sanitizeWindowsBootstrapReport,
+} from "./bootstrap.mjs";
 
 test("createWindowsSeedPluginData preserves existing values and forces bridge enablement", () => {
   const result = createWindowsSeedPluginData({
@@ -150,4 +153,41 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
   assert.match(script, /SystemSculptWindowsQA/);
   assert.match(script, /foreach \(\$name in @\("OPENAI_API_KEY", "ANTHROPIC_API_KEY"\)\)/);
   assert.match(script, /ArgumentList @\(\$vaultPath\)/);
+});
+
+test("sanitizeWindowsBootstrapReport redacts sensitive plugin data before printing", () => {
+  const sanitized = sanitizeWindowsBootstrapReport({
+    pluginData: {
+      settingsMode: "advanced",
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      licenseKey: "license-123",
+      userEmail: "mike@example.com",
+      userName: "mike@example.com",
+      displayName: "Mike",
+      openAiApiKey: "sk-test",
+      readwiseApiToken: "rw-test",
+      customProviders: [
+        {
+          id: "provider-1",
+          apiKey: "cp-test",
+          label: "Custom Provider",
+        },
+      ],
+    },
+    launch: {
+      ok: true,
+      vaultPath: "C:/Vaults/SystemSculptWindowsQA",
+    },
+  });
+
+  assert.equal(sanitized.pluginData.settingsMode, "advanced");
+  assert.equal(sanitized.pluginData.selectedModelId, "systemsculpt@@systemsculpt/ai-agent");
+  assert.equal(sanitized.pluginData.licenseKey, "[REDACTED]");
+  assert.equal(sanitized.pluginData.userEmail, "[REDACTED]");
+  assert.equal(sanitized.pluginData.userName, "[REDACTED]");
+  assert.equal(sanitized.pluginData.displayName, "[REDACTED]");
+  assert.equal(sanitized.pluginData.openAiApiKey, "[REDACTED]");
+  assert.equal(sanitized.pluginData.readwiseApiToken, "[REDACTED]");
+  assert.equal(sanitized.pluginData.customProviders[0].apiKey, "[REDACTED]");
+  assert.equal(sanitized.launch.vaultPath, "C:/Vaults/SystemSculptWindowsQA");
 });

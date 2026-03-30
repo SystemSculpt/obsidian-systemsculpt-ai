@@ -283,6 +283,73 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.refreshCreditsBalance).toHaveBeenCalledTimes(1);
   });
 
+  it("does not continue the hosted tool loop when a local Pi tool call is already completed", async () => {
+    const { aiService, handler, messages } = createHostedToolLoopHarness();
+
+    const localPiAssistantMessage: ChatMessage = {
+      role: "assistant",
+      content: "Read the file locally.",
+      message_id: "assistant-local-pi",
+      tool_calls: [
+        {
+          id: "pi_call_1",
+          messageId: "assistant-local-pi",
+          request: {
+            id: "pi_call_1",
+            type: "function",
+            function: {
+              name: "read",
+              arguments: "{\"filePath\":\"alpha.md\"}",
+            },
+          },
+          state: "completed",
+          timestamp: 1,
+          executionStartedAt: 1,
+          executionCompletedAt: 2,
+          result: {
+            success: true,
+            data: { content: [{ type: "text", text: "ALPHA_20260311-194643" }] },
+          },
+        },
+      ],
+      messageParts: [],
+    } as any;
+
+    const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn");
+    streamAssistantTurn.mockImplementationOnce(async () => {
+      await (handler as any).onAssistantResponse(localPiAssistantMessage);
+      return {
+        messageId: "assistant-local-pi",
+        message: localPiAssistantMessage,
+        messageEl: document.createElement("div"),
+        completed: true,
+        completionState: "completed",
+        stopReason: "toolUse",
+      };
+    });
+
+    handler.setValue("Use local Pi tools.");
+    await handler.submitWithOverrides({ includeContextFiles: false });
+
+    expect(streamAssistantTurn).toHaveBeenCalledTimes(1);
+    expect(aiService.executeHostedToolCall).not.toHaveBeenCalled();
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "Use local Pi tools." }),
+        expect.objectContaining({
+          message_id: "assistant-local-pi",
+          content: "Read the file locally.",
+          tool_calls: [
+            expect.objectContaining({
+              id: "pi_call_1",
+              state: "completed",
+            }),
+          ],
+        }),
+      ])
+    );
+  });
+
   it("retries a reasoning-only continuation after hosted tool execution and finishes the turn", async () => {
     const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
 

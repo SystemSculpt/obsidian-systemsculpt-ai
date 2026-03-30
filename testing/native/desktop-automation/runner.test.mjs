@@ -95,6 +95,7 @@ test("buildBaselineSummary surfaces one combined baselines verdict", () => {
         provider: { providerId: "openrouter" },
         providerModel: { modelId: "local-pi-openrouter@@openai/gpt-5.4-mini" },
         providerTurn: { token: "PROVIDER_CONNECTED_OPENROUTER_1" },
+        providerToolTurn: { token: "PROVIDER_CONNECTED_TOOLS_OPENROUTER_1" },
         recoverySelection: {
           selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
         },
@@ -114,8 +115,183 @@ test("buildBaselineSummary surfaces one combined baselines verdict", () => {
   assert.equal(summary?.provider.connectedOk, true);
   assert.equal(summary?.provider.providerId, "openrouter");
   assert.equal(summary?.provider.modelId, "local-pi-openrouter@@openai/gpt-5.4-mini");
+  assert.equal(summary?.provider.toolTurnOk, true);
   assert.equal(summary?.provider.recoverySelectionOk, true);
   assert.equal(summary?.finalManagedSelectionOk, true);
+});
+
+test("runProviderConnectedBaselineCase exercises a real ChatView filesystem tool turn when fixtureDir is provided", async () => {
+  const fixtureDir = "SystemSculpt/QA/NativeRuntimeFixtures/current";
+  const expectedOutput = [
+    "ALPHA=ALPHA_20260311-194643",
+    "BETA=BETA_20260311-194643",
+    "SHARED=GAMMA_20260311-194643",
+  ].join("\n");
+  const managedModel = {
+    value: "systemsculpt@@systemsculpt/ai-agent",
+    label: "SystemSculpt Agent",
+    providerAuthenticated: true,
+    providerId: "systemsculpt",
+    providerLabel: "SystemSculpt",
+    section: "systemsculpt",
+  };
+  const providerReadyModel = {
+    value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    providerAuthenticated: true,
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
+    section: "local",
+  };
+  const providerSetupModel = {
+    ...providerReadyModel,
+    providerAuthenticated: false,
+  };
+
+  let currentModelId = managedModel.value;
+  let providerConnected = false;
+  let writtenOutputPath = null;
+
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [managedModel, providerConnected ? providerReadyModel : providerSetupModel],
+      };
+    },
+    async getProvidersSnapshot() {
+      return {
+        settings: {
+          settingsModalOpen: true,
+          pluginSettingsOpen: true,
+          activePluginTabId: "providers",
+        },
+        ui: {
+          panelVisible: true,
+          rowCount: 1,
+        },
+        providers: {
+          rowCount: 1,
+          rows: [
+            {
+              providerId: "openrouter",
+              label: "OpenRouter",
+              source: providerConnected ? "api_key" : "none",
+              credentialType: providerConnected ? "api_key" : "none",
+              isLocalProvider: false,
+              apiKeyEnvVar: "OPENROUTER_API_KEY",
+              oauthEnabled: true,
+              apiKeyEnabled: true,
+              hasAnyAuth: providerConnected,
+              hasStoredCredential: providerConnected,
+              display: {
+                ready: providerConnected,
+                connected: providerConnected,
+                blocked: false,
+                tone: providerConnected ? "connected" : "disconnected",
+                summary: providerConnected ? "Connected via API key" : "Not connected",
+              },
+            },
+          ],
+        },
+      };
+    },
+    async clearProviderAuth() {
+      providerConnected = false;
+      return await this.getProvidersSnapshot();
+    },
+    async setProviderApiKey(providerId, apiKey) {
+      assert.equal(providerId, "openrouter");
+      assert.equal(apiKey, "sk-openrouter");
+      providerConnected = true;
+      return await this.getProvidersSnapshot();
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      assert.equal(currentModelId, providerReadyModel.value);
+      if (!providerConnected) {
+        throw new Error(
+          "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers."
+        );
+      }
+      if (String(body.text || "").includes("Use filesystem tools for this task.")) {
+        const tokenMatch = String(body.text).match(/Reply with this exact token and nothing else: ([A-Z0-9_]+)/);
+        const outputMatch = String(body.text).match(/Write "([^"]+)" with exactly these lines:/);
+        assert.ok(tokenMatch, "tool prompt should include an exact token");
+        assert.ok(outputMatch, "tool prompt should include an output path");
+        writtenOutputPath = outputMatch[1];
+        return {
+          selectedModelId: currentModelId,
+          currentModelName: "GPT-5.4 Mini",
+          messages: [
+            {
+              role: "assistant",
+              content: tokenMatch[1],
+              toolCalls: [
+                {
+                  id: "tool_1",
+                  name: "read",
+                  state: "completed",
+                  result: { success: true, data: { path: `${fixtureDir}/alpha.md` } },
+                },
+                {
+                  id: "tool_2",
+                  name: "write",
+                  state: "completed",
+                  result: { success: true, data: { path: writtenOutputPath } },
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      const token = String(body.text || "").replace(
+        "Reply with this exact token and nothing else: ",
+        ""
+      );
+      return {
+        selectedModelId: currentModelId,
+        currentModelName: "GPT-5.4 Mini",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+    async readVaultText(vaultPath) {
+      assert.equal(vaultPath, writtenOutputPath);
+      return {
+        path: vaultPath,
+        content: expectedOutput,
+      };
+    },
+  };
+
+  const outcome = await runProviderConnectedBaselineCase(client, {
+    fixtureDir,
+    env: {
+      SYSTEMSCULPT_DESKTOP_PROVIDER_ID: "openrouter",
+      SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY: "sk-openrouter",
+    },
+  });
+
+  assert.equal(outcome.provider.providerId, "openrouter");
+  assert.equal(outcome.providerToolTurn?.model.modelId, providerReadyModel.value);
+  assert.match(outcome.providerToolTurn?.response || "", /PROVIDER_CONNECTED_TOOLS_OPENROUTER_/);
+  assert.equal(outcome.providerToolTurn?.outputPreview, expectedOutput);
+  assert.equal(outcome.providerToolTurn?.relevantToolCallCount, 2);
+  assert.equal(outcome.providerToolTurn?.completedRelevantToolCallCount, 2);
 });
 
 test("isTransientModelExecutionError treats generic provider-side upstream failures as transient", () => {
@@ -129,6 +305,14 @@ test("isTransientModelExecutionError treats generic provider-side upstream failu
   assert.equal(isTransientModelExecutionError(new Error("This operation was aborted")), true);
   assert.equal(
     isTransientModelExecutionError(new Error("Timed out waiting for providers settings panel.")),
+    true
+  );
+  assert.equal(
+    isTransientModelExecutionError(
+      new Error(
+        'The Win32 internal error "No process is on the other end of the pipe" 0xE9 occurred while setting the console window title. SetConsoleWindowTitle'
+      )
+    ),
     true
   );
   assert.equal(isTransientModelExecutionError(new Error("Invalid API key")), false);
@@ -1418,7 +1602,6 @@ test("runProviderConnectedBaselineCase skips a redundant managed precheck before
           "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers."
         );
       }
-
       const token = String(body.text || "").replace(
         "Reply with this exact token and nothing else: ",
         ""
@@ -1782,8 +1965,152 @@ test("runProviderConnectedBaselineCase retries transient OpenRouter failures wit
   assert.deepEqual(setApiKeyCalls, ["openrouter"]);
   assert.deepEqual(clearCalls, ["openrouter", "openrouter"]);
   assert.equal(outcome.provider.providerId, "openrouter");
+  assert.deepEqual(outcome.candidateTransientRetries, []);
   assert.match(outcome.providerTurn.response, /PROVIDER_CONNECTED_OPENROUTER_/);
   assert.match(outcome.providerTurnAfterClear.response, /PROVIDER_CONNECTED_OPENROUTER_AFTER_CLEAR_/);
+});
+
+test("runProviderConnectedBaselineCase retries transient Windows provider setup failures and reports them", async () => {
+  const managedModel = {
+    value: "systemsculpt@@systemsculpt/ai-agent",
+    label: "SystemSculpt Agent",
+    providerAuthenticated: true,
+    providerId: "systemsculpt",
+    providerLabel: "SystemSculpt",
+    section: "systemsculpt",
+  };
+  const providerReadyModel = {
+    value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    providerAuthenticated: true,
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
+    section: "local",
+  };
+  const providerSetupModel = {
+    ...providerReadyModel,
+    providerAuthenticated: false,
+  };
+
+  let currentModelId = managedModel.value;
+  let providerConnected = false;
+  let setProviderApiKeyAttempts = 0;
+
+  function buildProvidersSnapshot() {
+    return {
+      settings: {
+        settingsModalOpen: true,
+        pluginSettingsOpen: true,
+        activePluginTabId: "providers",
+      },
+      ui: {
+        panelVisible: true,
+      },
+      providers: {
+        rowCount: 1,
+        rows: [
+          {
+            providerId: "openrouter",
+            label: "OpenRouter",
+            source: providerConnected ? "api_key" : "none",
+            credentialType: providerConnected ? "api_key" : "none",
+            isLocalProvider: false,
+            apiKeyEnvVar: "OPENROUTER_API_KEY",
+            oauthEnabled: true,
+            apiKeyEnabled: true,
+            hasAnyAuth: providerConnected,
+            hasStoredCredential: providerConnected,
+            display: {
+              ready: providerConnected,
+              connected: providerConnected,
+              blocked: false,
+              tone: providerConnected ? "connected" : "disconnected",
+              summary: providerConnected ? "Connected via API key" : "Not connected",
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [managedModel, providerConnected ? providerReadyModel : providerSetupModel],
+      };
+    },
+    async getProvidersSnapshot() {
+      return buildProvidersSnapshot();
+    },
+    async clearProviderAuth() {
+      providerConnected = false;
+      return buildProvidersSnapshot();
+    },
+    async setProviderApiKey(providerId, apiKey) {
+      setProviderApiKeyAttempts += 1;
+      assert.equal(providerId, "openrouter");
+      assert.equal(apiKey, "sk-openrouter");
+      if (setProviderApiKeyAttempts === 1) {
+        throw new Error(
+          'The Win32 internal error "No process is on the other end of the pipe" 0xE9 occurred while setting the console window title. SetConsoleWindowTitle'
+        );
+      }
+      providerConnected = true;
+      return buildProvidersSnapshot();
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      if (!providerConnected && currentModelId === providerReadyModel.value) {
+        throw new Error(
+          "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers."
+        );
+      }
+      const token = String(body.text || "").replace(
+        "Reply with this exact token and nothing else: ",
+        ""
+      );
+      return {
+        selectedModelId: currentModelId,
+        currentModelName:
+          currentModelId === managedModel.value ? "SystemSculpt Agent" : "GPT-5.4 Mini",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runProviderConnectedBaselineCase(client, {
+    env: {
+      SYSTEMSCULPT_DESKTOP_PROVIDER_ID: "openrouter",
+      SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY: "sk-openrouter",
+    },
+  });
+
+  assert.equal(setProviderApiKeyAttempts, 2);
+  assert.deepEqual(outcome.candidateTransientRetries, [
+    {
+      attempt: 1,
+      providerId: "openrouter",
+      label: "OpenRouter",
+      error:
+        'The Win32 internal error "No process is on the other end of the pipe" 0xE9 occurred while setting the console window title. SetConsoleWindowTitle',
+    },
+  ]);
+  assert.equal(outcome.provider.providerId, "openrouter");
+  assert.match(outcome.providerTurn.response, /PROVIDER_CONNECTED_OPENROUTER_/);
 });
 
 test("runProviderConnectedBaselineCase only force-refreshes provider state once per auth transition", async () => {
