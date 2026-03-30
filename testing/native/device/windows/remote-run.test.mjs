@@ -31,7 +31,7 @@ test("buildRemoteWindowsNodeScript writes the task, captures exit code, and clea
       },
     ],
     args: ["--provider-id", "google"],
-    cleanupPaths: ["C:/Users/Administrator/AppData/Local/Temp/secret.txt"],
+    cleanupPaths: ["C:/Windows/Temp/secret.txt"],
   });
 
   assert.match(script, /\$workspacePath = Join-Path \$env:TEMP/);

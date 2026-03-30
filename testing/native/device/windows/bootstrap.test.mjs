@@ -31,14 +31,14 @@ test("upsertObsidianVaultRegistry marks the target vault open and clears older o
     {
       vaults: {
         oldvault: {
-          path: "C:/Users/Administrator/Documents/OldVault",
+          path: "C:/Vaults/OldVault",
           ts: 1,
           open: true,
         },
       },
     },
     {
-      vaultPath: "C:/Users/Administrator/Documents/SystemSculptWindowsQA",
+      vaultPath: "C:/Vaults/SystemSculptWindowsQA",
       vaultName: "SystemSculptWindowsQA",
       timestamp: 2,
     }
@@ -46,7 +46,7 @@ test("upsertObsidianVaultRegistry marks the target vault open and clears older o
 
   assert.equal(result.vaults.oldvault.open, false);
   assert.deepEqual(result.vaults.systemsculptwindowsqa, {
-    path: path.resolve("C:/Users/Administrator/Documents/SystemSculptWindowsQA"),
+    path: path.resolve("C:/Vaults/SystemSculptWindowsQA"),
     ts: 2,
     open: true,
   });
@@ -138,8 +138,8 @@ test("readJsonIfExists accepts BOM-prefixed JSON files", async (t) => {
 test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing list", () => {
   const script = buildWindowsLaunchScript({
     obsidianExe: "C:/Obsidian/Obsidian.exe",
-    piAgentDir: "C:/Users/Administrator/Documents/SystemSculptWindowsQA/.systemsculpt/pi-empty-agent",
-    vaultPath: "C:/Users/Administrator/Documents/SystemSculptWindowsQA",
+    piAgentDir: "C:/Vaults/SystemSculptWindowsQA/.systemsculpt/pi-empty-agent",
+    vaultPath: "C:/Vaults/SystemSculptWindowsQA",
     resultPath: "C:/Windows/Temp/obsidian-launch.json",
     clearedEnvKeys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
   });

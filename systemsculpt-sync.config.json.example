@@ -11,7 +11,7 @@
     {
       "type": "windows-ssh",
       "host": "tickblaze-kamatera",
-      "path": "C:/Users/Administrator/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
+      "path": "C:/path/to/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
       "label": "windows-vm"
     }
   ]

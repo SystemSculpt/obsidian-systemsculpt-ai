@@ -1,7 +1,7 @@
 {
   "segmentId": "windows-baselines-combined-v1",
   "runTag": "windows-baselines-combined",
-  "workingDir": "/Users/systemsculpt/gits/obsidian-systemsculpt-ai",
+  "workingDir": ".",
   "startingBranch": "main",
   "editablePaths": [
     "testing/native/desktop-automation/runner.mjs",

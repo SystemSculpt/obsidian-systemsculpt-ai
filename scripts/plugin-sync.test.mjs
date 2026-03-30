@@ -49,7 +49,7 @@ test("loadConfiguredTargets includes local plugin targets, windows mirrors, and 
       {
         type: "windows-ssh",
         host: "tickblaze-kamatera",
-        path: "C:/Users/Administrator/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
+        path: "C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
         label: "windows-vm",
       },
     ],
@@ -73,7 +73,7 @@ test("loadConfiguredTargets includes local plugin targets, windows mirrors, and 
   );
   assert.equal(
     formatSyncTarget(loaded.targets[2]),
-    "mirror: windows-vm -> tickblaze-kamatera:C:/Users/Administrator/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai"
+    "mirror: windows-vm -> tickblaze-kamatera:C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai"
   );
 });
 
@@ -116,7 +116,7 @@ test("syncConfiguredTargets drives windows mirrors through ssh plus scp", (t) =>
       {
         type: "windows-ssh",
         host: "tickblaze-kamatera",
-        path: "C:/Users/Administrator/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
+        path: "C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
       },
     ],
   });
@@ -138,7 +138,7 @@ test("syncConfiguredTargets drives windows mirrors through ssh plus scp", (t) =>
   assert.equal(calls.length, 2);
   assert.equal(calls[0].command, "ssh");
   assert.equal(calls[1].command, "scp");
-  assert.match(calls[1].args[calls[1].args.length - 1], /^tickblaze-kamatera:C:\/Users\/Administrator/);
+  assert.match(calls[1].args[calls[1].args.length - 1], /^tickblaze-kamatera:C:\/SystemSculptWindowsQA/);
   assert.deepEqual(calls[1].args.slice(0, 1), ["-Cq"]);
 });
 

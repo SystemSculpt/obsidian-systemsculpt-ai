@@ -10,7 +10,7 @@ import { build as buildWithEsbuild } from "esbuild";
 import { assertProductionPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "../../../../scripts/plugin-artifacts.mjs";
 
 export const DEFAULT_WINDOWS_SSH_HOST = "tickblaze-kamatera";
-export const DEFAULT_WINDOWS_REMOTE_TEMP_DIR = "C:/Users/Administrator/AppData/Local/Temp";
+export const DEFAULT_WINDOWS_REMOTE_TEMP_DIR = "C:/Windows/Temp";
 export const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS = 10;
 export const DEFAULT_SSH_SERVER_ALIVE_INTERVAL_SECONDS = 15;
 export const DEFAULT_SSH_SERVER_ALIVE_COUNT_MAX = 120;
