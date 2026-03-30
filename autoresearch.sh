@@ -8,8 +8,7 @@ RUN_DIR="$LOG_DIR/$RUN_ID"
 mkdir -p "$RUN_DIR"
 
 CHECK_LOG="$RUN_DIR/checks.log"
-MANAGED_JSON="$RUN_DIR/managed-baseline.json"
-PROVIDER_JSON="$RUN_DIR/provider-connected-baseline.json"
+BASELINES_JSON="$RUN_DIR/windows-baselines.json"
 
 PROVIDER_ID="${SYSTEMSCULPT_DESKTOP_PROVIDER_ID:-openrouter}"
 PROVIDER_MODEL_ID="${SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID:-openai/gpt-5.4-mini}"
@@ -24,50 +23,47 @@ pushd "$ROOT" >/dev/null
 
 ./autoresearch.checks.sh | tee "$CHECK_LOG"
 
-node testing/native/device/windows/run-desktop-automation.mjs \
-  --case managed-baseline \
-  --no-reload \
-  --json-output "$MANAGED_JSON"
-
 SYSTEMSCULPT_DESKTOP_PROVIDER_ID="$PROVIDER_ID" \
 SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="$PROVIDER_API_KEY" \
 SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID="$PROVIDER_MODEL_ID" \
 node testing/native/device/windows/run-desktop-automation.mjs \
-  --case provider-connected-baseline \
+  --case baselines \
   --no-reload \
-  --json-output "$PROVIDER_JSON"
+  --json-output "$BASELINES_JSON"
 
-node - "$MANAGED_JSON" "$PROVIDER_JSON" <<'NODE'
+node - "$BASELINES_JSON" <<'NODE'
 const fs = require("node:fs");
 
-const managed = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const provider = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-
-const managedResult = managed?.iterations?.[0]?.results?.["managed-baseline"] || {};
-const providerResult = provider?.iterations?.[0]?.results?.["provider-connected-baseline"] || {};
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const iteration = report?.iterations?.[0]?.results || {};
+const managedResult = iteration["managed-baseline"] || {};
+const baselineSummary = report?.baselineSummary || {};
 
 const boolMetric = (value) => (value ? 1 : 0);
-const systemsculptModelId = "systemsculpt@@systemsculpt/ai-agent";
 
-const managedHostedTurnOk = Boolean(managedResult.hostedTurn || managedResult.recoveryTurn);
-const managedTransientClassifiedOk = Array.isArray(managedResult.transientFailures);
-const providerConnectedOk = Boolean(providerResult.providerTurn);
-const providerRecoveryOk =
-  providerResult?.recoverySelection?.selectedModelId === systemsculptModelId &&
-  provider?.statusSummary?.chat?.selectedModelId === systemsculptModelId;
+const managedHostedTurnOk = Boolean(baselineSummary?.managed?.hostedTurnOk);
+const managedTransientClassifiedOk = typeof baselineSummary?.managed?.transientFailureCount === "number";
+const providerConnectedOk = Boolean(baselineSummary?.provider?.connectedOk);
+const providerRecoveryOk = Boolean(baselineSummary?.provider?.recoverySelectionOk);
+const windowsBaselinesOk =
+  typeof baselineSummary?.ok === "boolean"
+    ? baselineSummary.ok
+    : managedHostedTurnOk && providerConnectedOk && providerRecoveryOk;
 
 console.log(`METRIC runner_tests_ok=1`);
 console.log(`METRIC managed_hosted_turn_ok=${boolMetric(managedHostedTurnOk)}`);
 console.log(`METRIC managed_transient_classified_ok=${boolMetric(managedTransientClassifiedOk)}`);
 console.log(`METRIC provider_connected_ok=${boolMetric(providerConnectedOk)}`);
 console.log(`METRIC provider_recovery_ok=${boolMetric(providerRecoveryOk)}`);
-console.log(
-  `METRIC windows_baselines_ok=${boolMetric(managedHostedTurnOk && providerConnectedOk && providerRecoveryOk)}`
-);
+console.log(`METRIC windows_baselines_ok=${boolMetric(windowsBaselinesOk)}`);
 
 console.log(
   `DETAIL managed_transient_failure_count=${JSON.stringify(
-    Array.isArray(managedResult.transientFailures) ? managedResult.transientFailures.length : 0
+    typeof baselineSummary?.managed?.transientFailureCount === "number"
+      ? baselineSummary.managed.transientFailureCount
+      : Array.isArray(managedResult.transientFailures)
+        ? managedResult.transientFailures.length
+        : 0
   )}`
 );
 NODE

@@ -1,3 +1,2 @@
-- Teach the release/check flow to surface `transientFailures` as hosted noise instead of flattening them into a generic plugin failure.
-- Add a combined Windows baseline command that runs managed and provider-connected lanes back to back and emits one summarized verdict for release prep.
+- Persist the new combined `baselineSummary` into any release-check artifact or checklist output so CI/release notes can report hosted noise without parsing the full JSON payload.
 - Add a longer unattended Windows soak pass once the release-critical baseline lane stays green across multiple runs.

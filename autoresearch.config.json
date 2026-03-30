@@ -1,6 +1,6 @@
 {
-  "segmentId": "windows-baselines-transient-hosted-v1",
-  "runTag": "windows-baselines-transient-hosted",
+  "segmentId": "windows-baselines-combined-v1",
+  "runTag": "windows-baselines-combined",
   "workingDir": "/Users/systemsculpt/gits/obsidian-systemsculpt-ai",
   "startingBranch": "main",
   "editablePaths": [
@@ -8,6 +8,7 @@
     "testing/native/desktop-automation/runner.test.mjs",
     "testing/native/desktop-automation/README.md",
     "testing/native/device/windows/README.md",
+    "package.json",
     "autoresearch.md",
     "autoresearch.sh",
     "autoresearch.checks.sh",

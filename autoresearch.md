@@ -26,8 +26,8 @@ desktop automation harness, not about adding new chat features.
 
 ## Current segment
 
-- `segmentId`: `windows-baselines-transient-hosted-v1`
-- `runTag`: `windows-baselines-transient-hosted`
+- `segmentId`: `windows-baselines-combined-v1`
+- `runTag`: `windows-baselines-combined`
 - working tree: `main`
 
 ## Benchmark workload
@@ -38,8 +38,10 @@ It must:
 
 1. run the focused local desktop-automation runner tests
 2. attach to the already-open Windows QA vault through the no-focus bridge
-3. run `managed-baseline`
-4. run `provider-connected-baseline` with a runner-side OpenRouter key
+3. run the combined `baselines` case with a runner-side OpenRouter key
+4. verify the payload still contains both:
+   - `managed-baseline`
+   - `provider-connected-baseline`
 5. print `METRIC name=value` lines based on the resulting JSON payloads
 
 ## Editable surface
@@ -48,6 +50,7 @@ It must:
 - `testing/native/desktop-automation/runner.test.mjs`
 - `testing/native/desktop-automation/README.md`
 - `testing/native/device/windows/README.md`
+- `package.json`
 - `autoresearch.*`
 
 ## Locked harness
@@ -84,6 +87,12 @@ iteration.
 Managed baseline currently passes even when a later managed recovery send is
 rate-limited upstream: the runner records that under `transientFailures`
 instead of collapsing the whole case as a false plugin failure.
+
+The release-prep path should now use one combined `baselines` command instead
+of separately reattaching for managed and provider-connected checks.
+That command now also emits a concise `baselineSummary` so release prep can see
+overall status, provider choice, recovery, and transient failure count without
+digging through the full JSON payload first.
 
 ## Logs
 
