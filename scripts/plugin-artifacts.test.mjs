@@ -48,6 +48,41 @@ test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   const inspection = assertProductionPluginArtifacts({ root });
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
+  assert.deepEqual(inspection.mainBundle.forbiddenFragments, []);
+});
+
+test("assertProductionPluginArtifacts rejects Pi CLI interactive fragments in main.js", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    [
+      "console.log('production build');",
+      "// node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/index.js",
+      "",
+    ].join("\n")
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /interactive component index/i
+  );
+});
+
+test("assertProductionPluginArtifacts rejects the mobile-breaking node:url import-meta banner", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    [
+      'const __systemsculpt_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;',
+      "console.log('production build');",
+      "",
+    ].join("\n")
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /breaks mobile plugin startup/i
+  );
 });
 
 test("buildProductionPlugin revalidates the post-build artifact set", () => {

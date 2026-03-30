@@ -9,7 +9,9 @@ function logPiCatalogFailure(
 ): void {
   try {
     plugin.getLogger?.().warn("Pi text model catalog unavailable; falling back to managed model", {
-      error: error instanceof Error ? error.message : String(error || "Unknown error"),
+      metadata: {
+        error: error instanceof Error ? error.message : String(error || "Unknown error"),
+      },
     });
   } catch {
     // Keep catalog fallback non-fatal even if logging is unavailable.

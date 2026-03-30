@@ -1160,6 +1160,48 @@ export class DesktopAutomationBridge {
     ) as HTMLElement | null;
   }
 
+  private getAnyProviderSettingsPanel(): HTMLElement | null {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return document.querySelector(
+      '.systemsculpt-tab-content[data-tab="providers"]',
+    ) as HTMLElement | null;
+  }
+
+  private getProvidersPanelDiagnostics(): Record<string, unknown> {
+    const activePanel = this.getProviderSettingsPanel();
+    const mountedPanel = activePanel || this.getAnyProviderSettingsPanel();
+    const previewText =
+      mountedPanel instanceof HTMLElement
+        ? String(mountedPanel.textContent || "").trim().slice(0, 200) || null
+        : null;
+
+    return {
+      settings: this.getSettingsSnapshot(),
+      activePanelVisible: activePanel instanceof HTMLElement,
+      panelMounted: mountedPanel instanceof HTMLElement,
+      loading:
+        mountedPanel instanceof HTMLElement &&
+        Boolean(mountedPanel.querySelector(".ss-providers-loading")),
+      listVisible:
+        mountedPanel instanceof HTMLElement &&
+        Boolean(mountedPanel.querySelector(".ss-providers-list")),
+      error:
+        mountedPanel instanceof HTMLElement
+          ? String(
+              mountedPanel.querySelector<HTMLElement>(".ss-providers-error")
+                ?.textContent || "",
+            ).trim() || null
+          : null,
+      rowCount:
+        mountedPanel instanceof HTMLElement
+          ? mountedPanel.querySelectorAll(".ss-provider-row").length
+          : 0,
+      previewText,
+    };
+  }
+
   private async waitForProvidersPanelLoaded(): Promise<void> {
     await this.waitForValue(
       async () => this.getProviderSettingsPanel(),
@@ -1181,6 +1223,38 @@ export class DesktopAutomationBridge {
     );
   }
 
+  private async waitForProvidersPanelLoadedWithRecovery(
+    targetTab: string = "providers",
+  ): Promise<void> {
+    try {
+      await this.waitForProvidersPanelLoaded();
+      return;
+    } catch (initialError) {
+      const diagnosticsBeforeRefresh = this.getProvidersPanelDiagnostics();
+      let refreshError: string | null = null;
+
+      try {
+        await this.refreshVisibleSettingsTab(targetTab);
+      } catch (error) {
+        refreshError = toDiagnosticErrorMessage(error);
+      }
+
+      try {
+        await this.waitForProvidersPanelLoaded();
+      } catch (finalError) {
+        const diagnosticsAfterRefresh = this.getProvidersPanelDiagnostics();
+        const details = {
+          diagnosticsBeforeRefresh,
+          refreshError,
+          diagnosticsAfterRefresh,
+        };
+        throw new Error(
+          `${toDiagnosticErrorMessage(finalError)} ${JSON.stringify(details)}`,
+        );
+      }
+    }
+  }
+
   private async refreshVisibleSettingsTab(targetTab: string): Promise<void> {
     const snapshot = this.getSettingsSnapshot();
     if (!snapshot.settingsModalOpen || !snapshot.pluginSettingsOpen) {
@@ -1199,7 +1273,7 @@ export class DesktopAutomationBridge {
       await this.openSettingsAndWait("providers");
     }
     if (options?.waitForLoaded !== false) {
-      await this.waitForProvidersPanelLoaded();
+      await this.waitForProvidersPanelLoadedWithRecovery("providers");
     }
 
     const panel = this.getProviderSettingsPanel();

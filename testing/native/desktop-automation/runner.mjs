@@ -19,6 +19,7 @@ import {
   describeModelOptions,
   findProviderModelOption,
   normalizeProviderId,
+  resolveProviderModelPreferences,
 } from "../shared/model-inventory.mjs";
 
 export const CORE_CASES = ["model-switch", "chat-exact", "file-read", "file-write", "web-fetch"];
@@ -27,12 +28,16 @@ export const STRESS_CASES = ["reload-stress"];
 export const DEFAULT_STRESS_CASE = STRESS_CASES[0];
 export const CHATVIEW_STRESS_CASE = "chatview-stress";
 export const SETUP_BASELINE_CASE = "setup-baseline";
+export const BASELINE_SUITE_CASE = "baselines";
 export const MANAGED_BASELINE_CASE = "managed-baseline";
 export const PROVIDER_CONNECTED_BASELINE_CASE = "provider-connected-baseline";
 export const SOAK_CASES = [DEFAULT_STRESS_CASE, CHATVIEW_STRESS_CASE];
+const BASELINE_SUITE_CASES = [MANAGED_BASELINE_CASE, PROVIDER_CONNECTED_BASELINE_CASE];
 const MANAGED_SYSTEMSCULPT_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
-const WINDOWS_BASELINE_LOCAL_MODEL_ID = "local-pi-openai@@gpt-4.1";
-const WINDOWS_BASELINE_LOCAL_MODEL_LABEL = "gpt-4.1";
+const DESKTOP_BASELINE_PI_MODEL_ID = "local-pi-openrouter@@openai/gpt-5.4-mini";
+const DESKTOP_BASELINE_PI_MODEL_LABEL = "GPT-5.4 Mini";
+const DESKTOP_BASELINE_PI_PROVIDER_ID = "openrouter";
+const DESKTOP_BASELINE_PI_PROVIDER_LABEL = "OpenRouter";
 const PROVIDER_CONNECTED_PROVIDER_ID_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_ID";
 const PROVIDER_CONNECTED_API_KEY_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY";
 const PROVIDER_CONNECTED_API_KEYS_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS";
@@ -40,17 +45,7 @@ const PROVIDER_CONNECTED_MODEL_ID_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID"
 const DEFAULT_PROVIDER_CONNECTED_WAIT_TIMEOUT_MS = 90_000;
 const DEFAULT_TRANSIENT_SEND_ATTEMPTS = 3;
 const DEFAULT_TRANSIENT_SEND_PAUSE_MS = 5_000;
-const DEFAULT_PROVIDER_CONNECTED_MODEL_PREFERENCES = new Map([
-  [
-    "openrouter",
-    [
-      "openai/gpt-5.4-mini",
-      "openai/gpt-4.1-mini",
-      "google/gemini-2.5-flash",
-      "anthropic/claude-3.7-sonnet",
-    ],
-  ],
-]);
+const PROVIDER_CONNECTED_PREFERRED_PROVIDER_IDS = ["openrouter"];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,9 +115,15 @@ export function isTransientModelExecutionError(error) {
   return (
     /\b429\b/.test(message) ||
     staleCatalogModel ||
+    (
+      message.includes("timed out waiting for") &&
+      (message.includes("provider") || message.includes("settings panel"))
+    ) ||
     [
       "http 429",
       "status 429",
+      "this operation was aborted",
+      "the operation was aborted due to timeout",
       "provider returned error",
       "too many requests",
       "rate-limited",
@@ -266,13 +267,9 @@ function resolveProviderConnectedAuthConfig(env = process.env) {
 }
 
 function resolveProviderConnectedModelPreferences(providerId, authConfig) {
-  const normalizedProviderId = normalizeProviderId(providerId);
-  const defaults = DEFAULT_PROVIDER_CONNECTED_MODEL_PREFERENCES.get(normalizedProviderId) || [];
-  return Array.from(
-    new Set([
-      ...(Array.isArray(authConfig?.preferredModelIds) ? authConfig.preferredModelIds : []),
-      ...defaults,
-    ])
+  return resolveProviderModelPreferences(
+    providerId,
+    Array.isArray(authConfig?.preferredModelIds) ? authConfig.preferredModelIds : []
   );
 }
 
@@ -388,14 +385,62 @@ function resolveProviderConnectedCandidate(row, authConfig) {
   };
 }
 
+function providerConnectedCandidateRank(candidate) {
+  const preferredIndex = PROVIDER_CONNECTED_PREFERRED_PROVIDER_IDS.indexOf(
+    normalizeProviderId(candidate?.providerId)
+  );
+  return preferredIndex === -1 ? PROVIDER_CONNECTED_PREFERRED_PROVIDER_IDS.length : preferredIndex;
+}
+
 function resolveProviderConnectedCandidates(snapshot, authConfig) {
   return getProviderSettingsRows(snapshot)
-    .map((row) => resolveProviderConnectedCandidate(row, authConfig))
-    .filter(Boolean);
+    .map((row, index) => ({
+      index,
+      candidate: resolveProviderConnectedCandidate(row, authConfig),
+    }))
+    .filter((entry) => Boolean(entry.candidate))
+    .sort((left, right) => {
+      const rankDiff =
+        providerConnectedCandidateRank(left.candidate) - providerConnectedCandidateRank(right.candidate);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return left.index - right.index;
+    })
+    .map((entry) => entry.candidate);
+}
+
+function resolveDefaultProviderConnectedCandidate(snapshot, authConfig) {
+  if (authConfig.explicitProviderId) {
+    return null;
+  }
+
+  const openrouterRow = findProviderRow(snapshot, DESKTOP_BASELINE_PI_PROVIDER_ID);
+  if (!openrouterRow) {
+    return null;
+  }
+
+  return resolveProviderConnectedCandidate(openrouterRow, authConfig);
 }
 
 function buildProviderConnectedCredentialError(snapshot, authConfig) {
   const rows = getProviderSettingsRows(snapshot);
+
+  if (!authConfig.explicitProviderId) {
+    const openrouterRow = findProviderRow(snapshot, DESKTOP_BASELINE_PI_PROVIDER_ID);
+    if (openrouterRow) {
+      const suggestedSources = [
+        String(openrouterRow.apiKeyEnvVar || "").trim() || null,
+        PROVIDER_CONNECTED_API_KEYS_ENV,
+        `${PROVIDER_CONNECTED_PROVIDER_ID_ENV}=openrouter + ${PROVIDER_CONNECTED_API_KEY_ENV}`,
+      ].filter(Boolean);
+      return new Error(
+        `Provider-connected desktop automation defaults to OpenRouter. No API key was available for "${DESKTOP_BASELINE_PI_PROVIDER_LABEL}". Supply one through ${suggestedSources.join(
+          ", "
+        )}.`
+      );
+    }
+  }
 
   if (authConfig.explicitProviderId) {
     const row = findProviderRow(snapshot, authConfig.explicitProviderId);
@@ -628,6 +673,9 @@ export function caseList(caseName) {
   if (caseName === SETUP_BASELINE_CASE) {
     return [SETUP_BASELINE_CASE];
   }
+  if (caseName === BASELINE_SUITE_CASE) {
+    return [...BASELINE_SUITE_CASES];
+  }
   if (caseName === MANAGED_BASELINE_CASE) {
     return [MANAGED_BASELINE_CASE];
   }
@@ -682,6 +730,49 @@ export function summarizeStatusForReport(status, client = null) {
       currentModelName:
         typeof status?.chat?.currentModelName === "string" ? status.chat.currentModelName : null,
     },
+  };
+}
+
+export function buildBaselineSummary(results, statusSummary = null) {
+  const managed = results?.[MANAGED_BASELINE_CASE] || null;
+  const provider = results?.[PROVIDER_CONNECTED_BASELINE_CASE] || null;
+  if (!managed || !provider) {
+    return null;
+  }
+
+  const managedHostedTurnOk = Boolean(managed.hostedTurn || managed.recoveryTurn);
+  const managedRecoveryTurnOk = Boolean(managed.recoveryTurn);
+  const managedTransientFailureCount = Array.isArray(managed.transientFailures)
+    ? managed.transientFailures.length
+    : 0;
+  const providerConnectedOk = Boolean(provider.providerTurn);
+  const providerRecoverySelectionOk =
+    provider?.recoverySelection?.selectedModelId === MANAGED_SYSTEMSCULPT_MODEL_ID;
+  const finalChatModelId =
+    typeof statusSummary?.chat?.selectedModelId === "string" ? statusSummary.chat.selectedModelId : null;
+  const finalManagedSelectionOk =
+    finalChatModelId === null ? null : finalChatModelId === MANAGED_SYSTEMSCULPT_MODEL_ID;
+
+  return {
+    ok:
+      managedHostedTurnOk &&
+      providerConnectedOk &&
+      providerRecoverySelectionOk &&
+      (finalManagedSelectionOk !== false),
+    managed: {
+      hostedTurnOk: managedHostedTurnOk,
+      recoveryTurnOk: managedRecoveryTurnOk,
+      transientFailureCount: managedTransientFailureCount,
+    },
+    provider: {
+      connectedOk: providerConnectedOk,
+      providerId: typeof provider?.provider?.providerId === "string" ? provider.provider.providerId : null,
+      modelId:
+        typeof provider?.providerModel?.modelId === "string" ? provider.providerModel.modelId : null,
+      recoverySelectionOk: providerRecoverySelectionOk,
+    },
+    finalChatModelId,
+    finalManagedSelectionOk,
   };
 }
 
@@ -740,14 +831,14 @@ async function loadModelInventory(client, options = {}) {
   };
 }
 
-function pickWindowsLocalFallbackOption(options) {
+function pickDesktopPiBaselineOption(options) {
   return (
-    options.find((option) => option && option.value === WINDOWS_BASELINE_LOCAL_MODEL_ID) || {
-      value: WINDOWS_BASELINE_LOCAL_MODEL_ID,
-      label: WINDOWS_BASELINE_LOCAL_MODEL_LABEL,
+    options.find((option) => option && option.value === DESKTOP_BASELINE_PI_MODEL_ID) || {
+      value: DESKTOP_BASELINE_PI_MODEL_ID,
+      label: DESKTOP_BASELINE_PI_MODEL_LABEL,
       providerAuthenticated: false,
-      providerId: "local-pi-openai",
-      providerLabel: "OpenAI",
+      providerId: DESKTOP_BASELINE_PI_PROVIDER_ID,
+      providerLabel: DESKTOP_BASELINE_PI_PROVIDER_LABEL,
       section: "pi",
     }
   );
@@ -802,7 +893,7 @@ async function pickReadyModels(client, options = {}) {
     ready,
     candidates,
     selected: preferredSecond ? [preferredFirst, preferredSecond] : [preferredFirst],
-    fallbackLocalOption: pickWindowsLocalFallbackOption(availableOptions),
+    fallbackLocalOption: pickDesktopPiBaselineOption(availableOptions),
   };
 }
 
@@ -1032,6 +1123,15 @@ function isDisconnectedProviderRow(row) {
   return !Boolean(row?.hasAnyAuth) && !Boolean(row?.hasStoredCredential) && !Boolean(row?.display?.ready);
 }
 
+function isEnvironmentFallbackProviderRow(row) {
+  return (
+    String(row?.source || "").trim() === "environment_or_fallback" &&
+    Boolean(row?.hasAnyAuth) &&
+    !Boolean(row?.hasStoredCredential) &&
+    Boolean(row?.display?.ready)
+  );
+}
+
 function isConnectedApiKeyProviderRow(row) {
   return (
     String(row?.source || "").trim() === "api_key" &&
@@ -1041,34 +1141,156 @@ function isConnectedApiKeyProviderRow(row) {
   );
 }
 
+async function waitForProviderConnectedState(client, providerId, options = {}) {
+  const timeoutMs = Math.max(
+    1000,
+    Number(options.timeoutMs) || DEFAULT_PROVIDER_CONNECTED_WAIT_TIMEOUT_MS
+  );
+  const intervalMs = Math.max(100, Number(options.intervalMs) || 500);
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = options.initialSnapshot || null;
+
+  const matchState = (snapshot) => {
+    const row = findProviderRow(snapshot, providerId);
+    if (!row) {
+      return null;
+    }
+    if (isConnectedApiKeyProviderRow(row)) {
+      return {
+        snapshot,
+        row,
+        mode: "api_key",
+      };
+    }
+    if (options.allowEnvironmentFallback === true && isEnvironmentFallbackProviderRow(row)) {
+      return {
+        snapshot,
+        row,
+        mode: "environment_or_fallback",
+      };
+    }
+    return null;
+  };
+
+  if (lastSnapshot) {
+    assertProvidersSnapshotReady(lastSnapshot, options.label || "Providers settings");
+    const matched = matchState(lastSnapshot);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  while (Date.now() < deadline) {
+    const snapshot = await client.getProvidersSnapshot({
+      ensureOpen: false,
+      waitForLoaded: true,
+      preflightRefresh: false,
+    });
+    assertProvidersSnapshotReady(snapshot, options.label || "Providers settings");
+    const matched = matchState(snapshot);
+    if (matched) {
+      return matched;
+    }
+    lastSnapshot = snapshot;
+    await sleep(intervalMs);
+  }
+
+  const lastRow = summarizeProviderRow(findProviderRow(lastSnapshot, providerId));
+  throw new Error(
+    `Timed out waiting for ${options.label || providerId} connected state. Last provider row: ${JSON.stringify(lastRow)}`
+  );
+}
+
+async function waitForProviderClearedState(client, providerId, options = {}) {
+  const timeoutMs = Math.max(
+    1000,
+    Number(options.timeoutMs) || DEFAULT_PROVIDER_CONNECTED_WAIT_TIMEOUT_MS
+  );
+  const intervalMs = Math.max(100, Number(options.intervalMs) || 500);
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = options.initialSnapshot || null;
+
+  const matchState = (snapshot) => {
+    const row = findProviderRow(snapshot, providerId);
+    if (!row) {
+      return null;
+    }
+    if (isDisconnectedProviderRow(row)) {
+      return {
+        snapshot,
+        row,
+        mode: "disconnected",
+      };
+    }
+    if (options.allowEnvironmentFallback !== false && isEnvironmentFallbackProviderRow(row)) {
+      return {
+        snapshot,
+        row,
+        mode: "environment_or_fallback",
+      };
+    }
+    return null;
+  };
+
+  if (lastSnapshot) {
+    assertProvidersSnapshotReady(lastSnapshot, options.label || "Providers settings");
+    const matched = matchState(lastSnapshot);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  while (Date.now() < deadline) {
+    const snapshot = await client.getProvidersSnapshot({
+      ensureOpen: false,
+      waitForLoaded: true,
+      preflightRefresh: false,
+    });
+    assertProvidersSnapshotReady(snapshot, options.label || "Providers settings");
+    const matched = matchState(snapshot);
+    if (matched) {
+      return matched;
+    }
+    lastSnapshot = snapshot;
+    await sleep(intervalMs);
+  }
+
+  const lastRow = summarizeProviderRow(findProviderRow(lastSnapshot, providerId));
+  throw new Error(
+    `Timed out waiting for ${options.label || providerId} cleared state. Last provider row: ${JSON.stringify(lastRow)}`
+  );
+}
+
 async function clearProviderAuthAndWait(client, candidate, options = {}) {
   const initialSnapshot = await client.clearProviderAuth(candidate.providerId);
-  const waitResult = await waitForProviderRow(
+  const waitResult = await waitForProviderClearedState(
     client,
     candidate.providerId,
-    (row) => isDisconnectedProviderRow(row),
     {
       initialSnapshot,
       timeoutMs: options.timeoutMs,
-      label: `${candidate.label} disconnected state`,
+      label: `${candidate.label} cleared state`,
+      allowEnvironmentFallback: options.allowEnvironmentFallback,
     }
   );
-  await waitForProviderModelDeauthenticated(client, candidate.providerId, {
-    timeoutMs: options.timeoutMs,
-  });
+  if (waitResult.mode === "disconnected") {
+    await waitForProviderModelDeauthenticated(client, candidate.providerId, {
+      timeoutMs: options.timeoutMs,
+    });
+  }
   return waitResult;
 }
 
 async function connectProviderApiKeyAndWait(client, candidate, options = {}) {
   const initialSnapshot = await client.setProviderApiKey(candidate.providerId, candidate.apiKey);
-  const waitResult = await waitForProviderRow(
+  const waitResult = await waitForProviderConnectedState(
     client,
     candidate.providerId,
-    (row) => isConnectedApiKeyProviderRow(row),
     {
       initialSnapshot,
       timeoutMs: options.timeoutMs,
-      label: `${candidate.label} connected via API key`,
+      label: `${candidate.label} connected state`,
+      allowEnvironmentFallback: options.allowEnvironmentFallback,
     }
   );
   const { option } = await waitForProviderModelOption(client, candidate.providerId, {
@@ -1083,13 +1305,17 @@ async function connectProviderApiKeyAndWait(client, candidate, options = {}) {
   return {
     snapshot: waitResult.snapshot,
     row: waitResult.row,
+    mode: waitResult.mode,
     model: option,
   };
 }
 
 async function runProviderConnectedCandidateCase(client, managedOption, candidate, options = {}) {
   const preClear = await clearProviderAuthAndWait(client, candidate, options);
-  const connected = await connectProviderApiKeyAndWait(client, candidate, options);
+  const connected = await connectProviderApiKeyAndWait(client, candidate, {
+    ...options,
+    allowEnvironmentFallback: preClear.mode === "environment_or_fallback",
+  });
 
   const providerTurn = await runManagedExactTurn(
     client,
@@ -1098,38 +1324,53 @@ async function runProviderConnectedCandidateCase(client, managedOption, candidat
   );
 
   const postClear = await clearProviderAuthAndWait(client, candidate, options);
-  const deauthenticatedInventory = await client.listModels({ refresh: true, preflightRefresh: false });
-  const blockedProviderModel =
-    findProviderModelOption(deauthenticatedInventory, candidate.providerId, {
-      authenticated: false,
-      modelId: connected.model.value,
-      preferredSections: ["pi", "local"],
-    }) ||
-    findProviderModelOption(deauthenticatedInventory, candidate.providerId, {
-      authenticated: false,
-      preferredSections: ["pi", "local"],
-    });
+  let blockedProviderSend = null;
+  let providerTurnAfterClear = null;
 
-  const blockedModelId = String(
-    blockedProviderModel?.value || connected.model.value || providerTurn.selectedModelId || ""
-  ).trim();
-  await ensureChatModelSelection(client, blockedModelId, {
-    reset: true,
-    label: `${candidate.label} blocked provider model selection`,
-  });
-  const blockedProviderSend = await expectChatSendFailure(
-    client,
-    {
-      text: "Reply with OK.",
-      includeContextFiles: false,
-      webSearchEnabled: false,
-      approvalMode: "interactive",
-    },
-    {
-      label: `${candidate.label} send after auth clear`,
-      expectedTarget: "providers",
-    }
-  );
+  if (postClear.mode === "disconnected") {
+    const deauthenticatedInventory = await client.listModels({ refresh: true, preflightRefresh: false });
+    const blockedProviderModel =
+      findProviderModelOption(deauthenticatedInventory, candidate.providerId, {
+        authenticated: false,
+        modelId: connected.model.value,
+        preferredSections: ["pi", "local"],
+      }) ||
+      findProviderModelOption(deauthenticatedInventory, candidate.providerId, {
+        authenticated: false,
+        preferredSections: ["pi", "local"],
+      });
+
+    const blockedModelId = String(
+      blockedProviderModel?.value || connected.model.value || providerTurn.selectedModelId || ""
+    ).trim();
+    await ensureChatModelSelection(client, blockedModelId, {
+      reset: true,
+      label: `${candidate.label} blocked provider model selection`,
+    });
+    blockedProviderSend = {
+      modelId: blockedModelId,
+      matchedProviderTurnModelId: blockedModelId === connected.model.value,
+      error: await expectChatSendFailure(
+        client,
+        {
+          text: "Reply with OK.",
+          includeContextFiles: false,
+          webSearchEnabled: false,
+          approvalMode: "interactive",
+        },
+        {
+          label: `${candidate.label} send after auth clear`,
+          expectedTarget: "providers",
+        }
+      ),
+    };
+  } else {
+    providerTurnAfterClear = await runManagedExactTurn(
+      client,
+      connected.model,
+      `${buildProviderTurnTokenPrefix(candidate.providerId)}_AFTER_CLEAR`
+    );
+  }
 
   const recoverySelection = await ensureChatModelSelection(client, managedOption.value, {
     reset: true,
@@ -1144,13 +1385,11 @@ async function runProviderConnectedCandidateCase(client, managedOption, candidat
       label: candidate.label,
       credentialSource: candidate.credentialSource,
       apiKeyEnvVar: candidate.apiKeyEnvVar,
+      connectionMode: connected.mode,
     },
     providerTurn,
-    blockedProviderSend: {
-      modelId: blockedModelId,
-      matchedProviderTurnModelId: blockedModelId === connected.model.value,
-      error: blockedProviderSend,
-    },
+    blockedProviderSend,
+    providerTurnAfterClear,
     recoverySelection: {
       model: buildModelSummary(managedOption),
       selectedModelId:
@@ -1228,7 +1467,7 @@ export async function runSetupBaselineCase(client) {
 
   await client.ensureChatOpen({
     reset: true,
-    selectedModelId: WINDOWS_BASELINE_LOCAL_MODEL_ID,
+    selectedModelId: DESKTOP_BASELINE_PI_MODEL_ID,
   });
   const providersError = await expectChatSendFailure(
     client,
@@ -1258,6 +1497,7 @@ export async function runSetupBaselineCase(client) {
 export async function runManagedBaselineCase(client) {
   const inventory = await loadModelInventory(client);
   const managedOption = inventory.managedOption;
+  const piBaselineModel = pickDesktopPiBaselineOption(inventory.options);
   if (!managedOption) {
     throw new Error("Desktop automation could not find the managed SystemSculpt model.");
   }
@@ -1277,23 +1517,29 @@ export async function runManagedBaselineCase(client) {
     "hosted"
   );
 
-  await client.ensureChatOpen({
-    reset: true,
-    selectedModelId: WINDOWS_BASELINE_LOCAL_MODEL_ID,
-  });
-  const blockedLocalPi = await expectChatSendFailure(
-    client,
-    {
-      text: "Reply with OK.",
-      includeContextFiles: false,
-      webSearchEnabled: false,
-      approvalMode: "interactive",
-    },
-    {
-      label: "Local Pi unavailable baseline send",
-      expectedTarget: "providers",
-    }
-  );
+  let localPiTurn = null;
+  let blockedLocalPi = null;
+  if (piBaselineModel.providerAuthenticated) {
+    localPiTurn = await runManagedExactTurn(client, piBaselineModel, "DESKTOP_PI_BASELINE");
+  } else {
+    await client.ensureChatOpen({
+      reset: true,
+      selectedModelId: DESKTOP_BASELINE_PI_MODEL_ID,
+    });
+    blockedLocalPi = await expectChatSendFailure(
+      client,
+      {
+        text: "Reply with OK.",
+        includeContextFiles: false,
+        webSearchEnabled: false,
+        approvalMode: "interactive",
+      },
+      {
+        label: "Local Pi unavailable baseline send",
+        expectedTarget: "providers",
+      }
+    );
+  }
 
   const recoveryOutcome = await captureManagedTurnOutcome(
     client,
@@ -1314,11 +1560,15 @@ export async function runManagedBaselineCase(client) {
     availableModelCount: inventory.options.length,
     readyModelCount: inventory.ready.length,
     managedModel: buildModelSummary(managedOption),
+    localPiModel: buildModelSummary(piBaselineModel),
     hostedTurn: hostedOutcome.turn,
-    blockedLocalPi: {
-      modelId: WINDOWS_BASELINE_LOCAL_MODEL_ID,
-      error: blockedLocalPi,
-    },
+    localPiTurn,
+    blockedLocalPi: blockedLocalPi
+      ? {
+          modelId: DESKTOP_BASELINE_PI_MODEL_ID,
+          error: blockedLocalPi,
+        }
+      : null,
     recoveryTurn: recoveryOutcome.turn,
     transientFailures,
   };
@@ -1342,7 +1592,10 @@ export async function runProviderConnectedBaselineCase(client, options = {}) {
     waitForLoaded: true,
   });
   assertProvidersSnapshotReady(providerSnapshot, "Provider-connected baseline");
-  const candidates = resolveProviderConnectedCandidates(providerSnapshot, authConfig);
+  const defaultCandidate = resolveDefaultProviderConnectedCandidate(providerSnapshot, authConfig);
+  const candidates = defaultCandidate
+    ? [defaultCandidate]
+    : resolveProviderConnectedCandidates(providerSnapshot, authConfig);
   if (candidates.length < 1) {
     throw buildProviderConnectedCredentialError(providerSnapshot, authConfig);
   }
@@ -1350,13 +1603,20 @@ export async function runProviderConnectedBaselineCase(client, options = {}) {
   const candidateFailures = [];
   for (const candidate of candidates) {
     try {
-      const result = await runProviderConnectedCandidateCase(
-        client,
-        managedOption,
-        candidate,
+      const result = await retryTransientOperation(
+        async () =>
+          await runProviderConnectedCandidateCase(
+            client,
+            managedOption,
+            candidate,
+            {
+              ...options,
+              authConfig,
+            }
+          ),
         {
-          ...options,
-          authConfig,
+          attempts: DEFAULT_TRANSIENT_SEND_ATTEMPTS,
+          pauseMs: DEFAULT_TRANSIENT_SEND_PAUSE_MS,
         }
       );
       return {
@@ -2203,6 +2463,19 @@ export async function runDesktopAutomation(options, dependencies = {}) {
   }
 
   const status = await client.status();
+  const statusSummary = summarizeStatusForReport(status, client);
+  const lastIterationResults = iterations[iterations.length - 1]?.results || null;
+  const baselineSummary = buildBaselineSummary(lastIterationResults, statusSummary);
+  if (baselineSummary) {
+    log(
+      `[desktop-automation] Baselines summary overall=${baselineSummary.ok ? "ok" : "failed"} ` +
+        `managed=${baselineSummary.managed.hostedTurnOk ? "ok" : "failed"} ` +
+        `transientFailures=${baselineSummary.managed.transientFailureCount} ` +
+        `provider=${baselineSummary.provider.providerId || "unknown"} ` +
+        `providerConnected=${baselineSummary.provider.connectedOk ? "ok" : "failed"} ` +
+        `recovery=${baselineSummary.provider.recoverySelectionOk ? "ok" : "failed"}`
+    );
+  }
   const payload = {
     bridge: {
       baseUrl: client.baseUrl,
@@ -2219,7 +2492,8 @@ export async function runDesktopAutomation(options, dependencies = {}) {
     fixtureDir,
     seededFixtures,
     status,
-    statusSummary: summarizeStatusForReport(status, client),
+    statusSummary,
+    baselineSummary,
     repeat,
     iterations,
   };

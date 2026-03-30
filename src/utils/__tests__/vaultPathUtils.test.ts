@@ -1,4 +1,9 @@
-import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../vaultPathUtils";
+import {
+  isAbsoluteFilesystemPath,
+  joinFilesystemPath,
+  normalizeVaultRelativePath,
+  resolveAbsoluteVaultPath,
+} from "../vaultPathUtils";
 
 describe("resolveAbsoluteVaultPath", () => {
   it("uses adapter getFullPath when available", () => {
@@ -57,5 +62,21 @@ describe("isAbsoluteFilesystemPath", () => {
 
   it("returns false for relative paths", () => {
     expect(isAbsoluteFilesystemPath("SystemSculpt/Studio/Test.systemsculpt")).toBe(false);
+  });
+});
+
+describe("normalizeVaultRelativePath", () => {
+  it("normalizes separators and trims vault-relative wrappers", () => {
+    expect(normalizeVaultRelativePath(" /SystemSculpt\\Studio/Test.systemsculpt/ ")).toBe(
+      "SystemSculpt/Studio/Test.systemsculpt",
+    );
+  });
+});
+
+describe("joinFilesystemPath", () => {
+  it("joins windows filesystem bases with vault-relative segments", () => {
+    expect(joinFilesystemPath("C:\\vault", ".systemsculpt/pi-agent/auth.json")).toBe(
+      "C:\\vault\\.systemsculpt\\pi-agent\\auth.json",
+    );
   });
 });

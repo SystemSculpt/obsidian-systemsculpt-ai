@@ -158,32 +158,56 @@ export function listAndroidDevices(adbPath = resolveAdbPath()) {
     .filter(device => device.serial && device.state !== "offline");
 }
 
-export function selectAndroidDevice({ adbPath = resolveAdbPath(), serial = null, preferEmulator = false } = {}) {
-  const devices = listAndroidDevices(adbPath).filter(device => device.state === "device");
+export function resolveAndroidDeviceSelection(
+  devices,
+  { serial = null, preferEmulator = false, allowMissing = false } = {}
+) {
+  const onlineDevices = Array.isArray(devices) ? devices.filter(device => device.state === "device") : [];
   if (serial) {
-    const matched = devices.find(device => device.serial === serial);
+    const matched = onlineDevices.find(device => device.serial === serial);
     if (!matched) {
+      if (allowMissing) {
+        return null;
+      }
       fail(`No connected Android device matched serial "${serial}".`);
     }
     return matched;
   }
 
-  if (devices.length === 0) {
+  if (onlineDevices.length === 0) {
+    if (allowMissing) {
+      return null;
+    }
     fail("No Android device or emulator is connected.");
   }
 
-  if (devices.length === 1) {
-    return devices[0];
+  if (onlineDevices.length === 1) {
+    return onlineDevices[0];
   }
 
   if (preferEmulator) {
-    const emulator = devices.find(device => device.serial.startsWith("emulator-"));
+    const emulator = onlineDevices.find(device => device.serial.startsWith("emulator-"));
     if (emulator) {
       return emulator;
     }
   }
 
   fail("Multiple Android devices are connected. Re-run with --serial.");
+}
+
+export function selectAndroidDevice({ adbPath = resolveAdbPath(), serial = null, preferEmulator = false } = {}) {
+  return resolveAndroidDeviceSelection(listAndroidDevices(adbPath), {
+    serial,
+    preferEmulator,
+  });
+}
+
+export function findAndroidDevice({ adbPath = resolveAdbPath(), serial = null, preferEmulator = false } = {}) {
+  return resolveAndroidDeviceSelection(listAndroidDevices(adbPath), {
+    serial,
+    preferEmulator,
+    allowMissing: true,
+  });
 }
 
 export function sleep(ms) {
@@ -204,6 +228,28 @@ export async function waitForDeviceBoot({ adbPath = resolveAdbPath(), serial, ti
   }
 
   fail(`Timed out waiting for Android device ${serial || "(auto)"} to finish booting.`);
+}
+
+export async function waitForAndroidDeviceSelection({
+  adbPath = resolveAdbPath(),
+  serial = null,
+  preferEmulator = false,
+  timeoutMs = 180000,
+} = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const matched = findAndroidDevice({
+      adbPath,
+      serial,
+      preferEmulator,
+    });
+    if (matched) {
+      return matched;
+    }
+    await sleep(1000);
+  }
+
+  fail(`Timed out waiting for Android device ${serial || "(auto)"} to appear.`);
 }
 
 export function shellQuote(value) {

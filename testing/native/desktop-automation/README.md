@@ -17,6 +17,7 @@ then this bridge runner owns the no-focus churn after the vault is already open.
 ```bash
 npm run test:native:desktop
 npm run test:native:desktop:extended
+npm run test:native:desktop:baselines
 npm run test:native:desktop:provider-connected
 npm run test:native:desktop:chatview-stress
 npm run test:native:desktop:stress
@@ -75,6 +76,10 @@ Current case profiles:
   - clear the provider auth again
   - prove the same provider path now fails with actionable Providers guidance
   - recover back to the managed SystemSculpt model
+- `baselines`
+  - run `managed-baseline` and `provider-connected-baseline` back to back against the same live bridge attach
+  - intended as the one-command release-prep verdict for no-focus managed and provider-connected parity
+  - prints a concise combined baselines summary before the final JSON payload, including `transientFailures`
 - `managed-baseline`
   - prove at least one real hosted SystemSculpt turn succeeds on the live vault
   - switch to the canonical unavailable local-Pi model and verify the failure routes cleanly to Providers guidance
@@ -106,6 +111,7 @@ Supported inputs:
   - the runner uses the bridge metadata to discover which env var name belongs to each provider
 
 If no explicit provider is pinned, the runner selects the first non-local provider row that supports API-key auth and has a matching key available from the inputs above.
+That same env-driven provider selection applies to `baselines`, which runs the managed and provider-connected checks back to back in one pass.
 
 ## Bootstrap behavior
 

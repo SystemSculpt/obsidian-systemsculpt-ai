@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
+import { postJsonStreaming } from "../utils/streaming";
 
 export type PlatformRequestInput = {
   url: string;
@@ -23,6 +24,16 @@ export class PlatformRequestClient {
       ...(input.headers || {}),
     };
     const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
+
+    if (input.stream) {
+      return await postJsonStreaming(
+        input.url,
+        headers,
+        input.body,
+        transport !== "fetch",
+        input.signal,
+      );
+    }
 
     if (transport === "fetch" && typeof fetch === "function") {
       try {
@@ -51,13 +62,6 @@ export class PlatformRequestClient {
     const status = result.status || 500;
     const textBody =
       typeof result.text === "string" ? result.text : JSON.stringify(result.json || {});
-
-    if (input.stream && status < 400) {
-      return new Response(textBody, {
-        status,
-        headers: { "Content-Type": "text/event-stream" },
-      });
-    }
 
     return new Response(textBody, {
       status,

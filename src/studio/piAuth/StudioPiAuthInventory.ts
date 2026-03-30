@@ -1,5 +1,8 @@
-import { readFile } from "fs/promises";
 import type SystemSculptPlugin from "../../main";
+import type {
+  AuthCredential,
+  PiAuthStorageInstance,
+} from "../../services/pi/PiSdkAuthStorage";
 import { resolvePiAuthPath } from "../../services/pi/PiSdkStoragePaths";
 import {
   getApiKeyEnvVarForProvider,
@@ -34,20 +37,7 @@ export type StudioPiProviderAuthRecord = {
   oauthExpiresAt: number | null;
 };
 
-type StoredApiKeyCredential = {
-  type?: "api_key";
-  key?: unknown;
-};
-
-type StoredOAuthCredential = {
-  type?: "oauth";
-  expires?: unknown;
-};
-
-type StoredAuthCredential =
-  | StoredApiKeyCredential
-  | StoredOAuthCredential
-  | Record<string, unknown>;
+type StoredAuthCredential = AuthCredential | Record<string, unknown>;
 
 type StoredAuthData = Record<string, StoredAuthCredential>;
 
@@ -55,6 +45,7 @@ type StudioPiAuthInventoryContext = {
   plugin?: SystemSculptPlugin | null;
   authPath?: string | null;
   authData?: Record<string, unknown> | null;
+  storage?: PiAuthStorageInstance | null;
 };
 
 export type StudioPiProviderAuthRecordsOptions = StudioPiAuthInventoryContext & {
@@ -67,24 +58,51 @@ function normalizeStoredAuthData(value: unknown): StoredAuthData {
     : {};
 }
 
-async function loadStoredAuthData(
+function loadPiAuthStorageFactory():
+  | ((authPath?: string) => PiAuthStorageInstance)
+  | null {
+  const runtimeRequire = typeof require === "function" ? require : (globalThis as any).require;
+  if (typeof runtimeRequire !== "function") {
+    return null;
+  }
+
+  try {
+    return (runtimeRequire("../../services/pi/PiSdkAuthStorage") as typeof import("../../services/pi/PiSdkAuthStorage"))
+      .createBundledPiAuthStorage;
+  } catch {
+    return null;
+  }
+}
+
+function resolveInventoryAuthStorage(
   context: StudioPiAuthInventoryContext = {},
-): Promise<StoredAuthData> {
+): PiAuthStorageInstance | null {
+  if (context.storage) {
+    return context.storage;
+  }
+
   if (context.authData) {
-    return normalizeStoredAuthData(context.authData);
+    return null;
   }
 
   const authPath = String(context.authPath ?? resolvePiAuthPath(context.plugin) ?? "").trim();
   if (!authPath) {
-    return {};
+    return null;
   }
 
-  try {
-    const raw = await readFile(authPath, "utf8");
-    return normalizeStoredAuthData(JSON.parse(raw));
-  } catch {
-    return {};
+  const createPiAuthStorage = loadPiAuthStorageFactory();
+  return createPiAuthStorage ? createPiAuthStorage(authPath) : null;
+}
+
+function loadStoredAuthData(
+  context: StudioPiAuthInventoryContext = {},
+  storage: PiAuthStorageInstance | null = resolveInventoryAuthStorage(context),
+): StoredAuthData {
+  if (context.authData) {
+    return normalizeStoredAuthData(context.authData);
   }
+
+  return storage ? normalizeStoredAuthData(storage.getAll()) : {};
 }
 
 function normalizeCredentialType(credentialType: unknown): StudioPiAuthCredentialType {
@@ -104,8 +122,30 @@ function normalizeAuthSource(
   return "none";
 }
 
-function hasStoredCredential(credential: StoredAuthCredential | undefined): boolean {
+function hasStoredCredential(
+  provider: string,
+  credential: StoredAuthCredential | undefined,
+  storage: PiAuthStorageInstance | null = null,
+): boolean {
+  if (storage && typeof storage.has === "function") {
+    return storage.has(provider);
+  }
   return Boolean(credential && typeof credential === "object" && !Array.isArray(credential));
+}
+
+function getOAuthExpiry(
+  credential: StoredAuthCredential | undefined,
+): number | null {
+  if (
+    credential &&
+    typeof credential === "object" &&
+    !Array.isArray(credential) &&
+    credential.type === "oauth" &&
+    typeof (credential as { expires?: unknown }).expires === "number"
+  ) {
+    return (credential as { expires: number }).expires;
+  }
+  return null;
 }
 
 function hasEnvironmentApiKey(provider: string): boolean {
@@ -123,8 +163,12 @@ function hasEnvironmentApiKey(provider: string): boolean {
 function resolveHasAnyAuth(
   provider: string,
   credential: StoredAuthCredential | undefined,
+  storage: PiAuthStorageInstance | null = null,
 ): boolean {
-  return hasStoredCredential(credential) || hasEnvironmentApiKey(provider);
+  if (storage && typeof storage.hasAuth === "function") {
+    return storage.hasAuth(provider);
+  }
+  return hasStoredCredential(provider, credential, storage) || hasEnvironmentApiKey(provider);
 }
 
 export function listStudioPiOAuthProviders(
@@ -136,7 +180,8 @@ export function listStudioPiOAuthProviders(
 export async function listStudioPiProviderAuthRecords(
   options: StudioPiProviderAuthRecordsOptions = {},
 ): Promise<StudioPiProviderAuthRecord[]> {
-  const authData = await loadStoredAuthData(options);
+  const storage = resolveInventoryAuthStorage(options);
+  const authData = loadStoredAuthData(options, storage);
   const providerIds = new Set<string>();
   const oauthProviders = listStudioPiOAuthProviders(options);
   const oauthById = new Map<string, StudioPiOAuthProvider>();
@@ -172,12 +217,9 @@ export async function listStudioPiProviderAuthRecords(
 
   for (const provider of providerIds) {
     const credential = authData[provider];
-    const hasAnyAuth = resolveHasAnyAuth(provider, credential);
+    const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage);
     const credentialType = normalizeCredentialType(credential?.type);
-    const oauthExpiresAt =
-      credentialType === "oauth" && typeof credential?.expires === "number"
-        ? credential.expires
-        : null;
+    const oauthExpiresAt = getOAuthExpiry(credential);
 
     records.push({
       provider,
@@ -187,7 +229,7 @@ export async function listStudioPiProviderAuthRecords(
         undefined,
       supportsOAuth: supportsOAuthLogin(provider, oauthById),
       hasAnyAuth,
-      hasStoredCredential: hasStoredCredential(credential),
+      hasStoredCredential: hasStoredCredential(provider, credential, storage),
       source: normalizeAuthSource(credential?.type, hasAnyAuth),
       credentialType,
       oauthExpiresAt,
@@ -210,9 +252,10 @@ export async function readStudioPiProviderAuthState(
     return { provider: "", hasAnyAuth: false, source: "none" };
   }
 
-  const authData = await loadStoredAuthData(context);
+  const storage = resolveInventoryAuthStorage(context);
+  const authData = loadStoredAuthData(context, storage);
   const credential = authData[provider];
-  const hasAnyAuth = resolveHasAnyAuth(provider, credential);
+  const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage);
   return {
     provider,
     hasAnyAuth,

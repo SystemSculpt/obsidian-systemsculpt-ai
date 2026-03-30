@@ -3,7 +3,7 @@
 /**
  * Unified, quiet checker for the Obsidian plugin.
  * - TypeScript typecheck (noEmit)
- * - In-memory esbuild bundle resolution of src/main.ts
+ * - Real production build + artifact validation
  * - Release workflow node:test coverage
  * - Jest unit tests
  * Prints concise summary on success; details only on failure or --verbose.
@@ -12,7 +12,7 @@
 import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import builtins from "builtin-modules";
+import { buildProductionPlugin } from './plugin-artifacts.mjs';
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
@@ -61,37 +61,18 @@ async function checkBundle() {
   if (!fs.existsSync(entry)) {
     return { ok: true, ms: 0, note: 'no-entry' };
   }
+
   const started = Date.now();
-  const esbuild = await import('esbuild');
   try {
-    await esbuild.build({
-      entryPoints: [entry],
-      bundle: true,
-      format: 'cjs',
-      platform: 'browser',
-      target: 'es2018',
-      write: false,
-      logLevel: 'silent',
-      external: [
-        'obsidian',
-        'electron',
-        '@codemirror/autocomplete',
-        '@codemirror/collab',
-        '@codemirror/commands',
-        '@codemirror/language',
-        '@codemirror/lint',
-        '@codemirror/search',
-        '@codemirror/state',
-        '@codemirror/view',
-        '@lezer/common',
-        '@lezer/highlight',
-        '@lezer/lr',
-        ...builtins,
-      ],
-      loader: { '.wasm': 'dataurl' },
-      treeShaking: true,
+    const inspection = buildProductionPlugin({
+      root,
+      stdio: 'pipe',
     });
-    return { ok: true, ms: Date.now() - started };
+    return {
+      ok: true,
+      ms: Date.now() - started,
+      note: inspection.mainBundle.formattedSize,
+    };
   } catch (error) {
     const message = error?.message || String(error);
     return { ok: false, ms: Date.now() - started, message };
@@ -112,7 +93,21 @@ async function main() {
 
   if (!skipTests) {
     checks.push('script-tests', 'tests');
-    const scriptTests = run('node --test scripts/release-plugin.test.mjs scripts/plugin-artifacts.test.mjs');
+    const scriptTests = run(
+      'node --test ' +
+        [
+          'scripts/release-plugin.test.mjs',
+          'scripts/plugin-artifacts.test.mjs',
+          'scripts/check-native-release-gates.test.mjs',
+          'testing/native/device/android/utils.test.mjs',
+          'testing/native/device/windows/bootstrap.test.mjs',
+          'testing/native/device/windows/clean-install-parity.test.mjs',
+          'testing/native/device/windows/interactive-task.test.mjs',
+          'testing/native/device/windows/remote-run.test.mjs',
+          'testing/native/device/windows/run-clean-install-parity.test.mjs',
+          'testing/native/device/windows/run-desktop-automation.test.mjs',
+        ].join(' ')
+    );
     results.push({ name: 'script-tests', ...scriptTests });
 
     let tests;

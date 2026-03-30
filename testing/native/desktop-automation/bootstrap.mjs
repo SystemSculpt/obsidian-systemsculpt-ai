@@ -42,6 +42,18 @@ async function readJsonIfExists(filePath) {
   }
 }
 
+async function readMtimeMsIfExists(filePath) {
+  try {
+    const stats = await fs.stat(filePath);
+    return Number.isFinite(stats.mtimeMs) ? Number(stats.mtimeMs) : null;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -155,32 +167,34 @@ function hasExplicitTargetSelector(options = {}) {
 }
 
 async function inferPluginTargetFromDiscovery(targets, options = {}) {
-  const loadEntries =
-    typeof options.loadEntries === "function" ? options.loadEntries : loadDiscoveryEntries;
+  const createClient =
+    typeof options.createClient === "function"
+      ? options.createClient
+      : createDesktopAutomationClient;
   const pluginId = String(options.pluginId || DEFAULT_PLUGIN_ID).trim() || DEFAULT_PLUGIN_ID;
 
   try {
-    const entries = await loadEntries({
-      ...options,
+    const client = await createClient({
       pluginId,
+      excludeStartedAt: options.excludeStartedAt,
+      loadEntries: typeof options.loadEntries === "function" ? options.loadEntries : loadDiscoveryEntries,
     });
-    if (!Array.isArray(entries) || entries.length === 0) {
+    const entry = client?.record;
+    if (!entry || typeof entry !== "object") {
       return null;
     }
 
-    for (const entry of entries) {
-      const entryVaultPath = String(entry?.vaultPath || "").trim();
-      const entryVaultName = String(entry?.vaultName || "").trim();
-      const resolvedEntryVaultPath = entryVaultPath ? path.resolve(entryVaultPath) : "";
-      const match = targets.find((target) => {
-        return (
-          (resolvedEntryVaultPath && target.vaultRoot === resolvedEntryVaultPath) ||
-          (entryVaultName && target.vaultName === entryVaultName)
-        );
-      });
-      if (match) {
-        return match;
-      }
+    const entryVaultPath = String(entry.vaultPath || "").trim();
+    const entryVaultName = String(entry.vaultName || "").trim();
+    const resolvedEntryVaultPath = entryVaultPath ? path.resolve(entryVaultPath) : "";
+    const match = targets.find((target) => {
+      return (
+        (resolvedEntryVaultPath && target.vaultRoot === resolvedEntryVaultPath) ||
+        (entryVaultName && target.vaultName === entryVaultName)
+      );
+    });
+    if (match) {
+      return match;
     }
   } catch {}
 
@@ -354,6 +368,63 @@ async function tryCreateTargetClient(target, options = {}) {
   return await createDesktopAutomationClient(buildClientFilter(target, options));
 }
 
+function parseIsoTimestampMs(value) {
+  const parsed = Date.parse(String(value || "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export async function diagnoseStaleDesktopAutomationRuntime(target, options = {}) {
+  const mainBundleMtimeMs = await readMtimeMsIfExists(target?.mainFilePath);
+  if (mainBundleMtimeMs === null) {
+    return null;
+  }
+
+  const loadEntries =
+    typeof options.loadEntries === "function" ? options.loadEntries : loadDiscoveryEntries;
+  const pluginId = String(options.pluginId || DEFAULT_PLUGIN_ID).trim() || DEFAULT_PLUGIN_ID;
+
+  let discoveryEntries = [];
+  try {
+    discoveryEntries = await loadEntries({
+      pluginId,
+      vaultName: target?.vaultName,
+      vaultPath: target?.vaultRoot,
+    });
+  } catch {
+    return null;
+  }
+
+  const latestEntry =
+    Array.isArray(discoveryEntries) && discoveryEntries.length > 0 ? discoveryEntries[0] : null;
+  const bridgeStartedAtMs = parseIsoTimestampMs(latestEntry?.startedAt);
+  if (!latestEntry || bridgeStartedAtMs === null) {
+    return null;
+  }
+
+  if (mainBundleMtimeMs <= bridgeStartedAtMs + 1500) {
+    return null;
+  }
+
+  const details = [
+    `The synced ${path.basename(target.mainFilePath || "main.js")} on disk is newer than the last published bridge session for this vault (${new Date(mainBundleMtimeMs).toISOString()} > ${String(latestEntry.startedAt || "").trim()}).`,
+    "This usually means Obsidian is still running an older in-memory plugin copy from before the sync, so the no-focus watcher/bootstrap path is not active yet.",
+  ];
+
+  const diagnosticsPath = path.join(target.vaultRoot, ".systemsculpt", "diagnostics", "session-latest.json");
+  const latestSession = await readJsonIfExists(diagnosticsPath);
+  const sessionStartedAtMs = parseIsoTimestampMs(latestSession?.startedAt);
+  if (latestSession && sessionStartedAtMs === bridgeStartedAtMs && !latestSession.bootstrappedAt) {
+    details.push(
+      "The latest diagnostics session for this vault also never reached bootstrappedAt, which matches a startup session that did not finish switching onto the newer runtime."
+    );
+  }
+
+  details.push(
+    "Do one manual plugin reload or Obsidian restart once after the sync so future desktop automation can stay attach-only."
+  );
+  return details.join(" ");
+}
+
 async function waitForStableTargetClient(target, options = {}) {
   return await waitForStableDesktopAutomationClient({
     ...buildClientFilter(target, options),
@@ -370,85 +441,116 @@ export async function bootstrapDesktopAutomationClient(options = {}) {
     Array.isArray(options.targets) && options.targets.length > 0
       ? options.targets
       : await loadPluginTargetsFromSyncConfig(options.syncConfigPath);
-  const target = await resolvePluginTarget(targets, options);
-  const ensured = await ensureDesktopAutomationSettings(target, {
-    targets,
-    seedFromOtherTargets: options.seedFromOtherTargets,
-  });
-
-  let existingClient = null;
-  try {
-    existingClient = await tryCreateTargetClient(target, options);
-  } catch {}
-
-  if (existingClient && options.reload !== false) {
-    const previousRecord = await existingClient.ping().catch(() => existingClient.record || {});
-    await existingClient.reloadPlugin();
-    const client = await waitForStableTargetClient(target, {
-      ...options,
-      excludeStartedAt: String(previousRecord?.startedAt || "").trim() || undefined,
+  const bootstrapTarget = async (target) => {
+    const ensured = await ensureDesktopAutomationSettings(target, {
+      targets,
+      seedFromOtherTargets: options.seedFromOtherTargets,
     });
+
+    let existingClient = null;
+    try {
+      existingClient = await tryCreateTargetClient(target, options);
+    } catch {}
+
+    if (existingClient && options.reload !== false) {
+      const previousRecord = await existingClient.ping().catch(() => existingClient.record || {});
+      await existingClient.reloadPlugin();
+      const client = await waitForStableTargetClient(target, {
+        ...options,
+        excludeStartedAt: String(previousRecord?.startedAt || "").trim() || undefined,
+      });
+      return {
+        client,
+        target,
+        ensured,
+        reload: {
+          method: "bridge",
+          previousStartedAt: String(previousRecord?.startedAt || "").trim() || null,
+          focusPreserved: true,
+        },
+      };
+    }
+
+    if (existingClient) {
+      const client = await waitForStableTargetClient(target, options);
+      return {
+        client,
+        target,
+        ensured,
+        reload: {
+          method: "none",
+          focusPreserved: true,
+        },
+      };
+    }
+
+    let reload = {
+      method: ensured.wrote ? "settings-file" : "settings-file-touch",
+      focusPreserved: true,
+    };
+
+    if (!ensured.wrote) {
+      reload = await signalDesktopAutomationSettingsChange(target, ensured);
+    }
+
+    let client;
+    try {
+      client = await waitForTargetClientWithSettingsKeepalive(target, ensured, {
+        ...options,
+        assumeRecentlySignaled: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unknown error");
+      const staleRuntimeHint = await diagnoseStaleDesktopAutomationRuntime(target, options);
+      const wedgedBridgeHint = /aborted|timeout|timed out|fetch failed/i.test(message)
+        ? " The published bridge appears to be wedged or stale; if this vault was exposed to older broken reloads, do one clean manual plugin reload or Obsidian restart once to flush the stale listeners, then the no-focus path can take over again."
+        : "";
+      throw new Error(
+        `No live desktop automation bridge was found after updating ${path.basename(target.dataFilePath)}. ` +
+          "This runner only attaches to an already-running Obsidian vault and will not launch or focus the app for you. " +
+          "The running plugin must support external settings sync for no-focus bootstrap. " +
+          "If the currently open vault is still on an older runtime, do one manual plugin reload once in that vault; " +
+          "after that, desktop automation bootstraps stay no-focus." +
+          wedgedBridgeHint +
+          (staleRuntimeHint ? ` ${staleRuntimeHint}` : "") +
+          " " +
+          `Details: ${message}.`
+      );
+    }
+
     return {
       client,
       target,
       ensured,
-      reload: {
-        method: "bridge",
-        previousStartedAt: String(previousRecord?.startedAt || "").trim() || null,
-        focusPreserved: true,
-      },
+      reload,
     };
-  }
-
-  if (existingClient) {
-    const client = await waitForStableTargetClient(target, options);
-    return {
-      client,
-      target,
-      ensured,
-      reload: {
-        method: "none",
-        focusPreserved: true,
-      },
-    };
-  }
-
-  let reload = {
-    method: ensured.wrote ? "settings-file" : "settings-file-touch",
-    focusPreserved: true,
   };
 
-  if (!ensured.wrote) {
-    reload = await signalDesktopAutomationSettingsChange(target, ensured);
+  if (hasExplicitTargetSelector(options)) {
+    const target = selectPluginTarget(targets, options);
+    return await bootstrapTarget(target);
   }
 
-  let client;
-  try {
-    client = await waitForTargetClientWithSettingsKeepalive(target, ensured, {
-      ...options,
-      assumeRecentlySignaled: true,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "Unknown error");
-    const wedgedBridgeHint = /aborted|timeout|timed out|fetch failed/i.test(message)
-      ? " The published bridge appears to be wedged or stale; if this vault was exposed to older broken reloads, do one clean manual plugin reload or Obsidian restart once to flush the stale listeners, then the no-focus path can take over again."
-      : "";
+  const liveDiscoveryTarget = await inferPluginTargetFromDiscovery(targets, options);
+  if (liveDiscoveryTarget) {
+    return await bootstrapTarget(liveDiscoveryTarget);
+  }
+
+  const candidateTargets = targets;
+  const failures = [];
+  for (const target of candidateTargets) {
+    try {
+      return await bootstrapTarget(target);
+    } catch (error) {
+      failures.push(`[${target.vaultName}] ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (failures.length > 0) {
     throw new Error(
-      `No live desktop automation bridge was found after updating ${path.basename(target.dataFilePath)}. ` +
-        "This runner only attaches to an already-running Obsidian vault and will not launch or focus the app for you. " +
-        "The running plugin must support external settings sync for no-focus bootstrap. " +
-        "If the currently open vault is still on an older runtime, do one manual plugin reload once in that vault; " +
-        "after that, desktop automation bootstraps stay no-focus." +
-        wedgedBridgeHint +
-        " " +
-        `Details: ${message}.`
+      `No synced desktop automation target produced a live bridge. Tried: ${failures.join(" | ")}`
     );
   }
 
-  return {
-    client,
-    target,
-    ensured,
-    reload,
-  };
+  throw new Error("No synced desktop automation target produced a live bridge.");
 }

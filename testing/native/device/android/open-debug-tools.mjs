@@ -6,6 +6,7 @@ import {
   DEFAULT_CONFIG_PATH,
   DEFAULT_PACKAGE_ID,
   buildAndroidEnv,
+  findAndroidDevice,
   inferPackageIdFromConfig,
   inferVaultNameFromConfig,
   listAndroidDevices,
@@ -17,6 +18,7 @@ import {
   selectAndroidDevice,
   shellQuote,
   spawnDetached,
+  waitForAndroidDeviceSelection,
   waitForDeviceBoot,
 } from "./utils.mjs";
 
@@ -166,7 +168,7 @@ async function main() {
   let device = null;
   const initialDevices = listAndroidDevices(adbPath).filter(entry => entry.state === "device");
   if (initialDevices.length > 0 || selectedSerial) {
-    device = selectAndroidDevice({ adbPath, serial: selectedSerial, preferEmulator: true });
+    device = findAndroidDevice({ adbPath, serial: selectedSerial, preferEmulator: true });
   }
 
   if (!device && options.avdName) {
@@ -177,11 +179,33 @@ async function main() {
       emulatorArgs.push("-no-window", "-no-boot-anim", "-gpu", "swiftshader_indirect", "-netfast");
     }
     spawnDetached(emulatorPath, emulatorArgs);
-    await waitForDeviceBoot({
-      adbPath,
-      timeoutMs: options.bootTimeoutMs,
-    });
-    device = selectAndroidDevice({ adbPath, serial: selectedSerial, preferEmulator: true });
+    if (selectedSerial) {
+      device = await waitForAndroidDeviceSelection({
+        adbPath,
+        serial: selectedSerial,
+        preferEmulator: true,
+        timeoutMs: options.bootTimeoutMs,
+      });
+      await waitForDeviceBoot({
+        adbPath,
+        serial: device.serial,
+        timeoutMs: options.bootTimeoutMs,
+      });
+    } else {
+      await waitForDeviceBoot({
+        adbPath,
+        timeoutMs: options.bootTimeoutMs,
+      });
+      device = findAndroidDevice({ adbPath, preferEmulator: true });
+    }
+  }
+
+  if (!device && selectedSerial) {
+    fail(`No connected Android device matched serial "${selectedSerial}".`);
+  }
+
+  if (!device) {
+    device = selectAndroidDevice({ adbPath, preferEmulator: true });
   }
 
   if (!device) {

@@ -14,6 +14,7 @@ module.exports = {
 		'^obsidian$': '<rootDir>/src/tests/mocks/obsidian.js',
 		'^@mariozechner/pi-coding-agent$': '<rootDir>/src/tests/mocks/pi-coding-agent.js',
 		'^@mariozechner/pi-ai$': '<rootDir>/node_modules/@mariozechner/pi-ai/dist/index.js',
+		'^@mariozechner/pi-ai/oauth$': '<rootDir>/node_modules/@mariozechner/pi-ai/dist/oauth.js',
 		'^@/(.*)$': '<rootDir>/src/$1',
 		'^src/(.*)$': '<rootDir>/src/$1'
 	},

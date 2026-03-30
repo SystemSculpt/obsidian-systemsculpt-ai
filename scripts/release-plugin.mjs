@@ -766,7 +766,7 @@ function printPlan({
   console.log(`[release] - Commits included: ${commitCount}`);
   console.log("[release] - Local GitHub draft release via gh: yes");
   console.log(`[release] - GitHub auth mode: ${githubAuthStrategyName}`);
-  console.log("[release] - Windows validation: manual risk accepted");
+  console.log("[release] - Native validation: required macOS + Windows + Android; iOS when available");
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
 
@@ -800,6 +800,9 @@ function runChecks(skipChecks) {
 
   logStep("Running npm run build");
   run("npm", ["run", "build"]);
+
+  logStep("Running npm run check:release:native");
+  run("npm", ["run", "check:release:native"]);
 }
 
 function ensureReleaseAssets() {

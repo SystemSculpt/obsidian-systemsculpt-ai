@@ -545,6 +545,78 @@ describe("DesktopAutomationBridge discovery cleanup", () => {
     }
   });
 
+  it("refreshes the visible providers tab once when the first providers-panel wait times out", async () => {
+    const previousHTMLElement = (globalThis as any).HTMLElement;
+    (globalThis as any).HTMLElement = class HTMLElementMock {};
+
+    try {
+      const bridge = new DesktopAutomationBridge(createPluginStub());
+      const waitSpy = jest
+        .spyOn(bridge as any, "waitForProvidersPanelLoaded")
+        .mockRejectedValueOnce(new Error("Timed out waiting for providers settings panel."))
+        .mockResolvedValueOnce(undefined);
+      const refreshSpy = jest
+        .spyOn(bridge as any, "refreshVisibleSettingsTab")
+        .mockResolvedValue(undefined);
+      jest.spyOn(bridge as any, "openSettingsAndWait").mockResolvedValue({});
+      jest.spyOn(bridge as any, "getProviderSettingsPanel").mockReturnValue(null);
+      jest.spyOn(bridge as any, "getAnyProviderSettingsPanel").mockReturnValue(null);
+      jest.spyOn(bridge as any, "getSettingsSnapshot").mockReturnValue({
+        settingsModalOpen: true,
+        pluginSettingsOpen: true,
+        activeSettingsTabId: "systemsculpt-ai",
+        activePluginTabId: "providers",
+        visiblePluginTabs: ["account", "providers"],
+      });
+
+      const snapshot = await (bridge as any).getProvidersSettingsSnapshot({
+        ensureOpen: true,
+        waitForLoaded: true,
+      });
+
+      expect(waitSpy).toHaveBeenCalledTimes(2);
+      expect(refreshSpy).toHaveBeenCalledWith("providers");
+      expect(snapshot.providers.rows).toEqual([
+        expect.objectContaining({
+          providerId: "openai",
+          label: "OpenAI",
+        }),
+      ]);
+    } finally {
+      if (previousHTMLElement === undefined) {
+        delete (globalThis as any).HTMLElement;
+      } else {
+        (globalThis as any).HTMLElement = previousHTMLElement;
+      }
+    }
+  });
+
+  it("includes providers-panel diagnostics when recovery still fails", async () => {
+    const bridge = new DesktopAutomationBridge(createPluginStub());
+    jest
+      .spyOn(bridge as any, "waitForProvidersPanelLoaded")
+      .mockRejectedValue(new Error("Timed out waiting for providers settings panel."));
+    jest.spyOn(bridge as any, "refreshVisibleSettingsTab").mockResolvedValue(undefined);
+    jest
+      .spyOn(bridge as any, "getProvidersPanelDiagnostics")
+      .mockReturnValueOnce({
+        activePanelVisible: false,
+        panelMounted: true,
+        loading: true,
+        rowCount: 0,
+      })
+      .mockReturnValueOnce({
+        activePanelVisible: false,
+        panelMounted: true,
+        loading: true,
+        rowCount: 0,
+      });
+
+    await expect(
+      (bridge as any).waitForProvidersPanelLoadedWithRecovery("providers")
+    ).rejects.toThrow(/diagnosticsBeforeRefresh/);
+  });
+
   it("captures live Pi catalog diagnostics even when models.json is absent", async () => {
     const authPath = path.join(tempDir, "auth.json");
     const modelsPath = path.join(tempDir, "models.json");

@@ -12,6 +12,8 @@ test("parseCleanInstallParityArgs accepts provider auth inputs", () => {
   const parsed = parseCleanInstallParityArgs([
     "--provider-id",
     "google",
+    "--provider-model-id",
+    "gemini-2.5-flash,gemini-2.5-pro",
     "--api-key-file",
     "C:/Temp/google.txt",
     "--wait-timeout-ms",
@@ -21,6 +23,7 @@ test("parseCleanInstallParityArgs accepts provider auth inputs", () => {
   ]);
 
   assert.equal(parsed.providerId, "google");
+  assert.deepEqual(parsed.preferredProviderModelIds, ["gemini-2.5-flash", "gemini-2.5-pro"]);
   assert.equal(parsed.apiKeyFile, "C:/Temp/google.txt");
   assert.equal(parsed.waitTimeoutMs, 90000);
   assert.equal(parsed.sendTimeoutMs, 180000);
@@ -52,6 +55,67 @@ test("findProviderModel resolves the authenticated provider option without depen
   );
 
   assert.equal(option?.value, "ready");
+});
+
+test("findProviderModel prefers the requested OpenRouter model before falling back", () => {
+  const option = findProviderModel(
+    {
+      options: [
+        {
+          providerId: "openrouter",
+          section: "pi",
+          providerAuthenticated: true,
+          value: "local-pi-openrouter@@ai21/jamba-large-1.7",
+          label: "AI21: Jamba Large 1.7",
+          piExecutionModelId: "openrouter/ai21/jamba-large-1.7",
+        },
+        {
+          providerId: "openrouter",
+          section: "pi",
+          providerAuthenticated: true,
+          value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+          label: "OpenAI: GPT-5.4 Mini",
+          piExecutionModelId: "openrouter/openai/gpt-5.4-mini",
+        },
+      ],
+    },
+    "openrouter",
+    true,
+    {
+      preferredModelIds: ["openai/gpt-5.4-mini"],
+    }
+  );
+
+  assert.equal(option?.value, "local-pi-openrouter@@openai/gpt-5.4-mini");
+});
+
+test("findProviderModel applies the shared stable-provider defaults when no explicit model is pinned", () => {
+  const option = findProviderModel(
+    {
+      options: [
+        {
+          providerId: "openrouter",
+          section: "pi",
+          providerAuthenticated: true,
+          value: "local-pi-openrouter@@ai21/jamba-large-1.7",
+          label: "AI21: Jamba Large 1.7",
+          piExecutionModelId: "openrouter/ai21/jamba-large-1.7",
+        },
+        {
+          providerId: "openrouter",
+          section: "pi",
+          providerAuthenticated: true,
+          value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+          label: "OpenAI: GPT-5.4 Mini",
+          piExecutionModelId: "openrouter/openai/gpt-5.4-mini",
+        },
+      ],
+    },
+    "openrouter",
+    true
+  );
+
+  assert.equal(option?.value, "local-pi-openrouter@@openai/gpt-5.4-mini");
 });
 
 test("summarizeProvidersPanel reads the nested settings and ui snapshot shape", () => {

@@ -72,19 +72,25 @@ describe("ViewManager", () => {
     expect(registerViewSpy).toHaveBeenCalledTimes(3);
   });
 
-  it("skips view types that are already present in Obsidian's view registry", () => {
-    const { plugin, manager } = createFixture([
+  it("replaces stale view types that are already present in Obsidian's view registry", () => {
+    const { app, plugin, manager } = createFixture([
       CHAT_VIEW_TYPE,
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
     ]);
-    const registerViewSpy = jest.spyOn(plugin, "registerView");
+    const originalChatCreator = app.viewRegistry?.viewByType[CHAT_VIEW_TYPE];
+    const originalStudioCreator = app.viewRegistry?.viewByType[SYSTEMSCULPT_STUDIO_VIEW_TYPE];
+    const registerViewSpy = jest.spyOn(plugin, "registerView").mockImplementation((type, creator) => {
+      if (!app.viewRegistry) {
+        app.viewRegistry = { viewByType: {} };
+      }
+      app.viewRegistry.viewByType[type] = creator;
+    });
 
     manager.registerView();
 
-    expect(registerViewSpy).toHaveBeenCalledTimes(1);
-    expect(registerViewSpy).toHaveBeenCalledWith(
-      EMBEDDINGS_VIEW_TYPE,
-      expect.any(Function)
-    );
+    expect(registerViewSpy).toHaveBeenCalledTimes(3);
+    expect(app.viewRegistry?.viewByType[CHAT_VIEW_TYPE]).not.toBe(originalChatCreator);
+    expect(app.viewRegistry?.viewByType[SYSTEMSCULPT_STUDIO_VIEW_TYPE]).not.toBe(originalStudioCreator);
+    expect(app.viewRegistry?.viewByType[EMBEDDINGS_VIEW_TYPE]).toEqual(expect.any(Function));
   });
 });

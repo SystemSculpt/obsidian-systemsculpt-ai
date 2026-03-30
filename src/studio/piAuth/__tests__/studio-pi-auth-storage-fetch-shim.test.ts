@@ -52,6 +52,47 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     );
   });
 
+  it("reads provider auth records through the Pi auth storage wrapper when an auth path is provided", async () => {
+    const storage = {
+      getAll: jest.fn(() => ({
+        anthropic: {
+          type: "oauth",
+          expires: 987654321,
+        },
+      })),
+      has: jest.fn((provider: string) => provider === "anthropic"),
+      hasAuth: jest.fn((provider: string) => provider === "anthropic"),
+    };
+
+    jest.doMock("../../../services/pi/PiSdkAuthStorage", () => ({
+      createBundledPiAuthStorage: jest.fn(() => storage),
+    }));
+
+    let listStudioPiProviderAuthRecords: typeof import("../StudioPiAuthInventory").listStudioPiProviderAuthRecords;
+    jest.isolateModules(() => {
+      ({ listStudioPiProviderAuthRecords } = require("../StudioPiAuthInventory"));
+    });
+
+    const records = await listStudioPiProviderAuthRecords!({
+      providerHints: ["anthropic"],
+      authPath: "/tmp/systemsculpt-pi-auth.json",
+    });
+
+    expect(storage.getAll).toHaveBeenCalledTimes(1);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "anthropic",
+          hasAnyAuth: true,
+          hasStoredCredential: true,
+          credentialType: "oauth",
+          source: "oauth",
+          oauthExpiresAt: 987654321,
+        }),
+      ]),
+    );
+  });
+
   it("wraps OAuth login with the desktop fetch shim", async () => {
     const storage = {
       login: jest.fn(async () => {}),

@@ -1,5 +1,9 @@
 const sessionFetchMock = jest.fn();
 
+jest.mock("../PiSdkAuthStorage", () => ({
+  createBundledPiAuthStorage: jest.fn(() => ({})),
+}));
+
 jest.mock(
   "electron",
   () => ({

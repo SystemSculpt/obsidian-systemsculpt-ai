@@ -8,6 +8,23 @@ export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.cs
 
 const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
+const FORBIDDEN_MAIN_BUNDLE_FRAGMENTS = [
+  {
+    fragment: 'const __systemsculpt_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;',
+    message:
+      "main.js still uses a node:url import-meta banner that breaks mobile plugin startup before load.",
+  },
+  {
+    fragment: "node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/index.js",
+    message:
+      "main.js still bundles the Pi interactive component index; expected the core SDK surface only.",
+  },
+  {
+    fragment: "node_modules/@mariozechner/pi-coding-agent/dist/main.js",
+    message:
+      "main.js still bundles the Pi CLI entrypoint; expected the core SDK surface only.",
+  },
+];
 
 function readFileTail(filePath, maxBytes = DEFAULT_TAIL_BYTES) {
   const stats = fs.statSync(filePath);
@@ -75,6 +92,7 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     sizeBytes: mainFile.sizeBytes,
     formattedSize: mainFile.exists ? formatBytes(mainFile.sizeBytes) : "missing",
     hasInlineSourceMap: false,
+    forbiddenFragments: [],
   };
 
   if (mainFile.exists) {
@@ -84,6 +102,18 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
       problems.push(
         `main.js still contains an inline source map (${mainBundle.formattedSize}); Android/mobile sync must use a production build.`
       );
+    }
+
+    const bundleText = fs.readFileSync(mainFile.path, "utf8");
+    mainBundle.forbiddenFragments = FORBIDDEN_MAIN_BUNDLE_FRAGMENTS.filter(({ fragment }) =>
+      bundleText.includes(fragment)
+    ).map(({ fragment, message }) => ({
+      fragment,
+      message,
+    }));
+
+    for (const match of mainBundle.forbiddenFragments) {
+      problems.push(`${match.message} (${mainBundle.formattedSize})`);
     }
   }
 

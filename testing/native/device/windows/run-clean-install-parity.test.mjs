@@ -17,6 +17,8 @@ test("parseArgs accepts Windows host and provider auth options", () => {
     "custom-windows-host",
     "--provider-id",
     "google",
+    "--provider-model-id",
+    "gemini-2.5-flash",
     "--api-key-env",
     "GEMINI_API_KEY",
     "--require-provider",
@@ -24,6 +26,7 @@ test("parseArgs accepts Windows host and provider auth options", () => {
 
   assert.equal(parsed.sshHost, "custom-windows-host");
   assert.equal(parsed.providerId, "google");
+  assert.deepEqual(parsed.preferredProviderModelIds, ["gemini-2.5-flash"]);
   assert.equal(parsed.apiKeyEnv, "GEMINI_API_KEY");
   assert.equal(parsed.requireProvider, true);
 });

@@ -1,13 +1,10 @@
-import { mkdtempSync, writeFileSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
 const modelRegistryCtorMock = jest.fn();
 
-jest.mock("@mariozechner/pi-coding-agent", () => ({
-  createAgentSession: jest.fn(),
-  createCodingTools: jest.fn(),
-  createExtensionRuntime: jest.fn(),
+jest.mock("../PiSdkCore", () => ({
   ModelRegistry: jest.fn().mockImplementation((authStorage: any, modelsPath: string) => {
     modelRegistryCtorMock(authStorage, modelsPath);
 
@@ -43,7 +40,7 @@ jest.mock("@mariozechner/pi-coding-agent", () => ({
   },
 }));
 
-import { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { ModelRegistry } from "../PiSdkCore";
 import { createBundledPiAuthStorage } from "../PiSdkAuthStorage";
 
 describe("PiSdkAuthStorage", () => {
@@ -56,22 +53,11 @@ describe("PiSdkAuthStorage", () => {
     const authPath = join(tempDir, "auth.json");
     const modelsPath = join(tempDir, "models.json");
 
-    writeFileSync(
-      authPath,
-      JSON.stringify(
-        {
-          google: {
-            type: "api_key",
-            key: "test-key",
-          },
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-
     const storage = createBundledPiAuthStorage(authPath);
+    storage.set("google", {
+      type: "api_key",
+      key: "test-key",
+    });
 
     expect(typeof storage.getOAuthProviders).toBe("function");
     expect(Array.isArray(storage.getOAuthProviders())).toBe(true);

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { normalizePath } from "obsidian";
 
 type VaultAdapterLike = {
@@ -5,8 +6,33 @@ type VaultAdapterLike = {
   basePath?: string;
 };
 
+export function normalizeVaultRelativePath(value: string): string {
+  const raw = String(value || "").trim().replace(/\\/g, "/");
+  const normalized =
+    typeof normalizePath === "function" ? normalizePath(raw) : raw.replace(/\/{2,}/g, "/");
+  return normalized.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+export function joinFilesystemPath(basePath: string, ...segments: string[]): string {
+  const normalizedBasePath = String(basePath || "").trim();
+  if (!normalizedBasePath) {
+    return "";
+  }
+
+  const pathApi =
+    normalizedBasePath.includes("\\") || /^[a-zA-Z]:/.test(normalizedBasePath)
+      ? path.win32
+      : path.posix;
+  const normalizedSegments = segments
+    .flatMap((segment) => normalizeVaultRelativePath(segment).split("/"))
+    .filter(Boolean);
+  return normalizedSegments.length > 0
+    ? pathApi.join(normalizedBasePath, ...normalizedSegments)
+    : normalizedBasePath;
+}
+
 export function resolveAbsoluteVaultPath(adapterLike: unknown, vaultPath: string): string | null {
-  const normalizedVaultPath = normalizePath(String(vaultPath || "").trim().replace(/\\/g, "/")).replace(/^\/+/, "");
+  const normalizedVaultPath = normalizeVaultRelativePath(vaultPath);
   if (!normalizedVaultPath) {
     return null;
   }
@@ -24,10 +50,7 @@ export function resolveAbsoluteVaultPath(adapterLike: unknown, vaultPath: string
   }
 
   if (adapter && typeof adapter.basePath === "string" && adapter.basePath.trim().length > 0) {
-    const basePath = adapter.basePath.replace(/[\\/]+$/, "");
-    const separator = basePath.includes("\\") ? "\\" : "/";
-    const normalizedRelative = normalizedVaultPath.split(/[\\/]+/).filter(Boolean).join(separator);
-    return normalizedRelative ? `${basePath}${separator}${normalizedRelative}` : basePath;
+    return joinFilesystemPath(adapter.basePath.replace(/[\\/]+$/, ""), normalizedVaultPath);
   }
 
   return null;

@@ -40,12 +40,17 @@ single section string.
 ```powershell
 npm run test:native:windows:prepare
 npm run test:native:windows:setup
+npm run test:native:windows:clean-install
+npm run test:native:windows:baselines
+$env:SYSTEMSCULPT_DESKTOP_PROVIDER_ID="openrouter"; $env:SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="..."; npm run test:native:windows:baselines
 npm run test:native:windows:baseline
-$env:SYSTEMSCULPT_DESKTOP_PROVIDER_ID="openai"; $env:SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="..."; npm run test:native:windows:provider-connected
+$env:SYSTEMSCULPT_DESKTOP_PROVIDER_ID="openrouter"; $env:SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID="openai/gpt-5.4-mini"; $env:SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="..."; npm run test:native:windows:provider-connected
 npm run test:native:windows:chatview-stress
 npm run test:native:windows:stress
 npm run test:native:windows:soak
 ```
+
+`npm run test:native:windows:prepare` now stages a bundled bootstrap workspace plus the latest local production plugin artifacts over SSH, so the Windows VM does not need its own checkout of this repo just to prepare the vault.
 
 ## Host requirements
 
@@ -78,14 +83,16 @@ republish the bridge without foregrounding Obsidian.
 
 ## Flow
 
-1. Do the clean-install / no-local-Pi proof on the Windows host.
+1. Do the clean-install / no-local-Pi proof on the Windows host with `npm run test:native:windows:clean-install`.
 2. Leave the vault open.
-3. Run `npm run test:native:windows:baseline` to prove the managed hosted path still works.
-4. Run `npm run test:native:windows:provider-connected` when you need Pi-provider parity on a fresh Windows install.
+3. Run `npm run test:native:windows:baselines` as the default release-prep command for managed hosted plus provider-connected parity. Pin `SYSTEMSCULPT_DESKTOP_PROVIDER_ID` and the matching API key first if you want deterministic provider coverage instead of "first available provider" selection. The runner now prints one combined baselines summary before the final JSON so transient hosted noise is visible without digging through the full payload.
+4. Use `npm run test:native:windows:baseline` or `npm run test:native:windows:provider-connected` only when you are isolating one half of that suite.
 5. Run the no-focus stress lanes for chatview churn and repeated reloads.
 
 That split keeps Windows responsible for fresh-user truth while still reusing the same bridge
 automation layer as macOS once the runtime is open.
+
+`npm run check:release:native` treats steps 1 and 3 as mandatory release gates.
 
 ## Interpreting transient hosted failures
 

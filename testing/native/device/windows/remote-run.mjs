@@ -5,6 +5,9 @@ import path from "node:path";
 import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { build as buildWithEsbuild } from "esbuild";
+
+import { assertProductionPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "../../../../scripts/plugin-artifacts.mjs";
 
 export const DEFAULT_WINDOWS_SSH_HOST = "tickblaze-kamatera";
 export const DEFAULT_WINDOWS_REMOTE_TEMP_DIR = "C:/Users/Administrator/AppData/Local/Temp";
@@ -35,23 +38,61 @@ export function toPowerShellArrayLiteral(values = []) {
 }
 
 export function buildRemoteWindowsNodeScript(options = {}) {
-  const sourceBase64 = String(options.sourceBase64 || "").trim();
-  if (!sourceBase64) {
-    fail("Missing base64-encoded Windows task source.");
+  const workspaceFiles = Array.isArray(options.workspaceFiles)
+    ? options.workspaceFiles
+        .map((entry) => ({
+          relativePath: String(entry?.relativePath || "").trim(),
+          sourceBase64: String(entry?.sourceBase64 || "").trim(),
+        }))
+        .filter((entry) => entry.relativePath && entry.sourceBase64)
+    : [];
+  if (workspaceFiles.length < 1) {
+    fail("Missing Windows task workspace files.");
   }
 
+  const entryRelativePath =
+    String(options.entryRelativePath || workspaceFiles[0]?.relativePath || "").trim() ||
+    workspaceFiles[0].relativePath;
   const cleanupPaths = Array.isArray(options.cleanupPaths) ? options.cleanupPaths : [];
   const args = Array.isArray(options.args) ? options.args : [];
+  const workspaceFilesLiteral = [
+    "@(",
+    ...workspaceFiles.map(
+      (file) =>
+        `  [pscustomobject]@{ relativePath = ${psSingleQuote(file.relativePath)}; sourceBase64 = ${psSingleQuote(file.sourceBase64)} }`
+    ),
+    ")",
+  ].join("\n");
 
   return [
     "$ErrorActionPreference = 'Stop'",
-    "$scriptPath = Join-Path $env:TEMP ('ss-remote-' + [guid]::NewGuid().ToString() + '.mjs')",
+    "$workspacePath = Join-Path $env:TEMP ('ss-remote-' + [guid]::NewGuid().ToString())",
     `$scriptArgs = ${toPowerShellArrayLiteral(args)}`,
     `$cleanupPaths = ${toPowerShellArrayLiteral(cleanupPaths)}`,
-    `[System.IO.File]::WriteAllText($scriptPath, [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${sourceBase64}')), [System.Text.UTF8Encoding]::new($false))`,
-    "node $scriptPath @scriptArgs",
-    "$exitCode = $LASTEXITCODE",
-    "if (Test-Path $scriptPath) { Remove-Item $scriptPath -Force -ErrorAction SilentlyContinue }",
+    `$workspaceFiles = ${workspaceFilesLiteral}`,
+    "New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null",
+    "foreach ($workspaceFile in $workspaceFiles) {",
+    "  $targetPath = Join-Path $workspacePath $workspaceFile.relativePath",
+    "  $targetDir = Split-Path -Parent $targetPath",
+    "  if ($targetDir -and !(Test-Path $targetDir)) {",
+    "    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null",
+    "  }",
+    "  [System.IO.File]::WriteAllText(",
+    "    $targetPath,",
+    "    [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($workspaceFile.sourceBase64)),",
+    "    [System.Text.UTF8Encoding]::new($false)",
+    "  )",
+    "}",
+    `$scriptPath = Join-Path $workspacePath ${psSingleQuote(entryRelativePath)}`,
+    "$exitCode = 0",
+    "Push-Location $workspacePath",
+    "try {",
+    "  node $scriptPath @scriptArgs",
+    "  $exitCode = $LASTEXITCODE",
+    "} finally {",
+    "  Pop-Location",
+    "}",
+    "if (Test-Path $workspacePath) { Remove-Item $workspacePath -Recurse -Force -ErrorAction SilentlyContinue }",
     "foreach ($cleanupPath in $cleanupPaths) {",
     "  if ($cleanupPath -and (Test-Path $cleanupPath)) {",
     "    Remove-Item $cleanupPath -Force -ErrorAction SilentlyContinue",
@@ -335,16 +376,55 @@ export async function copySecretToWindowsTempFile(value, options = {}) {
   }
 }
 
-export async function runWindowsNodeModuleRemotely(entryPath, options = {}) {
+export async function buildWindowsNodeModuleWorkspace(entryPath, options = {}) {
   const resolvedEntryPath = path.resolve(String(entryPath || ""));
   if (!resolvedEntryPath) {
     fail("Missing Windows task entry path.");
   }
 
-  const source = await fs.readFile(resolvedEntryPath, "utf8");
-  const sourceBase64 = Buffer.from(source, "utf8").toString("base64");
+  const bundleResult = await buildWithEsbuild({
+    entryPoints: [resolvedEntryPath],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: ["node20"],
+    write: false,
+    logLevel: "silent",
+  });
+  const bundledEntry = bundleResult.outputFiles?.[0];
+  if (!bundledEntry) {
+    fail(`Failed to bundle Windows task entry: ${resolvedEntryPath}`);
+  }
+
+  const artifactRoot = path.resolve(String(options.artifactRoot || process.cwd()));
+  const pluginInspection = assertProductionPluginArtifacts({ root: artifactRoot });
+  const workspaceFiles = await Promise.all(
+    REQUIRED_PLUGIN_ARTIFACTS.map(async (fileName) => {
+      const sourcePath = path.join(pluginInspection.root, fileName);
+      const source = await fs.readFile(sourcePath, "utf8");
+      return {
+        relativePath: fileName,
+        sourceBase64: Buffer.from(source, "utf8").toString("base64"),
+      };
+    })
+  );
+  workspaceFiles.unshift({
+    relativePath: "entry.mjs",
+    sourceBase64: Buffer.from(bundledEntry.text, "utf8").toString("base64"),
+  });
+
+  return {
+    entryRelativePath: "entry.mjs",
+    workspaceFiles,
+    artifactRoot: pluginInspection.root,
+  };
+}
+
+export async function runWindowsNodeModuleRemotely(entryPath, options = {}) {
+  const workspace = await buildWindowsNodeModuleWorkspace(entryPath, options);
   const script = buildRemoteWindowsNodeScript({
-    sourceBase64,
+    entryRelativePath: workspace.entryRelativePath,
+    workspaceFiles: workspace.workspaceFiles,
     args: Array.isArray(options.args) ? options.args : [],
     cleanupPaths: Array.isArray(options.cleanupPaths) ? options.cleanupPaths : [],
   });

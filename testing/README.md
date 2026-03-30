@@ -75,6 +75,18 @@ Docs:
 
 - [Desktop Automation](./native/desktop-automation/README.md)
 
+### Release matrix
+
+Before ship, the required native matrix is:
+
+- macOS: `npm run test:native:desktop:baselines`
+- Windows clean install: `npm run test:native:windows:clean-install`
+- Windows desktop baselines: `npm run test:native:windows:baselines`
+- Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync` then `npm run test:native:android:extended`
+- iOS: `npm run test:native:ios` when a paired physical device is available
+
+`npm run check:release:native` is the canonical one-command wrapper for that matrix. It fails the release path if macOS, Windows, or Android are not green, and it only skips iOS when the host genuinely does not have a paired device plus WebKit adapter available.
+
 ### 3. Mobile runtime smoke
 
 This is the shared Android and iOS real-runtime harness.

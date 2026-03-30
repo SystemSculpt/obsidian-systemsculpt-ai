@@ -1,14 +1,17 @@
-import { normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import {
+  joinFilesystemPath,
+  normalizeVaultRelativePath,
+  resolveAbsoluteVaultPath,
+} from "../../utils/vaultPathUtils";
 
 const PI_AGENT_DIR_ENV_KEY = "PI_CODING_AGENT_DIR";
 
-export const DEFAULT_PI_AGENT_VAULT_DIR = normalizePath(".systemsculpt/pi-agent");
-export const DEFAULT_PI_MODELS_VAULT_PATH = normalizePath(
+export const DEFAULT_PI_AGENT_VAULT_DIR = normalizeVaultRelativePath(".systemsculpt/pi-agent");
+export const DEFAULT_PI_MODELS_VAULT_PATH = normalizeVaultRelativePath(
   `${DEFAULT_PI_AGENT_VAULT_DIR}/models.json`,
 );
-export const DEFAULT_PI_AUTH_VAULT_PATH = normalizePath(
+export const DEFAULT_PI_AUTH_VAULT_PATH = normalizeVaultRelativePath(
   `${DEFAULT_PI_AGENT_VAULT_DIR}/auth.json`,
 );
 
@@ -31,16 +34,7 @@ function expandHomePrefix(pathValue: string): string {
     if (!homeDir) {
       return normalized.slice(2);
     }
-    const remainder = normalized.slice(2);
-    const separator =
-      homeDir.includes("\\") || /^[a-zA-Z]:/.test(homeDir) ? "\\" : "/";
-    const cleanedHomeDir = homeDir.replace(/[\\/]+$/, "");
-    const cleanedRemainder = remainder
-      .replace(/^[/\\]+/, "")
-      .replace(/[\\/]+/g, separator);
-    return cleanedRemainder
-      ? `${cleanedHomeDir}${separator}${cleanedRemainder}`
-      : cleanedHomeDir;
+    return joinFilesystemPath(homeDir, normalized.slice(2));
   }
 
   return normalized;
@@ -48,25 +42,6 @@ function expandHomePrefix(pathValue: string): string {
 
 function readPiAgentDirOverride(): string {
   return expandHomePrefix(String(process?.env?.[PI_AGENT_DIR_ENV_KEY] || "").trim());
-}
-
-function joinPath(basePath: string, leafName: string): string {
-  const normalizedBasePath = String(basePath || "").trim();
-  const normalizedLeafName = String(leafName || "").trim();
-  if (!normalizedBasePath) {
-    return normalizedLeafName;
-  }
-  if (!normalizedLeafName) {
-    return normalizedBasePath;
-  }
-
-  const separator =
-    normalizedBasePath.includes("\\") || /^[a-zA-Z]:/.test(normalizedBasePath) ? "\\" : "/";
-  const cleanedBasePath = normalizedBasePath.replace(/[\\/]+$/, "");
-  const cleanedLeafName = normalizedLeafName
-    .replace(/^[/\\]+/, "")
-    .replace(/[\\/]+/g, separator);
-  return `${cleanedBasePath}${separator}${cleanedLeafName}`;
 }
 
 function resolvePluginVaultPath(
@@ -89,7 +64,7 @@ function resolvePluginVaultPath(
     return null;
   }
 
-  return joinPath(basePath, normalizePath(vaultPath));
+  return joinFilesystemPath(basePath, normalizeVaultRelativePath(vaultPath));
 }
 
 export function resolvePiAgentDir(
@@ -107,7 +82,7 @@ export function resolvePiAuthPath(
 ): string | null {
   const overridePath = readPiAgentDirOverride();
   if (overridePath) {
-    return joinPath(overridePath, "auth.json");
+    return joinFilesystemPath(overridePath, "auth.json");
   }
   return resolvePluginVaultPath(plugin, DEFAULT_PI_AUTH_VAULT_PATH);
 }
@@ -117,7 +92,7 @@ export function resolvePiModelsPath(
 ): string | null {
   const overridePath = readPiAgentDirOverride();
   if (overridePath) {
-    return joinPath(overridePath, "models.json");
+    return joinFilesystemPath(overridePath, "models.json");
   }
   return resolvePluginVaultPath(plugin, DEFAULT_PI_MODELS_VAULT_PATH);
 }
@@ -127,7 +102,7 @@ export function getPiModelsDisplayPath(
 ): string {
   const overridePath = readPiAgentDirOverride();
   if (overridePath) {
-    return joinPath(overridePath, "models.json");
+    return joinFilesystemPath(overridePath, "models.json");
   }
   return DEFAULT_PI_MODELS_VAULT_PATH;
 }

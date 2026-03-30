@@ -3,12 +3,17 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { findProviderModelOption, normalizeProviderId } from "../../shared/model-inventory.mjs";
+import {
+  findProviderModelOption,
+  normalizeProviderId,
+  resolveProviderModelPreferences,
+} from "../../shared/model-inventory.mjs";
 
 export const DEFAULT_MANAGED_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
-export const DEFAULT_LOCAL_PI_MODEL_ID = "local-pi-openai@@gpt-4.1";
+export const DEFAULT_LOCAL_PI_MODEL_ID = "local-pi-openrouter@@openai/gpt-5.4-mini";
 export const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
 export const DEFAULT_SEND_TIMEOUT_MS = 300_000;
+const PROVIDER_CONNECTED_MODEL_ID_ENV = "SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID";
 
 function fail(message) {
   throw new Error(message);
@@ -24,6 +29,10 @@ export function parseCleanInstallParityArgs(argv, env = process.env) {
     managedModelId: String(env.SYSTEMSCULPT_WINDOWS_MANAGED_MODEL_ID || "").trim() || DEFAULT_MANAGED_MODEL_ID,
     localPiModelId: String(env.SYSTEMSCULPT_WINDOWS_LOCAL_PI_MODEL_ID || "").trim() || DEFAULT_LOCAL_PI_MODEL_ID,
     providerId: normalizeProviderId(env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID || ""),
+    preferredProviderModelIds: String(env[PROVIDER_CONNECTED_MODEL_ID_ENV] || "")
+      .split(",")
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry.length > 0),
     apiKeyFile: "",
     apiKey: "",
     waitTimeoutMs: numberOption(env.SYSTEMSCULPT_WINDOWS_WAIT_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS),
@@ -44,6 +53,14 @@ export function parseCleanInstallParityArgs(argv, env = process.env) {
     }
     if (arg === "--provider-id") {
       options.providerId = normalizeProviderId(argv[index + 1] || "");
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider-model-id") {
+      options.preferredProviderModelIds = String(argv[index + 1] || "")
+        .split(",")
+        .map((entry) => String(entry || "").trim())
+        .filter((entry) => entry.length > 0);
       index += 1;
       continue;
     }
@@ -84,6 +101,7 @@ Run the Windows clean-install parity checks against the live desktop bridge.
 
 Options:
   --provider-id <id>          Optional provider id for API-key auth parity
+  --provider-model-id <id>    Optional provider model id or comma list. Default env: ${PROVIDER_CONNECTED_MODEL_ID_ENV}
   --api-key-file <path>       Optional file containing the provider API key
   --api-key <value>           Optional provider API key literal
   --managed-model-id <id>     Managed model id. Default: ${DEFAULT_MANAGED_MODEL_ID}
@@ -204,10 +222,14 @@ function findModelOption(inventory, predicate) {
   return options.find((option) => predicate(option)) || null;
 }
 
-export function findProviderModel(inventory, providerId, authenticated) {
+export function findProviderModel(inventory, providerId, authenticated, options = {}) {
   return findProviderModelOption(inventory, providerId, {
     authenticated,
     preferredSections: ["pi", "local"],
+    preferredModelIds: resolveProviderModelPreferences(
+      providerId,
+      options.preferredModelIds
+    ),
   });
 }
 
@@ -480,7 +502,9 @@ export async function runCleanInstallParityAgainstRecord(record, options = {}) {
     `${options.providerId} authenticated model`,
     async () => {
       const inventory = await request(record, "/v1/chat/models?refresh=1", { timeoutMs: 60_000 });
-      const option = findProviderModel(inventory, options.providerId, true);
+      const option = findProviderModel(inventory, options.providerId, true, {
+        preferredModelIds: options.preferredProviderModelIds,
+      });
       return option ? { inventory, option } : null;
     },
     options.waitTimeoutMs
@@ -519,13 +543,19 @@ export async function runCleanInstallParityAgainstRecord(record, options = {}) {
     `${options.providerId} deauthenticated model`,
     async () => {
       const inventory = await request(record, "/v1/chat/models?refresh=1", { timeoutMs: 60_000 });
-      return findProviderModel(inventory, options.providerId, true) ? null : inventory;
+      return findProviderModel(inventory, options.providerId, true, {
+        preferredModelIds: options.preferredProviderModelIds,
+      })
+        ? null
+        : inventory;
     },
     options.waitTimeoutMs
   );
 
   const blockedProviderOption =
-    findProviderModel(inventoryAfterClear, options.providerId, false) || providerModelState.option;
+    findProviderModel(inventoryAfterClear, options.providerId, false, {
+      preferredModelIds: options.preferredProviderModelIds,
+    }) || providerModelState.option;
   const blockedProviderSend = await expectProvidersFailure(
     record,
     blockedProviderOption.value,

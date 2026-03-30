@@ -100,8 +100,38 @@ async function waitForObsidianApp(runtime, options) {
   );
 }
 
+async function waitForSystemSculptPlugin(runtime, options) {
+  const deadlineMs = options.mode === "ios" ? 120000 : 90000;
+  const startedAt = Date.now();
+  let lastSnapshot = null;
+  while (Date.now() - startedAt < deadlineMs) {
+    lastSnapshot = await runtime.evaluate(`(() => {
+      const plugin = app?.plugins?.plugins?.['systemsculpt-ai'] || app?.plugins?.getPlugin?.('systemsculpt-ai');
+      return {
+        hasPlugin: !!plugin,
+        manifestVersion: plugin?.manifest?.version ?? null,
+        enabledPlugins:
+          app?.plugins?.enabledPlugins instanceof Set
+            ? Array.from(app.plugins.enabledPlugins)
+            : Array.isArray(app?.plugins?.enabledPlugins)
+              ? app.plugins.enabledPlugins
+              : [],
+      };
+    })()`, 15000);
+    if (lastSnapshot?.hasPlugin) {
+      return lastSnapshot;
+    }
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Timed out waiting for systemsculpt-ai to load on ${options.mode}: ${JSON.stringify(lastSnapshot)}`
+  );
+}
+
 async function prepareRuntime(runtime, options) {
   await waitForObsidianApp(runtime, options);
+  await waitForSystemSculptPlugin(runtime, options);
   console.log(
     options.mode === "ios"
       ? "[runtime-smoke] Reloading systemsculpt-ai on iOS to refresh the live plugin instance"
@@ -131,7 +161,9 @@ async function prepareRuntime(runtime, options) {
   })()`, 60000);
 
   if (!state?.after?.hasPlugin) {
-    throw new Error("Failed to reload systemsculpt-ai on iOS before runtime smoke.");
+    throw new Error(
+      `Failed to reload systemsculpt-ai on ${options.mode} before runtime smoke. ${JSON.stringify(state)}`
+    );
   }
 
   return state;
@@ -162,13 +194,29 @@ async function bootstrapHostedAuth(runtime) {
     if (typeof plugin.saveSettings === 'function') {
       await plugin.saveSettings();
     }
+    const licenseManager =
+      typeof plugin.getLicenseManager === 'function'
+        ? plugin.getLicenseManager()
+        : plugin.licenseManager || null;
+    const pendingValidation = licenseManager?.pendingValidation;
+    if (pendingValidation && typeof pendingValidation.then === 'function') {
+      await pendingValidation;
+    }
+    let validationResult = null;
+    if (licenseManager && typeof licenseManager.validateLicenseKey === 'function') {
+      validationResult = await licenseManager.validateLicenseKey(true, false);
+      if (validationResult !== true) {
+        throw new Error('Hosted auth bootstrap could not validate the configured SystemSculpt license.');
+      }
+    }
     return {
       licenseKeyLength: String(plugin.settings.licenseKey || '').length,
       licenseValid: !!plugin.settings.licenseValid,
       serverUrl: plugin.settings.serverUrl || null,
       selectedModelId: plugin.settings.selectedModelId || null,
+      validationResult,
     };
-  })()`, 60000);
+  })()`, 120000);
 }
 
 async function main() {

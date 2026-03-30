@@ -91,6 +91,14 @@ export function parseArgs(argv, env = process.env) {
       index += 1;
       continue;
     }
+    if (arg === "--provider-model-id") {
+      options.preferredProviderModelIds = String(argv[index + 1] || "")
+        .split(",")
+        .map((entry) => String(entry || "").trim())
+        .filter((entry) => entry.length > 0);
+      index += 1;
+      continue;
+    }
     if (arg === "--api-key-env") {
       options.apiKeyEnv = String(argv[index + 1] || "").trim();
       index += 1;
@@ -147,6 +155,7 @@ Run the Windows clean-install desktop acceptance lane from either:
 Options:
   --host <alias>             SSH host alias. Default: ${DEFAULT_WINDOWS_SSH_HOST}
   --provider-id <id>         Optional provider id for Settings -> Providers parity
+  --provider-model-id <id>   Optional provider model id or comma list
   --api-key-env <ENV_VAR>    Resolve the provider API key from a host env var
   --api-key <value>          Optional provider API key literal
   --require-provider         Fail if provider credentials are not available

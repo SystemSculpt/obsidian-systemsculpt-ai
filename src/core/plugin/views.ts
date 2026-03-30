@@ -88,6 +88,7 @@ export class ViewManager {
   private restoreQueueLow: WorkspaceLeaf[] = [];
   private restoreQueuedLeaves: Set<WorkspaceLeaf> = new Set();
   private restorePromise: Promise<void> | null = null;
+  private registeredViewTypes: Set<string> = new Set();
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
@@ -258,11 +259,17 @@ export class ViewManager {
   }
 
   private registerViewType(viewType: string, viewCreator: (leaf: WorkspaceLeaf) => ItemView): void {
-    if (this.isViewTypeRegistered(viewType)) {
+    if (this.registeredViewTypes.has(viewType)) {
       return;
     }
 
+    const viewRegistry = (this.app as AppWithViewRegistry).viewRegistry?.viewByType;
+    if (viewRegistry && Object.prototype.hasOwnProperty.call(viewRegistry, viewType)) {
+      delete viewRegistry[viewType];
+    }
+
     this.plugin.registerView(viewType, viewCreator);
+    this.registeredViewTypes.add(viewType);
   }
 
   private async initializeModels() {

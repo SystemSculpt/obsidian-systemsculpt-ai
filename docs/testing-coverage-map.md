@@ -71,6 +71,7 @@ The current release contract is:
 - `npm run check:plugin`
 - `npm test`
 - `npm run build`
+- `npm run check:release:native`
 - `npm run release:plugin -- --dry-run` when validating the full publish path
 
 Releases now ship only the standard Obsidian plugin assets: `main.js`, `manifest.json`, and `styles.css`.
@@ -86,6 +87,6 @@ Releases now ship only the standard Obsidian plugin assets: `main.js`, `manifest
 
 ## Current gaps to close next
 
-- Re-run the real Windows clean-install / no-local-Pi pass on the current release candidate before shipping; that stays a release-time runtime gate even with the new desktop automation architecture.
-- Re-run the new Windows provider-connected baseline on the release candidate with a real provider API key to prove fresh-install provider auth parity end to end.
+- Keep the Windows provider-connected release run pinned to a real provider API key so provider-auth parity is deterministic instead of "first available provider".
+- iOS remains an honest conditional lane: when no paired device plus WebKit adapter is available on the host, the release matrix skips it rather than pretending it passed.
 - `npm run release:plugin -- --dry-run` still requires at least one commit after the current release tag before it can progress past the script's commit-range gate.

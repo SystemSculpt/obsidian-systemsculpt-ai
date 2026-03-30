@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHealthyStatus,
+  BASELINE_SUITE_CASE,
   CHATVIEW_STRESS_CASE,
   MANAGED_BASELINE_CASE,
   PROVIDER_CONNECTED_BASELINE_CASE,
   SETUP_BASELINE_CASE,
+  buildBaselineSummary,
   caseList,
   isTransientModelExecutionError,
   resolveBootstrapReload,
@@ -51,6 +53,10 @@ test("caseList resolves stress aliases to the dedicated reload stress case", () 
   assert.deepEqual(caseList("reload-stress"), ["reload-stress"]);
   assert.deepEqual(caseList(CHATVIEW_STRESS_CASE), [CHATVIEW_STRESS_CASE]);
   assert.deepEqual(caseList(SETUP_BASELINE_CASE), [SETUP_BASELINE_CASE]);
+  assert.deepEqual(caseList(BASELINE_SUITE_CASE), [
+    MANAGED_BASELINE_CASE,
+    PROVIDER_CONNECTED_BASELINE_CASE,
+  ]);
   assert.deepEqual(caseList(MANAGED_BASELINE_CASE), [MANAGED_BASELINE_CASE]);
   assert.deepEqual(caseList(PROVIDER_CONNECTED_BASELINE_CASE), [PROVIDER_CONNECTED_BASELINE_CASE]);
   assert.deepEqual(caseList("soak"), ["reload-stress", CHATVIEW_STRESS_CASE]);
@@ -77,12 +83,52 @@ test("assertHealthyStatus fails when duplicate status bar items are detected", (
   );
 });
 
+test("buildBaselineSummary surfaces one combined baselines verdict", () => {
+  const summary = buildBaselineSummary(
+    {
+      [MANAGED_BASELINE_CASE]: {
+        hostedTurn: { token: "WINDOWS_MANAGED_BASELINE_1" },
+        recoveryTurn: null,
+        transientFailures: [{ phase: "recovery" }],
+      },
+      [PROVIDER_CONNECTED_BASELINE_CASE]: {
+        provider: { providerId: "openrouter" },
+        providerModel: { modelId: "local-pi-openrouter@@openai/gpt-5.4-mini" },
+        providerTurn: { token: "PROVIDER_CONNECTED_OPENROUTER_1" },
+        recoverySelection: {
+          selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+        },
+      },
+    },
+    {
+      chat: {
+        selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      },
+    }
+  );
+
+  assert.equal(summary?.ok, true);
+  assert.equal(summary?.managed.hostedTurnOk, true);
+  assert.equal(summary?.managed.recoveryTurnOk, false);
+  assert.equal(summary?.managed.transientFailureCount, 1);
+  assert.equal(summary?.provider.connectedOk, true);
+  assert.equal(summary?.provider.providerId, "openrouter");
+  assert.equal(summary?.provider.modelId, "local-pi-openrouter@@openai/gpt-5.4-mini");
+  assert.equal(summary?.provider.recoverySelectionOk, true);
+  assert.equal(summary?.finalManagedSelectionOk, true);
+});
+
 test("isTransientModelExecutionError treats generic provider-side upstream failures as transient", () => {
   assert.equal(isTransientModelExecutionError(new Error("Provider returned error")), true);
   assert.equal(
     isTransientModelExecutionError(
       new Error("Provider returned error moonshotai/kimi-k2.5 is temporarily rate-limited upstream.")
     ),
+    true
+  );
+  assert.equal(isTransientModelExecutionError(new Error("This operation was aborted")), true);
+  assert.equal(
+    isTransientModelExecutionError(new Error("Timed out waiting for providers settings panel.")),
     true
   );
   assert.equal(isTransientModelExecutionError(new Error("Invalid API key")), false);
@@ -488,7 +534,7 @@ test("runChatExactCase works with a single authenticated model", async () => {
   assert.equal(outcome.currentModelName, "SystemSculpt Agent");
 });
 
-test("runModelSwitchCase falls back to the unavailable local Pi model when only one authenticated model exists", async () => {
+test("runModelSwitchCase falls back to the unavailable OpenRouter Pi model when only one authenticated model exists", async () => {
   const primaryModel = {
     value: "systemsculpt@@systemsculpt/ai-agent",
     label: "SystemSculpt Agent",
@@ -498,11 +544,11 @@ test("runModelSwitchCase falls back to the unavailable local Pi model when only 
     section: "systemsculpt",
   };
   const fallbackModel = {
-    value: "local-pi-openai@@gpt-4.1",
-    label: "gpt-4.1",
+    value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
     providerAuthenticated: false,
-    providerId: "local-pi-openai",
-    providerLabel: "OpenAI",
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
     section: "pi",
   };
 
@@ -556,7 +602,7 @@ test("runModelSwitchCase falls back to the unavailable local Pi model when only 
   assert.match(outcome.singleModelFallback.recoveryTurn.response, /DESKTOP_SINGLE_MODEL_RECOVERY_/);
 });
 
-test("runChatViewStressCase falls back to the unavailable local Pi model on fresh Windows", async () => {
+test("runChatViewStressCase falls back to the unavailable OpenRouter Pi model on fresh Windows", async () => {
   const primaryModel = {
     value: "systemsculpt@@systemsculpt/ai-agent",
     label: "SystemSculpt Agent",
@@ -566,11 +612,11 @@ test("runChatViewStressCase falls back to the unavailable local Pi model on fres
     section: "systemsculpt",
   };
   const fallbackModel = {
-    value: "local-pi-openai@@gpt-4.1",
-    label: "gpt-4.1",
+    value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
     providerAuthenticated: false,
-    providerId: "local-pi-openai",
-    providerLabel: "OpenAI",
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
     section: "pi",
   };
 
@@ -721,11 +767,11 @@ test("runChatViewStressCase ignores authenticated local models when local Pi is 
     section: "local",
   };
   const fallbackModel = {
-    value: "local-pi-openai@@gpt-4.1",
-    label: "gpt-4.1",
+    value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
     providerAuthenticated: false,
-    providerId: "local-pi-openai",
-    providerLabel: "OpenAI",
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
     section: "local",
   };
 
@@ -934,6 +980,66 @@ test("runManagedBaselineCase proves managed hosted chat and local Pi failure rec
   assert.equal(outcome.readyModelCount, 1);
   assert.match(outcome.hostedTurn.response, /WINDOWS_MANAGED_BASELINE_/);
   assert.match(outcome.blockedLocalPi.error, /Providers/i);
+  assert.match(outcome.recoveryTurn.response, /WINDOWS_MANAGED_RECOVERY_/);
+});
+
+test("runManagedBaselineCase exercises the authenticated OpenRouter Pi model when it is available", async () => {
+  let currentModelId = "systemsculpt@@systemsculpt/ai-agent";
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [
+          {
+            value: "systemsculpt@@systemsculpt/ai-agent",
+            label: "SystemSculpt Agent",
+            providerAuthenticated: true,
+            providerLabel: "SystemSculpt",
+            section: "systemsculpt",
+          },
+          {
+            value: "local-pi-openrouter@@openai/gpt-5.4-mini",
+            label: "GPT-5.4 Mini",
+            providerAuthenticated: true,
+            providerId: "openrouter",
+            providerLabel: "OpenRouter",
+            section: "pi",
+          },
+        ],
+      };
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      const token = String(body.text || "").replace("Reply with this exact token and nothing else: ", "");
+      return {
+        selectedModelId: currentModelId,
+        currentModelName:
+          currentModelId === "systemsculpt@@systemsculpt/ai-agent"
+            ? "SystemSculpt Agent"
+            : "GPT-5.4 Mini",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runManagedBaselineCase(client);
+  assert.match(outcome.hostedTurn.response, /WINDOWS_MANAGED_BASELINE_/);
+  assert.equal(outcome.localPiModel?.modelId, "local-pi-openrouter@@openai/gpt-5.4-mini");
+  assert.match(outcome.localPiTurn?.response || "", /DESKTOP_PI_BASELINE_/);
+  assert.equal(outcome.blockedLocalPi, null);
   assert.match(outcome.recoveryTurn.response, /WINDOWS_MANAGED_RECOVERY_/);
 });
 
@@ -1341,6 +1447,343 @@ test("runProviderConnectedBaselineCase skips a redundant managed precheck before
   assert.match(outcome.providerTurn.response, /PROVIDER_CONNECTED_OPENROUTER_/);
   assert.equal(outcome.recoverySelection.selectedModelId, managedModel.value);
   assert.equal(managedSendCount, 0);
+});
+
+test("runProviderConnectedBaselineCase prefers OpenRouter first and falls back to environment auth after clearing API-key state", async () => {
+  const managedModel = {
+    value: "systemsculpt@@systemsculpt/ai-agent",
+    label: "SystemSculpt Agent",
+    providerAuthenticated: true,
+    providerId: "systemsculpt",
+    providerLabel: "SystemSculpt",
+    section: "systemsculpt",
+  };
+  const googleModel = {
+    value: "google@@gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    providerAuthenticated: true,
+    providerId: "google",
+    providerLabel: "Google",
+    section: "local",
+  };
+  const openrouterModel = {
+    value: "openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    providerAuthenticated: true,
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
+    section: "local",
+  };
+
+  let currentModelId = managedModel.value;
+  let openrouterState = "environment";
+  const clearCalls = [];
+  const setApiKeyCalls = [];
+
+  function buildProvidersSnapshot() {
+    const openrouterConnected = openrouterState === "environment" || openrouterState === "api_key";
+    const openrouterStoredCredential = openrouterState === "api_key";
+    return {
+      settings: {
+        settingsModalOpen: true,
+        pluginSettingsOpen: true,
+        activePluginTabId: "providers",
+      },
+      ui: {
+        panelVisible: true,
+      },
+      providers: {
+        rowCount: 2,
+        rows: [
+          {
+            providerId: "google",
+            label: "Google",
+            source: "environment_or_fallback",
+            credentialType: "none",
+            isLocalProvider: false,
+            apiKeyEnvVar: "GOOGLE_API_KEY",
+            apiKeyEnabled: true,
+            hasAnyAuth: true,
+            hasStoredCredential: false,
+            display: {
+              ready: true,
+              connected: true,
+              blocked: false,
+              tone: "connected",
+              summary: "Connected from environment",
+            },
+          },
+          {
+            providerId: "openrouter",
+            label: "OpenRouter",
+            source: openrouterState === "api_key" ? "api_key" : "environment_or_fallback",
+            credentialType: openrouterState === "api_key" ? "api_key" : "none",
+            isLocalProvider: false,
+            apiKeyEnvVar: "OPENROUTER_API_KEY",
+            apiKeyEnabled: true,
+            hasAnyAuth: openrouterConnected,
+            hasStoredCredential: openrouterStoredCredential,
+            display: {
+              ready: openrouterConnected,
+              connected: openrouterConnected,
+              blocked: false,
+              tone: "connected",
+              summary:
+                openrouterState === "api_key" ? "Connected via API key" : "Connected from environment",
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [managedModel, googleModel, openrouterModel],
+      };
+    },
+    async getProvidersSnapshot() {
+      return buildProvidersSnapshot();
+    },
+    async clearProviderAuth(providerId) {
+      clearCalls.push(providerId);
+      assert.equal(providerId, "openrouter");
+      openrouterState = "environment";
+      return buildProvidersSnapshot();
+    },
+    async setProviderApiKey(providerId, apiKey) {
+      setApiKeyCalls.push(providerId);
+      assert.equal(providerId, "openrouter");
+      assert.equal(apiKey, "sk-openrouter");
+      return buildProvidersSnapshot();
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      const token = String(body.text || "").replace(
+        "Reply with this exact token and nothing else: ",
+        ""
+      );
+      return {
+        selectedModelId: currentModelId,
+        currentModelName:
+          currentModelId === managedModel.value
+            ? "SystemSculpt Agent"
+            : currentModelId === openrouterModel.value
+              ? "GPT-5.4 Mini"
+              : "Gemini 2.5 Flash",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runProviderConnectedBaselineCase(client, {
+    env: {
+      SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS: JSON.stringify({
+        google: "sk-google",
+        openrouter: "sk-openrouter",
+      }),
+    },
+  });
+
+  assert.deepEqual(outcome.attemptedCandidateIds, ["openrouter"]);
+  assert.deepEqual(setApiKeyCalls, ["openrouter"]);
+  assert.deepEqual(clearCalls, ["openrouter", "openrouter"]);
+  assert.equal(outcome.provider.providerId, "openrouter");
+  assert.equal(outcome.provider.connectionMode, "environment_or_fallback");
+  assert.equal(outcome.providerStates.beforeConnect.source, "environment_or_fallback");
+  assert.equal(outcome.providerStates.connected.source, "environment_or_fallback");
+  assert.equal(outcome.providerStates.afterClear.source, "environment_or_fallback");
+  assert.equal(outcome.blockedProviderSend, null);
+  assert.match(outcome.providerTurn.response, /PROVIDER_CONNECTED_OPENROUTER_/);
+  assert.match(outcome.providerTurnAfterClear.response, /PROVIDER_CONNECTED_OPENROUTER_AFTER_CLEAR_/);
+  assert.equal(outcome.recoverySelection.selectedModelId, managedModel.value);
+});
+
+test("runProviderConnectedBaselineCase retries transient OpenRouter failures without falling back to other providers", async () => {
+  const managedModel = {
+    value: "systemsculpt@@systemsculpt/ai-agent",
+    label: "SystemSculpt Agent",
+    providerAuthenticated: true,
+    providerId: "systemsculpt",
+    providerLabel: "SystemSculpt",
+    section: "systemsculpt",
+  };
+  const googleModel = {
+    value: "google@@gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    providerAuthenticated: true,
+    providerId: "google",
+    providerLabel: "Google",
+    section: "local",
+  };
+  const openrouterModel = {
+    value: "openrouter@@openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    providerAuthenticated: true,
+    providerId: "openrouter",
+    providerLabel: "OpenRouter",
+    section: "local",
+  };
+
+  let currentModelId = managedModel.value;
+  let openrouterState = "environment";
+  let openrouterTurnAttempts = 0;
+  let googleTurnAttempts = 0;
+  const clearCalls = [];
+  const setApiKeyCalls = [];
+
+  function buildProvidersSnapshot() {
+    const openrouterConnected = openrouterState === "environment" || openrouterState === "api_key";
+    const openrouterStoredCredential = openrouterState === "api_key";
+    return {
+      settings: {
+        settingsModalOpen: true,
+        pluginSettingsOpen: true,
+        activePluginTabId: "providers",
+      },
+      ui: {
+        panelVisible: true,
+      },
+      providers: {
+        rowCount: 2,
+        rows: [
+          {
+            providerId: "google",
+            label: "Google",
+            source: "environment_or_fallback",
+            credentialType: "none",
+            isLocalProvider: false,
+            apiKeyEnvVar: "GOOGLE_API_KEY",
+            apiKeyEnabled: true,
+            hasAnyAuth: true,
+            hasStoredCredential: false,
+            display: {
+              ready: true,
+              connected: true,
+              blocked: false,
+              tone: "connected",
+              summary: "Connected from environment",
+            },
+          },
+          {
+            providerId: "openrouter",
+            label: "OpenRouter",
+            source: openrouterState === "api_key" ? "api_key" : "environment_or_fallback",
+            credentialType: openrouterState === "api_key" ? "api_key" : "none",
+            isLocalProvider: false,
+            apiKeyEnvVar: "OPENROUTER_API_KEY",
+            apiKeyEnabled: true,
+            hasAnyAuth: openrouterConnected,
+            hasStoredCredential: openrouterStoredCredential,
+            display: {
+              ready: openrouterConnected,
+              connected: openrouterConnected,
+              blocked: false,
+              tone: "connected",
+              summary:
+                openrouterState === "api_key" ? "Connected via API key" : "Connected from environment",
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  const client = {
+    async listModels() {
+      return {
+        selectedModelId: currentModelId,
+        options: [managedModel, googleModel, openrouterModel],
+      };
+    },
+    async getProvidersSnapshot() {
+      return buildProvidersSnapshot();
+    },
+    async clearProviderAuth(providerId) {
+      clearCalls.push(providerId);
+      assert.equal(providerId, "openrouter");
+      openrouterState = "environment";
+      return buildProvidersSnapshot();
+    },
+    async setProviderApiKey(providerId, apiKey) {
+      setApiKeyCalls.push(providerId);
+      assert.equal(providerId, "openrouter");
+      assert.equal(apiKey, "sk-openrouter");
+      return buildProvidersSnapshot();
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return {
+        selectedModelId: currentModelId,
+      };
+    },
+    async sendChat(body = {}) {
+      const token = String(body.text || "").replace(
+        "Reply with this exact token and nothing else: ",
+        ""
+      );
+      if (currentModelId === openrouterModel.value) {
+        openrouterTurnAttempts += 1;
+        if (openrouterTurnAttempts === 1) {
+          throw new Error("This operation was aborted");
+        }
+      }
+      if (currentModelId === googleModel.value) {
+        googleTurnAttempts += 1;
+      }
+      return {
+        selectedModelId: currentModelId,
+        currentModelName:
+          currentModelId === managedModel.value
+            ? "SystemSculpt Agent"
+            : currentModelId === openrouterModel.value
+              ? "GPT-5.4 Mini"
+              : "Gemini 2.5 Flash",
+        messages: [{ role: "assistant", content: token }],
+      };
+    },
+  };
+
+  const outcome = await runProviderConnectedBaselineCase(client, {
+    env: {
+      SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEYS: JSON.stringify({
+        google: "sk-google",
+        openrouter: "sk-openrouter",
+      }),
+    },
+  });
+
+  assert.deepEqual(outcome.attemptedCandidateIds, ["openrouter"]);
+  assert.equal(openrouterTurnAttempts, 3);
+  assert.equal(googleTurnAttempts, 0);
+  assert.deepEqual(setApiKeyCalls, ["openrouter"]);
+  assert.deepEqual(clearCalls, ["openrouter", "openrouter"]);
+  assert.equal(outcome.provider.providerId, "openrouter");
+  assert.match(outcome.providerTurn.response, /PROVIDER_CONNECTED_OPENROUTER_/);
+  assert.match(outcome.providerTurnAfterClear.response, /PROVIDER_CONNECTED_OPENROUTER_AFTER_CLEAR_/);
 });
 
 test("runProviderConnectedBaselineCase only force-refreshes provider state once per auth transition", async () => {

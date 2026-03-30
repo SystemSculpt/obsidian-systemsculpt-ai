@@ -35,6 +35,18 @@ function appendNormalizedValue(target, value) {
   target.push(normalized);
 }
 
+export const DEFAULT_PROVIDER_MODEL_PREFERENCES = new Map([
+  [
+    "openrouter",
+    [
+      "openai/gpt-5.4-mini",
+      "openai/gpt-4.1-mini",
+      "google/gemini-2.5-flash",
+      "anthropic/claude-3.7-sonnet",
+    ],
+  ],
+]);
+
 function appendNestedModelSelectors(target, value) {
   const normalized = normalizeText(value);
   if (!normalized) {
@@ -78,6 +90,12 @@ function collectOptionSelectors(option) {
 
 export function normalizeProviderId(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+export function resolveProviderModelPreferences(providerId, preferredModelIds = []) {
+  const normalizedProviderId = normalizeProviderId(providerId);
+  const defaults = DEFAULT_PROVIDER_MODEL_PREFERENCES.get(normalizedProviderId) || [];
+  return Array.from(new Set([...toModelSelectorList(preferredModelIds), ...defaults]));
 }
 
 export function findProviderModelOption(inventory, providerId, options = {}) {
