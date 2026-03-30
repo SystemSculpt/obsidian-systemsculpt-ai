@@ -33,6 +33,7 @@ const createPluginStub = (app: App) => {
       mcpServers: [],
       defaultChatTag: "",
       respectReducedMotion: true,
+      hideSystemMessagesInChat: false,
       favoriteModels: [],
     },
     modelService: {
@@ -70,6 +71,7 @@ describe("Chat tab native layout", () => {
     const names = Array.from(container.querySelectorAll('.setting-item .setting-item-name')).map((el) => el.textContent?.trim());
     expect(names).toContain("Default chat tag");
     expect(names).toContain("Default Chat Font Size");
+    expect(names).toContain("Hide SystemSculpt system messages");
     expect(names).toContain("Honor OS Reduced Motion");
     expect(names).not.toContain("Default system prompt");
     expect(names).not.toContain("Favorite models");

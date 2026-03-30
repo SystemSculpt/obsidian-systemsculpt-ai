@@ -17,6 +17,32 @@ describe("RecorderFormats", () => {
   });
 
   describe("pickRecorderFormat", () => {
+    it("prefers m4a on mobile when requested and supported", () => {
+      (global as any).MediaRecorder = {
+        isTypeSupported: jest.fn((mimeType: string) => {
+          return mimeType === "audio/mp4;codecs=mp4a.40.2";
+        }),
+      };
+
+      const format = pickRecorderFormat({ preferM4a: true });
+
+      expect(format.mimeType).toBe("audio/mp4;codecs=mp4a.40.2");
+      expect(format.extension).toBe("m4a");
+    });
+
+    it("falls back to standard formats when m4a is preferred but unsupported", () => {
+      (global as any).MediaRecorder = {
+        isTypeSupported: jest.fn((mimeType: string) => {
+          return mimeType === "audio/webm;codecs=opus";
+        }),
+      };
+
+      const format = pickRecorderFormat({ preferM4a: true });
+
+      expect(format.mimeType).toBe("audio/webm;codecs=opus");
+      expect(format.extension).toBe("webm");
+    });
+
     it("returns webm with opus codec when supported", () => {
       (global as any).MediaRecorder = {
         isTypeSupported: jest.fn((mimeType: string) => {
@@ -147,6 +173,32 @@ describe("RecorderFormats", () => {
       const format = pickRecorderFormat();
 
       expect(format.mimeType).toBe("audio/ogg;codecs=opus");
+    });
+
+    it("prefers m4a on mobile when mp4 recording is supported", () => {
+      (global as any).MediaRecorder = {
+        isTypeSupported: jest.fn((mimeType: string) => {
+          return mimeType === "audio/mp4";
+        }),
+      };
+
+      const format = pickRecorderFormat({ preferM4a: true });
+
+      expect(format.mimeType).toBe("audio/mp4");
+      expect(format.extension).toBe("m4a");
+    });
+
+    it("falls back to webm on mobile when m4a is unavailable", () => {
+      (global as any).MediaRecorder = {
+        isTypeSupported: jest.fn((mimeType: string) => {
+          return mimeType === "audio/webm;codecs=opus";
+        }),
+      };
+
+      const format = pickRecorderFormat({ preferM4a: true });
+
+      expect(format.mimeType).toBe("audio/webm;codecs=opus");
+      expect(format.extension).toBe("webm");
     });
   });
 

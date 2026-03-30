@@ -2,6 +2,7 @@ import { App, Setting, Notice, DropdownComponent } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { PlatformContext } from "../services/PlatformContext";
+import { DEFAULT_SETTINGS } from "../types";
 
 export async function displayRecorderTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -78,6 +79,37 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
         .setValue(plugin.settings.postProcessingEnabled)
         .onChange(async (value) => {
           await plugin.getSettingsManager().updateSettings({ postProcessingEnabled: value });
+        });
+    });
+
+  let postProcessingPromptText: HTMLTextAreaElement | null = null;
+  new Setting(containerEl)
+    .setName("Transcription clean-up prompt")
+    .setDesc("Optional. Adjust the clean-up instructions while SystemSculpt continues to run the managed cleanup step.")
+    .addTextArea((text) => {
+      postProcessingPromptText = text.inputEl;
+      text
+        .setPlaceholder(DEFAULT_SETTINGS.postProcessingPrompt)
+        .setValue(plugin.settings.postProcessingPrompt || DEFAULT_SETTINGS.postProcessingPrompt)
+        .onChange(async (value) => {
+          await plugin.getSettingsManager().updateSettings({
+            postProcessingPrompt: value || DEFAULT_SETTINGS.postProcessingPrompt,
+          });
+        });
+      text.inputEl.rows = 8;
+      text.inputEl.addClass("ss-settings-textarea");
+    })
+    .addButton((button) => {
+      button
+        .setButtonText("Reset prompt")
+        .onClick(async () => {
+          await plugin.getSettingsManager().updateSettings({
+            postProcessingPrompt: DEFAULT_SETTINGS.postProcessingPrompt,
+          });
+          if (postProcessingPromptText) {
+            postProcessingPromptText.value = DEFAULT_SETTINGS.postProcessingPrompt;
+          }
+          new Notice("Transcription clean-up prompt reset.");
         });
     });
 

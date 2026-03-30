@@ -47,6 +47,18 @@ new Setting(containerEl)
             });
 	    });
 
+new Setting(containerEl)
+    .setName("Hide SystemSculpt system messages")
+    .setDesc("Keep system-role messages in the saved chat history, but hide them from the chat view.")
+    .addToggle((toggle: ToggleComponent) => {
+        toggle
+            .setValue(plugin.settings.hideSystemMessagesInChat ?? false)
+            .onChange(async (value) => {
+                await plugin.getSettingsManager().updateSettings({ hideSystemMessagesInChat: value });
+                new Notice(`System messages ${value ? 'hidden' : 'shown'} in chat.`);
+            });
+    });
+
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
     .setName("Honor OS Reduced Motion")

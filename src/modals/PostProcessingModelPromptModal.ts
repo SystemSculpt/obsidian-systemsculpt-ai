@@ -38,11 +38,11 @@ export class PostProcessingModelPromptModal extends StandardModal {
 
     const details = container.createEl("div", { cls: "ss-modal__callout" });
     details.createEl("p", {
-      text: "SystemSculpt handles transcription clean-up automatically, so there is nothing to change here in the plugin.",
+      text: "SystemSculpt still handles transcription clean-up automatically, but you can change the clean-up prompt in Recording settings.",
     });
 
     container.createEl("p", {
-      text: "Open Account to check your license, or disable post-processing until SystemSculpt is available again.",
+      text: "Open Account to fix license or availability problems, open Recording settings to adjust the prompt, or disable post-processing until SystemSculpt is available again.",
       cls: "ss-modal__muted",
     });
 
@@ -52,9 +52,16 @@ export class PostProcessingModelPromptModal extends StandardModal {
   private renderActions(): void {
     this.addActionButton(
       "Open Account",
-      () => this.openSetup(),
+      () => this.openAccountSetup(),
       true,
       "settings"
+    );
+
+    this.addActionButton(
+      "Open Recording Settings",
+      () => this.openRecordingSettings(),
+      false,
+      "mic"
     );
 
     this.addActionButton(
@@ -69,8 +76,13 @@ export class PostProcessingModelPromptModal extends StandardModal {
     this.addActionButton("Later", () => this.close(), false, "x");
   }
 
-  private openSetup(): void {
+  private openAccountSetup(): void {
     this.plugin.openSettingsTab("account");
+    this.close();
+  }
+
+  private openRecordingSettings(): void {
+    this.plugin.openSettingsTab("workflow");
     this.close();
   }
 

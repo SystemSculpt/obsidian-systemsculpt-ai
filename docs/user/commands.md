@@ -65,7 +65,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
-| Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio |
+| Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio, or creates one automatically when none exists |
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
 
 ## Diagnostics

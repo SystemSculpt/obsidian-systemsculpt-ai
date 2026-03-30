@@ -1,5 +1,6 @@
 import { PostProcessingService } from "../PostProcessingService";
 import { SystemSculptError } from "../../utils/errors";
+import { DEFAULT_SETTINGS } from "../../types";
 
 const MANAGED_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
 
@@ -136,6 +137,28 @@ describe("PostProcessingService", () => {
       );
     });
 
+    it("falls back to the default clean-up prompt when the configured prompt is blank", async () => {
+      mockPlugin.settings.postProcessingPrompt = "   ";
+      mockSculptService.streamMessage.mockReturnValue(
+        (async function* () {
+          yield { type: "content", text: "Processed text" };
+        })()
+      );
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      await expect(service.processTranscription("original text")).resolves.toBe("Processed text");
+      expect(mockSculptService.streamMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "system",
+              content: DEFAULT_SETTINGS.postProcessingPrompt,
+            }),
+          ]),
+        })
+      );
+    });
+
     it("returns the original text when validation says the managed model is unavailable", async () => {
       mockPlugin.modelService.validateSpecificModel.mockResolvedValueOnce({
         isAvailable: false,
@@ -164,6 +187,29 @@ describe("PostProcessingService", () => {
 
       const service = PostProcessingService.getInstance(mockPlugin);
       await expect(service.processTranscription("test")).resolves.toBe("result with spaces");
+    });
+
+    it("falls back to the default cleanup prompt when the stored prompt is blank", async () => {
+      mockPlugin.settings.postProcessingPrompt = "   ";
+      mockSculptService.streamMessage.mockReturnValue(
+        (async function* () {
+          yield { type: "content", text: "Processed text" };
+        })()
+      );
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      await service.processTranscription("test");
+
+      expect(mockSculptService.streamMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "system",
+              content: expect.stringContaining("You are a transcription post-processor."),
+            }),
+          ]),
+        })
+      );
     });
 
     it("handles empty stream responses", async () => {

@@ -554,13 +554,7 @@ export class CommandManager {
         }
 
         try {
-          const studio = this.plugin.getStudioService();
-          const project = await studio.createProject();
-          const projectPath = studio.getCurrentProjectPath();
-          if (!projectPath) {
-            throw new Error("Studio project was created but no project path was returned.");
-          }
-          await this.plugin.getViewManager().activateSystemSculptStudioView(projectPath);
+          const project = await this.createAndOpenStudioProject();
           new Notice(`Created Studio project: ${project.name}`);
         } catch (error: any) {
           new Notice(`Unable to create Studio project: ${error?.message || error}`);
@@ -589,7 +583,8 @@ export class CommandManager {
               .find((file) => file.extension.toLowerCase() === "systemsculpt");
 
           if (!fallbackStudioFile) {
-            new Notice('No .systemsculpt files found. Run "New SystemSculpt Studio Project" first.');
+            const project = await this.createAndOpenStudioProject();
+            new Notice(`No Studio project found. Created and opened: ${project.name}`);
             return;
           }
 
@@ -689,6 +684,18 @@ export class CommandManager {
     }
 
     return activeView;
+  }
+
+  private async createAndOpenStudioProject(): Promise<{ name: string; path: string }> {
+    const studio = this.plugin.getStudioService();
+    const project = await studio.createProject();
+    const projectPath = studio.getCurrentProjectPath();
+    if (!projectPath) {
+      throw new Error("Studio project was created but no project path was returned.");
+    }
+
+    await this.plugin.getViewManager().activateSystemSculptStudioView(projectPath);
+    return { name: project.name, path: projectPath };
   }
 
   private getCurrentActiveFilePath(): string | null {

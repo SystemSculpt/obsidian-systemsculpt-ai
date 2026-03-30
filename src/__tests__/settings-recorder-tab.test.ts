@@ -38,6 +38,7 @@ describe("Recorder settings tab", () => {
         cleanTranscriptionOutput: true,
         autoSubmitAfterTranscription: false,
         postProcessingEnabled: false,
+        postProcessingPrompt: "Custom cleanup instructions",
         transcriptionProvider: "custom",
         transcriptionOutputFormat: "markdown",
         showTranscriptionFormatChooserInModal: true,
@@ -66,7 +67,8 @@ describe("Recorder settings tab", () => {
     expect(text).toContain("transcribe through SystemSculpt");
     expect(names).toContain("Transcription execution");
     expect(text).toContain("SystemSculpt clean-up");
-    expect(text).not.toContain("post-processing prompt");
+    expect(names).toContain("Transcription clean-up prompt");
+    expect(text).toContain("managed cleanup step");
     expect(names).not.toContain("Transcription provider");
     expect(text).not.toContain("Custom endpoint URL");
     expect(text).not.toContain("API key");

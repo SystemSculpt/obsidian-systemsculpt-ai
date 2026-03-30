@@ -113,7 +113,9 @@ export class RecorderService {
 
     try {
       const directoryPath = this.plugin.settings.recordingsDirectory || "SystemSculpt/Recordings";
-      const format = pickRecorderFormat();
+      const format = pickRecorderFormat({
+        preferM4a: this.platform.isMobile(),
+      });
       const directoryManager = this.plugin.directoryManager;
       if (!directoryManager) {
         throw new Error("Recorder directories are not initialized yet. Please wait and try again.");

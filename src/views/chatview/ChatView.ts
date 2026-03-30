@@ -807,6 +807,10 @@ export class ChatView extends ItemView {
     });
   }
 
+  public shouldRenderMessageRole(role: ChatRole): boolean {
+    return !(this.plugin.settings.hideSystemMessagesInChat && role === "system");
+  }
+
 
   public async getCurrentSystemPrompt(): Promise<string> {
     this.ensureCoreServicesReady();
@@ -1412,11 +1416,14 @@ export class ChatView extends ItemView {
     if (!this.chatContainer) return;
 
     const renderEpoch = ++this.renderEpoch;
+    const visibleMessages = this.messages.filter((message) =>
+      this.shouldRenderMessageRole(message.role)
+    );
 
     // Determine the slice of history we want to render.  If this is the first
     // render of the view (virtualStartIndex === 0) we default to showing only
     // the most recent VIRTUAL_BATCH_SIZE messages.
-    const total = this.messages.length;
+    const total = visibleMessages.length;
     if (total === 0) {
       this.chatContainer.empty();
       this.removeChatLoadingBanner();
@@ -1474,7 +1481,7 @@ export class ChatView extends ItemView {
       const end = Math.min(total, start + chunkSize);
       for (let i = start; i < end; i++) {
         if (renderEpoch !== this.renderEpoch) return;
-        const msg = this.messages[i];
+        const msg = visibleMessages[i];
         await messageHandling.addMessage(this, msg.role, msg.content, msg.message_id, msg, frag);
       }
 

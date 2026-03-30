@@ -22,7 +22,7 @@ describe("PostProcessingModelPromptModal", () => {
     modal.onOpen();
 
     const text = modal.contentEl.textContent || "";
-    expect(text).toContain("nothing to change here in the plugin");
+    expect(text).toContain("change the clean-up prompt in Recording settings");
     expect(text).toContain("SystemSculpt");
     expect(text).not.toContain("Model id:");
     expect(text).not.toContain("systemsculpt@@systemsculpt/ai-agent");

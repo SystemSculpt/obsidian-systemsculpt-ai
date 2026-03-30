@@ -16,6 +16,25 @@ describe("messageHandling resubmit behavior", () => {
     jest.clearAllMocks();
   });
 
+  it("skips rendering hidden system-role messages", async () => {
+    const chatContainer = document.createElement("div");
+    const renderMessage = jest.fn();
+    const chatView: any = {
+      shouldRenderMessageRole: jest.fn(() => false),
+      messageRenderer: { renderMessage },
+      chatContainer,
+      isGenerating: false,
+      manageDomSize: jest.fn(),
+      register: jest.fn(),
+    };
+
+    await messageHandling.addMessage(chatView, "system", "Hidden system turn", "system_1");
+
+    expect(chatView.shouldRenderMessageRole).toHaveBeenCalledWith("system");
+    expect(renderMessage).not.toHaveBeenCalled();
+    expect(chatContainer.childElementCount).toBe(0);
+  });
+
   it("branches managed-session chats and restores the resent prompt into the composer", async () => {
     const chatView: any = {
       messages: [{ message_id: "user_pi_1", role: "user", content: "Hello Pi" }],

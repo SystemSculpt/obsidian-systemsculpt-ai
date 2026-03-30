@@ -5,7 +5,7 @@ import {
 } from "./systemsculpt/ManagedSystemSculptModel";
 import type SystemSculptPlugin from "../main";
 
-import { ChatMessage } from "../types";
+import { ChatMessage, DEFAULT_SETTINGS } from "../types";
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
 
 import { PostProcessingModelPromptModal } from "../modals/PostProcessingModelPromptModal";
@@ -49,7 +49,7 @@ export class PostProcessingService {
       const messages: ChatMessage[] = [
         {
           role: "system",
-          content: this.plugin.settings.postProcessingPrompt,
+          content: this.getPostProcessingPrompt(),
           message_id: crypto.randomUUID(),
         },
         {
@@ -124,6 +124,14 @@ export class PostProcessingService {
     });
 
     modal.open();
+  }
+
+  private getPostProcessingPrompt(): string {
+    const configuredPrompt = String(
+      this.plugin.settings.postProcessingPrompt || ""
+    ).trim();
+
+    return configuredPrompt || DEFAULT_SETTINGS.postProcessingPrompt;
   }
 
   private buildModelUnavailableReason(modelId: string): string {

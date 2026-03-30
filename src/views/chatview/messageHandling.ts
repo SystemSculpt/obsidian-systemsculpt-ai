@@ -6,6 +6,10 @@ import { appendMessageToGroupedContainer, removeGroupIfEmpty } from "./utils/Mes
 
 export const messageHandling = {
   addMessage: async function(chatView: ChatView, role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage, targetContainer?: HTMLElement | DocumentFragment): Promise<void> {
+    if (!chatView.shouldRenderMessageRole(role)) {
+      return;
+    }
+
     const messageId = existingMessageId || chatView.generateMessageId();
     
     const { messageEl, contentEl } = await chatView.messageRenderer.renderMessage({

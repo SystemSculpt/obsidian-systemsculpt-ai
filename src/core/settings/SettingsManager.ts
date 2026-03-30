@@ -243,6 +243,10 @@ export class SettingsManager {
       migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
     }
 
+    if (typeof migratedSettings.hideSystemMessagesInChat !== "boolean") {
+      migratedSettings.hideSystemMessagesInChat = DEFAULT_SETTINGS.hideSystemMessagesInChat;
+    }
+
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }
@@ -584,6 +588,10 @@ export class SettingsManager {
 
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
+    }
+
+    if (typeof validatedSettings.hideSystemMessagesInChat !== "boolean") {
+      validatedSettings.hideSystemMessagesInChat = defaultSettings.hideSystemMessagesInChat;
     }
 
     if (

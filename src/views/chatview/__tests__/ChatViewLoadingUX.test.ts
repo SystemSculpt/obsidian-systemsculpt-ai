@@ -20,6 +20,7 @@ describe("ChatView loading UX", () => {
         chatsDirectory: "SystemSculpt/Chats",
         selectedModelId: "",
         chatFontSize: "medium",
+        hideSystemMessagesInChat: false,
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
         customProviders: [],
@@ -72,5 +73,43 @@ describe("ChatView loading UX", () => {
     expect(chatView.chatContainer.querySelector(".systemsculpt-chat-loading-banner")).toBeNull();
     expect(chatView.chatContainer.querySelectorAll(".systemsculpt-message").length).toBe(20);
     expect(chatView.chatContainer.querySelector(".systemsculpt-load-more")?.textContent).toContain("(40)");
+  });
+
+  test("omits system-role messages from the rendered history when the setting is enabled", async () => {
+    const app = new App();
+    const leaf = new WorkspaceLeaf(app);
+
+    jest.spyOn(SystemSculptService, "getInstance").mockReturnValue({} as any);
+
+    const plugin: any = {
+      app,
+      manifest: { id: "systemsculpt-ai" },
+      settings: {
+        chatsDirectory: "SystemSculpt/Chats",
+        selectedModelId: "",
+        chatFontSize: "medium",
+        hideSystemMessagesInChat: true,
+        respectReducedMotion: false,
+        activeProvider: { type: "native", id: "systemsculpt" },
+        customProviders: [],
+        mcpServers: [],
+      },
+    };
+
+    const chatView = new ChatView(leaf as any, plugin);
+    chatView.chatContainer = document.createElement("div");
+    chatView.messages = [
+      { role: "user", content: "Visible user turn", message_id: "u1" },
+      { role: "system", content: "Hidden system turn", message_id: "s1" },
+      { role: "assistant", content: "Visible assistant turn", message_id: "a1" },
+    ] as any;
+
+    await chatView.renderMessagesInChunks();
+
+    expect(chatView.chatContainer.querySelectorAll(".systemsculpt-message")).toHaveLength(2);
+    expect(chatView.chatContainer.querySelector(".systemsculpt-system-message")).toBeNull();
+    expect(chatView.chatContainer.textContent).toContain("Visible user turn");
+    expect(chatView.chatContainer.textContent).toContain("Visible assistant turn");
+    expect(chatView.chatContainer.textContent).not.toContain("Hidden system turn");
   });
 });

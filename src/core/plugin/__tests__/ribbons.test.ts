@@ -13,9 +13,6 @@ const SYSTEMSCULPT_TOP_TITLES = [
   "Open SystemSculpt Chat",
 ];
 
-const SYSTEMSCULPT_SECONDARY_TITLES = ["Open Similar Notes Panel"];
-const SYSTEMSCULPT_RIBBON_DIVIDER_CLASS = "ss-systemsculpt-ribbon-divider";
-
 const createPlugin = () => {
   const app = new App();
   const plugin = new Plugin(app, { id: "systemsculpt", version: "0.0.0" }) as any;
@@ -32,9 +29,6 @@ const getRibbonElements = (plugin: any): HTMLElement[] =>
 
 const getRibbonTitles = (plugin: any): string[] =>
   getRibbonElements(plugin).map((ribbon) => ribbon.getAttribute("aria-label") || ribbon.title || "");
-
-const getRibbonContainerChildren = (plugin: any): HTMLElement[] =>
-  Array.from(plugin._ribbonActionsEl.children as HTMLCollectionOf<HTMLElement>);
 
 const seedCoreRibbonActions = (plugin: any, titles: string[]) => {
   titles.forEach((title) => {
@@ -87,7 +81,7 @@ describe("RibbonManager", () => {
     expect(getRibbonElements(plugin)).toHaveLength(8);
   });
 
-  it("keeps the SystemSculpt ribbon cluster grouped at the very top in the curated order", async () => {
+  it("registers the expected SystemSculpt ribbon actions without removing native ribbons", async () => {
     const { app, plugin } = createPlugin();
     const manager = new RibbonManager(plugin, app);
 
@@ -96,15 +90,14 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     const titles = getRibbonTitles(plugin);
-    expect(titles.slice(0, 7)).toEqual(SYSTEMSCULPT_TOP_TITLES);
-    expect(
-      titles.filter((title) => SYSTEMSCULPT_TOP_TITLES.includes(title))
-    ).toEqual(SYSTEMSCULPT_TOP_TITLES);
-    expect(titles[7]).toBe("Open quick switcher");
-    expect(titles.slice(-1)).toEqual(SYSTEMSCULPT_SECONDARY_TITLES);
+    expect(titles).toEqual(expect.arrayContaining(SYSTEMSCULPT_TOP_TITLES));
+    expect(titles).toContain("Open Similar Notes Panel");
+    expect(titles).toContain("Open quick switcher");
+    expect(titles).toContain("Open graph view");
+    expect(titles).toContain("Open command palette");
   });
 
-  it("inserts a subtle divider between the SystemSculpt block and the rest of the ribbon", async () => {
+  it("does not inject a divider into the ribbon container", async () => {
     const { app, plugin } = createPlugin();
     const manager = new RibbonManager(plugin, app);
 
@@ -112,12 +105,12 @@ describe("RibbonManager", () => {
     manager.initialize();
     await flushAsyncWork();
 
-    const containerChildren = getRibbonContainerChildren(plugin);
-    expect(containerChildren[7]?.classList.contains(SYSTEMSCULPT_RIBBON_DIVIDER_CLASS)).toBe(true);
-    expect(containerChildren[8]?.getAttribute("aria-label")).toBe("Open quick switcher");
+    expect(
+      plugin._ribbonActionsEl.querySelector(".ss-systemsculpt-ribbon-divider")
+    ).toBeNull();
   });
 
-  it("keeps the SystemSculpt ribbon cluster topmost even when later ribbon actions are prepended", async () => {
+  it("leaves later ribbon actions untouched", async () => {
     const { app, plugin } = createPlugin();
     const manager = new RibbonManager(plugin, app);
 
@@ -128,12 +121,12 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     const titles = getRibbonTitles(plugin);
-    expect(titles.slice(0, 7)).toEqual(SYSTEMSCULPT_TOP_TITLES);
-    expect(titles[7]).toBe("Later Ribbon Action");
-    expect(titles.slice(-1)).toEqual(SYSTEMSCULPT_SECONDARY_TITLES);
+    expect(titles).toContain("Later Ribbon Action");
+    expect(titles).toEqual(expect.arrayContaining(SYSTEMSCULPT_TOP_TITLES));
+    expect(titles).toContain("Open Similar Notes Panel");
   });
 
-  it("does not add custom ribbon-branding classes to the top cluster", async () => {
+  it("does not add custom ribbon-branding classes to SystemSculpt ribbons", async () => {
     const { app, plugin } = createPlugin();
     const manager = new RibbonManager(plugin, app);
 
@@ -141,7 +134,7 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     const ribbons = getRibbonElements(plugin);
-    ribbons.slice(0, 7).forEach((ribbon) => {
+    ribbons.forEach((ribbon) => {
       expect(ribbon.className).not.toContain("ss-systemsculpt-ribbon-action");
       expect(ribbon.dataset.ssRibbonGroup).toBeUndefined();
     });

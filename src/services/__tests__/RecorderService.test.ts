@@ -4,6 +4,8 @@
 
 import { App } from "obsidian";
 import { RecorderService } from "../RecorderService";
+import { PlatformContext } from "../PlatformContext";
+import { pickRecorderFormat } from "../recorder/RecorderFormats";
 
 // Mock dependencies
 jest.mock("../PlatformContext", () => ({
@@ -67,6 +69,9 @@ describe("RecorderService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (PlatformContext.get as jest.Mock).mockReturnValue({
+      isMobile: jest.fn().mockReturnValue(false),
+    });
 
     // Reset singleton
     (RecorderService as any).instance = null;
@@ -160,6 +165,18 @@ describe("RecorderService", () => {
   });
 
   describe("toggleRecording", () => {
+    it("prefers m4a recorder formats on mobile", async () => {
+      const { pickRecorderFormat } = require("../recorder/RecorderFormats");
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn().mockReturnValue(true),
+      });
+
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+      await (service as any).startRecording();
+
+      expect(pickRecorderFormat).toHaveBeenCalledWith({ preferM4a: true });
+    });
+
     it("queues toggle operations", async () => {
       const service = RecorderService.getInstance(mockApp, mockPlugin);
 
@@ -247,6 +264,18 @@ describe("RecorderService", () => {
 
       expect(stopMock).toHaveBeenCalledTimes(1);
       expect((service as any).isRecording).toBe(false);
+    });
+
+    it("selects the recorder format with the current mobile preference", async () => {
+      const { PlatformContext } = require("../PlatformContext");
+      (PlatformContext.get as jest.Mock).mockReturnValueOnce({
+        isMobile: jest.fn().mockReturnValue(true),
+      });
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+
+      await (service as any).startRecording();
+
+      expect(pickRecorderFormat as jest.Mock).toHaveBeenCalledWith({ preferM4a: true });
     });
   });
 

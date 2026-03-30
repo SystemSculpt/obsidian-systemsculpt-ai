@@ -164,10 +164,20 @@ export const uiSetup = {
         const licenseChanged =
           oldSettings?.licenseValid !== newSettings?.licenseValid ||
           oldSettings?.licenseKey !== newSettings?.licenseKey;
+        const messageVisibilityChanged =
+          oldSettings?.hideSystemMessagesInChat !== newSettings?.hideSystemMessagesInChat;
         if (licenseChanged) {
           void chatView.refreshCreditsBalance();
         } else {
           void chatView.updateCreditsIndicator();
+        }
+
+        if (messageVisibilityChanged) {
+          if (chatView.messages.length === 0) {
+            chatView.displayChatStatus();
+          } else {
+            void chatView.renderMessagesInChunks();
+          }
         }
       })
     );

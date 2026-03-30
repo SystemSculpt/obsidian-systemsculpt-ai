@@ -15,7 +15,4 @@ SystemSculpt adds the following ribbon actions in this order:
 | `message-square` | Open SystemSculpt Chat | Opens a new chat view |
 | `network` | Open Similar Notes Panel | Opens Similar Notes view |
 
-The first seven actions are kept together at the very top of the left ribbon so the main SystemSculpt tools stay in one contiguous block.
-A subtle divider separates that block from the rest of the ribbon.
-
-You can still hide or reorder ribbon icons with Obsidian's standard ribbon controls.
+SystemSculpt no longer forces a custom top-of-ribbon cluster or divider. Obsidian keeps control of ribbon placement, and you can still hide or reorder icons with the app's standard ribbon controls.

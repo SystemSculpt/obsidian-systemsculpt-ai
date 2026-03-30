@@ -14,6 +14,11 @@ import { MeetingProcessorOptions } from "../types";
 import { ensureCanonicalId } from "../utils/modelUtils";
 import { TranscriptionService } from "../services/TranscriptionService";
 import { normalizePath } from "obsidian";
+
+const MEETING_SOURCE_PATH_FRONTMATTER_KEY = "systemsculptMeetingSourcePath";
+const MEETING_SOURCE_FINGERPRINT_FRONTMATTER_KEY =
+  "systemsculptMeetingSourceFingerprint";
+
 // Simple filename sanitizer (keep ASCII, replace illegal chars)
 const sanitizeFileName = (name: string): string => {
   return name
@@ -925,6 +930,10 @@ export class MeetingProcessorModal extends StandardModal {
 
   private async writeProcessedNote(file: TFile, content: string): Promise<string> {
     const { dir, targetPath } = this.getMeetingOutputDestination(file);
+    const contentWithSourceMetadata = this.prependMeetingSourceFrontmatter(
+      file,
+      content
+    );
 
     if (!(await this.plugin.app.vault.adapter.exists(dir))) {
       await this.plugin.app.vault.createFolder(dir);
@@ -932,9 +941,9 @@ export class MeetingProcessorModal extends StandardModal {
 
     const existing = this.plugin.app.vault.getAbstractFileByPath(targetPath);
     if (existing instanceof TFile) {
-      await this.plugin.app.vault.modify(existing, content);
+      await this.plugin.app.vault.modify(existing, contentWithSourceMetadata);
     } else {
-      await this.plugin.app.vault.create(targetPath, content);
+      await this.plugin.app.vault.create(targetPath, contentWithSourceMetadata);
     }
     return targetPath;
   }
@@ -965,9 +974,76 @@ export class MeetingProcessorModal extends StandardModal {
     return { dir, targetPath };
   }
 
+  private prependMeetingSourceFrontmatter(file: TFile, content: string): string {
+    const frontmatter = [
+      "---",
+      `${MEETING_SOURCE_PATH_FRONTMATTER_KEY}: "${this.escapeFrontmatterValue(file.path)}"`,
+      `${MEETING_SOURCE_FINGERPRINT_FRONTMATTER_KEY}: "${this.escapeFrontmatterValue(
+        this.buildMeetingSourceFingerprint(file)
+      )}"`,
+      "---",
+      "",
+      content.trim(),
+    ];
+
+    return frontmatter.join("\n");
+  }
+
+  private escapeFrontmatterValue(value: string): string {
+    return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  private buildMeetingSourceFingerprint(file: TFile): string {
+    const size =
+      typeof file.stat?.size === "number" ? String(file.stat.size) : "unknown";
+    const mtime =
+      typeof file.stat?.mtime === "number" ? String(file.stat.mtime) : "unknown";
+
+    return `${normalizeFileExtension(file.extension)}:${size}:${mtime}`;
+  }
+
+  private findProcessedOutputFile(file: TFile): TFile | null {
+    const { dir, targetPath } = this.getMeetingOutputDestination(file);
+    const expectedOutput = this.plugin.app.vault.getAbstractFileByPath(targetPath);
+    if (expectedOutput instanceof TFile) {
+      return expectedOutput;
+    }
+
+    const outputDirPrefix = `${dir}/`;
+    const fingerprint = this.buildMeetingSourceFingerprint(file);
+
+    const candidates = (
+      this.plugin.vaultFileCache?.getAllFiles() || this.app.vault.getFiles()
+    ).filter(
+      (candidate) =>
+        candidate.path.startsWith(outputDirPrefix) &&
+        normalizeFileExtension(candidate.extension) === "md"
+    );
+
+    for (const candidate of candidates) {
+      const frontmatter =
+        this.plugin.app.metadataCache?.getFileCache(candidate)?.frontmatter || {};
+      const sourcePath = String(
+        frontmatter[MEETING_SOURCE_PATH_FRONTMATTER_KEY] || ""
+      ).trim();
+      const sourceFingerprint = String(
+        frontmatter[MEETING_SOURCE_FINGERPRINT_FRONTMATTER_KEY] || ""
+      ).trim();
+
+      if (sourceFingerprint && sourceFingerprint === fingerprint) {
+        return candidate;
+      }
+
+      if (sourcePath && normalizePath(sourcePath) === file.path) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
   private getAudioFileProcessedStatus(file: TFile): MeetingProcessorProcessedStatus {
-    const { targetPath } = this.getMeetingOutputDestination(file);
-    const outputFile = this.plugin.app.vault.getAbstractFileByPath(targetPath);
+    const outputFile = this.findProcessedOutputFile(file);
     if (!(outputFile instanceof TFile)) return "unprocessed";
 
     const audioMtime = file.stat?.mtime;

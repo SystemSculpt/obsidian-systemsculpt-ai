@@ -63,6 +63,7 @@ jest.mock("../../../types", () => ({
     lastAutomaticBackup: 0,
     preserveReasoningVerbatim: true,
     respectReducedMotion: true,
+    hideSystemMessagesInChat: false,
     recordingsDirectory: "SystemSculpt/Recordings",
     transcriptionOutputFormat: "markdown",
     showTranscriptionFormatChooserInModal: true,
@@ -277,6 +278,11 @@ describe("SettingsManager", () => {
       it("initializes missing respectReducedMotion", () => {
         const result = migrateSettings({});
         expect(result.respectReducedMotion).toBe(true);
+      });
+
+      it("initializes missing hideSystemMessagesInChat", () => {
+        const result = migrateSettings({});
+        expect(result.hideSystemMessagesInChat).toBe(false);
       });
     });
 

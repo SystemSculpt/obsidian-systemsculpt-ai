@@ -319,6 +319,11 @@ export interface SystemSculptSettings {
   chatFontSize: "small" | "medium" | "large";
 
   /**
+   * When enabled, system-role messages stay in history but are hidden from the chat UI.
+   */
+  hideSystemMessagesInChat: boolean;
+
+  /**
    * Inline completions (ghost text) shown in the editor.
    * Hotkey accepts the suggestion (Tab by default), Escape dismisses.
    */
@@ -608,6 +613,7 @@ Raw transcript:`,
 
   defaultChatTag: "",
   chatFontSize: "medium",
+  hideSystemMessagesInChat: false,
   respectReducedMotion: true,
   openAiApiKey: "",
 
