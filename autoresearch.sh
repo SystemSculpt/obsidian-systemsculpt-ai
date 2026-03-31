@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$ROOT/autoresearch-logs"
@@ -17,37 +17,67 @@ run_check() {
   shift 2
 
   local log_file="$RUN_DIR/${name}.log"
-  local status=0
-
   printf '[autoresearch] %s\n' "$name"
-  "$@" >"$log_file" 2>&1 || status=$?
-  cat "$log_file"
 
-  if [[ "$status" -eq 0 ]]; then
+  if "$@" >"$log_file" 2>&1; then
+    cat "$log_file"
     printf 'METRIC %s=1\n' "$metric"
   else
+    cat "$log_file"
     printf 'METRIC %s=0\n' "$metric"
     failing_checks=$((failing_checks + 1))
   fi
 }
 
 run_check \
-  "pi-local-executor" \
-  "pi_local_executor_ok" \
+  "message-renderer-order" \
+  "renderer_order_ok" \
   node scripts/jest.mjs \
     --config jest.config.cjs \
     --runInBand \
     --runTestsByPath \
-    src/services/pi-native/__tests__/PiLocalAgentExecutor.test.ts
+    src/views/chatview/__tests__/message-renderer-order.test.ts
 
 run_check \
-  "streaming-controller" \
-  "streaming_controller_ok" \
+  "message-renderer-reasoning-layout" \
+  "reasoning_layout_ok" \
   node scripts/jest.mjs \
     --config jest.config.cjs \
     --runInBand \
     --runTestsByPath \
-    src/views/chatview/__tests__/streaming-controller.test.ts
+    src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts
+
+run_check \
+  "chat-markdown-serializer-order" \
+  "serializer_roundtrip_ok" \
+  node scripts/jest.mjs \
+    --config jest.config.cjs \
+    --runInBand \
+    --runTestsByPath \
+    src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts
+
+run_check \
+  "systemsculpt-service-hosted-tool-call-ids" \
+  "hosted_unique_tool_call_ids_ok" \
+  node scripts/jest.mjs \
+    --config jest.config.cjs \
+    --runInBand \
+    --runTestsByPath \
+    src/services/__tests__/SystemSculptService.test.ts
+
+run_check \
+  "desktop-automation-bridge-open-history" \
+  "bridge_open_history_ok" \
+  node scripts/jest.mjs \
+    --config jest.config.cjs \
+    --runInBand \
+    --runTestsByPath \
+    src/testing/automation/__tests__/DesktopAutomationBridge.test.ts
+
+run_check \
+  "desktop-automation-client-open-history" \
+  "desktop_client_history_ok" \
+  node --test testing/native/desktop-automation/client.test.mjs
 
 run_check \
   "input-handler-tool-loop" \
@@ -57,11 +87,6 @@ run_check \
     --runInBand \
     --runTestsByPath \
     src/views/chatview/__tests__/input-handler-tool-loop.test.ts
-
-run_check \
-  "desktop-runner" \
-  "desktop_runner_ok" \
-  node --test testing/native/desktop-automation/runner.test.mjs
 
 printf 'METRIC failing_checks=%s\n' "$failing_checks"
 

@@ -534,6 +534,44 @@ export class DesktopAutomationBridge {
         return;
       }
 
+      if (method === "POST" && url.pathname === "/v1/chat/open-history") {
+        const body = await this.readJsonBody(request);
+        const chatId = String(body.chatId || "").trim();
+        if (!chatId) {
+          throw new BridgeHttpError(400, "chatId is required.");
+        }
+
+        const view = await this.ensureChatView({ createIfMissing: true });
+        await view.setState({
+          chatId,
+          chatTitle:
+            typeof body.chatTitle === "string" && body.chatTitle.trim().length > 0
+              ? body.chatTitle
+              : undefined,
+          selectedModelId:
+            typeof body.selectedModelId === "string" && body.selectedModelId.trim().length > 0
+              ? body.selectedModelId
+              : view.getEffectiveSelectedModelId(),
+          chatFontSize:
+            typeof body.chatFontSize === "string" && body.chatFontSize.trim().length > 0
+              ? body.chatFontSize
+              : view.chatFontSize,
+          chatBackend:
+            typeof body.chatBackend === "string" && body.chatBackend.trim().length > 0
+              ? body.chatBackend
+              : view.chatBackend,
+          version:
+            typeof body.version === "number" && Number.isFinite(body.version)
+              ? body.version
+              : view.chatVersion,
+        });
+        this.sendJson(response, 200, {
+          ok: true,
+          data: view.getAutomationSnapshot(),
+        });
+        return;
+      }
+
       if (method === "GET" && url.pathname === "/v1/chat/snapshot") {
         const view = await this.ensureChatView({ createIfMissing: true });
         this.sendJson(response, 200, {

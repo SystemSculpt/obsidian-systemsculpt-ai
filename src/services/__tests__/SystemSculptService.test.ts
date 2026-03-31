@@ -285,6 +285,129 @@ describe("SystemSculptService", () => {
     expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
   });
 
+  it("keeps repeated hosted tool-call ids unique across continuation rounds", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+
+    const repeatedSearchId = "functions.mcp-filesystem_search:0";
+    const repeatedFindId = "functions.mcp-filesystem_find:1";
+
+    const makeToolCall = (id: string, name: string, args: string) => ({
+      id,
+      messageId: "assistant",
+      request: {
+        id,
+        type: "function",
+        function: {
+          name,
+          arguments: args,
+        },
+      },
+      state: "completed",
+      result: {
+        success: true,
+        data: { ok: true, id, args },
+      },
+    });
+
+    const { requestBody } = await service.buildRequestPreview({
+      messages: [
+        {
+          role: "user",
+          content: "Show me the chronology reload fixture.",
+          message_id: "user-1",
+        } as any,
+        {
+          role: "assistant",
+          content: "",
+          message_id: "assistant-1",
+          tool_calls: [
+            makeToolCall(
+              repeatedSearchId,
+              "mcp-filesystem_search",
+              "{\"patterns\":[\"chronology reload fixture\"]}"
+            ),
+            makeToolCall(
+              repeatedFindId,
+              "mcp-filesystem_find",
+              "{\"patterns\":[\"fixture\"]}"
+            ),
+          ],
+        } as any,
+        {
+          role: "tool",
+          tool_call_id: repeatedSearchId,
+          content: "{\"results\":[]}",
+          message_id: "tool-1",
+        } as any,
+        {
+          role: "tool",
+          tool_call_id: repeatedFindId,
+          content: "{\"results\":[\"fixtures\"]}",
+          message_id: "tool-2",
+        } as any,
+        {
+          role: "assistant",
+          content: "",
+          message_id: "assistant-2",
+          tool_calls: [
+            makeToolCall(
+              repeatedSearchId,
+              "mcp-filesystem_search",
+              "{\"patterns\":[\"00-activity-log chronology\"]}"
+            ),
+            makeToolCall(
+              repeatedFindId,
+              "mcp-filesystem_find",
+              "{\"patterns\":[\"05-meeting-prep.md\"]}"
+            ),
+          ],
+          reasoning_details: [
+            { type: "reasoning.summary", index: 0, id: repeatedSearchId },
+          ],
+        } as any,
+        {
+          role: "tool",
+          tool_call_id: repeatedSearchId,
+          content: "{\"results\":[\"05-meeting-prep.md\"]}",
+          message_id: "tool-3",
+        } as any,
+        {
+          role: "tool",
+          tool_call_id: repeatedFindId,
+          content: "{\"results\":[\"Sales/Prospects/tick-blaze/05-meeting-prep.md\"]}",
+          message_id: "tool-4",
+        } as any,
+      ],
+      model: "systemsculpt@@systemsculpt/ai-agent",
+    });
+
+    const previewMessages = requestBody.messages as any[];
+    const firstAssistant = previewMessages[1];
+    const firstSearchTool = previewMessages[2];
+    const firstFindTool = previewMessages[3];
+    const secondAssistant = previewMessages[4];
+    const secondSearchTool = previewMessages[5];
+    const secondFindTool = previewMessages[6];
+
+    const firstRoundIds = firstAssistant.tool_calls.map((toolCall: any) => toolCall.id);
+    const secondRoundIds = secondAssistant.tool_calls.map((toolCall: any) => toolCall.id);
+
+    expect(firstRoundIds).toHaveLength(2);
+    expect(secondRoundIds).toHaveLength(2);
+    expect(new Set([...firstRoundIds, ...secondRoundIds]).size).toBe(4);
+    expect(firstRoundIds[0]).not.toBe(repeatedSearchId);
+    expect(firstRoundIds[1]).not.toBe(repeatedFindId);
+    expect(secondRoundIds[0]).not.toBe(firstRoundIds[0]);
+    expect(secondRoundIds[1]).not.toBe(firstRoundIds[1]);
+
+    expect(firstSearchTool.tool_call_id).toBe(firstRoundIds[0]);
+    expect(firstFindTool.tool_call_id).toBe(firstRoundIds[1]);
+    expect(secondSearchTool.tool_call_id).toBe(secondRoundIds[0]);
+    expect(secondFindTool.tool_call_id).toBe(secondRoundIds[1]);
+    expect(secondAssistant.reasoning_details?.[0]?.id).toBe(secondRoundIds[0]);
+  });
+
   it("executes hosted tool calls through the local MCP service", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

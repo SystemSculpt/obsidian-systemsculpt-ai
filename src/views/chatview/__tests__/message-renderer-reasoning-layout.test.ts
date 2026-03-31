@@ -66,7 +66,7 @@ describe("MessageRenderer reasoning layout", () => {
     renderer.unload();
   });
 
-  test("collapses reasoning into one block even when tool calls appear between segments", async () => {
+  test("keeps reasoning segments separate when tool calls appear between them", async () => {
     const app = new App();
     const renderer = new TestMessageRenderer(app as any);
 
@@ -124,17 +124,16 @@ describe("MessageRenderer reasoning layout", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Pi-first assistant UX keeps one collapsed reasoning block for the turn.
     const wrappers = messageEl.querySelectorAll(".systemsculpt-inline-reasoning");
-    expect(wrappers.length).toBe(1);
-    expect(markdownSpy).toHaveBeenCalledTimes(1);
-    expect(markdownSpy.mock.calls[0][1]).toBe("FirstSecond");
+    expect(wrappers.length).toBe(2);
+    expect(markdownSpy).toHaveBeenCalledTimes(2);
+    expect(markdownSpy.mock.calls.map((call) => call[1])).toEqual(["First", "Second"]);
 
     markdownSpy.mockRestore();
     renderer.unload();
   });
 
-  test("renders one activity block and one reasoning block for a mixed Pi turn", async () => {
+  test("renders a mixed Pi turn in exact chronological order", async () => {
     const app = new App();
     const renderer = new TestMessageRenderer(app as any);
 
@@ -254,8 +253,17 @@ describe("MessageRenderer reasoning layout", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const blocks = Array.from(messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-collapsible"));
-    expect(blocks.map((el) => el.dataset.aggregateSection)).toEqual(["activity", "reasoning"]);
+    const blocks = Array.from(messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part"));
+    expect(blocks.map((el) => el.dataset.partType)).toEqual([
+      "reasoning",
+      "tool_call",
+      "reasoning",
+      "tool_call",
+      "reasoning",
+      "tool_call",
+      "reasoning",
+      "content",
+    ]);
 
     const summaries = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
@@ -266,6 +274,7 @@ describe("MessageRenderer reasoning layout", () => {
     expect(summaries[2]).toContain("Searched");
 
     expect(markdownSpy.mock.calls.some((call) => call[1] === "Done")).toBe(true);
+    expect(markdownSpy.mock.calls.filter((call) => String(call[1]).startsWith("Step"))).toHaveLength(4);
 
     markdownSpy.mockRestore();
     renderer.unload();

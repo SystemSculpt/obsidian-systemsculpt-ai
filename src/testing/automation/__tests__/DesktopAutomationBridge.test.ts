@@ -5,6 +5,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 const mockCreatePiAuthStorage = jest.fn();
 const mockCreatePiModelRegistry = jest.fn();
@@ -180,6 +181,54 @@ describe("DesktopAutomationBridge discovery cleanup", () => {
     } catch {
       return false;
     }
+  }
+
+  async function invokeRoute(
+    bridge: DesktopAutomationBridge,
+    options: {
+      method?: string;
+      url?: string;
+      body?: Record<string, unknown>;
+      token?: string;
+    } = {},
+  ): Promise<{ statusCode: number; payload: Record<string, unknown> | null }> {
+    const request = Readable.from(
+      options.body === undefined ? [] : [Buffer.from(JSON.stringify(options.body), "utf8")]
+    ) as Readable & {
+      method?: string;
+      url?: string;
+      headers?: Record<string, string>;
+    };
+    request.method = options.method ?? "POST";
+    request.url = options.url ?? "/v1/chat/open-history";
+    request.headers = {
+      authorization: `Bearer ${options.token ?? "bridge-token"}`,
+    };
+
+    const responseBody: string[] = [];
+    const response: {
+      headersSent: boolean;
+      statusCode: number;
+      setHeader: jest.Mock;
+      end: jest.Mock;
+    } = {
+      headersSent: false,
+      statusCode: 0,
+      setHeader: jest.fn(),
+      end: jest.fn((value?: string) => {
+        response.headersSent = true;
+        if (typeof value === "string") {
+          responseBody.push(value);
+        }
+      }),
+    };
+
+    await (bridge as any).handleRequest(request as any, response as any);
+
+    return {
+      statusCode: response.statusCode,
+      payload: responseBody.length > 0 ? JSON.parse(responseBody.join("")) : null,
+    };
   }
 
   it("removes the discovery file owned by the stopping bridge instance", async () => {
@@ -460,6 +509,67 @@ describe("DesktopAutomationBridge discovery cleanup", () => {
       "local-pi-github-copilot@@claude-haiku-4.5",
       { focusInput: false }
     );
+  });
+
+  it("opens saved chat history through the automation route with current view defaults", async () => {
+    const bridge = new DesktopAutomationBridge(createPluginStub());
+    const view = {
+      setState: jest.fn().mockResolvedValue(undefined),
+      getAutomationSnapshot: jest.fn(() => ({
+        chatId: "2026-03-31 03-33-08",
+        toolCalls: [{ id: "call-1" }, { id: "call-2" }],
+      })),
+      getEffectiveSelectedModelId: jest.fn(() => "local-pi-github-copilot@@claude-haiku-4.5"),
+      chatFontSize: "medium",
+      chatBackend: "systemsculpt",
+      chatVersion: 7,
+    };
+    (bridge as any).token = "bridge-token";
+    jest.spyOn(bridge as any, "ensureChatView").mockResolvedValue(view);
+
+    const response = await invokeRoute(bridge, {
+      body: {
+        chatId: "2026-03-31 03-33-08",
+        chatTitle: "Chronology Reload QA",
+      },
+    });
+
+    expect((bridge as any).ensureChatView).toHaveBeenCalledWith({ createIfMissing: true });
+    expect(view.setState).toHaveBeenCalledWith({
+      chatId: "2026-03-31 03-33-08",
+      chatTitle: "Chronology Reload QA",
+      selectedModelId: "local-pi-github-copilot@@claude-haiku-4.5",
+      chatFontSize: "medium",
+      chatBackend: "systemsculpt",
+      version: 7,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual({
+      ok: true,
+      data: {
+        chatId: "2026-03-31 03-33-08",
+        toolCalls: [{ id: "call-1" }, { id: "call-2" }],
+      },
+    });
+  });
+
+  it("rejects chat history opens without a chatId", async () => {
+    const bridge = new DesktopAutomationBridge(createPluginStub());
+    (bridge as any).token = "bridge-token";
+    const ensureSpy = jest.spyOn(bridge as any, "ensureChatView");
+
+    const response = await invokeRoute(bridge, {
+      body: {
+        chatId: "   ",
+      },
+    });
+
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({
+      ok: false,
+      error: "chatId is required.",
+    });
   });
 
   it("status snapshot does not wait on an unready chat view", async () => {

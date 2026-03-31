@@ -1,19 +1,21 @@
-# Autoresearch: ChatView Pi Tool Calling
+# Autoresearch: ChatView Chronology And Hosted Continuation Completion
 
 ## Objective
 
-Stabilize ChatView local Pi tool-calling so Pi-executed tools are rendered as
-completed local work instead of being reinterpreted as hosted external tool
-requests.
+Keep assistant output truly chronological in ChatView and prevent managed
+SystemSculpt turns from stalling after repeated hosted tool rounds.
 
-This segment also needs the desktop provider-connected baseline to exercise real
-ChatView filesystem tool prompts on `local-pi-openrouter@@openai/gpt-5.4-mini`
-so the same contract is covered on both macOS and Windows.
+The visible turn must preserve emitted order during streaming and after reload.
+If the model emits reasoning, tool calls, more reasoning, and then content, the
+UI must show that same interleaving instead of collapsing whole sections.
 
-Windows exposed a second requirement for this segment: provider auth inventory
-must read the canonical bundled Pi auth storage directly. Silent runtime-
-relative fallbacks are not acceptable because they hide broken production paths
-instead of surfacing the real failure.
+Managed SystemSculpt continuations must also finish with final answer content
+when upstream tool-call ids repeat across rounds. The bad failure shape is:
+multiple assistant tool-use messages with blank content, no final answer, and a
+turn that stops only because the continuation loop cap is hit.
+
+The same request must still complete on Pi/provider-backed models so we can
+prove the cutoff bug is isolated to the managed hosted transcript path.
 
 ## Experiment Contract
 
@@ -27,9 +29,8 @@ instead of surfacing the real failure.
 ## Branch Context
 
 - current branch: `main`
-- branch state: `ahead 1`
-- working tree: intentionally dirty with the active autoresearch edits listed
-  below
+- comparison boundary for this segment starts from an already-dirty tree that
+  contains the chronology v1 renderer/serializer changes
 
 ## Primary Metric
 
@@ -39,95 +40,108 @@ instead of surfacing the real failure.
 
 ## Secondary Metrics
 
-- `pi_local_executor_ok` — local Pi stream contract covers tool execution end-state
-- `streaming_controller_ok` — ChatView stream layer updates tool calls correctly
-- `input_handler_tool_loop_ok` — hosted loop does not re-execute completed Pi tools
-- `desktop_runner_ok` — desktop runner coverage proves the provider-connected baseline case
-- `mac_provider_connected_ok` — live macOS provider-connected tool-call pass
-- `windows_provider_connected_ok` — live Windows provider-connected tool-call pass
+- `renderer_order_ok` — live DOM keeps assistant parts in emitted order
+- `reasoning_layout_ok` — only adjacent reasoning merges; separated reasoning
+  stays separate
+- `serializer_roundtrip_ok` — persisted markdown reload preserves chronology
+- `hosted_unique_tool_call_ids_ok` — hosted continuation requests keep repeated
+  raw tool-call ids unique round to round
+- `bridge_open_history_ok` — desktop automation bridge can reopen saved chats
+  for durable reload QA
+- `desktop_client_history_ok` — desktop automation client can drive the history
+  reopen route directly
+- `input_handler_tool_loop_ok` — hosted/local continuation behavior stays green
+- `streaming_controller_ok` — nearby stream assembly guard still passes
+- `build_ok` — plugin bundle still builds cleanly after the touched changes
 
 ## Iteration Budget
 
-- benchmark wall-clock budget: under 10 minutes for local checks
-- checks cadence: every run for local targeted tests, live macOS/Windows
-  provider-connected passes on keep candidates when the bridges/auth are
-  available
+- benchmark wall-clock budget: under 5 minutes for the local deterministic
+  harness
+- broader checks and live desktop proof run after keep candidates
 
 ## Confidence Policy
 
 - low-confidence threshold: `0`
 - confirm runs required: `1`
-- noise estimate source: deterministic pass/fail local checks
-- confidence is high once the local checks pass together, the targeted auth
-  preflight stays green, and the live provider-connected lanes are re-run on
-  both platforms
+- noise estimate source: deterministic local Jest and `node --test` suites
+- confidence is high only when:
+  - chronology suites pass
+  - hosted repeated-id regression stays green
+  - bridge/client reload helpers stay green
+  - nearby stream loop checks pass
+  - real Obsidian proof shows the managed prompt now finishes with final
+    content and the provider-backed parity turn also finishes
 
 ## Current Best
 
-- run: `chatview-pi-tool-calling-v2 keep @ 2026-03-30T16:22:10Z`
-- `failing_checks`: `0`
-- local benchmark log: `autoresearch-logs/20260330T161837Z`
-- live macOS provider pass: `mac_provider_connected_ok=1`
-- live Windows provider pass: `windows_provider_connected_ok=1`
-- why it stays kept: the rebuilt plugin kept the full local harness green,
-  Windows now flips OpenRouter auth state from `none` to `api_key` through the
-  canonical bundled auth-storage path, and both macOS and Windows completed the
-  real filesystem tool turn on `local-pi-openrouter@@openai/gpt-5.4-mini` with
-  `completedRelevantToolCallCount=3`
+- failing history repro:
+  - saved chat `2026-03-31 00-40-04` reloads as 5 messages total
+  - 4 assistant messages are blank and contain only completed tool calls
+  - duplicate raw tool ids appear across rounds, matching the bad managed
+    continuation shape
+- live fixed managed proof:
+  - chat `2026-03-31 03-57-53` on `systemsculpt@@systemsculpt/ai-agent`
+    finished with final answer content after 3 assistant messages
+  - the managed rerun no longer stalls at blank tool-use rounds
+- live provider parity proof:
+  - chat `2026-03-31 03-58-18` on
+    `local-pi-openrouter@@openai/gpt-5.4-mini` also finished with final answer
+    content
+  - this points to the cutoff bug being isolated to the managed hosted
+    transcript-remapping path, not the Pi/provider execution path
+- why this is kept:
+  - `SystemSculptService.toSystemSculptApiMessages()` now allocates unique API
+    tool-call ids per assistant occurrence and binds later tool results to the
+    correct occurrence instead of reusing raw upstream ids across rounds
+  - chronology reload rendering remains green
+  - open-history bridge/client helpers make the failing saved chat easy to
+    reopen for future QA
 
-## How to Run
+## How To Run
 
 ```bash
 bash autoresearch.sh
-npm test -- --runInBand \
-  src/studio/piAuth/__tests__/studio-pi-auth-storage-fetch-shim.test.ts \
-  src/services/pi/__tests__/PiSdkRuntime.paths.test.ts \
-  src/__tests__/settings-providers-tab.import-safe.test.ts
-npm run build
-node testing/native/device/windows/remote-run.mjs --entry ./testing/native/device/windows/bootstrap.mjs -- --launch
-SYSTEMSCULPT_DESKTOP_PROVIDER_ID=openrouter \
-SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID=openai/gpt-5.4-mini \
-SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="$OPENROUTER_API_KEY" \
-  npm run test:native:windows:provider-connected
-SYSTEMSCULPT_DESKTOP_PROVIDER_ID=openrouter \
-SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID=openai/gpt-5.4-mini \
-SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="$OPENROUTER_API_KEY" \
-  npm run test:native:desktop:provider-connected
+bash autoresearch.checks.sh
 ```
 
-## Files in Scope
+## Files In Scope
 
-- `src/services/pi-native/PiLocalAgentExecutor.ts` — local Pi stream bridge
-- `src/streaming/types.ts` — stream tool-call contract
-- `src/views/chatview/controllers/StreamingController.ts` — ChatView tool-call assembly
-- `src/views/chatview/InputHandler.ts` — hosted tool-loop continuation rules
-- `src/studio/piAuth/StudioPiAuthInventory.ts` — provider auth inventory must use
-  the canonical bundled auth-storage path
-- `src/services/pi-native/__tests__/PiLocalAgentExecutor.test.ts` — local Pi regression lock
-- `src/views/chatview/__tests__/streaming-controller.test.ts` — stream/tool-call state regression lock
-- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts` — hosted-loop regression lock
-- `testing/native/desktop-automation/runner.mjs` — provider-connected baseline coverage
-- `testing/native/desktop-automation/runner.test.mjs` — desktop runner regression lock
-- `src/studio/piAuth/__tests__/studio-pi-auth-storage-fetch-shim.test.ts` —
-  auth inventory preflight verification
-- `src/services/pi/__tests__/PiSdkRuntime.paths.test.ts` — bundled auth-path
-  preflight verification
-- `src/__tests__/settings-providers-tab.import-safe.test.ts` — import-safety
-  guard around provider surfaces
-- `autoresearch.*` — durable experiment state
+- `src/views/chatview/MessageRenderer.ts`
+- `src/views/chatview/storage/ChatMarkdownSerializer.ts`
+- `src/views/chatview/__tests__/message-renderer-order.test.ts`
+- `src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts`
+- `src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts`
+- `src/services/SystemSculptService.ts`
+- `src/services/__tests__/SystemSculptService.test.ts`
+- `src/testing/automation/DesktopAutomationBridge.ts`
+- `src/testing/automation/__tests__/DesktopAutomationBridge.test.ts`
+- `testing/native/desktop-automation/client.mjs`
+- `testing/native/desktop-automation/client.test.mjs`
+- `src/css/components/chat-activity-block.css`
+- `src/css/components/messages.css`
+- `autoresearch.md`
+- `autoresearch.sh`
+- `autoresearch.checks.sh`
+- `autoresearch.config.json`
+- `autoresearch.ideas.md`
+- `autoresearch.jsonl`
 
 ## Editable Surface
 
-- `src/services/pi-native/PiLocalAgentExecutor.ts`
-- `src/streaming/types.ts`
-- `src/views/chatview/controllers/StreamingController.ts`
-- `src/views/chatview/InputHandler.ts`
-- `src/studio/piAuth/StudioPiAuthInventory.ts`
-- `src/services/pi-native/__tests__/PiLocalAgentExecutor.test.ts`
-- `src/views/chatview/__tests__/streaming-controller.test.ts`
-- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts`
-- `testing/native/desktop-automation/runner.mjs`
-- `testing/native/desktop-automation/runner.test.mjs`
+- `src/views/chatview/MessageRenderer.ts`
+- `src/views/chatview/storage/ChatMarkdownSerializer.ts`
+- `src/views/chatview/__tests__/message-renderer-order.test.ts`
+- `src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts`
+- `src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts`
+- `src/services/SystemSculptService.ts`
+- `src/services/__tests__/SystemSculptService.test.ts`
+- `src/testing/automation/DesktopAutomationBridge.ts`
+- `src/testing/automation/__tests__/DesktopAutomationBridge.test.ts`
+- `testing/native/desktop-automation/client.mjs`
+- `testing/native/desktop-automation/client.test.mjs`
+- `src/css/components/chat-activity-block.css`
+- `src/css/components/messages.css`
 - `autoresearch.md`
 - `autoresearch.sh`
 - `autoresearch.checks.sh`
@@ -137,64 +151,60 @@ SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY="$OPENROUTER_API_KEY" \
 
 ## Locked Harness
 
-- `testing/native/desktop-automation/client.mjs`
-- `testing/native/device/windows/run-desktop-automation.mjs`
 - `scripts/jest.mjs`
-- provider auth/setup flows and existing desktop bridge attach behavior
+- `jest.config.cjs`
+- `src/views/chatview/__tests__/streaming-controller.test.ts`
+- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts`
+- the already-open native Obsidian desktop host and its bridge discovery path
 
 ## Off Limits
 
-- hosted tool execution semantics for non-Pi chats
-- unrelated model inventory/catalog behavior
-- mobile runtime smoke unless the desktop baseline change requires shared helper reuse
+- unrelated model catalog or provider-auth UX changes
+- non-chat desktop automation features unrelated to reload/history proof
+- changing the message-part data model or introducing new dependencies
 
 ## Constraints
 
-- preserve hosted external tool-call execution for managed/SystemSculpt chats
-- keep the provider-connected baseline pinned to the Pi OpenRouter GPT-5.4 Mini path
 - no new dependencies
-- macOS and Windows automation should assert completed tool calls, not just text output
-- do not add silent fallbacks that mask broken canonical auth/runtime paths
+- preserve the existing message-part data model
+- keep streaming updates incremental; do not regress assistant rendering to a
+  full chat reload
+- reload ordering must come from persisted message parts, not ad hoc UI sorting
+- live desktop proof must stay attach-only to the already-open vault
 
 ## Logs
 
 - ledger: `autoresearch.jsonl`
 - benchmark/check logs: `autoresearch-logs/`
+- live proof bundle:
+  `autoresearch-logs/20260330T195753801Z/cutoff-live-proof/`
 - deferred ideas: `autoresearch.ideas.md`
-- latest local harness: `autoresearch-logs/20260330T161837Z`
-- latest Windows tool output: `SystemSculpt/QA/NativeRuntimeFixtures/current/desktop-automation-output-1774887633770.md`
-- latest macOS tool output: `SystemSculpt/QA/NativeRuntimeFixtures/current/desktop-automation-output-1774887693956.md`
 
 ## Benchmark Notes
 
-- The fast benchmark is local and deterministic: targeted Jest + desktop runner
-  node tests only.
-- Run the targeted auth preflight before live desktop passes whenever the
-  provider inventory or auth-storage path changes.
-- Live provider-connected verification depends on existing bridge availability
-  and provider auth on the local macOS vault and the Windows QA machine.
-- If the fast checks pass but a live provider-connected lane fails, treat that
-  as a keep/discard decision point instead of claiming success.
+- The local benchmark is deterministic and fully repo-local.
+- The benchmark is invalid if it stops checking either:
+  - chronology render/reload order, or
+  - hosted repeated-id regression coverage.
+- The live proof uses the real `private-vault` desktop bridge and reopens the
+  original failing chat before sending fresh managed and provider-backed turns.
 
 ## What's Been Tried
 
-- Segment reset: widened the editable surface from the initial ChatView-only
-  files to include `src/studio/piAuth/StudioPiAuthInventory.ts` after the real
-  Windows failure proved the provider auth read path was part of the same end-
-  to-end contract.
-- Keep:
-  - Wire Pi `tool_execution_end` through the local executor, stream contract,
-    and ChatView controller so completed local Pi tools stay completed instead
-    of being re-executed as hosted tool calls.
-  - Extend the provider-connected desktop baseline so both macOS and Windows
-    assert the real filesystem tool turn, output preview, and completed tool
-    call counts on `local-pi-openrouter@@openai/gpt-5.4-mini`.
-  - Remove the runtime-relative auth-storage fallback from
-    `StudioPiAuthInventory` and import `createBundledPiAuthStorage` directly.
-- Discard:
-  - Returning `null` from a runtime-relative `require("../../services/pi/PiSdkAuthStorage")`
-    fallback in `StudioPiAuthInventory`, because it hides broken bundled reads
-    in production instead of failing on the canonical path.
-- Open questions:
-  - Audit nearby provider/setup code for any other silent runtime-relative
-    fallbacks that can hide broken canonical paths in the built plugin.
+- chronology v1:
+  - renderer now keeps assistant parts as keyed chronological blocks instead of
+    aggregate activity/reasoning sections
+  - serializer now round-trips sequential reasoning/tool/content blocks in
+    source order
+- hosted cutoff diagnosis:
+  - failing managed bundle showed 8 completed hosted continuation requests, no
+    errors, and 8 assistant tool-use messages before the loop cap
+  - raw hosted tool-call ids such as `functions.mcp-filesystem_list_items:0`
+    and `functions.mcp-filesystem_search:1` repeat across rounds
+  - the old managed transcript mapper reused those raw ids globally, which
+    collapsed distinct assistant rounds onto the same API tool-call ids
+- durability work:
+  - desktop automation bridge gained `/v1/chat/open-history`
+  - desktop automation client gained `openChatHistory()`
+  - saved failing chat can now be reopened in the automation leaf for future
+    QA and screenshots

@@ -213,6 +213,15 @@ export class DesktopAutomationClient {
     });
   }
 
+  async openChatHistory(body = {}) {
+    return await this.request("/v1/chat/open-history", {
+      method: "POST",
+      body,
+      timeoutMs: 30000,
+      allowRecovery: true,
+    });
+  }
+
   async getChatSnapshot() {
     return await this.request("/v1/chat/snapshot", { timeoutMs: 10000, allowRecovery: true });
   }

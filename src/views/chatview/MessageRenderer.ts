@@ -306,9 +306,8 @@ export class MessageRenderer extends Component {
   }
 
   /**
-   * Unified rendering for message parts using diff-based updates.
-   * Pi-first assistant turns render as one calm answer card with compact
-   * activity and reasoning sections beneath it.
+   * Unified rendering for message parts using keyed chronological updates.
+   * The visible assistant turn should follow the emitted part order exactly.
    */
   public renderUnifiedMessageParts(messageEl: HTMLElement, parts: MessagePart[], isActivelyStreaming: boolean = false): void {
     const contentEl = messageEl.querySelector('.systemsculpt-message-content') as HTMLElement | null;
@@ -316,10 +315,10 @@ export class MessageRenderer extends Component {
       return;
     }
 
+    this.clearMessageContentAnchor(contentEl);
+
     if (!parts || parts.length === 0) {
-      void this.renderMarkdownContent("", contentEl, isActivelyStreaming);
-      this.removeAggregateBlock(messageEl, "activity");
-      this.removeAggregateBlock(messageEl, "reasoning");
+      this.removeStaleUnifiedParts(messageEl, new Set());
       messageEl.classList.remove("has-reasoning");
       this.ensureToolbarAnchored(messageEl);
       return;
@@ -327,23 +326,166 @@ export class MessageRenderer extends Component {
 
     const sortedParts = [...parts].sort((a, b) => a.timestamp - b.timestamp);
     const normalizedParts = mergeAdjacentReasoningParts(sortedParts);
-    const partList = new MessagePartList(normalizedParts);
-    const answerMarkdown = partList.contentMarkdown("\n\n");
-    if (answerMarkdown.trim().length > 0) {
-      void this.renderMarkdownContent(answerMarkdown, contentEl, isActivelyStreaming);
-    } else {
-      contentEl.empty();
+    const renderedPartIds = new Set<string>();
+    let previousElement: HTMLElement | null = null;
+
+    for (let index = 0; index < normalizedParts.length; index += 1) {
+      const rawPart = normalizedParts[index];
+      const part = rawPart.id ? rawPart : {
+        ...rawPart,
+        id: `ss-part-${rawPart.type}-${index}`,
+      };
+      renderedPartIds.add(part.id);
+
+      let element = this.findRenderedPartElement(messageEl, part.id);
+      if (element && !this.isCompatiblePartElement(element, part)) {
+        element.remove();
+        element = null;
+      }
+
+      if (!element) {
+        element = this.renderChronologicalPart(messageEl, part, previousElement, isActivelyStreaming);
+      } else {
+        this.placePartElement(messageEl, contentEl, element, previousElement);
+        if (this.partNeedsUpdate(part, isActivelyStreaming, element)) {
+          this.updateExistingPart(element, part, isActivelyStreaming);
+        } else if (element.classList.contains("systemsculpt-inline-collapsible")) {
+          setStreaming(element, isActivelyStreaming);
+        }
+      }
+
+      if (!element) {
+        renderedPartIds.delete(part.id);
+        continue;
+      }
+
+      this.markRenderedPartElement(element, part);
+      previousElement = element;
     }
 
-    this.pruneLegacyUnifiedParts(messageEl);
-    this.renderAggregateActivityBlock(messageEl, partList.toolCalls, isActivelyStreaming, contentEl);
-    this.renderAggregateReasoningBlock(messageEl, partList.reasoningMarkdown(), isActivelyStreaming, contentEl);
+    this.removeStaleUnifiedParts(messageEl, renderedPartIds);
+    if (!normalizedParts.some((part) => part.type === "reasoning")) {
+      messageEl.classList.remove("has-reasoning");
+    }
     this.ensureToolbarAnchored(messageEl);
+    this.refreshStructuredBlocks(messageEl);
   }
 
   private pruneLegacyUnifiedParts(messageEl: HTMLElement): void {
     messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part:not([data-aggregate-section])").forEach((el) => {
       el.remove();
+    });
+  }
+
+  private clearMessageContentAnchor(contentEl: HTMLElement): void {
+    Array.from(contentEl.childNodes).forEach((node) => {
+      if (!(node instanceof HTMLElement)) {
+        node.parentNode?.removeChild(node);
+        return;
+      }
+
+      if (
+        node.classList.contains("systemsculpt-message-toolbar") ||
+        node.classList.contains("systemsculpt-citations-container")
+      ) {
+        return;
+      }
+
+      node.remove();
+    });
+  }
+
+  private findRenderedPartElement(messageEl: HTMLElement, partId: string): HTMLElement | null {
+    return Array.from(
+      messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part[data-part-id]:not([data-aggregate-section])"),
+    ).find((element) => element.dataset.partId === partId) ?? null;
+  }
+
+  private isCompatiblePartElement(element: HTMLElement, part: MessagePart): boolean {
+    const existingType = element.dataset.partType
+      || (element.classList.contains("systemsculpt-content-part")
+        ? "content"
+        : element.classList.contains("systemsculpt-inline-reasoning") || element.classList.contains("systemsculpt-reasoning-wrapper")
+          ? "reasoning"
+          : element.classList.contains("systemsculpt-inline-tool_call") || element.classList.contains("systemsculpt-tool-call-group")
+            ? "tool_call"
+            : "");
+
+    return existingType === part.type;
+  }
+
+  private renderChronologicalPart(
+    messageEl: HTMLElement,
+    part: MessagePart,
+    insertAfterElement: HTMLElement | null,
+    isActivelyStreaming: boolean,
+  ): HTMLElement | null {
+    switch (part.type) {
+      case "reasoning":
+        return this.renderInlineReasoning(
+          messageEl,
+          String(part.data ?? ""),
+          insertAfterElement,
+          isActivelyStreaming,
+          part.id,
+        );
+      case "tool_call":
+        return this.renderInlineToolCall(
+          messageEl,
+          part.data as ToolCall,
+          0,
+          insertAfterElement,
+          part.id,
+          isActivelyStreaming,
+        );
+      case "content":
+        return this.renderUnifiedContent(
+          messageEl,
+          part.data,
+          insertAfterElement,
+          part.id,
+          isActivelyStreaming,
+          part,
+        );
+      default:
+        return null;
+    }
+  }
+
+  private placePartElement(
+    messageEl: HTMLElement,
+    contentAnchor: HTMLElement,
+    element: HTMLElement,
+    previousElement: HTMLElement | null,
+  ): void {
+    if (previousElement) {
+      if (previousElement.nextElementSibling !== element) {
+        previousElement.insertAdjacentElement("afterend", element);
+      }
+      return;
+    }
+
+    if (element !== contentAnchor.previousElementSibling) {
+      messageEl.insertBefore(element, contentAnchor);
+    }
+  }
+
+  private markRenderedPartElement(element: HTMLElement, part: MessagePart): void {
+    element.dataset.partId = part.id;
+    element.dataset.partType = part.type;
+  }
+
+  private removeStaleUnifiedParts(messageEl: HTMLElement, livePartIds: Set<string>): void {
+    messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part").forEach((element) => {
+      if (element.dataset.aggregateSection) {
+        element.remove();
+        return;
+      }
+
+      const partId = element.dataset.partId;
+      if (!partId || !livePartIds.has(partId)) {
+        element.remove();
+      }
     });
   }
 
@@ -640,6 +782,7 @@ export class MessageRenderer extends Component {
     });
 
     block.classList.add('systemsculpt-unified-part');
+    block.dataset.partType = "reasoning";
 
     if (messageEl && messageEl.classList) {
       messageEl.classList.add('has-reasoning');
@@ -684,6 +827,7 @@ export class MessageRenderer extends Component {
     });
 
     block.classList.add('systemsculpt-unified-part');
+    block.dataset.partType = "tool_call";
 
     // Render tool call content inside the collapsible
     const contentContainer = getBlockContent(block);
@@ -1068,6 +1212,7 @@ export class MessageRenderer extends Component {
 
     const container = document.createElement("div");
     container.className = "systemsculpt-unified-part systemsculpt-content-part";
+    container.dataset.partType = "content";
 
     // Add part ID for tracking
     if (partId) {

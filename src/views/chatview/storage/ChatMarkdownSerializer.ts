@@ -72,31 +72,27 @@ export class ChatMarkdownSerializer {
       const parts: MessagePart[] = [];
       let ts = Date.now();
 
-      // New robust parsing approach:
-      // 1. Extract all special blocks first
-      // 2. Process remaining content
-      
-      let workingBody = body;
-      const extractedBlocks: { type: 'reasoning' | 'tool_call' | 'content'; data: any; position: number }[] = [];
-      
-      // Extract all REASONING blocks
+      const extractedBlocks: Array<{
+        type: "reasoning" | "tool_calls";
+        data: any;
+        start: number;
+        end: number;
+      }> = [];
+
       const reasoningRegex = /<!-- REASONING\n([\s\S]*?)\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
       while ((reasoningMatch = reasoningRegex.exec(body)) !== null) {
-        // IMPORTANT: Do not trim() reasoning text to preserve formatting
         const reasoningText = reasoningMatch[1];
         if (reasoningText) {
           extractedBlocks.push({
-            type: 'reasoning',
+            type: "reasoning",
             data: reasoningText,
-            position: reasoningMatch.index
+            start: reasoningMatch.index,
+            end: reasoningMatch.index + reasoningMatch[0].length,
           });
-          // Mark this section for removal
-          workingBody = workingBody.replace(reasoningMatch[0], `\n<!-- EXTRACTED-${extractedBlocks.length - 1} -->\n`);
         }
       }
-      
-      // Extract all TOOL-CALLS blocks
+
       const toolCallRegex = /<!-- TOOL-CALLS\n([\s\S]*?)\n-->/g;
       let toolCallMatch: RegExpExecArray | null;
       while ((toolCallMatch = toolCallRegex.exec(body)) !== null) {
@@ -105,68 +101,67 @@ export class ChatMarkdownSerializer {
           try {
             const toolCallsArray = JSON.parse(toolCallJson);
             if (Array.isArray(toolCallsArray)) {
-              // Handle each tool call separately
-              for (const toolCall of toolCallsArray) {
-                extractedBlocks.push({
-                  type: 'tool_call',
-                  data: toolCall,
-                  position: toolCallMatch.index
-                });
-              }
+              extractedBlocks.push({
+                type: "tool_calls",
+                data: toolCallsArray,
+                start: toolCallMatch.index,
+                end: toolCallMatch.index + toolCallMatch[0].length,
+              });
             }
           } catch { /* ignore JSON errors */ }
-          // Mark this section for removal
-          workingBody = workingBody.replace(toolCallMatch[0], `\n<!-- EXTRACTED-TC -->\n`);
         }
-      }
-      
-      // Clean up the working body to get pure content
-      const contentText = workingBody
-        .replace(/<!-- EXTRACTED-[\w-]+ -->/g, '');
-      
-      // Sort blocks by their original position to maintain chronological order
-      extractedBlocks.sort((a, b) => a.position - b.position);
-      
-      // Build parts array in chronological order
-      let lastPosition = 0;
-      for (const block of extractedBlocks) {
-        // Check if there's content before this block
-        const beforeContent = body.substring(lastPosition, block.position)
-          .replace(/<!-- REASONING\n[\s\S]*?\n-->/g, '')
-          .replace(/<!-- TOOL-CALLS\n[\s\S]*?\n-->/g, '');
-        
-        if (beforeContent && beforeContent.trim().length > 0) {
-          parts.push({ id: `content-${ts}`, type: "content", data: beforeContent, timestamp: ts++ });
-        }
-        
-        // Add the block itself
-        if (block.type === 'reasoning') {
-          parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
-        } else if (block.type === 'tool_call') {
-          // Prefer a stable ID based on the tool call's id when available
-          const toolId = (block.data && typeof block.data.id === 'string') ? block.data.id : String(ts);
-          const partId = toolId ? `tool_call_part-${toolId}` : `tool_call-${ts}`;
-          parts.push({ id: partId, type: "tool_call", data: block.data, timestamp: ts++ });
-        }
-        
-        // Update position for next iteration
-        lastPosition = block.position + 
-          (block.type === 'reasoning' ? body.substring(block.position).match(/<!-- REASONING\n[\s\S]*?\n-->/)?.[0].length || 0 :
-           block.type === 'tool_call' ? body.substring(block.position).match(/<!-- TOOL-CALLS\n[\s\S]*?\n-->/)?.[0].length || 0 : 0);
-      }
-      
-      // Check for any trailing content
-      const trailingContent = body.substring(lastPosition)
-        .replace(/<!-- REASONING\n[\s\S]*?\n-->/g, '')
-        .replace(/<!-- TOOL-CALLS\n[\s\S]*?\n-->/g, '');
-      
-      if (trailingContent && trailingContent.trim().length > 0) {
-        parts.push({ id: `content-${ts}`, type: "content", data: trailingContent, timestamp: ts++ });
       }
 
-      // If we didn't extract any special blocks but have content, add it
-      if (parts.length === 0 && contentText && contentText.trim().length > 0) {
-        parts.push({ id: `content-${ts}`, type: "content", data: contentText, timestamp: ts++ });
+      extractedBlocks.sort((a, b) => {
+        if (a.start !== b.start) {
+          return a.start - b.start;
+        }
+        return a.end - b.end;
+      });
+
+      const pushContentChunk = (
+        rawChunk: string,
+        options: { trimLeadingBoundary: boolean; trimTrailingBoundary: boolean },
+      ) => {
+        const normalizedChunk = this.normalizeSequentialContentChunk(rawChunk, options);
+        if (normalizedChunk.trim().length === 0) {
+          return;
+        }
+        parts.push({ id: `content-${ts}`, type: "content", data: normalizedChunk, timestamp: ts++ });
+      };
+
+      let cursor = 0;
+      for (const block of extractedBlocks) {
+        if (block.start > cursor) {
+          pushContentChunk(body.slice(cursor, block.start), {
+            trimLeadingBoundary: cursor > 0,
+            trimTrailingBoundary: true,
+          });
+        }
+
+        if (block.type === "reasoning") {
+          parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
+        } else {
+          for (const toolCall of block.data as any[]) {
+            const toolId = (toolCall && typeof toolCall.id === "string") ? toolCall.id : String(ts);
+            const partId = toolId ? `tool_call_part-${toolId}` : `tool_call-${ts}`;
+            parts.push({ id: partId, type: "tool_call", data: toolCall, timestamp: ts++ });
+          }
+        }
+
+        cursor = Math.max(cursor, block.end);
+      }
+
+      if (cursor < body.length) {
+        pushContentChunk(body.slice(cursor), {
+          trimLeadingBoundary: cursor > 0,
+          trimTrailingBoundary: true,
+        });
+      } else if (parts.length === 0) {
+        pushContentChunk(body, {
+          trimLeadingBoundary: true,
+          trimTrailingBoundary: true,
+        });
       }
 
       if (parts.length > 0) {
@@ -278,6 +273,23 @@ export class ChatMarkdownSerializer {
       tool_calls: list.toolCalls,
       messageParts,
     };
+  }
+
+  private static normalizeSequentialContentChunk(
+    chunk: string,
+    options: { trimLeadingBoundary: boolean; trimTrailingBoundary: boolean },
+  ): string {
+    let normalized = chunk;
+
+    if (options.trimLeadingBoundary) {
+      normalized = normalized.replace(/^\r?\n/, "");
+    }
+
+    if (options.trimTrailingBoundary) {
+      normalized = normalized.replace(/\r?\n$/, "");
+    }
+
+    return normalized;
   }
 
   // ───────────────────────── Front-matter helpers ─────────────────────────

@@ -187,6 +187,64 @@ test("DesktopAutomationClient exposes settings, provider auth, and refreshable m
   }
 });
 
+test("DesktopAutomationClient opens saved chat history through the bridge", async () => {
+  const loadEntries = async () => [OLD_RECORD];
+
+  const originalFetch = globalThis.fetch;
+  const fetchStub = createFetchStub(async ({ url, method, authorization, body }) => {
+    assert.equal(authorization, "Bearer token-old");
+
+    if (url === "http://127.0.0.1:62001/v1/ping") {
+      return jsonResponse({ ok: true, data: OLD_RECORD });
+    }
+    if (url === "http://127.0.0.1:62001/v1/chat/open-history" && method === "POST") {
+      assert.deepEqual(body, {
+        chatId: "2026-03-31 03-40-28",
+        chatTitle: "Chronology Reload QA",
+        selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      });
+      return jsonResponse({
+        ok: true,
+        data: {
+          chatId: "2026-03-31 03-40-28",
+          messages: [{ role: "assistant", content: "Final answer restored" }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  });
+
+  globalThis.fetch = fetchStub;
+  try {
+    const client = await createDesktopAutomationClient({
+      vaultName: "automation-vault",
+      loadEntries,
+    });
+
+    const snapshot = await client.openChatHistory({
+      chatId: "2026-03-31 03-40-28",
+      chatTitle: "Chronology Reload QA",
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+    });
+
+    assert.deepEqual(snapshot, {
+      chatId: "2026-03-31 03-40-28",
+      messages: [{ role: "assistant", content: "Final answer restored" }],
+    });
+    assert.deepEqual(
+      fetchStub.calls.map((call) => `${call.method} ${call.url}`),
+      [
+        "GET http://127.0.0.1:62001/v1/ping",
+        "GET http://127.0.0.1:62001/v1/ping",
+        "POST http://127.0.0.1:62001/v1/chat/open-history",
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("DesktopAutomationClient can skip bridge preflight and strips that flag from provider snapshot payloads", async () => {
   const loadEntries = async () => [OLD_RECORD];
 

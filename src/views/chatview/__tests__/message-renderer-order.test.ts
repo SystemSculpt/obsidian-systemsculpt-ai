@@ -60,11 +60,10 @@ describe("MessageRenderer tool call ordering", () => {
 
     renderer.renderUnifiedMessageParts(messageEl, [first, second], false);
 
-    // Pi-first assistant UX collapses tool work into one activity block.
     const initialBlocks = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool_call")
     );
-    expect(initialBlocks.length).toBe(1);
+    expect(initialBlocks.length).toBe(2);
 
     const initialSummaries = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
@@ -80,10 +79,8 @@ describe("MessageRenderer tool call ordering", () => {
     const blocks = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool_call")
     );
-    expect(blocks.length).toBe(1);
-    expect(blocks[0]?.dataset.aggregateSection).toBe("activity");
+    expect(blocks.length).toBe(3);
 
-    // Verify tool summaries contain search info
     const summaries = Array.from(
       messageEl.querySelectorAll<HTMLElement>(".systemsculpt-inline-tool-summary")
     ).map(
@@ -94,6 +91,11 @@ describe("MessageRenderer tool call ordering", () => {
       "Searched 2",
       "Searched 3",
     ]);
+
+    const sequence = Array.from(
+      messageEl.querySelectorAll<HTMLElement>(".systemsculpt-unified-part")
+    ).map((el) => el.dataset.partType);
+    expect(sequence).toEqual(["tool_call", "tool_call", "tool_call"]);
 
     renderer.unload();
   });
@@ -123,7 +125,7 @@ describe("MessageRenderer tool call ordering", () => {
     renderer.renderUnifiedMessageParts(messageEl, [webSearchPart], false);
 
     const title = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-collapsible-title");
-    expect(title?.textContent).toBe("Activity");
+    expect(title?.textContent).toBe("Web Search");
 
     const summary = messageEl.querySelector<HTMLElement>(".systemsculpt-inline-tool-summary");
     expect(summary?.textContent?.trim()).toBe("Searched systemsculpt pricing");
