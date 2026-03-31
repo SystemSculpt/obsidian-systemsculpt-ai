@@ -662,6 +662,164 @@ function buildReleaseNotes(version, commits) {
   ].join("\n");
 }
 
+function joinWrappedMarkdownLines(lines) {
+  return lines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isMarkdownHeadingLine(line) {
+  return /^\s{0,3}#{1,6}\s/.test(line);
+}
+
+function isMarkdownRuleLine(line) {
+  return /^\s{0,3}(?:[-*_]\s*){3,}$/.test(line);
+}
+
+function isMarkdownTableLine(line) {
+  return /^\s*\|/.test(line);
+}
+
+function isMarkdownBlockquoteLine(line) {
+  return /^\s*>\s?/.test(line);
+}
+
+function parseMarkdownListLine(line) {
+  const match = line.match(/^(\s*)([-+*]|\d+[.)])\s+(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    indent: match[1],
+    marker: match[2],
+    content: match[3],
+  };
+}
+
+function normalizeReleaseNotesListBlock(lines) {
+  const normalizedLines = [];
+  let currentItem = null;
+
+  const flushCurrentItem = () => {
+    if (!currentItem) {
+      return;
+    }
+
+    normalizedLines.push(
+      `${currentItem.indent}${currentItem.marker} ${joinWrappedMarkdownLines(currentItem.lines)}`
+    );
+    currentItem = null;
+  };
+
+  for (const line of lines) {
+    const listItem = parseMarkdownListLine(line);
+    if (listItem) {
+      flushCurrentItem();
+      currentItem = {
+        indent: listItem.indent,
+        marker: listItem.marker,
+        lines: [listItem.content],
+      };
+      continue;
+    }
+
+    if (!currentItem) {
+      normalizedLines.push(line.trimEnd());
+      continue;
+    }
+
+    currentItem.lines.push(line);
+  }
+
+  flushCurrentItem();
+  return normalizedLines;
+}
+
+function normalizeReleaseNotesBlock(lines) {
+  const normalizedLines = lines.map((line) => line.trimEnd());
+  if (normalizedLines.length === 0) {
+    return [];
+  }
+
+  if (normalizedLines.length === 1) {
+    const [line] = normalizedLines;
+    if (isMarkdownHeadingLine(line) || isMarkdownRuleLine(line)) {
+      return normalizedLines;
+    }
+  }
+
+  if (normalizedLines.every((line) => isMarkdownTableLine(line))) {
+    return normalizedLines;
+  }
+
+  if (parseMarkdownListLine(normalizedLines[0])) {
+    return normalizeReleaseNotesListBlock(normalizedLines);
+  }
+
+  if (normalizedLines.every((line) => isMarkdownBlockquoteLine(line))) {
+    return [`> ${joinWrappedMarkdownLines(normalizedLines.map((line) => line.replace(/^\s*>\s?/, "")))}`];
+  }
+
+  return [joinWrappedMarkdownLines(normalizedLines)];
+}
+
+function normalizeReleaseNotesMarkdown(markdown) {
+  const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const normalized = [];
+  let block = [];
+  let fenceToken = null;
+
+  const flushBlock = () => {
+    if (block.length === 0) {
+      return;
+    }
+
+    normalized.push(...normalizeReleaseNotesBlock(block));
+    block = [];
+  };
+
+  for (const line of lines) {
+    if (fenceToken) {
+      normalized.push(line);
+      if (new RegExp(`^\\s*${fenceToken}{3,}`).test(line)) {
+        fenceToken = null;
+      }
+      continue;
+    }
+
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      flushBlock();
+      normalized.push(line);
+      fenceToken = fenceMatch[1][0];
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushBlock();
+      if (normalized.length > 0 && normalized[normalized.length - 1] !== "") {
+        normalized.push("");
+      }
+      continue;
+    }
+
+    block.push(line);
+  }
+
+  flushBlock();
+
+  while (normalized[0] === "") {
+    normalized.shift();
+  }
+  while (normalized[normalized.length - 1] === "") {
+    normalized.pop();
+  }
+
+  return normalized.join("\n");
+}
+
 function getRepoRoot() {
   const result = runCapture("git", ["rev-parse", "--show-toplevel"]);
   return result.stdout;
@@ -771,18 +929,21 @@ function printPlan({
 }
 
 function writeNotesFile(version, commits, customNotesFile) {
+  let notes;
   if (customNotesFile) {
     const resolvedNotesPath = path.resolve(cwd, customNotesFile);
     if (!fs.existsSync(resolvedNotesPath)) {
       fail(`Notes file does not exist: ${resolvedNotesPath}`);
     }
-    return resolvedNotesPath;
+    notes = fs.readFileSync(resolvedNotesPath, "utf8");
+  } else {
+    notes = buildReleaseNotes(version, commits);
   }
 
-  const notes = buildReleaseNotes(version, commits);
+  const normalizedNotes = normalizeReleaseNotesMarkdown(notes);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-release-"));
   const notesPath = path.join(tempDir, `${version}.md`);
-  fs.writeFileSync(notesPath, `${notes}\n`, "utf8");
+  fs.writeFileSync(notesPath, `${normalizedNotes}\n`, "utf8");
   return notesPath;
 }
 
@@ -971,9 +1132,11 @@ if (isDirectExecution) {
 
 export {
   hasGitHubEnvTokens,
+  normalizeReleaseNotesMarkdown,
   parseGitHubAuthStatus,
   resolveGitHubReleaseAuthStrategy,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
   withoutGitHubEnvTokens,
+  writeNotesFile,
 };

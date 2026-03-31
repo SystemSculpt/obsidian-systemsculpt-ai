@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   parseGitHubAuthStatus,
+  normalizeReleaseNotesMarkdown,
   resolveGitHubReleaseAuthStrategy,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
   withoutGitHubEnvTokens,
+  writeNotesFile,
 } from "./release-plugin.mjs";
 
 function withGitHubToken(t, token = "test-release-scope-token") {
@@ -29,6 +34,82 @@ github.com
 
   assert.equal(parsed.usesEnvToken, true);
   assert.deepEqual(parsed.scopes, ["repo", "read:org"]);
+});
+
+test("normalizeReleaseNotesMarkdown unwraps wrapped prose and list items while preserving markdown structure", () => {
+  const input = `# SystemSculpt 5.3.3
+
+## What's New
+
+This paragraph was written like commit prose and
+should become a single release paragraph.
+
+- First highlight wraps onto
+  a continuation line.
+- Second highlight also wraps
+  and should stay a bullet.
+
+1. Numbered step wraps onto
+   the next line too.
+
+\`\`\`sh
+npm run build
+npm test
+\`\`\`
+`;
+
+  const normalized = normalizeReleaseNotesMarkdown(input);
+  assert.equal(
+    normalized,
+    `# SystemSculpt 5.3.3
+
+## What's New
+
+This paragraph was written like commit prose and should become a single release paragraph.
+
+- First highlight wraps onto a continuation line.
+- Second highlight also wraps and should stay a bullet.
+
+1. Numbered step wraps onto the next line too.
+
+\`\`\`sh
+npm run build
+npm test
+\`\`\``
+  );
+});
+
+test("writeNotesFile normalizes custom notes files without mutating the source file", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-test-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const sourcePath = path.join(tempDir, "wrapped-notes.md");
+  const original = `## Highlights
+
+- Wrapped bullet that should
+  be flattened.
+
+Plain paragraph line one
+line two.
+`;
+  fs.writeFileSync(sourcePath, original, "utf8");
+
+  const generatedPath = writeNotesFile("9.9.9", [], sourcePath);
+  const generated = fs.readFileSync(generatedPath, "utf8");
+
+  assert.notEqual(generatedPath, sourcePath);
+  assert.equal(
+    generated,
+    `## Highlights
+
+- Wrapped bullet that should be flattened.
+
+Plain paragraph line one line two.
+`
+  );
+  assert.equal(fs.readFileSync(sourcePath, "utf8"), original);
 });
 
 test("resolveGitHubReleaseAuthStrategy prefers stored gh auth when env-token auth lacks workflow scope", (t) => {
