@@ -92,6 +92,8 @@ export class StreamingController extends Component {
     let stopReason: string | undefined;
     let collectedAnnotations: Annotation[] = [];
     const collectedReasoningDetails: unknown[] = [];
+    let emittedRenderableOutput = false;
+    let restoredSeedRendering = false;
 
     const streamStartTime = performance.now();
     let eventCount = 0;
@@ -145,11 +147,17 @@ export class StreamingController extends Component {
           case "content": {
             assembler.apply(event);
             this.updateMessageRendering(assembler, messageEl, assistantMessage, true);
+            if (String(event.text || "").length > 0) {
+              emittedRenderableOutput = true;
+            }
             metricsTracker.setStatus("content");
             break;
           }
           case "tool-call": {
             metricsTracker.setStatus("tool_calls");
+            if (event.phase !== "delta") {
+              emittedRenderableOutput = true;
+            }
             this.handleToolCallEvent({
               event,
               assembler,
@@ -271,15 +279,14 @@ export class StreamingController extends Component {
       // Reasoning alone is not a valid terminal assistant answer. If a provider
       // finishes with only hidden reasoning and no visible content or tool calls,
       // treat the turn as empty so higher-level retry/error policy can recover.
-      const hasRenderableOutput =
-        summary.content.trim().length > 0 ||
-        ((assistantMessage.tool_calls?.length ?? 0) > 0);
-
-      if (!abortedBySignal && completedNaturally && !hasRenderableOutput) {
+      if (!abortedBySignal && completedNaturally && !emittedRenderableOutput) {
         completedNaturally = false;
-        try {
-          messageEl.remove();
-        } catch {}
+        restoredSeedRendering = this.restoreSeedRendering(messageEl, seedParts);
+        if (!restoredSeedRendering) {
+          try {
+            messageEl.remove();
+          } catch {}
+        }
       }
 
       // Only persist if: not aborted, and either completed naturally or we recovered from an error
@@ -294,6 +301,9 @@ export class StreamingController extends Component {
       } else {
         // Ensure any pending autosave timers are cancelled so partial output is not saved
         try { this.persistence.cancelAutosave(); } catch {}
+        if (!restoredSeedRendering) {
+          restoredSeedRendering = this.restoreSeedRendering(messageEl, seedParts);
+        }
       }
 
       this.scheduleStickToBottom(scrollManager, true);
@@ -497,6 +507,22 @@ export class StreamingController extends Component {
       .filter((part): part is MessagePart & { type: "tool_call"; data: ToolCall } => part.type === "tool_call")
       .map((part) => part.data);
     return calls.length > 0 ? calls : undefined;
+  }
+
+  private restoreSeedRendering(messageEl: HTMLElement, seedParts?: MessagePart[]): boolean {
+    if (!Array.isArray(seedParts) || seedParts.length === 0) {
+      return false;
+    }
+
+    try {
+      this.opts.messageRenderer.renderMessageParts(messageEl, { messageParts: seedParts }, false);
+      try {
+        (this.opts.messageRenderer as any).finalizeInlineBlocks?.(messageEl);
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private scheduleStickToBottom(scrollManager: ScrollManagerService, immediate = false): void {

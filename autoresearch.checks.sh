@@ -6,10 +6,4 @@ cd "$ROOT"
 
 bash autoresearch.sh
 
-node scripts/jest.mjs \
-  --config jest.config.cjs \
-  --runInBand \
-  --runTestsByPath \
-  src/views/chatview/__tests__/streaming-controller.test.ts
-
 npm run build

@@ -1,36 +1,40 @@
-# Autoresearch: ChatView Chronology And Hosted Continuation Completion
+# Autoresearch: ChatView Live Assistant Turn Compaction
 
 ## Objective
 
-Keep assistant output truly chronological in ChatView and prevent managed
-SystemSculpt turns from stalling after repeated hosted tool rounds.
+Make live hosted ChatView streaming use the same compact assistant-turn shape that
+we already like after reload.
 
-The visible turn must preserve emitted order during streaming and after reload.
-If the model emits reasoning, tool calls, more reasoning, and then content, the
-UI must show that same interleaving instead of collapsing whole sections.
+When one user prompt triggers multiple hosted continuation rounds, the UI should
+keep everything inside one assistant container from the start:
 
-Managed SystemSculpt continuations must also finish with final answer content
-when upstream tool-call ids repeat across rounds. The bad failure shape is:
-multiple assistant tool-use messages with blank content, no final answer, and a
-turn that stops only because the continuation loop cap is hit.
+- reasoning stays in chronological order
+- tool calls stay in chronological order
+- final answer content lands in that same assistant container
 
-The same request must still complete on Pi/provider-backed models so we can
-prove the cutoff bug is isolated to the managed hosted transcript path.
+The current bad shape is:
+
+- the first streamed assistant round renders in one assistant container
+- later hosted continuation rounds create fresh assistant containers
+- reload looks better because the persisted transcript is compacted after the
+  fact
 
 ## Experiment Contract
 
 - `autoresearch.md` is the durable program for this comparable segment.
 - `autoresearch.sh` / `autoresearch.checks.sh` / `autoresearch.config.json`
-  stay fixed unless the experiment contract itself changes.
+  stay fixed unless this experiment contract changes materially.
 - If the objective, metric, benchmark workload, editable surface, or locked
-  harness changes materially, start a new `config` segment in
-  `autoresearch.jsonl`.
+  harness changes materially, append a new `config` record to
+  `autoresearch.jsonl` before comparing results again.
 
 ## Branch Context
 
 - current branch: `main`
-- comparison boundary for this segment starts from an already-dirty tree that
-  contains the chronology v1 renderer/serializer changes
+- baseline tree at segment start: clean tracked files, branch ahead of origin by
+  one commit
+- prior chronology/reload work is already present in the repo; this segment is
+  specifically about live hosted continuation parity
 
 ## Primary Metric
 
@@ -40,63 +44,42 @@ prove the cutoff bug is isolated to the managed hosted transcript path.
 
 ## Secondary Metrics
 
-- `renderer_order_ok` — live DOM keeps assistant parts in emitted order
-- `reasoning_layout_ok` — only adjacent reasoning merges; separated reasoning
-  stays separate
-- `serializer_roundtrip_ok` — persisted markdown reload preserves chronology
-- `hosted_unique_tool_call_ids_ok` — hosted continuation requests keep repeated
-  raw tool-call ids unique round to round
-- `bridge_open_history_ok` — desktop automation bridge can reopen saved chats
-  for durable reload QA
-- `desktop_client_history_ok` — desktop automation client can drive the history
-  reopen route directly
-- `input_handler_tool_loop_ok` — hosted/local continuation behavior stays green
-- `streaming_controller_ok` — nearby stream assembly guard still passes
-- `build_ok` — plugin bundle still builds cleanly after the touched changes
+- `assistant_root_reuse_ok` — hosted continuation rounds reuse the existing
+  assistant root instead of creating a new live container
+- `seeded_empty_continuation_ok` — a seeded continuation with no new renderable
+  output returns `empty` and preserves the prior assistant render
+- `reload_compaction_ok` — the reload normalization path still compacts
+  consecutive assistant messages into one assistant turn
+- `build_ok` — plugin bundle still builds cleanly
 
 ## Iteration Budget
 
-- benchmark wall-clock budget: under 5 minutes for the local deterministic
-  harness
-- broader checks and live desktop proof run after keep candidates
+- local harness budget: under 3 minutes
+- broader build pass only after a keep candidate
 
 ## Confidence Policy
 
 - low-confidence threshold: `0`
 - confirm runs required: `1`
-- noise estimate source: deterministic local Jest and `node --test` suites
+- noise estimate source: deterministic local Jest and build checks
 - confidence is high only when:
-  - chronology suites pass
-  - hosted repeated-id regression stays green
-  - bridge/client reload helpers stay green
-  - nearby stream loop checks pass
-  - real Obsidian proof shows the managed prompt now finishes with final
-    content and the provider-backed parity turn also finishes
+  - the new live-compaction regressions pass
+  - seeded empty continuation handling stays correct
+  - reload compaction still passes
+  - the bundle still builds
 
-## Current Best
+## Current Baseline
 
-- failing history repro:
-  - saved chat `2026-03-31 00-40-04` reloads as 5 messages total
-  - 4 assistant messages are blank and contain only completed tool calls
-  - duplicate raw tool ids appear across rounds, matching the bad managed
-    continuation shape
-- live fixed managed proof:
-  - chat `2026-03-31 03-57-53` on `systemsculpt@@systemsculpt/ai-agent`
-    finished with final answer content after 3 assistant messages
-  - the managed rerun no longer stalls at blank tool-use rounds
-- live provider parity proof:
-  - chat `2026-03-31 03-58-18` on
-    `local-pi-openrouter@@openai/gpt-5.4-mini` also finished with final answer
-    content
-  - this points to the cutoff bug being isolated to the managed hosted
-    transcript-remapping path, not the Pi/provider execution path
-- why this is kept:
-  - `SystemSculptService.toSystemSculptApiMessages()` now allocates unique API
-    tool-call ids per assistant occurrence and binds later tool results to the
-    correct occurrence instead of reusing raw upstream ids across rounds
-  - chronology reload rendering remains green
-  - open-history bridge/client helpers make the failing saved chat easy to
-    reopen for future QA
+- `InputHandler.streamAssistantTurn()` always creates a fresh assistant
+  container before each hosted streamed round.
+- `StreamingController.stream()` already supports `seedParts`, but the hosted
+  continuation path does not currently use that capability.
+- Because continuation rounds create fresh assistant roots, live hosted turns
+  look split across multiple assistant containers even though reload later looks
+  compact.
+- A seeded stream with no new content/tool output is currently at risk of being
+  treated as non-empty because completion is derived from the aggregate seeded
+  summary instead of this round's new output.
 
 ## How To Run
 
@@ -107,19 +90,11 @@ bash autoresearch.checks.sh
 
 ## Files In Scope
 
-- `src/views/chatview/MessageRenderer.ts`
-- `src/views/chatview/storage/ChatMarkdownSerializer.ts`
-- `src/views/chatview/__tests__/message-renderer-order.test.ts`
-- `src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts`
-- `src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts`
-- `src/services/SystemSculptService.ts`
-- `src/services/__tests__/SystemSculptService.test.ts`
-- `src/testing/automation/DesktopAutomationBridge.ts`
-- `src/testing/automation/__tests__/DesktopAutomationBridge.test.ts`
-- `testing/native/desktop-automation/client.mjs`
-- `testing/native/desktop-automation/client.test.mjs`
-- `src/css/components/chat-activity-block.css`
-- `src/css/components/messages.css`
+- `src/views/chatview/InputHandler.ts`
+- `src/views/chatview/controllers/StreamingController.ts`
+- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts`
+- `src/views/chatview/__tests__/streaming-controller.test.ts`
+- `src/views/chatview/__tests__/chat-storage-normalization.test.ts`
 - `autoresearch.md`
 - `autoresearch.sh`
 - `autoresearch.checks.sh`
@@ -129,19 +104,11 @@ bash autoresearch.checks.sh
 
 ## Editable Surface
 
-- `src/views/chatview/MessageRenderer.ts`
-- `src/views/chatview/storage/ChatMarkdownSerializer.ts`
-- `src/views/chatview/__tests__/message-renderer-order.test.ts`
-- `src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts`
-- `src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts`
-- `src/services/SystemSculptService.ts`
-- `src/services/__tests__/SystemSculptService.test.ts`
-- `src/testing/automation/DesktopAutomationBridge.ts`
-- `src/testing/automation/__tests__/DesktopAutomationBridge.test.ts`
-- `testing/native/desktop-automation/client.mjs`
-- `testing/native/desktop-automation/client.test.mjs`
-- `src/css/components/chat-activity-block.css`
-- `src/css/components/messages.css`
+- `src/views/chatview/InputHandler.ts`
+- `src/views/chatview/controllers/StreamingController.ts`
+- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts`
+- `src/views/chatview/__tests__/streaming-controller.test.ts`
+- `src/views/chatview/__tests__/chat-storage-normalization.test.ts`
 - `autoresearch.md`
 - `autoresearch.sh`
 - `autoresearch.checks.sh`
@@ -153,58 +120,38 @@ bash autoresearch.checks.sh
 
 - `scripts/jest.mjs`
 - `jest.config.cjs`
-- `src/views/chatview/__tests__/streaming-controller.test.ts`
-- `src/views/chatview/__tests__/input-handler-tool-loop.test.ts`
-- the already-open native Obsidian desktop host and its bridge discovery path
+- message-part rendering/runtime modules outside the chatview continuation path
 
 ## Off Limits
 
-- unrelated model catalog or provider-auth UX changes
-- non-chat desktop automation features unrelated to reload/history proof
-- changing the message-part data model or introducing new dependencies
+- unrelated provider/model/auth changes
+- full-chat rerender fallbacks during streaming
+- message data-model redesigns or new dependencies
 
 ## Constraints
 
 - no new dependencies
-- preserve the existing message-part data model
-- keep streaming updates incremental; do not regress assistant rendering to a
-  full chat reload
-- reload ordering must come from persisted message parts, not ad hoc UI sorting
-- live desktop proof must stay attach-only to the already-open vault
+- keep streaming incremental; do not solve this by reloading the whole chat on
+  every continuation round
+- preserve the persisted reload compaction experience the user already likes
+- keep the final user-facing flow visually compact from the first streamed round
 
 ## Logs
 
 - ledger: `autoresearch.jsonl`
 - benchmark/check logs: `autoresearch-logs/`
-- live proof bundle:
-  `autoresearch-logs/20260330T195753801Z/cutoff-live-proof/`
 - deferred ideas: `autoresearch.ideas.md`
 
 ## Benchmark Notes
 
-- The local benchmark is deterministic and fully repo-local.
-- The benchmark is invalid if it stops checking either:
-  - chronology render/reload order, or
-  - hosted repeated-id regression coverage.
-- The live proof uses the real `private-vault` desktop bridge and reopens the
-  original failing chat before sending fresh managed and provider-backed turns.
+- the benchmark is invalid if it stops checking either:
+  - live hosted continuation root reuse, or
+  - reload compaction parity
+- this segment is local-only; it does not require live desktop automation to
+  establish pass/fail
 
 ## What's Been Tried
 
-- chronology v1:
-  - renderer now keeps assistant parts as keyed chronological blocks instead of
-    aggregate activity/reasoning sections
-  - serializer now round-trips sequential reasoning/tool/content blocks in
-    source order
-- hosted cutoff diagnosis:
-  - failing managed bundle showed 8 completed hosted continuation requests, no
-    errors, and 8 assistant tool-use messages before the loop cap
-  - raw hosted tool-call ids such as `functions.mcp-filesystem_list_items:0`
-    and `functions.mcp-filesystem_search:1` repeat across rounds
-  - the old managed transcript mapper reused those raw ids globally, which
-    collapsed distinct assistant rounds onto the same API tool-call ids
-- durability work:
-  - desktop automation bridge gained `/v1/chat/open-history`
-  - desktop automation client gained `openChatHistory()`
-  - saved failing chat can now be reopened in the automation leaf for future
-    QA and screenshots
+- prior chronology work already made reload/persisted rendering feel right
+- the remaining mismatch is specifically that live hosted continuation rounds do
+  not stream back into the already-rendered assistant root

@@ -30,63 +30,31 @@ run_check() {
 }
 
 run_check \
-  "message-renderer-order" \
-  "renderer_order_ok" \
+  "streaming-controller" \
+  "seeded_empty_continuation_ok" \
   node scripts/jest.mjs \
     --config jest.config.cjs \
     --runInBand \
     --runTestsByPath \
-    src/views/chatview/__tests__/message-renderer-order.test.ts
-
-run_check \
-  "message-renderer-reasoning-layout" \
-  "reasoning_layout_ok" \
-  node scripts/jest.mjs \
-    --config jest.config.cjs \
-    --runInBand \
-    --runTestsByPath \
-    src/views/chatview/__tests__/message-renderer-reasoning-layout.test.ts
-
-run_check \
-  "chat-markdown-serializer-order" \
-  "serializer_roundtrip_ok" \
-  node scripts/jest.mjs \
-    --config jest.config.cjs \
-    --runInBand \
-    --runTestsByPath \
-    src/views/chatview/__tests__/chat-markdown-serializer-order.test.ts
-
-run_check \
-  "systemsculpt-service-hosted-tool-call-ids" \
-  "hosted_unique_tool_call_ids_ok" \
-  node scripts/jest.mjs \
-    --config jest.config.cjs \
-    --runInBand \
-    --runTestsByPath \
-    src/services/__tests__/SystemSculptService.test.ts
-
-run_check \
-  "desktop-automation-bridge-open-history" \
-  "bridge_open_history_ok" \
-  node scripts/jest.mjs \
-    --config jest.config.cjs \
-    --runInBand \
-    --runTestsByPath \
-    src/testing/automation/__tests__/DesktopAutomationBridge.test.ts
-
-run_check \
-  "desktop-automation-client-open-history" \
-  "desktop_client_history_ok" \
-  node --test testing/native/desktop-automation/client.test.mjs
+    src/views/chatview/__tests__/streaming-controller.test.ts
 
 run_check \
   "input-handler-tool-loop" \
-  "input_handler_tool_loop_ok" \
+  "assistant_root_reuse_ok" \
   node scripts/jest.mjs \
     --config jest.config.cjs \
     --runInBand \
     --runTestsByPath \
     src/views/chatview/__tests__/input-handler-tool-loop.test.ts
+
+run_check \
+  "chat-storage-normalization" \
+  "reload_compaction_ok" \
+  node scripts/jest.mjs \
+    --config jest.config.cjs \
+    --runInBand \
+    --runTestsByPath \
+    src/views/chatview/__tests__/chat-storage-normalization.test.ts
 
 printf 'METRIC failing_checks=%s\n' "$failing_checks"
 

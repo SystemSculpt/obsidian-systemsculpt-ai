@@ -1,11 +1,10 @@
 # Deferred ideas
 
-- Add a first-class desktop automation runner case that replays the historical
-  managed cutoff prompt and asserts the final assistant message is non-empty
-  after multi-round tool use.
-- Expose assistant `messageParts` or reasoning summaries in the automation
-  snapshot if future reload-order regressions need stronger live assertions than
-  screenshots plus saved-chat reload.
-- If chronology now reads correctly but still feels too boxy, soften the
-  content-part chrome for mid-turn content fragments without reintroducing
-  aggregation.
+- If same-message seeding proves too brittle, extract a dedicated display-only
+  projection for consecutive assistant rounds instead of reusing the persisted
+  assistant root directly.
+- If the compact live flow works but still feels visually busy, tighten the
+  spacing between consecutive structured blocks inside one assistant container
+  without changing the chronological order.
+- Add a native desktop smoke case later that asserts a multi-round hosted turn
+  finishes inside one assistant root without needing a reload.

@@ -264,10 +264,13 @@ export class InputHandler extends Component {
     signal: AbortSignal,
     includeContextFiles: boolean
   ): Promise<StreamTurnResult> {
-    const { messageEl } = this.createAssistantMessageContainer();
-    let messageId = messageEl.dataset.messageId;
+    const continuationTarget = this.getHostedContinuationTarget();
+    const { messageEl } = continuationTarget ?? this.createAssistantMessageContainer();
+    let messageId = continuationTarget?.messageId || messageEl.dataset.messageId;
     if (!messageId || messageId.trim().length === 0) {
       messageId = this.generateMessageId();
+      messageEl.dataset.messageId = messageId;
+    } else if (!messageEl.dataset.messageId || messageEl.dataset.messageId.trim().length === 0) {
       messageEl.dataset.messageId = messageId;
     }
 
@@ -295,8 +298,43 @@ export class InputHandler extends Component {
       stream,
       messageEl,
       messageId,
-      signal
+      signal,
+      continuationTarget?.seedParts
     );
+  }
+
+  private getHostedContinuationTarget():
+    | { messageEl: HTMLElement; messageId: string; seedParts: MessagePart[] }
+    | null {
+    const messages = this.getMessages();
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    if (!lastMessage || lastMessage.role !== "assistant") {
+      return null;
+    }
+
+    const messageId = String(lastMessage.message_id || "").trim();
+    if (!messageId) {
+      return null;
+    }
+
+    const messageEl = this.findRenderedMessageElement(messageId);
+    if (!messageEl) {
+      return null;
+    }
+
+    const normalizedParts = this.messageRenderer.normalizeMessageToParts(lastMessage);
+    return {
+      messageEl,
+      messageId,
+      seedParts: Array.isArray(normalizedParts?.parts) ? normalizedParts.parts : [],
+    };
+  }
+
+  private findRenderedMessageElement(messageId: string): HTMLElement | null {
+    const renderedMessages = Array.from(
+      this.chatContainer.querySelectorAll<HTMLElement>(".systemsculpt-message")
+    );
+    return renderedMessages.find((messageEl) => messageEl.dataset.messageId === messageId) ?? null;
   }
 
   private shouldContinueHostedToolLoop(message: ChatMessage, _stopReason?: string): boolean {

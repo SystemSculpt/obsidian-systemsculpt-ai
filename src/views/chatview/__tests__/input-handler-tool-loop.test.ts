@@ -283,6 +283,80 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.refreshCreditsBalance).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses the last assistant root when a hosted continuation round starts", async () => {
+    const { aiService, chatContainer, handler, messages } = createHostedToolLoopHarness();
+
+    const existingMessageEl = document.createElement("div");
+    existingMessageEl.classList.add("systemsculpt-message", "systemsculpt-assistant-message");
+    existingMessageEl.dataset.messageId = "assistant-root";
+    chatContainer.appendChild(existingMessageEl);
+
+    const existingToolCall = {
+      id: "call_1",
+      messageId: "assistant-root",
+      request: {
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "mcp-filesystem_read",
+          arguments: "{\"paths\":[\"alpha.md\"]}",
+        },
+      },
+      state: "completed",
+      timestamp: 1,
+      executionStartedAt: 1,
+      executionCompletedAt: 2,
+      result: {
+        success: true,
+        data: { contents: ["alpha"] },
+      },
+    };
+
+    const existingParts = [
+      {
+        id: "tool_call_part-call_1",
+        type: "tool_call",
+        timestamp: 1,
+        data: existingToolCall,
+      },
+    ];
+
+    messages.push({
+      role: "assistant",
+      content: "",
+      message_id: "assistant-root",
+      tool_calls: [existingToolCall],
+      messageParts: existingParts,
+    } as any);
+
+    aiService.streamMessage.mockReturnValue((async function* () {
+      yield { type: "content", text: "Done." } as any;
+    })());
+
+    const createAssistantMessageContainerSpy = jest.spyOn(handler as any, "createAssistantMessageContainer");
+    const streamSpy = jest
+      .spyOn((handler as any).streamingController, "stream")
+      .mockResolvedValue({
+        messageId: "assistant-root",
+        message: {
+          role: "assistant",
+          content: "Done.",
+          message_id: "assistant-root",
+        },
+        messageEl: existingMessageEl,
+        completed: true,
+        completionState: "completed",
+      });
+
+    await (handler as any).streamAssistantTurn(new AbortController().signal, false);
+
+    expect(createAssistantMessageContainerSpy).not.toHaveBeenCalled();
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(streamSpy.mock.calls[0]?.[1]).toBe(existingMessageEl);
+    expect(streamSpy.mock.calls[0]?.[2]).toBe("assistant-root");
+    expect(streamSpy.mock.calls[0]?.[4]).toEqual(existingParts);
+  });
+
   it("does not continue the hosted tool loop when a local Pi tool call is already completed", async () => {
     const { aiService, handler, messages } = createHostedToolLoopHarness();
 

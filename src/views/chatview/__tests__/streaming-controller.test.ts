@@ -64,6 +64,42 @@ describe("StreamingController stream behavior", () => {
     expect(onAssistantResponse).toHaveBeenCalledTimes(1);
   });
 
+  test("treats seeded continuations with no new renderable output as empty", async () => {
+    const { controller, saveChat, onAssistantResponse } = createController();
+
+    const stream = (async function* () {
+      yield { type: "meta", key: "inline-footnote", value: "Retrying upstream…" } as any;
+    })();
+
+    const seedParts: MessagePart[] = [
+      {
+        id: "content-1",
+        type: "content",
+        timestamp: 1,
+        data: "Hello",
+      },
+    ];
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-seeded-empty";
+    document.body.appendChild(messageEl);
+
+    const abortController = new AbortController();
+    const result = await controller.stream(
+      stream,
+      messageEl,
+      "assistant-seeded-empty",
+      abortController.signal,
+      seedParts
+    );
+
+    expect(result.completed).toBe(false);
+    expect(result.completionState).toBe("empty");
+    expect(saveChat).not.toHaveBeenCalled();
+    expect(onAssistantResponse).not.toHaveBeenCalled();
+    expect(messageEl.isConnected).toBe(true);
+  });
+
   test("captures PI stop reason metadata on the assistant message", async () => {
     const { controller } = createController();
     const stream = (async function* () {
