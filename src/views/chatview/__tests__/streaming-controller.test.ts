@@ -233,6 +233,75 @@ describe("StreamingController stream behavior", () => {
     });
   });
 
+  test("assigns a fresh tool-call id when a seeded continuation reuses a raw id from an earlier round", async () => {
+    const { controller } = createController();
+
+    const existingToolCall = {
+      id: "functions.mcp-filesystem_list_items:0",
+      messageId: "assistant-seeded-tools",
+      request: {
+        id: "functions.mcp-filesystem_list_items:0",
+        type: "function",
+        function: {
+          name: "mcp-filesystem_list_items",
+          arguments: "{\"dirPath\":\".\"}",
+        },
+      },
+      state: "completed",
+      timestamp: 1,
+      executionStartedAt: 1,
+      executionCompletedAt: 2,
+      result: {
+        success: true,
+        data: { items: ["alpha.md"] },
+      },
+    } as any;
+
+    const seedParts: MessagePart[] = [
+      {
+        id: "tool-call-1",
+        type: "tool_call",
+        timestamp: 1,
+        data: existingToolCall,
+      },
+    ];
+
+    const stream = (async function* () {
+      yield {
+        type: "tool-call",
+        phase: "final",
+        call: {
+          id: "functions.mcp-filesystem_list_items:0",
+          index: 0,
+          type: "function",
+          function: {
+            name: "mcp-filesystem_list_items",
+            arguments: "{\"dirPath\":\"SystemSculpt\"}",
+          },
+        },
+      } as any;
+    })();
+
+    const messageEl = document.createElement("div");
+    messageEl.dataset.messageId = "assistant-seeded-tools";
+
+    const abortController = new AbortController();
+    const result = await controller.stream(
+      stream,
+      messageEl,
+      "assistant-seeded-tools",
+      abortController.signal,
+      seedParts
+    );
+
+    const toolCalls = result.message.tool_calls ?? [];
+    expect(toolCalls).toHaveLength(2);
+    expect(toolCalls[0]?.id).toBe("functions.mcp-filesystem_list_items:0");
+    expect(toolCalls[1]?.id).toMatch(/^call_/);
+    expect(toolCalls[1]?.id).not.toBe(toolCalls[0]?.id);
+    expect(result.message.messageParts?.filter((part) => part.type === "tool_call")).toHaveLength(2);
+  });
+
   test("returns completed=false when aborted", async () => {
     const { controller, saveChat } = createController();
 

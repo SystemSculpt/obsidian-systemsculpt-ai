@@ -27,7 +27,7 @@ systemsculpt-sync.ios.json
 systemsculpt-sync.android.json
 systemsculpt-sync.windows.generated.json
 run.sh
-autoresearch-logs/
+/autoresearch*
 
 # OS / editors
 .DS_Store

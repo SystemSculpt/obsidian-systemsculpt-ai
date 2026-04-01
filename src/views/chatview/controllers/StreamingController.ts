@@ -87,6 +87,13 @@ export class StreamingController extends Component {
     } as any;
 
     const toolCallIdState = createToolCallIdState();
+    const seededToolCalls = this.collectToolCalls(assembler.getParts()) ?? [];
+    for (const toolCall of seededToolCalls) {
+      const existingId = typeof toolCall?.id === "string" ? toolCall.id.trim() : "";
+      if (existingId.length > 0) {
+        toolCallIdState.usedIds.add(existingId);
+      }
+    }
     const pendingToolCalls = new Map<string, StreamToolCall>();
 
     let stopReason: string | undefined;

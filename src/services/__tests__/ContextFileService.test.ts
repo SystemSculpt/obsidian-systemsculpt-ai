@@ -351,6 +351,113 @@ describe("ContextFileService", () => {
       expect(result.filter((m) => m.role === "tool")).toHaveLength(0);
     });
 
+    it("expands a compact assistant message into chronological assistant/tool transport rounds", async () => {
+      const firstToolCall = {
+        id: "call-1",
+        messageId: "assistant-root",
+        request: {
+          id: "call-1",
+          type: "function",
+          function: {
+            name: "mcp-filesystem_search",
+            arguments: "{\"patterns\":[\"vault\"]}",
+          },
+        },
+        state: "completed",
+        result: {
+          success: true,
+          data: { results: ["alpha.md"] },
+        },
+      } as any;
+
+      const secondToolCall = {
+        id: "call-2",
+        messageId: "assistant-root",
+        request: {
+          id: "call-2",
+          type: "function",
+          function: {
+            name: "mcp-filesystem_read",
+            arguments: "{\"paths\":[\"alpha.md\"]}",
+          },
+        },
+        state: "completed",
+        result: {
+          success: true,
+          data: { contents: ["Alpha content"] },
+        },
+      } as any;
+
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Summarize the vault", message_id: "u1" } as any,
+        {
+          role: "assistant",
+          content: "Final summary.",
+          message_id: "assistant-root",
+          tool_calls: [firstToolCall, secondToolCall],
+          messageParts: [
+            {
+              id: "reasoning-1",
+              type: "reasoning",
+              timestamp: 1,
+              data: "Need to search first.",
+            },
+            {
+              id: "tool-call-1",
+              type: "tool_call",
+              timestamp: 2,
+              data: firstToolCall,
+            },
+            {
+              id: "reasoning-2",
+              type: "reasoning",
+              timestamp: 3,
+              data: "Now read the hit.",
+            },
+            {
+              id: "tool-call-2",
+              type: "tool_call",
+              timestamp: 4,
+              data: secondToolCall,
+            },
+            {
+              id: "content-1",
+              type: "content",
+              timestamp: 5,
+              data: "Final summary.",
+            },
+          ],
+        } as any,
+      ];
+
+      const result = await service.prepareMessagesWithContext(
+        messages,
+        new Set(),
+        true
+      );
+
+      expect(result.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+        "assistant",
+      ]);
+
+      const assistantMessages = result.filter((message) => message.role === "assistant");
+      expect((assistantMessages[0] as any)?.tool_calls?.map((toolCall: any) => toolCall.id)).toEqual(["call-1"]);
+      expect(assistantMessages[0]?.content).toBe("");
+      expect((result[2] as any)?.tool_call_id).toBe("call-1");
+
+      expect((assistantMessages[1] as any)?.tool_calls?.map((toolCall: any) => toolCall.id)).toEqual(["call-2"]);
+      expect(assistantMessages[1]?.content).toBe("");
+      expect((result[4] as any)?.tool_call_id).toBe("call-2");
+
+      expect((assistantMessages[2] as any)?.tool_calls).toBeUndefined();
+      expect(assistantMessages[2]?.content).toBe("Final summary.");
+    });
+
     it("prunes orphan tool role messages that do not follow assistant tool calls", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool", message_id: "u1" },

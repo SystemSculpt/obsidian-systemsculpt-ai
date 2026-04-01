@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { ChatMessage } from "../types";
+import { ChatMessage, MessagePart, MultiPartContent } from "../types";
 import { ImageProcessor } from "../utils/ImageProcessor";
 import { simpleHash } from "../utils/cryptoUtils";
 import { mentionsObsidianBases } from "../utils/obsidianBases";
@@ -8,6 +8,7 @@ import {
   buildToolResultMessagesFromToolCalls,
   pruneToolMessagesNotFollowingToolCalls,
 } from "../utils/tooling";
+import type { ToolCall } from "../types/toolCalls";
 
 /**
  * Service responsible for handling context files and message preparation
@@ -63,6 +64,269 @@ export class ContextFileService {
     }
 
     return false;
+  }
+
+  private expandCompactAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
+    const expanded: ChatMessage[] = [];
+
+    messages.forEach((message, index) => {
+      expanded.push(...this.expandCompactAssistantMessage(message, messages, index));
+    });
+
+    return expanded;
+  }
+
+  private expandCompactAssistantMessage(
+    message: ChatMessage,
+    messages: ChatMessage[],
+    messageIndex: number
+  ): ChatMessage[] {
+    if (message?.role !== "assistant") {
+      return [message];
+    }
+
+    const messageParts = Array.isArray(message.messageParts) ? [...message.messageParts] : [];
+    if (messageParts.length === 0 || !messageParts.some((part) => part?.type === "tool_call")) {
+      return [message];
+    }
+
+    if (this.hasFollowingExplicitToolMessages(messages, messageIndex)) {
+      return [message];
+    }
+
+    const sortedParts = messageParts
+      .map((part) => this.cloneMessagePart(part))
+      .sort((left, right) => left.timestamp - right.timestamp);
+
+    const rounds: ChatMessage[] = [];
+    let bufferedParts: MessagePart[] = [];
+    let toolClusterCount = 0;
+    let roundIndex = 0;
+
+    for (let idx = 0; idx < sortedParts.length; idx += 1) {
+      const part = sortedParts[idx];
+      if (part.type !== "tool_call") {
+        bufferedParts.push(part);
+        continue;
+      }
+
+      const toolCluster: MessagePart[] = [];
+      while (idx < sortedParts.length && sortedParts[idx]?.type === "tool_call") {
+        toolCluster.push(sortedParts[idx]);
+        idx += 1;
+      }
+      idx -= 1;
+
+      const clusterToolCalls = toolCluster.map((entry) => entry.data as ToolCall);
+      if (!clusterToolCalls.every((toolCall) => this.isResolvedToolCallForTransport(toolCall))) {
+        return [message];
+      }
+
+      toolClusterCount += 1;
+      const roundMessage = this.buildTransportAssistantRoundMessage({
+        sourceMessage: message,
+        roundIndex,
+        parts: [...bufferedParts, ...toolCluster],
+      });
+      if (roundMessage) {
+        rounds.push(roundMessage);
+        roundIndex += 1;
+      }
+      bufferedParts = [];
+    }
+
+    const finalRound = this.buildTransportAssistantRoundMessage({
+      sourceMessage: message,
+      roundIndex,
+      parts: bufferedParts,
+      annotations: message.annotations,
+    });
+    if (finalRound) {
+      rounds.push(finalRound);
+    }
+
+    return rounds.length > 1 || toolClusterCount > 1 ? rounds : [message];
+  }
+
+  private hasFollowingExplicitToolMessages(messages: ChatMessage[], messageIndex: number): boolean {
+    for (let idx = messageIndex + 1; idx < messages.length; idx += 1) {
+      const nextMessage = messages[idx];
+      if (nextMessage?.role === "tool") {
+        return true;
+      }
+      if (nextMessage?.role !== "tool") {
+        break;
+      }
+    }
+    return false;
+  }
+
+  private buildTransportAssistantRoundMessage(params: {
+    sourceMessage: ChatMessage;
+    roundIndex: number;
+    parts: MessagePart[];
+    annotations?: ChatMessage["annotations"];
+  }): ChatMessage | null {
+    const { sourceMessage, roundIndex, annotations } = params;
+    const parts = Array.isArray(params.parts) ? params.parts : [];
+    const roundMessageId = this.deterministicId(
+      `${sourceMessage.message_id || "assistant"}:transport:${roundIndex}`,
+      "assistant"
+    );
+
+    const normalizedParts = parts.map((part) => {
+      if (part.type !== "tool_call") {
+        return part;
+      }
+
+      const toolCall = this.cloneToolCallForTransport(part.data as ToolCall, roundMessageId);
+      return {
+        ...part,
+        data: toolCall,
+      } as MessagePart;
+    });
+
+    const toolCalls = normalizedParts
+      .filter((part): part is MessagePart & { type: "tool_call"; data: ToolCall } => part.type === "tool_call")
+      .map((part) => part.data);
+    const content = this.extractContentFromParts(normalizedParts);
+
+    if (toolCalls.length === 0 && !this.hasRenderableContent(content)) {
+      return null;
+    }
+
+    const message: ChatMessage = {
+      role: "assistant",
+      content: toolCalls.length > 0 && !this.hasRenderableContent(content) ? "" : content,
+      message_id: roundMessageId,
+    };
+
+    if (toolCalls.length > 0) {
+      message.tool_calls = toolCalls;
+    }
+
+    if (annotations && annotations.length > 0) {
+      message.annotations = annotations;
+    }
+
+    return message;
+  }
+
+  private isResolvedToolCallForTransport(toolCall: ToolCall | undefined): boolean {
+    if (!toolCall || typeof toolCall !== "object") {
+      return false;
+    }
+
+    if (toolCall.state === "failed") {
+      return true;
+    }
+
+    return toolCall.state === "completed" && toolCall.result !== undefined;
+  }
+
+  private cloneMessagePart(part: MessagePart): MessagePart {
+    if (part.type === "tool_call") {
+      return {
+        ...part,
+        data: this.cloneToolCallForTransport(part.data as ToolCall),
+      };
+    }
+
+    if (Array.isArray(part.data)) {
+      return {
+        ...part,
+        data: part.data.map((chunk) => ({ ...chunk })) as MultiPartContent[],
+      };
+    }
+
+    return { ...part };
+  }
+
+  private cloneToolCallForTransport(toolCall: ToolCall, messageId?: string): ToolCall {
+    return {
+      ...toolCall,
+      ...(messageId ? { messageId } : {}),
+      request: {
+        ...toolCall.request,
+        function: {
+          ...(toolCall.request?.function ?? {}),
+        },
+      },
+      ...(toolCall.result !== undefined
+        ? {
+            result:
+              toolCall.result && typeof toolCall.result === "object"
+                ? {
+                    ...toolCall.result,
+                    ...(toolCall.result.data && typeof toolCall.result.data === "object"
+                      ? { data: { ...(toolCall.result.data as Record<string, unknown>) } }
+                      : {}),
+                    ...(toolCall.result.error && typeof toolCall.result.error === "object"
+                      ? { error: { ...(toolCall.result.error as Record<string, unknown>) } }
+                      : {}),
+                  }
+                : toolCall.result,
+          }
+        : {}),
+    };
+  }
+
+  private extractContentFromParts(parts: MessagePart[]): string | MultiPartContent[] | null {
+    let textContent = "";
+    let multipartContent: MultiPartContent[] | null = null;
+
+    const appendText = (text: string): void => {
+      if (!text) return;
+      if (multipartContent) {
+        multipartContent.push({ type: "text", text });
+      } else {
+        textContent += text;
+      }
+    };
+
+    const ensureMultipartContent = (): MultiPartContent[] => {
+      if (!multipartContent) {
+        multipartContent = [];
+        if (textContent.length > 0) {
+          multipartContent.push({ type: "text", text: textContent });
+          textContent = "";
+        }
+      }
+      return multipartContent;
+    };
+
+    for (const part of parts) {
+      if (part.type !== "content") continue;
+
+      const data = part.data;
+      if (typeof data === "string") {
+        appendText(data);
+        continue;
+      }
+
+      if (Array.isArray(data)) {
+        const target = ensureMultipartContent();
+        target.push(...data.map((chunk) => ({ ...chunk })) as MultiPartContent[]);
+        continue;
+      }
+
+      if (data != null) {
+        appendText(String(data));
+      }
+    }
+
+    if (multipartContent) {
+      return multipartContent;
+    }
+
+    return textContent;
+  }
+
+  private hasRenderableContent(content: string | MultiPartContent[] | null): boolean {
+    if (typeof content === "string") {
+      return content.length > 0;
+    }
+    return Array.isArray(content) && content.length > 0;
   }
 
   /**
@@ -207,7 +471,8 @@ export class ContextFileService {
     includeImages?: boolean,
     finalSystemPrompt?: string
   ): Promise<ChatMessage[]> {
-    const { messages: sanitizedMessages } = pruneToolMessagesNotFollowingToolCalls(messages || []);
+    const expandedMessages = this.expandCompactAssistantMessages(messages || []);
+    const { messages: sanitizedMessages } = pruneToolMessagesNotFollowingToolCalls(expandedMessages);
     const shouldIncludeImages = includeImages !== false;
     const preparedMessages: ChatMessage[] = [];
 
