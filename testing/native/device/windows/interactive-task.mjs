@@ -78,6 +78,11 @@ function runPowerShellScript(scriptPath) {
   return result;
 }
 
+export function shouldFallbackToDirectInteractiveRun(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /Register-ScheduledTask/i.test(message) && /(Access is denied|0x80070005)/i.test(message);
+}
+
 function buildPowerShellScriptPath(tempDir, fileName) {
   return path.join(tempDir, fileName);
 }
@@ -215,7 +220,16 @@ export async function runInteractiveWindowsPowerShell(options = {}) {
   );
 
   try {
-    runPowerShellScript(schedulerScriptPath);
+    try {
+      runPowerShellScript(schedulerScriptPath);
+    } catch (error) {
+      // Parallels current-user exec already runs inside the logged-in Windows account,
+      // but that session may still lack permission to register scheduled tasks.
+      if (!shouldFallbackToDirectInteractiveRun(error)) {
+        throw error;
+      }
+      runPowerShellScript(taskScriptPath);
+    }
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       try {

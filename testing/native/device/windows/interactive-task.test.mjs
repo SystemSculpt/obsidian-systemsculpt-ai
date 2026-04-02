@@ -4,6 +4,7 @@ import {
   buildInteractiveUserCandidates,
   buildWrappedInteractiveTaskScript,
   resolveDefaultInteractiveUser,
+  shouldFallbackToDirectInteractiveRun,
 } from "./interactive-task.mjs";
 import { resolveWindowsInteractiveTempRoot } from "./common.mjs";
 
@@ -59,4 +60,10 @@ test("buildWrappedInteractiveTaskScript writes failure details when the inner sc
   assert.match(script, /Interactive script completed without writing a result file/);
   assert.match(script, /C:\\Windows\\Temp\\result\.json/);
   assert.match(script, /catch \{/);
+});
+
+test("shouldFallbackToDirectInteractiveRun matches scheduled-task access denied failures", () => {
+  const error = new Error("PowerShell failed.\nRegister-ScheduledTask : Access is denied.\n0x80070005");
+  assert.equal(shouldFallbackToDirectInteractiveRun(error), true);
+  assert.equal(shouldFallbackToDirectInteractiveRun(new Error("PowerShell failed.\nGet-ChildItem : Not found")), false);
 });

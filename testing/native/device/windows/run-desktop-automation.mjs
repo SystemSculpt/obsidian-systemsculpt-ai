@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -6,8 +7,10 @@ import { runDesktopAutomation } from "../../desktop-automation/runner.mjs";
 import { waitForStableDesktopAutomationClient } from "../../desktop-automation/client.mjs";
 import {
   DEFAULT_PLUGIN_ID,
+  loadDiscoveryEntries,
   matchesDiscoveryEntry,
 } from "../../desktop-automation/discovery.mjs";
+import { normalizeProviderId } from "../../shared/model-inventory.mjs";
 import {
   DEFAULT_FIXTURE_DIR,
   DEFAULT_PAUSE_MS,
@@ -16,14 +19,22 @@ import {
   DEFAULT_YOUTUBE_URL,
 } from "../../runtime-smoke/constants.mjs";
 import {
+  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
   DEFAULT_WINDOWS_SSH_HOST,
+  DEFAULT_WINDOWS_TRANSPORT,
+  normalizeWindowsTransport,
+  resolveWindowsTransportOptions,
   runRemotePowerShellScript,
-  startSshLocalPortForward,
+  runWindowsNodeModuleRemotely,
+  startWindowsLocalPortForward,
   stopChildProcess,
 } from "./remote-run.mjs";
 import {
   assertNoLocalPiInstalled,
+  readLocalWindowsPiStatus,
   readLatestWindowsLocalPiStatus,
+  resolveProviderApiKey,
 } from "./run-clean-install-parity.mjs";
 import { ensureFreshRemoteWindowsPluginVersion } from "./runtime-version.mjs";
 
@@ -48,8 +59,16 @@ export function parseArgs(argv) {
     jsonOutput: "",
     reload: true,
     allowSingleModelFallback: false,
-    sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim() || DEFAULT_WINDOWS_SSH_HOST,
+    transport: String(process.env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
+    sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    vmName: String(process.env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    parallelsRepoRoot: String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
+    nodeExe:
+      String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || "").trim() ||
+      DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
     allowLocalPi: false,
+    providerId: String(process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID || "").trim(),
+    providerApiKey: String(process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY || "").trim(),
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -115,8 +134,28 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--transport") {
+      options.transport = normalizeWindowsTransport(argv[index + 1]);
+      index += 1;
+      continue;
+    }
     if (arg === "--host") {
       options.sshHost = String(argv[index + 1] || "").trim() || options.sshHost;
+      index += 1;
+      continue;
+    }
+    if (arg === "--vm-name") {
+      options.vmName = String(argv[index + 1] || "").trim() || options.vmName;
+      index += 1;
+      continue;
+    }
+    if (arg === "--parallels-repo-root") {
+      options.parallelsRepoRoot = String(argv[index + 1] || "").trim() || options.parallelsRepoRoot;
+      index += 1;
+      continue;
+    }
+    if (arg === "--node-exe") {
+      options.nodeExe = String(argv[index + 1] || "").trim() || options.nodeExe;
       index += 1;
       continue;
     }
@@ -130,6 +169,16 @@ export function parseArgs(argv) {
     }
     if (arg === "--allow-local-pi") {
       options.allowLocalPi = true;
+      continue;
+    }
+    if (arg === "--provider-id") {
+      options.providerId = normalizeProviderId(argv[index + 1] || "");
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider-api-key") {
+      options.providerApiKey = String(argv[index + 1] || "").trim();
+      index += 1;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
@@ -147,12 +196,16 @@ function usage() {
   console.log(`Usage: node testing/native/device/windows/run-desktop-automation.mjs [options]
 
 Run no-focus desktop automation against the already-open Windows Obsidian vault
-by reading the live Windows bridge discovery over SSH and forwarding the bridge
-locally on demand.
+by reading the live Windows bridge discovery through the configured transport
+and forwarding the bridge locally on demand.
 
 Options:
   --case <name|all|extended|stress|soak>   Same cases as testing/native/desktop-automation/run.mjs
-  --host <alias>                           SSH host alias. Default: ${DEFAULT_WINDOWS_SSH_HOST}
+  --transport <parallels|ssh>              Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --vm-name <name>                         Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
+  --parallels-repo-root <path>             Windows repo root inside the Parallels guest
+  --node-exe <path>                        Windows Node executable for Parallels runs
+  --host <alias>                           SSH host alias for the optional remote fallback
   --vault-name <name>                      Filter to one Windows vault name
   --vault-path <path>                      Filter to one Windows vault path
   --fixture-dir <path>                     Vault-relative fixture folder. Default: ${DEFAULT_FIXTURE_DIR}
@@ -164,6 +217,8 @@ Options:
   --no-reload                              Reuse the live bridge instead of forcing a bootstrap reload
   --allow-single-model-fallback            Allow fresh-install fallback coverage when only one authenticated model exists
   --allow-local-pi                         Skip the default no-local-Pi preflight
+  --provider-id <id>                       Provider id for provider-connected baseline inside remote guest execution
+  --provider-api-key <value>               Provider API key for provider-connected baseline inside remote guest execution
 `);
 }
 
@@ -278,9 +333,44 @@ function discoveryCacheKey(filters = {}) {
   });
 }
 
+export class WindowsLocalBridgeDiscovery {
+  constructor(options = {}) {
+    this.discoveryDir = String(options.discoveryDir || "").trim();
+    this.cacheTtlMs = Math.max(0, Number(options.cacheTtlMs) || DEFAULT_DISCOVERY_CACHE_TTL_MS);
+    this.cachedAt = 0;
+    this.cachedEntries = [];
+    this.cachedKey = "";
+  }
+
+  async loadEntries(filters = {}) {
+    const cacheKey = discoveryCacheKey(filters);
+    if (this.cachedKey === cacheKey && Date.now() - this.cachedAt <= this.cacheTtlMs) {
+      return this.cachedEntries;
+    }
+
+    this.cachedEntries = await loadDiscoveryEntries({
+      discoveryDir: String(filters.discoveryDir || this.discoveryDir || "").trim() || undefined,
+      pluginId: DEFAULT_PLUGIN_ID,
+      vaultName: String(filters.vaultName || "").trim() || undefined,
+      vaultPath: String(filters.vaultPath || "").trim() || undefined,
+      vaultInstanceId: String(filters.vaultInstanceId || "").trim() || undefined,
+      excludeStartedAt: String(filters.excludeStartedAt || "").trim() || undefined,
+    });
+    this.cachedKey = cacheKey;
+    this.cachedAt = Date.now();
+    return this.cachedEntries;
+  }
+
+  async close() {
+    this.cachedEntries = [];
+    this.cachedKey = "";
+    this.cachedAt = 0;
+  }
+}
+
 export class WindowsForwardedBridgeDiscovery {
   constructor(options = {}) {
-    this.sshHost = String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST;
+    this.connection = resolveWindowsTransportOptions(options);
     this.cacheTtlMs = Math.max(0, Number(options.cacheTtlMs) || DEFAULT_DISCOVERY_CACHE_TTL_MS);
     this.forward = null;
     this.cachedAt = 0;
@@ -306,7 +396,7 @@ export class WindowsForwardedBridgeDiscovery {
 
   async fetchRemoteRecords() {
     const stdout = await runRemotePowerShellScript(buildListWindowsBridgeRecordsScript(), {
-      sshHost: this.sshHost,
+      ...this.connection,
     });
     return parseRemoteBridgeRecords(stdout);
   }
@@ -323,8 +413,8 @@ export class WindowsForwardedBridgeDiscovery {
     }
 
     await this.closeForward();
-    const forward = await startSshLocalPortForward({
-      sshHost: this.sshHost,
+    const forward = await startWindowsLocalPortForward({
+      ...this.connection,
       remoteHost: String(record.host || "127.0.0.1"),
       remotePort: Number(record.port),
     });
@@ -335,8 +425,8 @@ export class WindowsForwardedBridgeDiscovery {
 
     return {
       ...record,
-      host: "127.0.0.1",
-      port: forward.localPort,
+      host: forward.host,
+      port: forward.port,
       forwardedHost: String(record.host || "127.0.0.1"),
       forwardedPort: Number(record.port),
     };
@@ -418,6 +508,8 @@ function buildSyntheticTarget(baseOptions, ping) {
     vaultRoot: vaultPath,
     vaultName,
     sshHost: baseOptions.sshHost,
+    transport: baseOptions.transport,
+    vmName: baseOptions.vmName || null,
     remote: true,
   };
 }
@@ -437,36 +529,177 @@ function summarizeRuntimeVersionRefresh(refresh) {
   };
 }
 
-export async function runWindowsDesktopAutomation(options, dependencies = {}) {
-  const discovery =
-    dependencies.discovery instanceof WindowsForwardedBridgeDiscovery
-      ? dependencies.discovery
-      : new WindowsForwardedBridgeDiscovery({
-          sshHost: options.sshHost,
-          cacheTtlMs: dependencies.cacheTtlMs,
-        });
+export function buildRemoteWindowsDesktopAutomationArgs(options = {}) {
+  const args = [];
+  if (String(options.caseName || "").trim()) {
+    args.push("--case", String(options.caseName).trim());
+  }
+  if (String(options.vaultName || "").trim()) {
+    args.push("--vault-name", String(options.vaultName).trim());
+  }
+  if (String(options.vaultPath || "").trim()) {
+    args.push("--vault-path", String(options.vaultPath).trim());
+  }
+  if (String(options.fixtureDir || "").trim()) {
+    args.push("--fixture-dir", String(options.fixtureDir).trim());
+  }
+  if (String(options.webFetchUrl || "").trim()) {
+    args.push("--web-fetch-url", String(options.webFetchUrl).trim());
+  }
+  if (String(options.youtubeUrl || "").trim()) {
+    args.push("--youtube-url", String(options.youtubeUrl).trim());
+  }
+  if (Number.isFinite(Number(options.repeat)) && Number(options.repeat) > 0) {
+    args.push("--repeat", String(Number(options.repeat)));
+  }
+  if (Number.isFinite(Number(options.pauseMs)) && Number(options.pauseMs) >= 0) {
+    args.push("--pause-ms", String(Number(options.pauseMs)));
+  }
+  if (options.reload === false) {
+    args.push("--no-reload");
+  }
+  if (options.allowSingleModelFallback) {
+    args.push("--allow-single-model-fallback");
+  }
+  if (options.allowLocalPi) {
+    args.push("--allow-local-pi");
+  }
+  if (String(options.providerId || "").trim()) {
+    args.push("--provider-id", String(options.providerId).trim());
+  }
+  if (String(options.providerApiKey || "").trim()) {
+    args.push("--provider-api-key", String(options.providerApiKey).trim());
+  }
+  return args;
+}
 
-  if (!options.allowLocalPi) {
-    assertNoLocalPiInstalled(
-      await readLatestWindowsLocalPiStatus({
-        sshHost: options.sshHost,
-      })
+export function resolveRemoteWindowsDesktopAutomationProviderConfig(options = {}, env = process.env) {
+  const explicitProviderId = normalizeProviderId(options.providerId || env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID || "");
+  if (explicitProviderId) {
+    const apiKey = resolveProviderApiKey(
+      {
+        providerId: explicitProviderId,
+        apiKey: options.providerApiKey || env.SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY || "",
+      },
+      env
     );
+    return apiKey
+      ? {
+          providerId: explicitProviderId,
+          providerApiKey: apiKey,
+        }
+      : null;
   }
 
-  const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion(
-    {
-      sshHost: options.sshHost,
-      vaultName: options.vaultName,
-      vaultPath: options.vaultPath,
-      artifactRoot: process.cwd(),
-    },
-    dependencies.runtimeVersionDependencies
-  );
-  if (runtimeVersionRefresh.relaunched) {
-    console.log(
-      `[windows-desktop-automation] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
+  const defaultProviderId = "openrouter";
+  const apiKey = resolveProviderApiKey({ providerId: defaultProviderId }, env);
+  return apiKey
+    ? {
+        providerId: defaultProviderId,
+        providerApiKey: apiKey,
+      }
+    : null;
+}
+
+export async function runWindowsDesktopAutomation(options, dependencies = {}) {
+  const connection = resolveWindowsTransportOptions(options);
+  const runWindowsNodeModuleRemotelyImpl =
+    dependencies.runWindowsNodeModuleRemotelyImpl || runWindowsNodeModuleRemotely;
+  const isLocalWindowsRuntime = process.platform === "win32";
+
+  if (!isLocalWindowsRuntime && connection.transport === "parallels") {
+    const remoteProviderConfig = resolveRemoteWindowsDesktopAutomationProviderConfig(options, process.env);
+    if (!options.allowLocalPi) {
+      assertNoLocalPiInstalled(
+        await readLatestWindowsLocalPiStatus({
+          ...connection,
+        })
+      );
+    }
+
+    const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion(
+      {
+        ...connection,
+        vaultName: options.vaultName,
+        vaultPath: options.vaultPath,
+        artifactRoot: process.cwd(),
+      },
+      dependencies.runtimeVersionDependencies
     );
+    if (runtimeVersionRefresh.relaunched) {
+      console.log(
+        `[windows-desktop-automation] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
+      );
+    }
+
+    const stdout = await runWindowsNodeModuleRemotelyImpl(
+      path.resolve(process.cwd(), "testing/native/device/windows/run-desktop-automation.mjs"),
+      {
+        ...connection,
+        artifactRoot: process.cwd(),
+        args: buildRemoteWindowsDesktopAutomationArgs({
+          ...options,
+          ...remoteProviderConfig,
+        }),
+      }
+    );
+    const payload = parseJsonPayloadText(stdout, "the Windows desktop automation report");
+    const finalPayload = {
+      ...payload,
+      runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
+    };
+
+    if (options.jsonOutput) {
+      await fs.mkdir(path.dirname(options.jsonOutput), { recursive: true });
+      await fs.writeFile(options.jsonOutput, `${JSON.stringify(finalPayload, null, 2)}\n`, "utf8");
+    }
+
+    return finalPayload;
+  }
+
+  if (String(options.providerId || "").trim() && String(options.providerApiKey || "").trim()) {
+    process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID = String(options.providerId).trim();
+    process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY = String(options.providerApiKey).trim();
+  }
+
+  const discovery =
+    dependencies.discovery instanceof WindowsForwardedBridgeDiscovery ||
+    dependencies.discovery instanceof WindowsLocalBridgeDiscovery
+      ? dependencies.discovery
+      : isLocalWindowsRuntime
+        ? new WindowsLocalBridgeDiscovery({
+            cacheTtlMs: dependencies.cacheTtlMs,
+          })
+        : new WindowsForwardedBridgeDiscovery({
+            ...connection,
+            cacheTtlMs: dependencies.cacheTtlMs,
+          });
+
+  if (!options.allowLocalPi) {
+    const localPiStatus = isLocalWindowsRuntime
+      ? readLocalWindowsPiStatus()
+      : await readLatestWindowsLocalPiStatus({
+          ...connection,
+        });
+    assertNoLocalPiInstalled(localPiStatus);
+  }
+
+  let runtimeVersionRefresh = null;
+  if (!isLocalWindowsRuntime) {
+    runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion(
+      {
+        ...connection,
+        vaultName: options.vaultName,
+        vaultPath: options.vaultPath,
+        artifactRoot: process.cwd(),
+      },
+      dependencies.runtimeVersionDependencies
+    );
+    if (runtimeVersionRefresh.relaunched) {
+      console.log(
+        `[windows-desktop-automation] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
+      );
+    }
   }
 
   try {

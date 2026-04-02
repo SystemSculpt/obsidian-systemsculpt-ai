@@ -9,25 +9,202 @@ import { build as buildWithEsbuild } from "esbuild";
 
 import { assertProductionPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "../../../../scripts/plugin-artifacts.mjs";
 
-export const DEFAULT_WINDOWS_SSH_HOST = "tickblaze-kamatera";
+export const DEFAULT_WINDOWS_TRANSPORT = "parallels";
+export const DEFAULT_WINDOWS_SSH_HOST = "";
+export const DEFAULT_WINDOWS_PARALLELS_VM_NAME = "Windows 11";
+export const DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE = "Y:";
+export const DEFAULT_WINDOWS_PARALLELS_NODE_EXE = "node";
 export const DEFAULT_WINDOWS_REMOTE_TEMP_DIR = "C:/Windows/Temp";
 export const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS = 10;
 export const DEFAULT_SSH_SERVER_ALIVE_INTERVAL_SECONDS = 15;
 export const DEFAULT_SSH_SERVER_ALIVE_COUNT_MAX = 120;
 export const DEFAULT_SSH_MAX_BUFFER_BYTES = 1024 * 1024 * 24;
+const SUPPORTED_WINDOWS_TRANSPORTS = new Set(["parallels", "ssh"]);
 
 function fail(message) {
   throw new Error(message);
 }
 
 function outputText(result) {
-  return [String(result.stdout || "").trim(), String(result.stderr || "").trim()]
+  return [String(result?.stdout || "").trim(), String(result?.stderr || "").trim()]
     .filter(Boolean)
     .join("\n");
 }
 
 function psSingleQuote(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+function encodePowerShell(scriptContent) {
+  return Buffer.from(String(scriptContent || ""), "utf16le").toString("base64");
+}
+
+function normalizeWindowsPath(value) {
+  return String(value || "").trim().replace(/\\/g, "/");
+}
+
+function maxBufferBytes(options = {}) {
+  return Math.max(1024 * 1024, Number(options.maxBufferBytes) || DEFAULT_SSH_MAX_BUFFER_BYTES);
+}
+
+export function normalizeWindowsTransport(value) {
+  const normalized = String(value || DEFAULT_WINDOWS_TRANSPORT).trim().toLowerCase();
+  if (SUPPORTED_WINDOWS_TRANSPORTS.has(normalized)) {
+    return normalized;
+  }
+  fail(
+    `Unsupported Windows transport: ${String(value || "").trim() || "(empty)"}. Expected one of ${Array.from(
+      SUPPORTED_WINDOWS_TRANSPORTS
+    ).join(", ")}.`
+  );
+}
+
+export function resolveDefaultParallelsRepoRoot(localRepoRoot = process.cwd(), env = process.env) {
+  const explicitRoot = String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim();
+  if (explicitRoot) {
+    return normalizeWindowsPath(explicitRoot);
+  }
+  const shareDrive =
+    String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_SHARE_DRIVE || "").trim() ||
+    DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE;
+  return normalizeWindowsPath(path.win32.join(shareDrive, path.basename(path.resolve(localRepoRoot))));
+}
+
+export function resolveWindowsTransportOptions(options = {}, env = process.env) {
+  const localRepoRoot = path.resolve(String(options.localRepoRoot || options.artifactRoot || process.cwd()));
+  const transport = normalizeWindowsTransport(
+    options.transport ?? env.SYSTEMSCULPT_WINDOWS_TRANSPORT ?? DEFAULT_WINDOWS_TRANSPORT
+  );
+
+  return {
+    transport,
+    localRepoRoot,
+    sshHost: String(options.sshHost || env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    vmName: String(options.vmName || env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    parallelsRepoRoot:
+      normalizeWindowsPath(
+        options.parallelsRepoRoot || env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || ""
+      ) || resolveDefaultParallelsRepoRoot(localRepoRoot, env),
+    nodeExe:
+      normalizeWindowsPath(
+        options.nodeExe || env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || DEFAULT_WINDOWS_PARALLELS_NODE_EXE
+      ) || DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+  };
+}
+
+export function mapLocalPathToParallelsRepoPath(localPath, options = {}, env = process.env) {
+  const connection = resolveWindowsTransportOptions(options, env);
+  const resolvedLocalPath = path.resolve(String(localPath || ""));
+  const relativePath = path.relative(connection.localRepoRoot, resolvedLocalPath);
+  if (
+    !relativePath ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    fail(
+      `Parallels Windows transport requires a repo-local path under ${connection.localRepoRoot}. Got ${resolvedLocalPath}.`
+    );
+  }
+  return normalizeWindowsPath(
+    path.win32.join(connection.parallelsRepoRoot.replace(/\//g, "\\"), ...relativePath.split(path.sep))
+  );
+}
+
+function resolveParallelsVmIpv4(options = {}) {
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  const spawnSyncImpl = options.spawnSyncImpl || spawnSync;
+  const result = spawnSyncImpl("prlctl", ["list", "-f", "-i", connection.vmName], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  if (result?.error) {
+    throw result.error;
+  }
+  if ((result?.status ?? 1) !== 0) {
+    fail(outputText(result) || `Failed to query Parallels VM info for ${connection.vmName}.`);
+  }
+
+  const ipLine = String(result.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("IP Addresses:"));
+  const ipValue = String(ipLine || "")
+    .replace(/^IP Addresses:\s*/u, "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .find((entry) => /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(entry));
+
+  if (!ipValue) {
+    fail(`Could not resolve an IPv4 address for Parallels VM ${connection.vmName}.`);
+  }
+  return ipValue;
+}
+
+function buildPrlctlExecArgs(options = {}, commandArgs = []) {
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  return ["exec", connection.vmName, "--current-user", ...commandArgs];
+}
+
+function buildPowerShellCommandArgs(scriptContent) {
+  return [
+    "powershell.exe",
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-EncodedCommand",
+    encodePowerShell(scriptContent),
+  ];
+}
+
+function buildParallelsNodeForwardScript() {
+  return [
+    "const net = require('node:net');",
+    "const remoteHost = String(process.argv[1] || '127.0.0.1');",
+    "const remotePort = Number(process.argv[2]);",
+    "if (!Number.isFinite(remotePort) || remotePort <= 0) {",
+    "  console.error('FORWARD_ERROR=invalid remote port');",
+    "  process.exit(1);",
+    "}",
+    "const sockets = new Set();",
+    "const server = net.createServer((client) => {",
+    "  const upstream = net.connect({ host: remoteHost, port: remotePort });",
+    "  sockets.add(client);",
+    "  sockets.add(upstream);",
+    "  const cleanup = () => {",
+    "    sockets.delete(client);",
+    "    sockets.delete(upstream);",
+    "    if (!client.destroyed) client.destroy();",
+    "    if (!upstream.destroyed) upstream.destroy();",
+    "  };",
+    "  client.on('error', cleanup);",
+    "  upstream.on('error', cleanup);",
+    "  client.on('close', () => sockets.delete(client));",
+    "  upstream.on('close', () => sockets.delete(upstream));",
+    "  client.pipe(upstream);",
+    "  upstream.pipe(client);",
+    "});",
+    "server.on('error', (error) => {",
+    "  console.error(`FORWARD_ERROR=${error && error.message ? error.message : String(error)}`);",
+    "  process.exit(1);",
+    "});",
+    "server.listen(0, '0.0.0.0', () => {",
+    "  const address = server.address();",
+    "  const port = address && typeof address === 'object' ? address.port : 0;",
+    "  process.stdout.write(`FORWARD_PORT=${port}\\n`);",
+    "});",
+    "const closeAll = () => {",
+    "  for (const socket of sockets) {",
+    "    if (!socket.destroyed) socket.destroy();",
+    "  }",
+    "  server.close(() => process.exit(0));",
+    "};",
+    "process.on('SIGTERM', closeAll);",
+    "process.on('SIGINT', closeAll);",
+  ].join("\n");
 }
 
 export function toPowerShellArrayLiteral(values = []) {
@@ -55,6 +232,7 @@ export function buildRemoteWindowsNodeScript(options = {}) {
     workspaceFiles[0].relativePath;
   const cleanupPaths = Array.isArray(options.cleanupPaths) ? options.cleanupPaths : [];
   const args = Array.isArray(options.args) ? options.args : [];
+  const nodeCommand = String(options.nodeCommand || "node").trim() || "node";
   const workspaceFilesLiteral = [
     "@(",
     ...workspaceFiles.map(
@@ -70,6 +248,7 @@ export function buildRemoteWindowsNodeScript(options = {}) {
     `$scriptArgs = ${toPowerShellArrayLiteral(args)}`,
     `$cleanupPaths = ${toPowerShellArrayLiteral(cleanupPaths)}`,
     `$workspaceFiles = ${workspaceFilesLiteral}`,
+    `$nodeCommand = ${psSingleQuote(nodeCommand)}`,
     "New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null",
     "foreach ($workspaceFile in $workspaceFiles) {",
     "  $targetPath = Join-Path $workspacePath $workspaceFile.relativePath",
@@ -87,8 +266,8 @@ export function buildRemoteWindowsNodeScript(options = {}) {
     "$exitCode = 0",
     "Push-Location $workspacePath",
     "try {",
-    "  node $scriptPath @scriptArgs",
-    "  $exitCode = $LASTEXITCODE",
+    "  & $nodeCommand $scriptPath @scriptArgs",
+    "  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }",
     "} finally {",
     "  Pop-Location",
     "}",
@@ -97,6 +276,32 @@ export function buildRemoteWindowsNodeScript(options = {}) {
     "  if ($cleanupPath -and (Test-Path $cleanupPath)) {",
     "    Remove-Item $cleanupPath -Force -ErrorAction SilentlyContinue",
     "  }",
+    "}",
+    "exit $exitCode",
+    "",
+  ].join("\n");
+}
+
+function buildParallelsRemoteNodeScript(entryPath, options = {}) {
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  const remoteEntryPath = mapLocalPathToParallelsRepoPath(entryPath, connection, options.env || process.env);
+  const args = Array.isArray(options.args) ? options.args : [];
+
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$repoRoot = ${psSingleQuote(connection.parallelsRepoRoot)}`,
+    `$scriptPath = ${psSingleQuote(remoteEntryPath)}`,
+    `$nodeCommand = ${psSingleQuote(connection.nodeExe)}`,
+    `$scriptArgs = ${toPowerShellArrayLiteral(args)}`,
+    "if (!(Test-Path $repoRoot)) { throw ('Parallels repo root not found: ' + $repoRoot) }",
+    "if (!(Test-Path $scriptPath)) { throw ('Parallels entry path not found: ' + $scriptPath) }",
+    "$exitCode = 0",
+    "Push-Location $repoRoot",
+    "try {",
+    "  & $nodeCommand $scriptPath @scriptArgs",
+    "  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }",
+    "} finally {",
+    "  Pop-Location",
     "}",
     "exit $exitCode",
     "",
@@ -140,12 +345,16 @@ export async function findOpenLocalPort() {
   });
 }
 
-export async function waitForForwardedPort(localPort, timeoutMs = 15_000) {
+export async function waitForForwardedPort(hostOrPort, maybePortOrTimeout, maybeTimeout) {
+  const hasExplicitHost = typeof hostOrPort === "string" && hostOrPort.trim();
+  const host = hasExplicitHost ? hostOrPort.trim() : "127.0.0.1";
+  const port = Number(hasExplicitHost ? maybePortOrTimeout : hostOrPort);
+  const timeoutMs = Number(hasExplicitHost ? maybeTimeout : maybePortOrTimeout) || 15_000;
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
     const connected = await new Promise((resolve) => {
-      const socket = net.connect({ host: "127.0.0.1", port: localPort });
+      const socket = net.connect({ host, port });
       socket.once("connect", () => {
         socket.destroy();
         resolve(true);
@@ -163,7 +372,7 @@ export async function waitForForwardedPort(localPort, timeoutMs = 15_000) {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  fail(`Timed out waiting for the Windows bridge port-forward on localhost:${localPort}.`);
+  fail(`Timed out waiting for the Windows bridge port-forward on ${host}:${port}.`);
 }
 
 export async function stopChildProcess(child) {
@@ -196,7 +405,10 @@ export async function startSshLocalPortForward(options = {}) {
     ? Number(options.localPort)
     : await findOpenLocalPort();
   const remoteHost = String(options.remoteHost || "127.0.0.1").trim() || "127.0.0.1";
-  const sshHost = String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST;
+  const sshHost = String(options.sshHost || "").trim();
+  if (!sshHost) {
+    fail("SSH Windows transport requires --host or SYSTEMSCULPT_WINDOWS_SSH_HOST.");
+  }
   const sshArgs = [
     "-N",
     "-T",
@@ -240,6 +452,9 @@ export async function startSshLocalPortForward(options = {}) {
 
   return {
     process: sshProcess,
+    host: "127.0.0.1",
+    port: localPort,
+    localHost: "127.0.0.1",
     localPort,
     remoteHost,
     remotePort,
@@ -248,33 +463,161 @@ export async function startSshLocalPortForward(options = {}) {
   };
 }
 
+async function waitForParallelsForward(child, timeoutMs = 15_000) {
+  return await new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (error, port) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ port, stdout: stdout.trim(), stderr: stderr.trim() });
+    };
+
+    const parseForwardPort = () => {
+      const match = stdout.match(/FORWARD_PORT=(\d+)/u);
+      if (match) {
+        finish(null, Number(match[1]));
+      }
+    };
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk || "");
+      parseForwardPort();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk || "");
+    });
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, signal) => {
+      finish(
+        new Error(
+          [stderr.trim(), stdout.trim()]
+            .filter(Boolean)
+            .join("\n") ||
+            `Parallels port-forward exited before it became ready (code=${code ?? "null"}, signal=${signal ?? "null"}).`
+        )
+      );
+    });
+
+    const timer = setTimeout(() => {
+      finish(
+        new Error(
+          [stderr.trim(), stdout.trim()]
+            .filter(Boolean)
+            .join("\n") || "Timed out waiting for the Parallels port-forward to report its listening port."
+        )
+      );
+    }, timeoutMs);
+  });
+}
+
+async function startParallelsLocalPortForward(options = {}) {
+  const remotePort = Number(options.remotePort);
+  if (!Number.isFinite(remotePort) || remotePort <= 0) {
+    fail(`Invalid remote port for Parallels port-forward: ${String(options.remotePort)}`);
+  }
+
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  const remoteHost = String(options.remoteHost || "127.0.0.1").trim() || "127.0.0.1";
+  const vmHost = String(options.vmHost || "").trim() || resolveParallelsVmIpv4(connection);
+  const prlctlProcess = spawn(
+    "prlctl",
+    buildPrlctlExecArgs(connection, [
+      connection.nodeExe,
+      "-e",
+      buildParallelsNodeForwardScript(),
+      remoteHost,
+      String(remotePort),
+    ]),
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+
+  try {
+    const ready = await waitForParallelsForward(prlctlProcess, Number(options.timeoutMs) || 15_000);
+    await waitForForwardedPort(vmHost, ready.port, Number(options.timeoutMs) || 15_000);
+    return {
+      process: prlctlProcess,
+      host: vmHost,
+      port: ready.port,
+      localHost: vmHost,
+      localPort: ready.port,
+      remoteHost,
+      remotePort,
+      vmHost,
+      vmName: connection.vmName,
+      getStdout: () => ready.stdout,
+      getStderr: () => ready.stderr,
+    };
+  } catch (error) {
+    await stopChildProcess(prlctlProcess);
+    throw error;
+  }
+}
+
+export async function startWindowsLocalPortForward(options = {}, dependencies = {}) {
+  const connection = {
+    ...options,
+    ...resolveWindowsTransportOptions(options, options.env || process.env),
+  };
+  const startSshLocalPortForwardImpl = dependencies.startSshLocalPortForwardImpl || startSshLocalPortForward;
+  const startParallelsLocalPortForwardImpl =
+    dependencies.startParallelsLocalPortForwardImpl || startParallelsLocalPortForward;
+  if (connection.transport === "ssh") {
+    return await startSshLocalPortForwardImpl(connection);
+  }
+  return await startParallelsLocalPortForwardImpl(connection);
+}
+
 export function buildRemotePowerShellInvocation(options = {}) {
   const command = String(options.command || "").trim();
   if (!command) {
     fail("Missing remote PowerShell command.");
   }
 
+  const sshHost = String(options.sshHost || "").trim();
+  if (!sshHost) {
+    fail("SSH Windows transport requires --host or SYSTEMSCULPT_WINDOWS_SSH_HOST.");
+  }
+
   return [
     "-T",
     ...buildSshOptionArgs(options),
-    String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST,
+    sshHost,
     command,
   ];
 }
 
 async function copyLocalFileToWindowsPath(localPath, remotePath, options = {}) {
+  const sshHost = String(options.sshHost || "").trim();
+  if (!sshHost) {
+    fail("SSH Windows transport requires --host or SYSTEMSCULPT_WINDOWS_SSH_HOST.");
+  }
+
   const result = spawnSync(
     "scp",
     [
       "-q",
       ...buildSshOptionArgs(options),
       localPath,
-      `${String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST}:${remotePath}`,
+      `${sshHost}:${remotePath}`,
     ],
     {
       encoding: "utf8",
       stdio: "pipe",
-      maxBuffer: Math.max(1024 * 1024, Number(options.maxBufferBytes) || DEFAULT_SSH_MAX_BUFFER_BYTES),
+      maxBuffer: maxBufferBytes(options),
     }
   );
 
@@ -290,6 +633,24 @@ export async function runRemotePowerShellScript(script, options = {}) {
   const remoteScript = String(script || "");
   if (!remoteScript.trim()) {
     fail("Missing remote PowerShell script.");
+  }
+
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  if (connection.transport === "parallels") {
+    const result = spawnSync("prlctl", buildPrlctlExecArgs(connection, buildPowerShellCommandArgs(remoteScript)), {
+      encoding: "utf8",
+      stdio: "pipe",
+      maxBuffer: maxBufferBytes(options),
+    });
+
+    if (result.error) {
+      throw result.error;
+    }
+    if ((result.status ?? 1) !== 0) {
+      fail(outputText(result) || `Parallels PowerShell command failed with exit code ${result.status ?? "unknown"}.`);
+    }
+
+    return String(result.stdout || "");
   }
 
   const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -310,12 +671,12 @@ export async function runRemotePowerShellScript(script, options = {}) {
   await fs.writeFile(localPath, remoteScript, "utf8");
 
   try {
-    await copyLocalFileToWindowsPath(localPath, remotePath, options);
+    await copyLocalFileToWindowsPath(localPath, remotePath, connection);
 
-    const result = spawnSync("ssh", buildRemotePowerShellInvocation({ ...options, command: remoteCommand }), {
+    const result = spawnSync("ssh", buildRemotePowerShellInvocation({ ...connection, command: remoteCommand }), {
       encoding: "utf8",
       stdio: "pipe",
-      maxBuffer: Math.max(1024 * 1024, Number(options.maxBufferBytes) || DEFAULT_SSH_MAX_BUFFER_BYTES),
+      maxBuffer: maxBufferBytes(options),
     });
 
     if (result.error) {
@@ -337,6 +698,7 @@ export async function copySecretToWindowsTempFile(value, options = {}) {
     fail("Missing secret value for Windows temp-file copy.");
   }
 
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
   const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const prefix = String(options.fileNamePrefix || "ss-secret").trim() || "ss-secret";
   const localPath = path.join(os.tmpdir(), `${prefix}-${nonce}.txt`);
@@ -345,6 +707,23 @@ export async function copySecretToWindowsTempFile(value, options = {}) {
     DEFAULT_WINDOWS_REMOTE_TEMP_DIR;
   const remotePath = `${remoteTempDir.replace(/[\\/]+$/g, "")}/${prefix}-${nonce}.txt`;
 
+  if (connection.transport === "parallels") {
+    const remoteScript = [
+      "$ErrorActionPreference = 'Stop'",
+      `$targetPath = ${psSingleQuote(remotePath)}`,
+      `$contentBase64 = ${psSingleQuote(Buffer.from(secretValue, "utf8").toString("base64"))}`,
+      "New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath) -Force | Out-Null",
+      "[System.IO.File]::WriteAllText(",
+      "  $targetPath,",
+      "  [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($contentBase64)),",
+      "  [System.Text.UTF8Encoding]::new($false)",
+      ")",
+      "",
+    ].join("\n");
+    await runRemotePowerShellScript(remoteScript, connection);
+    return remotePath;
+  }
+
   await fs.writeFile(localPath, secretValue, "utf8");
 
   try {
@@ -352,14 +731,14 @@ export async function copySecretToWindowsTempFile(value, options = {}) {
       "scp",
       [
         "-q",
-        ...buildSshOptionArgs(options),
+        ...buildSshOptionArgs(connection),
         localPath,
-        `${String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST}:${remotePath}`,
+        `${String(connection.sshHost || "").trim()}:${remotePath}`,
       ],
       {
         encoding: "utf8",
         stdio: "pipe",
-        maxBuffer: Math.max(1024 * 1024, Number(options.maxBufferBytes) || DEFAULT_SSH_MAX_BUFFER_BYTES),
+        maxBuffer: maxBufferBytes(options),
       }
     );
 
@@ -420,23 +799,49 @@ export async function buildWindowsNodeModuleWorkspace(entryPath, options = {}) {
   };
 }
 
-export async function runWindowsNodeModuleRemotely(entryPath, options = {}) {
-  const workspace = await buildWindowsNodeModuleWorkspace(entryPath, options);
+export async function runWindowsNodeModuleRemotely(entryPath, options = {}, dependencies = {}) {
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
+  const taskArgs = Array.isArray(options.args) ? options.args : [];
+  const runRemotePowerShellScriptImpl =
+    dependencies.runRemotePowerShellScriptImpl || runRemotePowerShellScript;
+  const buildWindowsNodeModuleWorkspaceImpl =
+    dependencies.buildWindowsNodeModuleWorkspaceImpl || buildWindowsNodeModuleWorkspace;
+
+  if (connection.transport === "parallels") {
+    return await runRemotePowerShellScriptImpl(
+      buildParallelsRemoteNodeScript(entryPath, {
+        ...connection,
+        args: taskArgs,
+      }),
+      connection
+    );
+  }
+
+  const workspace = await buildWindowsNodeModuleWorkspaceImpl(entryPath, connection);
   const script = buildRemoteWindowsNodeScript({
     entryRelativePath: workspace.entryRelativePath,
     workspaceFiles: workspace.workspaceFiles,
-    args: Array.isArray(options.args) ? options.args : [],
-    cleanupPaths: Array.isArray(options.cleanupPaths) ? options.cleanupPaths : [],
+    args: Array.isArray(connection.args) ? connection.args : taskArgs,
+    cleanupPaths: Array.isArray(connection.cleanupPaths)
+      ? connection.cleanupPaths
+      : Array.isArray(options.cleanupPaths)
+        ? options.cleanupPaths
+        : [],
+    nodeCommand: "node",
   });
 
-  return await runRemotePowerShellScript(script, options);
+  return await runRemotePowerShellScriptImpl(script, connection);
 }
 
 export function parseRemoteRunArgs(argv) {
   const args = Array.isArray(argv) ? argv : [];
   const options = {
     entryPath: "",
-    sshHost: DEFAULT_WINDOWS_SSH_HOST,
+    transport: DEFAULT_WINDOWS_TRANSPORT,
+    sshHost: "",
+    vmName: DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    parallelsRepoRoot: "",
+    nodeExe: DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
     taskArgs: [],
   };
 
@@ -454,8 +859,28 @@ export function parseRemoteRunArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--transport") {
+      options.transport = normalizeWindowsTransport(args[index + 1]);
+      index += 1;
+      continue;
+    }
     if (arg === "--host") {
       options.sshHost = String(args[index + 1] || "").trim() || options.sshHost;
+      index += 1;
+      continue;
+    }
+    if (arg === "--vm-name") {
+      options.vmName = String(args[index + 1] || "").trim() || options.vmName;
+      index += 1;
+      continue;
+    }
+    if (arg === "--parallels-repo-root") {
+      options.parallelsRepoRoot = normalizeWindowsPath(String(args[index + 1] || "").trim());
+      index += 1;
+      continue;
+    }
+    if (arg === "--node-exe") {
+      options.nodeExe = normalizeWindowsPath(String(args[index + 1] || "").trim()) || options.nodeExe;
       index += 1;
       continue;
     }
@@ -470,10 +895,17 @@ export function parseRemoteRunArgs(argv) {
 }
 
 function usage() {
-  console.log(`Usage: node testing/native/device/windows/remote-run.mjs --entry <path> [--host <alias>] -- [task args...]
+  console.log(`Usage: node testing/native/device/windows/remote-run.mjs --entry <path> [options] -- [task args...]
 
-Send a local JavaScript file to the Windows VM over SSH, execute it with the
-remote Node runtime, and stream stdout back to this host.
+Send a repo-local JavaScript file to the Windows test host and execute it with the
+configured Windows transport.
+
+Options:
+  --transport <parallels|ssh>           Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --vm-name <name>                      Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
+  --parallels-repo-root <path>          Windows repo root inside the Parallels guest
+  --node-exe <path>                     Windows Node executable for Parallels runs
+  --host <alias>                        SSH host alias for the optional remote fallback
 `);
 }
 
@@ -488,7 +920,11 @@ async function main() {
     fail("Missing --entry.");
   }
   const stdout = await runWindowsNodeModuleRemotely(options.entryPath, {
+    transport: options.transport,
     sshHost: options.sshHost,
+    vmName: options.vmName,
+    parallelsRepoRoot: options.parallelsRepoRoot,
+    nodeExe: options.nodeExe,
     args: options.taskArgs,
   });
   process.stdout.write(stdout);

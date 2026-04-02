@@ -38,6 +38,7 @@ single section string.
 ## Main commands
 
 ```powershell
+npm run test:native:windows:install-node
 npm run test:native:windows:prepare
 npm run test:native:windows:prepare -- --launch
 npm run test:native:windows:setup
@@ -51,7 +52,9 @@ npm run test:native:windows:stress
 npm run test:native:windows:soak
 ```
 
-`npm run test:native:windows:prepare` now stages a bundled bootstrap workspace plus the latest local production plugin artifacts over SSH, so the Windows VM does not need its own checkout of this repo just to prepare the vault. The npm wrapper now forwards extra task args too, so `npm run test:native:windows:prepare -- --launch` does a full remote sync plus Obsidian relaunch from the Mac.
+`npm run test:native:windows:install-node` is the first local-machine setup step for the Parallels guest. It installs a user-scoped Node 20 runtime inside Windows 11 so the bridge bootstrap and no-focus test commands can execute repo-local scripts through the shared `Y:` repo mount.
+
+`npm run test:native:windows:prepare` now runs the repo's Windows bootstrap directly inside the local Parallels Windows 11 guest through that shared repo mount. The npm wrapper still forwards extra task args, so `npm run test:native:windows:prepare -- --launch` does the bootstrap plus Obsidian relaunch from the Mac.
 
 The printed bootstrap JSON now redacts sensitive seeded plugin fields such as
 license data, user identity, and API or access tokens. Future release prep can
@@ -69,8 +72,8 @@ For the provider-connected lane, set the provider env vars on the machine that r
 That is usually the Mac if you are attaching from the Mac into the Windows VM through the bridge workflow.
 The bridge writes the API key into the Windows plugin's auth storage, so the Windows Obsidian process itself does not need those env vars.
 
-If you are driving the Windows VM from the Mac during active development, keep the Windows plugin path under a Mac-side `mirrorTargets` entry with `"type": "windows-ssh"` in the ignored local `systemsculpt-sync.config.json`.
-That keeps the VM on the newest bundle through the normal dev watcher without polluting the Mac desktop runner's local `pluginTargets` list.
+If you are driving the Windows VM from the Mac during active development, keep the Windows plugin path under a Mac-side `mirrorTargets` entry with `"type": "windows-parallels"` in the ignored local `systemsculpt-sync.config.json`.
+That keeps the local Parallels Windows 11 guest on the newest bundle through the normal dev watcher without polluting the Mac desktop runner's local `pluginTargets` list. Keep `"type": "windows-ssh"` only as the explicit fallback when you intentionally point the harness at some other remote Windows box and provide its SSH host yourself.
 
 ## Bootstrap rule
 
@@ -103,7 +106,9 @@ republish the bridge without foregrounding Obsidian.
 That split keeps Windows responsible for fresh-user truth while still reusing the same bridge
 automation layer as macOS once the runtime is open.
 
-`npm run check:release:native` treats steps 1 and 3 as mandatory release gates.
+`npm run check:release:windows` is the fast Windows release gate on the local Parallels Windows 11 guest: it runs `build`, `test:native:windows:clean-install`, and `test:native:windows:baselines` in that order.
+
+`npm run check:release:native` treats steps 1 and 3 as mandatory release gates inside the broader native matrix.
 
 ## Interpreting transient hosted failures
 

@@ -68,7 +68,7 @@ npm run check:plugin:fast # faster local check
 npm run check:all         # plugin check + Jest suite
 ```
 
-If you keep a local-only `systemsculpt-sync.config.json`, the dev watcher now auto-syncs every successful rebuild into all configured `pluginTargets` plus any `mirrorTargets`, including Windows VM mirrors declared as `"type": "windows-ssh"`.
+If you keep a local-only `systemsculpt-sync.config.json`, the dev watcher now auto-syncs every successful rebuild into all configured `pluginTargets` plus any `mirrorTargets`, including local Parallels Windows mirrors declared as `"type": "windows-parallels"`.
 `./run.sh --headless` remains the canonical background entrypoint because it enables the same build-integrated sync path and also asks the already-open desktop vault to hot-reload the plugin after local sync succeeds.
 
 ### Tests
@@ -94,6 +94,7 @@ Desktop validation is attach-only to an already-open Obsidian vault. Keep live s
 ### Local plugin release
 
 ```bash
+npm run check:release:windows         # build + Windows 11 clean install + Windows baselines
 npm run check:release:native          # required native release matrix
 npm run release:plugin                  # auto bump (major/minor/patch from commits)
 npm run release:plugin -- --dry-run    # preview next version + notes only
@@ -104,6 +105,7 @@ Release automation now runs fully on your local machine: it validates the plugin
 Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
 If `GITHUB_TOKEN` or `GH_TOKEN` is present but weaker than your stored `gh` login, the release script now automatically falls back to the stored auth for push and draft-release steps.
 The native release matrix is now explicit instead of implicit: macOS desktop baselines, Windows clean-install parity, Windows desktop baselines, and Android runtime smoke must all pass before release creation can continue. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
+Use `npm run check:release:windows` when you want the fast Windows-only release gate on the local Parallels Windows 11 guest before running the full native matrix.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.

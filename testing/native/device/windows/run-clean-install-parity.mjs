@@ -11,9 +11,15 @@ import {
   runWindowsCleanInstallParity,
 } from "./clean-install-parity.mjs";
 import {
+  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
   DEFAULT_WINDOWS_SSH_HOST,
+  DEFAULT_WINDOWS_TRANSPORT,
+  normalizeWindowsTransport,
+  resolveWindowsTransportOptions,
   runRemotePowerShellScript,
-  startSshLocalPortForward,
+  runWindowsNodeModuleRemotely,
+  startWindowsLocalPortForward,
   stopChildProcess,
 } from "./remote-run.mjs";
 import { ensureFreshRemoteWindowsPluginVersion } from "./runtime-version.mjs";
@@ -75,15 +81,41 @@ export function parseArgs(argv, env = process.env) {
   const parity = parseCleanInstallParityArgs([], env);
   const options = {
     ...parity,
-    sshHost: String(env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim() || DEFAULT_WINDOWS_SSH_HOST,
+    transport: String(env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
+    sshHost: String(env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    vmName: String(env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    parallelsRepoRoot: String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
+    nodeExe:
+      String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || "").trim() ||
+      DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
     apiKeyEnv: "",
     requireProvider: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === "--transport") {
+      options.transport = normalizeWindowsTransport(argv[index + 1]);
+      index += 1;
+      continue;
+    }
     if (arg === "--host") {
       options.sshHost = String(argv[index + 1] || "").trim() || options.sshHost;
+      index += 1;
+      continue;
+    }
+    if (arg === "--vm-name") {
+      options.vmName = String(argv[index + 1] || "").trim() || options.vmName;
+      index += 1;
+      continue;
+    }
+    if (arg === "--parallels-repo-root") {
+      options.parallelsRepoRoot = String(argv[index + 1] || "").trim() || options.parallelsRepoRoot;
+      index += 1;
+      continue;
+    }
+    if (arg === "--node-exe") {
+      options.nodeExe = String(argv[index + 1] || "").trim() || options.nodeExe;
       index += 1;
       continue;
     }
@@ -150,11 +182,15 @@ function usage() {
 Run the Windows clean-install desktop acceptance lane from either:
 
 - Windows directly, against the already-open trusted vault, or
-- macOS/Linux by forwarding the Windows bridge locally over SSH and driving the
+- macOS/Linux by forwarding the Windows bridge locally through the configured transport and driving the
   same no-focus bridge API from this machine
 
 Options:
-  --host <alias>             SSH host alias. Default: ${DEFAULT_WINDOWS_SSH_HOST}
+  --transport <parallels|ssh>  Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --vm-name <name>             Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
+  --parallels-repo-root <path> Windows repo root inside the Parallels guest
+  --node-exe <path>            Windows Node executable for Parallels runs
+  --host <alias>               SSH host alias for the optional remote fallback
   --provider-id <id>         Optional provider id for Settings -> Providers parity
   --provider-model-id <id>   Optional provider model id or comma list
   --api-key-env <ENV_VAR>    Resolve the provider API key from a host env var
@@ -303,19 +339,19 @@ export function assertNoLocalPiInstalled(status) {
 
 export async function readLatestWindowsBridgeRecord(options = {}) {
   const stdout = await runRemotePowerShellScript(buildLatestWindowsBridgeRecordScript(), {
-    sshHost: options.sshHost,
+    ...resolveWindowsTransportOptions(options),
   });
   return parseWindowsBridgeRecord(stdout);
 }
 
 export async function readLatestWindowsLocalPiStatus(options = {}) {
   const stdout = await runRemotePowerShellScript(buildWindowsLocalPiStatusScript(), {
-    sshHost: options.sshHost,
+    ...resolveWindowsTransportOptions(options),
   });
   return parseWindowsLocalPiStatus(stdout);
 }
 
-function readLocalWindowsPiStatus() {
+export function readLocalWindowsPiStatus() {
   const homeDir = os.homedir();
   const modelsPath = path.win32.resolve(homeDir, ".pi", "models.json");
   const authPath = path.win32.resolve(homeDir, ".pi", "auth.json");
@@ -335,6 +371,32 @@ function readLocalWindowsPiStatus() {
   };
 }
 
+export function buildRemoteCleanInstallParityArgs(options = {}) {
+  const args = [];
+  if (String(options.providerId || "").trim()) {
+    args.push("--provider-id", String(options.providerId).trim());
+  }
+  if (Array.isArray(options.preferredProviderModelIds) && options.preferredProviderModelIds.length > 0) {
+    args.push("--provider-model-id", options.preferredProviderModelIds.map((entry) => String(entry || "").trim()).filter(Boolean).join(","));
+  }
+  if (String(options.apiKey || "").trim()) {
+    args.push("--api-key", String(options.apiKey).trim());
+  }
+  if (String(options.managedModelId || "").trim()) {
+    args.push("--managed-model-id", String(options.managedModelId).trim());
+  }
+  if (String(options.localPiModelId || "").trim()) {
+    args.push("--local-pi-model-id", String(options.localPiModelId).trim());
+  }
+  if (Number.isFinite(Number(options.waitTimeoutMs)) && Number(options.waitTimeoutMs) > 0) {
+    args.push("--wait-timeout-ms", String(Number(options.waitTimeoutMs)));
+  }
+  if (Number.isFinite(Number(options.sendTimeoutMs)) && Number(options.sendTimeoutMs) > 0) {
+    args.push("--send-timeout-ms", String(Number(options.sendTimeoutMs)));
+  }
+  return args;
+}
+
 function summarizeRuntimeVersionRefresh(refresh) {
   if (!refresh) {
     return null;
@@ -351,17 +413,17 @@ function summarizeRuntimeVersionRefresh(refresh) {
 }
 
 export async function withForwardedWindowsBridgeRecord(record, options = {}, operation) {
-  const forward = await startSshLocalPortForward({
-    ...options,
-    sshHost: options.sshHost,
+  const connection = resolveWindowsTransportOptions(options);
+  const forward = await startWindowsLocalPortForward({
+    ...connection,
     remoteHost: String(record.host || "127.0.0.1"),
     remotePort: Number(record.port),
   });
   try {
     return await operation({
       ...record,
-      host: "127.0.0.1",
-      port: forward.localPort,
+      host: forward.host,
+      port: forward.port,
       forwardedPort: Number(record.port),
       forwardedHost: String(record.host || "127.0.0.1"),
     });
@@ -370,9 +432,12 @@ export async function withForwardedWindowsBridgeRecord(record, options = {}, ope
   }
 }
 
-export async function runCleanInstallParity(options, env = process.env) {
+export async function runCleanInstallParity(options, env = process.env, dependencies = {}) {
+  const connection = resolveWindowsTransportOptions(options, env);
   const apiKey = resolveProviderApiKey(options, env);
   const providerRequested = Boolean(options.providerId);
+  const runWindowsNodeModuleRemotelyImpl =
+    dependencies.runWindowsNodeModuleRemotelyImpl || runWindowsNodeModuleRemotely;
 
   if (providerRequested && !apiKey) {
     fail(
@@ -399,11 +464,11 @@ export async function runCleanInstallParity(options, env = process.env) {
 
   const windowsHost = assertNoLocalPiInstalled(
     await readLatestWindowsLocalPiStatus({
-      sshHost: options.sshHost,
+      ...connection,
     })
   );
   const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion({
-    sshHost: options.sshHost,
+    ...connection,
     artifactRoot: process.cwd(),
   });
   if (runtimeVersionRefresh.relaunched) {
@@ -411,8 +476,29 @@ export async function runCleanInstallParity(options, env = process.env) {
       `[windows-clean-install-runner] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
     );
   }
+
+  if (connection.transport === "parallels") {
+    const stdout = await runWindowsNodeModuleRemotelyImpl(
+      path.resolve(process.cwd(), "testing/native/device/windows/clean-install-parity.mjs"),
+      {
+        ...connection,
+        artifactRoot: process.cwd(),
+        args: buildRemoteCleanInstallParityArgs({
+          ...options,
+          apiKey,
+        }),
+      }
+    );
+    const remoteResult = parseJsonObjectText(stdout, "the Windows clean-install parity result");
+    return {
+      ...remoteResult,
+      windowsHost,
+      runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
+    };
+  }
+
   const remoteRecord = await readLatestWindowsBridgeRecord({
-    sshHost: options.sshHost,
+    ...connection,
   });
 
   const result = await withForwardedWindowsBridgeRecord(remoteRecord, options, async (forwardedRecord) => {
