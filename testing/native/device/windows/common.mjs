@@ -40,6 +40,24 @@ function resolveRuntimeSmokeLicenseKey(env = process.env) {
   return String(env.SYSTEMSCULPT_E2E_LICENSE_KEY || "").trim();
 }
 
+export function normalizeWindowsHostedAuthSeed(value = {}) {
+  const licenseKey = String(value.licenseKey || "").trim();
+  if (!licenseKey) {
+    return null;
+  }
+
+  const serverUrl = String(value.serverUrl || "").trim() || DEFAULT_WINDOWS_SYSTEMSCULPT_SERVER_URL;
+  return {
+    licenseKey,
+    licenseValid: true,
+    enableSystemSculptProvider: true,
+    serverUrl,
+    selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+    transcriptionProvider: "systemsculpt",
+    embeddingsProvider: "systemsculpt",
+  };
+}
+
 export function generateVaultInstanceId() {
   if (typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -96,25 +114,18 @@ export function normalizeVaultRegistryKey(value) {
   return normalized || "systemsculptwindowsqa";
 }
 
-export function resolveWindowsHostedAuthSeed(env = process.env) {
-  const licenseKey = resolveRuntimeSmokeLicenseKey(env);
-  if (!licenseKey) {
-    return null;
+export function resolveWindowsHostedAuthSeed(env = process.env, explicitSeed = null) {
+  const normalizedExplicitSeed = normalizeWindowsHostedAuthSeed(explicitSeed || {});
+  if (normalizedExplicitSeed) {
+    return normalizedExplicitSeed;
   }
 
-  const serverUrl =
-    String(env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || "").trim() ||
-    DEFAULT_WINDOWS_SYSTEMSCULPT_SERVER_URL;
-
-  return {
-    licenseKey,
-    licenseValid: true,
-    enableSystemSculptProvider: true,
-    serverUrl,
-    selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-    transcriptionProvider: "systemsculpt",
-    embeddingsProvider: "systemsculpt",
-  };
+  return normalizeWindowsHostedAuthSeed({
+    licenseKey: resolveRuntimeSmokeLicenseKey(env),
+    serverUrl:
+      String(env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || "").trim() ||
+      DEFAULT_WINDOWS_SYSTEMSCULPT_SERVER_URL,
+  });
 }
 
 export function upsertObsidianVaultRegistry(existingState, options = {}) {
@@ -147,7 +158,7 @@ export function upsertObsidianVaultRegistry(existingState, options = {}) {
 
 export function createWindowsSeedPluginData(existingSettings, options = {}) {
   const nextSettings = isObject(existingSettings) ? { ...existingSettings } : {};
-  const hostedAuthSeed = resolveWindowsHostedAuthSeed(options.env);
+  const hostedAuthSeed = resolveWindowsHostedAuthSeed(options.env, options.hostedAuthSeed);
   if (!String(nextSettings.settingsMode || "").trim()) {
     nextSettings.settingsMode = "advanced";
   }
@@ -208,6 +219,7 @@ export async function prepareWindowsDesktopVault(options = {}) {
   const existingPluginData = await readJsonIfExists(pluginDataPath);
   const nextPluginData = createWindowsSeedPluginData(existingPluginData, {
     env: options.env,
+    hostedAuthSeed: options.hostedAuthSeed,
   });
   const existingAppState = await readJsonIfExists(appJsonPath);
   const existingAppearanceState = await readJsonIfExists(appearanceJsonPath);

@@ -3,7 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
   DEFAULT_WINDOWS_SSH_HOST,
+  DEFAULT_WINDOWS_TRANSPORT,
+  resolveWindowsTransportOptions,
   runRemotePowerShellScript,
   runWindowsNodeModuleRemotely,
 } from "./remote-run.mjs";
@@ -125,6 +129,31 @@ export function buildWindowsPluginManifestVersionScript(options = {}) {
   ].join("\n");
 }
 
+export function buildWindowsPluginHostedAuthStateScript(options = {}) {
+  const pluginId = String(options.pluginId || DEFAULT_WINDOWS_PLUGIN_ID).trim() || DEFAULT_WINDOWS_PLUGIN_ID;
+  const vaultPath = String(options.vaultPath || "").trim();
+
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$pluginId = ${psSingleQuote(pluginId)}`,
+    `$vaultPath = ${psSingleQuote(vaultPath)}`,
+    "if (-not $vaultPath) { throw 'Missing Windows vault path.' }",
+    "$pluginDir = Join-Path (Join-Path $vaultPath '.obsidian/plugins') $pluginId",
+    "$dataPath = Join-Path $pluginDir 'data.json'",
+    "if (!(Test-Path $dataPath)) { throw ('Remote plugin data not found: ' + $dataPath) }",
+    "$settings = Get-Content -Raw $dataPath | ConvertFrom-Json",
+    "[pscustomobject]@{",
+    "  dataPath = $dataPath",
+    "  licenseKeyLength = ([string]$settings.licenseKey).Length",
+    "  licenseValid = [bool]$settings.licenseValid",
+    "  enableSystemSculptProvider = [bool]$settings.enableSystemSculptProvider",
+    "  serverUrl = $settings.serverUrl",
+    "  selectedModelId = $settings.selectedModelId",
+    "} | ConvertTo-Json -Compress -Depth 5",
+    "",
+  ].join("\n");
+}
+
 export async function readExpectedLocalPluginVersion(options = {}) {
   const artifactRoot = path.resolve(String(options.artifactRoot || process.cwd()));
   const manifestPath = path.join(artifactRoot, "manifest.json");
@@ -139,19 +168,31 @@ export async function readExpectedLocalPluginVersion(options = {}) {
 export async function readLatestRemoteWindowsBridgeRecord(options = {}, dependencies = {}) {
   const runRemotePowerShellScriptImpl =
     dependencies.runRemotePowerShellScriptImpl || runRemotePowerShellScript;
-  const stdout = await runRemotePowerShellScriptImpl(buildLatestWindowsBridgeRecordScript(options), {
-    sshHost: String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST,
-  });
+  const stdout = await runRemotePowerShellScriptImpl(
+    buildLatestWindowsBridgeRecordScript(options),
+    resolveWindowsTransportOptions(options)
+  );
   return parseJsonObjectText(stdout, "the latest Windows bridge record");
 }
 
 export async function readRemoteWindowsPluginManifestVersion(options = {}, dependencies = {}) {
   const runRemotePowerShellScriptImpl =
     dependencies.runRemotePowerShellScriptImpl || runRemotePowerShellScript;
-  const stdout = await runRemotePowerShellScriptImpl(buildWindowsPluginManifestVersionScript(options), {
-    sshHost: String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST,
-  });
+  const stdout = await runRemotePowerShellScriptImpl(
+    buildWindowsPluginManifestVersionScript(options),
+    resolveWindowsTransportOptions(options)
+  );
   return parseJsonObjectText(stdout, "the remote Windows plugin manifest");
+}
+
+export async function readRemoteWindowsPluginHostedAuthState(options = {}, dependencies = {}) {
+  const runRemotePowerShellScriptImpl =
+    dependencies.runRemotePowerShellScriptImpl || runRemotePowerShellScript;
+  const stdout = await runRemotePowerShellScriptImpl(
+    buildWindowsPluginHostedAuthStateScript(options),
+    resolveWindowsTransportOptions(options)
+  );
+  return parseJsonObjectText(stdout, "the remote Windows plugin hosted auth state");
 }
 
 export function buildWindowsBootstrapArgs(options = {}) {
@@ -159,6 +200,8 @@ export function buildWindowsBootstrapArgs(options = {}) {
   const vaultName = String(options.vaultName || "").trim();
   const vaultPath = String(options.vaultPath || "").trim();
   const timeoutMs = Number(options.launchTimeoutMs || options.timeoutMs) || 0;
+  const hostedAuthLicenseKey = String(options.hostedAuthSeed?.licenseKey || "").trim();
+  const hostedAuthServerUrl = String(options.hostedAuthSeed?.serverUrl || "").trim();
 
   if (vaultName) {
     args.push("--vault-name", vaultName);
@@ -169,8 +212,97 @@ export function buildWindowsBootstrapArgs(options = {}) {
   if (timeoutMs > 0) {
     args.push("--timeout-ms", String(Math.max(1000, timeoutMs)));
   }
+  if (hostedAuthLicenseKey) {
+    args.push("--license-key", hostedAuthLicenseKey);
+  }
+  if (hostedAuthServerUrl) {
+    args.push("--server-url", hostedAuthServerUrl);
+  }
   args.push("--launch");
   return args;
+}
+
+async function readHostedAuthSeedFromPluginDir(pluginDir) {
+  const pluginPath = path.resolve(String(pluginDir || ""));
+  if (!pluginPath) {
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(await fs.readFile(path.join(pluginPath, "data.json"), "utf8"));
+    const licenseKey = String(data?.licenseKey || "").trim();
+    if (!licenseKey) {
+      return null;
+    }
+
+    return {
+      licenseKey,
+      serverUrl: String(data?.serverUrl || "").trim() || null,
+      licenseValid: Boolean(data?.licenseValid),
+      enableSystemSculptProvider: Boolean(data?.enableSystemSculptProvider),
+      selectedModelId: String(data?.selectedModelId || "").trim() || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scoreHostedAuthSeed(seed) {
+  if (!seed) {
+    return -1;
+  }
+
+  let score = 0;
+  if (seed.enableSystemSculptProvider) {
+    score += 4;
+  }
+  if (seed.licenseValid) {
+    score += 2;
+  }
+  if (seed.selectedModelId === "systemsculpt@@systemsculpt/ai-agent") {
+    score += 1;
+  }
+  return score;
+}
+
+export async function resolveWindowsBootstrapHostedAuthSeed(options = {}, env = process.env) {
+  const explicitLicenseKey =
+    String(env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || "").trim() ||
+    String(env.SYSTEMSCULPT_E2E_LICENSE_KEY || "").trim();
+  if (explicitLicenseKey) {
+    return {
+      licenseKey: explicitLicenseKey,
+      serverUrl: String(env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || "").trim() || null,
+    };
+  }
+
+  const artifactRoot = path.resolve(String(options.artifactRoot || process.cwd()));
+  const syncConfigPath = path.resolve(
+    String(options.syncConfigPath || path.join(artifactRoot, "systemsculpt-sync.config.json"))
+  );
+
+  let pluginTargets = [];
+  try {
+    const parsed = JSON.parse(await fs.readFile(syncConfigPath, "utf8"));
+    pluginTargets = Array.isArray(parsed?.pluginTargets) ? parsed.pluginTargets : [];
+  } catch {
+    return null;
+  }
+
+  let selectedSeed = null;
+  for (const target of pluginTargets) {
+    const candidateSeed = await readHostedAuthSeedFromPluginDir(target?.path);
+    if (scoreHostedAuthSeed(candidateSeed) > scoreHostedAuthSeed(selectedSeed)) {
+      selectedSeed = candidateSeed;
+    }
+  }
+
+  return selectedSeed
+    ? {
+        licenseKey: selectedSeed.licenseKey,
+        serverUrl: selectedSeed.serverUrl,
+      }
+    : null;
 }
 
 function summarizeRecord(record) {
@@ -205,13 +337,29 @@ export async function ensureFreshRemoteWindowsPluginVersion(options = {}, depend
       readRemoteWindowsPluginManifestVersion(runtimeOptions, {
         runRemotePowerShellScriptImpl: dependencies.runRemotePowerShellScriptImpl,
       }));
+  const readRemoteWindowsPluginHostedAuthStateImpl =
+    dependencies.readRemoteWindowsPluginHostedAuthStateImpl ||
+    ((runtimeOptions) =>
+      readRemoteWindowsPluginHostedAuthState(runtimeOptions, {
+        runRemotePowerShellScriptImpl: dependencies.runRemotePowerShellScriptImpl,
+      }));
   const runWindowsNodeModuleRemotelyImpl =
     dependencies.runWindowsNodeModuleRemotelyImpl || runWindowsNodeModuleRemotely;
+  const resolveWindowsBootstrapHostedAuthSeedImpl =
+    dependencies.resolveWindowsBootstrapHostedAuthSeedImpl || resolveWindowsBootstrapHostedAuthSeed;
   const sleepImpl = dependencies.sleepImpl || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const nowImpl = dependencies.nowImpl || (() => Date.now());
 
+  const connection = resolveWindowsTransportOptions({
+    transport: options.transport || DEFAULT_WINDOWS_TRANSPORT,
+    sshHost: options.sshHost || DEFAULT_WINDOWS_SSH_HOST,
+    vmName: options.vmName || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    parallelsRepoRoot: options.parallelsRepoRoot || "",
+    nodeExe: options.nodeExe || DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+    artifactRoot: options.artifactRoot || process.cwd(),
+  });
   const runtimeOptions = {
-    sshHost: String(options.sshHost || DEFAULT_WINDOWS_SSH_HOST).trim() || DEFAULT_WINDOWS_SSH_HOST,
+    ...connection,
     vaultName: String(options.vaultName || "").trim(),
     vaultPath: String(options.vaultPath || "").trim(),
     pluginId: String(options.pluginId || DEFAULT_WINDOWS_PLUGIN_ID).trim() || DEFAULT_WINDOWS_PLUGIN_ID,
@@ -220,6 +368,13 @@ export async function ensureFreshRemoteWindowsPluginVersion(options = {}, depend
   const expectedPluginVersion =
     String(options.expectedPluginVersion || "").trim() ||
     (await readExpectedLocalPluginVersionImpl({ artifactRoot }));
+  const hostedAuthSeed = await resolveWindowsBootstrapHostedAuthSeedImpl(
+    {
+      artifactRoot,
+      syncConfigPath: options.syncConfigPath,
+    },
+    options.env || process.env
+  );
 
   let beforeRecord = null;
   try {
@@ -227,14 +382,37 @@ export async function ensureFreshRemoteWindowsPluginVersion(options = {}, depend
   } catch {}
 
   if (String(beforeRecord?.pluginVersion || "").trim() === expectedPluginVersion) {
-    return {
-      expectedPluginVersion,
-      relaunched: false,
-      before: summarizeRecord(beforeRecord),
-      after: summarizeRecord(beforeRecord),
-      bootstrap: null,
-      remoteManifestVersion: null,
-    };
+    const currentVaultPath = runtimeOptions.vaultPath || String(beforeRecord?.vaultPath || "").trim();
+    if (!hostedAuthSeed || !currentVaultPath) {
+      return {
+        expectedPluginVersion,
+        relaunched: false,
+        before: summarizeRecord(beforeRecord),
+        after: summarizeRecord(beforeRecord),
+        bootstrap: null,
+        remoteManifestVersion: null,
+      };
+    }
+
+    try {
+      const hostedAuthState = await readRemoteWindowsPluginHostedAuthStateImpl({
+        ...runtimeOptions,
+        vaultPath: currentVaultPath,
+      });
+      if (
+        Number(hostedAuthState?.licenseKeyLength) > 0 &&
+        Boolean(hostedAuthState?.enableSystemSculptProvider)
+      ) {
+        return {
+          expectedPluginVersion,
+          relaunched: false,
+          before: summarizeRecord(beforeRecord),
+          after: summarizeRecord(beforeRecord),
+          bootstrap: null,
+          remoteManifestVersion: null,
+        };
+      }
+    } catch {}
   }
 
   let remoteManifestVersion = null;
@@ -256,6 +434,7 @@ export async function ensureFreshRemoteWindowsPluginVersion(options = {}, depend
     vaultName: runtimeOptions.vaultName || String(beforeRecord?.vaultName || "").trim(),
     vaultPath: runtimeOptions.vaultPath || String(beforeRecord?.vaultPath || "").trim(),
     launchTimeoutMs: options.launchTimeoutMs,
+    hostedAuthSeed,
   });
   const bootstrapStdout = await runWindowsNodeModuleRemotelyImpl(bootstrapEntryPath, {
     sshHost: runtimeOptions.sshHost,

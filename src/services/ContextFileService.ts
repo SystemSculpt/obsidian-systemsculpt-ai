@@ -154,9 +154,7 @@ export class ContextFileService {
       if (nextMessage?.role === "tool") {
         return true;
       }
-      if (nextMessage?.role !== "tool") {
-        break;
-      }
+      break;
     }
     return false;
   }
@@ -232,7 +230,7 @@ export class ContextFileService {
       };
     }
 
-    if (Array.isArray(part.data)) {
+    if (part.type === "content" && Array.isArray(part.data)) {
       return {
         ...part,
         data: part.data.map((chunk) => ({ ...chunk })) as MultiPartContent[],
@@ -243,6 +241,30 @@ export class ContextFileService {
   }
 
   private cloneToolCallForTransport(toolCall: ToolCall, messageId?: string): ToolCall {
+    const result = toolCall.result;
+    const clonedResult = result
+      ? {
+          success: result.success,
+          ...(result.data !== undefined
+            ? {
+                data:
+                  result.data && typeof result.data === "object"
+                    ? { ...(result.data as Record<string, unknown>) }
+                    : result.data,
+              }
+            : {}),
+          ...(result.error
+            ? {
+                error: {
+                  code: result.error.code,
+                  message: result.error.message,
+                  ...(result.error.details !== undefined ? { details: result.error.details } : {}),
+                },
+              }
+            : {}),
+        }
+      : undefined;
+
     return {
       ...toolCall,
       ...(messageId ? { messageId } : {}),
@@ -252,22 +274,7 @@ export class ContextFileService {
           ...(toolCall.request?.function ?? {}),
         },
       },
-      ...(toolCall.result !== undefined
-        ? {
-            result:
-              toolCall.result && typeof toolCall.result === "object"
-                ? {
-                    ...toolCall.result,
-                    ...(toolCall.result.data && typeof toolCall.result.data === "object"
-                      ? { data: { ...(toolCall.result.data as Record<string, unknown>) } }
-                      : {}),
-                    ...(toolCall.result.error && typeof toolCall.result.error === "object"
-                      ? { error: { ...(toolCall.result.error as Record<string, unknown>) } }
-                      : {}),
-                  }
-                : toolCall.result,
-          }
-        : {}),
+      ...(clonedResult !== undefined ? { result: clonedResult } : {}),
     };
   }
 

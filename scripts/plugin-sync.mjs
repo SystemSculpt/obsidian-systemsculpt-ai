@@ -8,6 +8,10 @@ import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-arti
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const LEGACY_ENV_AUTO_SYNC_PATH_KEY = "SYSTEMSCULPT_AUTO_SYNC_PATH";
+export const DEFAULT_WINDOWS_PARALLELS_VM_NAME =
+  String(process.env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || "Windows 11";
+export const DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE =
+  String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_SHARE_DRIVE || "").trim() || "Y:";
 export const LEGACY_RELEASE_EXTRAS = [
   "README.md",
   "LICENSE",
@@ -51,6 +55,19 @@ function quotePowerShellLiteral(value) {
 
 function normalizeWindowsRemotePath(remotePath) {
   return String(remotePath || "").trim().replace(/\\/g, "/");
+}
+
+function resolveDefaultParallelsRepoRoot(root, env = process.env) {
+  const explicitRoot = String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim();
+  if (explicitRoot) {
+    return normalizeWindowsRemotePath(explicitRoot);
+  }
+  return normalizeWindowsRemotePath(
+    path.win32.join(
+      String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_SHARE_DRIVE || "").trim() || DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE,
+      path.basename(path.resolve(root))
+    )
+  );
 }
 
 function withTrailingForwardSlash(remotePath) {
@@ -104,6 +121,28 @@ function runRemoteWindowsPowerShell(target, scriptContent, options = {}) {
   ], options);
 }
 
+function runParallelsWindowsPowerShell(target, scriptContent, options = {}) {
+  const shell = String(target.shell || "powershell.exe").trim() || "powershell.exe";
+  const encoded = encodePowerShell(scriptContent);
+  return runCommand(
+    "prlctl",
+    [
+      "exec",
+      target.vmName,
+      "--current-user",
+      shell,
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      encoded,
+    ],
+    options
+  );
+}
+
 function buildRemoteWindowsPrepScript(targetPath) {
   const legacyPaths = LEGACY_RELEASE_EXTRAS.map((value) => quotePowerShellLiteral(value)).join(", ");
   return [
@@ -116,6 +155,32 @@ function buildRemoteWindowsPrepScript(targetPath) {
     "  if (Test-Path $candidate) {",
     "    Remove-Item $candidate -Recurse -Force -ErrorAction SilentlyContinue",
     "  }",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function buildParallelsWindowsSyncScript(target) {
+  const legacyPaths = LEGACY_RELEASE_EXTRAS.map((value) => quotePowerShellLiteral(value)).join(", ");
+  const sourceFiles = REQUIRED_PLUGIN_ARTIFACTS.map((value) => quotePowerShellLiteral(value)).join(", ");
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$targetPath = ${quotePowerShellLiteral(target.path)}`,
+    `$repoRoot = ${quotePowerShellLiteral(target.repoRoot)}`,
+    "if (!(Test-Path $repoRoot)) { throw ('Parallels repo root not found: ' + $repoRoot) }",
+    "New-Item -ItemType Directory -Path $targetPath -Force | Out-Null",
+    `$legacyPaths = @(${legacyPaths})`,
+    "foreach ($relativePath in $legacyPaths) {",
+    "  $candidate = Join-Path $targetPath $relativePath",
+    "  if (Test-Path $candidate) {",
+    "    Remove-Item $candidate -Recurse -Force -ErrorAction SilentlyContinue",
+    "  }",
+    "}",
+    `$sourceFiles = @(${sourceFiles})`,
+    "foreach ($fileName in $sourceFiles) {",
+    "  $sourcePath = Join-Path $repoRoot $fileName",
+    "  if (!(Test-Path $sourcePath)) { throw ('Missing repo artifact: ' + $sourcePath) }",
+    "  Copy-Item -Path $sourcePath -Destination (Join-Path $targetPath $fileName) -Force",
     "}",
     "",
   ].join("\n");
@@ -226,10 +291,34 @@ function normalizeWindowsSshTarget(entry, options = {}) {
   };
 }
 
+function normalizeWindowsParallelsTarget(entry, options = {}) {
+  const rawPath = String(entry?.path || "").trim();
+  if (!rawPath) {
+    return null;
+  }
+  const root = path.resolve(String(options.root || process.cwd()));
+  const env = options.env || process.env;
+  return {
+    type: "windows-parallels",
+    group: options.group || "mirrorTargets",
+    vmName:
+      String(entry?.vmName || env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() ||
+      DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    repoRoot:
+      normalizeWindowsRemotePath(entry?.repoRoot || "") || resolveDefaultParallelsRepoRoot(root, env),
+    path: normalizeWindowsRemotePath(rawPath),
+    label: String(entry?.label || "").trim(),
+    shell: String(entry?.shell || "powershell.exe").trim() || "powershell.exe",
+  };
+}
+
 function normalizeConfigTarget(entry, options = {}) {
   const declaredType = String(entry?.type || "").trim().toLowerCase();
   if (declaredType === "windows-ssh") {
     return normalizeWindowsSshTarget(entry, options);
+  }
+  if (declaredType === "windows-parallels") {
+    return normalizeWindowsParallelsTarget(entry, options);
   }
   return normalizeLocalTarget(entry, options);
 }
@@ -309,8 +398,12 @@ export function loadConfiguredTargets(options = {}) {
   const mirrorTargets = Array.isArray(config.mirrorTargets) ? config.mirrorTargets : [];
 
   const targets = [
-    ...pluginTargets.map((entry) => normalizeConfigTarget(entry, { group: "pluginTargets", root })),
-    ...mirrorTargets.map((entry) => normalizeConfigTarget(entry, { group: "mirrorTargets", root })),
+    ...pluginTargets.map((entry) =>
+      normalizeConfigTarget(entry, { group: "pluginTargets", root, env: options.env || process.env })
+    ),
+    ...mirrorTargets.map((entry) =>
+      normalizeConfigTarget(entry, { group: "mirrorTargets", root, env: options.env || process.env })
+    ),
     ...getEnvMirrorTargets(options.env || process.env, root),
   ].filter(Boolean);
 
@@ -329,6 +422,13 @@ export function formatSyncTarget(target) {
   const prefix = target.group === "mirrorTargets" ? "mirror" : "plugin";
   if (target.type === "windows-ssh") {
     const remotePath = `${target.host}:${target.path}`;
+    if (target.label) {
+      return `${prefix}: ${target.label} -> ${remotePath}`;
+    }
+    return `${prefix}: ${remotePath}`;
+  }
+  if (target.type === "windows-parallels") {
+    const remotePath = `${target.vmName}:${target.path}`;
     if (target.label) {
       return `${prefix}: ${target.label} -> ${remotePath}`;
     }
@@ -366,9 +466,17 @@ function syncWindowsSshTarget(target, options = {}) {
   runCommand("scp", ["-Cq", ...localFiles, remoteDestination], options);
 }
 
+function syncWindowsParallelsTarget(target, options = {}) {
+  runParallelsWindowsPowerShell(target, buildParallelsWindowsSyncScript(target), options);
+}
+
 export function syncTarget(target, options = {}) {
   if (target.type === "windows-ssh") {
     syncWindowsSshTarget(target, options);
+    return;
+  }
+  if (target.type === "windows-parallels") {
+    syncWindowsParallelsTarget(target, options);
     return;
   }
   syncLocalTarget(target, options);

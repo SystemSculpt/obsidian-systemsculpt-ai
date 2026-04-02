@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertNoLocalPiInstalled,
+  buildRemoteCleanInstallParityArgs,
   buildWindowsLocalPiStatusScript,
   buildLatestWindowsBridgeRecordScript,
   parseArgs,
@@ -11,8 +12,12 @@ import {
   resolveProviderApiKey,
 } from "./run-clean-install-parity.mjs";
 
-test("parseArgs accepts Windows host and provider auth options", () => {
+test("parseArgs accepts Windows transport selectors and provider auth options", () => {
   const parsed = parseArgs([
+    "--transport",
+    "parallels",
+    "--vm-name",
+    "Windows 11",
     "--host",
     "custom-windows-host",
     "--provider-id",
@@ -24,11 +29,42 @@ test("parseArgs accepts Windows host and provider auth options", () => {
     "--require-provider",
   ]);
 
+  assert.equal(parsed.transport, "parallels");
+  assert.equal(parsed.vmName, "Windows 11");
   assert.equal(parsed.sshHost, "custom-windows-host");
   assert.equal(parsed.providerId, "google");
   assert.deepEqual(parsed.preferredProviderModelIds, ["gemini-2.5-flash"]);
   assert.equal(parsed.apiKeyEnv, "GEMINI_API_KEY");
   assert.equal(parsed.requireProvider, true);
+});
+
+test("buildRemoteCleanInstallParityArgs preserves provider and timeout options for guest execution", () => {
+  const args = buildRemoteCleanInstallParityArgs({
+    providerId: "google",
+    preferredProviderModelIds: ["gemini-2.5-pro", "gemini-2.5-flash"],
+    apiKey: "secret-value",
+    managedModelId: "managed-model",
+    localPiModelId: "local-pi-model",
+    waitTimeoutMs: 45678,
+    sendTimeoutMs: 123456,
+  });
+
+  assert.deepEqual(args, [
+    "--provider-id",
+    "google",
+    "--provider-model-id",
+    "gemini-2.5-pro,gemini-2.5-flash",
+    "--api-key",
+    "secret-value",
+    "--managed-model-id",
+    "managed-model",
+    "--local-pi-model-id",
+    "local-pi-model",
+    "--wait-timeout-ms",
+    "45678",
+    "--send-timeout-ms",
+    "123456",
+  ]);
 });
 
 test("resolveKnownProviderEnvCandidates returns the canonical provider env vars", () => {

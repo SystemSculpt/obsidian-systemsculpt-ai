@@ -66,6 +66,76 @@ export function buildWindowsLaunchScript(options = {}) {
   ].join("\n");
 }
 
+export function buildWindowsTrustPromptDismissScript(options = {}) {
+  const resultPath = JSON.stringify(String(options.resultPath || "").trim());
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 15_000);
+
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -AssemblyName UIAutomationTypes",
+    `$resultPath = ${resultPath}`,
+    `$deadline = (Get-Date).AddMilliseconds(${timeoutMs})`,
+    "$promptName = 'Do you trust the author of this vault?'",
+    "$buttonName = 'Trust author and enable plugins'",
+    "$promptFound = $false",
+    "$buttonFound = $false",
+    "$clicked = $false",
+    "$clickMethod = $null",
+    "while ((Get-Date) -lt $deadline -and -not $clicked) {",
+    "  $root = [System.Windows.Automation.AutomationElement]::RootElement",
+    "  if ($root) {",
+    "    $prompt = $root.FindFirst(",
+    "      [System.Windows.Automation.TreeScope]::Descendants,",
+    "      (New-Object System.Windows.Automation.PropertyCondition(",
+    "        [System.Windows.Automation.AutomationElement]::NameProperty,",
+    "        $promptName",
+    "      ))",
+    "    )",
+    "    $button = $root.FindFirst(",
+    "      [System.Windows.Automation.TreeScope]::Descendants,",
+    "      (New-Object System.Windows.Automation.PropertyCondition(",
+    "        [System.Windows.Automation.AutomationElement]::NameProperty,",
+    "        $buttonName",
+    "      ))",
+    "    )",
+    "    if ($prompt) { $promptFound = $true }",
+    "    if ($button) { $buttonFound = $true }",
+    "    if ($button) {",
+    "      try {",
+    "        $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
+    "        $invokePattern.Invoke()",
+    "        $clicked = $true",
+    "        $clickMethod = 'invoke-pattern'",
+    "      } catch {",
+    "        $shell = New-Object -ComObject WScript.Shell",
+    "        if ($shell.AppActivate('Obsidian')) {",
+    "          Start-Sleep -Milliseconds 250",
+    "          [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')",
+    "          $clicked = $true",
+    "          $clickMethod = 'sendkeys-enter'",
+    "        }",
+    "      }",
+    "    }",
+    "  }",
+    "  if (-not $clicked) { Start-Sleep -Milliseconds 500 }",
+    "}",
+    "if ($clicked) { Start-Sleep -Milliseconds 1500 }",
+    "$result = [ordered]@{",
+    "  ok = $true",
+    "  sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId",
+    "  promptFound = $promptFound",
+    "  buttonFound = $buttonFound",
+    "  clicked = $clicked",
+    "  clickMethod = $clickMethod",
+    "  completedAt = (Get-Date).ToString('o')",
+    "}",
+    "$result | ConvertTo-Json -Depth 5 | Set-Content -Path $resultPath -Encoding UTF8",
+    "",
+  ].join("\n");
+}
+
 export function resolveWindowsBootstrapOptions(argv, env = process.env) {
   const repoRoot = path.resolve(process.cwd());
   const options = {
@@ -75,6 +145,8 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
     piAgentDir: "",
     obsidianExe: path.join(String(env.LOCALAPPDATA || ""), "Programs", "Obsidian", "Obsidian.exe"),
     appDataPath: path.join(String(env.APPDATA || ""), "Obsidian"),
+    hostedAuthLicenseKey: "",
+    hostedAuthServerUrl: "",
     resetVault: false,
     launch: false,
     keepExistingObsidian: false,
@@ -113,6 +185,16 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
       index += 1;
       continue;
     }
+    if (arg === "--license-key") {
+      options.hostedAuthLicenseKey = String(argv[index + 1] || "").trim();
+      index += 1;
+      continue;
+    }
+    if (arg === "--server-url") {
+      options.hostedAuthServerUrl = String(argv[index + 1] || "").trim();
+      index += 1;
+      continue;
+    }
     if (arg === "--reset-vault") {
       options.resetVault = true;
       continue;
@@ -142,6 +224,12 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
     repoRoot,
     vaultPath,
     piAgentDir: options.piAgentDir || resolveDefaultWindowsPiAgentDir(vaultPath),
+    hostedAuthSeed: options.hostedAuthLicenseKey
+      ? {
+          licenseKey: options.hostedAuthLicenseKey,
+          serverUrl: options.hostedAuthServerUrl,
+        }
+      : null,
   };
 }
 
@@ -159,6 +247,8 @@ Options:
   --pi-agent-dir <path>      Empty Pi agent dir for the clean-install launch
   --obsidian-exe <path>      Obsidian executable path
   --appdata <path>           Obsidian app-data directory
+  --license-key <value>      Hosted SystemSculpt license to seed into the Windows vault
+  --server-url <url>         Hosted SystemSculpt server URL override for the seeded vault
   --reset-vault              Delete and recreate the target vault before copying artifacts
   --launch                   Relaunch Obsidian through an interactive scheduled task after prep
   --keep-existing-obsidian   Skip the pre-launch Obsidian shutdown step
@@ -285,6 +375,27 @@ async function launchPreparedVault(options) {
   };
 }
 
+async function dismissWindowsTrustPromptIfPresent(options) {
+  const resultPath = path.join(
+    resolveWindowsInteractiveTempRoot(process.env),
+    `systemsculpt-obsidian-trust-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.json`
+  );
+  const taskResult = await runInteractiveWindowsPowerShell({
+    taskNamePrefix: "SystemSculptObsidianTrust",
+    timeoutMs: Math.min(Math.max(1000, Number(options.timeoutMs) || 15_000), 15_000),
+    resultPath,
+    scriptContent: buildWindowsTrustPromptDismissScript({
+      resultPath,
+      timeoutMs: Math.min(Math.max(1000, Number(options.timeoutMs) || 15_000), 15_000),
+    }),
+  });
+
+  return {
+    resultPath,
+    trustPrompt: taskResult.parsed || null,
+  };
+}
+
 export async function runWindowsBootstrap(options) {
   if (process.platform !== "win32") {
     throw new Error("Windows desktop bootstrap must run on the Windows host.");
@@ -296,6 +407,7 @@ export async function runWindowsBootstrap(options) {
     vaultName: options.vaultName,
     syncConfigPath: options.syncConfigPath,
     piAgentDir: options.piAgentDir,
+    hostedAuthSeed: options.hostedAuthSeed,
     resetVault: options.resetVault,
     env: process.env,
   });
@@ -312,12 +424,16 @@ export async function runWindowsBootstrap(options) {
     appDataPath: options.appDataPath,
     obsidianJsonPath: registry.obsidianJsonPath,
     launch: null,
+    trustPrompt: null,
   };
 
   if (options.launch) {
     const launchResult = await launchPreparedVault(options);
     result.launch = launchResult.launch;
     result.launchResultPath = launchResult.resultPath;
+    const trustPromptResult = await dismissWindowsTrustPromptIfPresent(options);
+    result.trustPrompt = trustPromptResult.trustPrompt;
+    result.trustPromptResultPath = trustPromptResult.resultPath;
   }
 
   return result;

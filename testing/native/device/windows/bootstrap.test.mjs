@@ -12,6 +12,7 @@ import {
 } from "./common.mjs";
 import {
   buildWindowsLaunchScript,
+  buildWindowsTrustPromptDismissScript,
   sanitizeWindowsBootstrapReport,
 } from "./bootstrap.mjs";
 
@@ -153,6 +154,20 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
   assert.match(script, /SystemSculptWindowsQA/);
   assert.match(script, /foreach \(\$name in @\("OPENAI_API_KEY", "ANTHROPIC_API_KEY"\)\)/);
   assert.match(script, /ArgumentList @\(\$vaultPath\)/);
+});
+
+test("buildWindowsTrustPromptDismissScript looks for the trust prompt and enable button", () => {
+  const script = buildWindowsTrustPromptDismissScript({
+    resultPath: "C:/Windows/Temp/obsidian-trust.json",
+    timeoutMs: 12000,
+  });
+
+  assert.match(script, /UIAutomationClient/);
+  assert.match(script, /Do you trust the author of this vault\?/);
+  assert.match(script, /Trust author and enable plugins/);
+  assert.match(script, /InvokePattern/);
+  assert.match(script, /SendKeys/);
+  assert.match(script, /obsidian-trust\.json/);
 });
 
 test("sanitizeWindowsBootstrapReport redacts sensitive plugin data before printing", () => {
