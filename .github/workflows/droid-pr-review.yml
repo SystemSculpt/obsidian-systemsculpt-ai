@@ -1,0 +1,75 @@
+name: Droid PR Review
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: droid-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trust-check:
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.evaluate.outputs.allowed }}
+      reason: ${{ steps.evaluate.outputs.reason }}
+    steps:
+      - name: Evaluate PR trust
+        id: evaluate
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_BASE_REPO: ${{ github.repository }}
+          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+
+          allowed=true
+          reason=trusted
+
+          if [ "${REPO_OWNER}" != "SystemSculpt" ]; then
+            allowed=false
+            reason="repository owner ${REPO_OWNER} is not allowed"
+          elif [ "${PR_HEAD_REPO}" != "${PR_BASE_REPO}" ]; then
+            allowed=false
+            reason="fork and cross-repository pull requests are intentionally skipped"
+          elif [ "${PR_IS_DRAFT}" = "true" ]; then
+            allowed=false
+            reason="draft pull request"
+          else
+            case "${PR_AUTHOR_ASSOCIATION}" in
+              COLLABORATOR|MEMBER|OWNER) ;;
+              *)
+                allowed=false
+                reason="author association ${PR_AUTHOR_ASSOCIATION:-unknown} is not trusted"
+                ;;
+            esac
+          fi
+
+          echo "allowed=${allowed}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+
+      - name: Log skip reason
+        if: steps.evaluate.outputs.allowed != 'true'
+        run: |
+          echo "Skipping Droid review: ${{ steps.evaluate.outputs.reason }}"
+
+  droid-review:
+    needs: trust-check
+    if: needs.trust-check.outputs.allowed == 'true'
+    uses: SystemSculpt/.github/.github/workflows/droid-pr-review.yml@1ebf8d1859c5513d2767771b912d43171dbbd992
+    with:
+      shared-revision: 1ebf8d1859c5513d2767771b912d43171dbbd992
+    secrets:
+      COPILOT_PROXY_GH_TOKEN: ${{ secrets.COPILOT_PROXY_GH_TOKEN }}
+      DROID_AUTH_BUNDLE_JSON_B64: ${{ secrets.DROID_AUTH_BUNDLE_JSON_B64 }}
