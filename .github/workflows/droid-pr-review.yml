@@ -67,9 +67,9 @@ jobs:
   droid-review:
     needs: trust-check
     if: needs.trust-check.outputs.allowed == 'true'
-    uses: SystemSculpt/.github/.github/workflows/droid-pr-review.yml@1ebf8d1859c5513d2767771b912d43171dbbd992
+    uses: SystemSculpt/.github/.github/workflows/droid-pr-review.yml@01265dc5ba3a9de8cf1ad7c520fd663e3befff80
     with:
-      shared-revision: 1ebf8d1859c5513d2767771b912d43171dbbd992
+      shared-revision: 01265dc5ba3a9de8cf1ad7c520fd663e3befff80
     secrets:
       COPILOT_PROXY_GH_TOKEN: ${{ secrets.COPILOT_PROXY_GH_TOKEN }}
       DROID_AUTH_BUNDLE_JSON_B64: ${{ secrets.DROID_AUTH_BUNDLE_JSON_B64 }}
