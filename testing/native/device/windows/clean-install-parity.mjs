@@ -151,7 +151,7 @@ export function isTransientError(error) {
   );
 }
 
-async function retryTransient(operation, attempts = 5, pauseMs = 3000) {
+async function retryTransient(operation, attempts = 6, basePauseMs = 2000) {
   let lastError = null;
   for (let index = 0; index < attempts; index += 1) {
     try {
@@ -161,7 +161,9 @@ async function retryTransient(operation, attempts = 5, pauseMs = 3000) {
       if (!isTransientError(error) || index === attempts - 1) {
         throw error;
       }
-      await sleep(pauseMs);
+      // Exponential backoff: 2s, 4s, 8s, 16s, 32s (total ~62s window)
+      const delay = basePauseMs * Math.pow(2, index);
+      await sleep(delay);
     }
   }
   throw lastError || new Error("Transient retry exhausted.");
