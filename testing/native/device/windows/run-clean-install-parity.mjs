@@ -82,7 +82,7 @@ export function parseArgs(argv, env = process.env) {
   const options = {
     ...parity,
     transport: String(env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
-    sshHost: String(env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    sshHost: String(env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
     vmName: String(env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
     parallelsRepoRoot: String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
     nodeExe:

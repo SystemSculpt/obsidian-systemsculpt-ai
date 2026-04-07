@@ -1,0 +1,177 @@
+name: Windows E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      obsidian_version:
+        description: "Obsidian version to install"
+        required: false
+        default: "1.8.9"
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-install-parity:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build
+
+      # ---- Install Obsidian ----
+
+      - name: Cache Obsidian installer
+        id: obsidian-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/obsidian-installer
+          key: obsidian-installer-${{ env.OBSIDIAN_VERSION }}
+
+      - name: Download Obsidian installer
+        if: steps.obsidian-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $installerDir = Join-Path $env:USERPROFILE "obsidian-installer"
+          New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+          $url = "https://github.com/obsidianmd/obsidian-releases/releases/download/v$env:OBSIDIAN_VERSION/Obsidian-$env:OBSIDIAN_VERSION.exe"
+          $dest = Join-Path $installerDir "Obsidian-$env:OBSIDIAN_VERSION.exe"
+          Write-Host "Downloading Obsidian $env:OBSIDIAN_VERSION from $url"
+          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+          Write-Host "Downloaded: $((Get-Item $dest).Length) bytes"
+
+      - name: Install Obsidian (silent)
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:USERPROFILE "obsidian-installer" "Obsidian-$env:OBSIDIAN_VERSION.exe"
+          Write-Host "Installing Obsidian from $installer"
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Obsidian\Obsidian.exe"
+          $retries = 0
+          while (!(Test-Path $exe) -and $retries -lt 15) {
+            Start-Sleep -Seconds 2
+            $retries++
+            Write-Host "Waiting for Obsidian install to finish ($retries)..."
+          }
+          if (!(Test-Path $exe)) {
+            throw "Obsidian.exe not found at $exe after silent install."
+          }
+          Write-Host "Obsidian installed at $exe"
+
+      # ---- Bootstrap vault and launch ----
+
+      - name: Bootstrap vault and launch Obsidian
+        shell: pwsh
+        run: |
+          node testing/native/device/windows/bootstrap.mjs `
+            --launch `
+            --reset-vault `
+            --timeout-ms 90000
+
+      - name: Wait for desktop automation bridge
+        shell: pwsh
+        run: |
+          $discoveryDir = Join-Path $env:USERPROFILE ".systemsculpt\obsidian-automation"
+          $deadline = (Get-Date).AddSeconds(120)
+          $found = $false
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $discoveryDir) {
+              $files = Get-ChildItem -Path $discoveryDir -Filter *.json -ErrorAction SilentlyContinue
+              foreach ($f in $files) {
+                $parsed = Get-Content -Raw $f.FullName | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($parsed -and $parsed.pluginId -eq 'systemsculpt-ai' -and $parsed.port) {
+                  Write-Host "Bridge discovered: port=$($parsed.port) vault=$($parsed.vaultName)"
+                  $found = $true
+                  break
+                }
+              }
+              if ($found) { break }
+            }
+            Write-Host "Waiting for bridge discovery file..."
+            Start-Sleep -Seconds 3
+          }
+          if (-not $found) {
+            throw "Desktop automation bridge did not become ready within 120 seconds."
+          }
+
+      # ---- Run tests ----
+
+      - name: Run clean-install parity
+        run: node testing/native/device/windows/run-clean-install-parity.mjs
+
+      # ---- Failure diagnostics ----
+
+      - name: Capture screenshot on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+          $bitmap = New-Object System.Drawing.Bitmap($screen.Bounds.Width, $screen.Bounds.Height)
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen($screen.Bounds.Location, [System.Drawing.Point]::Empty, $screen.Bounds.Size)
+          $screenshotPath = Join-Path $env:GITHUB_WORKSPACE "failure-screenshot.png"
+          $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose()
+          $bitmap.Dispose()
+          Write-Host "Screenshot saved to $screenshotPath"
+
+      - name: Collect logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $diagDir = Join-Path $env:GITHUB_WORKSPACE "diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagDir | Out-Null
+          $sources = @(
+            @{ Name = "obsidian-logs";       Path = Join-Path $env:APPDATA "Obsidian\logs" },
+            @{ Name = "plugin-dir";          Path = Join-Path $env:USERPROFILE "Documents\SystemSculptWindowsQA\.obsidian\plugins\systemsculpt-ai" },
+            @{ Name = "bridge-discovery";    Path = Join-Path $env:USERPROFILE ".systemsculpt\obsidian-automation" }
+          )
+          foreach ($src in $sources) {
+            if (Test-Path $src.Path) {
+              $dest = Join-Path $diagDir $src.Name
+              Copy-Item -Path $src.Path -Destination $dest -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "Collected: $($src.Path)"
+            } else {
+              Write-Host "Not found (skipping): $($src.Path)"
+            }
+          }
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-e2e-diagnostics
+          path: |
+            failure-screenshot.png
+            diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ---- Cleanup ----
+
+      - name: Stop Obsidian
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name Obsidian -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Write-Host "Obsidian processes stopped."

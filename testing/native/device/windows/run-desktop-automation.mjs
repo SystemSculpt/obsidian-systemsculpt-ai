@@ -60,7 +60,7 @@ export function parseArgs(argv) {
     reload: true,
     allowSingleModelFallback: false,
     transport: String(process.env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
-    sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
     vmName: String(process.env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
     parallelsRepoRoot: String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
     nodeExe:

@@ -9,9 +9,8 @@
       "path": "/absolute/path/to/another/folder/systemsculpt-ai-build"
     },
     {
-      "type": "windows-parallels",
-      "vmName": "Windows 11",
-      "repoRoot": "X:/repos/obsidian-systemsculpt-ai",
+      "type": "windows-ssh",
+      "host": "tickblaze-kamatera",
       "path": "C:/path/to/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
       "label": "windows-vm"
     }

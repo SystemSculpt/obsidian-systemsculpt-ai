@@ -13,7 +13,7 @@ The canonical test story is:
 
 The old separate-instance WDIO harness has been removed.
 Dev builds now sync through the shared config-driven pipeline: keep a local-only `systemsculpt-sync.config.json` in the repo root and the watcher will push every successful rebuild into its `pluginTargets` plus any `mirrorTargets`.
-Use a `"type": "windows-parallels"` mirror target when the local Parallels Windows 11 guest should stay on the latest bundle without turning that VM path into a local desktop-automation selector on the Mac.
+Use a `"type": "windows-ssh"` mirror target when the online Windows VM should stay on the latest bundle without turning that VM path into a local desktop-automation selector on the Mac.
 
 ## Layers
 
@@ -85,7 +85,7 @@ Before ship, the required native matrix is:
 - Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync` then `npm run test:native:android:extended`
 - iOS: `npm run test:native:ios` when a paired physical device is available
 
-For the Windows-only release gate on the local Parallels Windows 11 guest, run `npm run check:release:windows`.
+For the Windows-only release gate on the online Windows VM, run `npm run check:release:windows`.
 
 `npm run check:release:native` is the canonical one-command wrapper for that matrix. It fails the release path if macOS, Windows, or Android are not green, and it only skips iOS when the host genuinely does not have a paired device plus WebKit adapter available.
 
