@@ -151,7 +151,7 @@ export function isTransientError(error) {
   );
 }
 
-async function retryTransient(operation, attempts = 3, pauseMs = 1500) {
+async function retryTransient(operation, attempts = 5, pauseMs = 3000) {
   let lastError = null;
   for (let index = 0; index < attempts; index += 1) {
     try {
