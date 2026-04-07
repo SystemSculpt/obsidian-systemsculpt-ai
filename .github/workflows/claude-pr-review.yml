@@ -1,0 +1,62 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-pr-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: |
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are reviewing a PR for SystemSculpt AI, an Obsidian plugin (TypeScript, esbuild, Jest).
+
+            ## What to review
+
+            **TypeScript & type safety**
+            - Strict mode compliance -- no untyped `any` without justification
+            - Proper use of Obsidian plugin API types
+
+            **Plugin lifecycle**
+            - Settings persistence correctness
+            - Bridge reconnection and hot-reload paths not broken
+            - onload/onunload cleanup (event listeners, intervals, MCP connections)
+
+            **Platform separation**
+            - Desktop vs mobile code paths must not bleed across
+            - MCP transport and tool registration isolated correctly
+
+            **Architecture**
+            - Source structure: `src/core` (plugin/UI), `src/services` (logic), `src/mcp-tools`, `src/settings`, `src/views`, `src/commands`
+            - Path alias: `@/*` maps to `Nexus/src/*`
+
+            **Build & bundle**
+            - esbuild config changes must not break CSS inlining or banner wrapping
+            - Plugin sync (multi-platform vault mirroring) impact if touched
+
+            **Tests**
+            - Jest with SWC; mocks for `obsidian`, `pi-coding-agent`, `pi-ai`
+            - Changes to services should have corresponding test coverage
+
+            **Security**
+            - No API keys, tokens, or secrets in code
+            - User data handling in chat/embeddings must be safe
+
+            Focus on correctness and regressions. Be specific -- cite file paths and line numbers. Skip stylistic nits unless they affect readability significantly.
