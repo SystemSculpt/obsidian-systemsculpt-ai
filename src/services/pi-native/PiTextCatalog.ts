@@ -2,6 +2,7 @@ import type SystemSculptPlugin from "../../main";
 import type { SystemSculptModel } from "../../types/llm";
 import { buildManagedSystemSculptModel } from "../systemsculpt/ManagedSystemSculptModel";
 import { PlatformContext } from "../PlatformContext";
+import { listConfiguredRemoteProviderModels } from "../providerRuntime/RemoteProviderCatalog";
 
 function logPiCatalogFailure(
   plugin: SystemSculptPlugin,
@@ -22,6 +23,15 @@ export async function listPiTextCatalogModels(
   plugin: SystemSculptPlugin
 ): Promise<SystemSculptModel[]> {
   const models: SystemSculptModel[] = [buildManagedSystemSculptModel(plugin)];
+  const existingIds = new Set(models.map((m) => m.id));
+
+  const remoteProviderModels = listConfiguredRemoteProviderModels(plugin);
+  for (const model of remoteProviderModels) {
+    if (!existingIds.has(model.id)) {
+      models.push(model);
+      existingIds.add(model.id);
+    }
+  }
 
   // On desktop, include all models from authenticated Pi providers
   if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
@@ -30,7 +40,6 @@ export async function listPiTextCatalogModels(
       const localModels = await listLocalPiTextModelsAsSystemModels(plugin);
 
       // Deduplicate: skip any local model whose id already matches the managed model
-      const existingIds = new Set(models.map((m) => m.id));
       for (const model of localModels) {
         if (!existingIds.has(model.id)) {
           models.push(model);

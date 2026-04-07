@@ -46,6 +46,9 @@ const mcpService = {
 const localPiStreamExecutor = {
   executeLocalPiStream: jest.fn(),
 };
+const remoteProviderStreamExecutor = {
+  executeOpenRouterRemoteStream: jest.fn(),
+};
 
 jest.mock("../StreamingService", () => ({
   StreamingService: jest.fn().mockImplementation(() => {
@@ -76,6 +79,12 @@ jest.mock("../AudioUploadService", () => ({
 
 jest.mock("../LocalPiStreamExecutor", () => ({
   executeLocalPiStream: jest.fn((...args) => localPiStreamExecutor.executeLocalPiStream(...args)),
+}));
+
+jest.mock("../providerRuntime/OpenRouterRemoteStreamExecutor", () => ({
+  executeOpenRouterRemoteStream: jest.fn((...args) =>
+    remoteProviderStreamExecutor.executeOpenRouterRemoteStream(...args)
+  ),
 }));
 
 jest.mock("../../mcp/MCPService", () => ({
@@ -161,6 +170,9 @@ describe("SystemSculptService", () => {
     jest.clearAllMocks();
     SystemSculptService.clearInstance();
     localPiStreamExecutor.executeLocalPiStream.mockImplementation(async function* () {
+      return;
+    });
+    remoteProviderStreamExecutor.executeOpenRouterRemoteStream.mockImplementation(async function* () {
       return;
     });
     mcpService.getAvailableTools.mockResolvedValue([
@@ -283,6 +295,38 @@ describe("SystemSculptService", () => {
     ]);
     expect(actualModelId).toBe("openai/gpt-4.1");
     expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+  });
+
+  it("builds hosted-style request previews for remote provider models", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    modelManagementService.getModelInfo.mockResolvedValueOnce({
+      isCustom: true,
+      actualModelId: "openai/gpt-5.4-mini",
+      modelSource: "custom_endpoint",
+      model: {
+        id: "openrouter@@openai/gpt-5.4-mini",
+        provider: "openrouter",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "openrouter",
+        piExecutionModelId: "openai/gpt-5.4-mini",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        supported_parameters: ["tools"],
+      },
+    });
+
+    const { requestBody, actualModelId } = await service.buildRequestPreview({
+      messages: [{ role: "user", content: "Hello remote", message_id: "msg_remote_preview_1" } as any],
+      model: "openrouter@@openai/gpt-5.4-mini",
+    });
+
+    expect(requestBody).toEqual({
+      model: "openai/gpt-5.4-mini",
+      messages: [{ role: "user", content: "Hello remote" }],
+      stream: true,
+    });
+    expect(actualModelId).toBe("openai/gpt-5.4-mini");
   });
 
   it("keeps repeated hosted tool-call ids unique across continuation rounds", async () => {
@@ -513,6 +557,40 @@ describe("SystemSculptService", () => {
       AGENT_PRESET.systemPrompt
     );
     expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes remote provider models through the remote provider stream executor", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    modelManagementService.getModelInfo.mockResolvedValueOnce({
+      isCustom: true,
+      actualModelId: "openai/gpt-5.4-mini",
+      modelSource: "custom_endpoint",
+      model: {
+        id: "openrouter@@openai/gpt-5.4-mini",
+        provider: "openrouter",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "openrouter",
+        piExecutionModelId: "openai/gpt-5.4-mini",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        supported_parameters: ["tools"],
+      },
+    });
+    remoteProviderStreamExecutor.executeOpenRouterRemoteStream.mockImplementationOnce(async function* () {
+      yield { type: "content", text: "Hello from OpenRouter" };
+    });
+
+    const events = await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Hello remote", message_id: "msg_remote_1" } as any],
+        model: "openrouter@@openai/gpt-5.4-mini",
+      })
+    );
+
+    expect(events).toEqual([{ type: "content", text: "Hello from OpenRouter" }]);
+    expect(remoteProviderStreamExecutor.executeOpenRouterRemoteStream).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toBeUndefined();
   });
 
   it("supports hosted text-only requests without tools and forwards reasoning effort", async () => {

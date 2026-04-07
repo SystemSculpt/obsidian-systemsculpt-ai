@@ -38,12 +38,20 @@ import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCal
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
 let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
+let remoteProviderStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> | null = null;
 
 async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
   if (!localPiStreamExecutorModulePromise) {
     localPiStreamExecutorModulePromise = import("./LocalPiStreamExecutor");
   }
   return await localPiStreamExecutorModulePromise;
+}
+
+async function loadRemoteProviderStreamExecutorModule(): Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> {
+  if (!remoteProviderStreamExecutorModulePromise) {
+    remoteProviderStreamExecutorModulePromise = import("./providerRuntime/OpenRouterRemoteStreamExecutor");
+  }
+  return await remoteProviderStreamExecutorModulePromise;
 }
 
 export type CreditsBalanceSnapshot = {
@@ -1311,6 +1319,20 @@ export class SystemSculptService {
             aborted: !!signal?.aborted,
           });
         } catch {}
+        return;
+      }
+
+      if (prepared.modelSource === "custom_endpoint") {
+        const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
+        for await (const event of executeOpenRouterRemoteStream({
+          plugin: this.plugin,
+          prepared,
+          signal,
+          reasoningEffort,
+          debug,
+        })) {
+          yield event;
+        }
         return;
       }
 

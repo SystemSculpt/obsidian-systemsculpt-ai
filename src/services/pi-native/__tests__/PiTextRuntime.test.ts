@@ -4,6 +4,21 @@ import {
   resolvePiTextExecutionPlan,
   shouldUseLocalPiExecution,
 } from "../PiTextRuntime";
+import { ensureProviderRuntimeReady } from "../../providerRuntime/ProviderRuntime";
+
+jest.mock("../PiTextAuth", () => ({
+  hasPiTextProviderAuth: jest.fn(async () => true),
+  buildPiTextProviderSetupMessage: jest.fn((providerId: string, actualModelId?: string) =>
+    actualModelId
+      ? `Connect ${providerId} in Pi before running "${actualModelId}".`
+      : `Connect ${providerId} in Pi before using this model.`
+  ),
+}));
+
+jest.mock("../../providerRuntime/RemoteProviderCatalog", () => ({
+  resolveRemoteProviderEndpoint: jest.fn(() => "https://openrouter.ai/api/v1"),
+  getConfiguredRemoteProviderApiKey: jest.fn(() => ""),
+}));
 
 describe("PiTextRuntime", () => {
   let supportsDesktopOnlyFeatures: jest.Mock<boolean, []>;
@@ -131,6 +146,94 @@ describe("PiTextRuntime", () => {
         providerId: "anthropic",
         authMode: "local",
       });
+    });
+  });
+
+  describe("ensureProviderRuntimeReady", () => {
+    it("returns a remote runtime plan for configured remote provider models", async () => {
+      supportsDesktopOnlyFeatures.mockReturnValue(false);
+
+      await expect(
+        ensureProviderRuntimeReady({
+          id: "openrouter@@openai/gpt-5.4-mini",
+          provider: "openrouter",
+          sourceMode: "custom_endpoint",
+          sourceProviderId: "openrouter",
+          piExecutionModelId: "openai/gpt-5.4-mini",
+          piRemoteAvailable: true,
+          supported_parameters: ["tools"],
+          architecture: { modality: "text+image->text" },
+        } as any)
+      ).resolves.toEqual({
+        mode: "remote",
+        actualModelId: "openai/gpt-5.4-mini",
+        providerId: "openrouter",
+        authMode: "byok",
+        endpoint: "https://openrouter.ai/api/v1",
+        supportsTools: true,
+        supportsImages: true,
+      });
+    });
+
+    it("accepts plugin-stored remote provider API keys before auth inventory catches up", async () => {
+      const remoteCatalog = jest.requireMock("../../providerRuntime/RemoteProviderCatalog") as {
+        getConfiguredRemoteProviderApiKey: jest.Mock;
+      };
+      supportsDesktopOnlyFeatures.mockReturnValue(false);
+      remoteCatalog.getConfiguredRemoteProviderApiKey.mockReturnValueOnce("sk-or-mobile");
+
+      await expect(
+        ensureProviderRuntimeReady({
+          id: "openrouter@@openai/gpt-5.4-mini",
+          provider: "openrouter",
+          sourceMode: "custom_endpoint",
+          sourceProviderId: "openrouter",
+          piExecutionModelId: "openai/gpt-5.4-mini",
+          piRemoteAvailable: true,
+          supported_parameters: ["tools"],
+          architecture: { modality: "text+image->text" },
+        } as any, {
+          settings: {
+            customProviders: [
+              {
+                id: "openrouter",
+                endpoint: "https://openrouter.ai/api/v1",
+                apiKey: "sk-or-mobile",
+                isEnabled: true,
+              },
+            ],
+          },
+        } as any)
+      ).resolves.toEqual({
+        mode: "remote",
+        actualModelId: "openai/gpt-5.4-mini",
+        providerId: "openrouter",
+        authMode: "byok",
+        endpoint: "https://openrouter.ai/api/v1",
+        supportsTools: true,
+        supportsImages: true,
+      });
+    });
+
+    it("fails remote provider models when mobile auth is missing", async () => {
+      const { hasPiTextProviderAuth } = jest.requireMock("../PiTextAuth") as {
+        hasPiTextProviderAuth: jest.Mock;
+      };
+      supportsDesktopOnlyFeatures.mockReturnValue(false);
+      hasPiTextProviderAuth.mockResolvedValueOnce(false);
+
+      await expect(
+        ensureProviderRuntimeReady({
+          id: "openrouter@@openai/gpt-5.4-mini",
+          provider: "openrouter",
+          sourceMode: "custom_endpoint",
+          sourceProviderId: "openrouter",
+          piExecutionModelId: "openai/gpt-5.4-mini",
+          piRemoteAvailable: true,
+          supported_parameters: ["tools"],
+          architecture: { modality: "text+image->text" },
+        } as any)
+      ).rejects.toThrow('Connect openrouter in Pi before running "openai/gpt-5.4-mini".');
     });
   });
 });
