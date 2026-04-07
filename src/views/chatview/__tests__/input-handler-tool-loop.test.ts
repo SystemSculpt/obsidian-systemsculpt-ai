@@ -6,10 +6,10 @@ import { App } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import { InputHandler } from "../InputHandler";
 import { messageHandling } from "../messageHandling";
-import { assertPiTextExecutionReady } from "../../../services/pi-native/PiTextRuntime";
+import { ensureProviderRuntimeReady } from "../../../services/providerRuntime/ProviderRuntime";
+import { getConfiguredRemoteProviderApiKey } from "../../../services/providerRuntime/RemoteProviderCatalog";
 import {
   buildPiTextProviderSetupMessage,
-  hasPiTextProviderAuth,
 } from "../../../services/pi-native/PiTextAuth";
 
 jest.mock("../../../services/RecorderService", () => ({
@@ -71,8 +71,12 @@ jest.mock("../messageHandling", () => ({
   },
 }));
 
-jest.mock("../../../services/pi-native/PiTextRuntime", () => ({
-  assertPiTextExecutionReady: jest.fn(),
+jest.mock("../../../services/providerRuntime/ProviderRuntime", () => ({
+  ensureProviderRuntimeReady: jest.fn(),
+}));
+
+jest.mock("../../../services/providerRuntime/RemoteProviderCatalog", () => ({
+  getConfiguredRemoteProviderApiKey: jest.fn(() => ""),
 }));
 
 jest.mock("../../../services/pi-native/PiTextAuth", () => ({
@@ -81,7 +85,6 @@ jest.mock("../../../services/pi-native/PiTextAuth", () => ({
       ? `Connect ${providerId} in Pi before running "${actualModelId}".`
       : `Connect ${providerId} in Pi before using this model.`
   ),
-  hasPiTextProviderAuth: jest.fn(async () => true),
   loadPiTextProviderAuth: jest.fn(async () => new Map()),
   piTextProviderRequiresAuth: jest.fn(() => true),
 }));
@@ -89,6 +92,7 @@ jest.mock("../../../services/pi-native/PiTextAuth", () => ({
 describe("InputHandler hosted tool loop", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (getConfiguredRemoteProviderApiKey as jest.Mock).mockReturnValue("");
   });
 
   const createHostedToolLoopHarness = () => {
@@ -701,15 +705,8 @@ describe("InputHandler hosted tool loop", () => {
       chatView,
     });
 
-    (assertPiTextExecutionReady as jest.Mock).mockResolvedValue({
-      mode: "local",
-      actualModelId: "openai/gpt-4.1",
-      providerId: "openai",
-      authMode: "local",
-    });
-    (hasPiTextProviderAuth as jest.Mock).mockResolvedValue(false);
-    (buildPiTextProviderSetupMessage as jest.Mock).mockReturnValue(
-      'Connect OpenAI in Pi before running "openai/gpt-4.1".'
+    (ensureProviderRuntimeReady as jest.Mock).mockRejectedValue(
+      new Error('Connect OpenAI in Pi before running "openai/gpt-4.1".')
     );
 
     await expect((handler as any).ensureProviderReadyForChat()).resolves.toBe(false);
@@ -784,6 +781,24 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.promptProviderSetup).not.toHaveBeenCalled();
   });
 
+  it("accepts remote-provider mobile chats when plugin settings already contain the API key", async () => {
+    const { handler, chatView, plugin } = createHostedToolLoopHarness();
+    chatView.getSelectedModelId = jest.fn(() => "openrouter@@openai/gpt-5.4-mini");
+    plugin.settings.selectedModelId = "openrouter@@openai/gpt-5.4-mini";
+    plugin.modelService.getModelById = jest.fn(async () => ({
+      id: "openrouter@@openai/gpt-5.4-mini",
+      provider: "openrouter",
+      sourceProviderId: "openrouter",
+      sourceMode: "custom_endpoint",
+      piRemoteAvailable: true,
+      piExecutionModelId: "openai/gpt-5.4-mini",
+    }));
+    (getConfiguredRemoteProviderApiKey as jest.Mock).mockReturnValue("sk-or-mobile");
+
+    await expect((handler as any).ensureProviderReadyForChat()).resolves.toBe(true);
+    expect(ensureProviderRuntimeReady).not.toHaveBeenCalled();
+  });
+
   it("uses the selected model setup target when automation blocks a setup prompt without overrides", async () => {
     const app = new App();
     const container = document.createElement("div");
@@ -840,7 +855,7 @@ describe("InputHandler hosted tool loop", () => {
     (handler as any).automationRequestDepth = 1;
 
     await expect((handler as any).invokeProviderSetupPrompt()).rejects.toThrow(
-      "Open Settings -> Providers to connect the selected Pi provider."
+      "Open Settings -> Providers to connect the selected provider."
     );
 
     expect(chatView.promptProviderSetup).not.toHaveBeenCalled();

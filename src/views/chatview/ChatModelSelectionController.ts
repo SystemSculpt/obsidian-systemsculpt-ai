@@ -2,13 +2,13 @@ import { App, Component, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { SystemSculptModel } from "../../types/llm";
 import {
-  assertPiTextExecutionReady,
-  type PiTextExecutionPlan,
-} from "../../services/pi-native/PiTextRuntime";
-import {
   buildPiTextProviderSetupMessage,
-  hasPiTextProviderAuth,
 } from "../../services/pi-native/PiTextAuth";
+import {
+  ensureProviderRuntimeReady,
+  type ProviderRuntimePlan,
+} from "../../services/providerRuntime/ProviderRuntime";
+import { getConfiguredRemoteProviderApiKey } from "../../services/providerRuntime/RemoteProviderCatalog";
 import {
   hasManagedSystemSculptAccess,
   isManagedSystemSculptModelId,
@@ -227,38 +227,39 @@ export class ChatModelSelectionController extends Component {
     const selectedModel = await this.options.getSelectedModelRecord();
     if (!selectedModel) {
       await this.invokeProviderSetupPrompt(
-        "The selected Pi model is unavailable. Reconnect the provider or pick another model in Settings -> Providers.",
+        "The selected provider model is unavailable. Reconnect the provider or pick another model in Settings -> Providers.",
         setupSurface,
       );
       return false;
     }
 
-    let executionPlan: PiTextExecutionPlan;
+    if (
+      selectedModel.sourceMode === "custom_endpoint" &&
+      selectedModel.piRemoteAvailable &&
+      String(
+        getConfiguredRemoteProviderApiKey(
+          this.options.plugin,
+          String(selectedModel.sourceProviderId || selectedModel.provider || ""),
+        ),
+      ).trim().length > 0
+    ) {
+      return true;
+    }
+
+    let executionPlan: ProviderRuntimePlan;
     try {
-      executionPlan = await assertPiTextExecutionReady(selectedModel);
+      executionPlan = await ensureProviderRuntimeReady(selectedModel, this.options.plugin);
     } catch (error: any) {
       await this.invokeProviderSetupPrompt(
-        error?.message || "Pi is not ready to run the selected model yet.",
+        error?.message || "The selected provider is not ready to run this model yet.",
         setupSurface,
       );
       return false;
     }
 
-    try {
-      const hasAuth = await hasPiTextProviderAuth(
-        executionPlan.providerId,
-        this.options.plugin,
-      );
-      if (!hasAuth) {
-        await this.invokeProviderSetupPrompt(
-          buildPiTextProviderSetupMessage(executionPlan.providerId, executionPlan.actualModelId),
-          setupSurface,
-        );
-        return false;
-      }
-    } catch (error: any) {
+    if (!executionPlan.providerId) {
       await this.invokeProviderSetupPrompt(
-        error?.message || "Pi provider credentials are not ready yet.",
+        buildPiTextProviderSetupMessage("provider", executionPlan.actualModelId),
         setupSurface,
       );
       return false;

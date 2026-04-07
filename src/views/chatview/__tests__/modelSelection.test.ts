@@ -59,9 +59,9 @@ describe("chat model setup helpers", () => {
 
     expect(showPopup).toHaveBeenCalledWith(
       expect.any(App),
-      "Open Settings -> Providers to connect the selected Pi provider.",
+      "Open Settings -> Providers to connect the selected provider.",
       expect.objectContaining({
-        title: "Finish Pi setup",
+        title: "Finish provider setup",
         primaryButton: "Open Providers",
       }),
     );
@@ -159,6 +159,46 @@ describe("chat model setup helpers", () => {
       expect.objectContaining({
         section: "pi",
         providerAuthenticated: true,
+      })
+    );
+  });
+
+  it("marks configured remote provider models as authenticated on mobile without local provider ids", async () => {
+    (loadPiTextProviderAuth as jest.Mock).mockResolvedValue(
+      new Map([
+        [
+          "openrouter",
+          {
+            provider: "openrouter",
+            hasAnyAuth: true,
+          },
+        ],
+      ])
+    );
+    const plugin = {
+      modelService: {
+        getModels: jest.fn().mockResolvedValue([
+          {
+            id: "openrouter@@openai/gpt-5.4-mini",
+            name: "GPT-5.4 Mini",
+            provider: "openrouter",
+            sourceProviderId: "openrouter",
+            sourceMode: "custom_endpoint",
+            piRemoteAvailable: true,
+            piLocalAvailable: false,
+          },
+        ]),
+      },
+      settings: {},
+    } as any;
+
+    const options = await loadChatModelPickerOptions(plugin);
+    expect(options).toHaveLength(1);
+    expect(options[0]).toEqual(
+      expect.objectContaining({
+        section: "pi",
+        providerAuthenticated: true,
+        providerId: "openrouter",
       })
     );
   });

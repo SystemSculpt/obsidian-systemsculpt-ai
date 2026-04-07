@@ -40,7 +40,7 @@ export async function loadPiTextProviderAuth(
   providerHints: string[],
   plugin?: SystemSculptPlugin
 ): Promise<Map<string, StudioPiProviderAuthRecord>> {
-  if (!supportsDesktopPiFeatures() || providerHints.length === 0) {
+  if (providerHints.length === 0) {
     return new Map<string, StudioPiProviderAuthRecord>();
   }
 
@@ -81,10 +81,6 @@ export async function resolvePiTextProviderCredential(
   providerHint: string,
   plugin?: SystemSculptPlugin
 ): Promise<PiTextProviderCredentialInput | null> {
-  if (!supportsDesktopPiFeatures()) {
-    return null;
-  }
-
   const { resolveStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
   const apiKey = await resolveStudioPiProviderApiKey(providerHint, { plugin });
   if (!apiKey) {
@@ -111,10 +107,6 @@ export async function hasPiTextProviderAuth(
 ): Promise<boolean> {
   if (!piTextProviderRequiresAuth(providerHint)) {
     return true;
-  }
-
-  if (!supportsDesktopPiFeatures()) {
-    return false;
   }
 
   const providerId = normalizeStudioPiProviderId(providerHint);

@@ -61,7 +61,6 @@ export interface SettingsTabConfig {
 
 export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTabConfig[] {
   const isProActive = tab.plugin.settings.licenseValid === true;
-  const isDesktop = PlatformContext.get().supportsDesktopOnlyFeatures();
 
   const configs: SettingsTabConfig[] = [
     {
@@ -80,21 +79,19 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
     },
   ];
 
-  if (isDesktop) {
-    configs.push({
-      id: "providers",
-      label: "Providers",
-      sections: [
-        (parent) => {
-          void loadProvidersTabContentModule().displayProvidersTabContent(parent, tab);
-        },
-      ],
-      anchor: {
-        title: "AI Providers, API Keys, OAuth, BYOK",
-        desc: "Connect your own AI provider accounts (OpenAI, Anthropic, Google, OpenRouter, etc.) to use their models in Chat and Studio.",
+  configs.push({
+    id: "providers",
+    label: "Providers",
+    sections: [
+      (parent) => {
+        void loadProvidersTabContentModule().displayProvidersTabContent(parent, tab);
       },
-    });
-  }
+    ],
+    anchor: {
+      title: "AI Providers, API Keys, OAuth, BYOK",
+      desc: "Connect your own AI provider accounts (OpenAI, Anthropic, Google, OpenRouter, etc.) to use their models in Chat and Studio.",
+    },
+  });
 
   configs.push(
     {

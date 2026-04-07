@@ -151,4 +151,157 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
       key: "sk-test",
     });
   });
+
+  it("persists provider API keys to plugin settings when Pi auth storage is unavailable", async () => {
+    const updateSettings = jest.fn(async (patch: any) => {
+      plugin.settings = {
+        ...plugin.settings,
+        ...patch,
+      };
+    });
+    const plugin = {
+      settings: {
+        customProviders: [],
+      },
+      getSettingsManager: () => ({
+        updateSettings,
+      }),
+    } as any;
+
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => {
+        throw new Error("storage unavailable");
+      }),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let setStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").setStudioPiProviderApiKey;
+    let resolveStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").resolveStudioPiProviderApiKey;
+    let readStudioPiProviderAuthState: typeof import("../StudioPiAuthStorage").readStudioPiProviderAuthState;
+    jest.isolateModules(() => {
+      ({
+        setStudioPiProviderApiKey,
+        resolveStudioPiProviderApiKey,
+        readStudioPiProviderAuthState,
+      } = require("../StudioPiAuthStorage"));
+    });
+
+    await setStudioPiProviderApiKey!("openrouter", "sk-or-mobile", { plugin });
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      customProviders: [
+        expect.objectContaining({
+          id: "openrouter",
+          name: "openrouter",
+          apiKey: "sk-or-mobile",
+          isEnabled: true,
+        }),
+      ],
+    });
+
+    await expect(resolveStudioPiProviderApiKey!("openrouter", { plugin })).resolves.toBe("sk-or-mobile");
+    await expect(readStudioPiProviderAuthState!("openrouter", { plugin })).resolves.toEqual({
+      provider: "openrouter",
+      hasAnyAuth: true,
+      source: "api_key",
+    });
+  });
+
+  it("clears plugin-stored provider API keys even when Pi auth storage is unavailable", async () => {
+    const updateSettings = jest.fn(async (patch: any) => {
+      plugin.settings = {
+        ...plugin.settings,
+        ...patch,
+      };
+    });
+    const plugin = {
+      settings: {
+        customProviders: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            endpoint: "https://openrouter.ai/api/v1",
+            apiKey: "sk-or-mobile",
+            isEnabled: true,
+          },
+        ],
+      },
+      getSettingsManager: () => ({
+        updateSettings,
+      }),
+    } as any;
+
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => {
+        throw new Error("storage unavailable");
+      }),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let clearStudioPiProviderAuth: typeof import("../StudioPiAuthStorage").clearStudioPiProviderAuth;
+    let resolveStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").resolveStudioPiProviderApiKey;
+    jest.isolateModules(() => {
+      ({
+        clearStudioPiProviderAuth,
+        resolveStudioPiProviderApiKey,
+      } = require("../StudioPiAuthStorage"));
+    });
+
+    await clearStudioPiProviderAuth!("openrouter", { plugin });
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      customProviders: [
+        expect.objectContaining({
+          id: "openrouter",
+          apiKey: "",
+        }),
+      ],
+    });
+
+    await expect(resolveStudioPiProviderApiKey!("openrouter", { plugin })).resolves.toBeNull();
+  });
+
+  it("uses plugin-stored API keys in inventory records when auth storage is unavailable", async () => {
+    jest.doMock("../../../services/pi/PiSdkAuthStorage", () => ({
+      createBundledPiAuthStorage: jest.fn(() => {
+        throw new Error("storage unavailable");
+      }),
+    }));
+
+    let listStudioPiProviderAuthRecords: typeof import("../StudioPiAuthInventory").listStudioPiProviderAuthRecords;
+    jest.isolateModules(() => {
+      ({ listStudioPiProviderAuthRecords } = require("../StudioPiAuthInventory"));
+    });
+
+    const plugin = {
+      settings: {
+        customProviders: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            endpoint: "https://openrouter.ai/api/v1",
+            apiKey: "sk-or-mobile",
+            isEnabled: true,
+          },
+        ],
+      },
+    } as any;
+
+    const records = await listStudioPiProviderAuthRecords!({
+      providerHints: ["openrouter"],
+      plugin,
+    });
+
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "openrouter",
+          hasAnyAuth: true,
+          hasStoredCredential: true,
+          credentialType: "api_key",
+          source: "api_key",
+        }),
+      ]),
+    );
+  });
 });
